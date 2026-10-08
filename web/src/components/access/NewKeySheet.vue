@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { AccessError, type Agent, type AgentKeyCreated, agentScopeCeiling, createAgentKey, grantablePresetScopes, groupPermissions, keyHint, keyScopes, keyExpiryAfter, selectScopeGroup, lostPermission, matchesScope, MAX_KEY_SCOPES, type Permission, rotateAgentKey } from '../../lib/access'
+import { AccessError, type Agent, type AgentKeyCreated, agentScopeCeiling, createAgentKey, grantablePresetScopes, groupPermissions, keyHint, keyScopes, keyExpiryAfter, selectScopeGroup, lostPermission, fullAccessLabel, matchesScope, MAX_KEY_SCOPES, type Permission, rotateAgentKey } from '../../lib/access'
 import type { AgentKey } from '../../lib/settings'
 import { can, myPermissions } from '../../lib/authz'
 import { useAccess } from '../../stores/access'
@@ -27,6 +27,7 @@ const busy = ref(false)
 const error = ref('')
 const created = ref<AgentKeyCreated | null>(null)
 const access = useAccess()
+const fullAccess = ref(props.rotateKey?.full_access ?? false)
 const scopes = ref(new Set<string>(props.rotateKey?.scopes ?? []))
 const rotationScopesChanged = ref(false)
 const term = ref('')
@@ -48,7 +49,7 @@ const groups = computed(() => groupPermissions(available.value.filter(p => match
 const rotationScopes = computed(() => (props.rotateKey?.scopes ?? []).map(key => access.registry.find(p => p.key === key) ?? { key, group: 'Other', description: 'This scope is no longer in the permission registry.', risk: 'low', grantable_at: [], agent_grantable: false } as Permission).filter(p => matchesScope(p, term.value)))
 const tried = ref(false)
 function toggle(key: string) { if (busy.value || !held.value.has(key)) return; if (props.rotateKey) rotationScopesChanged.value = true; const next = new Set(scopes.value); if (next.has(key)) next.delete(key); else next.add(key); scopes.value = next }
-function preset(keys: string[]) { if (busy.value || !allowed.value) return; if (props.rotateKey) rotationScopesChanged.value = true; scopes.value = new Set(grantablePresetScopes(keys, held.value, access.registry)) }
+function preset(keys: string[], full = false) { if (busy.value || !allowed.value) return; if (props.rotateKey) rotationScopesChanged.value = true; fullAccess.value = full; scopes.value = new Set(full ? [] : grantablePresetScopes(keys, held.value, access.registry)) }
 function selectGroup(keys: string[], all: boolean) {
   if (busy.value || !allowed.value) return
   if (props.rotateKey) rotationScopesChanged.value = true
@@ -64,7 +65,7 @@ function codeUnavailable(key: string): string | undefined {
   return undefined
 }
 const allowed = computed(() => can('keys.manage'))
-const scopeProblem = computed(() => !scopes.value.size ? 'Choose at least one thing it may do; a key without scopes can do nothing.'
+const scopeProblem = computed(() => fullAccess.value ? '' : !scopes.value.size ? 'Choose at least one thing it may do; a key without scopes can do nothing.'
   : scopes.value.size > MAX_KEY_SCOPES ? `A key holds at most ${MAX_KEY_SCOPES} scopes; clear ${scopes.value.size - MAX_KEY_SCOPES}.` : '')
 const copied = ref(false)
 const copyFallback = ref(false)
@@ -76,7 +77,7 @@ const session = useSession()
 const loginCommand = computed(() => agentLoginCommand(window.location.origin, session.identity?.tenant.slug))
 const role = computed(() => currentAgent.value.workspace_role?.name)
 const submitLabel = computed(() => props.rotateKey ? 'Rotate key' : props.firstKey ? 'Create first key' : 'Create key')
-const rotationProblem = computed(() => props.rotateKey && !rotationScopesChanged.value && props.rotateKey.scopes.some(k => !held.value.has(k))
+const rotationProblem = computed(() => props.rotateKey && !fullAccess.value && !rotationScopesChanged.value && props.rotateKey.scopes.some(k => !held.value.has(k))
   ? 'The original scopes exceed what you or this agent’s role may grant. Rotation keeps those scopes, so it cannot continue.' : '')
 async function create() {
   if (busy.value) return
@@ -89,7 +90,7 @@ async function create() {
   error.value = ''
   try {
     const expires = keyExpiryAfter(days.value)
-    created.value = props.rotateKey ? await rotateAgentKey(props.rotateKey.id, expires, rotationScopesChanged.value ? [...scopes.value] : undefined) : await createAgentKey(props.agent, expires, [...scopes.value])
+    created.value = props.rotateKey ? await rotateAgentKey(props.rotateKey.id, expires, rotationScopesChanged.value && !fullAccess.value ? [...scopes.value] : undefined, fullAccess.value !== !!props.rotateKey.full_access ? fullAccess.value : undefined) : await createAgentKey(props.agent, expires, fullAccess.value ? [] : [...scopes.value], fullAccess.value)
     emit('created')
     await nextTick()
     document.querySelector<HTMLElement>('.token-copy')?.focus()
@@ -126,14 +127,14 @@ async function copyCommand() {
   <AccessSheet :title="created ? 'Key ready' : `${rotateKey ? 'Rotate key' : firstKey ? 'Create first key' : 'New key'} for ${agent.name}`" size="center" scale="l" actions-first :submit-shortcut="!created" @submit="create" @close="busy || emit('close')">
     <div v-if="!created" class="body">
       <p v-if="rotateKey" class="note"><AppIcon name="refresh" :size="14" /><span>Rotate {{ keyHint(rotateKey.prefix) }}: create a replacement and revoke the old key immediately when you confirm. The same scopes are kept unless you change the selection. Copy the new key into {{ agent.name }}’s configuration to reconnect it.</span></p>
-      <p v-else class="note"><AppIcon name="shield" :size="14" /><span>The key does only what you tick below, and never more than {{ agent.name }}’s role{{ role ? ` (${role})` : '' }} allows. Revoking it stops it at once.</span></p>
+      <p v-else class="note"><AppIcon name="shield" :size="14" /><span>Choose Full access or individual permissions below, and never more than {{ agent.name }}’s role{{ role ? ` (${role})` : '' }} allows. Revoking it stops it at once.</span></p>
       <KeyLifetime v-model="days" :disabled="busy || !allowed" />
-      <ScopeCodeField :unavailable="codeUnavailable" :disabled="busy || !allowed" @applied="applyCode" />
+      <ScopeCodeField :unavailable="codeUnavailable" :disabled="busy || !allowed || fullAccess" @applied="applyCode" />
       <label class="search-field">
         <AppIcon name="search" :size="14" />
-        <input v-model="term" class="field" type="search" placeholder="Find a scope by name, id or group" aria-label="Find a scope" autocomplete="off" spellcheck="false" />
+        <input v-model="term" class="field" type="search" placeholder="Find a scope by name, id or group" aria-label="Find a scope" :disabled="fullAccess" autocomplete="off" spellcheck="false" />
       </label>
-      <div v-if="rotateKey" class="rotation-scopes">
+      <div v-if="rotateKey && !fullAccess" class="rotation-scopes">
         <p class="label">{{ rotationScopesChanged ? 'Original scopes' : `${rotateKey.scopes.length} ${rotateKey.scopes.length === 1 ? 'scope' : 'scopes'} kept` }}</p>
         <p class="expiry-note">Search only filters the preview.{{ rotationScopesChanged ? '' : ' Rotation keeps every original scope unless you change the selection.' }}</p>
         <ScopeDetails v-for="scope in rotationScopes" :key="scope.key" :scope="scope" />
@@ -141,10 +142,13 @@ async function copyCommand() {
         <p v-else-if="!rotationScopes.length" class="empty">No scope matches “{{ term }}”.</p>
         <p v-if="rotationProblem" class="field-error" role="alert">{{ rotationProblem }}</p>
       </div>
+      <p v-if="rotateKey && fullAccess && !rotationScopesChanged" class="expiry-note">{{ fullAccessLabel() }}</p>
       <fieldset v-if="!rotateKey || rotationScopesChanged" id="key-scopes" class="scopes" tabindex="-1" :disabled="busy || !allowed" :aria-invalid="tried && !!scopeProblem" :aria-describedby="tried && scopeProblem ? 'key-scopes-error' : undefined">
-        <legend class="label">What it may do <span class="count">{{ scopes.size }} chosen</span></legend>
+        <legend class="label">What it may do <span class="count">{{ fullAccess ? 'Dynamic access' : `${scopes.size} chosen` }}</span></legend>
         <ScopePresets :held="presetHeld" :registry="access.registry" :disabled="busy || !allowed" :preferred="preferredPreset" @apply="preset" />
-        <button type="button" class="btn sm clear" :disabled="busy || !scopes.size" @click="preset([])">Clear</button>
+        <button type="button" class="btn sm clear" :disabled="busy || (!scopes.size && !fullAccess)" @click="preset([])">Clear</button>
+        <p v-if="fullAccess" class="expiry-note">{{ fullAccessLabel() }}. The agent’s role, creator permissions and project access still apply.</p>
+        <template v-else>
         <div v-for="group in groups" :key="group.group" class="scope-group" role="group" :aria-label="group.group">
           <div class="group-h"><span>{{ group.group }}</span><span class="group-actions">
             <button type="button" class="btn sm ghost" :disabled="busy || !allowed || !group.items.some(p => presetHeld.has(p.key))" @click="selectGroup(group.items.map(p => p.key), true)">All</button>
@@ -156,6 +160,7 @@ async function copyCommand() {
           </label>
         </div>
         <p v-if="!groups.length" class="empty">No scope matches “{{ term }}”.</p>
+        </template>
         <p v-if="tried && scopeProblem" id="key-scopes-error" class="field-error" role="alert"><AppIcon name="alert" :size="12" />{{ scopeProblem }}</p>
       </fieldset>
       <p v-if="!allowed" class="set-note error" role="alert"><AppIcon name="shield" :size="14" />{{ lostPermission('keys.manage') }}</p>

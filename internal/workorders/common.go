@@ -341,15 +341,16 @@ func CurrentKeyPrincipalAt(r *http.Request, tx pgx.Tx, p tenant.Principal, scope
 	}
 	sum := sha256.Sum256([]byte(secret))
 	var creator *string
-	err := tx.QueryRow(r.Context(), `SELECT scopes,created_by_principal_id::text FROM agent_keys
+	err := tx.QueryRow(r.Context(), `SELECT scopes,created_by_principal_id::text,coalesce(full_access,false) FROM agent_keys
  WHERE tenant_id=$1 AND principal_id=$2 AND prefix=$3 AND hash=$4
- AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>$5)`, p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:]), now).Scan(&p.Scopes, &creator)
+ AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>$5)`, p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:]), now).Scan(&p.Scopes, &creator, &p.FullAccess)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, Fail(403, "key scope required: "+scope)
 	}
 	if err != nil {
 		return p, err
 	}
+	p.Scopes = authz.ResolveKeyScopes(p.Scopes, p.FullAccess)
 	allowed := false
 	for _, s := range p.Scopes {
 		if s == scope || scope == "models.read" && strings.ReplaceAll(s, ":", ".") == scope {

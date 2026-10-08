@@ -26,9 +26,10 @@ func ValidateKeyCreatorTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) er
 		return nil
 	}
 	var creator string
-	err := tx.QueryRow(ctx, `SELECT coalesce(created_by_principal_id::text,'') FROM agent_keys
-	 WHERE tenant_id=$1::uuid AND id=$2::uuid AND principal_id=$3::uuid`, p.TenantID, p.KeyID, p.ID).Scan(&creator)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && !strings.EqualFold(creator, p.KeyCreatorID) {
+	var fullAccess bool
+	err := tx.QueryRow(ctx, `SELECT coalesce(created_by_principal_id::text,''),coalesce(full_access,false) FROM agent_keys
+	 WHERE tenant_id=$1::uuid AND id=$2::uuid AND principal_id=$3::uuid`, p.TenantID, p.KeyID, p.ID).Scan(&creator, &fullAccess)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && (!strings.EqualFold(creator, p.KeyCreatorID) || fullAccess != p.FullAccess) {
 		return ErrKeyAuthorityChanged
 	}
 	return err

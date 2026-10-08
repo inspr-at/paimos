@@ -137,7 +137,7 @@ func permitEffective(p tenant.Principal, permission string, effective Effective,
 		}
 		return &denial{reason: "missing_role_permission"}
 	}
-	if p.Kind == tenant.Agent && !containsScope(p.Scopes, permission) && !CoordinatorCeiling(p.Scopes, permission) {
+	if p.Kind == tenant.Agent && !KeyAllows(p, permission) {
 		return &denial{reason: "missing_key_scope", scope: permission}
 	}
 	return nil
@@ -405,7 +405,7 @@ func ProjectsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (ProjectChec
 		if creator != nil && !creator.allows(permission, projectID) {
 			return false
 		}
-		return p.Kind != tenant.Agent || containsScope(p.Scopes, permission) || CoordinatorCeiling(p.Scopes, permission)
+		return p.Kind != tenant.Agent || KeyGrantable(permission, OwnerWorkstation(p)) && KeyAllows(p, permission)
 	}, nil
 }
 

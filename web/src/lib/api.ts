@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export interface Identity {
+  full_access?: boolean
   principal: { id: string; name: string; email?: string; kind?: 'person' | 'agent'; roles?: string[] }
   // brand: the workspace's own header brand (AEON-431), absent when unset.
   // slug: the workspace's stable short name (also the default CLI instance name).

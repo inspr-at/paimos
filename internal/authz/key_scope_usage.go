@@ -37,16 +37,18 @@ func recordKeyScopeUseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, per
 	// A grant waiting behind approval must see the new live ceiling. SELECT
 	// takes no key row lock; the usage fence, shared with trims, is authoritative.
 	var scopes []string
-	err := tx.QueryRow(ctx, `SELECT scopes FROM agent_keys WHERE tenant_id=$1::uuid AND id=$2::uuid
+	var fullAccess bool
+	err := tx.QueryRow(ctx, `SELECT scopes,coalesce(full_access,false) FROM agent_keys WHERE tenant_id=$1::uuid AND id=$2::uuid
 	 AND principal_id=$3::uuid AND created_by_principal_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
 	 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())`,
-		p.TenantID, p.KeyID, p.ID, p.KeyCreatorID).Scan(&scopes)
+		p.TenantID, p.KeyID, p.ID, p.KeyCreatorID).Scan(&scopes, &fullAccess)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrForbidden
 	}
 	if err != nil {
 		return err
 	}
+	scopes = ResolveKeyScopes(scopes, fullAccess)
 	used := []string{permission}
 	if !containsScope(scopes, permission) {
 		if !CoordinatorCeiling(scopes, permission) {

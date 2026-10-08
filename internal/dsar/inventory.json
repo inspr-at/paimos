@@ -536,6 +536,17 @@
         "tenant_column": "tenant_id"
       },
       "table": "work_kinds"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "full_access": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "created_by_principal_id"
+      },
+      "table": "agent_keys"
     }
   ],
   "version": 1
