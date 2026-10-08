@@ -41,7 +41,7 @@ func loadUsagePolicy(ctx context.Context, tx pgx.Tx, id string) (usagePolicy, er
 	p := usagePolicy{AccountID: id, Posture: "balanced", Source: "schedule"}
 	var account, person, workspace *string
 	err := tx.QueryRow(ctx, `SELECT
- CASE WHEN a.usage_posture_person_id=a.owner_person_id AND a.usage_posture_link_revision=a.link_revision THEN a.usage_posture END,
+ CASE WHEN a.usage_posture_person_id=`+modelprefs.CanonicalPersonSQL("a.owner_person_id")+` AND a.usage_posture_link_revision=a.link_revision THEN a.usage_posture END,
  (SELECT usage FROM model_pref_profiles WHERE scope='person' AND person_id=`+modelprefs.CanonicalPersonSQL("a.owner_person_id")+`),
  (SELECT usage FROM model_pref_profiles WHERE scope='workspace'),
  COALESCE(a.usage_floor_percent,0),COALESCE(a.usage_revision,0),a.link_revision,
@@ -228,7 +228,7 @@ func (m *Module) writeUsagePolicy(w http.ResponseWriter, r *http.Request) {
 		if floor {
 			_, err = tx.Exec(ctx, `UPDATE agent_accounts SET usage_floor_percent=$2,usage_revision=$3 WHERE id=$1`, id, *percent, *revision+1)
 		} else {
-			_, err = tx.Exec(ctx, `UPDATE agent_accounts SET usage_posture=$2,usage_posture_person_id=owner_person_id,usage_posture_link_revision=link_revision,usage_revision=$3 WHERE id=$1`, id, posture, *revision+1)
+			_, err = tx.Exec(ctx, `UPDATE agent_accounts SET usage_posture=$2,usage_posture_person_id=`+modelprefs.CanonicalPersonSQL("owner_person_id")+`,usage_posture_link_revision=link_revision,usage_revision=$3 WHERE id=$1`, id, posture, *revision+1)
 		}
 		if err != nil {
 			return err

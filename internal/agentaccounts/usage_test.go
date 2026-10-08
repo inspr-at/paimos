@@ -176,6 +176,8 @@ func TestUsageOwnerOverrideSharedFloorAdmissionAndGuard(t *testing.T) {
 		More     bool           `json:"has_more"`
 		Cursor   string         `json:"next_cursor"`
 	}
+	callStatus(t, mod, &runner, token, "GET", "/api/agent-accounts/posture?harness=codex&limit=1", "", 403, nil)
+	dbtest.BindRole(t, testDB, owner.TenantID, runner.ID, "admin")
 	callStatus(t, mod, &runner, token, "GET", "/api/agent-accounts/posture?harness=codex&limit=1", "", 200, &page)
 	if len(page.Accounts) != 1 || !page.More || page.Cursor == "" || page.Accounts[0].Floor != 20 || page.Accounts[0].Boost != 0 || page.Accounts[0].BoostUntil != nil {
 		t.Fatalf("projection %+v", page)
@@ -183,5 +185,20 @@ func TestUsageOwnerOverrideSharedFloorAdmissionAndGuard(t *testing.T) {
 	callStatus(t, mod, &runner, token, "GET", "/api/agent-accounts/posture?harness=codex&limit=1&after="+page.Cursor, "", 200, &page)
 	if len(page.Accounts) != 1 || page.More {
 		t.Fatal("pagination lost account")
+	}
+	callStatus(t, mod, &owner, "", "PUT", "/api/agent-accounts/"+b.ID+"/posture", `{"posture":"careful","revision":0,"binding_revision":0}`, 200, &saved)
+	// Linking an owner principal to another canonical person must invalidate
+	// the old person's override even when the account binding did not change.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, owner.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE principals SET linked_to=$2 WHERE id=$1`, owner.ID, peer.ID); err != nil {
+			return err
+		}
+		u, err := loadUsagePolicy(t.Context(), tx, b.ID)
+		if err == nil && u.Source == "account" {
+			t.Fatal("canonical owner change retained the old override")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
