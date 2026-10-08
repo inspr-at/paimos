@@ -24,26 +24,40 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
-	"POST /api/engine/admission":                       "engine.admission",
-	"GET /api/projects/{projectId}/admission-settings": "engine.read",
-	"PUT /api/projects/{projectId}/admission-settings": "engine.manage",
-	"POST /api/github/webhook":                         "public",
-	"GET /api/delivery/enqueue-allowed":                "delivery.read",
-	"GET /api/delivery":                                "delivery.read",
-	"GET /api/delivery/alerts":                         "delivery.read",
-	"GET /api/delivery/audit":                          "delivery.read",
-	"GET /api/nodes/{id}/delivery":                     "delivery.read",
-	"POST /api/delivery/{itemId}/hold":                 "delivery.manage",
-	"DELETE /api/delivery/{itemId}/hold":               "delivery.manage",
-	"GET /api/settings/delivery":                       "delivery.read",
-	"PUT /api/settings/delivery":                       "delivery.manage",
-	"GET /api/projects/{projectId}/delivery-settings":  "delivery.read",
-	"PUT /api/projects/{projectId}/delivery-settings":  "delivery.manage",
-	"GET /api/settings/review-policy":                  "reviewpolicy.read",
-	"PUT /api/settings/review-policy":                  "reviewpolicy.manage",
-	"GET /api/projects/{projectId}/review-policy":      "reviewpolicy.read",
-	"PUT /api/projects/{projectId}/review-policy":      "reviewpolicy.manage",
-	"DELETE /api/projects/{projectId}/review-policy":   "reviewpolicy.manage",
+	"POST /api/engine/admission":                                      "engine.admission",
+	"GET /api/projects/{projectId}/admission-settings":                "engine.read",
+	"PUT /api/projects/{projectId}/admission-settings":                "engine.manage",
+	"GET /api/model-preferences/board":                                "models.read",
+	"PUT /api/model-preferences/orders/{column}/{situation}":          "models.read|model_prefs.manage",
+	"DELETE /api/model-preferences/orders/{column}/{situation}":       "models.read|model_prefs.manage",
+	"PUT /api/model-preferences/orders/{column}/{situation}/thinking": "models.read|model_prefs.manage",
+	"PUT /api/model-preferences/profile":                              "models.read|model_prefs.manage",
+	"POST /api/model-preferences/tray/{line}/dismiss":                 "models.read|model_prefs.manage",
+	"GET /api/model-preferences/situations":                           "models.read",
+	"PUT /api/model-preferences/situations":                           "model_prefs.manage",
+	"GET /api/model-preferences/evidence":                             "models.read",
+	"GET /api/model-preferences/coverage":                             "models.read",
+	"GET /api/model-rules":                                            "models.read",
+	"PUT /api/model-rules/{scope}/{column}":                           "model_prefs.manage",
+	"PUT /api/work-kinds/order":                                       "model_prefs.manage",
+
+	"POST /api/github/webhook":                        "public",
+	"GET /api/delivery/enqueue-allowed":               "delivery.read",
+	"GET /api/delivery":                               "delivery.read",
+	"GET /api/delivery/alerts":                        "delivery.read",
+	"GET /api/delivery/audit":                         "delivery.read",
+	"GET /api/nodes/{id}/delivery":                    "delivery.read",
+	"POST /api/delivery/{itemId}/hold":                "delivery.manage",
+	"DELETE /api/delivery/{itemId}/hold":              "delivery.manage",
+	"GET /api/settings/delivery":                      "delivery.read",
+	"PUT /api/settings/delivery":                      "delivery.manage",
+	"GET /api/projects/{projectId}/delivery-settings": "delivery.read",
+	"PUT /api/projects/{projectId}/delivery-settings": "delivery.manage",
+	"GET /api/settings/review-policy":                 "reviewpolicy.read",
+	"PUT /api/settings/review-policy":                 "reviewpolicy.manage",
+	"GET /api/projects/{projectId}/review-policy":     "reviewpolicy.read",
+	"PUT /api/projects/{projectId}/review-policy":     "reviewpolicy.manage",
+	"DELETE /api/projects/{projectId}/review-policy":  "reviewpolicy.manage",
 	// Lead handlers retain their actor/owner checks inside the final transaction.
 	"GET /api/projects/{projectId}/lead":                            "harness.read",
 	"POST /api/projects/{projectId}/lead":                           "harness.control",
@@ -355,6 +369,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/events":                                                        "events.read",
 	"GET /api/events/activity":                                               "events.read",
 	"GET /api/events/stream":                                                 "events.read",
+	"GET /api/events/subscribe":                                              "events.subscribe",
 	"GET /api/from-classic":                                                  "nodes.read",
 	"GET /api/harness-sessions":                                              "harness.read",
 	"GET /api/me/agent-pause-settings":                                       "harness.read",
@@ -754,6 +769,7 @@ var RoutePermissions = map[string]string{
 
 // Tier reads, worker reports and person decisions use the existing session permissions.
 func init() {
+	RoutePermissions["GET /api/projects/{projectId}/harness-sessions/{sessionId}/notifications"] = "harness.worker"
 	RoutePermissions["GET /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.read"
 	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.control"
 	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/report"] = "harness.worker"

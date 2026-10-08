@@ -42,7 +42,7 @@ func RouteCandidatesTx(ctx context.Context, tx pgx.Tx, run string, fields []byte
 		ticketID = *ticket
 	}
 	placement, err := modelregistry.PlacementFor(ctx, tx, tenant.Principal{}, modelregistry.WorkQuery{
-		TicketID: ticketID, Role: role, TicketRole: f.RouteRole, Area: f.Area, Complexity: f.Complexity,
+		TicketID: ticketID, Role: role, Queued: true, TicketRole: f.RouteRole, Area: f.Area, Complexity: f.Complexity,
 		ComplexitySource: f.ComplexitySource, TicketResidency: f.Residency, ProjectID: project, PersonID: starter,
 	}, time.Now().UTC())
 	if err != nil {

@@ -73,6 +73,8 @@ func makeRegistry() []Permission {
 	out = append(out, Permission{Key: "account.overview.read", Group: "Account", Description: "Read all enrolled account capacity values", Risk: "low", GrantableAt: []string{"workspace"}, AgentGrantable: true})
 	out = append(out, Permission{Key: "ownership.transfer", Group: "Ownership", Description: "Transfer workspace ownership", Risk: "high", GrantableAt: []string{"workspace"}, AgentGrantable: false})
 	out = append(out, Permission{Key: "agents.plan.read", Group: "Agents", Description: "Read the person's agent start plan and running counts", Risk: "low", GrantableAt: []string{"workspace"}, AgentGrantable: true})
+	// Delegation is explicit: built-in agent roles exclude this permission.
+	out = append(out, Permission{Key: "events.subscribe", Group: "Events", Description: "Subscribe to authorized change hints (explicit custom agent grant)", Risk: "low", GrantableAt: []string{"workspace"}, AgentGrantable: true})
 	for i := range out {
 		out[i].OwnerWorkstationGrantable = out[i].AgentGrantable || OwnerWorkstationPermission(out[i].Key)
 	}

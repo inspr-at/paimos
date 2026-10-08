@@ -415,6 +415,20 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (out 
 		Report   json.RawMessage `json:"report"`
 		Run      Run             `json:"run"`
 	}{v.ID, t.Sequence, canonical, v}
+	if before.Status == "starting" && v.Status == "running" && v.ProfileID != nil && len(v.Trace) > 0 && string(v.Trace) != "null" {
+		var trace struct {
+			Placement json.RawMessage `json:"work_placement"`
+		}
+		if err := json.Unmarshal(v.Trace, &trace); err != nil {
+			return nil, err
+		}
+		if evidence, used, err := modelregistry.PinnedBottomUsed(trace.Placement, *v.ProfileID); err != nil {
+			return nil, err
+		} else if used {
+			evidence["run_id"] = v.ID
+			pending = append(pending, events.Change{NodeID: &o.NodeID, Type: "model.pinned_bottom_used", After: evidence})
+		}
+	}
 	pending = append(pending, events.Change{NodeID: &o.NodeID, Type: "run.telemetry", Before: before, After: after})
 	for _, change := range pending {
 		if _, err := events.Append(ctx, tx, p, change); err != nil {

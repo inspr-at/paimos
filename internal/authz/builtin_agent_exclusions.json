@@ -7,6 +7,7 @@
     "account.overview.read",
     "engine.admission",
     "engine.read",
-    "engine.manage"
+    "engine.manage",
+    "events.subscribe"
   ]
 }
