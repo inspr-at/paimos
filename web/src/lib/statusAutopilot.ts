@@ -15,7 +15,7 @@ export const getStatusAutopilot = (signal?: AbortSignal) => request<AutopilotSet
 export const saveStatusAutopilot = (s: AutopilotSettings, confirmUpgrade = false, signal?: AbortSignal) => request<AutopilotSettings>('/settings/status-autopilot', { enabled: s.enabled, rules: s.rules, expected_revision: s.revision, ...(confirmUpgrade ? { confirm_upgrade: true } : {}) }, signal)
 export const getAutopilotProposals = () => request<{ items: AutopilotProposal[] }>('/status-autopilot/proposals')
 export const resolveAutopilotProposal = (id: number, action: 'apply' | 'dismiss') => request<Record<string, never>>(`/status-autopilot/proposals/${id}`, { action })
-export const getProjectAutopilot = (id: string) => request<ProjectOverride>(`/projects/${encodeURIComponent(id)}/status-autopilot`)
+export const getProjectAutopilot = (id: string, signal?: AbortSignal) => request<ProjectOverride>(`/projects/${encodeURIComponent(id)}/status-autopilot`, undefined, signal)
 export const saveProjectAutopilot = (id: string, mode: ProjectOverride['mode'], revision: number, signal?: AbortSignal) => request<ProjectOverride>(`/projects/${encodeURIComponent(id)}/status-autopilot`, { mode, expected_revision: revision }, signal)
 export const getAutomaticChanges = (nodeId?: string) => request<{ items: AutomaticChange[] }>(`/status-autopilot/changes${nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : ''}`)
 export const getAutopilotSuggestions = () => request<{ items: AutomaticChange[] }>('/status-autopilot/changes?suggestions=true')
