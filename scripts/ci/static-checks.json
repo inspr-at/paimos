@@ -459,6 +459,21 @@
       "timeout_seconds": 120
     },
     {
+      "id": "tracked-bytecode",
+      "command": "node scripts/check-tracked-bytecode.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "Offline code-health audit toolkit and slice ownership",
+        "command": "node scripts/check-tracked-bytecode.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30
+    },
+    {
       "id": "ci-plan-tests",
       "command": "node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs",
       "cwd": ".",
