@@ -3397,6 +3397,26 @@ paths:
                 type: string
         '400':
           $ref: '#/components/responses/Error'
+  /events/subscribe:
+    get:
+      operationId: subscribeAgentEvents
+      description: 'Read-only agent SSE change hints. Requires an explicit events.subscribe key scope and a custom workspace role granting it; built-in agent roles exclude it. Topic reads also require their live resource permissions; node-backed hints require nodes.read for every referenced project. Preference hints require models.resolve, policy hints reviewpolicy.read, approvals approvals.read, decisions questions.read and delivery delivery.read. Settings hints require the corresponding settings.read or settings.manage authority. Project sets above 2000 or events with more than 100 node references are refused without advancing the cursor. Plan hints are restricted to the key creator’s canonical person. Data contains only id, type, topic and at, never snapshots, actor identities, secrets or resource values. Fetch current values through their authorized APIs. LISTEN/NOTIFY wakes durable replay after commit. Numeric cursors replay without a backlog cutoff; Last-Event-ID wins over after. after defaults to latest. A cursor ahead of the tenant log is rejected, never reset. Changing topics requires replaying from the earlier cursor. stream.ready and stream.cursor name the exclusive resume cursor; stream.ping has no id. Persist cursor ids only after processing earlier frames. Heartbeats occur every 15 seconds. Two connections per key across server processes and at most 64 subscriptions per server; excess gets 429 and Retry-After. Reads and writes have 10-second deadlines, replay batches have at most 200 hints, and slow clients disconnect to resume from their last processed cursor. Current key, creator and topic authority is checked on every replay and heartbeat; revoked subscription authority closes the stream.'
+      security: *auth
+      parameters:
+        - {name: Last-Event-ID, in: header, description: 'Exclusive resume cursor; takes precedence over after.', schema: {type: string, pattern: '^[0-9]{1,19}$', maxLength: 19}}
+        - {name: after, in: query, description: 'latest or an exclusive numeric resume cursor. No automatic backlog skip.', schema: {type: string, default: latest, pattern: '^(latest|[0-9]{1,19})$', maxLength: 19}}
+        - {name: topics, in: query, description: 'Comma-separated distinct topics; omitted means all. Unknown or repeated topics are rejected.', schema: {type: string, maxLength: 128, example: 'plan,policies,delivery'}}
+      responses:
+        '200':
+          description: 'SSE change hints and cursor checkpoints. Topics are plan, settings, preferences, policies, approvals, decisions and delivery.'
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '429':
+          description: 'Subscription connection limit reached; Retry-After is 15 seconds.'
+        '503': {$ref: '#/components/responses/Error'}
   /events/{eventId}/undo:
     parameters: [{$ref: '#/components/parameters/EventId'}]
     post:
@@ -4956,10 +4976,62 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
+  /model-preferences/board:
+    get:
+      operationId: getModelPreferenceBoard
+      security: *auth
+      description: "Line ids are family:line (for example openai:sol or anthropic:opus). Ranking board and rules use the same six-step resolver. Hidden columns remain active. New lines run nowhere until placed. Bounded to 256 kinds and 512 profiles; overflow returns 413."
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: layer, in: query, schema: {type: string, enum: [mine, default, rules], default: mine}}
+        - {name: situation, in: query, schema: {type: string, enum: [first, fix, stuck], default: first}}
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoard'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+  /model-preferences/coverage:
+    get:
+      operationId: getModelPreferenceCoverage
+      security: *auth
+      description: "Declares consumers that read ranked boards. Lead harness sessions remain observational until Engine Wave 2."
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardCoverage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+  /model-preferences/evidence:
+    get:
+      operationId: getModelPreferenceEvidence
+      security: *auth
+      description: "Tenant and project-visible run evidence with for whom and the recorded preference decision. Cursor pagination never infers historical agreement."
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: kind, in: query, schema: {type: string, maxLength: 48}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardEvidence'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
   /model-preferences/levels/{level}:
     put:
       operationId: replaceModelPreferenceLevel
       security: *auth
+      deprecated: true
       description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
       parameters:
         - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
@@ -4967,6 +5039,7 @@ paths:
         - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceLevelWrite'}}}}
       responses:
+        '405': {description: "Legacy preference writes are read only for this release; use the board endpoints."}
         '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -4978,6 +5051,7 @@ paths:
     delete:
       operationId: resetModelPreferenceLevel
       security: *auth
+      deprecated: true
       description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
       parameters:
         - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
@@ -4985,6 +5059,7 @@ paths:
         - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
         - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
       responses:
+        '405': {description: "Legacy preference writes are read only for this release; use the board endpoints."}
         '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -4996,6 +5071,7 @@ paths:
     put:
       operationId: setModelPreferenceRow
       security: *auth
+      deprecated: true
       description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
       parameters:
         - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
@@ -5004,6 +5080,7 @@ paths:
         - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceRowWrite'}}}}
       responses:
+        '405': {description: "Legacy preference writes are read only for this release; use the board endpoints."}
         '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -5015,6 +5092,7 @@ paths:
     delete:
       operationId: resetModelPreferenceRow
       security: *auth
+      deprecated: true
       description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
       parameters:
         - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
@@ -5023,6 +5101,7 @@ paths:
         - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
       responses:
+        '405': {description: "Legacy preference writes are read only for this release; use the board endpoints."}
         '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -5030,6 +5109,131 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '428': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
+  /model-preferences/orders/{column}/{situation}:
+    put:
+      operationId: putModelBoardOrder
+      security: *auth
+      description: "One revision-checked write and event. Personal Not allowed is additive to rules. Agents cannot write."
+      parameters:
+        - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
+        - {name: If-Prefs-Person, in: header, description: 'Required for person writes. Equality precondition against the current canonical caller; never selects a person.', schema: {type: string, format: uuid}}
+        - {name: column, in: path, required: true, schema: {type: string, maxLength: 64}}
+        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, fix, stuck]}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardOrderWrite'}}}}
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: resetModelBoardOrder
+      security: *auth
+      description: "Reset to the inherited order with the profile revision."
+      parameters:
+        - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
+        - {name: If-Prefs-Person, in: header, description: 'Required for person writes. Equality precondition against the current canonical caller; never selects a person.', schema: {type: string, format: uuid}}
+        - {name: column, in: path, required: true, schema: {type: string, maxLength: 64}}
+        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, fix, stuck]}}
+        - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+  /model-preferences/orders/{column}/{situation}/thinking:
+    put:
+      operationId: putModelColumnThinking
+      security: *auth
+      description: "Set or clear column thinking; review effort remains xhigh."
+      parameters:
+        - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
+        - {name: If-Prefs-Person, in: header, description: 'Required for person writes. Equality precondition against the current canonical caller; never selects a person.', schema: {type: string, format: uuid}}
+        - {name: column, in: path, required: true, schema: {type: string, maxLength: 64}}
+        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, fix, stuck]}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelColumnThinkingWrite'}}}}
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+  /model-preferences/profile:
+    put:
+      operationId: putModelPreferenceProfile
+      security: *auth
+      description: "Sparse personal settings follow the workspace. Templates preserve own orders unless replace_own is true. dry_run returns the same moved diff without writes or events. Residency may only tighten the workspace. Usage posture writes are deferred to AEON-880."
+      parameters:
+        - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
+        - {name: If-Prefs-Person, in: header, description: 'Required for person writes. Equality precondition against the current canonical caller; never selects a person.', schema: {type: string, format: uuid}}
+        - {name: dry_run, in: query, schema: {type: boolean, default: false}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardProfileWrite'}}}}
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+  /model-preferences/situations:
+    get:
+      operationId: getModelSituationLimits
+      security: *auth
+      description: "PAIMOS defines situations; only their limits are editable."
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelSituationLimits'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putModelSituationLimits
+      security: *auth
+      description: "Work-kind administrators set bounded small-work and fix-round limits."
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelSituationLimitsWrite'}}}}
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelSituationLimits'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+  /model-preferences/tray/{line}/dismiss:
+    post:
+      operationId: dismissModelPreferenceLine
+      security: *auth
+      description: "Dismiss a new line for this profile without placing it in an order."
+      parameters:
+        - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
+        - {name: If-Prefs-Person, in: header, description: 'Required for person writes. Equality precondition against the current canonical caller; never selects a person.', schema: {type: string, format: uuid}}
+        - {name: line, in: path, required: true, schema: {type: string, maxLength: 128}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardRevisionWrite'}}}}
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
   /model-prices:
     get:
       operationId: listModelPrices
@@ -5057,6 +5261,41 @@ paths:
         '400': {description: Invalid price}
         '403': {description: models.manage person permission required}
         '409': {description: Conflicting or out-of-order version}
+  /model-rules:
+    get:
+      operationId: getModelRules
+      security: *auth
+      description: "Workspace and project locks, with who, when and why. Projects only add rules."
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelRules'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+  /model-rules/{scope}/{column}:
+    put:
+      operationId: putModelRules
+      security: *auth
+      description: "Replace rules in the addressed scope only. Project pins go before workspace pins. Attempts to loosen or omit a workspace rule return 422 looser_than_workspace. Every new rule requires a reason."
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: column, in: path, required: true, schema: {type: string, maxLength: 64}}
+        - {name: scope, in: path, required: true, schema: {type: string, enum: [workspace, project]}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRulesWrite'}}}}
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelRules'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
   /models:
     get:
       operationId: listModelProfiles
@@ -5105,7 +5344,7 @@ paths:
       description: Requires models.refresh. Runs the deterministic refresh with tenant settings and vault credentials. All callers and the scheduler share interval_minutes. Vendor requests run after the reservation transaction commits, with a shared 30-second deadline, at most 5 pages and 500 identifiers per vendor, and 200 observations/profile additions per run. Accepts no profile, route, URL or credential writes. Optional API calls stay disabled until a person enables them. Every completed run writes one audit event; outages keep the last good catalog and mark that source stale.
       security: *auth
       responses:
-        '200': {description: Refresh result, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+        '200': {description: Refresh result, content: {application/json: {schema: {type: object, additionalProperties: true, properties: {new_lines: {type: array, maxItems: 200, items: {type: string}}}}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
@@ -5164,6 +5403,11 @@ paths:
         - {name: mode, in: query, description: Explicitly enable placement resolution when only role and project_id are supplied., schema: {type: string, enum: [placement]}}
         - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible work item or legacy ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
         - {name: area, in: query, schema: {type: string, maxLength: 48}}
+        - {name: situation, in: query, schema: {type: string, enum: [first, fix, stuck]}}
+        - {name: fix_round, in: query, schema: {type: integer, minimum: 0, maximum: 1000}}
+        - {name: estimate_hours, in: query, schema: {type: number, minimum: 0, maximum: 100000}}
+        - {name: concept, in: query, schema: {type: boolean}, description: 'Explicit request for a concept or ADR; uses the Concepts column.'}
+        - {name: previous_family, in: query, schema: {type: string}, description: 'Previous author family for a Stuck fallback.'}
         - {name: complexity, in: query, schema: {type: string, enum: [S, M, L]}}
         - {name: person_id, in: query, schema: {type: string, format: uuid}, description: Must map to the canonical caller or key creator. Operator keys cannot supply it.}
       responses:
@@ -7397,6 +7641,19 @@ paths:
         '200': {description: Evidence recorded}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/harness-sessions/{sessionId}/notifications:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+    get:
+      operationId: watchHarnessNotifications
+      description: "Content-free SSE wake hints for this managed generation's controls and inbox, over the existing committed event notification channel. Requires current harness.worker authority and the exact worker lease. harness.wake on connection and relevant changes tells the daemon to claim controls and drain through their existing authorized routes; stream.ping is a keepalive. Hints grant no process authority, carry no message text, and acknowledge nothing. Reconnect triggers a fresh drain to cover missed hints. Authority is rechecked on wakes and every 15 seconds."
+      responses:
+        '200': {description: "SSE harness.wake and stream.ping events with empty JSON objects", content: {text/event-stream: {schema: {type: string}}}}
+        '403': {description: "Worker proof or current permission rejected"}
+        '409': {description: "Managed worker required"}
+        '410': {description: "Archived generation"}
   /projects/{projectId}/harness-sessions/{sessionId}/pause:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -12322,6 +12579,23 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
+  /work-kinds/order:
+    put:
+      operationId: orderWorkKinds
+      security: *auth
+      description: "Order all active visible work kinds once, preserving ticket area values."
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindOrderWrite'}}}}
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindOrderedPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
   /work-kinds/{kindId}:
     patch:
       operationId: updateWorkKind
@@ -12438,7 +12712,7 @@ components:
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.9']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.10']}}
     JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.4']}}
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.3']}}
     MutationEventIds:
@@ -17241,6 +17515,125 @@ components:
         event_id: {type: integer, format: int64}
         stale: {type: boolean, description: "The learning's text changed after it was recommended"}
         target_missing: {type: boolean, description: "The chosen entry was deleted or left the project"}
+    ModelBoard:
+      type: object
+      required: [person_id, layer, situation, columns, tray, residency, revision, profile, needs_you]
+      properties:
+        person_id: {type: [string, 'null'], format: uuid}
+        layer: {type: string, enum: [mine, default, rules]}
+        situation: {type: string, enum: [first, fix, stuck]}
+        revision: {type: integer, format: int64}
+        profile: {$ref: '#/components/schemas/ModelBoardProfile'}
+        columns: {type: array, maxItems: 260, items: {$ref: '#/components/schemas/ModelBoardColumn'}}
+        tray: {type: array, maxItems: 512, items: {$ref: '#/components/schemas/ModelBoardCard'}}
+        residency: {type: object, required: [own, effective], properties: {own: {type: [string, 'null']}, effective: {type: string, enum: [any, eu, local]}}}
+        needs_you: {type: array, items: {type: string}}
+    ModelBoardCard:
+      type: object
+      required: [line, version, harness, effort]
+      properties:
+        line: {type: string, maxLength: 128}
+        version: {type: string}
+        harness: {type: string}
+        effort: {type: string}
+        introduced_at: {type: string, format: date-time}
+        lock: {$ref: '#/components/schemas/ModelBoardLock'}
+    ModelBoardColumn:
+      type: object
+      required: [column, label, short, sentence, fixed, hidden, source, thinking, list, top, free, bottom, not, cant]
+      properties:
+        column: {type: string}
+        label: {type: string}
+        short: {type: string}
+        sentence: {type: string}
+        fixed: {type: boolean}
+        hidden: {type: boolean}
+        source: {type: string, enum: [own, default, template, follows]}
+        thinking: {type: object, required: [word, source], properties: {word: {type: string, enum: [lean, standard, deep, max]}, source: {type: string}}}
+        list: {type: array, items: {$ref: '#/components/schemas/ModelBoardCard'}}
+        top: {type: array, items: {$ref: '#/components/schemas/ModelBoardCard'}}
+        free: {type: array, items: {$ref: '#/components/schemas/ModelBoardCard'}}
+        bottom: {type: array, items: {$ref: '#/components/schemas/ModelBoardCard'}}
+        not: {type: array, items: {$ref: '#/components/schemas/ModelBoardCard'}}
+        cant: {type: array, items: {type: object, required: [line, reason], properties: {line: {type: string}, reason: {type: string}}}}
+    ModelBoardCoverage:
+      type: object
+      required: [consumers]
+      properties:
+        consumers: {type: array, items: {type: object, required: [consumer, reads_board, agreement], properties: {consumer: {type: string}, reads_board: {type: boolean}, agreement: {type: string}}}}
+    ModelBoardEvidence:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        next_cursor: {type: [string, 'null'], format: uuid}
+        items: {type: array, maxItems: 100, items: {type: object, required: [id, kind, for_person, preference, at, source], properties: {id: {type: string, format: uuid}, kind: {type: string}, for_person: {type: [string, 'null'], format: uuid}, preference: {type: object}, at: {type: string, format: date-time}, source: {type: string}, actual_profile_id: {type: [string, 'null'], format: uuid}, agreement: {type: string, enum: [matches, differs, unplanned, pending]}}}}
+    ModelBoardLock:
+      type: object
+      required: [kind, value, who, why, at, scope]
+      properties:
+        kind: {type: string, enum: [rule, cross_family, residency]}
+        value: {type: string, enum: [top, bottom, not]}
+        who: {type: [string, 'null']}
+        why: {type: string}
+        at: {type: [string, 'null'], format: date-time}
+        scope: {type: string}
+    ModelBoardOrderWrite:
+      type: object
+      additionalProperties: false
+      required: [rank, not, revision]
+      properties:
+        rank: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
+        not: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
+        revision: {type: integer, format: int64, minimum: 0}
+    ModelBoardProfile:
+      type: object
+      required: [scope, person_id, template, thinking, usage, residency, hidden_kinds, dismissed_lines, revision]
+      properties:
+        scope: {type: string, enum: [workspace, person]}
+        person_id: {type: [string, 'null'], format: uuid}
+        template: {type: [string, 'null'], enum: [best, balanced, save, null]}
+        thinking: {type: [string, 'null'], enum: [lean, standard, deep, max, null]}
+        usage: {type: [string, 'null'], enum: [careful, balanced, maxout, null]}
+        residency: {type: [string, 'null'], enum: [any, eu, local, null]}
+        hidden_kinds: {type: array, maxItems: 256, items: {type: string}}
+        dismissed_lines: {type: array, maxItems: 512, items: {type: string}}
+        revision: {type: integer, format: int64}
+    ModelBoardProfileWrite:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      properties:
+        template: {type: [string, 'null'], enum: [best, balanced, save, null]}
+        thinking: {type: [string, 'null'], enum: [lean, standard, deep, max, null]}
+        usage: {type: [string, 'null'], enum: [careful, balanced, maxout, null]}
+        residency: {type: [string, 'null'], enum: [any, eu, local, null]}
+        hidden_kinds: {type: array, maxItems: 256, items: {type: string}}
+        dismissed_lines: {type: array, maxItems: 512, items: {type: string}}
+        replace_own: {type: boolean, default: false}
+        revision: {type: integer, format: int64, minimum: 0}
+    ModelBoardRevisionWrite:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+    ModelBoardWriteResult:
+      type: object
+      required: [person_id, revision, moved, dry_run, profile]
+      properties:
+        person_id: {type: [string, 'null'], format: uuid}
+        revision: {type: integer, format: int64}
+        profile: {$ref: '#/components/schemas/ModelBoardProfile'}
+        dry_run: {type: boolean}
+        moved: {type: array, items: {type: object, required: [column, before, after], properties: {column: {type: string}, before: {type: array, items: {type: string}}, after: {type: array, items: {type: string}}}}}
+        running_outside: {type: array, maxItems: 10000, items: {type: string, format: uuid}, description: 'Starting or running turns outside a newly tightened residency floor.'}
+    ModelColumnThinkingWrite:
+      type: object
+      additionalProperties: false
+      required: [thinking, revision]
+      properties:
+        thinking: {type: [string, 'null'], enum: [lean, standard, deep, max, null]}
+        revision: {type: integer, format: int64, minimum: 0}
     ModelEstimateHistory:
       type: object
       required: [state, basis, tickets, hours, tokens, speed_factor, speed_tickets]
@@ -17352,6 +17745,12 @@ components:
       type: object
       description: Creation-time preference evidence. Historical runs and reviews may omit it. Residency warnings survive a looser chosen value below a lock.
       properties:
+        preference_of: {type: object, required: [person, source], properties: {person: {type: [string, 'null'], format: uuid}, source: {type: string}}}
+        column: {type: string}
+        situation: {type: string, enum: [first, fix, stuck]}
+        card_index: {type: integer, minimum: 1}
+        lock: {$ref: '#/components/schemas/ModelBoardLock'}
+        held: {type: array, items: {type: object, required: [line, reason], properties: {line: {type: string}, reason: {type: string}}}}
         selector: {$ref: '#/components/schemas/ModelSelector'}
         order_mode: {type: string, enum: [legacy, saved], description: "Ordinary managed review fallback source captured with its ladder; preferences still apply within qualified candidates."}
         worker_assignment: {$ref: '#/components/schemas/WorkerHandoff'}
@@ -17605,6 +18004,34 @@ components:
         managed_fallback_order: {type: array, maxItems: 50, items: {type: string, format: uuid}, description: Present for review-gate. Applied fallback order of the displayed profiles before qualification and model preferences; incomplete when truncated.}
         dispatch_family_order: {type: array, items: {type: string}, description: 'Built-in family order used only by legacy ordinary review dispatch.'}
         review_floors: {type: array, items: {type: string}, description: Existing review constraints in words; not new enforcement.}
+    ModelRule:
+      type: object
+      required: [scope, project_id, column, line, lock, position, why, set_by, set_at]
+      properties:
+        scope: {type: string, enum: [workspace, project]}
+        project_id: {type: [string, 'null'], format: uuid}
+        column: {type: string}
+        line: {type: string}
+        lock: {type: string, enum: [top, bottom, not]}
+        position: {type: integer}
+        why: {type: string, maxLength: 1000}
+        set_by: {type: [string, 'null'], format: uuid}
+        set_at: {type: string, format: date-time}
+    ModelRules:
+      type: object
+      required: [rules, revision]
+      properties:
+        revision: {type: integer, format: int64}
+        rules: {type: array, maxItems: 4096, items: {$ref: '#/components/schemas/ModelRule'}}
+    ModelRulesWrite:
+      type: object
+      additionalProperties: false
+      required: [top, bottom, not, revision]
+      properties:
+        top: {type: array, maxItems: 512, items: {type: object, required: [line, why], additionalProperties: false, properties: {line: {type: string, maxLength: 128}, why: {type: string, minLength: 1, maxLength: 1000}}}}
+        bottom: {type: array, maxItems: 512, items: {type: object, required: [line, why], additionalProperties: false, properties: {line: {type: string, maxLength: 128}, why: {type: string, minLength: 1, maxLength: 1000}}}}
+        not: {type: object, maxProperties: 512, additionalProperties: {type: string, minLength: 1, maxLength: 1000}}
+        revision: {type: integer, format: int64, minimum: 0}
     ModelSelector:
       type: object
       additionalProperties: false
@@ -17626,6 +18053,23 @@ components:
         line: {type: string, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
         effort: {type: string, maxLength: 32}
         harness: {type: string, enum: [codex, claude, grok, pi, cursor, gemini, opencode]}
+    ModelSituationLimits:
+      type: object
+      required: [small_hours, fix_rounds, revision, set_by, set_at]
+      properties:
+        small_hours: {type: integer, minimum: 1, maximum: 8, default: 2}
+        fix_rounds: {type: integer, minimum: 1, maximum: 6, default: 3}
+        revision: {type: integer, format: int64}
+        set_by: {type: [string, 'null'], format: uuid}
+        set_at: {type: [string, 'null'], format: date-time}
+    ModelSituationLimitsWrite:
+      type: object
+      additionalProperties: false
+      required: [small_hours, fix_rounds, revision]
+      properties:
+        small_hours: {type: integer, minimum: 1, maximum: 8}
+        fix_rounds: {type: integer, minimum: 1, maximum: 6}
+        revision: {type: integer, format: int64, minimum: 0}
     MoveNode:
       type: object
       required: [parent_id]
@@ -21994,6 +22438,9 @@ components:
       type: object
       required: [id, slug, label, hint, position]
       properties:
+        examples: {type: array, maxItems: 3, items: {type: string, maxLength: 120}}
+        labels: {type: array, maxItems: 32, items: {type: string, maxLength: 48}}
+        ticket_count: {type: integer, minimum: 0}
         id: {type: string, format: uuid}
         slug: {type: string, maxLength: 48}
         label: {type: string, minLength: 1, maxLength: 60}
@@ -22002,6 +22449,18 @@ components:
         system: {type: string, enum: [review, security, other]}
         position: {type: integer}
         archived_at: {type: string, format: date-time}
+    WorkKindOrderWrite:
+      type: object
+      additionalProperties: false
+      required: [slugs]
+      properties:
+        slugs: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, maxLength: 48}}
+    WorkKindOrderedPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/WorkKind'}}
+        next_cursor: {type: 'null'}
     WorkKindPage:
       type: object
       required: [items, next_cursor]
@@ -22013,6 +22472,8 @@ components:
       additionalProperties: false
       minProperties: 1
       properties:
+        examples: {type: array, maxItems: 3, items: {type: string, maxLength: 120}}
+        labels: {type: array, maxItems: 32, items: {type: string, maxLength: 48}}
         label: {type: string, minLength: 1, maxLength: 60}
         hint: {type: string, maxLength: 120}
         position: {type: integer, minimum: -1000000, maximum: 1000000}
@@ -22021,6 +22482,9 @@ components:
       additionalProperties: false
       required: [label]
       properties:
+        examples: {type: array, maxItems: 3, items: {type: string, maxLength: 120}}
+        labels: {type: array, maxItems: 32, items: {type: string, maxLength: 48}}
+        position: {type: integer, minimum: -1000000, maximum: 1000000}
         label: {type: string, minLength: 1, maxLength: 60}
         hint: {type: string, maxLength: 120}
         project_id: {type: string, format: uuid}

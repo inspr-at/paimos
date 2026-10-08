@@ -234,6 +234,148 @@
       }
     },
     {
+      "table": "model_pref_profiles",
+      "classification": "personal",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "person_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "id": "metadata",
+        "scope": "metadata",
+        "person_id": "personal",
+        "template": "personal",
+        "thinking": "personal",
+        "usage": "personal",
+        "residency": "personal",
+        "hidden_kinds": "personal",
+        "dismissed_lines": "personal",
+        "revision": "metadata",
+        "set_by": "personal",
+        "set_at": "metadata"
+      }
+    },
+    {
+      "table": "model_pref_orders",
+      "classification": "personal",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "set_by"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "profile_id": "metadata",
+        "column_key": "metadata",
+        "situation": "metadata",
+        "rank": "personal",
+        "not_allowed": "personal",
+        "thinking": "personal",
+        "set_by": "personal",
+        "set_at": "metadata"
+      }
+    },
+    {
+      "table": "model_rules",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "set_by"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "scope": "metadata",
+        "project_id": "metadata",
+        "column_key": "metadata",
+        "line": "metadata",
+        "lock": "metadata",
+        "position": "metadata",
+        "why": "review",
+        "set_by": "personal",
+        "set_at": "metadata"
+      }
+    },
+    {
+      "table": "model_rule_revisions",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "scope": "metadata",
+        "scope_key": "metadata",
+        "revision": "metadata"
+      }
+    },
+    {
+      "table": "model_situation_limits",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "set_by"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "small_hours": "metadata",
+        "fix_rounds": "metadata",
+        "revision": "metadata",
+        "set_by": "personal",
+        "set_at": "metadata"
+      }
+    },
+    {
+      "table": "model_pref_migrations",
+      "classification": "review",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "audit": "review",
+        "migrated_at": "metadata"
+      }
+    },
+    {
+      "table": "work_kinds",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "created_by"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "id": "metadata",
+        "slug": "metadata",
+        "label": "metadata",
+        "hint": "review",
+        "project_id": "metadata",
+        "system": "metadata",
+        "position": "metadata",
+        "archived_at": "metadata",
+        "created_by": "personal",
+        "created_at": "metadata",
+        "examples": "review",
+        "labels": "metadata",
+        "label_override": "metadata"
+      }
+    },
+    {
+      "table": "model_profile_display",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "profile_id": "metadata",
+        "model_display": "metadata",
+        "provider": "metadata",
+        "effort_level": "metadata",
+        "introduced_at": "metadata"
+      }
+    },
+    {
       "table": "attention_batches",
       "classification": "personal",
       "locator": {

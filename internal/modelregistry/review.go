@@ -65,6 +65,17 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	if err := requireCatalog(ctx, tx); err != nil {
 		return out, err
 	}
+	q.Role = out.Role
+	q.AuthorFamily = author
+	if board, err := resolveBoardWork(ctx, tx, p, q, now, nil); err != nil {
+		return out, err
+	} else if board != nil {
+		out.Profile, out.Ladder, out.OwnerRequired, out.Trace, out.Residency = board.Profile, board.Ladder, board.OwnerRequired, board.Trace, board.Residency
+		if out.Profile != nil {
+			out.Account, err = agentaccounts.ReviewAccount(ctx, tx, out.Profile.ID, out.Profile.Harness, q.ProjectID, now, out.Residency)
+		}
+		return out, err
+	}
 	chain, trace, requirement, err := placementTrace(ctx, tx, q)
 	if err != nil {
 		return out, err

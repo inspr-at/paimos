@@ -408,6 +408,7 @@ const evidenceRefresh = tierEvidenceRefresh(() => selected.value?.session, sessi
 }, () => document.visibilityState !== 'hidden')
 function evidenceVisible() { if (document.visibilityState !== 'hidden') evidenceRefresh.notify() }
 function changed(event?: string, identity?: AgentEventIdentity) {
+  if (!event || event.startsWith('inbox.')) agents.threadChanged()
   evidenceRefresh.notify(event, identity)
   // Confirmation polling already tracks its own exact pending sessions.
   if (!event) serviceTiers.reconcile()
