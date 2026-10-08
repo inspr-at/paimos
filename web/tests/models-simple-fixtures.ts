@@ -6,6 +6,7 @@ import type { Page } from '@playwright/test'
 import type { ModelRule, RegistryProfile, SimpleDocument, SimpleRow, SimpleTrace, SimpleUnavailable, TailBoard, TailColumn } from '../src/lib/modelsSimple'
 
 export const simplePerson = '11111111-1111-4111-8111-111111111111'
+export const otherPerson = '22222222-2222-4222-8222-222222222222'
 const LEVEL: Record<string, number> = { off: 0, default: 0, low: 1, medium: 2, high: 3, xhigh: 4, max: 5 }
 type Line = { id: string; harness: string; family: string; model: string; efforts: string[]; display: string; short: string; version: string; note?: string; retireAt?: string; source?: 'auto' | 'manual'; tools?: boolean }
 export const LINES: Line[] = [
@@ -44,6 +45,8 @@ export interface MockOptions {
   /** The caller is a person with only their own choices (a member) who already overrides concepts. */
   member?: boolean
   noQueue?: boolean
+  /** Another person set the design lock (and the member list names them). */
+  lockedByOther?: boolean
   /** Refuse every write with this status. */
   fail?: number
   german?: boolean
@@ -67,7 +70,7 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     layers.default.set('other', { rank: TEMPLATE, not: [], effort: 'xhigh' })
     layers.default.set('design', { rank: ['anthropic:opus', 'anthropic:sonnet', 'openai:sol'], not: [], effort: 'xhigh' })
     layers.default.set('concept', { rank: ['anthropic:opus', 'openai:sol'], not: [], effort: 'high' })
-    rules = [{ scope: 'workspace', project_id: null, column: 'design', line: 'anthropic:opus', lock: 'top', position: 0, why: 'Design mocks stay on Opus while the design gate is tuned (AEON-912).', set_by: simplePerson, set_at: '2026-10-02T09:00:00Z' }]
+    rules = [{ scope: 'workspace', project_id: null, column: 'design', line: 'anthropic:opus', lock: 'top', position: 0, why: 'Design mocks stay on Opus while the design gate is tuned (AEON-912).', set_by: options.lockedByOther ? otherPerson : simplePerson, set_at: '2026-10-02T09:00:00Z' }]
   } else layers.default.set('other', { rank: TEMPLATE, not: [], effort: 'xhigh' })
   if (options.member) {
     layers.mine.set('other', { rank: ['openai:sol', ...TEMPLATE.slice(1)], not: [], effort: 'high' })
@@ -131,14 +134,15 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     })
     return { person_id: simplePerson, revision: revision[layer], profile: { dismissed_lines: dismissed[layer] }, columns }
   }
-  const permissions = ['models.read', ...(options.manage === false || options.member ? [] : ['model_prefs.manage', 'models.manage'])]
+  const permissions = ['models.read', 'members.read', ...(options.manage === false || options.member ? [] : ['model_prefs.manage', 'models.manage'])]
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname.replace(/^\/api/, ''), method = request.method()
-    const known = path === '/me/permissions' || path === '/models' || path.startsWith('/model-preferences') || path.startsWith('/model-rules')
+    const known = path === '/me/permissions' || path === '/members' || path === '/models' || path.startsWith('/model-preferences') || path.startsWith('/model-rules')
     if (options.fallback && !known) return route.fallback()
     state.calls.push(`${method} ${path}${url.search}`)
     if (path === '/me/permissions') return route.fulfill({ json: { workspace: { id: 'board-tenant', role: 'member', permissions }, project: null } })
     if (path === '/projects') return route.fulfill({ json: { items: [], next_cursor: null } })
+    if (path === '/members' && method === 'GET') return route.fulfill({ json: { people: [{ principal_id: simplePerson, name: 'Markus' }, { principal_id: otherPerson, name: 'Ada Admin' }], agents: [], invites: [], imported: [], owner_count: 1 } })
     if (path === '/models' && method === 'GET') return route.fulfill({ json: profiles })
     if (path === '/models/refresh' && method === 'GET') return route.fulfill({ json: { settings: { agent_reports_enabled: true, auto_add_profiles: true, api_enabled: false, interval_minutes: 1440 }, last_run_at: null, last_result: { sources: [] }, sources: [], observations: [] } })
     if (path === '/model-rules' && method === 'GET') return route.fulfill({ json: { revision: rulesRevision, rules } })

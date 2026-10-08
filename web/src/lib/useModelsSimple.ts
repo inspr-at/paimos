@@ -5,6 +5,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { APIError } from './api'
 import { can, onAccessChange } from './authz'
 import { toast } from './toast'
+import { getMembers } from './access'
 import { preferenceFailure } from './modelsSettings'
 import { useSession } from '../stores/session'
 import { dismissLine, getRegistry, getSimple, getTail, getWorkspaceRules, putDismissed, putEffort, putOrder, putWorkspaceRules, resetOrder } from './modelsSimpleApi'
@@ -29,11 +30,14 @@ export function useModelsSimple() {
   const profiles = ref<RegistryProfile[]>([])
   const loading = ref(false), busy = ref(false), error = ref(''), failed = ref(false), announcement = ref('')
   const draft = ref<string | null>(null)
+  // Who locked a row, by name: only people who may see the member list can name others; the rest read "an admin".
+  const names = ref(new Map<string, string>())
   const owner = computed(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : '')
   const isPerson = computed(() => !!owner.value && session.identity?.principal.kind === 'person' && session.authenticationCurrent())
-  const readable = computed(() => isPerson.value && can('models.read'))
+  // Agents read the page like anyone; only a person's session writes.
+  const readable = computed(() => !!owner.value && session.authenticationCurrent() && can('models.read'))
   const admin = computed(() => isPerson.value && can('model_prefs.manage'))
-  const editable = computed(() => readable.value && (scope.value === 'me' || admin.value))
+  const editable = computed(() => isPerson.value && readable.value && (scope.value === 'me' || admin.value))
   const key = computed(() => `${owner.value}/${scope.value}`)
   const epoch = ref(0), actionKey = computed(() => `${key.value}/${epoch.value}`)
   let generation = 0, read = 0, abort: AbortController | undefined, alive = true
@@ -63,6 +67,7 @@ export function useModelsSimple() {
         if (simple.revision !== board.revision) continue
         const changedPerson = previous !== undefined && previous !== simple.person_id
         doc.value = simple; tail.value = board; profiles.value = registry; workspace.value = workspaceDoc; error.value = ''; failed.value = false
+        void nameLockOwners(simple, current)
         if (changedPerson) { generation++; epoch.value++; busy.value = false; error.value = 'Your identity changed. The page was refreshed; the old change and Undo were discarded.'; return false }
         return true
       }
@@ -73,6 +78,14 @@ export function useModelsSimple() {
     } finally { if (current() && turn === read) loading.value = false }
   }
 
+  async function nameLockOwners(simple: SimpleDocument, current: () => boolean) {
+    const unknown = [simple.all, ...simple.exceptions].map(row => row.lock?.by).filter((id): id is string => !!id && !names.value.has(id))
+    if (!unknown.length || !can('members.read')) return
+    try {
+      const members = await getMembers()
+      if (current() && Array.isArray(members?.people)) names.value = new Map(members.people.map(person => [person.principal_id, person.name] as const))
+    } catch { /* The lock still says it was set for everyone; the name is a courtesy. */ }
+  }
   const advanced = (result: { revision: number }, before: number) => {
     if (!Number.isSafeInteger(result.revision) || result.revision <= before) throw new Unconfirmed()
     return result.revision
@@ -220,5 +233,5 @@ export function useModelsSimple() {
   watch(() => can('models.read'), allowed => { if (allowed && !doc.value && !loading.value && owner.value) void load() })
   onBeforeUnmount(() => { alive = false; generation++; epoch.value++; abort?.abort(); unsubscribe() })
 
-  return { scope, doc, rows, entries, labels, kinds, freeKinds, next, news, tail, loading, busy, error, failed, announcement, draft, admin, editable, readable, owner, actionKey, cantReason, load, pick, use, clear, lock, dismiss, startException, discardException, setScope, dropError }
+  return { scope, doc, rows, names, entries, labels, kinds, freeKinds, next, news, tail, loading, busy, error, failed, announcement, draft, admin, editable, readable, owner, actionKey, cantReason, load, pick, use, clear, lock, dismiss, startException, discardException, setScope, dropError }
 }

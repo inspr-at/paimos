@@ -36,7 +36,8 @@ function openPicker(row: RowView, anchor: HTMLElement) {
   if (picker.value?.key === row.key) { picker.value = null; return }
   closeMenus(); picker.value = { key: row.key, anchor }
 }
-function refocus(key: string) { void nextTick(() => document.getElementById(`pk-${key}`)?.focus({ preventScroll: true })) }
+// Back to the row that was picked; when it is gone (a draft that matched the default), to the add button.
+function refocus(key: string) { void nextTick(() => (document.getElementById(`pk-${key}`) ?? document.getElementById('add'))?.focus({ preventScroll: true })) }
 async function choose(entry: ModelEntry, effort: string | null) {
   const row = pickRow.value, key = picker.value?.key
   picker.value = null
@@ -47,6 +48,9 @@ async function choose(entry: ModelEntry, effort: string | null) {
 }
 // Esc or a click elsewhere takes a row that was never picked for away again.
 function pickerClosed() { if (draft.value && picker.value?.key === draft.value) model.discardException(); picker.value = null }
+// A row that goes leaves focus on the add button; a row that resets keeps it on its picker.
+async function removeRow(row: RowView) { if (await model.clear(row)) void nextTick(() => document.getElementById('add')?.focus({ preventScroll: true })) }
+async function resetRow(row: RowView) { if (await model.clear(row)) refocus(row.key) }
 async function lockRow(on: boolean) {
   const row = pickRow.value, key = picker.value?.key
   picker.value = null
@@ -90,7 +94,7 @@ async function chooseKind(column: string) {
 async function notNow() { if (news.value) await model.dismiss(news.value.entry.line) }
 
 // ----- text -------------------------------------------------------------------------------------------------
-const tip = (row: RowView) => row.lock ? lockTip(row.lock, { mine: !!row.lock.by && row.lock.by === person.value, name: () => 'An admin', admin: admin.value, scope: scope.value }) : ''
+const tip = (row: RowView) => row.lock ? lockTip(row.lock, { mine: !!row.lock.by && row.lock.by === person.value, name: id => model.names.value.get(id) ?? 'An admin', admin: admin.value, scope: scope.value }) : ''
 const instead = (row: RowView) => row.unavailable ? pickText(entries.value.find(entry => entry.line === row.unavailable!.runs_instead) ?? null, row.unavailable.effort, lineFallback(row.unavailable.runs_instead)) : ''
 // ?why=1 (a ticket's "Why this model?" link) opens the trace for the next queued ticket, once.
 let whyOpened = false
@@ -110,9 +114,9 @@ watch(() => [route.hash, shown.value], async () => {
     <section class="glass-card m-card" aria-labelledby="m-title">
       <div class="m-head">
         <div class="titles"><h2 id="m-title">Models</h2><p class="lead">One default for all work, overrides only where you care.</p></div>
-        <div v-if="admin" class="seg scope" role="radiogroup" aria-label="Who this changes" data-scope-group>
-          <button type="button" role="radio" data-scope="default" :aria-checked="scope === 'default'" @click="model.setScope('default')">For everyone</button>
-          <button type="button" role="radio" data-scope="me" :aria-checked="scope === 'me'" @click="model.setScope('me')">Just me</button>
+        <div v-if="admin" class="seg scope" role="group" aria-label="Who this changes" data-scope-group>
+          <button type="button" data-scope="default" :aria-pressed="scope === 'default'" @click="model.setScope('default')">For everyone</button>
+          <button type="button" data-scope="me" :aria-pressed="scope === 'me'" @click="model.setScope('me')">Just me</button>
         </div>
       </div>
       <div v-if="error && shown" class="m-note" role="alert" data-models-error><AppIcon name="alert" :size="14" /><span>{{ error }}</span></div>
@@ -121,11 +125,11 @@ watch(() => [route.hash, shown.value], async () => {
       <template v-else>
         <Transition name="rw"><div v-if="news" class="rw" data-news><div class="rw-in"><div class="news-in"><AppIcon name="sparkle" :size="15" /><span class="grow"><b>{{ news.entry.name }}</b> is new. <button id="news-use" type="button" class="link-btn" aria-haspopup="listbox" :aria-expanded="!!kinds?.use" data-news-use @click="openUse">Use it for…</button></span><button type="button" class="icon-btn sm flat" data-news-x aria-label="Not now" data-tip="Not now" :disabled="busy" @click="notNow"><AppIcon name="close" :size="14" /></button></div></div></div></Transition>
         <div class="m-list">
-          <ModelRow v-if="defaultRow" :row="defaultRow" :expanded="picker?.key === defaultRow.key" :lock-tip="tip(defaultRow)" :instead="instead(defaultRow)" :reason="defaultRow.unavailable ? reasonText(defaultRow.unavailable.reason) : ''" @open="openPicker(defaultRow, $event)" @reset="model.clear(defaultRow)" @remove="model.clear(defaultRow)" />
+          <ModelRow v-if="defaultRow" :row="defaultRow" :expanded="picker?.key === defaultRow.key" :lock-tip="tip(defaultRow)" :instead="instead(defaultRow)" :reason="defaultRow.unavailable ? reasonText(defaultRow.unavailable.reason) : ''" @open="openPicker(defaultRow, $event)" @reset="resetRow(defaultRow)" @remove="removeRow(defaultRow)" />
           <div class="ex-group" role="group" aria-labelledby="ex-h">
             <p v-if="exceptions.length" id="ex-h" class="ex-h">Except for</p><span v-else id="ex-h" class="sr-only">Overrides</span>
             <TransitionGroup name="rw">
-              <div v-for="row in exceptions" :key="row.key" class="rw" :data-key="row.key"><div class="rw-in"><ModelRow :row="row" :expanded="picker?.key === row.key" :lock-tip="tip(row)" :instead="instead(row)" :reason="row.unavailable ? reasonText(row.unavailable.reason) : ''" @open="openPicker(row, $event)" @reset="model.clear(row)" @remove="model.clear(row)" /></div></div>
+              <div v-for="row in exceptions" :key="row.key" class="rw" :data-key="row.key"><div class="rw-in"><ModelRow :row="row" :expanded="picker?.key === row.key" :lock-tip="tip(row)" :instead="instead(row)" :reason="row.unavailable ? reasonText(row.unavailable.reason) : ''" @open="openPicker(row, $event)" @reset="resetRow(row)" @remove="removeRow(row)" /></div></div>
             </TransitionGroup>
             <div v-if="editable && model.freeKinds.value.length" class="addrow"><button id="add" type="button" class="add" aria-haspopup="listbox" :aria-expanded="!!kinds && !kinds.use" data-add :disabled="busy" @click="openAdd"><AppIcon name="plus" :size="15" /><span>Different model for…</span></button></div>
           </div>

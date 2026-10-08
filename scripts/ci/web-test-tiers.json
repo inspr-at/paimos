@@ -8386,6 +8386,8 @@
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a failing read shows one honest line with Try again, in place of the card","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a lock set by someone else names them, and says \"an admin\" when the member list is not for this person","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a member sees locked rows as text, resets their own picks and drops rows only they have","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a new model is one line with Use it for… and Not now; it asks for no capability filter","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -8395,6 +8397,8 @@
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a pick that has no tools here is still offered, with its reason, and the row says what runs instead","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"admins switch between For everyone and Just me; the lock lives in the picker and follows the row","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-simple.spec.ts","name":"clicking elsewhere takes a row that was never picked away again, and an agent only reads","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"controls stay still while menus open, picks change, rows come and go and the scope switches (AEON-541)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -15183,6 +15187,8 @@
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > locks with a generated reason and unlocks with one rule write; a member cannot reach it","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > names a half-finished change when the second write fails, and an unconfirmed revision is never a save","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > names who set a lock only for people who may read the member list","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > reports a refused write as refused: refreshes, says it was not saved, shows no success and no Undo","tier":"ESSENTIAL"}
     ,

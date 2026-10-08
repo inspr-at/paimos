@@ -15,7 +15,7 @@ async function open(page: Page, options: MockOptions = {}, query = '') { const s
 test('the default leads, overrides read as exceptions, reviews pick themselves and one line says what runs next', async ({ page }) => {
   await open(page)
   // Admins open on Just me; nothing here is stored for them yet, so the workspace default shows through.
-  await expect(page.getByRole('radio', { name: 'Just me' })).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByRole('button', { name: 'Just me' })).toHaveAttribute('aria-pressed', 'true')
   await expect(row(page, 'all')).toContainText('Default · all work'); await expect(row(page, 'all')).toContainText('Used unless a row below overrides it.')
   await expect(pick(page, 'all')).toContainText('GPT-6.1 Sol · xhigh')
   await expect(page.locator('#ex-h')).toHaveText('Except for')
@@ -76,7 +76,7 @@ test('the keyboard picks without the mouse: arrows choose the model and its leve
 
 test('admins switch between For everyone and Just me; the lock lives in the picker and follows the row', async ({ page }) => {
   const state = await open(page)
-  await page.getByRole('radio', { name: 'For everyone' }).click()
+  await page.getByRole('button', { name: 'For everyone' }).click()
   await expect(row(page, 'design').locator('[data-lock]')).toBeVisible(); await expect(row(page, 'design').locator('[data-remove]')).toBeVisible()
   await expect(row(page, 'all').locator('.mine')).toHaveCount(0)
   await expect(row(page, 'design').locator('[data-lock]')).toHaveAttribute('data-tip', /You locked this for everyone · 2 Oct · Design mocks stay on Opus/)
@@ -99,22 +99,27 @@ test('admins switch between For everyone and Just me; the lock lives in the pick
   await expect(row(page, 'concept').locator('[data-lock]')).toBeVisible()
   expect(state.rules.map(rule => [rule.column, rule.line, rule.why])).toEqual([['concept', 'anthropic:opus', 'Locked in Settings › Models by Markus']])
   // Back on Just me the locked row reads as plain text with its lock; the pick is not editable there.
-  await page.getByRole('radio', { name: 'Just me' }).click()
+  await page.getByRole('button', { name: 'Just me' }).click()
   await expect(row(page, 'concept').locator('[data-lock]')).toBeVisible(); expect(await pick(page, 'concept').evaluate(element => element.tagName)).toBe('SPAN')
   await expect(row(page, 'concept').locator('[data-lock]')).toHaveAttribute('data-tip', /You locked this for everyone .* Change it under For everyone\./)
 })
 
+test('a lock set by someone else names them, and says "an admin" when the member list is not for this person', async ({ page }) => {
+  await open(page, { member: true, lockedByOther: true })
+  await expect(row(page, 'design').locator('[data-lock]')).toHaveAttribute('data-tip', 'Ada Admin set this for everyone · 2 Oct · Design mocks stay on Opus while the design gate is tuned (AEON-912).')
+})
 test('a member sees locked rows as text, resets their own picks and drops rows only they have', async ({ page }) => {
   const state = await open(page, { member: true })
   await expect(page.locator('[data-scope-group]')).toHaveCount(0)
   expect(await pick(page, 'design').evaluate(element => element.tagName)).toBe('SPAN'); await expect(row(page, 'design').locator('[data-lock]')).toBeVisible()
   await expect(row(page, 'design').locator('.mine')).toHaveCount(0)
+  await expect(row(page, 'design').locator('[data-lock]')).toHaveAttribute('data-tip', 'You locked this for everyone · 2 Oct · Design mocks stay on Opus while the design gate is tuned (AEON-912).')
   await expect(pick(page, 'all')).toContainText('GPT-6.1 Sol · high'); await expect(row(page, 'all').locator('.mine')).toContainText('yours · reset')
   await expect(row(page, 'concept').locator('.mine')).toContainText('yours · reset'); await expect(row(page, 'concept').locator('[data-remove]')).toHaveCount(0)
   await expect(row(page, 'docs').locator('.mine')).toContainText('yours'); await expect(row(page, 'docs').locator('[data-reset]')).toHaveCount(0)
   await expect(row(page, 'docs').locator('[data-remove]')).toHaveAccessibleName('Remove Docs and copy; it uses the default again')
   await row(page, 'concept').getByRole('button', { name: 'Reset Concepts to the workspace default' }).click()
-  await expect(pick(page, 'concept')).toContainText('Opus 5.5 · high'); await expect(row(page, 'concept').locator('.mine')).toHaveCount(0)
+  await expect(pick(page, 'concept')).toContainText('Opus 5.5 · high'); await expect(row(page, 'concept').locator('.mine')).toHaveCount(0); await expect(pick(page, 'concept')).toBeFocused()
   expect(state.writes[0]).toMatchObject({ method: 'DELETE', path: '/model-preferences/orders/concept/first', search: '?for=me&revision=3', person: simplePerson })
   await row(page, 'docs').locator('[data-remove]').click()
   await expect(row(page, 'docs')).toHaveCount(0)
@@ -138,9 +143,20 @@ test('a different model for a kind starts from the default with the picker open;
   await expect(row(page, 'backend')).toBeVisible(); await expect(row(page, 'backend').locator('[data-remove]')).toBeVisible(); await expect(pick(page, 'backend')).toBeFocused()
   expect(state.writes.map(write => `${write.method} ${write.path}`)).toEqual(['PUT /model-preferences/orders/backend/first', 'PUT /model-preferences/orders/backend/first/thinking'])
   expect(state.writes[1]!.body).toEqual({ effort: 'xhigh', revision: 4 })
-  await row(page, 'backend').locator('[data-remove]').click(); await expect(row(page, 'backend')).toHaveCount(0)
+  await row(page, 'backend').locator('[data-remove]').click(); await expect(row(page, 'backend')).toHaveCount(0); await expect(page.locator('#add')).toBeFocused()
   expect(state.writes.at(-1)).toMatchObject({ method: 'DELETE', path: '/model-preferences/orders/backend/first' })
   await page.getByRole('button', { name: 'Undo', exact: true }).last().click(); await expect(row(page, 'backend')).toBeVisible()
+})
+
+test('clicking elsewhere takes a row that was never picked away again, and an agent only reads', async ({ page }) => {
+  const state = await open(page)
+  await page.getByRole('button', { name: 'Different model for…' }).click(); await page.getByRole('option', { name: 'Docs and copy' }).click()
+  await expect(row(page, 'docs')).toBeVisible(); await expect(page.getByRole('combobox')).toBeFocused()
+  await page.mouse.click(6, 500)
+  await expect(row(page, 'docs')).toHaveCount(0); await expect(page.locator('.mdl-pop')).toHaveCount(0); expect(state.writes).toHaveLength(0)
+  await page.goto('/tests/models-settings-harness.html?agent=1')
+  await expect(pick(page, 'all')).toContainText('GPT-6.1 Sol · xhigh'); await expect(page.locator('button[data-pick]')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Different model for…' })).toHaveCount(0); await expect(page.locator('[data-scope-group]')).toHaveCount(0)
 })
 
 test('a pick that cannot run says so in words under its row, and Why? shows the skipped step', async ({ page }) => {
@@ -223,8 +239,8 @@ test('controls stay still while menus open, picks change, rows come and go and t
   await guard.check(async () => { await pick(page, 'concept').click(); await option(page, 'anthropic:fable').locator('.lvc[data-eff="max"]').click(); await expect(pick(page, 'concept')).toContainText('Fable 5.1 · max') })
   await guard.check(async () => { await page.getByRole('button', { name: 'Undo', exact: true }).last().click(); await expect(pick(page, 'concept')).toContainText('Opus 5.5 · high') })
   await guard.check(async () => { await page.getByRole('button', { name: 'Different model for…' }).click(); await page.getByRole('option', { name: 'Backend build' }).click(); await expect(page.getByRole('combobox')).toBeFocused(); await page.keyboard.press('Escape'); await expect(row(page, 'backend')).toHaveCount(0) })
-  await guard.check(async () => { await page.getByRole('radio', { name: 'For everyone' }).click(); await expect(row(page, 'design').locator('[data-lock]')).toBeVisible() })
-  await guard.check(async () => { await page.getByRole('radio', { name: 'Just me' }).click(); await expect(row(page, 'all').locator('.mine')).toHaveCount(0) }); guard.done()
+  await guard.check(async () => { await page.getByRole('button', { name: 'For everyone' }).click(); await expect(row(page, 'design').locator('[data-lock]')).toBeVisible() })
+  await guard.check(async () => { await page.getByRole('button', { name: 'Just me' }).click(); await expect(row(page, 'all').locator('.mine')).toHaveCount(0) }); guard.done()
   // The options of the picker keep their height and place while one is active, selected or has its level stepped.
   await pick(page, 'all').click()
   const options = await controlStability(page, { first: option(page, 'openai:sol'), second: option(page, 'openai:astra'), third: option(page, 'anthropic:opus'), filter: page.getByRole('combobox') })
@@ -240,7 +256,7 @@ test('the card holds its layout on a phone', async ({ page }) => {
   await guard.check(async () => { await pick(page, 'all').click(); await expect(page.locator('.mdl-pop')).toBeVisible(); await page.keyboard.press('Escape') })
   await guard.check(async () => { await pick(page, 'concept').click(); await option(page, 'anthropic:sonnet').locator('.lvc[data-eff="max"]').click(); await expect(row(page, 'concept').locator('.mine')).toContainText('yours · reset') })
   await guard.check(async () => { await page.getByRole('button', { name: 'Undo', exact: true }).last().click(); await expect(row(page, 'concept').locator('.mine')).toHaveCount(0) }); guard.done()
-  await page.getByRole('radio', { name: 'For everyone' }).click(); await expect(row(page, 'design').locator('[data-remove]')).toBeVisible()
+  await page.getByRole('button', { name: 'For everyone' }).click(); await expect(row(page, 'design').locator('[data-remove]')).toBeVisible()
   for (const key of ['all', 'design', 'concept']) { const box = await pick(page, key).boundingBox(); expect(box!.height, key).toBeGreaterThanOrEqual(44) }
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
 })

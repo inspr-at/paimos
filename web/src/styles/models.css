@@ -145,9 +145,11 @@
   .models-section .m-head .titles { flex-basis: 100%; }
   /* The picker keeps the whole width; lock and remove sit on the label line, and "yours" and the can't-run line grow
      downward under the picker, so nothing that is picked moves when one of them appears. */
-  .models-section .row { grid-template-columns: minmax(0, 1fr) 44px 44px; grid-template-areas: 'l t x' 'p p p' 'm m m' 'n n n'; column-gap: 6px; row-gap: 0; padding: 12px; align-items: center; }
+  .models-section .row { grid-template-columns: minmax(0, 1fr) 44px 44px; grid-template-areas: 'l t x' 'h h h' 'p p p' 'm m m' 'n n n'; column-gap: 6px; row-gap: 0; padding: 12px; align-items: center; }
   .models-section .rl { display: contents; }
-  .models-section .rt { grid-area: l; }
+  .models-section .rt { display: contents; }
+  .models-section .rn { grid-area: l; }
+  .models-section .row.def .hint { grid-area: h; }
   .models-section .mine { grid-area: m; margin-top: 8px; }
   .models-section .row > .pick { margin-top: 8px; }
   .models-section .na { margin-top: 8px; }
@@ -161,6 +163,12 @@
   .models-section .next { padding: 16px 12px 18px; }
   .models-section .pick, .models-section .add { min-height: 44px; height: 44px; }
   .models-section .x, .models-section .lock { width: 44px; height: 44px; }
+}
+/* A small window with a mouse: the levels move under the model's name so nothing is squeezed. */
+@media (max-width: 560px) {
+  .mdl-pop .opt { grid-template-columns: 22px minmax(0, 1fr) 16px; }
+  .mdl-pop .opt .lvp { grid-column: 2 / -1; grid-row: 2; flex-wrap: wrap; margin: 4px 0 2px -7px; }
+  .mdl-pop .opt .ok { grid-column: 3; grid-row: 1; }
 }
 /* Pointer: text links get a 24 px hit area without moving the text around them (WCAG 2.5.8). */
 .models-section .link-btn, .mdl-pop .link-btn { position: relative; }

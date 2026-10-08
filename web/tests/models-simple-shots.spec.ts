@@ -22,7 +22,7 @@ for (const size of sizes) for (const theme of ['light', 'dark']) {
   })
   test(`for everyone with the lock at ${size.width} ${theme}`, async ({ page }, testInfo) => {
     await show(page, {}, theme, size)
-    await page.getByRole('radio', { name: 'For everyone' }).click()
+    await page.getByRole('button', { name: 'For everyone' }).click()
     await expect(page.locator('[data-row="design"] [data-lock]')).toBeVisible()
     await page.locator('[data-pick="design"]').click()
     await expect(page.locator('.mdl-pop .pm-lock')).toBeVisible()

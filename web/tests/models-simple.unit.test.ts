@@ -8,6 +8,7 @@ import {
   buildEntries, buildRows, movePin, nearestEffort, nextView, orderWithFirst, pinFirst, reasonText, rulesBody, unpin,
   type RegistryProfile, type SimpleDocument, type TailBoard,
 } from '../src/lib/modelsSimple'
+import { getMembers } from '../src/lib/access'
 import { dismissLine, getRegistry, getSimple, getTail, getWorkspaceRules, putDismissed, putEffort, putOrder, putWorkspaceRules, resetOrder } from '../src/lib/modelsSimpleApi'
 import { useModelsSimple } from '../src/lib/useModelsSimple'
 import { resetToasts, toasts } from '../src/lib/toast'
@@ -15,12 +16,13 @@ import { KINDS, NEW_LINE, registry, simplePerson } from './models-simple-fixture
 
 const state = vi.hoisted(() => ({
   session: { identity: { tenant: { id: 'tenant' }, principal: { id: 'person', name: 'Markus', kind: 'person' } } as { tenant: { id: string }; principal: { id: string; name: string; kind: string } } | null, authenticationCurrent: () => true },
-  cleanups: [] as (() => void)[], access: undefined as (() => void) | undefined, manage: true,
+  cleanups: [] as (() => void)[], access: undefined as (() => void) | undefined, manage: true, members: true,
 }))
 vi.mock('../src/stores/session', () => ({ useSession: () => state.session }))
-vi.mock('../src/lib/authz', () => ({ can: (permission: string) => permission !== 'model_prefs.manage' || state.manage, onAccessChange: (listener: () => void) => { state.access = listener; return () => {} } }))
+vi.mock('../src/lib/authz', () => ({ can: (permission: string) => permission === 'model_prefs.manage' ? state.manage : permission === 'members.read' ? state.members : true, onAccessChange: (listener: () => void) => { state.access = listener; return () => {} } }))
 vi.mock('vue', async original => ({ ...await original<typeof import('vue')>(), onBeforeUnmount: (cleanup: () => void) => state.cleanups.push(cleanup) }))
 vi.mock('../src/lib/api', async original => ({ ...await original<typeof import('../src/lib/api')>(), api: vi.fn() }))
+vi.mock('../src/lib/access', async original => ({ ...await original<typeof import('../src/lib/access')>(), getMembers: vi.fn() }))
 vi.mock('../src/lib/modelsSimpleApi', async original => ({ ...await original<typeof import('../src/lib/modelsSimpleApi')>(), getSimple: vi.fn(), getTail: vi.fn(), getRegistry: vi.fn(), getWorkspaceRules: vi.fn(), putOrder: vi.fn(), resetOrder: vi.fn(), putEffort: vi.fn(), putWorkspaceRules: vi.fn(), dismissLine: vi.fn(), putDismissed: vi.fn() }))
 
 const settle = async () => { for (let index = 0; index < 20; index++) await Promise.resolve() }
@@ -143,7 +145,8 @@ describe('what runs next', () => {
 describe('the card’s writes', () => {
   beforeEach(() => {
     state.cleanups.forEach(cleanup => cleanup()); state.cleanups = []; vi.resetAllMocks(); resetToasts()
-    state.session.identity = { tenant: { id: 'tenant' }, principal: { id: 'person', name: 'Markus', kind: 'person' } }; state.manage = true
+    state.session.identity = { tenant: { id: 'tenant' }, principal: { id: 'person', name: 'Markus', kind: 'person' } }; state.manage = true; state.members = true
+    vi.mocked(getMembers).mockResolvedValue({ people: [{ principal_id: simplePerson, name: 'Ada Admin' }] } as unknown as Awaited<ReturnType<typeof getMembers>>)
     vi.mocked(getSimple).mockImplementation(async scope => scope === 'me' ? simpleDoc() : simpleDoc({ exceptions: simpleDoc().exceptions }))
     vi.mocked(getTail).mockResolvedValue(tailBoard()); vi.mocked(getRegistry).mockResolvedValue(registry([])); vi.mocked(getWorkspaceRules).mockResolvedValue(rulesDoc())
     const advance = (revision: number) => ({ revision, person_id: simplePerson })
@@ -160,6 +163,14 @@ describe('the card’s writes', () => {
     vi.mocked(getSimple).mockResolvedValue({ items: [] } as unknown as SimpleDocument)
     model = await page()
     expect(model.doc.value).toBeNull(); expect(model.failed.value).toBe(true); expect(model.error.value).toBe('Models couldn’t load.')
+  })
+  it('names who set a lock only for people who may read the member list', async () => {
+    let model = await page(); expect(model.names.value.get(simplePerson)).toBe('Ada Admin'); expect(getMembers).toHaveBeenCalledTimes(1)
+    state.cleanups.forEach(cleanup => cleanup()); state.cleanups = []; vi.mocked(getMembers).mockClear(); state.members = false
+    model = await page(); expect(model.names.value.size).toBe(0); expect(getMembers).not.toHaveBeenCalled()
+    state.members = true; vi.mocked(getMembers).mockRejectedValue(new Error('down'))
+    state.cleanups.forEach(cleanup => cleanup()); state.cleanups = []
+    model = await page(); expect(model.rows.value.map(row => row.key)).toEqual(['all', 'design', 'concept']); expect(model.names.value.size).toBe(0)
   })
   it('asks again once when a write lands between the two reads, and gives up in words after that', async () => {
     vi.mocked(getTail).mockResolvedValueOnce(tailBoard({ revision: 2 })).mockResolvedValue(tailBoard())
