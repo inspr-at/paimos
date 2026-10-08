@@ -1,15 +1,15 @@
 {
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "permissions": [
-    "recurrences.manage",
-    "delivery.manage",
-    "delivery_queue.manage",
-    "delivery_queue.claim",
-    "reviewpolicy.manage",
     "account.overview.read",
+    "delivery.manage",
+    "delivery_queue.claim",
+    "delivery_queue.manage",
     "engine.admission",
-    "engine.read",
     "engine.manage",
-    "events.subscribe"
+    "engine.read",
+    "events.subscribe",
+    "recurrences.manage",
+    "reviewpolicy.manage"
   ]
 }
