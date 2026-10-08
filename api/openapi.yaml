@@ -7468,6 +7468,60 @@ paths:
       responses:
         '200': {description: 'Effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/metrics:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectDeliveryMetrics
+      description: 'Requires delivery.read on the project; an invisible project is absent (404). Computes the ten Project Arion delivery numbers for the repository linked to the project, from GitHub App events, the backfill and reported facts. Every metric names its source and definition; windows without samples are no_data and windows before complete coverage are partial, never zero.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Delivery metrics', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetrics'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/metrics/backfill:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: backfillProjectDeliveryMetrics
+      description: 'Requires delivery.manage. Runs one bounded backfill step (at most about 40 GitHub reads with the App installation token) from the stored cursor and stores workflow runs and pull requests idempotently. Call again while state is running. restart begins a new backfill over days (1 to 90, default 30). A failed GitHub read writes nothing and returns 502; a concurrent step or source change returns 409.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricsBackfillInput'}}}}
+      responses:
+        '200': {description: 'Backfill position after this step', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricsBackfill'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '502': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/metrics/facts:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: reportProjectDeliveryMetricFacts
+      description: 'Requires delivery.manage. Reports facts PAIMOS cannot observe itself: review verdicts of gates that post no aeon/review status, merge rounds (scripted or model) and releases (merge queue to live). Keys are idempotent per kind; a repeated key corrects the earlier report. At most 100 facts per call.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricFactsInput'}}}}
+      responses:
+        '200': {description: 'Stored facts', content: {application/json: {schema: {type: object, additionalProperties: false, required: [stored], properties: {stored: {type: integer, minimum: 0}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/metrics/source:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: putProjectDeliveryMetricSource
+      description: 'Requires delivery.manage. Links the project to the GitHub repository whose delivery it measures, with the CI and nightly workflow files. Changing any of them starts the backfill over. Does not change GitHub.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricSourceInput'}}}}
+      responses:
+        '200': {description: 'Metric source', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricSource'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/harness-sessions:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -15409,6 +15463,131 @@ components:
         required_checks_total: {type: integer, minimum: 0, description: 'Configured required checks in the stored observation.'}
         link_source: {type: [string, 'null'], enum: [review_row, title_key, branch_key, null]}
         updated_at: {type: string, format: date-time}
+    DeliveryMetric:
+      type: object
+      additionalProperties: false
+      required: [number, key, label, unit, source, definition, status, reason, latest, windows, daily, target]
+      properties:
+        number: {type: integer, minimum: 1, maximum: 10, description: 'Project Arion number this metric belongs to; numbers 3 and 7 have two metrics.'}
+        key: {type: string, enum: [pr_ci_wall, queue_run_wall, first_attempt_green, flaked_failures, time_to_first_green, pr_open_to_merged, queue_runs_per_pr, review_time, review_changes_share, merge_rounds_model_share, release_queue_to_live, nightly_green]}
+        label: {type: string}
+        unit: {type: string, enum: [minutes, percent, runs]}
+        source: {type: string, description: 'Where the samples come from.'}
+        definition: {type: string, description: 'What one sample measures, written for the page.'}
+        status: {type: string, enum: [ok, partial, no_data]}
+        reason: {type: [string, 'null'], description: 'Why the metric is partial or has no data; null when ok.'}
+        latest: {oneOf: [{$ref: '#/components/schemas/DeliveryMetricSample'}, {type: 'null'}]}
+        windows: {type: array, maxItems: 2, items: {$ref: '#/components/schemas/DeliveryMetricWindow'}}
+        daily: {type: array, maxItems: 30, description: 'One point per UTC day, oldest first; days without samples have null values, never zero.', items: {$ref: '#/components/schemas/DeliveryMetricPoint'}}
+        target: {oneOf: [{$ref: '#/components/schemas/DeliveryMetricTarget'}, {type: 'null'}]}
+    DeliveryMetricFactsInput:
+      type: object
+      additionalProperties: false
+      required: [facts]
+      properties:
+        facts:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, key, at, outcome]
+            properties:
+              kind: {type: string, enum: [review, merge_round, release]}
+              key: {type: string, pattern: '^[A-Za-z0-9._:/+-]{1,128}$', description: 'Idempotency key per kind, for example a release version or a gate run id.'}
+              pull_request: {type: [integer, 'null'], minimum: 1, description: 'Required for merge_round.'}
+              head_sha: {type: [string, 'null'], pattern: '^[0-9a-f]{40}$'}
+              started_at: {type: [string, 'null'], format: date-time, description: 'Review requested, or the release PR entering the merge queue. Required for review and release.'}
+              at: {type: string, format: date-time, description: 'Verdict, merge round or live time.'}
+              outcome: {type: string, enum: [ok, changes, scripted, model, live, failed], description: 'review ok or changes; merge_round scripted or model; release live or failed.'}
+    DeliveryMetricPoint:
+      type: object
+      additionalProperties: false
+      required: [date, status, n, value, p50, p90]
+      properties:
+        date: {type: string, format: date}
+        status: {type: string, enum: [ok, partial, no_data], description: 'partial when the day starts before complete coverage or the source is incomplete.'}
+        n: {type: integer, minimum: 0}
+        value: {type: [number, 'null']}
+        p50: {type: [number, 'null']}
+        p90: {type: [number, 'null']}
+    DeliveryMetricSample:
+      type: object
+      additionalProperties: false
+      required: [value, at]
+      properties:
+        value: {type: number}
+        at: {type: string, format: date-time}
+    DeliveryMetricSource:
+      type: object
+      additionalProperties: false
+      required: [repository, ci_workflow, nightly_workflow, app_connected, backfill, backfill_since, backfill_done_at, covered_since]
+      properties:
+        repository: {type: string}
+        ci_workflow: {type: string}
+        nightly_workflow: {type: string}
+        app_connected: {type: boolean, description: 'True when the workspace GitHub App receives events for this repository.'}
+        backfill: {type: string, enum: [not_started, running, done]}
+        backfill_since: {type: [string, 'null'], format: date-time}
+        backfill_done_at: {type: [string, 'null'], format: date-time}
+        covered_since: {type: [string, 'null'], format: date-time, description: 'Run and pull request facts are complete from this time on.'}
+    DeliveryMetricSourceInput:
+      type: object
+      additionalProperties: false
+      required: [repository]
+      properties:
+        repository: {type: string, description: 'owner/name'}
+        ci_workflow: {type: string, pattern: '^\.github/workflows/[A-Za-z0-9._-]{1,100}\.ya?ml$', default: '.github/workflows/ci.yml'}
+        nightly_workflow: {type: string, pattern: '^\.github/workflows/[A-Za-z0-9._-]{1,100}\.ya?ml$', default: '.github/workflows/nightly-full.yml'}
+    DeliveryMetricTarget:
+      type: object
+      additionalProperties: false
+      required: [value, direction, note, source]
+      properties:
+        value: {type: number}
+        direction: {type: string, enum: [max, min], description: 'max: at most this value is on target; min: at least.'}
+        note: {type: string}
+        source: {type: string}
+    DeliveryMetricWindow:
+      type: object
+      additionalProperties: false
+      required: [days, status, n, value, p50, p90]
+      properties:
+        days: {type: integer, enum: [7, 30]}
+        status: {type: string, enum: [ok, partial, no_data]}
+        n: {type: integer, minimum: 0, description: 'Samples in the window.'}
+        value: {type: [number, 'null'], description: 'p50 for durations, the mean for runs per PR, the share in percent for rates.'}
+        p50: {type: [number, 'null']}
+        p90: {type: [number, 'null']}
+    DeliveryMetrics:
+      type: object
+      additionalProperties: false
+      required: [project_id, generated_at, source, metrics]
+      properties:
+        project_id: {type: string, format: uuid}
+        generated_at: {type: string, format: date-time}
+        source: {oneOf: [{$ref: '#/components/schemas/DeliveryMetricSource'}, {type: 'null'}], description: 'Null when no repository is linked.'}
+        metrics: {type: array, maxItems: 12, items: {$ref: '#/components/schemas/DeliveryMetric'}}
+    DeliveryMetricsBackfill:
+      type: object
+      additionalProperties: false
+      required: [state, since, phase, day, calls, runs, pulls, truncated]
+      properties:
+        state: {type: string, enum: [running, done]}
+        since: {type: string, format: date-time}
+        phase: {type: string, enum: [runs, pulls, done]}
+        day: {type: [string, 'null'], format: date, description: 'Next UTC day of runs to read.'}
+        calls: {type: integer, minimum: 0, description: 'GitHub reads in this step.'}
+        runs: {type: integer, minimum: 0}
+        pulls: {type: integer, minimum: 0}
+        truncated: {type: boolean, description: 'A day had more runs than GitHub lists; metrics stay partial.'}
+    DeliveryMetricsBackfillInput:
+      type: object
+      additionalProperties: false
+      properties:
+        days: {type: integer, minimum: 1, maximum: 90, default: 30}
+        restart: {type: boolean, default: false}
     DeliveryPage:
       type: object
       required: [items, next_cursor]

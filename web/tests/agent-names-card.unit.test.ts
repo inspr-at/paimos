@@ -62,7 +62,7 @@ afterEach(() => { for (const s of scopes.splice(0)) s.stop(); vi.unstubAllGlobal
 
 const modules: Record<string, unknown> = {
   vue: Vue, '../../lib/api': apiModule, '../../lib/authz': { can: () => true }, '../../lib/lead': lead, '../../lib/workVocabulary': vocabularyLib,
-  '../../stores/session': sessionModule, '../../stores/workVocabulary': storeModule, '../AppIcon.vue': {}, '../KeyCap.vue': {}, './SettingsCard.vue': {},
+  '../../stores/session': sessionModule, '../../stores/workVocabulary': storeModule, '../AppIcon.vue': {}, '../KeyCap.vue': {}, './SettingsCard.vue': {}, './IconChoice.vue': {},
 }
 function setup<T>(file: string): T {
   const { descriptor } = parse(readFileSync(new URL(`../src/components/settings/${file}`, import.meta.url), 'utf8'))
