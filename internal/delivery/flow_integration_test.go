@@ -1171,3 +1171,142 @@ func TestDeliveryFlowParkReplayAtOneTimestamp(t *testing.T) {
 		t.Fatalf("replay changed rows or events %d → %d\nbefore:\n%s\nafter:\n%s", events, flowEventCount(t, f), before, after)
 	}
 }
+
+// syncFlowAll projects every pending PAIMOS event of the fixture tenant.
+func syncFlowAll(t *testing.T, f *fixture) {
+	t.Helper()
+	for {
+		more, err := f.m.SyncFlow(t.Context(), f.person.TenantID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !more {
+			return
+		}
+	}
+}
+
+// parkRound writes the queued and parked transitions of the first build round
+// for the fixture ticket and pull request 7.
+func parkRound(t *testing.T, f *fixture, at time.Time) {
+	t.Helper()
+	pr := int64(7)
+	build := Round{RoundInput: RoundInput{Ticket: f.ticket, Slug: "aeon-848", Kind: "first_build", Number: 1, PR: &pr}, ID: requestID(1), Project: f.project, State: "queued"}
+	for i, state := range []string{"queued", "parked"} {
+		r := build
+		r.State = state
+		appendFlowSource(t, f, queueChange(f.project, "transition", nil, queueSnapshot{Project: f.project, Round: &r}, at.Add(time.Duration(i)*time.Minute)))
+	}
+}
+
+func TestDeliveryFlowParkAfterMergeStaysClosed(t *testing.T) {
+	// Risk: a merge is projected before the change has a flow row, then a PAIMOS
+	// round parks the already merged work. The round names no repository, so
+	// the late row skips the merge reconciliation and stays open for good,
+	// with no GitHub ingestion to close it.
+	f, g := newMetricsFixture(t)
+	p := f.pull()
+	f.gh.pulls[7] = p
+	opened := f.at.Add(-3 * time.Hour)
+	auditSend(t, f, "pull_request", "flow-park-open", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": opened, "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+	p.Open, p.Merged = false, true
+	f.gh.pulls[7] = p
+	pr := int64(7)
+	fact := MergeFact{SHA: strings.Repeat("c", 40), Head: p.Head, Title: p.Title, Branch: p.Branch, MergedBy: "github-merge-queue[bot]", PR: &pr, At: f.at}
+	g.checks[fact.SHA] = auditGreen()
+	auditSend(t, f, "pull_request", "flow-park-merge", auditPRBody(f, fact), 204)
+	delivery := f.item(t, 7)
+	if delivery.State != Merged {
+		t.Fatalf("delivery state %s", delivery.State)
+	}
+	syncFlowAll(t, f)
+	var items int
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_flow_items`).Scan(&items)
+	})
+	if items != 0 {
+		t.Fatalf("merge of an unseen change created %d flow rows", items)
+	}
+	parkRound(t, f, f.at.Add(time.Hour))
+	syncFlowAll(t, f)
+	var ended *time.Time
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*), max(ended_at) FROM delivery_flow_items WHERE kind='change' AND ref='AEON-848'`).Scan(&items, &ended)
+	})
+	if items != 1 || ended == nil || !ended.Equal(delivery.Since) {
+		t.Fatalf("parked merged change: items %d ended %v, delivery merged at %s", items, ended, delivery.Since)
+	}
+}
+
+func TestDeliveryFlowParkIgnoresAmbiguousRepository(t *testing.T) {
+	// Risk: resolving the repository of a PAIMOS round picks a repository when
+	// two claim the same pull-request number for the ticket, so another
+	// repository's merged pull request closes a change that is still open.
+	f, _ := newMetricsFixture(t)
+	p := f.pull()
+	f.gh.pulls[7] = p
+	opened := f.at.Add(-3 * time.Hour)
+	auditSend(t, f, "pull_request", "flow-ambiguous-open", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": opened, "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+	if linked := f.item(t, 7); linked.State == Merged || linked.Ticket == nil || *linked.Ticket != f.ticket {
+		t.Fatalf("linked delivery: %+v", linked)
+	}
+	mergedAt := f.at.Add(-time.Hour)
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO delivery_items(tenant_id,id,project_id,ticket_node_id,repository,pull_request,branch,head_sha,state,state_since,owner,observation,updated_at)
+			VALUES($1,gen_random_uuid(),$2,$3,'other/repo',7,'work/other',$4,'merged',$5,'person','{}'::jsonb,$5)`,
+			f.person.TenantID, f.project, f.ticket, strings.Repeat("c", 40), mergedAt)
+		return err
+	})
+	parkRound(t, f, f.at.Add(time.Hour))
+	syncFlowAll(t, f)
+	var items int
+	var ended *time.Time
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*), max(ended_at) FROM delivery_flow_items WHERE kind='change' AND ref='AEON-848'`).Scan(&items, &ended)
+	})
+	if items != 1 || ended != nil {
+		t.Fatalf("another repository closed the change: items %d ended %v", items, ended)
+	}
+}
+
+func TestDeliveryFlowEarlierRunQueuedAfterLaterRunMovesItemStart(t *testing.T) {
+	// Risk: runs 501 and 502 of one pull request arrive out of order. Run 502
+	// is already running when run 501's queued report arrives, so the earlier
+	// step is stored but the item still starts at run 502 and every window that
+	// ends before it omits the item and the valid earlier step.
+	f, g := newMetricsFixture(t)
+	g.respond = func(string) (any, error) { return nil, errRead }
+	p := f.pull()
+	f.gh.pulls[7] = p
+	opened := f.at.Add(-3 * time.Hour)
+	auditSend(t, f, "pull_request", "flow-order-pr", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": opened, "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+	early := f.at.Add(-50 * time.Minute)
+	late := f.at.Add(-20 * time.Minute)
+	lateStart := late.Add(time.Minute)
+	itemStart := func() time.Time {
+		var at time.Time
+		f.tx(t, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT started_at FROM delivery_flow_items WHERE kind='change' AND ref='AEON-848'`).Scan(&at)
+		})
+		return at
+	}
+	auditSend(t, f, "workflow_run", "flow-order-later", workflowRunBody("in_progress", 502, 1, "pull_request", p.Branch, p.Head, defaultCIWorkflow, late, &lateStart, nil, 7), 204)
+	if got := itemStart(); !got.Equal(lateStart) {
+		t.Fatalf("item start after the later run: %s", got)
+	}
+	auditSend(t, f, "workflow_run", "flow-order-earlier", workflowRunBody("requested", 501, 1, "pull_request", p.Branch, p.Head, defaultCIWorkflow, early, nil, nil, 7), 204)
+	if got := itemStart(); !got.Equal(early) {
+		t.Fatalf("item start %s after the earlier run's queued report, want %s", got, early)
+	}
+	var flow DeliveryFlow
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/flow?from="+early.Add(-time.Minute).Format(time.RFC3339)+"&to="+early.Add(10*time.Minute).Format(time.RFC3339), nil, 200, &flow)
+	if len(flow.Items) != 1 || len(flow.Steps) != 1 || flow.Steps[0].ID != flowStepID(f.person.TenantID, flow.Items[0].ID, "github_app", "run/501/1") {
+		t.Fatalf("window before the later run: %d items, steps %+v", len(flow.Items), flow.Steps)
+	}
+	// The same queued report again changes nothing: the step exists.
+	events := flowEventCount(t, f)
+	auditSend(t, f, "workflow_run", "flow-order-earlier-again", workflowRunBody("requested", 501, 1, "pull_request", p.Branch, p.Head, defaultCIWorkflow, early, nil, nil, 7), 204)
+	if got := itemStart(); !got.Equal(early) || flowEventCount(t, f) != events {
+		t.Fatalf("queued redelivery: item start %s, events %d → %d", got, events, flowEventCount(t, f))
+	}
+}
