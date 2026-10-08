@@ -51,9 +51,13 @@ test('guided setup preserves controls and own columns, saves once with exact Und
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1100 }); await page.emulateMedia({ colorScheme: theme })
     await page.addInitScript(value => { document.addEventListener('DOMContentLoaded', () => { document.documentElement.dataset.theme = value }) }, theme)
     await page.addInitScript(person => { localStorage.removeItem(`models-page/board-tenant/${person}/setup-visited`) }, boardPerson)
-    await mockModelsSettings(page, { setup: true, german: true }); await openModelsSettings(page, '?mode=simple&lang=de')
+    const evidenceState = await mockModelsSettings(page, { setup: true, german: true }); await openModelsSettings(page, '?mode=simple&lang=de')
     await expect(page.locator('[data-setup-welcome]')).toBeVisible()
     await page.screenshot({ path: testInfo.outputPath(`welcome-${width}-${theme}-de.png`) })
+    if (width === 1440 && theme === 'light') {
+      const manual = await controlStability(page, { show: page.locator('[data-board-show]'), providers: page.locator('[data-board-providers]'), column: page.locator('[data-column="backend"] .bc-head') })
+      await manual.check(async () => { await page.locator('[data-column="backend"] [data-line="anthropic:sonnet"]').press('Alt+ArrowUp'); await expect.poll(() => evidenceState.writes.length).toBe(1); await expect(page.locator('[data-column="backend"] [data-zone="list"] li').first()).toHaveAttribute('data-card', 'anthropic:sonnet'); await expect(page.locator('[data-setup-welcome]')).toBeVisible(); await expect(page.locator('[data-setup-welcome] b > span').last()).toHaveText('Für mich einrichten') }); manual.done()
+    }
     await setup(page)
     const evidence = await controlStability(page, { frame: panel(page), back: page.locator('[data-setup-back]'), next: next(page), close: panel(page).locator('.pane-close') })
     await evidence.check(async () => { await page.getByLabel('Qualität zuerst').check(); await forward(page); await forward(page) })
