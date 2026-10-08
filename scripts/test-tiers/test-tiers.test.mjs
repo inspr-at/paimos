@@ -684,8 +684,10 @@ test('offline replay CLI prints every real PR with selected counts, effective la
   assert.equal(report.replay.length,80)
   // Measured on the current tree (consumers, migrations); deleted files replay as full.
   // The merge keeps PR 200 and PR 245 over the 1000-case Go consumer bound (openapi fan-out).
-  assert.deepEqual(report.transitions,{'full->full':50,'full->essential':16,'essential->essential':14})
-  assert.equal(report.summary.newNarrowed,30)
+  // AEON-879 retires the dialog files: historical PR 208 now safely widens
+  // because those deleted paths have no dependency metadata in this tree.
+  assert.deepEqual(report.transitions,{'full->full':51,'full->essential':15,'essential->essential':14})
+  assert.equal(report.summary.newNarrowed,29)
   assert.equal(report.summary.oldEssential,14)
   assert.ok(report.summary.fullReasons['CI machinery']>=15)
   for(const row of report.replay) {
