@@ -8638,6 +8638,8 @@
     ,
     {"kind":"go","package":"internal/ticketwork","name":"TestApplyUsageGroupsModelsOnce","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/ticketwork","name":"TestLeakPatternsIgnoreGeneratedIDsAndTimestamps","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/ticketwork","name":"TestMigratedWorkSessionsAndCostsRespectVisibility","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/ticketwork","name":"TestSummarizeAgentWork","tags":["delete-candidate"],"tier":"GATED-FULL"}

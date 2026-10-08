@@ -259,7 +259,7 @@ func TestTicketAgentWork(t *testing.T) {
 	if numberField.Match(raw) {
 		t.Fatalf("token or cost encoded as a JSON number: %s", raw)
 	}
-	if regexp.MustCompile(`4242|999999|"777"`).Match(raw) {
+	if regexp.MustCompile(`4242|999999|"777"`).Match(withoutGeneratedText(raw)) {
 		t.Fatalf("sibling, other tenant or hidden project usage leaked: %s", raw)
 	}
 
@@ -518,12 +518,44 @@ func TestTicketAgentWorkSkipsRunTelemetry(t *testing.T) {
 	f.managedSession(t, sid, f.project, ticket, run, past)
 	f.usage(t, f.person, sid, "gpt-test", "12", "3", "1", "0.010000000000", false, "1", "api", "")
 	raw := f.body(t, f.person, ticket, "")
-	if regexp.MustCompile(`999999|888888|777777|666666`).Match(raw) {
+	if regexp.MustCompile(`999999|888888|777777|666666`).Match(withoutGeneratedText(raw)) {
 		t.Fatalf("managed run telemetry was added to session usage: %s", raw)
 	}
 	report := f.get(t, f.person, ticket, "")
 	if report.Totals.SessionCount != 1 || str(report.Totals.InputTokens) != "12" || str(report.Totals.OutputTokens) != "3" || str(report.Totals.EstimatedCostUSD) != "0.010000000000" || report.Totals.DurationSeconds == nil || *report.Totals.DurationSeconds != 30 {
 		t.Fatalf("usage-only totals %+v", report.Totals)
+	}
+}
+
+// generatedText matches what a fixture draws at random or from the clock:
+// UUIDs and RFC 3339 timestamps. Their digits are not counters or money.
+var generatedText = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\d{4}-\d\d-\d\dT[0-9:.]+(?:Z|[+-]\d\d:\d\d)`)
+
+// withoutGeneratedText lets the leak patterns below see counters and money
+// only. A random id such as 4242b618-… must not read as a leaked 4242.
+func withoutGeneratedText(raw []byte) []byte {
+	return generatedText.ReplaceAll(raw, []byte("~"))
+}
+
+func TestLeakPatternsIgnoreGeneratedIDsAndTimestamps(t *testing.T) {
+	leak := regexp.MustCompile(`4242|999999|"777"`)
+	for _, clean := range []string{
+		`{"id":"4242b618-e676-6050-dcac-3f40b46e3bd0","input_tokens":"50"}`,
+		`{"id":"3f40b46e-4242-4999-9999-999999999999"}`,
+		`{"started_at":"2026-10-08T05:42:42.424242Z","ended_at":"2026-10-08T07:39:51.999999+02:00"}`,
+	} {
+		if leak.Match(withoutGeneratedText([]byte(clean))) {
+			t.Fatalf("generated text read as a leaked figure: %s", clean)
+		}
+	}
+	for _, leaked := range []string{
+		`{"id":"4242b618-e676-6050-dcac-3f40b46e3bd0","input_tokens":"4242"}`,
+		`{"started_at":"2026-10-08T05:25:30Z","input_tokens":"999999"}`,
+		`{"input_tokens":"777"}`,
+	} {
+		if !leak.Match(withoutGeneratedText([]byte(leaked))) {
+			t.Fatalf("a real leaked figure was scrubbed away: %s", leaked)
+		}
 	}
 }
 
