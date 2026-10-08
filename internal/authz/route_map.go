@@ -331,6 +331,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/agent-keys":                                                    "keys.read",
 	"GET /api/approvals":                                                     "approvals.read",
 	"GET /api/audit":                                                         "audit.read",
+	"GET /api/attachments/{id}":                                              "attachments.read",
 	"GET /api/attachments/{id}/content":                                      "attachments.read",
 	"POST /api/attachments/{id}/preview":                                     "attachments.read",
 	"GET /api/auth/callback":                                                 "public",
