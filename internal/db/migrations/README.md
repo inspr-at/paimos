@@ -182,6 +182,13 @@ migration guard remain the ongoing checks. Reverting AEON-985 restores the
 ledger and tests together; there is no database migration or dependent runtime
 schema change.
 
+Conversion validation at `e6a8d1c19`: the dump proof passed for all 27 exception
+records and 37 original cases; all 38 migration tests passed. The full
+`internal/db` suite passed on mbp2606, and the locked remote
+`ci-static --merge-main` run passed all 40 checks with zero skips. The local
+static/planner regressions (294 tests) and ownership audit (33 tests) also
+passed. No origin push, deployment or worker-run review gate was performed.
+
 The sole initial exception, AEON-397's `1054_confirmed_quota_pools.sql`, replaces
 the reservation guard immediately. Existing accounts start unconfirmed, so
 self-reported fingerprints cease to authorize shared-pool reservations until
