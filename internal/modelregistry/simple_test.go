@@ -225,13 +225,13 @@ func TestMinimalSimpleReadPreservesFirstAndFallback(t *testing.T) {
 		t.Fatal(defaultDoc)
 	}
 	minimalAccount(t, admin, profileBySlug(ps, "claude-opus-xhigh"))
-	project := editorProject(t, admin, "MINIMAL-P")
+	project := editorProject(t, admin, "MINIMAL-3")
 	inRegistry(t, admin, func(tx pgx.Tx) error {
 		var ticket, order, runner string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state,project_id,fields) SELECT $1,id,'MINIMAL-1','Queued work','open',$2,'{"area":"backend"}' FROM node_kinds WHERE slug='work' RETURNING id::text`, admin.TenantID, project).Scan(&ticket); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id) SELECT $1,id,'MINIMAL-O','Queued order',$2,$3 FROM node_kinds WHERE slug='work_order' RETURNING id::text`, admin.TenantID, ticket, project).Scan(&order); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id) SELECT $1,id,'MINIMAL-2','Queued order',$2,$3 FROM node_kinds WHERE slug='work_order' RETURNING id::text`, admin.TenantID, ticket, project).Scan(&order); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, admin.TenantID, order, member.ID); err != nil {
