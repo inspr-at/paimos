@@ -29,7 +29,9 @@ func New(pool *pgxpool.Pool, config crossreview.AppConfig, secret []byte, github
 }
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountWorkQueue(mux)
-	mux.HandleFunc("POST /api/github/webhook", m.webhook)
+	// auditWebhook keeps the reviewed ingress and records merge-audit facts after it accepts the event.
+	mux.HandleFunc("POST /api/github/webhook", m.auditWebhook)
+	mux.HandleFunc("GET /api/delivery/audit", m.auditList)
 	mux.HandleFunc("GET /api/delivery", m.list)
 	mux.HandleFunc("GET /api/delivery/alerts", m.listAlerts)
 	mux.HandleFunc("GET /api/delivery/enqueue-allowed", m.enqueueAllowed)

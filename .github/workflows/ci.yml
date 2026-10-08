@@ -277,6 +277,7 @@ jobs:
             go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-${{ github.head_ref || github.ref_name }}-
             go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-main-
       - name: Install shells when this shard runs pairing path-proof tests
+        timeout-minutes: 4
         env:
           AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
           AEON_TEST_TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
@@ -295,7 +296,7 @@ jobs:
             console.log(tests.some(row => row.package === "internal/agentpairing" && row.name === "TestPathProofCommandsRunInShells") ? "yes" : "no");
           ')"
           if [ "$need" = yes ] || [ "$tier_need" = yes ]; then
-            sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+            bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" apt zsh fish
           fi
       - name: Test this shard (essential plus changed area, or full on main)
         env:
@@ -582,7 +583,8 @@ jobs:
       - name: Restore web runtime
         run: tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"
       - name: Install shells used by command round-trip unit tests
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh
+        timeout-minutes: 4
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" apt fish zsh
       - name: Run selected web units without retries
         env:
           CI_LANE: ${{ needs.tier-plan.outputs.lane }}
@@ -650,8 +652,9 @@ jobs:
           fail-on-cache-miss: true
       # OS libraries are per runner; browser downloads and npm ci are shared.
       - name: Install Chromium system dependencies
+        timeout-minutes: 13
         working-directory: web
-        run: npx playwright install-deps chromium
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install-deps chromium
       - name: Run selected UI cases without retries
         env:
           CI_LANE: ${{ needs.tier-plan.outputs.lane }}
@@ -852,6 +855,7 @@ jobs:
         run: |
           python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'
           python3 -B scripts/audit/covcheck.py --summary
+          node scripts/check-tracked-bytecode.mjs
       - name: PR classification and exact-SHA reuse regressions
         run: node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs
       - name: Full UI QA workflow regressions
@@ -963,8 +967,9 @@ jobs:
       - name: Build server
         run: go build -tags webembed -o bin/paimos ./cmd/aeon
       - name: Install Playwright
+        timeout-minutes: 13
         working-directory: web
-        run: npx playwright install --with-deps --only-shell chromium
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install --with-deps --only-shell chromium
       - name: Measure Chromium shell cleanup on success, failure and interruption
         env:
           AEON_BROWSER_LIFECYCLE: '1'
