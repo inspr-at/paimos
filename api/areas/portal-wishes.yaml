@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/portal
+paths:
+  /portal/wishes/{wishId}/fulfillment:
+    put:
+      operationId: writePortalFulfillment
+      summary: Link a published or hidden wish to the live feature that fulfilled it, or clear the link
+      description: settings.manage, people only. The wish must have been opened before the feature went live. The public figure is a median of days once five wishes are fulfilled, never the wish title.
+      security: [{session: []}]
+      parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalFulfillmentWrite'}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Pace after the link, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPace'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /portal/wishes/{wishId}/hide:
+    post:
+      operationId: hidePortalWish
+      summary: Hide a published wish
+      description: settings.manage, people only. Agents are refused. Only a published wish can be hidden. A wish that is already hidden is unchanged.
+      security: [{session: []}]
+      parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/wishes/{wishId}/publish:
+    post:
+      operationId: publishPortalWish
+      summary: Publish a wish on the public portal
+      description: settings.manage, people only. Agents are refused. A pending or hidden wish becomes published. A wish that is already published is unchanged.
+      security: [{session: []}]
+      parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/wishes/{wishId}/reject:
+    post:
+      operationId: rejectPortalWish
+      summary: Reject a wish that is waiting for review
+      description: settings.manage, people only. Agents are refused. Only a pending wish can be rejected. A wish that is already rejected is unchanged.
+      security: [{session: []}]
+      parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    PortalFulfillmentWrite:
+      type: object
+      additionalProperties: false
+      required: [feature_id]
+      properties:
+        feature_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}]}

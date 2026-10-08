@@ -1,0 +1,218 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/intake
+paths:
+  /projects/{projectId}/intake:
+    get:
+      operationId: getProjectIntake
+      summary: Read intake history
+      description: Aithema's source, transcript and draft history. Delegated calls require exact intake.read, session tid/pid/sid and current auth_epoch; reads do not check gen. Accepted and superseded proposals remain visible.
+      security: [{session: []}, {agentKey: []}, {aithemaDelegated: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: node_id, in: query, schema: {type: string, format: uuid}, description: Return accepted drafts for this node or the requirement that generated this ticket; sources and turns are empty. Requires the same intake.read permission.}
+      responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
+        '200': {description: Intake snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSnapshot'}}}}
+        '404': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
+        '409': {$ref: '#/components/responses/IntakeError'}
+  /projects/{projectId}/intake/drafts:
+    post:
+      operationId: proposeIntakeDraft
+      summary: Propose a cited draft
+      description: Aithema proposes an immutable cited brief or requirement draft against a target node revision. Proposals never patch people-edited nodes.
+      x-aithema-authorization: {capability: intake.write, checks: [tid, pid, sid, gen, auth_epoch, exp, ephemeral_live_grant]}
+      security: [{agentKey: []}, {aithemaDelegated: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraftWrite'}}}}
+      responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
+        '201': {description: Draft, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraft'}}}}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
+  /projects/{projectId}/intake/drafts/{draftId}/accept:
+    post:
+      operationId: acceptIntakeDraft
+      summary: Accept a cited draft
+      description: Person explicitly accepts one draft. If the target changed since base_event_id, return 409 with no write; acceptance never overwrites later edits.
+      security: [{session: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: draftId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeAccept'}}}}
+      responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
+        '200': {description: Accepted draft, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraft'}}}}
+        '403': {$ref: '#/components/responses/IntakeError'}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+  /projects/{projectId}/intake/drafts/{draftId}/replace:
+    post:
+      operationId: replaceIntakeDraft
+      summary: Atomically replace a proposed draft
+      description: Agent-only replacement with intake.write and a live grant. Inserts a new immutable draft linked by supersedes_draft_id and an immutable receipt under the same project lock as acceptance. Accepted old drafts return already_accepted; superseded old drafts return draft_superseded. The same key and exact request bytes return the original 201 result, even after later acceptance or replacement; changed bytes or an operation on a different old draft return idempotency_conflict. No bare withdrawal is offered. Delegated requester_principal_id is derived from act.sub; a supplied value must match.
+      security: [{agentKey: []}, {aithemaDelegated: []}]
+      x-aithema-authorization: {capability: intake.write, checks: [tid, pid, sid, gen, auth_epoch, exp, ephemeral_live_grant]}
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: draftId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraftWrite'}}}}
+      responses:
+        '201': {description: Original replacement receipt, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraft'}}}}
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
+        '404': {$ref: '#/components/responses/IntakeError'}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
+  /projects/{projectId}/intake/sources:
+    post:
+      operationId: addIntakeSource
+      summary: Record an intake source
+      description: Aithema records a source reference, content digest and provenance; file bytes remain behind Aeon's tenant-scoped file storage boundary. Never accepts credentials in locators.
+      x-aithema-authorization: {capability: intake.write, checks: [tid, pid, sid, gen, auth_epoch, exp, ephemeral_live_grant]}
+      security: [{session: []}, {agentKey: []}, {aithemaDelegated: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSourceWrite'}}}}
+      responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
+        '201': {description: Source, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSource'}}}}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
+  /projects/{projectId}/intake/transcript-turns:
+    post:
+      operationId: appendIntakeTurn
+      summary: Append a conversation turn
+      description: Appends an immutable conversation turn to a source. Idempotency key binds a retry to the same content.
+      x-aithema-authorization: {capability: intake.write, checks: [tid, pid, sid, gen, auth_epoch, exp, ephemeral_live_grant]}
+      security: [{session: []}, {agentKey: []}, {aithemaDelegated: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeTurnWrite'}}}}
+      responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
+        '201': {description: Turn, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeTurn'}}}}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
+components:
+  schemas:
+    IntakeAccept:
+      type: object
+      additionalProperties: false
+      required: [expected_base_event_id]
+      properties:
+        expected_base_event_id: {type: integer, minimum: 0}
+    IntakeCitation:
+      type: object
+      additionalProperties: false
+      required: [source_id, locator]
+      properties:
+        source_id: {type: string, format: uuid}
+        turn_id: {type: string, format: uuid}
+        locator: {type: string, minLength: 1, maxLength: 256, description: 'Stable page, paragraph, time or character-span locator'}
+        quote_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    IntakeDraft:
+      allOf:
+        - {$ref: '#/components/schemas/IntakeDraftWrite'}
+        - {type: object, required: [id, status, proposed_at], properties: {supersedes_draft_id: {type: string, format: uuid}, id: {type: string, format: uuid}, status: {type: string, enum: [proposed, accepted, rejected, superseded]}, proposed_at: {type: string, format: date-time}, accepted_at: {type: [string, 'null'], format: date-time}}}
+    IntakeDraftWrite:
+      type: object
+      additionalProperties: false
+      required: [kind, title, body, base_event_id, citations, idempotency_key]
+      properties:
+        kind: {type: string, enum: [brief, requirement]}
+        requirement_kind: {type: string, enum: [functional, nonfunctional]}
+        target_node_id: {type: string, format: uuid}
+        requester_principal_id: {type: string, format: uuid, description: Person represented by the delegated token. Omit to derive from act.sub; cannot be set by an ordinary agent key.}
+        title: {type: string, minLength: 1}
+        body: {type: string}
+        extensions: {$ref: '#/components/schemas/IntakeExtensions'}
+        document_bytes:
+          type: string
+          description: Original Aithema review snapshot JSON, preserved as text. Extensions are extracted from its single confirmed, unbound item; an explicit extensions map must match those exact bytes. This native draft envelope retains its required projection fields. The complete request is limited to 1 MiB, allowing a 64 KiB canonical extension map plus JSON escaping and projection overhead.
+        base_event_id: {type: integer, minimum: 0, description: Last target-node event observed by Aithema; zero for a new target}
+        citations: {type: array, minItems: 1, items: {$ref: '#/components/schemas/IntakeCitation'}}
+        ticket_suggestions: {type: array, items: {$ref: '#/components/schemas/IntakeTicketSuggestion'}}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+    IntakeError:
+      type: object
+      required: [error, code]
+      properties:
+        error: {type: string}
+        code: {type: string, description: 'Stable refusal code: idempotency_conflict, citation_invalid (422), draft_superseded, already_accepted, target_changed, already_accepted_on_target, no_recorded_content, person_authored, fenced_generation, revoked (409); forbidden for plain authorization (403). Transport failures use invalid_request, unauthenticated, not_found, unavailable or internal.'}
+    IntakeExtensions:
+      type: object
+      maxProperties: 8
+      description: Aithema item.extensions, preserved without reshaping. Registry and canonical 16 KiB instance / 64 KiB map validation belong to Aithema; Aeon checks the envelope and retains unknown namespaces. Evidence strings are not trimmed or normalized. Changing the raw map or document on an idempotent retry returns 409.
+      additionalProperties: false
+      patternProperties:
+        '^x-[a-z0-9]+(\.[a-z0-9-]+)+@(0|[1-9][0-9]*)$':
+          type: object
+          additionalProperties: false
+          required: [version, data]
+          properties:
+            version: {type: string, maxLength: 33, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$', description: Major must match the map key}
+            data: {}
+    IntakeSnapshot:
+      type: object
+      required: [sources, turns, drafts]
+      properties:
+        sources: {type: array, items: {$ref: '#/components/schemas/IntakeSource'}}
+        turns: {type: array, items: {$ref: '#/components/schemas/IntakeTurn'}}
+        drafts: {type: array, items: {$ref: '#/components/schemas/IntakeDraft'}}
+    IntakeSource:
+      allOf:
+        - {$ref: '#/components/schemas/IntakeSourceWrite'}
+        - {type: object, required: [id, project_node_id, created_at], properties: {id: {type: string, format: uuid}, project_node_id: {type: string, format: uuid}, created_at: {type: string, format: date-time}}}
+    IntakeSourceWrite:
+      type: object
+      additionalProperties: false
+      required: [kind, label, content_sha256, idempotency_key]
+      properties:
+        kind: {type: string, enum: [url, file, note, conversation]}
+        label: {type: string, minLength: 1, maxLength: 512}
+        locator: {type: string, maxLength: 2048, description: Public URL or symbolic source reference only}
+        file_id: {type: string, format: uuid}
+        content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+    IntakeTicketSuggestion:
+      type: object
+      additionalProperties: false
+      required: [title, estimated_hours, later, access_change]
+      properties:
+        title: {type: string, minLength: 1}
+        estimated_hours: {type: number, minimum: 0}
+        later: {type: boolean, description: Place in backlog instead of the first release}
+        access_change: {type: boolean}
+    IntakeTurn:
+      allOf:
+        - {$ref: '#/components/schemas/IntakeTurnWrite'}
+        - {type: object, required: [id, created_at], properties: {id: {type: string, format: uuid}, created_at: {type: string, format: date-time}}}
+    IntakeTurnWrite:
+      type: object
+      additionalProperties: false
+      required: [source_id, ordinal, speaker, body, idempotency_key]
+      properties:
+        source_id: {type: string, format: uuid}
+        ordinal: {type: integer, minimum: 0}
+        speaker: {type: string, enum: [person, agent]}
+        speaker_principal_id: {type: string, format: uuid}
+        body: {type: string, minLength: 1, maxLength: 65536}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+  responses:
+    IntakeError:
+      description: Intake refusal with a stable machine-readable code; Cache-Control no-store.
+      content: {application/json: {schema: {$ref: '#/components/schemas/IntakeError'}}}

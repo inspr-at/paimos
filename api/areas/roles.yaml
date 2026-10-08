@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /roles:
+    get:
+      operationId: listRoles
+      responses:
+        '200': {description: Built-in and custom roles, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AuthzRole'}}}}}
+    post:
+      operationId: createRole
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoleWrite'}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '201': {description: Role created, content: {application/json: {schema: {$ref: '#/components/schemas/AuthzRole'}}}}
+        '403': {description: Permission denied or role escalation}
+  /roles/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    patch:
+      operationId: updateRole
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoleWrite'}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Updated custom role, content: {application/json: {schema: {$ref: '#/components/schemas/AuthzRole'}}}}
+        '403': {description: Permission denied or role escalation}
+    delete:
+      operationId: deleteRole
+      parameters:
+        - {name: reassign_to, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '204': {description: Custom role deleted}
+        '409': {description: Role still has bindings}
+components:
+  schemas:
+    RoleWrite:
+      type: object
+      properties:
+        name: {type: string}
+        description: {type: string}
+        permissions: {type: array, items: {type: string}}
+        based_on: {type: string, format: uuid}

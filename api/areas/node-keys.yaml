@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/nodes
+paths:
+  /node-keys/{key}:
+    get:
+      operationId: getNodeByKey
+      description: Resolve a current key or a historical key alias to the same live node.
+      security: *auth
+      parameters:
+        - {name: key, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {$ref: '#/components/responses/Node'}
+        '404': {$ref: '#/components/responses/Error'}
+components:
