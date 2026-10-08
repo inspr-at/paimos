@@ -4,6 +4,8 @@ package agentaccounts
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -334,6 +336,10 @@ func TestVendorStopAdviceRejectsUnenrolledDaemonSquatter(t *testing.T) {
 
 // Risk: a redacted overview row discloses quota headroom through routable,
 // or by omitting wait when slots remain. Private rows keep one constant shape.
+// The owned row is the control, so it has to be inside working hours. The
+// default schedule is closed after 22:00 UTC and on weekends; CI failed this
+// test at 22:18Z while the manual window still had slots. The clock is pinned
+// to that closed hour. The person's clock gate stays (AEON-478).
 // The default schedule is weekdays 08:00–22:00 UTC with nights off, so a
 // wall-clock overview after 22:00 waits on the schedule even when the manual
 // window still has slots (CI on 9f3604f8 at 2026-10-07 22:16Z). Pin the probe,
@@ -341,6 +347,59 @@ func TestVendorStopAdviceRejectsUnenrolledDaemonSquatter(t *testing.T) {
 // A manual allowance still follows the owner's schedule; pin both clocks and
 // allow night work so this privacy guard cannot depend on the time CI runs.
 func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
+	t.Run("account schedule outside default closed hours", func(t *testing.T) {
+		reset(t)
+		person := makePrincipal(t, "overview-routable", "person", "Owner", []string{"admin"})
+		other := addPrincipal(t, person.TenantID, "person", "Other", nil)
+		runner := addPrincipal(t, person.TenantID, "agent", "runtime", nil)
+		codexProfile(t, person)
+		// Wednesday 23:30 UTC is outside DefaultSchedule (Monday–Friday 08:00–22:00).
+		now := time.Date(2026, 10, 7, 23, 30, 0, 0, time.UTC)
+		var own, private string
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+			for _, row := range []struct{ label, owner string }{{"Own", person.ID}, {"Private", other.ID}} {
+				var id string
+				if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,owner_person_id,linked_at) VALUES($1,$2,'codex','daemon-a',$3,$2,$4,true,'g1',$5,$6,$4) RETURNING id::text`, person.TenantID, row.label, runner.ID, now, person.ID, row.owner).Scan(&id); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model) VALUES($1,$2,$3,$4,'requests',100,10,'unrestricted')`, person.TenantID, id, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+					return err
+				}
+				if row.label == "Own" {
+					own = id
+				} else {
+					private = id
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		// Open only this owner's hours. A manual allowance is still gated by the
+		// person's clock; the default week would wait until 08:00.
+		open := capacity.DefaultSchedule()
+		for i := range open.Week {
+			open.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+		}
+		callStatus(t, accountsMod(), &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", own, &open, false, ""}), 204, nil)
+		page := overviewAt(t, person, now)
+		seen := map[string]overviewAccount{}
+		for _, a := range page.Accounts {
+			seen[a.AccountID] = a
+		}
+		shared, privateRow := seen[own], seen[private]
+		if shared.AccountID == "" || shared.DetailsRedacted || !shared.Routable || shared.Wait != nil {
+			wait := any(nil)
+			if shared.Wait != nil {
+				wait = *shared.Wait
+			}
+			t.Fatalf("owned account with open slots was not routable: %+v wait=%+v", shared, wait)
+		}
+		if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
+			t.Fatalf("redacted overview disclosed headroom: %+v", privateRow)
+		}
+	})
+
 	t.Run("schedule-band", func(t *testing.T) {
 		reset(t)
 		person := makePrincipal(t, "overview-routable", "person", "Owner", []string{"admin"})
@@ -566,6 +625,25 @@ func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
 			t.Fatalf("redacted overview disclosed headroom: %+v", privateRow)
 		}
 	})
+}
+
+func overviewAt(t *testing.T, p tenant.Principal, at time.Time) overviewPage {
+	t.Helper()
+	mod := accountsMod()
+	r := httptest.NewRequest(http.MethodGet, "/api/agent-accounts/overview", nil)
+	r = r.WithContext(context.WithValue(tenant.WithPrincipal(r.Context(), p), clockKey{}, at))
+	mux := http.NewServeMux()
+	mod.Mount(mux)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("overview: status %d: %s", w.Code, w.Body.String())
+	}
+	var page overviewPage
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatalf("overview json: %v body %s", err, w.Body.String())
+	}
+	return page
 }
 
 func enrollComputerAccount(t *testing.T, owner, host tenant.Principal, accountID, daemonID, profile, token string) {

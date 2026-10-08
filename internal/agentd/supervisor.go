@@ -132,7 +132,7 @@ type owned struct {
 	pending         []HarnessControl
 	process         Process
 	tools           *managedToolServer
-	replies         map[string]string // delivered message ID -> sender principal
+	replies         map[string]InboxReplyTarget // delivered message ID -> authenticated reply target
 	replyOrder      []string
 	doneRequested   bool
 	monitorDone     chan struct{}
@@ -1095,7 +1095,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		if err := s.journal.Put(rec); err != nil {
 			return err
 		}
-		entry = &owned{record: rec, replies: map[string]string{}}
+		entry = &owned{record: rec, replies: map[string]InboxReplyTarget{}}
 		s.mu.Lock()
 		s.runs[run.ID] = entry
 		s.mu.Unlock()
@@ -1252,7 +1252,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				defer entry.mu.Unlock()
 				return entry.budgetStopReason() == "" && entry.record.Generation == s.generation && (entry.record.State == "starting" || entry.record.State == "running")
 			}
-			replySender := func(messageID string) (string, bool) {
+			replySender := func(messageID string) (InboxReplyTarget, bool) {
 				entry.mu.Lock()
 				defer entry.mu.Unlock()
 				sender, ok := entry.replies[messageID]
@@ -1919,7 +1919,7 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 					}
 					entry.replyOrder = append(entry.replyOrder, item.MessageID)
 				}
-				entry.replies[item.MessageID] = item.SenderPrincipalID
+				entry.replies[item.MessageID] = InboxReplyTarget{PrincipalID: item.SenderPrincipalID, ProjectID: item.ProjectID, ReplyToID: item.ReplyToID, SenderSessionID: entry.harness.ID, RecipientSessionID: item.SenderSessionID}
 				entry.mu.Unlock()
 			}
 			if _, err := s.controlInbox(ctx, req, false, true); err != nil {

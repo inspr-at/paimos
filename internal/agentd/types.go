@@ -129,14 +129,26 @@ type HarnessControl struct {
 	Kind              string                 `json:"kind"`
 }
 
+// InboxReplyTarget is captured from an authenticated drain, never from tool input.
+type InboxReplyTarget struct {
+	PrincipalID        string
+	ProjectID          string
+	ReplyToID          string
+	SenderSessionID    string
+	RecipientSessionID *string
+}
+
 type HarnessDelivery struct {
-	Outcome           string `json:"-"`
-	FailureReason     string `json:"-"`
-	ID                string `json:"delivery_id"`
-	MessageID         string `json:"message_id"`
-	Cursor            int64  `json:"cursor"`
-	SenderPrincipalID string `json:"sender_principal_id"`
-	Body              string `json:"body"`
+	ProjectID         string  `json:"project_id,omitempty"`
+	ReplyToID         string  `json:"reply_to_id,omitempty"`
+	SenderSessionID   *string `json:"sender_session_id,omitempty"`
+	Outcome           string  `json:"-"`
+	FailureReason     string  `json:"-"`
+	ID                string  `json:"delivery_id"`
+	MessageID         string  `json:"message_id"`
+	Cursor            int64   `json:"cursor"`
+	SenderPrincipalID string  `json:"sender_principal_id"`
+	Body              string  `json:"body"`
 }
 
 type WorkOrder struct {

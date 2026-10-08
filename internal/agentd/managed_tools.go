@@ -45,7 +45,7 @@ type toolBinding struct {
 	api                                   RunToolAPI
 	workOrderID, runID, workspace, branch string
 	active                                func() bool
-	replySender                           func(string) (string, bool)
+	replySender                           func(string) (InboxReplyTarget, bool)
 	requestDone                           func()
 }
 
@@ -206,7 +206,7 @@ func addManagedTools(s *mcp.Server, b toolBinding) {
 				return nil, "", errors.New("inbox delivery is not bound")
 			}
 			sender, ok := b.replySender(in.MessageID)
-			if !ok || !uuidPattern.MatchString(sender) {
+			if !ok || !uuidPattern.MatchString(sender.PrincipalID) {
 				return nil, "", errors.New("inbox delivery is not bound")
 			}
 			return nil, "reply recorded", b.api.ReplyInbox(ctx, in.MessageID, sender, in.Body, in.IdempotencyKey)

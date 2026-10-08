@@ -20,7 +20,7 @@ paths:
         '409': {description: Idempotency conflict or session ended}
     get:
       operationId: inspectCompatMessages
-      description: Person administrator inspection, including held bodies. Attached owner-note metadata is visible only to its current computer owner; its text is not retained. Never releases or executes an action request.
+      description: "Person inbox.manage inspection includes held bodies. Exact-session threads are also readable by people with harness.read in the accessible project, including the session owner; held messages and attached notes are excluded. Attached owner-note metadata is visible only to its current computer owner; its text is not retained. Never releases or executes an action request."
       responses:
         '200': {description: Message page}
   /api/projects/{projectId}/messages/listen:

@@ -220,13 +220,16 @@ export const useAgents = defineStore('agents', () => {
   // The newest runs cover the rows' account, model and telemetry in one read.
   const refreshRuns = runsRead.refresh
   // Held action requests still waiting on a person, and message addresses for names.
+  // This poll is not the session thread. pending=true requires inbox.manage, so a
+  // harness reader is refused; that refusal must not hide the composer. Only the
+  // thread read (refreshThread) sets messagingState.
   const messagingOrder = createReadOrder()
   async function refreshMessaging(force = false, retried = false): Promise<void> {
     if (!force && Date.now() - messagingAt < 30_000) return
     messagingAt = Date.now()
     const ticket = messagingOrder.begin()
     const ids = sessionProjects()
-    if (!ids.length) { pendingHeld.value = {}; if (messagingState.value === 'idle') messagingState.value = 'ready'; return }
+    if (!ids.length) { pendingHeld.value = {}; return }
     const held: Record<string, ProjectMessage[]> = {}
     const names: Record<string, string> = { ...addresses.value }
     const positions: (number | undefined)[] = []
@@ -243,8 +246,7 @@ export const useAgents = defineStore('agents', () => {
     const verdict = messagingOrder.land(ticket, failure ? undefined : lowestPosition(positions))
     if (verdict === 'older') return
     if (verdict === 'stale') return retried ? undefined : refreshMessaging(true, true)
-    if (failure && !Object.keys(held).length) { messagingState.value = availability(failure); return }
-    messagingState.value = 'ready'
+    if (failure && !Object.keys(held).length) return
     pendingHeld.value = held
     addresses.value = names
     learnAddresses(Object.values(held).flat())
