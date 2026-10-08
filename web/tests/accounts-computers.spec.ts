@@ -329,7 +329,7 @@ async function wideAway(page: Page, width: number) {
 
 // Retain the positive-case guard over every original width. The actual fold
 // interactions run below in bounded groups, instead of 82 clicks in one case.
-test('Away stays put when unfolding removes Verify again beside it, even with a wide status', async ({ page }) => {
+test('the wide status scan encounters Away beside Verify again', async ({ page }) => {
   const { verify, measure } = await wideAway(page, 1100)
   let shared = 0
   for (let width = 1100; width >= 700; width -= 10) {
