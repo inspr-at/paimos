@@ -185,3 +185,25 @@ it('column thinking captures the situation and person, restores auto with Undo, 
   held.resolve({ person_id: next.person_id, revision: 6, dry_run: false, moved: [], profile: next.profile }); await writing
   expect(getBoard).toHaveBeenCalledTimes(reads); expect(toasts).toHaveLength(0)
 })
+
+// Risk: setup could save twice or Undo could replace a new person's board.
+it('setup previews the complete patch, applies once, restores exact inheritance, and rejects stale approvals', async () => {
+  const { setupAnswers, setupPatch } = await import('../src/lib/modelsSetup')
+  const editor = useModelsBoard(ref({ layer: 'mine', situation: 'first' }), ref(false)); await settle()
+  const source = boardFixture(), body = setupPatch(setupAnswers(source, source))
+  vi.mocked(putBoardProfile).mockResolvedValue({ person_id: source.person_id, revision: 3, dry_run: true, moved: [], profile: source.profile, previous_other_order: null })
+  const preview = await editor.previewSetup(body, source)
+  expect(preview?.before).toMatchObject({ template: null, thinking: null, usage: null, residency: null, other_order: null })
+  const saved = { ...source, revision: 4 }
+  vi.mocked(putBoardProfile).mockResolvedValue({ person_id: source.person_id, revision: 4, dry_run: false, moved: [], profile: source.profile }); vi.mocked(getBoard).mockResolvedValue(saved)
+  expect(await editor.applySetup(preview!)).toBe(true)
+  expect(putBoardProfile).toHaveBeenCalledTimes(2); expect(putBoardProfile).toHaveBeenLastCalledWith({ layer: 'mine', situation: 'first' }, body, 3, source.person_id)
+  expect(await editor.applySetup(preview!)).toBe(false)
+  const undo = toasts.at(-1)!.actions[0]!.run
+  vi.mocked(putBoardProfile).mockResolvedValue({ person_id: source.person_id, revision: 5, dry_run: false, moved: [], profile: source.profile }); vi.mocked(getBoard).mockResolvedValue({ ...saved, revision: 5 })
+  undo(); await settle()
+  expect(putBoardProfile).toHaveBeenLastCalledWith({ layer: 'mine', situation: 'first' }, preview!.before, 4, source.person_id)
+  state.session.identity!.principal.id = 'new-person'
+  undo(); await settle(); expect(putBoardProfile).toHaveBeenCalledTimes(3)
+  expect(await editor.applySetup(preview!)).toBe(false)
+})

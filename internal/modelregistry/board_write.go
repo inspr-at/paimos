@@ -24,13 +24,18 @@ type boardMoved struct {
 	Before []string `json:"before"`
 	After  []string `json:"after"`
 }
+type boardSetupOrder struct {
+	Rank []string `json:"rank"`
+	Not  []string `json:"not"`
+}
 type boardWriteResult struct {
-	PersonID       *string                 `json:"person_id"`
-	Revision       int64                   `json:"revision"`
-	Profile        modelprefs.BoardProfile `json:"profile"`
-	DryRun         bool                    `json:"dry_run"`
-	Moved          []boardMoved            `json:"moved"`
-	RunningOutside []string                `json:"running_outside"`
+	PreviousOtherOrder json.RawMessage         `json:"previous_other_order,omitempty"`
+	PersonID           *string                 `json:"person_id"`
+	Revision           int64                   `json:"revision"`
+	Profile            modelprefs.BoardProfile `json:"profile"`
+	DryRun             bool                    `json:"dry_run"`
+	Moved              []boardMoved            `json:"moved"`
+	RunningOutside     []string                `json:"running_outside"`
 }
 type boardOrderWrite struct {
 	Rank     []string `json:"rank"`
@@ -293,7 +298,7 @@ func profilePatch(profile modelprefs.BoardProfile, raw map[string]json.RawMessag
 	for key, value := range raw {
 		var err error
 		switch key {
-		case "revision":
+		case "revision", "other_order":
 			continue
 		case "replace_own":
 			err = json.Unmarshal(value, &replace)
@@ -345,6 +350,11 @@ func (m *Module) writeBoardProfile(w http.ResponseWriter, r *http.Request) {
 		writePreferenceError(w, err)
 		return
 	}
+	project, err := projectInput(r)
+	if err != nil {
+		writePreferenceError(w, err)
+		return
+	}
 	var raw map[string]json.RawMessage
 	if err := decodeJSON(w, r, &raw); err != nil {
 		writePreferenceError(w, err)
@@ -370,7 +380,10 @@ func (m *Module) writeBoardProfile(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		s, err := modelprefs.LoadBoard(ctx, tx, person, "")
+		if err := readableProject(ctx, tx, p, project); err != nil {
+			return err
+		}
+		s, err := modelprefs.LoadBoard(ctx, tx, person, project)
 		if err != nil {
 			return err
 		}
@@ -408,6 +421,45 @@ func (m *Module) writeBoardProfile(w http.ResponseWriter, r *http.Request) {
 		if err := validateBoardLines(c, profile.DismissedLines, nil); err != nil {
 			return err
 		}
+		var setupOrder *modelprefs.BoardOrder
+		var previousSetupOrder *boardSetupOrder
+		_, setup := raw["other_order"]
+		if setup {
+			if level != "person" || replace {
+				return prefFail(422, "invalid_setup_target")
+			}
+			var previous *modelprefs.BoardOrder
+			for _, order := range s.Orders {
+				if order.ProfileID == before.ID && order.Column == "other" && order.Situation == "first" {
+					copy := order
+					previous = &copy
+					break
+				}
+			}
+			if previous != nil && previous.Rank != nil {
+				previousSetupOrder = &boardSetupOrder{Rank: previous.Rank, Not: previous.Not}
+			}
+			if string(raw["other_order"]) != "null" {
+				var order boardSetupOrder
+				decoder := json.NewDecoder(strings.NewReader(string(raw["other_order"])))
+				decoder.DisallowUnknownFields()
+				if err := decoder.Decode(&order); err != nil || order.Rank == nil || order.Not == nil {
+					return prefFail(422, "invalid_setup_order")
+				}
+				if err := validateBoardLines(c, order.Rank, order.Not); err != nil {
+					return err
+				}
+				setupOrder = &modelprefs.BoardOrder{ProfileID: before.ID, Column: "other", Situation: "first", Rank: order.Rank, Not: order.Not}
+				if previous != nil {
+					setupOrder.Thinking = previous.Thinking
+				}
+			} else if previous != nil && previous.Thinking != nil {
+				copy := *previous
+				copy.Rank, copy.Not = nil, []string{}
+				setupOrder = &copy
+			}
+		}
+
 		s.Lines = c.lines
 		after := s
 		if level == "person" {
@@ -418,11 +470,53 @@ func (m *Module) writeBoardProfile(w http.ResponseWriter, r *http.Request) {
 		if replace {
 			after.Orders = slices.DeleteFunc(slices.Clone(after.Orders), func(o modelprefs.BoardOrder) bool { return o.ProfileID == before.ID })
 		}
+		if setup {
+			after.Orders = slices.DeleteFunc(slices.Clone(after.Orders), func(o modelprefs.BoardOrder) bool {
+				return o.ProfileID == before.ID && o.Column == "other" && o.Situation == "first"
+			})
+			if setupOrder != nil {
+				after.Orders = append(after.Orders, *setupOrder)
+			}
+		}
+
 		out = boardResult(profile, person)
 		out.DryRun = dry
+		if setup {
+			out.PreviousOtherOrder, err = json.Marshal(previousSetupOrder)
+			if err != nil {
+				return err
+			}
+		}
+
+		// Preview uses the same hard route restrictions as the board, including
+		// the new providers answer. Read the legacy workspace/project floor
+		// without the old personal limit, which this write replaces.
+		oldResidency, err := boardResidency(ctx, tx, s, profile.PersonID, project, "")
+		if err != nil {
+			return err
+		}
+		newResidency, err := boardResidency(ctx, tx, modelprefs.BoardState{Workspace: after.Workspace}, nil, project, "")
+		if err != nil {
+			return err
+		}
+		if after.Person != nil && after.Person.Residency != nil {
+			newResidency = modelprefs.Strictest(newResidency, *after.Person.Residency)
+		}
+		oldCounts, err := c.residencyCounts(ctx, tx, project, oldResidency)
+		if err != nil {
+			return err
+		}
+		newCounts, err := c.residencyCounts(ctx, tx, project, newResidency)
+		if err != nil {
+			return err
+		}
 		for _, column := range boardColumns(s) {
-			old := modelprefs.ResolveBoard(s, modelprefs.BoardQuery{Column: column.Slug, Situation: "first"}, nil)
-			next := modelprefs.ResolveBoard(after, modelprefs.BoardQuery{Column: column.Slug, Situation: "first"}, nil)
+			query := modelprefs.BoardQuery{Column: column.Slug, Situation: "first"}
+			oldState, nextState := s, after
+			oldState.Lines = c.residencyLines(s.Lines, oldCounts, modelprefs.ResolveBoard(s, query, nil), oldResidency)
+			nextState.Lines = c.residencyLines(after.Lines, newCounts, modelprefs.ResolveBoard(after, query, nil), newResidency)
+			old := modelprefs.ResolveBoard(oldState, query, nil)
+			next := modelprefs.ResolveBoard(nextState, query, nil)
 			if !reflect.DeepEqual(old.Rank, next.Rank) {
 				out.Moved = append(out.Moved, boardMoved{column.Slug, old.Rank, next.Rank})
 			}
@@ -465,6 +559,24 @@ func (m *Module) writeBoardProfile(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		if setup {
+			if setupOrder == nil {
+				if _, err := tx.Exec(ctx, `DELETE FROM model_pref_orders WHERE profile_id=$1 AND column_key='other' AND situation='first'`, profile.ID); err != nil {
+					return err
+				}
+			} else {
+				setupOrder.ProfileID = profile.ID
+				if err := putBoardOrder(ctx, tx, p, profile, *setupOrder); err != nil {
+					return err
+				}
+			}
+			for i := range after.Orders {
+				if after.Orders[i].ProfileID == before.ID {
+					after.Orders[i].ProfileID = profile.ID
+				}
+			}
+		}
+
 		restamped := []events.Change{}
 		if prior != nil {
 			runs, changes, err := modelprefs.RestampAfterDeferred(ctx, tx, scope, prior)

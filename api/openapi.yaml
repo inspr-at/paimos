@@ -5189,8 +5189,9 @@ paths:
     put:
       operationId: putModelPreferenceProfile
       security: *auth
-      description: "Sparse personal settings follow the workspace. Templates preserve own orders unless replace_own is true. dry_run returns the same moved diff without writes or events. Residency may only tighten the workspace. Usage follows the account owner’s personal setting unless that owner sets an account override; admin floors always cap admission."
+      description: "Sparse personal settings follow the workspace. Templates preserve own orders unless replace_own is true. dry_run returns the same moved diff without writes or events. An optional other_order atomically updates the personal Everything else First build order with the profile, preserving all other orders and column thinking; null restores inheritance. previous_other_order supplies the exact ranked order for Undo. Residency may only tighten the workspace. Usage follows the account owner’s personal setting unless that owner sets an account override; admin floors always cap admission."
       parameters:
+        - {name: project_id, in: query, description: 'Optional readable project context for the preview only; the saved profile remains personal or workspace scoped.', schema: {type: string, format: uuid}}
         - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
         - {name: If-Prefs-Person, in: header, description: 'Required for person writes. Equality precondition against the current canonical caller; never selects a person.', schema: {type: string, format: uuid}}
         - {name: dry_run, in: query, schema: {type: boolean, default: false}}
@@ -17453,8 +17454,16 @@ components:
         residency: {type: [string, 'null'], enum: [any, eu, local, null]}
         hidden_kinds: {type: array, maxItems: 256, items: {type: string}}
         dismissed_lines: {type: array, maxItems: 512, items: {type: string}}
+        other_order: {anyOf: [{$ref: '#/components/schemas/ModelSetupOrder'}, {type: 'null'}], description: 'Personal Everything else First build order, saved atomically with the profile. Omitted leaves it unchanged; null restores inheritance. Cannot combine with replace_own.'}
         replace_own: {type: boolean, default: false}
         revision: {type: integer, format: int64, minimum: 0}
+    ModelSetupOrder:
+      type: object
+      additionalProperties: false
+      required: [rank, not]
+      properties:
+        rank: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
+        not: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
     ModelBoardRevisionWrite:
       type: object
       additionalProperties: false
@@ -17470,6 +17479,7 @@ components:
         profile: {$ref: '#/components/schemas/ModelBoardProfile'}
         dry_run: {type: boolean}
         moved: {type: array, items: {type: object, required: [column, before, after], properties: {column: {type: string}, before: {type: array, items: {type: string}}, after: {type: array, items: {type: string}}}}}
+        previous_other_order: {anyOf: [{$ref: '#/components/schemas/ModelSetupOrder'}, {type: 'null'}], description: 'Prior personal Everything else First build rank and exclusions, included when other_order is supplied. Null means inherited rank. Column thinking is preserved independently.'}
         running_outside: {type: array, maxItems: 10000, items: {type: string, format: uuid}, description: 'Starting or running turns outside a newly tightened residency floor.'}
     ModelColumnThinkingWrite:
       type: object

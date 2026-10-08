@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api, APIError } from './api'
-import type { BoardContext, BoardProfile, BoardWriteResult, ModelBoardDocument, OrderBody, RulesBody, RulesDocument, ThinkingWord } from './modelsBoard'
+import type { BoardContext, BoardProfilePatch, BoardWriteResult, ModelBoardDocument, OrderBody, RulesBody, RulesDocument, ThinkingWord } from './modelsBoard'
 import type { BoardCoverage, BoardEvidence, ModelResolution } from './modelsSettings'
 import type { PrefProfile } from './modelPrefs'
 import { policyJSON, policyRequest } from './policyEditor'
@@ -16,7 +16,7 @@ const orderPath = (context: BoardContext, column: string, thinking = false) => `
 export const putColumnThinking = (context: BoardContext, column: string, thinking: ThinkingWord | null, revision: number, person: string | null) => request<BoardWriteResult>(orderPath(context, column, true), 'PUT', { thinking, revision }, context.layer === 'mine' ? person : undefined)
 export const putBoardOrder = (context: BoardContext, column: string, body: OrderBody, revision: number, person: string | null) => request<BoardWriteResult>(orderPath(context, column), 'PUT', { ...body, revision }, context.layer === 'mine' ? person : undefined)
 export const resetBoardOrder = (context: BoardContext, column: string, revision: number, person: string | null) => request<BoardWriteResult>(`${orderPath(context, column)}&revision=${revision}`, 'DELETE', undefined, context.layer === 'mine' ? person : undefined)
-export const putBoardProfile = (context: BoardContext, body: Partial<BoardProfile> & { replace_own?: boolean }, revision: number, person: string | null, dryRun = false) => request<BoardWriteResult>(`/model-preferences/profile?for=${forQuery(context)}${dryRun ? '&dry_run=true' : ''}`, 'PUT', { ...body, revision }, context.layer === 'mine' ? person : undefined)
+export const putBoardProfile = (context: BoardContext, body: BoardProfilePatch, revision: number, person: string | null, dryRun = false) => request<BoardWriteResult>(`/model-preferences/profile?for=${forQuery(context)}${dryRun ? '&dry_run=true' : ''}${context.project ? `&project_id=${encodeURIComponent(context.project)}` : ''}`, 'PUT', { ...body, revision }, context.layer === 'mine' ? person : undefined)
 export const putBoardRules = (context: BoardContext, column: string, body: RulesBody, revision: number) => request<RulesDocument>(`/model-rules/${context.project ? 'project' : 'workspace'}/${encodeURIComponent(column)}${context.project ? `?project_id=${encodeURIComponent(context.project)}` : ''}`, 'PUT', { ...body, revision })
 export const dismissBoardLine = (context: BoardContext, line: string, revision: number, person: string | null) => request<BoardWriteResult>(`/model-preferences/tray/${encodeURIComponent(line)}/dismiss?for=${forQuery(context)}`, 'POST', { revision }, context.layer === 'mine' ? person : undefined)
 export const getBoardCoverage = (signal?: AbortSignal) => request<BoardCoverage>('/model-preferences/coverage', 'GET', undefined, undefined, signal)

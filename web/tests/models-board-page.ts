@@ -3,9 +3,9 @@ import { expect, type Page } from '@playwright/test'
 import { boardCards, boardFixture, boardPerson, boardPin } from './models-board-fixtures'
 import type { ModelRule, ThinkingWord } from '../src/lib/modelsBoard'
 
-export async function mockBoard(page: Page, options: { manage?: boolean; fail?: number; german?: boolean; noRoute?: boolean; fallback?: boolean } = {}) {
+export async function mockBoard(page: Page, options: { manage?: boolean; fail?: number; german?: boolean; noRoute?: boolean; fallback?: boolean; setup?: boolean } = {}) {
   let document = boardFixture(options.german), rules = [structuredClone(boardPin)], ruleRevision = 2
-  const writes: { path: string; body: Record<string, unknown>; person?: string; method: string }[] = []
+  const writes: { path: string; body: Record<string, unknown>; person?: string; method: string; dryRun?: boolean }[] = []
   const reads: string[] = []
   let fail = options.fail, hold: (() => Promise<void>) | undefined
   const original = structuredClone(document)
@@ -30,7 +30,8 @@ export async function mockBoard(page: Page, options: { manage?: boolean; fail?: 
           const bans = column.not.filter(card => card.lock?.kind === 'cross_family')
           const situation = column.column.startsWith('review:') || column.column === 'concept' ? 'first' : view.situation
           const exact = orders.get(`${layer}/${column.column}/${situation}`), first = orders.get(`${layer}/${column.column}/first`)
-          const own = exact?.rank ? exact : first
+          const fallback = !column.column.startsWith('review:') && column.column !== 'concept' ? orders.get(`${layer}/other/first`) : undefined
+          const own = exact?.rank ? exact : first?.rank ? first : options.setup ? fallback : first
           column.follows_first = situation !== 'first' && !exact?.rank
           const base = exact?.thinking ?? first?.thinking ?? document.profile.thinking ?? 'standard'
           const words: ThinkingWord[] = ['lean', 'standard', 'deep', 'max']
@@ -45,7 +46,7 @@ export async function mockBoard(page: Page, options: { manage?: boolean; fail?: 
           column.top = pins('top'); column.bottom = pins('bottom'); column.free = free
           column.list = [...column.top, ...free, ...column.bottom].filter(card => !column.cant.some(item => item.line === card.line))
           column.not = [...bans, ...pins('not'), ...(own?.not ?? []).filter(line => !bans.some(card => card.line === line) && !applicable.some(rule => rule.column === column.column && rule.line === line)).map(line => ({ ...cards.find(card => card.line === line)! }))]
-          if (exact?.rank) column.source = layer === 'mine' ? 'own' : 'default'; else if (own?.rank) column.source = 'follows'
+          if (exact?.rank) column.source = layer === 'mine' ? 'own' : 'default'; else if (own?.rank) column.source = 'follows'; else column.source = 'template'
           column.hidden = view.profile.hidden_kinds.includes(column.column)
           if (options.noRoute) { column.not = column.list.map(card => ({ ...card, lock: { kind: 'residency' as const, value: 'not' as const, who: null, why: 'No qualifying route', at: null, scope: 'workspace' } })).concat(column.not); column.list = [] }
         }
@@ -55,7 +56,7 @@ export async function mockBoard(page: Page, options: { manage?: boolean; fail?: 
       return route.fulfill({ json: { items: [] } })
     }
     const body = request.postDataJSON() ?? {}, person = request.headers()['if-prefs-person']
-    writes.push({ path, body, person, method: request.method() })
+    writes.push({ path, body, person, method: request.method(), ...(url.searchParams.get('dry_run') === 'true' ? { dryRun: true } : {}) })
     if (url.searchParams.get('for') === 'me' && person !== document.person_id) return route.fulfill({ status: 428, json: { error: 'person_precondition_required' } })
     if (hold) await hold()
     if (fail) return route.fulfill({ status: fail, json: { error: fail === 409 ? 'stale_revision' : 'looser_than_workspace' } })
@@ -65,6 +66,12 @@ export async function mockBoard(page: Page, options: { manage?: boolean; fail?: 
       if (scope === 'project' && rules.filter(rule => rule.scope === 'workspace' && rule.column === column).some(rule => !desired.some(pin => pin.line === rule.line && (pin.lock === rule.lock || pin.lock === 'not')))) return route.fulfill({ status: 422, json: { error: 'looser_than_workspace' } })
       rules = rules.filter(rule => rule.scope !== scope || rule.column !== column).concat(desired.filter(pin => scope !== 'project' || !rules.some(rule => rule.scope === 'workspace' && rule.column === column && rule.line === pin.line && rule.lock === pin.lock)).map(pin => ({ ...pin, column, scope, project_id: scope === 'project' ? url.searchParams.get('project_id') : null, set_by: 'Markus', set_at: '2026-10-07T13:00:00Z' }) as ModelRule))
       return route.fulfill({ json: { rules, revision: ++ruleRevision } })
+    }
+    const otherKey = 'mine/other/first', previousOther = orders.get(otherKey)
+    const previous_other_order = previousOther?.rank ? { rank: previousOther.rank, not: previousOther.not } : null
+    if (options.setup && path === '/model-preferences/profile' && url.searchParams.get('dry_run') === 'true') {
+      const moved = document.columns.filter(column => column.column === 'other' || !column.column.startsWith('review:') && column.column !== 'concept' && !orders.get(`mine/${column.column}/first`)?.rank).map(column => ({ column: column.column, before: (column.column === 'other' ? previousOther?.rank : undefined) ?? original.columns.find(value => value.column === column.column)!.list.map(card => card.line), after: body.residency ? [] : (body.other_order?.rank ?? original.columns.find(value => value.column === column.column)!.list.map(card => card.line)) as string[] }))
+      return route.fulfill({ json: { person_id: document.person_id, revision: document.revision, profile: { ...document.profile, ...body }, dry_run: true, moved, previous_other_order } })
     }
     if (url.searchParams.get('dry_run') === 'true') return route.fulfill({ json: { person_id: document.person_id, revision: document.revision, profile: document.profile, dry_run: true, moved: [{ column: 'backend', before: ['openai:sol'], after: ['openai:astra'] }] } })
     if (path.startsWith('/model-preferences/orders/')) {
@@ -76,12 +83,13 @@ export async function mockBoard(page: Page, options: { manage?: boolean; fail?: 
       else orders.set(key, { rank: body.rank, not: body.not, thinking: previous?.thinking })
     } else if (path === '/model-preferences/profile') {
       for (const field of ['residency', 'hidden_kinds', 'dismissed_lines', 'template', 'thinking', 'usage']) if (field in body) Object.assign(document.profile, { [field]: body[field] })
+      if ('other_order' in body) { if (body.other_order === null) { if (previousOther?.thinking) orders.set(otherKey, { not: [], thinking: previousOther.thinking }); else orders.delete(otherKey) } else orders.set(otherKey, { ...body.other_order, thinking: previousOther?.thinking }) }
       document.residency.own = document.profile.residency; document.residency.effective = document.profile.residency ?? 'any'
     } else if (path.includes('/tray/')) document.profile.dismissed_lines.push(decodeURIComponent(path.split('/')[3]!))
     document.revision++; document.profile.revision = document.revision
-    return route.fulfill({ json: { person_id: document.person_id, revision: document.revision, profile: document.profile, dry_run: false, moved: [] } })
+    return route.fulfill({ json: { person_id: document.person_id, revision: document.revision, profile: document.profile, dry_run: false, moved: [], ...('other_order' in body ? { previous_other_order } : {}) } })
   })
-  return { writes, reads, getDocument: () => structuredClone(document), setFail: (status?: number) => { fail = status }, holdNext: () => {
+  return { writes, reads, seedOrder: (column: string, rank: string[], not: string[] = []) => orders.set(`mine/${column}/first`, { rank, not }), getDocument: () => structuredClone(document), setFail: (status?: number) => { fail = status }, holdNext: () => {
     let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve }); hold = () => barrier
     return () => { hold = undefined; release() }
   }, setPerson: (person: string) => { document.person_id = person; document.profile.person_id = person }, addProjectRule: (rule: ModelRule) => { rules.push(rule) }, clearTray: () => { document.tray = [] } }
