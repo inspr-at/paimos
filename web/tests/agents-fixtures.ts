@@ -105,6 +105,9 @@ export interface AgentMockOptions {
   readMark?: { sessionId: string; event: number; id: string }
   // The next N marker PUTs fail. The call is still recorded.
   failReadMarks?: number
+  // pending=true is the held-request poll (inbox.manage). A harness reader is refused.
+  // The session thread (?session=) stays readable.
+  pendingForbidden?: boolean
   capacity?: CapacityWorld
   capacityForbidden?: boolean
   groups?: MockAccountGroup[]
@@ -225,6 +228,8 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
         return route.fulfill({ status: 201, json: sent })
       }
       const newest = q.get('newest_first') === 'true', limit = Number(q.get('limit') ?? 10), after = Number(q.get('after') ?? 0)
+      // Held-request inspection is not the session thread. Refuse only pending=true.
+      if (q.get('pending') === 'true' && options.pendingForbidden) return route.fulfill({ status: 403, json: { error: 'inbox.manage required' } })
       let all = [...data.messages, ...data.sent].filter(m => m.project === project)
       const session = q.get('session')
       if (session) {

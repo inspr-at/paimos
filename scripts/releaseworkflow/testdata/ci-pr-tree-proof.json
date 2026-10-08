@@ -1,0 +1,638 @@
+{
+  "SPDX-License-Identifier": "AGPL-3.0-only",
+  "description": "Representative offline API-shape fixture; not a hosted receipt.",
+  "repository": "inspr-at/paimos",
+  "mg": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "run": {
+    "id": 123,
+    "name": "CI",
+    "repository": {
+      "id": 10,
+      "full_name": "inspr-at/paimos"
+    },
+    "head_repository": {
+      "full_name": "inspr-at/paimos"
+    },
+    "workflow_id": 20,
+    "path": ".github/workflows/ci.yml",
+    "status": "completed",
+    "conclusion": "success",
+    "run_attempt": 1,
+    "event": "pull_request",
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "workflow": {
+    "id": 20,
+    "name": "CI",
+    "path": ".github/workflows/ci.yml"
+  },
+  "jobs": {
+    "total_count": 39,
+    "jobs": [
+      {
+        "name": "tier-plan",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": []
+      },
+      {
+        "name": "tier-measurements / pr-tree-v1:123:1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:cccccccccccccccccccccccccccccccccccccccc:dddddddddddddddddddddddddddddddddddddddd",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Confirm PR tree proof",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "runner-route / route",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": []
+      },
+      {
+        "name": "go",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": []
+      },
+      {
+        "name": "web",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": []
+      },
+      {
+        "name": "release-check",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": []
+      },
+      {
+        "name": "e2e",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": []
+      },
+      {
+        "name": "ci-plan",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Classify local PR diff",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "go-static",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Check prepared rules bootstrap drift",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "go-timing",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Timing budgets, alone",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-setup",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Build web",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "release-check-run",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Enforce test runner trust boundary",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "e2e-run",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Start server and run smoke",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "migration-compat",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Previous binary on the candidate schema",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "go-test (1)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Test this shard (essential plus changed area, or full on main)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "go-test (2)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Test this shard (essential plus changed area, or full on main)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "go-test (3)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Test this shard (essential plus changed area, or full on main)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "go-test (4)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Test this shard (essential plus changed area, or full on main)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "go-test (5)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Test this shard (essential plus changed area, or full on main)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "go-test (6)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Test this shard (essential plus changed area, or full on main)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "go-test (7)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Test this shard (essential plus changed area, or full on main)",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-unit (1)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected web units without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-unit (2)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected web units without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-unit (3)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected web units without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-unit (4)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected web units without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (1)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (2)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (3)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (4)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (5)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (6)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (7)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (8)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (9)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (10)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (11)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (12)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "cache-prime",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "skipped",
+        "steps": []
+      },
+      {
+        "name": "tree-reuse",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "skipped",
+        "steps": []
+      }
+    ]
+  },
+  "commit": {
+    "sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "tree": {
+      "sha": "dddddddddddddddddddddddddddddddddddddddd"
+    },
+    "parents": [
+      {
+        "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      {
+        "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  "candidate": {
+    "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "tree": {
+      "sha": "dddddddddddddddddddddddddddddddddddddddd"
+    }
+  },
+  "listed": {
+    "total_count": 1,
+    "workflow_runs": [
+      {
+        "id": 123,
+        "event": "pull_request",
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  }
+}

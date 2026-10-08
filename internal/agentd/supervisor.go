@@ -53,6 +53,8 @@ type Config struct {
 	// PollDiagnostic receives bounded cause codes on changes and 15-minute
 	// reminders only, never raw errors or bindings.
 	PollDiagnostic func(string)
+	// VerificationDiagnostic contains IDs and bounded lifecycle codes only.
+	VerificationDiagnostic func(run, account, stage, reason string)
 }
 
 type replay struct {
@@ -130,7 +132,7 @@ type owned struct {
 	pending         []HarnessControl
 	process         Process
 	tools           *managedToolServer
-	replies         map[string]string // delivered message ID -> sender principal
+	replies         map[string]InboxReplyTarget // delivered message ID -> authenticated reply target
 	replyOrder      []string
 	doneRequested   bool
 	monitorDone     chan struct{}
@@ -185,6 +187,7 @@ type Supervisor struct {
 	accountBilling         map[string]string
 	probePendingSince      map[string]time.Time // Protected by mu; reset only for a new probe lifecycle.
 	pollDiagnostic         func(string)
+	verificationDiagnostic func(string, string, string, string)
 	pollDiagnosticMu       sync.Mutex
 	pollDiagnosticLast     map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
 	loginRequired          map[string]bool
@@ -391,7 +394,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	}
 	s := &Supervisor{usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
-		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic}
+		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic, verificationDiagnostic: c.VerificationDiagnostic}
 	s.capacityNow = c.Now
 	s.capacityWake = make(chan struct{}, 1)
 	if err := s.loadCapacityChecks(); err != nil {
@@ -1092,7 +1095,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		if err := s.journal.Put(rec); err != nil {
 			return err
 		}
-		entry = &owned{record: rec, replies: map[string]string{}}
+		entry = &owned{record: rec, replies: map[string]InboxReplyTarget{}}
 		s.mu.Lock()
 		s.runs[run.ID] = entry
 		s.mu.Unlock()
@@ -1249,7 +1252,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				defer entry.mu.Unlock()
 				return entry.budgetStopReason() == "" && entry.record.Generation == s.generation && (entry.record.State == "starting" || entry.record.State == "running")
 			}
-			replySender := func(messageID string) (string, bool) {
+			replySender := func(messageID string) (InboxReplyTarget, bool) {
 				entry.mu.Lock()
 				defer entry.mu.Unlock()
 				sender, ok := entry.replies[messageID]
@@ -1321,6 +1324,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	launchedAt := time.Now()
+	s.verificationDiagnosticFor(run.ID, run.AccountID, run.Purpose, "starting", "")
 	// The accepted duration includes startup, before the monitor exists.
 	runCtx, cancelRun := context.WithTimeout(s.lifetime, duration)
 	startCtx, cancelStart := context.WithDeadline(ctx, launchedAt.Add(duration))
@@ -1329,6 +1333,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	cancelStart()
 	if err != nil {
 		cancelRun()
+		s.verificationDiagnosticFor(run.ID, run.AccountID, run.Purpose, "ownership_lost", "start_unconfirmed")
 		if errors.Is(err, errModelInvalid) {
 			s.reportModelState(entry, "invalid", profile.Model, profile.Effort)
 		}
@@ -1694,6 +1699,14 @@ func (s *Supervisor) monitor(entry *owned) {
 		final.LimitWindow, final.LimitResetsAt = limit.Window, limit.ResetsAt
 	}
 	reportErr := s.update(ctx, entry, final)
+	stage := status
+	if reportErr != nil {
+		stage = "settlement_pending"
+	}
+	entry.mu.Lock()
+	diagnosticRecord := entry.record
+	entry.mu.Unlock()
+	s.verificationDiagnosticFor(diagnosticRecord.RunID, diagnosticRecord.AccountID, diagnosticRecord.ExecutionMode, stage, code)
 	entry.mu.Lock()
 	doneRequested := entry.doneRequested
 	entry.mu.Unlock()
@@ -1906,7 +1919,7 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 					}
 					entry.replyOrder = append(entry.replyOrder, item.MessageID)
 				}
-				entry.replies[item.MessageID] = item.SenderPrincipalID
+				entry.replies[item.MessageID] = InboxReplyTarget{PrincipalID: item.SenderPrincipalID, ProjectID: item.ProjectID, ReplyToID: item.ReplyToID, SenderSessionID: entry.harness.ID, RecipientSessionID: item.SenderSessionID}
 				entry.mu.Unlock()
 			}
 			if _, err := s.controlInbox(ctx, req, false, true); err != nil {

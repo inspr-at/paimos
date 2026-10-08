@@ -27,7 +27,7 @@ const renderer = Vue.createRenderer<Node, Node>({
 const person = (principal = 'person-a', tenant = 'tenant-a'): Owner => ({ tenant: { id: tenant }, principal: { id: principal } })
 const session = Vue.reactive<{ identity: Owner | null }>({ identity: person() })
 const grants = Vue.reactive({ revoked: false, access: true, admin: true })
-const route = Vue.reactive({ params: { section: 'access' }, hash: '' })
+const route = Vue.reactive({ params: { section: 'access' }, query: {}, hash: '' })
 const mounted = vi.fn(), unmounted = vi.fn()
 const drafts: Vue.Ref<string>[] = [], links: Vue.Ref<string>[] = [], apps: Vue.App[] = []
 const section = Vue.defineComponent({
@@ -75,7 +75,7 @@ const input = (root: Node) => all(root).find(el => el.tag === 'input')
 beforeEach(() => {
   session.identity = person(); grants.revoked = false; grants.access = true; grants.admin = true; route.params.section = 'access'; route.hash = ''
   drafts.length = 0; links.length = 0; mounted.mockClear(); unmounted.mockClear()
-  vi.stubGlobal('document', { addEventListener() {}, removeEventListener() {} })
+  vi.stubGlobal('document', { documentElement: { lang: 'en' }, addEventListener() {}, removeEventListener() {} })
   vi.stubGlobal('window', { addEventListener() {}, removeEventListener() {} })
 })
 afterEach(() => { for (const app of apps.splice(0)) app.unmount(); vi.unstubAllGlobals(); vi.useRealTimers() })

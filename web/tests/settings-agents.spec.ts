@@ -294,9 +294,9 @@ test('stored agent settings stay together; bounds, failures, Undo and Models lin
   expect(writes).toHaveLength(before + 1)
   expect(values['agent-activity']).toEqual({ mode: 'off' })
   guard.done()
-  await expect(page.locator('#models').getByRole('link', { name: 'Accounts and computers' })).toHaveAttribute('href', '/settings/accounts')
-  await page.locator('#models').getByRole('link', { name: 'Accounts and computers' }).click()
-  await expect(page).toHaveURL('/settings/accounts')
+  await expect(page.getByRole('link', { name: 'Model preferences and catalog freshness' })).toHaveAttribute('href', '/settings/models')
+  await page.getByRole('link', { name: 'Model preferences and catalog freshness', exact: true }).click()
+  await expect(page).toHaveURL('/settings/models')
   await expect(page.locator('.toast:not(.toast-leave-active)').filter({ hasText: 'Agent activity saved.' })).toHaveCount(0)
 })
 

@@ -528,6 +528,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestValidateWorkingFolder","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestVerificationLogPrivateBoundedAndRejectsLinkedFiles","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestVerificationRefusalCompletesPairPolling","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestVerifyCommandOpensOnlyOwnerApprovalAndPreservesFixtureState","tier":"NIGHTLY"}
@@ -1644,6 +1646,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteProbeStatusSendsOnlyTheCause","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRemoteReplyRetainsProjectAndSession","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteRunToolsUseScopedExistingRoutes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteTelemetryErrorClassification","tier":"GATED-FULL"}
@@ -1847,6 +1851,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestUnsupportedVerificationPollProbesWithoutLaunching","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestUsageProbeOptInAndCooldownSurviveRestart","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestVerificationFailedProbeRetainsQueuedRunWithoutVendorLaunch","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestVerificationOneShotNoRepoToolsAndNoDuplicate","tier":"GATED-FULL"}
     ,
@@ -2391,6 +2397,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotChangedLeavesAndRetry","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotContinuationGuards","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotDeadlineWriteRollsBack","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotDuplicatesEligibilityAndCancellation","tier":"GATED-FULL"}
     ,
@@ -4616,6 +4624,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestSessionFullWorkCollections","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestSessionIdleCompanionWakesExactGeneration","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestSessionIndexEnumerationFdNotInherited","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestSessionIndexRefusesLiveConflict","tier":"GATED-FULL"}
@@ -6129,6 +6139,8 @@
     {"kind":"go","package":"internal/inbox","name":"TestSessionMessagesIsolationAndLegacyWire","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestSessionThreadIncludesBothDirectionsAndUnboundReplies","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestSessionThreadParticipantReadsAndManagedReply","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestStreamAndPoll","tier":"GATED-FULL"}
     ,
@@ -8892,6 +8904,8 @@
     ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestMatrixRunnerLabels","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/ci-runner-guard","name":"TestMergeGroupProofGuardRejectsUntrustedInputs","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestNightlyFullCannotNarrowTiersOrAcquirePRRunnerAuthority","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestNightlyFullRequiresAllThreeTiers","tier":"GATED-FULL"}
@@ -8949,6 +8963,8 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestImmutabilityGuardsFailClosed","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestLoadedImageResolverFailsClosed","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestMergeGroupPRReuseAggregatesRequireConfirmedProof","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestNativePlatformsAndIndexPublication","tier":"GATED-FULL"}
     ,

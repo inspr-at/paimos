@@ -20,7 +20,7 @@ it('captures the row, project and revision; saves one row optimistically and rol
   const saving = editor.row('backend', { bucket: 'normal', value: { mode: 'pinned', profile_id: PREF_MODELS[2]!.id } })
   expect(editor.doc.value!.views.person!.rows[0]!.changed_here).toBe(true)
   await saving
-  expect(putPreferenceRow).toHaveBeenCalledWith('person', 'backend', expect.objectContaining({ revision: 0, normal: { mode: 'pinned', profile_id: PREF_MODELS[2]!.id }, complex: { mode: 'auto' } }), 'project-a')
+  expect(putPreferenceRow).toHaveBeenCalledWith('person', 'backend', expect.objectContaining({ revision: 0, normal: { mode: 'pinned', profile_id: PREF_MODELS[2]!.id }, complex: { mode: 'auto' } }), 'project-a', before.person_id)
   expect(editor.doc.value).toEqual(before); expect(editor.notice.value).toBe('locked_above'); expect(editor.busy.value).toBe(false)
 })
 it('refreshes a revision conflict without claiming that the write succeeded', async () => {
@@ -62,9 +62,9 @@ it('preserves section locks on provider changes and snapshots inherited residenc
   const editor = useModelPrefsEditor(undefined, 'person'); await editor.load()
   vi.mocked(putPreferenceScope).mockResolvedValue({ level: doc.levels.person!, revision: 1, running_outside: [], residency: doc.views.person!.residency })
   await editor.scope({ residency: 'eu' })
-  expect(putPreferenceScope).toHaveBeenLastCalledWith('person', { revision: 0, residency: 'eu', residency_locked: false, prefs_locked: true }, undefined)
+  expect(putPreferenceScope).toHaveBeenLastCalledWith('person', { revision: 0, residency: 'eu', residency_locked: false, prefs_locked: true }, undefined, doc.person_id)
   await editor.scope({ residency_locked: true })
-  expect(putPreferenceScope).toHaveBeenLastCalledWith('person', { revision: 0, residency: 'any', residency_locked: true, prefs_locked: true }, undefined)
+  expect(putPreferenceScope).toHaveBeenLastCalledWith('person', { revision: 0, residency: 'any', residency_locked: true, prefs_locked: true }, undefined, doc.person_id)
 })
 
 it('loads preference evidence with one request and no independent review ladder', async () => {

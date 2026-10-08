@@ -10,6 +10,7 @@ import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { ACCOUNTS, NOW, TZ, capacityWorld, type CapacityOptions } from './capacity-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { controlStability } from './control-stability'
 import type { PairingView } from '../src/lib/agentPairing'
 import { mockEffectivePermissions } from './authz-fixtures'
 
@@ -112,12 +113,14 @@ test('a problem: the line names the first thing and counts the rest, and Verify 
   await open(page)
   // Claude on mbp2607 plus Codex low (9% left this week, early warning at 10%).
   await expect(status(page)).toHaveText('5 of 6 ready · Claude needs verifying on mbp2607 · +1')
-  const verify = section(page).getByRole('button', { name: 'Verify again' })
-  await verify.click()
-  await expect(page.locator('.toast').filter({ hasText: 'Verification requested for Claude on mbp2607.' })).toBeVisible()
+  const verify = section(page).locator('.fs-act .verify-button')
+  const guard = await controlStability(page, { verify, toggle: title(page), manage: section(page).getByRole('link', { name: /Manage/ }) })
+  await guard.check(async () => { await verify.click(); await expect(verify).toHaveAttribute('aria-busy', 'true') })
+  await expect(section(page).getByRole('status').filter({ hasText: 'Waiting for the computer to start' })).toBeVisible()
+  guard.done()
   expect(posted).toEqual({ expected_revision: c.revision, expected_verification_run_id: null })
-  // The check is queued: the sign-in no longer blocks agents, so the fix goes away; the line stops short of ready until it passes.
-  await expect(verify).toHaveCount(0)
+  // The queued check stays visible and disabled; readiness still awaits its result.
+  await expect(verify).toBeDisabled()
   await expect(status(page)).toHaveText('5 of 6 ready · Codex is low: 9% left this week')
 })
 
@@ -130,7 +133,7 @@ test('Needs you lists what blocks agents with the fix or its details; a low-quot
   await expect(needs).toBeVisible()
   const rows = section(page).locator('.att-row')
   await expect(rows).toHaveCount(2)
-  await expect(rows.nth(0)).toContainText('Claude needs verifying on mbp2607')
+  await expect(rows.nth(0)).toContainText('Claude verification on mbp2607')
   await expect(rows.nth(0)).toContainText('Verification expired. New agents wait until the sign-in passes again.')
   await expect(rows.nth(0).getByRole('button', { name: 'Verify again' })).toBeVisible()
   await expect(rows.nth(1)).toContainText('Codex is low: 9% left this week')
@@ -162,7 +165,7 @@ test('a name, a cell and Details open the right panel in Settings', async ({ pag
   await expect(page).toHaveURL(/\/settings\/accounts$/)
   await expect(page.locator('section.pane')).toContainText('Shared quota')
   await page.goBack()
-  await section(page).getByRole('link', { name: 'Claude needs verifying on mbp2607' }).click()
+  await section(page).getByRole('link', { name: 'Claude verification on mbp2607' }).click()
   await expect(page).toHaveURL(/\/settings\/accounts$/)
   const panel = page.locator('section.pane')
   await expect(panel).toContainText('mbp2607')
@@ -193,7 +196,7 @@ test('an approval link shows the folded section once and offers that account\'s 
   const { work } = await setup(page)
   await page.goto(`/agents?verify_account=${ACCOUNTS.claude}`)
   await expect(title(page)).toHaveAttribute('aria-expanded', 'true')
-  await expect(section(page).locator('.att-row').first()).toContainText('Verify Claude on mbp2607')
+  await expect(section(page).locator('.att-row').first()).toContainText('Claude verification on mbp2607')
   expect(work.preferences['ui.agents.sections']).toBeUndefined()
   // An explicit fold wins while the link is still in the address.
   await title(page).click()
@@ -313,38 +316,66 @@ test('Away with an expired verification keeps the head inside the card and its c
 // joins it. Verify again leaving on unfold must not change that row's height, or Away (centred in
 // the row) drops half the difference: back.y moved 1 px on the CI Linux fonts at 720 (AEON-782 gate).
 // Widening the state's letters stands in for the font, so this holds on any machine.
-test('Away stays put when unfolding removes Verify again beside it, even with a wide status', async ({ page }) => {
-  // 41 widths, each folding and unfolding twice: ~7 s here, but a loaded CI runner needs the full 30 s default
-  // and failed on the last width (AEON-887 and AEON-886 merge queues). The budget only guards against a hang.
-  test.setTimeout(90_000)
-  await page.setViewportSize({ width: 1100, height: 3000 })
+async function wideAway(page: Page, width: number) {
+  await page.setViewportSize({ width, height: 3000 })
   const { capacity } = await setup(page, { away: true, thresholds: { early_percent: 10, urgent_percent: 3 } })
   expireClaude(capacity)
   await open(page)
   await page.addStyleTag({ content: '.acc-section .fs-sum .t { letter-spacing: 2px; }' })
+  await page.evaluate(() => document.fonts.ready)
   const card = section(page)
   const verify = card.locator('.fs-act').getByRole('button', { name: 'Verify again' })
   const away = card.locator('.away')
   const back = card.getByRole('button', { name: 'Back now: end Away' })
   const measure = async () => ({ away: (await away.boundingBox())!, back: (await back.boundingBox())! })
+  return { verify, measure }
+}
+
+// Retain the positive-case guard over every original width. The actual fold
+// interactions run below in bounded groups, instead of 82 clicks in one case.
+test('the wide status scan encounters Away beside Verify again', async ({ page }) => {
+  // The old single scan folded and unfolded 41 widths and failed on the last width under the 30 s
+  // default (AEON-887 and AEON-886 merge queues). The budget only guards against a hang.
+  test.setTimeout(90_000)
+  const { verify, measure } = await wideAway(page, 1100)
   let shared = 0
   for (let width = 1100; width >= 700; width -= 10) {
     await page.setViewportSize({ width, height: 3000 })
     await expect(verify).toBeVisible()
     const folded = await measure()
     const beside = Math.abs((await verify.boundingBox())!.y + 14 - (folded.away.y + 13)) <= 1
-    await title(page).click()
-    await expect(verify).toHaveCount(0)
-    const unfolded = await measure()
-    await title(page).click()
-    await expect(verify).toBeVisible()
-    expect(Math.abs(unfolded.away.y - folded.away.y), `away.y at ${width}`).toBeLessThanOrEqual(0.5)
-    expect(Math.abs(unfolded.back.y - folded.back.y), `back.y at ${width}`).toBeLessThanOrEqual(0.5)
     if (beside) shared++
   }
-  // The scan must really have met the case it guards: Away and Verify again on one row.
   expect(shared, 'widths where Away and Verify again share a row').toBeGreaterThan(0)
 })
+
+// Every one of the original 41 widths keeps both fold/unfold interactions and
+// both 0.5 px assertions. Each case has at most 16 clicks and its own fixture.
+for (const first of [1100, 1020, 940, 860, 780, 700]) {
+  const last = Math.max(700, first - 70)
+  test(`Away and Back now stay put through fold and unfold from ${first} to ${last}px`, async ({ page }) => {
+    // Same hang-only budget as the wide-status scan this case was split from (AEON-887).
+    test.setTimeout(90_000)
+    const { verify, measure } = await wideAway(page, first)
+    for (let width = first; width >= last; width -= 10) {
+      await page.setViewportSize({ width, height: 3000 })
+      await expect(title(page)).toHaveAttribute('aria-expanded', 'false')
+      await expect(verify).toBeVisible()
+      const folded = await measure()
+      await title(page).click()
+      await expect(title(page)).toHaveAttribute('aria-expanded', 'true')
+      await expect(verify).toHaveCount(0)
+      const unfolded = await measure()
+      await title(page).click()
+      await expect(verify).toBeVisible()
+      const refolded = await measure()
+      expect(Math.abs(unfolded.away.y - folded.away.y), `away.y at ${width}`).toBeLessThanOrEqual(0.5)
+      expect(Math.abs(unfolded.back.y - folded.back.y), `back.y at ${width}`).toBeLessThanOrEqual(0.5)
+      expect(Math.abs(refolded.away.y - folded.away.y), `refolded away.y at ${width}`).toBeLessThanOrEqual(0.5)
+      expect(Math.abs(refolded.back.y - folded.back.y), `refolded back.y at ${width}`).toBeLessThanOrEqual(0.5)
+    }
+  })
+}
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
   test(`the head and the body keep their controls put through fold, verify and refresh at ${width} ${theme}`, async ({ page }, info) => {
@@ -366,7 +397,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       scrollAreas: { page: page.locator('html') },
       interactions: [
         { name: 'unfold', run: async () => { await title(page).click(); await expect(section(page).getByRole('table')).toBeVisible(); await info.attach('unfolded', { body: await section(page).screenshot({ animations: 'disabled' }), contentType: 'image/png' }) } },
-        { name: 'verify from Needs you', run: async () => { await section(page).locator('.att-row').first().getByRole('button', { name: 'Verify again' }).click(); await expect(page.locator('.toast').filter({ hasText: 'Verification requested' })).toBeVisible() } },
+        { name: 'verify from Needs you', run: async () => { await section(page).locator('.att-row').first().getByRole('button', { name: 'Verify again' }).click(); await expect(section(page)).toContainText('Waiting for the computer to start the check.'); await expect(section(page).locator('.verify-button')).toHaveAttribute('aria-busy', 'true') } },
         { name: 'fold again', run: async () => { await toggle.click(); await expect(section(page).getByRole('table')).toBeHidden() } },
       ],
     })
