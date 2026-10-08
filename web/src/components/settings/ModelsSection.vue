@@ -38,12 +38,15 @@ const managedCoverage = computed(() => coverage.value?.consumers.filter(consumer
 const coverageLabels = computed(() => managedCoverage.value.map(consumer => ({ managed_build: text('Builds', 'Builds'), managed_review: text('Reviews', 'Prüfungen'), queue: text('Queued work', 'Arbeit aus der Warteschlange') }[consumer.consumer] || text('Other managed runs', 'Andere verwaltete Läufe'))).join(' · '))
 const mode = ref<BoardMode>('auto')
 const isMode = (value: unknown): value is BoardMode => value === 'auto' || value === 'simple' || value === 'expert'
-let requestedMode = isMode(route.query.mode) ? route.query.mode : undefined, restoredPerson = false
+// A copied URL can choose a view. A URL left by another person in this tab
+// must not replace the new person's browser preference when Settings remounts.
+const urlModeOwner = () => typeof window === 'undefined' ? undefined : window.history?.state?.modelsModeOwner
+let requestedMode = isMode(route.query.mode) && (!urlModeOwner() || urlModeOwner() === owner.value) ? route.query.mode : undefined, restoredPerson = false
 const modeKey = computed(() => `models-page/${stateOwner.value}/mode`)
-watch(stateOwner, () => { mode.value = 'auto'; try { const stored = localStorage.getItem(modeKey.value); if (isMode(stored)) mode.value = stored } catch { /* Optional browser preference. */ }; if (!restoredPerson && requestedMode) mode.value = requestedMode; if (canonicalPerson.value) restoredPerson = true }, { immediate: true, flush: 'sync' })
+watch(stateOwner, () => { mode.value = 'auto'; try { const stored = localStorage.getItem(modeKey.value); if (isMode(stored)) mode.value = stored } catch { /* Optional browser preference. */ }; if (!restoredPerson && requestedMode) mode.value = requestedMode; if (canonicalPerson.value) restoredPerson = true; if (owner.value) setMode(mode.value) }, { immediate: true, flush: 'sync' })
 watch(owner, (value, previous) => { if (previous && value !== previous) requestedMode = undefined }, { flush: 'sync' })
-watch(() => route.query.mode, value => { if (isMode(value)) { mode.value = value; if (owner.value) try { localStorage.setItem(modeKey.value, value) } catch { /* Optional browser preference. */ } } })
-function setMode(value: BoardMode) { mode.value = value; if (owner.value) try { localStorage.setItem(modeKey.value, value) } catch { /* Optional browser preference. */ }; if (route.query.mode !== value) void router.replace({ query: { ...route.query, mode: value } }) }
+watch(() => route.query.mode, value => { if (isMode(value) && (!urlModeOwner() || urlModeOwner() === owner.value)) { mode.value = value; if (owner.value) try { localStorage.setItem(modeKey.value, value) } catch { /* Optional browser preference. */ } } })
+function setMode(value: BoardMode) { mode.value = value; if (!owner.value) return; try { localStorage.setItem(modeKey.value, value) } catch { /* Optional browser preference. */ }; if (route.query.mode !== value || urlModeOwner() !== owner.value) void router.replace({ query: { ...route.query, mode: value }, state: { modelsModeOwner: owner.value } }) }
 const columns = computed(() => board.value?.columns.map(column => localizeColumn(column, german.value)) ?? [])
 const orderNames = (lines: string[]) => lines.map(line => lineName({ line, version: '' }))
 const inherited = computed(() => context.value.layer === 'mine' && (!board.value?.profile.template || board.value.profile.scope === 'workspace'))
