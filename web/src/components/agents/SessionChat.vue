@@ -430,9 +430,7 @@ function refreshReceipts() {
 watch(() => agents.deliveryPulse, () => refreshReceipts())
 
 // ---------- Load and live refresh ----------
-let refreshedAt = 0
 async function refresh() {
-  refreshedAt = Date.now()
   await agents.refreshThread(s.value.project_id, s.value.id)
 }
 watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
@@ -465,9 +463,10 @@ watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
   if (props.active) await enter()
   refreshReceipts()
 }, { immediate: true })
-// The agents page re-reads sessions on every wake and poll; the open thread follows.
-watch(() => agents.sessionsUpdatedAt, () => { if (loaded && Date.now() - refreshedAt > 4000) void refresh().then(refreshReceipts) })
-watch(() => props.active, active => { if (active) refreshReceipts() })
+// Message hints refresh the open thread immediately; session reads retain the
+// periodic recovery path. The store coalesces bursts with a trailing read.
+watch([() => agents.threadPulse, () => agents.sessionsUpdatedAt], () => { if (loaded && props.active) void refresh().then(refreshReceipts) })
+watch(() => props.active, active => { if (active && loaded) void refresh().then(refreshReceipts) })
 
 // ---------- Composer ----------
 const composeBlock = computed(() => {
@@ -488,7 +487,6 @@ async function send() {
   try {
     await agents.send(s.value, recipient.value, draft.value.trim(), 'simple', replyTo.value?.id)
     if (!currentSend()) return
-    refreshedAt = Date.now()
     draft.value = ''; replyTo.value = null
     await nextTick(); if (currentSend()) { toBottom(true); refreshReceipts() }
   } catch (e) { if (currentSend()) sendError.value = e instanceof APIError && e.status === 409 && e.body.code === 'session_ended' ? 'This session has ended.' : e instanceof Error ? e.message : 'The message was not sent. Please try again.' }

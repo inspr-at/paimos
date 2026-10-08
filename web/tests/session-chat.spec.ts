@@ -10,6 +10,72 @@ import { agentData, mockAgents } from './agents-fixtures'
 import { controlStability } from './control-stability'
 
 const now = Date.parse('2026-09-29T06:00:00Z')
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`fast chat ${theme} ${width}: live bursts retain the latest post and stable controls`, async ({ page }, testInfo) => {
+    // Risk: a message arriving inside the old four-second window, or during
+    // an in-flight read, stays unseen. Frozen timers cannot rescue this test.
+    await page.addInitScript(() => {
+      class Stream extends EventTarget {
+        onopen: ((event: Event) => void) | null = null
+        onerror: ((event: Event) => void) | null = null
+        receive = (event: Event) => this.dispatchEvent(new MessageEvent((event as CustomEvent<string>).detail, { data: '{}' }))
+        constructor() {
+          super()
+          window.addEventListener('test:chat-signal', this.receive)
+          queueMicrotask(() => this.onopen?.(new Event('open')))
+        }
+        close() { window.removeEventListener('test:chat-signal', this.receive) }
+      }
+      Object.assign(window, { EventSource: Stream })
+    })
+    const { worker, messages } = await setup(page, { theme, count: 3 })
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`/agents/${worker.id}?tab=messages`)
+    const panel = panelOf(page)
+    const composer = panel.getByRole('textbox', { name: 'Message to release-lead' })
+    await expect(composer).toBeVisible()
+    await composer.fill('Bitte die ausführliche Freigabeprüfung und den vollständigen Übergabebericht berücksichtigen.')
+    await composer.blur()
+    await page.clock.pauseAt(new Date(now + 60_000))
+    const guard = await controlStability(page, {
+      frame: panel, messages: messagesTab(page), composer,
+      delivery: panel.getByRole('radiogroup', { name: 'Delivery' }),
+      simple: panel.getByRole('radio', { name: 'Simple' }),
+      steer: panel.getByRole('radio', { name: 'Steer' }),
+      send: panel.getByRole('button', { name: 'Send', exact: true }),
+    })
+    await guard.check(() => panel.getByRole('radio', { name: 'Steer' }).click())
+    let release!: () => void
+    let entered!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<void>(resolve => { release = resolve })
+    let reads = 0
+    await page.route('**/api/projects/*/messages?*', async route => {
+      if (new URL(route.request().url()).searchParams.get('session') !== worker.id) return route.fallback()
+      reads++
+      const snapshot = messages.slice().reverse()
+      if (reads === 1) { entered(); await held }
+      await route.fulfill({ json: { items: snapshot, next_after: 0 } })
+    })
+    const signal = () => page.evaluate(() => window.dispatchEvent(new CustomEvent('test:chat-signal', { detail: 'inbox.compat_sent' })))
+    const first = 'Die neue Nachricht ist bereits im laufenden Gespräch angekommen.'
+    const latest = 'Auch die zweite Nachricht während der laufenden Abfrage bleibt sichtbar, einschließlich der vollständigen Freigabeprüfung.'
+    await guard.check(async () => {
+      messages.push({ ...messages[0]!, id: 'live-first', sent_event_id: 900, body: first, created_at: new Date(now).toISOString() })
+      await signal()
+      await started
+      messages.push({ ...messages[0]!, id: 'live-latest', sent_event_id: 901, body: latest, created_at: new Date(now).toISOString() })
+      await signal()
+      release()
+      await expect(panel.getByText(latest, { exact: true })).toBeVisible()
+      await expect(panel.getByText(first, { exact: true })).toBeVisible()
+      expect(reads).toBe(2)
+    })
+    guard.done()
+    await page.screenshot({ path: testInfo.outputPath(`aeon-943-${theme}-${width}.png`) })
+  })
+}
 const longUrl = 'https://ci.example.test/inspr-at/paimos/actions/runs/18446744073709551615/jobs/9223372036854775807/logs?attempt=3&filter=playwright-session-chat-overflow-check'
 const longId = 'sha256:4f9c2a7be1d04c55a3a6c7f1d2e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6'
 

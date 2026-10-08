@@ -115,6 +115,9 @@ func (rt *runtime) cmdAttach() *Command {
 					if err != nil {
 						return err
 					}
+					if int64(len(raw)) != meta.Size {
+						return rt.fail(fmt.Errorf("incomplete attachment download: got %d bytes, expected %d", len(raw), meta.Size), "")
+					}
 					if download == "-" {
 						_, err = rt.stdout.Write(raw)
 						return err
@@ -152,20 +155,9 @@ func (rt *runtime) cmdAttach() *Command {
 }
 
 func (rt *runtime) findAttachment(id string) (attachmentView, error) {
-	nodes, err := rt.walkNodes(nil, nil)
-	if err != nil {
+	var a attachmentView
+	if err := rt.do(http.MethodGet, "/api/attachments/"+url.PathEscape(id), nil, &a); err != nil {
 		return attachmentView{}, err
 	}
-	for _, n := range nodes {
-		var items []attachmentView
-		if err := rt.do(http.MethodGet, "/api/nodes/"+url.PathEscape(n.ID)+"/attachments", nil, &items); err != nil {
-			return attachmentView{}, err
-		}
-		for _, a := range items {
-			if a.ID == id {
-				return a, nil
-			}
-		}
-	}
-	return attachmentView{}, rt.fail(fmt.Errorf("attachment %s not found", id), "")
+	return a, nil
 }
