@@ -4226,7 +4226,21 @@
   "taggingNote": "Retained candidates and mixed groups were reviewed under AEON-679 rule B; protected assertions stay in their existing tiers. Deletion counts and archive evidence are in the coordinator deleted.md report."
   ,
   "tests": [
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention controls and retained resolutions in light and dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention initial in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention initial in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention menu in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention menu in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention resolved in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention resolved in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention selected in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention selected in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: account menu in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
@@ -4510,9 +4524,19 @@
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Agents at once saves one ceiling and independent harness limits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away stays in the head with Back now, and one click ends it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 1020 to 950px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away stays put when unfolding removes Verify again beside it, even with a wide status","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 1100 to 1030px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 700 to 700px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 780 to 710px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 860 to 790px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 940 to 870px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away stays in the head with Back now, and one click ends it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away with an expired verification keeps the head inside the card and its controls put at 640, 720 and 800","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -4559,6 +4583,8 @@
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head keeps its height, and the toggle stays put, whether or not Verify again is shown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the row menu carries Sprint, Hold and Remove; the computer menu its own actions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the wide status scan encounters Away beside Verify again","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"warning pills and fixes clear 4.5:1 in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -7736,6 +7762,18 @@
     ,
     {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"rotate Full access on built-in Admin never sends recurrence automation","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"edit scopes stay in their columns at 1280px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"edit scopes stay in their columns at 1280px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"edit scopes stay in their columns at 360px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"edit scopes stay in their columns at 360px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"edit scopes stay in their columns at 768px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"edit scopes stay in their columns at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/key-layout.spec.ts","name":"first key and key ready fit at 1280px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/key-layout.spec.ts","name":"first key and key ready fit at 1280px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -7748,17 +7786,29 @@
     ,
     {"kind":"browser","file":"tests/key-layout.spec.ts","name":"first key and key ready fit at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 1280px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new scopes stay in their columns at 1280px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 1280px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new scopes stay in their columns at 1280px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 360px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new scopes stay in their columns at 360px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 360px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new scopes stay in their columns at 360px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 768px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new scopes stay in their columns at 768px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new scopes stay in their columns at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"rotate scopes stay in their columns at 1280px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"rotate scopes stay in their columns at 1280px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"rotate scopes stay in their columns at 360px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"rotate scopes stay in their columns at 360px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"rotate scopes stay in their columns at 768px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"rotate scopes stay in their columns at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

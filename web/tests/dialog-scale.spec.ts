@@ -49,7 +49,13 @@ async function openAccess(page: Page) {
   const world = accessWorld()
   world.agents.find(agent => agent.principal_id === COORDINATOR)!.name = 'ops-agm'
   await mockAccess(page, world)
+  // The view is lazy-loaded after the document load event. Wait for all three
+  // reads that useAccess.load joins before asserting its rendered agent list.
+  const accessRead = Promise.all(['/api/authz/permissions', '/api/roles', '/api/members'].map(path =>
+    page.waitForResponse(response => new URL(response.url()).pathname === path && response.request().method() === 'GET'),
+  ))
   await page.goto('/settings/access/agents')
+  for (const response of await accessRead) expect(response.status()).toBe(200)
   await expect(page.getByRole('list', { name: 'Agents' })).toBeVisible()
   return world
 }

@@ -216,7 +216,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/key-layout.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":7.039,"median":3.522,"min":2.322},"seconds":49.120865,"selectedTests":12},"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/key-layout.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":7.039,"median":3.522,"min":2.322},"seconds":49.120865,"selectedTests":12},"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -318,7 +318,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/accounts-computers.spec.ts","listedTests":26,"tierTiming":{"caseSeconds":{"max":4.348,"median":2.018,"min":1.197},"seconds":30.144583,"selectedTests":13},"weightSeconds":32.233918,"weightSource":"web-13"}
+        {"file":"tests/accounts-computers.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":4.348,"median":2.018,"min":1.197},"seconds":30.144583,"selectedTests":13},"weightSeconds":32.233918,"weightSource":"web-13"}
         ,
         {"file":"tests/agent-recovery.spec.ts","listedTests":9,"weightSeconds":20}
         ,
@@ -690,7 +690,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/a11y.spec.ts","listedTests":73,"weightSeconds":230.829268,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/a11y.spec.ts","listedTests":80,"weightSeconds":230.829268,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/accounts-card-fit.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
         ,
