@@ -7472,7 +7472,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: getProjectDeliveryMetrics
-      description: 'Requires delivery.read on the project; an invisible project is absent (404). Computes the ten Project Arion delivery numbers for the repository linked to the project, from GitHub App events, the backfill and reported facts. Every metric names its source and definition; windows without samples are no_data and windows before complete coverage are partial, never zero.'
+      description: 'Requires delivery.read on the project; an invisible project is absent (404). Computes the ten Project Arion delivery numbers for the repository linked to the project, from GitHub App events, the backfill and reported facts. Every metric names its source and definition; windows without samples are no_data and windows before complete coverage are partial, never zero. Windows of 7, 30, 90, 180 and 365 whole UTC days end today; each names its coverage and the window just before it; 90 and 180 days are bucketed by week and 365 by calendar month in series. Nothing is extrapolated.'
       security: [{session: []}, {agentKey: []}]
       responses:
         '200': {description: 'Delivery metrics', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetrics'}}}}
@@ -15447,7 +15447,7 @@ components:
     DeliveryMetric:
       type: object
       additionalProperties: false
-      required: [number, key, label, unit, source, definition, status, reason, latest, windows, daily, target]
+      required: [number, key, label, unit, source, definition, status, reason, latest, windows, daily, series, target]
       properties:
         number: {type: integer, minimum: 1, maximum: 10, description: 'Project Arion number this metric belongs to; numbers 3 and 7 have two metrics.'}
         key: {type: string, enum: [pr_ci_wall, queue_run_wall, first_attempt_green, flaked_failures, time_to_first_green, pr_open_to_merged, queue_runs_per_pr, review_time, review_changes_share, merge_rounds_model_share, release_queue_to_live, nightly_green]}
@@ -15455,12 +15455,40 @@ components:
         unit: {type: string, enum: [minutes, percent, runs]}
         source: {type: string, description: 'Where the samples come from.'}
         definition: {type: string, description: 'What one sample measures, written for the page.'}
-        status: {type: string, enum: [ok, partial, no_data]}
+        status: {type: string, enum: [ok, partial, no_data], description: 'Status of the 30-day window.'}
         reason: {type: [string, 'null'], description: 'Why the metric is partial or has no data; null when ok.'}
         latest: {oneOf: [{$ref: '#/components/schemas/DeliveryMetricSample'}, {type: 'null'}]}
-        windows: {type: array, maxItems: 2, items: {$ref: '#/components/schemas/DeliveryMetricWindow'}}
+        windows: {type: array, maxItems: 5, description: 'The 7, 30, 90, 180 and 365-day windows, in this order.', items: {$ref: '#/components/schemas/DeliveryMetricWindow'}}
         daily: {type: array, maxItems: 30, description: 'One point per UTC day, oldest first; days without samples have null values, never zero.', items: {$ref: '#/components/schemas/DeliveryMetricPoint'}}
+        series: {type: array, maxItems: 64, description: 'Chart buckets of the 90 and 180-day windows (weeks) and the 365-day window (calendar months), grouped by days and oldest first. Buckets without samples have null values, never zero.', items: {$ref: '#/components/schemas/DeliveryMetricBucket'}}
         target: {oneOf: [{$ref: '#/components/schemas/DeliveryMetricTarget'}, {type: 'null'}]}
+        releases: {type: array, maxItems: 50, description: 'Only on release_queue_to_live: releases reported in the 365-day window, newest first.', items: {$ref: '#/components/schemas/DeliveryMetricRelease'}}
+    DeliveryMetricBucket:
+      type: object
+      additionalProperties: false
+      required: [days, from, to, bucket, status, n, value, p50, p90]
+      properties:
+        days: {type: integer, enum: [90, 180, 365], description: 'The window this bucket belongs to.'}
+        from: {type: string, format: date, description: 'First UTC day of the bucket, clipped to the window.'}
+        to: {type: string, format: date, description: 'Last UTC day of the bucket, inclusive; the newest bucket ends today.'}
+        bucket: {type: string, enum: [week, month], description: 'week: seven days ending on the window''s last day (the oldest is clipped); month: a calendar month clipped to the window.'}
+        status: {type: string, enum: [ok, partial, no_data], description: 'partial when the bucket starts before complete coverage or the source is incomplete; no_data without samples.'}
+        n: {type: integer, minimum: 0}
+        value: {type: [number, 'null']}
+        p50: {type: [number, 'null']}
+        p90: {type: [number, 'null']}
+    DeliveryMetricCoverage:
+      type: object
+      additionalProperties: false
+      required: [window_days, bucket, buckets_total, buckets_covered, covered_days, from, full]
+      properties:
+        window_days: {type: integer, enum: [7, 30, 90, 180, 365]}
+        bucket: {type: string, enum: [day, week, month], description: 'Chart bucket of this window: day for 7 and 30, week for 90 and 180, month for 365.'}
+        buckets_total: {type: integer, minimum: 0}
+        buckets_covered: {type: integer, minimum: 0, description: 'Buckets with at least one covered day.'}
+        covered_days: {type: integer, minimum: 0, description: 'Days of the window that lie at least partly inside the time the source''s facts are complete.'}
+        from: {type: [string, 'null'], format: date, description: 'First covered day of the window; null when no day is covered.'}
+        full: {type: boolean, description: 'Every day of the window is covered. A covered window can still be partial when the source itself is incomplete; status and reason say so.'}
     DeliveryMetricFactsInput:
       type: object
       additionalProperties: false
@@ -15482,6 +15510,9 @@ components:
               started_at: {type: [string, 'null'], format: date-time, description: 'Review requested, or the release PR entering the merge queue. Required for review and release.'}
               at: {type: string, format: date-time, description: 'Verdict, merge round or live time.'}
               outcome: {type: string, enum: [ok, changes, scripted, model, live, failed], description: 'review ok or changes; merge_round scripted or model; release live or failed.'}
+              release: {type: [string, 'null'], pattern: '^[A-Za-z0-9._-]{1,32}$', description: 'Release only: the release name, for example 126.'}
+              tag: {type: [string, 'null'], pattern: '^[A-Za-z0-9._+-]{1,128}$', description: 'Release only: the version tag.'}
+              healthy_at: {type: [string, 'null'], format: date-time, description: 'Release only, outcome live: when the live version was healthy again after its live check; at or after at.'}
     DeliveryMetricPoint:
       type: object
       additionalProperties: false
@@ -15493,6 +15524,29 @@ components:
         value: {type: [number, 'null']}
         p50: {type: [number, 'null']}
         p90: {type: [number, 'null']}
+    DeliveryMetricPrevious:
+      type: object
+      additionalProperties: false
+      required: [status, n, value, p50, p90, coverage]
+      properties:
+        status: {type: string, enum: [ok, partial, no_data]}
+        n: {type: integer, minimum: 0}
+        value: {type: [number, 'null']}
+        p50: {type: [number, 'null']}
+        p90: {type: [number, 'null']}
+        coverage: {$ref: '#/components/schemas/DeliveryMetricCoverage'}
+    DeliveryMetricRelease:
+      type: object
+      additionalProperties: false
+      required: [key, release, tag, outcome, queued_at, live_at, healthy_at]
+      properties:
+        key: {type: string, description: 'The reported fact key.'}
+        release: {type: [string, 'null'], description: 'Release name; null when the tooling did not report one.'}
+        tag: {type: [string, 'null']}
+        outcome: {type: string, enum: [live, failed]}
+        queued_at: {type: string, format: date-time, description: 'The release PR entered the merge queue.'}
+        live_at: {type: [string, 'null'], format: date-time, description: 'Live on the production host; null when the release failed.'}
+        healthy_at: {type: [string, 'null'], format: date-time, description: 'Healthy again after the live check; null when not reported.'}
     DeliveryMetricSample:
       type: object
       additionalProperties: false
@@ -15533,14 +15587,16 @@ components:
     DeliveryMetricWindow:
       type: object
       additionalProperties: false
-      required: [days, status, n, value, p50, p90]
+      required: [days, status, n, value, p50, p90, coverage, previous]
       properties:
-        days: {type: integer, enum: [7, 30]}
+        days: {type: integer, enum: [7, 30, 90, 180, 365], description: 'Whole UTC days ending today.'}
         status: {type: string, enum: [ok, partial, no_data]}
         n: {type: integer, minimum: 0, description: 'Samples in the window.'}
         value: {type: [number, 'null'], description: 'p50 for durations, the mean for runs per PR, the share in percent for rates.'}
         p50: {type: [number, 'null']}
         p90: {type: [number, 'null']}
+        coverage: {$ref: '#/components/schemas/DeliveryMetricCoverage'}
+        previous: {oneOf: [{$ref: '#/components/schemas/DeliveryMetricPrevious'}, {type: 'null'}], description: 'The same number of days just before the window, for the change; null when no comparison is computed.'}
     DeliveryMetrics:
       type: object
       additionalProperties: false
