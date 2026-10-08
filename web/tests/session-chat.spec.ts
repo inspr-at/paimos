@@ -38,11 +38,11 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await composer.fill('Bitte die ausführliche Freigabeprüfung und den vollständigen Übergabebericht berücksichtigen.')
     await composer.blur()
     await page.clock.pauseAt(new Date(now + 60_000))
-    // AEON-942 removed the Simple/Steer toggle: session-bound messages have one
-    // delivery path, so the guard measures the composer, its Send and the frame.
+    // Per-send actions replace the old delivery toggle. Live arrivals must
+    // preserve the composer, its primary action and the frame.
     const guard = await controlStability(page, {
       frame: panel, messages: messagesTab(page), composer,
-      send: panel.getByRole('button', { name: 'Send', exact: true }),
+      send: panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true }),
     })
     let release!: () => void
     let entered!: () => void
@@ -600,9 +600,10 @@ test('the thread stays pinned at the bottom, counts posts that arrive while scro
   await thread.evaluate(el => el.scrollTo({ top: 0 }))
   await expect(panel.getByRole('button', { name: 'Go to the latest message' })).toBeVisible()
   await arrive(2, 'Off-screen: this arrives while you read older posts.')
-  const jump = panel.getByRole('button', { name: '1 new message, go to the latest' })
+  const jump = panel.getByRole('button', { name: '1 new, Go to the latest message' })
   await expect(jump).toBeVisible()
   await expect(jump).toHaveText('1 new')
+  expect(await jump.evaluate(el => { const pill = el.getBoundingClientRect(), frame = el.parentElement!.getBoundingClientRect(); return Math.abs(pill.left + pill.width / 2 - frame.left - frame.width / 2) })).toBeLessThanOrEqual(.5)
   // The open tab carries no badge; the count sits on the jump button.
   await expect(messagesTab(page).locator('.count')).toHaveCount(0)
   await shot(page, 'scrolled-up-390')
@@ -618,6 +619,8 @@ test('the thread stays pinned at the bottom, counts posts that arrive while scro
   await panel.getByRole('textbox', { name: 'Message to release-lead' }).focus()
   await expect.poll(atBottom).toBe(true)
   await expect(panel.getByRole('button', { name: /latest message/ })).toHaveCount(0)
+  await panel.locator('.composer').evaluate(el => { el.style.paddingBottom = '44px' })
+  await expect.poll(atBottom).toBe(true)
   await shot(page, 'focused-390')
 })
 
@@ -628,22 +631,22 @@ test('own posts show quiet delivery ticks from the sender status', async ({ page
   await expect(mine).toHaveCount(3)
   await expect(mine.first().locator('.delivery.read')).toHaveAttribute('data-tip', /^Read by the session · /)
   await expect(mine.first().locator('.delivery.read')).toContainText('Read')
-  await expect(mine.last().locator('.delivery.sent')).toHaveAttribute('data-tip', 'Sent · waiting for the session to pick it up')
+  await expect(mine.last().locator('.delivery.sent')).toHaveAttribute('data-tip', 'On its way to the agent.')
   // Only the viewer's own posts are asked for, never the agent's.
   const own = new Set(messages.filter(m => m.sender_principal_id === me.id).map(m => m.id))
   expect(receipts.length).toBeGreaterThan(0)
   expect(receipts.every(id => own.has(id))).toBe(true)
 })
 
-test('a managed session has no composer or Reply; Steer lives in the session controls (AEON-260)', async ({ page }) => {
+test('a managed session keeps its composer and Reply alongside the session controls (AEON-975)', async ({ page }) => {
   const { worker } = await setup(page, { count: 4, storage: { 'aeon.session-tab': 'messages' } })
   worker.advertised_capabilities = [...worker.advertised_capabilities, 'managed_control_v1']
   await page.goto(`/agents/${worker.id}`)
   const panel = panelOf(page)
   await expect(panel.locator('.msg').first()).toBeVisible()
-  await expect(panel.locator('.composer')).toHaveCount(0)
-  await expect(panel.getByRole('button', { name: 'Reply' })).toHaveCount(0)
-  await expect(panel.getByText('Steer this managed session with the controls above.')).toBeVisible()
+  await expect(panel.locator('.composer')).toBeVisible()
+  await expect(panel.getByRole('button', { name: 'Reply' }).first()).toBeVisible()
+  await expect(panel.getByText('Steer this managed session with the controls above.')).toHaveCount(0)
 })
 
 test.describe('phone screenshots', () => {
@@ -677,7 +680,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     await page.goto(`/agents/${worker.id}`)
     const panel = panelOf(page)
     const field = panel.getByRole('textbox', { name: `Message to ${worker.display_label}` })
-    const send = panel.getByRole('button', { name: 'Send', exact: true })
+    const send = panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true })
     await expect(field).toBeVisible()
     await expect(panel.getByRole('radiogroup', { name: 'Delivery' })).toHaveCount(0)
     await expect(panel.getByRole('radio', { name: 'Steer', exact: true })).toHaveCount(0)
@@ -691,14 +694,14 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     try {
       const text = 'Bitte die Freigabeprüfung vollständig durchführen und das abschließende Ergebnis hier im Gespräch festhalten.'
       await guard.check(() => field.fill(text))
-      await guard.check(async () => { await send.click(); await expect(send).toHaveAttribute('aria-busy', 'true') })
-      await guard.check(async () => { release(); await expect(field).toHaveValue(''); await expect(send).toHaveAttribute('aria-busy', 'false') })
+      await guard.check(async () => { await send.click(); await expect(field).toHaveValue(''); await expect(panel.getByText(text, { exact: true })).toBeVisible(); await expect(panel.locator('.msg').last().getByText('Sending', { exact: true })).toBeVisible() })
+      await guard.check(async () => { release(); await expect.poll(() => data.sent.length).toBe(1); await expect(field).toHaveValue(''); await expect(panel.getByText(text, { exact: true })).toHaveCount(1) })
       const sent = calls.filter(call => call.method === 'POST' && call.path.endsWith('/messages')).at(-1)
       expect(sent?.body).toMatchObject({ body: text, recipient_session_id: worker.id, delivery_level: 'simple' })
       expect(data.sent).toHaveLength(1)
       guard.done()
       expect(await noHorizontalScroll(page)).toEqual({ doc: true, panel: true, inner: true })
-      await page.screenshot({ path: testInfo.outputPath(`chat-${theme}-${width}.png`), fullPage: true })
+      await page.screenshot({ path: testInfo.outputPath(`aeon-975-chatbasics/chat-${theme}-${width}.png`), fullPage: true })
     } finally { release() }
   })
 }
@@ -709,7 +712,7 @@ test('a held-request 403 keeps the session composer (AEON-942)', async ({ page }
   await page.goto(`/agents/${worker.id}`)
   const panel = panelOf(page)
   const field = panel.getByRole('textbox', { name: 'Message to release-lead' })
-  const send = panel.getByRole('button', { name: 'Send', exact: true })
+  const send = panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true })
   const denied = panel.getByText('Reading this session requires access to its project and permission to read agent sessions.')
   const unread = panel.getByText('Messages could not be loaded right now. Close and reopen the session to try again.')
   const pendingReads = () => calls.filter(call => call.method === 'GET' && call.path.endsWith('/messages') && call.query?.get('pending') === 'true').length
@@ -738,4 +741,177 @@ test('a held-request 403 keeps the session composer (AEON-942)', async ({ page }
   await expect(denied).toHaveCount(0)
   await expect(unread).toHaveCount(0)
   await expect(panel.getByText('Still here', { exact: true })).toBeVisible()
+})
+
+for (const locale of ['en', 'de'] as const) for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`managed optimistic input and retry ${theme} ${width}${locale === 'de' ? ' German' : ''}`, async ({ page }, testInfo) => {
+    const { worker, calls } = await setup(page, { admin: false, theme, count: 3 })
+    Object.assign(worker, { management_mode: 'managed', activity: 'busy', advertised_capabilities: ['inbox', 'steer', 'interrupt', 'managed_control_v1'] })
+    if (locale === 'de') await page.route('**/api/me/profile', route => route.fulfill({ json: { principal_id: me.id, locale: 'de', avatar_hashes: {}, initials: 'MB', first_name: 'Markus', last_name: 'Barta', preferred_name: 'Markus', short_name: 'markus', timezone: 'Europe/Vienna', greeting_enabled: false, avatar_color: '#888888', week_start: 1, revision: 1 } }))
+    const words = locale === 'de' ? { message: 'Nachricht an release-lead', after: 'Nach dieser Runde', now: 'Jetzt senden', sending: 'Wird gesendet', retry: 'Erneut senden' } : { message: 'Message to release-lead', after: 'After this turn', now: 'Send now', sending: 'Sending', retry: 'Retry' }
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`/agents/${worker.id}?tab=messages`)
+    const panel = panelOf(page)
+    const field = panel.getByRole('textbox', { name: words.message })
+    const after = panel.getByRole('button', { name: words.after, exact: true })
+    const nowButton = panel.getByRole('button', { name: words.now, exact: true })
+    await expect(field).toBeVisible()
+    await field.focus()
+    const guard = await controlStability(page, { field, after, now: nowButton, frame: panel })
+    let release!: () => void
+    let entered!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<void>(resolve => { release = resolve })
+    const payloads: Record<string, unknown>[] = []
+    await page.route('**/api/projects/*/messages', async route => {
+      if (route.request().method() !== 'POST') return route.fallback()
+      payloads.push(route.request().postDataJSON())
+      if (payloads.length === 1) { entered(); await held; return route.fulfill({ status: 503, json: { error: 'fixture unavailable' } }) }
+      return route.fallback()
+    })
+    const text = 'Bitte die ausführliche Freigabeprüfung nach dieser Runde durchführen und den vollständigen Übergabebericht hier festhalten.'
+    try {
+      await guard.check(async () => {
+        await field.fill(text); await field.press('Enter'); await started
+        await expect(field).toHaveValue('')
+        await expect(panel.getByText(text, { exact: true })).toBeVisible()
+        await expect(panel.locator('.msg').last().getByText(words.sending, { exact: true })).toBeVisible()
+      })
+      await field.fill('A newer draft stays here')
+      await guard.check(async () => { release(); await expect(panel.getByRole('button', { name: words.retry, exact: true })).toBeVisible() })
+      await guard.check(async () => { await panel.getByRole('button', { name: words.retry, exact: true }).click(); await expect.poll(() => payloads.length).toBe(2); await expect(field).toHaveValue('A newer draft stays here') })
+      expect(payloads[0].delivery_level).toBe('simple')
+      expect(payloads[1].idempotency_key).toBe(payloads[0].idempotency_key)
+      await guard.check(async () => { await field.press('Control+Enter'); await expect.poll(() => payloads.length).toBe(3); await expect(field).toHaveValue('') })
+      expect(payloads[2].delivery_level).toBe('steer')
+      expect(payloads[2].idempotency_key).not.toBe(payloads[0].idempotency_key)
+      await expect.poll(() => calls.filter(call => call.method === 'POST' && call.path.endsWith('/messages')).length).toBe(2)
+      guard.done()
+      await page.screenshot({ path: testInfo.outputPath(`aeon-975-chatbasics/managed-${locale}-${theme}-${width}.png`) })
+    } finally { release?.() }
+  })
+}
+
+// AEON-976: these component interactions use the real Vue components with
+// isolated APIs. No durable transcript or harness capability is invented.
+const shellBody = (count: number) => '## Prüfung abgeschlossen\n\n- Umfang geprüft\n- Freigabe noch offen\n\n| Prüfung | Ergebnis |\n| --- | --- |\n| Leseberechtigung | Erfüllt |\n\n<script>window.chatInjected = true</script>\n\n[javascript](javascript:alert(1))\n\n```console\n' + Array.from({ length: count }, (_, i) => `Prüfschritt ${String(i + 1).padStart(3, '0')}: ausführliche Ausgabe ohne vertrauliche Informationen`).join('\n') + '\n```'
+async function hintStream(page: Page) {
+  await page.addInitScript(() => {
+    class Stream extends EventTarget {
+      onopen: ((event: Event) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      receive = () => this.dispatchEvent(new MessageEvent('inbox.compat_sent', { data: '{}' }))
+      constructor() { super(); window.addEventListener('test:976-hint', this.receive); queueMicrotask(() => this.onopen?.(new Event('open'))) }
+      close() { window.removeEventListener('test:976-hint', this.receive) }
+    }
+    Object.assign(window, { EventSource: Stream })
+  })
+}
+const signal976 = (page: Page) => page.evaluate(() => window.dispatchEvent(new Event('test:976-hint')))
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`AEON-976 markdown controls ${theme} ${width}: safe shell tail and stable expansion`, async ({ page, context }, testInfo) => {
+    const { worker, messages } = await setup(page, { theme, count: 1 })
+    Object.assign(worker, { management_mode: 'managed', advertised_capabilities: ['interrupt', 'stop', 'steer'], activity: 'busy' })
+    messages[0]!.body = shellBody(40)
+    await page.route('**/api/me/profile', route => route.fulfill({ json: { principal_id: me.id, locale: 'de', avatar_hashes: {}, initials: 'MB', first_name: 'Markus', last_name: 'Barta', preferred_name: 'Markus', short_name: 'markus', timezone: 'Europe/Vienna', greeting_enabled: false, avatar_color: '#888888', week_start: 1, revision: 1 } }))
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`/agents/${worker.id}?tab=messages`)
+    const panel = panelOf(page), thread = scroller(page), code = panel.locator('.chat-code'), pre = code.locator('pre')
+    await expect(code).toBeVisible()
+    await expect(panel.getByRole('heading', { name: 'Prüfung abgeschlossen' })).toBeAttached()
+    await expect(panel.locator('table th')).toHaveText(['Prüfung', 'Ergebnis'])
+    await expect(panel.locator('.markdown-body script, .markdown-body a[href^="javascript:"]')).toHaveCount(0)
+    expect(await page.evaluate(() => 'chatInjected' in window)).toBe(false)
+    await expect(code).toHaveClass(/folded/)
+    await expect.poll(() => pre.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThanOrEqual(2)
+    expect(await pre.evaluate(el => getComputedStyle(el).maskImage)).toContain('rgba(0, 0, 0, 0)')
+    await thread.evaluate(el => { el.scrollTop = 0; el.dispatchEvent(new WheelEvent('wheel', { deltaY: -50, bubbles: true })) })
+    const fold = code.locator('.code-fold'), copy = code.locator('.code-copy'), stop = panel.getByRole('button', { name: 'Stoppen', exact: true })
+    await expect(fold).toHaveText('Alle 40 Zeilen zeigen')
+    const guard = await controlStability(page, { copy, fold, composer: panel.locator('textarea'), stop, frame: panel })
+    await guard.check(async () => { await fold.click(); await expect(code).not.toHaveClass(/folded/) })
+    await guard.check(async () => { await code.getByRole('button', { name: 'Weniger zeigen' }).click(); await expect(code).toHaveClass(/folded/) })
+    await guard.check(async () => { await copy.click(); await expect(code.getByRole('status')).toHaveText('Kopiert') })
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('Prüfschritt 040')
+    guard.done()
+    await thread.evaluate(el => el.scrollTo({ top: el.scrollHeight }))
+    await expect.poll(() => thread.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThanOrEqual(2)
+    await page.screenshot({ path: testInfo.outputPath(`aeon-976-chatrender/markdown-de-${theme}-${width}.png`) })
+  })
+}
+
+test('AEON-976 history: more than 200 posts remain reachable and a late refresh retains the reader anchor', async ({ page }) => {
+  await hintStream(page)
+  const { worker, messages, calls } = await setup(page, { count: 231 })
+  // Unique bodies prevent duplicate collapsing at page boundaries.
+  messages.forEach((m, i) => { m.body = `History post ${i + 1} — ${m.body}` })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const panel = panelOf(page), thread = scroller(page), earlier = panel.getByRole('button', { name: 'Earlier messages' })
+  await expect(panel.locator('.msg')).toHaveCount(50)
+  for (const count of [100, 150, 200, 231]) {
+    await thread.evaluate(el => el.scrollTo({ top: 0 }))
+    const anchor = panel.locator('.msg').first(), id = await anchor.getAttribute('data-id')
+    const top = await anchor.evaluate(el => el.getBoundingClientRect().top)
+    const guard = await controlStability(page, { composer: panel.locator('textarea'), send: panel.locator('.compose-row .send'), frame: panel })
+    await guard.check(async () => { await earlier.click(); await expect(panel.locator('.msg')).toHaveCount(count) })
+    guard.done()
+    const after = await panel.locator(`.msg[data-id="${id}"]`).evaluate(el => el.getBoundingClientRect().top)
+    expect(Math.abs(after - top)).toBeLessThanOrEqual(.5)
+  }
+  await expect(earlier).toHaveCount(0)
+  await expect(panel.getByText('Start of the conversation')).toBeAttached()
+  const reads = calls.filter(c => c.method === 'GET' && c.path.endsWith('/messages') && c.query.has('session'))
+  expect(reads.every(c => c.query.get('limit') === '50')).toBe(true)
+  await signal976(page)
+  await expect.poll(() => calls.filter(c => c.method === 'GET' && c.path.endsWith('/messages') && c.query.has('session')).length).toBeGreaterThan(reads.length)
+  await expect(panel.locator('.msg')).toHaveCount(231)
+})
+
+test('AEON-976 shell updates: follow newest output until the reader scrolls up inside the pane', async ({ page }) => {
+  await hintStream(page)
+  const { worker, messages } = await setup(page, { count: 1 })
+  messages[0]!.body = shellBody(40)
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const pre = panelOf(page).locator('.chat-code pre')
+  await expect.poll(() => pre.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThanOrEqual(2)
+  await pre.focus()
+  messages[0]!.body = shellBody(45)
+  await signal976(page)
+  await expect(pre).toContainText('Prüfschritt 045')
+  await expect(pre).toBeFocused()
+  await expect.poll(() => pre.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThanOrEqual(2)
+  const top = await pre.evaluate(el => { el.dispatchEvent(new WheelEvent('wheel', { deltaY: -60, bubbles: true })); el.scrollTop = 70; el.dispatchEvent(new Event('scroll')); return el.scrollTop })
+  messages[0]!.body = shellBody(50)
+  await signal976(page)
+  await expect(pre).toContainText('Prüfschritt 050')
+  await expect.poll(() => pre.evaluate(el => el.scrollTop)).toBe(top)
+})
+
+test('AEON-976 Stop: Esc leaves the field then interrupts with captured process ownership', async ({ page }) => {
+  const { worker } = await setup(page, { count: 1 })
+  const ownership = { daemon_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', generation: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', process_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', root_pid: 420, group_id: 420, started_at: new Date(now).toISOString() }
+  Object.assign(worker, { management_mode: 'managed', advertised_capabilities: ['managed_control_v1', 'interrupt', 'stop', 'steer'], process_ownership: ownership, activity: 'busy' })
+  const payloads: Record<string, unknown>[] = []
+  await page.route('**/managed-controls', async route => {
+    payloads.push(route.request().postDataJSON())
+    return route.fulfill({ status: 409, json: { error: 'ownership changed' } })
+  })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const panel = panelOf(page), field = panel.locator('textarea'), stop = panel.getByRole('button', { name: 'Stop', exact: true })
+  await field.fill('Keep this draft')
+  await field.press('Escape')
+  await expect(field).not.toBeFocused()
+  expect(payloads).toHaveLength(0)
+  await page.keyboard.press('Escape')
+  await expect.poll(() => payloads.length).toBe(1)
+  expect(payloads[0]).toMatchObject({ kind: 'interrupt', expected_ownership: ownership })
+  await expect(page.locator('.toast.error').filter({ hasText: 'ownership changed' })).toBeVisible()
+  await expect(field).toHaveValue('Keep this draft')
+  await expect(panel).toBeVisible()
+  const guard = await controlStability(page, { field, stop, send: panel.locator('.send'), frame: panel })
+  await guard.check(async () => { await stop.click(); await expect.poll(() => payloads.length).toBe(2) })
+  guard.done()
+  expect(payloads[1]).toMatchObject({ kind: 'interrupt', expected_ownership: ownership })
 })

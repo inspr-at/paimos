@@ -323,6 +323,15 @@ paths:
         - $ref: '#/components/parameters/projectId'
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/workerLease'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                delivery_level: {type: string, enum: [steer], description: "While a turn is busy, lease only boundary input; omitted selects the ordinary FIFO between turns."}
       responses:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Leased FIFO inbox message}
@@ -343,7 +352,7 @@ paths:
               properties:
                 delivery_id: {type: string, format: uuid}
                 cursor: {type: integer, minimum: 1}
-                effective_level: {type: string, enum: [simple], default: simple}
+                effective_level: {type: string, enum: [simple, steer], default: simple}
                 outcome: {type: string, enum: [handed_off, failed], default: handed_off}
                 failure_reason: {type: string, enum: [outcome_unconfirmed, child_unavailable]}
       responses:
