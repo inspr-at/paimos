@@ -148,7 +148,11 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			_ = ln.Close()
 		}
 	}
+	ctx, cancelWorkers := context.WithCancel(ctx)
+	defer cancelWorkers()
 	workerCtx := db.Background(ctx)
+	var workers []func()
+	startWorker := func(run func()) { workers = append(workers, run) }
 
 	if err := db.EnsureTenant(ctx, pool, cfg.BootstrapTenantSlug, cfg.BootstrapTenantName); err != nil {
 		closeListener()
@@ -207,11 +211,11 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	journalStore.HostAuthorization = aithemaHost.CheckJournal
 	journalStore.AuthorityProjection = aithemaHost.CheckAuthority
 	if tokenMod.Keys != nil {
-		go aithemaHost.Run(workerCtx)
+		startWorker(func() { aithemaHost.Run(workerCtx) })
 	}
 
 	attachedMessages := attachedmsg.New(attachedmsg.Options{Enabled: cfg.AttachedMessages, SingleInstance: cfg.AttachedMessagesSingleInstance, Origin: cfg.PublicURL})
-	go attachedMessages.Run(workerCtx, pool)
+	startWorker(func() { attachedMessages.Run(workerCtx, pool) })
 	questionsMod := questions.New(pool)
 	var messagingMod httpapi.Module
 	if cfg.MessagingKey != nil {
@@ -228,7 +232,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			closeListener()
 			return fmt.Errorf("routine dispatcher: %w", err)
 		}
-		go runRoutineDispatchers(workerCtx, pool, dispatcher)
+		startWorker(func() { runRoutineDispatchers(workerCtx, pool, dispatcher) })
 	} else {
 		slog.Warn("messaging disabled: AEON_MESSAGING_KEY_FILE is not set")
 	}
@@ -274,9 +278,11 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		closeListener()
 		return fmt.Errorf("public quotes: %w", err)
 	}
-	go embedding.NewWorker(pool, nil, embedding.Options{Resolve: workspaceModels.Embeddings}).Run(workerCtx)
-	go parentBenefits.Run(workerCtx)
-	go runConfirmationJobs(workerCtx, pool, confirmationMod, pdfConcurrency)
+	startWorker(func() {
+		embedding.NewWorker(pool, nil, embedding.Options{Resolve: workspaceModels.Embeddings}).Run(workerCtx)
+	})
+	startWorker(func() { parentBenefits.Run(workerCtx) })
+	startWorker(func() { runConfirmationJobs(workerCtx, pool, confirmationMod, pdfConcurrency) })
 	// A bad AEON_BRAND_FILE must stop startup, never fall back silently.
 	productBrand, err := brand.Load()
 	if err != nil {
@@ -289,7 +295,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	historyMod.UseTickets(releasehistory.DBTickets(pool))
 	historyMod.WithBackfills(pool, "AEON")
 	portalMod := portal.New(pool, cfg.Env != "dev", authCfg.SessionKey)
-	go portalMod.RunLimitSweep(workerCtx)
+	startWorker(func() { portalMod.RunLimitSweep(workerCtx) })
 	// AEON-178: invites can create the sign-in account through a configured identity
 	// provisioner (none by default). A misconfigured provisioner stops startup.
 	provisioner, err := identity.FromEnv()
@@ -297,19 +303,19 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		return fmt.Errorf("identity provisioner: %w", err)
 	}
 	// R2: webhook wake for inbox deliveries.
-	go inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(workerCtx)
+	startWorker(func() { inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(workerCtx) })
 	// AEON-291: silent unmanaged sessions become "Lost contact" (one runner per tenant).
-	go harness.RunLostContactSweeper(workerCtx, pool)
-	go nodes.RunWorkLifecycle(workerCtx, pool)
+	startWorker(func() { harness.RunLostContactSweeper(workerCtx, pool) })
+	startWorker(func() { nodes.RunWorkLifecycle(workerCtx, pool) })
 	modelMod := modelregistry.NewWithVault(pool, authCfg.SessionKey)
-	go modelMod.Run(workerCtx)
+	startWorker(func() { modelMod.Run(workerCtx) })
 	// AEON-280: delivery deadlines and the attempt cap; one runner across
 	// processes through an advisory lock.
-	go inbox.NewSweeper(pool).Run(workerCtx)
+	startWorker(func() { inbox.NewSweeper(pool).Run(workerCtx) })
 	// AEON-288: one daily pass nominates method learnings. It never accepts them.
-	go knowledge.NewTagger(pool).Run(workerCtx)
+	startWorker(func() { knowledge.NewTagger(pool).Run(workerCtx) })
 	statusAuto := statusautopilot.New(pool)
-	go statusAuto.Run(workerCtx)
+	startWorker(func() { statusAuto.Run(workerCtx) })
 	recurringWork := recurrences.New(pool)
 	publishedHistory, err := releasehistory.Embedded()
 	if err != nil {
@@ -334,7 +340,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		publications = append(publications, recurrences.Publication{ProjectKey: "AEON", Name: name, Version: release.Version, PublishedAt: *at})
 	}
 	recurringWork.WithHistory(publications)
-	go recurringWork.Run(workerCtx)
+	startWorker(func() { recurringWork.Run(workerCtx) })
 	pairingMod := agentpairing.New(pool, cfg.PublicURL, cfg.BootstrapTenantSlug, cfg.PairingNixGuide)
 	if err := pairingMod.ConfigureAccountLink(authCfg.SessionKey); err != nil {
 		return fmt.Errorf("account linking: %w", err)
@@ -344,7 +350,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		vapid = &webpush.Options{VAPIDPublicKey: cfg.PhonePush.PublicKey, VAPIDPrivateKey: cfg.PhonePush.PrivateKey, Subscriber: cfg.PhonePush.Subject}
 	}
 	phoneMod := phoneapprovals.New(pool, pairingMod, cfg.PublicURL, cfg.LinkKey, vapid)
-	go phoneMod.Run(workerCtx)
+	startWorker(func() { phoneMod.Run(workerCtx) })
 	pairingMod.SetAttachedMessages(attachedMessages)
 	doctrineMod := doctrine.New(pool, doctrine.Options{
 		CredentialsDir:    cfg.DoctrineCredentialsDir,
@@ -357,9 +363,9 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		},
 	})
 	questionsMod.WithDoctrine(doctrineMod)
-	go questionsMod.Run(workerCtx)
-	go doctrineMod.EnsurePrivateGuards(workerCtx)
-	go doctrineMod.RunOutcomeAnalysis(workerCtx)
+	startWorker(func() { questionsMod.Run(workerCtx) })
+	startWorker(func() { doctrineMod.EnsurePrivateGuards(workerCtx) })
+	startWorker(func() { doctrineMod.RunOutcomeAnalysis(workerCtx) })
 	reviewApp := &crossreview.GitHubApp{Config: crossreview.AppConfig{
 		ID: cfg.ReviewAppID, InstallationID: cfg.ReviewInstallationID, KeyFile: cfg.ReviewAppKeyFile,
 		TenantID: cfg.ReviewAppTenantID, Repository: cfg.ReviewAppRepository,
@@ -370,11 +376,11 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	}
 	reviewMod := crossreview.New(pool, reviewPublisher)
 	reviewMod.ConfigureWebhook(cfg.ReviewWebhookSecret)
-	go reviewMod.RunStatusReporter(workerCtx)
+	startWorker(func() { reviewMod.RunStatusReporter(workerCtx) })
 	deliveryMod := delivery.New(pool, reviewApp.Config, cfg.ReviewWebhookSecret, delivery.AppReader{App: reviewApp}, reviewMod.HandlePullChange)
-	go deliveryMod.Run(workerCtx)
-	go deliveryMod.RunAlerts(workerCtx)
-	go deliveryMod.RunAudit(workerCtx)
+	startWorker(func() { deliveryMod.Run(workerCtx) })
+	startWorker(func() { deliveryMod.RunAlerts(workerCtx) })
+	startWorker(func() { deliveryMod.RunAudit(workerCtx) })
 	api := &httpapi.Server{
 		Pool:                    pool,
 		Brand:                   &productBrand,
@@ -475,6 +481,10 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		IdleTimeout:       time.Minute,
 	}
 
+	// Start the complete worker set only after initialization succeeds.
+	for _, run := range workers {
+		go run()
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		api.SetServing(true)

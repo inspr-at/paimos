@@ -39,12 +39,11 @@ func TestServeBackgroundPoolHeadroom(t *testing.T) {
 	}
 	poolCfg.MaxConns = 4 // Old pgx default on the affected four-CPU host.
 	poolCfg.MinConns = 0
-	var armed atomic.Bool
 	held := make(chan struct{}, 4)
 	release := make(chan struct{})
 	defer close(release)
 	poolCfg.PrepareConn = func(ctx context.Context, _ *pgx.Conn) (bool, error) {
-		if armed.Load() && db.IsBackground(ctx) {
+		if db.IsBackground(ctx) {
 			held <- struct{}{}
 			select {
 			case <-release:
@@ -79,15 +78,6 @@ func TestServeBackgroundPoolHeadroom(t *testing.T) {
 	}()
 	client := &http.Client{Timeout: 10 * time.Second}
 	base := "http://" + ln.Addr().String()
-	resp, err := client.Get(base + "/api/ready")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("initial readiness = %d", resp.StatusCode)
-	}
-	armed.Store(true)
 	for range 4 {
 		select {
 		case <-held:
@@ -97,7 +87,7 @@ func TestServeBackgroundPoolHeadroom(t *testing.T) {
 			t.Fatal("real workers did not reach acquisition barrier")
 		}
 	}
-	resp, err = client.Get(base + "/api/ready")
+	resp, err := client.Get(base + "/api/ready")
 	if err != nil {
 		t.Fatal(err)
 	}
