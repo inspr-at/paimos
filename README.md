@@ -4061,6 +4061,47 @@ pool counters and the p95 of the latest 256 completed acquisitions (including
 failed acquisitions and background admission waits). A warning logs those
 statistics when acquisition waits remain present for more than five seconds.
 
+The complete `serve.go` worker inventory is below. Counts are simultaneous
+query-pool slots per loop; the shared `pool_max_conns - 2` limit also applies
+across every row. Tenant scans close their rows before tenant work starts.
+Advisory-lock lanes retain their one session and reuse it for sequential
+per-tenant work, with no nested pool acquire.
+
+| Worker entrypoint | Maximum query slots | Retained session / fan-out |
+| --- | ---: | --- |
+| `aithemaHost.Run` | 1 | Sequential callbacks; enabled with signing keys |
+| `attachedMessages.Run` | 1 | Sequential tenant sweep |
+| `runRoutineDispatchers` | 1 per tenant | Startup scan closes before tenant goroutines start |
+| `embedding.Worker.Run` | 1 | Sequential claim, provider call, finish |
+| `parentBenefits.Run` | 1 | Sequential claim, provider call, finish |
+| `runConfirmationJobs` | C + 1 | C render jobs plus scanner; C = `AEON_PDF_CONCURRENCY` (1–4) |
+| `portalMod.RunLimitSweep` | 1 | One expiry transaction |
+| `inbox.Worker.Run` | 1 | Sequential webhook claim, send, finish |
+| `harness.RunLostContactSweeper` | 1 | Sequential tenant passes and deadline reads |
+| `nodes.RunWorkLifecycle` | 1 | Sequential bounded tenant pages |
+| `modelMod.Run` | 1 | Sequential catalog refresh |
+| `inbox.Sweeper.Run` | 1 | Advisory-lock session reused for scan and tenant transactions |
+| `knowledge.Tagger.Run` | 1 | Advisory-lock session reused for scan and tenant transactions |
+| `statusAuto.Run` | 1 | Sequential tenant passes |
+| `recurringWork.Run` | 1 | Sequential tenant passes |
+| `phoneMod.Run` | 1 | Plus one dedicated LISTEN connection outside the pool |
+| `questionsMod.Run` | 1 | Sequential tenant dispatch |
+| `doctrineMod.EnsurePrivateGuards` | 1 | One-time sequential guard rebuild |
+| `doctrineMod.RunOutcomeAnalysis` | 1 | Sequential inbox and daily analysis |
+| `reviewMod.RunStatusReporter` | 2 | One retained session per independent reporter/refresh lane |
+| `deliveryMod.Run` | 1 | Reconciliation and observation locks share one session, including fan-out |
+| `deliveryMod.RunAlerts` | 1 | Per-tenant advisory session reused by alert transactions |
+| `deliveryMod.RunAudit` | 1 | Advisory session reused by audit transactions |
+| `db.WatchPool` | 0 | In-memory counters only |
+| HTTP Serve goroutine | 0 | Request handlers acquire separately as foreground work |
+
+Admission, work queue, review/shipping projections, usage dashboards and chat
+are mounted request modules; they add no process-wide worker loop in
+`serve.go`. Event and inbox stream listeners are request-owned dedicated
+sessions outside the query pool. Direct pool acquisition under a retained
+session context is rejected and counted as `nested_acquires`, so an accidental
+regression fails without consuming another slot.
+
 ## Server outbound calls (AEON-493)
 
 With default optional configuration and no opted-in tenant integrations, the active external-service call list is **empty**. Startup, scheduled default workers, health and installation-guide rendering do not contact GitHub, the tap, an update feed or a telemetry service. Postgres is the required operator-configured database dependency (`AEON_DATABASE_URL`), not an external-service integration; use a local socket or local address when the installation must have no network dependency. DNS resolution for the optional destinations below occurs only when their activation requires it.
