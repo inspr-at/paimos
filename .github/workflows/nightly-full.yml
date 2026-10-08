@@ -76,7 +76,8 @@ jobs:
             go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-${{ github.head_ref || github.ref_name }}-
             go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-main-
       - name: Install shells used by pairing tests
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+        timeout-minutes: 4
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" apt zsh fish
       - name: Test this shard (essential plus changed area, or full on main)
         env:
           GOFLAGS: -count=1
@@ -250,7 +251,8 @@ jobs:
       - name: Check Docker web inputs without Docker
         run: node --test scripts/docker-web-inputs.test.mjs
       - name: Install shells used by command round-trip unit tests
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh
+        timeout-minutes: 4
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" apt fish zsh
       - working-directory: web
         run: npm run typecheck
       # The session and run ledger fences (AEON-449): endpoints only in lib/agentRows.ts, wire rows only through the ledger.
@@ -364,8 +366,9 @@ jobs:
           fail-on-cache-miss: true
       # OS libraries are per runner; browser downloads and npm ci are shared.
       - name: Install Chromium system dependencies
+        timeout-minutes: 13
         working-directory: web
-        run: npx playwright install-deps chromium
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install-deps chromium
       - name: Run selected UI cases without retries
         env:
           RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
@@ -441,6 +444,7 @@ jobs:
         run: |
           python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'
           python3 -B scripts/audit/covcheck.py --summary
+          node scripts/check-tracked-bytecode.mjs
       - name: Full UI QA workflow regressions
         run: node --test scripts/full-ui-qa.test.mjs
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -499,8 +503,9 @@ jobs:
       - name: Build server
         run: go build -tags webembed -o bin/paimos ./cmd/aeon
       - name: Install Playwright
+        timeout-minutes: 13
         working-directory: web
-        run: npx playwright install --with-deps --only-shell chromium
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install --with-deps --only-shell chromium
       - name: Measure Chromium shell cleanup on success, failure and interruption
         env:
           AEON_BROWSER_LIFECYCLE: '1'

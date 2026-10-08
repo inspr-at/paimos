@@ -28,7 +28,7 @@
     "go-test": {
       "kind": "not-static",
       "reason": "Database-backed tier execution; property lint is a supplement.",
-      "runs_sha256": "8d2ee7a5280e716a86adb19100a477ab41b0c81be95db2421db3004f1fb928d1"
+      "runs_sha256": "af006cee28516c502267a87e50e3124920c265e7e91171111b3aa4569ddfaabb"
     },
     "go-timing": {
       "kind": "not-static",
@@ -52,7 +52,7 @@
     "web-shard": {
       "kind": "not-static",
       "reason": "Browser tier execution and infrastructure preparation.",
-      "runs_sha256": "bbe9bd9c51a7b4a1d8665eda611fdb1334c895c648ca2ac8a807359199774f81"
+      "runs_sha256": "601c133460c6b87d69d4087e12293d6eac12eb4cf373bc5ff6807fbaa5e593d8"
     },
     "web": {
       "kind": "not-static",
@@ -75,7 +75,7 @@
     "e2e-run": {
       "kind": "not-static",
       "reason": "Build, database and browser end-to-end execution.",
-      "runs_sha256": "62ae1990fe28604e8325a5dee018268fc2b1064b8eb8eac1c13c117ec5e13648"
+      "runs_sha256": "13936e512d39dfba01146f60e6cbf7948dc2499bda882824a91ca892b7439697"
     },
     "migration-compat": {
       "kind": "static"
@@ -133,7 +133,7 @@
       "job": "web-unit",
       "step": "Install shells used by command round-trip unit tests",
       "cwd": ".",
-      "command": "sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh",
+      "command": "bash \"$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh\" apt fish zsh",
       "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
     },
     {
@@ -457,6 +457,21 @@
         "python3"
       ],
       "timeout_seconds": 120
+    },
+    {
+      "id": "tracked-bytecode",
+      "command": "node scripts/check-tracked-bytecode.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "Offline code-health audit toolkit and slice ownership",
+        "command": "node scripts/check-tracked-bytecode.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30
     },
     {
       "id": "ci-plan-tests",
@@ -783,6 +798,16 @@
       ],
       "timeout_seconds": 30,
       "local_only": "AEON-752: component colour-literal guard belongs to ci-static only; artwork and documents are explicitly exempted."
+    },
+    {
+      "id": "apt-step-bounds",
+      "command": "node --test scripts/check-apt-bounds.test.mjs",
+      "cwd": ".",
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30,
+      "local_only": "AEON-933: every apt and Playwright install-deps step must carry a step timeout and a bounded retry. This guard only reads workflow files."
     }
   ]
 }
