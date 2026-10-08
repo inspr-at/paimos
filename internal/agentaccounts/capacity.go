@@ -780,22 +780,33 @@ func (s *scheduleOverride) UnmarshalJSON(raw []byte) error {
 // The schedule period determines the day's share. When its usage baseline is
 // missing, count use since the first actual sample and keep it marked unknown.
 // Anchoring the share at that sample would starve accounts first read late in
-// the day. Never move the usage baseline forward on every route.
+// the day. Never move the usage baseline forward on every route. A window that
+// opened during this period uses the same rule: its first sample is a baseline,
+// not consumption already inside the period, and its start stays at open time.
 func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading, now time.Time, s capacity.Schedule) (capacity.Pacing, bool, error) {
 	period, _ := s.Period(now)
-	start, used, known := v.StartsAt(), v.UsedPercent, !v.StartsAt().Before(period)
-	if !known {
-		var baseline float64
-		var at time.Time
-		err := tx.QueryRow(ctx, `SELECT used_percent::float8,read_at FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND resets_at=$4 AND read_at>=$5 AND read_at<=$6 AND source<>'estimate' ORDER BY read_at,CASE source WHEN 'harness' THEN 0 ELSE 1 END LIMIT 1`, id, v.WindowKind, v.Bucket, v.ResetsAt, period, v.ReadAt).Scan(&baseline, &at)
-		if err != nil && !isNoRows(err) {
-			return capacity.Pacing{}, false, err
-		}
-		if err == nil && baseline <= v.UsedPercent {
-			start, used, known = period, v.UsedPercent-baseline, at.Equal(period)
+	openedHere := !v.StartsAt().Before(period)
+	start := v.StartsAt()
+	bound := period
+	if openedHere {
+		bound = start
+	}
+	var baseline float64
+	var at time.Time
+	err := tx.QueryRow(ctx, `SELECT used_percent::float8,read_at FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND resets_at=$4 AND read_at>=$5 AND read_at<=$6 AND source<>'estimate' ORDER BY read_at,CASE source WHEN 'harness' THEN 0 ELSE 1 END LIMIT 1`, id, v.WindowKind, v.Bucket, v.ResetsAt, bound, v.ReadAt).Scan(&baseline, &at)
+	if err != nil && !isNoRows(err) {
+		return capacity.Pacing{}, false, err
+	}
+	used, known := 0.0, false
+	if err == nil && baseline <= v.UsedPercent {
+		used = v.UsedPercent - baseline
+		if openedHere {
+			known = !at.After(start)
 		} else {
-			start, used = period, 0
+			start, known = period, at.Equal(period)
 		}
+	} else if !openedHere {
+		start = period
 	}
 	learned, err := loadLearning(ctx, tx, id)
 	if err != nil {

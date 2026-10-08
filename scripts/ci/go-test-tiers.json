@@ -686,6 +686,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestExpiredReadingRestoresUnknownSlots","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestFiveHourFirstReadingNearUTCMidnightStaysEligible","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestFix2KnownKeyCapKeepsTotalBalanceUnknown","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestFix2LegacyReadinessFactsUseMembershipAndUnknownBalance","tier":"GATED-FULL"}
