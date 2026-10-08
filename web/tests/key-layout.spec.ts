@@ -89,6 +89,7 @@ for (const width of [360, 768, 1280]) for (const theme of ['light', 'dark'] as c
       await fresh.locator('.scope-group').filter({ hasText: 'Imports' }).scrollIntoViewIfNeeded()
       await page.screenshot({ path: testInfo.outputPath(`new-key-${width}-${theme}.png`) })
       await fresh.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(fresh).toHaveCount(0)
     } else if (kind === 'edit') {
       await agent(page).getByRole('button', { name: /^Edit scopes/ }).click()
       const edit = page.getByRole('dialog', { name: 'Edit scopes for pharos-deployer', exact: true })
@@ -98,6 +99,7 @@ for (const width of [360, 768, 1280]) for (const theme of ['light', 'dark'] as c
       await fits(edit, true)
       await tooltips(edit)
       await edit.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(edit).toHaveCount(0)
     } else {
       // This fresh fixture still holds the stored long scope; no edit GET pruned it.
       await agent(page).locator('tbody tr').filter({ hasText: 'aeon_ph4r_' }).getByRole('button', { name: /^Rotate key/ }).click()
