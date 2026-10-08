@@ -21,15 +21,17 @@ import (
 )
 
 type usagePolicy struct {
-	AccountID       string `json:"account_id"`
-	Posture         string `json:"posture"`
-	Source          string `json:"source"`
-	Floor           int    `json:"floor_percent"`
-	OwnFloor        int    `json:"own_floor_percent"`
-	Revision        int64  `json:"revision"`
-	BindingRevision int64  `json:"binding_revision"`
-	CanSetPosture   bool   `json:"can_set_posture"`
-	CanSetFloor     bool   `json:"can_set_floor"`
+	AccountID       string     `json:"account_id"`
+	Posture         string     `json:"posture"`
+	Source          string     `json:"source"`
+	Floor           int        `json:"floor_percent"`
+	OwnFloor        int        `json:"own_floor_percent"`
+	Revision        int64      `json:"revision"`
+	BindingRevision int64      `json:"binding_revision"`
+	CanSetPosture   bool       `json:"can_set_posture"`
+	CanSetFloor     bool       `json:"can_set_floor"`
+	Boost           int        `json:"boost_percent"`
+	BoostUntil      *time.Time `json:"boost_until"`
 	active          bool
 }
 
@@ -41,13 +43,19 @@ func validPosture(s string) bool { return s == "careful" || s == "balanced" || s
 func loadUsagePolicy(ctx context.Context, tx pgx.Tx, id string) (usagePolicy, error) {
 	p := usagePolicy{AccountID: id, Posture: "balanced", Source: "schedule"}
 	var account, person, workspace *string
-	err := tx.QueryRow(ctx, `SELECT
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return p, err
+	}
+	err = tx.QueryRow(ctx, `SELECT
  CASE WHEN a.usage_posture_person_id=`+modelprefs.CanonicalPersonSQL("a.owner_person_id")+` AND a.usage_posture_link_revision=a.link_revision THEN a.usage_posture END,
  (SELECT usage FROM model_pref_profiles WHERE scope='person' AND person_id=`+modelprefs.CanonicalPersonSQL("a.owner_person_id")+`),
  (SELECT usage FROM model_pref_profiles WHERE scope='workspace'),
  COALESCE(a.usage_floor_percent,0),COALESCE(a.usage_revision,0),a.link_revision,
- (SELECT COALESCE(max(usage_floor_percent),0) FROM agent_accounts WHERE id IN (`+quotaAccounts+`))
- FROM agent_accounts a WHERE a.id=$1`, id).Scan(&account, &person, &workspace, &p.OwnFloor, &p.Revision, &p.BindingRevision, &p.Floor)
+ (SELECT COALESCE(max(usage_floor_percent),0) FROM agent_accounts WHERE id IN (`+quotaAccounts+`)),
+ CASE WHEN a.boost_person_id=`+modelprefs.CanonicalPersonSQL("a.owner_person_id")+` AND a.boost_link_revision=a.link_revision AND a.boost_until>$2 THEN COALESCE(a.boost_percent,0) ELSE 0 END,
+ CASE WHEN a.boost_person_id=`+modelprefs.CanonicalPersonSQL("a.owner_person_id")+` AND a.boost_link_revision=a.link_revision AND a.boost_until>$2 AND a.boost_percent>0 THEN a.boost_until END
+ FROM agent_accounts a WHERE a.id=$1`, id, now).Scan(&account, &person, &workspace, &p.OwnFloor, &p.Revision, &p.BindingRevision, &p.Floor, &p.Boost, &p.BoostUntil)
 	if isNoRows(err) {
 		return p, fail(404, "account not found")
 	}
@@ -68,6 +76,9 @@ func loadUsagePolicy(ctx context.Context, tx pgx.Tx, id string) (usagePolicy, er
 	}
 	if p.Floor < 0 || p.Floor > 80 {
 		return p, fail(503, "invalid stored usage floor")
+	}
+	if !validBoost(p.Boost) {
+		return p, fail(503, "invalid stored boost")
 	}
 	return p, nil
 }
@@ -130,7 +141,28 @@ func applyUsageFloor(windows []Window, p usagePolicy) {
 				w.PaceModel = "unrestricted"
 			}
 		}
+		w.BurstRatio = min(1, w.BurstRatio+float64(p.Boost)/100)
 	}
+}
+
+func canonicalOwnedIDs(ctx context.Context, tx pgx.Tx, personID string, ids []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if personID == "" || len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM agent_accounts WHERE id = ANY($1::uuid[]) AND NOT `+retiredSQL+` AND `+modelprefs.CanonicalPersonSQL("owner_person_id")+`=`+modelprefs.CanonicalPersonSQL("$2::uuid"), ids, personID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
 }
 
 func (m *Module) usagePermissions(ctx context.Context, tx pgx.Tx, p tenant.Principal, a Account, u *usagePolicy) error {
@@ -365,7 +397,7 @@ func (m *Module) postures(w http.ResponseWriter, r *http.Request) {
 			if u.Posture == "maxout" {
 				keep = float64(u.Floor)
 			}
-			out.Accounts = append(out.Accounts, guardPosture{ID: a.ID, Label: a.Label, Order: advice[a.ID].Rank, Posture: u.Posture, Floor: u.Floor, Keep: keep})
+			out.Accounts = append(out.Accounts, guardPosture{ID: a.ID, Label: a.Label, Order: advice[a.ID].Rank, Posture: u.Posture, Floor: u.Floor, Boost: u.Boost, BoostUntil: u.BoostUntil, Keep: keep})
 		}
 		return nil
 	})

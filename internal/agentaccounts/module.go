@@ -55,6 +55,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	handle("GET /api/agent-accounts/catalog", m.catalog)
 	handle("GET /api/agent-accounts/overview", m.overview)
 	handle("GET /api/agent-accounts/posture", m.postures)
+	handle("PUT /api/agent-accounts/boost", m.writeBoost)
 	handle("PUT /api/agent-accounts/{accountId}/posture", m.writeUsagePolicy)
 	handle("PUT /api/agent-accounts/{accountId}/floor", m.writeUsagePolicy)
 	handle("GET /api/agent-accounts/groups", m.groups)

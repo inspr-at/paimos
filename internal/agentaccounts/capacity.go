@@ -916,6 +916,13 @@ func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading
 	}
 	p, err := capacity.Plan(capacity.PlanInput{Now: now, Reset: v.ResetsAt, WindowStart: start, Remaining: 100 - v.UsedPercent - drift, UsedToday: used, WindowLength: time.Duration(v.WindowMinutes) * time.Minute, AutoReserve: metric.AutoReserve, Throughput: metric.PerHour * float64(parallel)}, s)
 	p.DriftPercent = drift
+	if err == nil && v.Source != "estimate" && (v.Freshness(now) == "fresh" || v.Freshness(now) == "aging") {
+		u, loadErr := loadUsagePolicy(ctx, tx, id)
+		if loadErr != nil {
+			return p, known, loadErr
+		}
+		p = boostPacing(p, 100-v.UsedPercent-drift, u.Boost, s, now)
+	}
 	return p, known, err
 }
 

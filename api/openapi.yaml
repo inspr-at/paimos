@@ -35,6 +35,50 @@ paths:
       responses:
         '201': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/boost:
+    put:
+      operationId: putAccountBoost
+      summary: Set Boost today on the person's accounts
+      description: "Person account.manage and canonical owner only. Atomically writes every current canonical-owned account inside the mutation fence. The body lists exactly the privacy-visible owned accounts, with the policy and binding revisions captured on screen. Accounts withheld by owner-sharing are updated from the locked row's stored revision, omitted from accounts, and reported only as withheld_count. Boost adds N/100 to pacing, never to vendor allowance; hard floors, Hold and safety guards still apply. Ends at 23:59 in the supplied IANA local timezone, computed by the server clock. Zero clears it. At most 1024 accounts and a five-second deadline."
+      tags: [agent-accounts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [boost_percent, timezone, accounts]
+              properties:
+                boost_percent: {type: integer, enum: [0, 10, 20, 30]}
+                timezone: {type: string, minLength: 1, maxLength: 128}
+                accounts:
+                  type: array
+                  minItems: 0
+                  maxItems: 1024
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [account_id, revision, binding_revision]
+                    properties:
+                      account_id: {type: string, format: uuid}
+                      revision: {type: integer, minimum: 0}
+                      binding_revision: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: "Visible owned account policies. Withheld owned accounts are saved and omitted."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accounts]
+                properties:
+                  accounts: {type: array, items: {$ref: '#/components/schemas/AccountUsagePolicy'}}
+                  withheld_count: {type: integer, minimum: 0, description: "Canonical-owned accounts updated from their stored revisions because owner-sharing withheld them. Omitted when zero."}
+                  withheld_boost_until: {type: [string, 'null'], format: date-time, description: "Shared expiry of a nonzero withheld boost. Absent when withheld_count is zero or the boost is cleared."}
+        '400': {description: "Invalid boost, timezone or account list."}
+        '403': {description: "Current person owner and account.manage required."}
+        '409': {description: "Visible account list, policy or binding changed; reload before retrying."}
   /agent-accounts/capacity:
     get:
       operationId: listAccountCapacity
@@ -191,7 +235,7 @@ paths:
   /agent-accounts/posture:
     get:
       operationId: listAccountPostures
-      description: "Small, tenant-scoped guard projection of owner posture and floors, without windows, owner details or credentials. Requires account.read, including a live explicit key scope for agents. Only owner-authorized or usage-shared accounts are included; sharing is rechecked at the response boundary. At most 100 accounts per keyset page, with a five-second deadline. Order follows routing advice; Max out uses the soonest active reset. Boost remains zero until its separate feature ships."
+      description: "Small, tenant-scoped guard projection of owner posture, floors and active Boost today, without windows, owner details or credentials. Requires account.read, including a live explicit key scope for agents. Only owner-authorized or usage-shared accounts are included; sharing is rechecked at the response boundary. At most 100 accounts per keyset page, with a five-second deadline. Order follows routing advice; Max out uses the soonest active reset. Expired or rebound boosts read as zero and null."
       parameters:
         - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, grok, pi, cursor, gemini, opencode]}}
         - {name: after, in: query, schema: {type: string, format: uuid}}
@@ -7363,6 +7407,20 @@ paths:
         "403": {"$ref":"#/components/responses/Error"}
         "409": {"description":"Stale revision, conflicting retry or invalid transition"}
       requestBody: {"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryRoundProgress"}}}}
+  /projects/{projectId}/delivery-reviews:
+    parameters: [{"name":"projectId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}]
+    get: {"operationId":"listDeliveryReviews","description":"Requires delivery_reviews.read. Bounded position keyset pagination of shadow review rounds. All proposed actions are observations and confer no approval authority.","security":[{"session":[]},{"agentKey":[]}],"responses":{"200":{"description":"Shadow review result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryReviewPage"}}}},"400":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"404":{"$ref":"#/components/responses/Error"},"409":{"description":"Conflicting retry, stale revision or unavailable binding"}},"parameters":[{"name":"after","in":"query","schema":{"type":"string","pattern":"^[0-9]{1,19}$"}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":100,"default":50}}]}
+    post: {"operationId":"queueDeliveryReview","description":"Requires explicit delivery_reviews.manage. Records an idempotent shadow review for a completed delivery round and completed build run on the same leaf. Author family comes from the run profile. Continuations use the latest review of this slug and cannot reset the two gate-triggered fix cap. No worker starts.","security":[{"session":[]},{"agentKey":[]}],"responses":{"200":{"description":"Shadow review result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryReviewRound"}}}},"400":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"404":{"$ref":"#/components/responses/Error"},"409":{"description":"Conflicting retry, stale revision or unavailable binding"},"201":{"description":"Shadow review result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryReviewRound"}}}}},"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryReviewInput"}}}}}
+  /projects/{projectId}/delivery-reviews/settings:
+    parameters: [{"name":"projectId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}]
+    get: {"operationId":"getDeliveryReviewSettings","description":"Requires delivery_reviews.read. Default off; only shadow mode is supported.","security":[{"session":[]},{"agentKey":[]}],"responses":{"200":{"description":"Shadow review result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryReviewSettings"}}}},"400":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"404":{"$ref":"#/components/responses/Error"},"409":{"description":"Conflicting retry, stale revision or unavailable binding"}}}
+    put: {"operationId":"putDeliveryReviewSettings","description":"Requires explicit delivery_reviews.manage and current revision. Records a project switch change as an event.","security":[{"session":[]},{"agentKey":[]}],"responses":{"200":{"description":"Shadow review result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryReviewSettings"}}}},"400":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"404":{"$ref":"#/components/responses/Error"},"409":{"description":"Conflicting retry, stale revision or unavailable binding"}},"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryReviewSettings"}}}}}
+  /projects/{projectId}/delivery-reviews/{reviewId}/claim:
+    parameters: [{"name":"projectId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},{"name":"reviewId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}]
+    post: {"operationId":"claimDeliveryReview","description":"Requires explicit delivery_reviews.claim. Resolves the current reviewer route from preferences, qualified accounts and current AEON-851 family policy. One claimant per review; request UUID is bound to caller and comparison. Always execute=false. Every decision is recorded, including off or unavailable routes.","security":[{"session":[]},{"agentKey":[]}],"responses":{"200":{"description":"Shadow review result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryReviewClaim"}}}},"400":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"404":{"$ref":"#/components/responses/Error"},"409":{"description":"Conflicting retry, stale revision or unavailable binding"}},"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryReviewClaimInput"}}}}}
+  /projects/{projectId}/delivery-reviews/{reviewId}/verdict:
+    parameters: [{"name":"projectId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},{"name":"reviewId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}]
+    post: {"operationId":"recordDeliveryReviewVerdict","description":"Requires explicit delivery_reviews.report and original claimant. Ingests a bounded script observation for the pinned head and selected profile, rechecking the current target, completed author run, route identity and policy. High/Medium block; changes with only Low/Nit becomes ok. Two gate-triggered fix rounds are proposed, then a lead decision. Low/Nit become one proposed sibling follow-up ticket per verdict with pills. Script action comparison is recorded. These shadow proposals never create tickets, Desk requests, build rounds, GitHub statuses or shipping authority.","security":[{"session":[]},{"agentKey":[]}],"responses":{"200":{"description":"Shadow review result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryReviewRound"}}}},"400":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"404":{"$ref":"#/components/responses/Error"},"409":{"description":"Conflicting retry, stale revision or unavailable binding"}},"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryReviewVerdictInput"}}}}}
   /projects/{projectId}/delivery-settings:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -13122,6 +13180,7 @@ components:
         routable: {type: boolean, description: "Advisory admission and slot eligibility, never launch authority or proof of measured room. A redacted row is always false and is not quota headroom."}
         wait: {$ref: '#/components/schemas/CapacityWait'}
         details_redacted: {type: boolean, description: "Windows, schedule, limit, pool membership and routing withheld by current owner-sharing policy. A redacted row also reports routable false and a wait whose code is state."}
+        boost_withheld: {type: boolean, description: "Canonical-owned account whose usage policy is withheld. Boost today updates it from the stored revision and the client must not send its id."}
     AccountOverviewLearning:
       type: object
       additionalProperties: false
@@ -13167,8 +13226,8 @@ components:
         order: {type: integer, minimum: 0, description: "Routing rank; zero means currently unavailable."}
         posture: {type: string, enum: [careful, balanced, maxout]}
         floor_percent: {type: integer, minimum: 0, maximum: 80}
-        boost_percent: {type: integer, enum: [0]}
-        boost_until: {type: 'null'}
+        boost_percent: {type: integer, enum: [0, 10, 20, 30]}
+        boost_until: {type: [string, 'null'], format: date-time}
         keep_for_you_percent: {type: number, minimum: 0, maximum: 80}
     AccountProbe:
       type: object
@@ -13293,6 +13352,8 @@ components:
         binding_revision: {type: integer, minimum: 0}
         can_set_posture: {type: boolean}
         can_set_floor: {type: boolean}
+        boost_percent: {type: integer, enum: [0, 10, 20, 30]}
+        boost_until: {type: [string, 'null'], format: date-time}
     AccountUse:
       type: object
       required: [accounts]
@@ -15320,6 +15381,17 @@ components:
         rework_rate: {type: [string, 'null'], pattern: '^[1-9][0-9]*/[1-9][0-9]*$', description: exceptions/deliveries. Null when there are no exceptions.}
         by_model: {type: array, items: {$ref: '#/components/schemas/DeliveryRatingGroup'}}
         by_harness: {type: array, items: {$ref: '#/components/schemas/DeliveryRatingGroup'}}
+    DeliveryReviewClaim: {"type":"object","additionalProperties":false,"required":["request_id","project_id","review_id","claimant_id","script_family","mode","execute","reason","round","agreement"],"properties":{"request_id":{"type":"string","format":"uuid"},"project_id":{"type":"string","format":"uuid"},"review_id":{"type":"string","format":"uuid"},"claimant_id":{"type":"string","format":"uuid"},"script_family":{"oneOf":[{"type":"string"},{"type":"null"}]},"mode":{"type":"string","enum":["off","shadow"]},"execute":{"type":"boolean","const":false},"reason":{"type":"string"},"round":{"oneOf":[{"$ref":"#/components/schemas/DeliveryReviewRound"},{"type":"null"}]},"agreement":{"oneOf":[{"type":"boolean"},{"type":"null"}]}}}
+    DeliveryReviewClaimInput: {"type":"object","additionalProperties":false,"required":["request_id"],"properties":{"request_id":{"type":"string","format":"uuid"},"script_family":{"oneOf":[{"type":"string"},{"type":"null"}]}}}
+    DeliveryReviewFinding: {"type":"object","additionalProperties":false,"required":["severity","file","line","message"],"properties":{"severity":{"type":"string","enum":["high","medium","low","nit"]},"file":{"type":"string","maxLength":500},"line":{"type":"integer","minimum":1,"maximum":10000000},"message":{"type":"string","maxLength":2000}}}
+    DeliveryReviewFollowUp: {"type":"object","additionalProperties":false,"required":["id","parent_id","title","description","status","priority","hide_from_release_notes","pill_en","pill_de","benefit_en","benefit_de","findings"],"properties":{"id":{"type":"string","format":"uuid"},"parent_id":{"oneOf":[{"type":"string","format":"uuid"},{"type":"null"}]},"title":{"type":"string"},"description":{"type":"string"},"status":{"type":"string","const":"backlog"},"priority":{"type":"string","const":"low"},"hide_from_release_notes":{"type":"boolean","const":true},"pill_en":{"type":"string"},"pill_de":{"type":"string"},"benefit_en":{"type":"string"},"benefit_de":{"type":"string"},"findings":{"type":"array","maxItems":100,"items":{"$ref":"#/components/schemas/DeliveryReviewFinding"}}}}
+    DeliveryReviewInput: {"type":"object","additionalProperties":false,"required":["source_round_id","author_run_id","repository","base_sha","head_sha"],"properties":{"source_round_id":{"type":"string","format":"uuid"},"author_run_id":{"type":"string","format":"uuid"},"repository":{"type":"string","maxLength":200},"base_sha":{"type":"string","pattern":"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},"head_sha":{"type":"string","pattern":"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"}}}
+    DeliveryReviewLeadDecision: {"type":"object","additionalProperties":false,"required":["id","title","options"],"properties":{"id":{"type":"string","format":"uuid"},"title":{"type":"string"},"options":{"type":"array","items":{"type":"string"}}}}
+    DeliveryReviewPage: {"type":"object","additionalProperties":false,"required":["items","settings","next_cursor"],"properties":{"items":{"type":"array","maxItems":100,"items":{"$ref":"#/components/schemas/DeliveryReviewRound"}},"settings":{"$ref":"#/components/schemas/DeliveryReviewSettings"},"next_cursor":{"oneOf":[{"type":"string"},{"type":"null"}]}}}
+    DeliveryReviewRound: {"type":"object","additionalProperties":false,"required":["source_round_id","author_run_id","repository","base_sha","head_sha","id","project_id","ticket_node_id","slug","key","position","state","gate_fix_rounds","previous_review_id","delta_base_sha","author_family","route","policy","reason","claimant_id","claim_request_id","revision","updated_at","action","effective_verdict","verdict_input","fix_round","follow_up","lead_decision","agreement"],"properties":{"source_round_id":{"type":"string","format":"uuid"},"author_run_id":{"type":"string","format":"uuid"},"repository":{"type":"string","maxLength":200},"base_sha":{"type":"string","pattern":"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},"head_sha":{"type":"string","pattern":"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},"id":{"type":"string","format":"uuid"},"project_id":{"type":"string","format":"uuid"},"ticket_node_id":{"type":"string","format":"uuid"},"slug":{"type":"string"},"key":{"type":"string"},"position":{"type":"integer","minimum":1},"state":{"type":"string","enum":["queued","claimed","completed"]},"gate_fix_rounds":{"type":"integer","minimum":0,"maximum":2},"previous_review_id":{"oneOf":[{"type":"string","format":"uuid"},{"type":"null"}]},"delta_base_sha":{"oneOf":[{"type":"string"},{"type":"null"}]},"author_family":{"type":"string"},"route":{"oneOf":[{"$ref":"#/components/schemas/DeliveryReviewRoute"},{"type":"null"}]},"policy":{"$ref":"#/components/schemas/ReviewPolicy"},"reason":{"type":"string"},"claimant_id":{"oneOf":[{"type":"string","format":"uuid"},{"type":"null"}]},"claim_request_id":{"oneOf":[{"type":"string","format":"uuid"},{"type":"null"}]},"revision":{"type":"integer","minimum":1},"updated_at":{"type":"string","format":"date-time"},"action":{"type":"string","enum":["","ready_to_ship","fix","lead_decision"]},"effective_verdict":{"type":"string","enum":["","ok","changes"]},"verdict_input":{"oneOf":[{"$ref":"#/components/schemas/DeliveryReviewVerdictInput"},{"type":"null"}]},"fix_round":{"oneOf":[{"$ref":"#/components/schemas/DeliveryRoundInput"},{"type":"null"}]},"follow_up":{"oneOf":[{"$ref":"#/components/schemas/DeliveryReviewFollowUp"},{"type":"null"}]},"lead_decision":{"oneOf":[{"$ref":"#/components/schemas/DeliveryReviewLeadDecision"},{"type":"null"}]},"agreement":{"oneOf":[{"type":"boolean"},{"type":"null"}]}}}
+    DeliveryReviewRoute: {"type":"object","additionalProperties":false,"required":["profile_id","account_id","reviewer_principal_id","family","harness","model","effort"],"properties":{"profile_id":{"type":"string","format":"uuid"},"account_id":{"type":"string","format":"uuid"},"reviewer_principal_id":{"type":"string","format":"uuid"},"family":{"type":"string"},"harness":{"type":"string"},"model":{"type":"string"},"effort":{"type":"string"}}}
+    DeliveryReviewSettings: {"type":"object","additionalProperties":false,"required":["mode","revision"],"properties":{"mode":{"type":"string","enum":["off","shadow"]},"revision":{"type":"integer","minimum":0}}}
+    DeliveryReviewVerdictInput: {"type":"object","additionalProperties":false,"required":["request_id","revision","head_sha","reviewer_profile_id","verdict","findings"],"properties":{"request_id":{"type":"string","format":"uuid"},"revision":{"type":"integer","minimum":1},"head_sha":{"type":"string","pattern":"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},"reviewer_profile_id":{"type":"string","format":"uuid"},"verdict":{"type":"string","enum":["ok","changes"]},"findings":{"type":"array","maxItems":100,"items":{"$ref":"#/components/schemas/DeliveryReviewFinding"}},"script_action":{"oneOf":[{"type":"string","enum":["ready_to_ship","fix","lead_decision"]},{"type":"null"}]}}}
     DeliveryRound:
       type: "object"
       additionalProperties: false

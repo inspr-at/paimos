@@ -636,6 +636,12 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestBlindVendorBackoffAdmitsOneRecovery","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestBoostAppliesWithheldOwnedAccounts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestBoostAtomicOwnerWriteAndLiveExpiry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestBoostLocalExpiryAndSafety","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityActiveWindowSelection","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityCheckQuotaWatermarkAcrossPoolResources","tier":"GATED-FULL"}
@@ -5151,6 +5157,12 @@
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryManageExplicitAgentGrant","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryReconciliationHealsMissedWebhooksAndFanoutRetry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryReviewsConcurrentClaimsHaveOneOwner","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryReviewsSeverityFloorAndBoundedObservations","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryReviewsShadowFixCapFollowUpReplayAndIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliverySettingsAndIngressBinding","tier":"ESSENTIAL"}
     ,
