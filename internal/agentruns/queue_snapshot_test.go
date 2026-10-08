@@ -151,6 +151,31 @@ func TestParentQueueSnapshotBounds(t *testing.T) {
 	if !out.Partial || !out.Truncated || f.queuePage(t).Count != 100 {
 		t.Fatalf("bounded apply %+v", out)
 	}
+	// R18: reading a bounded receipt must not repeat ticket and permission
+	// queries for every leaf. Count database operations, never elapsed time.
+	queries := &snapshotQueryCount{}
+	cfg := f.d.App.Config()
+	cfg.ConnConfig.Tracer = queries
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	f.mux = http.NewServeMux()
+	agentruns.New(pool).Mount(f.mux)
+	var read parentSnapshot
+	f.call(t, f.person, "GET", "/api/queue-snapshots/"+s.ID, nil, 200, &read)
+	if len(read.Items) != 100 || read.State != "applied" || !read.Truncated || !read.Partial {
+		t.Fatalf("bounded receipt %+v", read)
+	}
+	for _, item := range read.Items {
+		if item.Outcome != "queued" || item.RunID == "" {
+			t.Fatalf("receipt lost queued identity: %+v", item)
+		}
+	}
+	if n := queries.total.Load(); n > 24 {
+		t.Fatalf("bounded receipt needed %d queries for one project's 100 leaves; want at most 24", n)
+	}
 	// A timeout before transaction entry must not create any snapshot or queue
 	// write. This is cancellation evidence, with no elapsed-time assertion.
 	r := httprequestCancelled(f.person, "/api/queue-snapshots/"+s.ID+"/apply")
@@ -159,6 +184,14 @@ func TestParentQueueSnapshotBounds(t *testing.T) {
 		t.Fatal("cancelled request reported success")
 	}
 }
+
+type snapshotQueryCount struct{ total atomic.Int64 }
+
+func (q *snapshotQueryCount) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	q.total.Add(1)
+	return ctx
+}
+func (*snapshotQueryCount) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 func TestParentQueueSnapshotOwnerPermissionRevocationAndVisibility(t *testing.T) {
 	f := setup(t)
 	nodes.New(f.d.App, nil).Mount(f.mux)
