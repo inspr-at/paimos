@@ -5170,11 +5170,19 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowGitHubRunsBecomeChecksSteps","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowLiveRunsStayOpenUntilCompletion","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowMergeBeforeCIStaysClosed","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowNormsSeparateWaitsAndNeedHistory","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowParkEpisodesStayDistinct","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowProjectsPaimosRoundsReviewsAndHolds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowReadIsForProjectMembers","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowReworkReopensCompletedPhase","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRolloutIngestIsIdempotentAndRead","tier":"ESSENTIAL"}
     ,
@@ -5182,7 +5190,11 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRunsMapToChecksQueueAndFlakes","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowStreamRevokesDuringBacklog","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowStreamSendsValueFreeLiveHints","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowWorkflowRunShowsRunningChecks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryManageExplicitAgentGrant","tier":"ESSENTIAL"}
     ,

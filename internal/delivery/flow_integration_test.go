@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -131,7 +133,8 @@ func TestDeliveryFlowRolloutIngestIsIdempotentAndRead(t *testing.T) {
 		t.Fatalf("rollout evidence leaked into the flow: %s", raw)
 	}
 
-	// The healthy report ends the run: 100 %, no gate, no ETA.
+	// The healthy report ends the run at healthy_at. The explicit gate stays
+	// until a later report omits it. There is still no ETA.
 	healthy := f.at.Add(-2 * time.Minute)
 	f.call(t, f.person, "POST", path+"/rollout", release126(f, cut, &healthy), 200, &res)
 	if res.Changed != 1 {
@@ -139,8 +142,16 @@ func TestDeliveryFlowRolloutIngestIsIdempotentAndRead(t *testing.T) {
 	}
 	var run DeliveryFlowRun
 	f.call(t, f.person, "GET", path+"/runs/"+res.ItemID, nil, 200, &run)
-	if run.Item.PctDone != 100 || run.Item.EndedAt == nil || !run.Item.EndedAt.Equal(healthy) || run.Item.NextHumanGate != nil || len(run.Steps) != 11 || len(run.Incidents) != 1 {
+	if run.Item.PctDone != 100 || run.Item.EndedAt == nil || !run.Item.EndedAt.Equal(healthy) || run.Item.ETA.Basis != "none" || run.Item.ETA.P50At != nil ||
+		run.Item.NextHumanGate == nil || run.Item.NextHumanGate.What != "agm1 GO" || len(run.Steps) != 11 || len(run.Incidents) != 1 {
 		t.Fatalf("run: %+v (%d steps)", run.Item, len(run.Steps))
+	}
+	cleared := release126(f, cut, &healthy)
+	delete(cleared, "next_human_gate")
+	f.call(t, f.person, "POST", path+"/rollout", cleared, 200, &res)
+	f.call(t, f.person, "GET", path+"/runs/"+res.ItemID, nil, 200, &run)
+	if run.Item.PctDone != 100 || run.Item.EndedAt == nil || !run.Item.EndedAt.Equal(healthy) || run.Item.NextHumanGate != nil {
+		t.Fatalf("omitted gate: %+v", run.Item)
 	}
 	// Replay at an earlier moment shows the run open again.
 	f.call(t, f.person, "GET", path+"/runs/"+res.ItemID+"?at="+cut.Add(30*time.Minute).Format(time.RFC3339), nil, 200, &run)
@@ -564,5 +575,327 @@ func TestDeliveryFlowStreamSendsValueFreeLiveHints(t *testing.T) {
 	}
 	if seen["delivery.step"] != 11 || seen["delivery.incident"] != 1 || seen["delivery.item"] != 1 {
 		t.Fatalf("hints: %v", seen)
+	}
+}
+
+// flushGate blocks the second flush: the ready frame, then the first full
+// page. The test revokes the reader and jumps the authorization clock before
+// that flush returns, so the next page must not be sent.
+type flushGate struct {
+	http.ResponseWriter
+	n       int
+	blocked chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (g *flushGate) Flush() {
+	g.n++
+	if g.n == 2 {
+		g.once.Do(func() { close(g.blocked) })
+		<-g.release
+	}
+	if f, ok := g.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (g *flushGate) Unwrap() http.ResponseWriter { return g.ResponseWriter }
+
+func TestDeliveryFlowStreamRevokesDuringBacklog(t *testing.T) {
+	// Risk: a full page of pending hints is sent without re-checking
+	// delivery.read, so a revoked reader keeps receiving the project.
+	f := newFixture(t)
+	prev := flowStreamBatch
+	flowStreamBatch = 1
+	release := make(chan struct{})
+	blocked := make(chan struct{})
+	var once sync.Once
+	var jumped atomic.Bool
+	free := func() { once.Do(func() { close(release) }) }
+	var server *httptest.Server
+	defer func() {
+		free()
+		if server != nil {
+			server.Close()
+		}
+		flowStreamBatch = prev
+		f.m.flowStreamNow = nil
+	}()
+	f.m.flowStreamNow = func() time.Time {
+		if jumped.Load() {
+			return time.Now().Add(time.Hour)
+		}
+		return time.Now()
+	}
+	step := map[string]any{"key": "a", "step": "a", "kind": "work", "actor": map[string]any{"type": "ci", "principal_id": nil, "label": "Checks", "model": nil}, "started_at": f.at.Add(-time.Hour), "ended_at": f.at.Add(-50 * time.Minute)}
+	var res RolloutResult
+	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/flow/rollout", map[string]any{"schema": "aeon.rollout.v1", "release": "201", "cut_at": f.at.Add(-time.Hour), "steps": []any{step}}, 200, &res)
+	if res.Changed < 2 {
+		t.Fatalf("pending hints: %d", res.Changed)
+	}
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mux.ServeHTTP(&flushGate{ResponseWriter: w, blocked: blocked, release: release}, r.WithContext(tenant.WithPrincipal(r.Context(), f.person)))
+	}))
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", server.URL+"/api/projects/"+f.project+"/delivery/flow/stream?after=0", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("stream: %v %v", resp, err)
+	}
+	defer resp.Body.Close()
+	frames := make(chan string, 8)
+	go func() {
+		defer close(frames)
+		sc := bufio.NewScanner(resp.Body)
+		var event string
+		for sc.Scan() {
+			line := sc.Text()
+			switch {
+			case strings.HasPrefix(line, "event: "):
+				event = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: ") && strings.HasPrefix(event, "delivery."):
+				frames <- event
+			}
+		}
+	}()
+	select {
+	case <-blocked:
+	case <-ctx.Done():
+		t.Fatal("stream did not block on the full page")
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.person.ID)
+		return err
+	})
+	jumped.Store(true)
+	free()
+	got := 0
+	timeout := time.NewTimer(15 * time.Second)
+	defer timeout.Stop()
+	for {
+		select {
+		case _, ok := <-frames:
+			if !ok {
+				if got != 1 {
+					t.Fatalf("delivery hints after revocation: %d", got)
+				}
+				return
+			}
+			got++
+		case <-timeout.C:
+			t.Fatalf("stream stayed open after revocation with %d hints", got)
+		}
+	}
+}
+
+func workflowRunBody(action string, id int64, attempt int, event, branch, head, workflow string, created time.Time, started *time.Time, conclusion any, pr int64) map[string]any {
+	status := map[string]string{"requested": "queued", "in_progress": "in_progress", "completed": "completed"}[action]
+	run := map[string]any{"id": id, "run_attempt": attempt, "name": "CI", "path": workflow, "event": event, "head_branch": branch, "head_sha": head, "status": status, "conclusion": conclusion, "created_at": created, "updated_at": created.Add(10 * time.Minute), "pull_requests": []any{}}
+	if started != nil {
+		run["run_started_at"] = *started
+	}
+	if pr > 0 {
+		run["pull_requests"] = []any{map[string]any{"number": pr}}
+	}
+	return map[string]any{"action": action, "workflow_run": run}
+}
+
+func TestDeliveryFlowWorkflowRunShowsRunningChecks(t *testing.T) {
+	// Risk: a running check never appears, an in-progress run is stored as a
+	// metric fact, or a late queued delivery reopens a finished run.
+	f, g := newMetricsFixture(t)
+	g.respond = func(string) (any, error) { return nil, errRead }
+	p := f.pull()
+	f.gh.pulls[7] = p
+	opened := f.at.Add(-3 * time.Hour)
+	auditSend(t, f, "pull_request", "flow-live-pr", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": opened, "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+	created := f.at.Add(-20 * time.Minute)
+	auditSend(t, f, "workflow_run", "flow-live-queued", workflowRunBody("requested", 501, 1, "pull_request", p.Branch, p.Head, defaultCIWorkflow, created, nil, nil, 7), 204)
+	if step, ended, _ := flowStepRow(t, f, "github_app", "run/501/1"); step != "ci" || ended != nil {
+		t.Fatalf("queued: %s %v", step, ended)
+	}
+	if runs, _, _ := metricCounts(t, f); runs != 0 {
+		t.Fatalf("queued run wrote %d metric runs", runs)
+	}
+	started := created.Add(time.Minute)
+	auditSend(t, f, "workflow_run", "flow-live-running", workflowRunBody("in_progress", 501, 1, "pull_request", p.Branch, p.Head, defaultCIWorkflow, created, &started, nil, 7), 204)
+	var start time.Time
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT started_at FROM delivery_flow_steps WHERE source='github_app' AND source_key='run/501/1'`).Scan(&start)
+	})
+	if !start.Equal(started) {
+		t.Fatalf("running start %s", start)
+	}
+	var flow DeliveryFlow
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/flow?from="+created.Add(-time.Minute).Format(time.RFC3339), nil, 200, &flow)
+	if len(flow.Items) != 1 || flow.Items[0].EndedAt != nil || flow.Items[0].PctDone != 0 || flow.Items[0].CurrentStepID == nil || *flow.Items[0].CurrentStepID != flowStepID(f.person.TenantID, flow.Items[0].ID, "github_app", "run/501/1") {
+		t.Fatalf("live item: %+v", flow.Items)
+	}
+	auditSend(t, f, "workflow_run", "flow-live-done", workflowRunBody("completed", 501, 1, "pull_request", p.Branch, p.Head, defaultCIWorkflow, created, &started, "failure", 7), 204)
+	if step, ended, outcome := flowStepRow(t, f, "github_app", "run/501/1"); step != "ci" || ended == nil || outcome == nil || *outcome != "red" {
+		t.Fatalf("completed: %s %v %v", step, ended, outcome)
+	}
+	if runs, _, _ := metricCounts(t, f); runs != 0 {
+		t.Fatalf("completed workflow run wrote %d metric runs", runs)
+	}
+	events := flowEventCount(t, f)
+	auditSend(t, f, "workflow_run", "flow-live-done", workflowRunBody("completed", 501, 1, "pull_request", p.Branch, p.Head, defaultCIWorkflow, created, &started, "failure", 7), 204)
+	auditSend(t, f, "workflow_run", "flow-live-late", workflowRunBody("requested", 501, 1, "pull_request", p.Branch, p.Head, defaultCIWorkflow, created, nil, nil, 7), 204)
+	if _, ended, outcome := flowStepRow(t, f, "github_app", "run/501/1"); ended == nil || outcome == nil || *outcome != "red" || flowEventCount(t, f) != events {
+		t.Fatalf("late queued reopened the run, events %d → %d", events, flowEventCount(t, f))
+	}
+	auditSend(t, f, "workflow_run", "flow-live-nightly", workflowRunBody("requested", 777, 1, "pull_request", p.Branch, p.Head, defaultNightlyWorkflow, created, nil, nil, 7), 204)
+	auditSend(t, f, "workflow_run", "flow-live-unlinked", workflowRunBody("requested", 778, 1, "pull_request", "work/other", strings.Repeat("9", 40), defaultCIWorkflow, created, nil, nil, 8), 204)
+	var steps int
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_flow_steps`).Scan(&steps)
+	})
+	if steps != 1 || flowEventCount(t, f) != events {
+		t.Fatalf("unrelated runs stored steps %d events %d", steps, flowEventCount(t, f))
+	}
+	auditSend(t, f, "workflow_run", "flow-live-bad", workflowRunBody("completed", 501, 1, "pull_request", p.Branch, "nope", defaultCIWorkflow, created, &started, "failure", 7), 502)
+	auditSend(t, f, "workflow_run", "flow-live-action", map[string]any{"action": "deleted", "workflow_run": map[string]any{}}, 400)
+
+	branch := "gh-readonly-queue/main/pr-7-" + p.Head
+	auditSend(t, f, "workflow_run", "flow-live-queue", workflowRunBody("requested", 600, 1, "merge_group", branch, strings.Repeat("e", 40), defaultCIWorkflow, created, nil, nil, 0), 204)
+	if step, ended, _ := flowStepRow(t, f, "github_app", "run/600/1/queued"); step != "queue" || ended != nil {
+		t.Fatalf("queue wait: %s %v", step, ended)
+	}
+	auditSend(t, f, "workflow_run", "flow-live-queue-run", workflowRunBody("in_progress", 600, 1, "merge_group", branch, strings.Repeat("e", 40), defaultCIWorkflow, created, &started, nil, 0), 204)
+	if _, ended, _ := flowStepRow(t, f, "github_app", "run/600/1/queued"); ended == nil || !ended.Equal(started) {
+		t.Fatalf("queue wait still open: %v", ended)
+	}
+	if step, ended, _ := flowStepRow(t, f, "github_app", "run/600/1"); step != "queue" || ended != nil {
+		t.Fatalf("queue work: %s %v", step, ended)
+	}
+}
+
+func TestDeliveryFlowMergeBeforeCIStaysClosed(t *testing.T) {
+	// Risk: a merge projected before the change has a flow row is discarded,
+	// and the later CI ingestion leaves the merged change open forever.
+	f, g := newMetricsFixture(t)
+	p := f.pull()
+	f.gh.pulls[7] = p
+	opened := f.at.Add(-3 * time.Hour)
+	auditSend(t, f, "pull_request", "flow-merge-open", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": opened, "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+	p.Open, p.Merged = false, true
+	f.gh.pulls[7] = p
+	pr := int64(7)
+	fact := MergeFact{SHA: strings.Repeat("c", 40), Head: p.Head, Title: p.Title, Branch: p.Branch, MergedBy: "github-merge-queue[bot]", PR: &pr, At: f.at}
+	g.checks[fact.SHA] = auditGreen()
+	auditSend(t, f, "pull_request", "flow-merge-before-ci", auditPRBody(f, fact), 204)
+	delivery := f.item(t, 7)
+	if delivery.State != Merged {
+		t.Fatalf("delivery state %s", delivery.State)
+	}
+	for {
+		more, err := f.m.SyncFlow(t.Context(), f.person.TenantID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !more {
+			break
+		}
+	}
+	var items int
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_flow_items`).Scan(&items)
+	})
+	if items != 0 {
+		t.Fatalf("merge of an unseen change created %d flow rows", items)
+	}
+	head := p.Head
+	created := f.at.Add(-2 * time.Hour)
+	latest := githubRunBody(501, 1, defaultCIWorkflow, "pull_request", p.Branch, head, created, 10*time.Minute, "success", 900)
+	latest["pull_requests"] = []any{map[string]any{"number": 7}}
+	g.respond = func(path string) (any, error) {
+		if path == "/actions/runs?check_suite_id=900&head_sha="+head+"&per_page=2" {
+			return map[string]any{"total_count": 1, "workflow_runs": []any{latest}}, nil
+		}
+		return nil, errRead
+	}
+	auditSend(t, f, "check_suite", "flow-merge-suite", map[string]any{"action": "completed", "check_suite": map[string]any{"id": 900, "head_sha": head, "head_branch": p.Branch, "status": "completed", "conclusion": "success", "app": map[string]any{"slug": "github-actions"}, "pull_requests": []any{}}}, 204)
+	var ended *time.Time
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT ended_at FROM delivery_flow_items WHERE kind='change' AND ref='AEON-848'`).Scan(&ended)
+	})
+	if ended == nil || !ended.Equal(delivery.Since) {
+		t.Fatalf("flow ended %v, delivery merged at %s", ended, delivery.Since)
+	}
+}
+
+func TestDeliveryFlowParkEpisodesStayDistinct(t *testing.T) {
+	// Risk: parking the same round twice reuses one step, so the second wait
+	// never opens, and a replay closes a later episode.
+	f := newFixture(t)
+	t0 := f.at.Add(-2 * time.Hour)
+	at := func(m int) time.Time { return t0.Add(time.Duration(m) * time.Minute) }
+	pr := int64(7)
+	build := Round{RoundInput: RoundInput{Ticket: f.ticket, Slug: "aeon-848", Kind: "first_build", Number: 1, PR: &pr}, ID: requestID(1), Project: f.project, State: "queued"}
+	send := func(m int, state string) {
+		r := build
+		r.State = state
+		appendFlowSource(t, f, queueChange(f.project, "transition", nil, queueSnapshot{Project: f.project, Round: &r}, at(m)))
+	}
+	send(0, "queued")
+	send(10, "parked")
+	send(20, "queued")
+	send(30, "parked")
+	for {
+		more, err := f.m.SyncFlow(t.Context(), f.person.TenantID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !more {
+			break
+		}
+	}
+	type hold struct {
+		key   string
+		start time.Time
+		end   *time.Time
+	}
+	var holds []hold
+	f.tx(t, func(tx pgx.Tx) error {
+		rows, err := tx.Query(t.Context(), `SELECT source_key,started_at,ended_at FROM delivery_flow_steps WHERE source='paimos' AND step_key='hold' ORDER BY started_at,source_key`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var h hold
+			if err := rows.Scan(&h.key, &h.start, &h.end); err != nil {
+				return err
+			}
+			holds = append(holds, h)
+		}
+		return rows.Err()
+	})
+	if len(holds) != 2 || holds[0].key == holds[1].key || !strings.Contains(holds[0].key, "/parked/") || !strings.Contains(holds[1].key, "/parked/") ||
+		!holds[0].start.Equal(at(10)) || holds[0].end == nil || !holds[0].end.Equal(at(20)) || !holds[1].start.Equal(at(30)) || holds[1].end != nil {
+		t.Fatalf("park episodes: %+v", holds)
+	}
+	events := flowEventCount(t, f)
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE delivery_flow_cursors SET last_event_id=0`)
+		return err
+	})
+	for {
+		more, err := f.m.SyncFlow(t.Context(), f.person.TenantID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !more {
+			break
+		}
+	}
+	var stillOpen int
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_flow_steps WHERE source='paimos' AND step_key='hold' AND ended_at IS NULL`).Scan(&stillOpen)
+	})
+	if flowEventCount(t, f) != events || stillOpen != 1 {
+		t.Fatalf("replay events %d → %d, open holds %d", events, flowEventCount(t, f), stillOpen)
 	}
 }

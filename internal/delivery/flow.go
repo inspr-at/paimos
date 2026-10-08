@@ -217,32 +217,42 @@ func flowItemView(row flowItemRow, steps []FlowStep, h flowHistory, at time.Time
 		out.PRs = []int64{}
 	}
 	path := flowPath(row.Kind)
+	// Completion follows the latest critical-path attempt at this moment. An
+	// earlier success does not keep a phase done once rework is the attempt
+	// that applies, and a side step never completes the phase it sits beside.
 	done := map[string]bool{}
 	open := map[string]FlowStep{}
+	latest := map[string]FlowStep{}
 	var current *FlowStep
 	for i := range steps {
 		s := steps[i]
 		if s.StartedAt.After(at) {
 			continue
 		}
-		if endedBy(s.EndedAt, at) {
-			if s.Kind != "wait" && s.Outcome == nil || s.Outcome != nil && (*s.Outcome == "ok" || *s.Outcome == "green") {
-				done[s.StepKey] = true
-			}
-			continue
-		}
-		if !s.Side {
+		openNow := !endedBy(s.EndedAt, at)
+		if openNow && !s.Side {
 			if current == nil || s.StartedAt.After(current.StartedAt) || s.StartedAt.Equal(current.StartedAt) && s.ID > current.ID {
 				current = &steps[i]
 			}
+			if s.Kind == "wait" && s.WaitReason != nil && *s.WaitReason == "human_gate" && row.Gate == nil && !endedBy(row.Ended, at) {
+				out.NextHumanGate = &FlowGate{PrincipalID: s.WaitsFor, What: s.StepKey}
+			}
 		}
-		if s.Kind != "wait" {
-			if prev, ok := open[s.StepKey]; !ok || s.StartedAt.Before(prev.StartedAt) {
+		if s.Side || s.Kind == "wait" {
+			continue
+		}
+		if openNow {
+			if prev, ok := open[s.StepKey]; !ok || s.StartedAt.After(prev.StartedAt) || s.StartedAt.Equal(prev.StartedAt) && s.ID > prev.ID {
 				open[s.StepKey] = s
 			}
 		}
-		if s.Kind == "wait" && s.WaitReason != nil && *s.WaitReason == "human_gate" && row.Gate == nil && !endedBy(row.Ended, at) {
-			out.NextHumanGate = &FlowGate{PrincipalID: s.WaitsFor, What: s.StepKey}
+		if prev, ok := latest[s.StepKey]; !ok || s.StartedAt.After(prev.StartedAt) || s.StartedAt.Equal(prev.StartedAt) && s.ID > prev.ID {
+			latest[s.StepKey] = s
+		}
+	}
+	for key, s := range latest {
+		if endedBy(s.EndedAt, at) && (s.Outcome == nil || *s.Outcome == "ok" || *s.Outcome == "green") {
+			done[key] = true
 		}
 	}
 	finished := endedBy(row.Ended, at)
@@ -250,7 +260,9 @@ func flowItemView(row flowItemRow, steps []FlowStep, h flowHistory, at time.Time
 		id := current.ID
 		out.CurrentStepID = &id
 	}
-	if row.Gate != nil && !finished {
+	// An explicit gate is the reporter's pending decision. A healthy release
+	// does not clear it; only a later report that omits the gate does.
+	if row.Gate != nil {
 		g := *row.Gate
 		out.NextHumanGate = &g
 	}
@@ -263,7 +275,6 @@ func flowItemView(row flowItemRow, steps []FlowStep, h flowHistory, at time.Time
 	out.PctDone = int(math.Round(100 * float64(count) / float64(len(path))))
 	if finished {
 		out.PctDone = 100
-		out.NextHumanGate = nil
 		reason := "The run has finished."
 		out.ETA = FlowETA{Basis: "none", Reason: &reason}
 		return out

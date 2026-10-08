@@ -53,7 +53,8 @@ func TestDeliveryFlowETAFromHistoryOrNoneWithReason(t *testing.T) {
 		t.Fatalf("thin eta: %+v %v", v.ETA, v.ETA.Reason)
 	}
 
-	// An OPS estimate wins; a finished run has none and is 100 % done.
+	// An OPS estimate wins. A finished run has none and is 100 % done, and an
+	// explicit human gate stays until a later report omits it.
 	p50, p90 := at.Add(time.Hour), at.Add(2*time.Hour)
 	ops := row
 	ops.OpsP50, ops.OpsP90 = &p50, &p90
@@ -64,12 +65,39 @@ func TestDeliveryFlowETAFromHistoryOrNoneWithReason(t *testing.T) {
 	ended := at.Add(-time.Minute)
 	done.Ended = &ended
 	done.Gate = &FlowGate{What: "agm1 GO"}
-	if v = flowItemView(done, steps, full, at); v.ETA.Basis != "none" || v.ETA.Reason == nil || v.PctDone != 100 || v.CurrentStepID != nil || v.NextHumanGate != nil {
+	if v = flowItemView(done, steps, full, at); v.ETA.Basis != "none" || v.ETA.Reason == nil || v.ETA.P50At != nil || v.PctDone != 100 || v.CurrentStepID != nil || v.NextHumanGate == nil || v.NextHumanGate.What != "agm1 GO" {
 		t.Fatalf("finished: %+v", v)
 	}
 	// Before the run ended, the same moment in Replay still shows it open.
 	if v = flowItemView(done, steps, full, ended.Add(-time.Minute)); v.PctDone == 100 || v.NextHumanGate == nil || v.NextHumanGate.What != "agm1 GO" {
 		t.Fatalf("replayed moment: %+v", v)
+	}
+}
+
+func TestDeliveryFlowReworkReopensCompletedPhase(t *testing.T) {
+	// Risk: an earlier successful build stays done while a fix is still
+	// running, so progress and the ETA skip that active build. A side check
+	// must not complete the phase it sits beside.
+	at := time.Date(2026, 10, 8, 20, 0, 0, 0, time.UTC)
+	row := flowItemRow{ID: "item", Kind: "change", Ref: "AEON-1", Title: "Change"}
+	ok, changes, green := flowStr("ok"), flowStr("changes"), flowStr("green")
+	build := flowStepAt("b1", "build", "work", at.Add(-40*time.Minute), 20, ok)
+	review := flowStepAt("r1", "review", "work", at.Add(-20*time.Minute), 10, changes)
+	fix := flowStepAt("b2", "build", "rework", at.Add(-5*time.Minute), -1, nil)
+	side := flowStepAt("c1", "ci", "work", at.Add(-4*time.Minute), 1, green)
+	side.Side = true
+	full := flowHistory{
+		{"build", false}:  {N: 5, P50: 30, P90: 40},
+		{"review", false}: {N: 4, P50: 10, P90: 20},
+		{"ci", false}:     {N: 9, P50: 8, P90: 12},
+		{"queue", false}:  {N: 3, P50: 7, P90: 9},
+	}
+	v := flowItemView(row, []FlowStep{build, review, fix, side}, full, at)
+	// The fix has run 5 of build's usual 30. Review asked for changes, so it
+	// is not done. The side check does not finish ci. 25+10+8+7 and 35+20+12+9.
+	if v.PctDone != 0 || v.CurrentStepID == nil || *v.CurrentStepID != "b2" || v.ETA.Basis != "history" || v.ETA.P50At == nil || v.ETA.P90At == nil ||
+		!v.ETA.P50At.Equal(at.Add(50*time.Minute)) || !v.ETA.P90At.Equal(at.Add(76*time.Minute)) {
+		t.Fatalf("rework: pct %d current %v eta %+v", v.PctDone, v.CurrentStepID, v.ETA)
 	}
 }
 
@@ -132,6 +160,54 @@ func TestDeliveryFlowRunsMapToChecksQueueAndFlakes(t *testing.T) {
 
 func itoaInt(n int) string { b, _ := json.Marshal(n); return string(b) }
 
+func TestDeliveryFlowLiveRunsStayOpenUntilCompletion(t *testing.T) {
+	// Risk: a queued or running check is stored already ended, a merge-queue
+	// run is drawn as work before it starts, or one failed attempt is flaky
+	// before a later attempt passes.
+	t0 := time.Date(2026, 10, 8, 18, 0, 0, 0, time.UTC)
+	started := t0.Add(time.Minute)
+	ci := flowLiveRun{ID: 501, Attempt: 1, Event: "pull_request", Created: t0, Started: t0, Phase: "queued"}
+	queued := flowLiveSteps(ci)
+	if len(queued) != 1 || queued[0].Key != "run/501/1" || queued[0].StepKey != "ci" || queued[0].Ended != nil || !queued[0].Progress || !queued[0].Started.Equal(t0) {
+		t.Fatalf("queued check: %+v", queued)
+	}
+	ci.Phase, ci.Started = "running", started
+	running := flowLiveSteps(ci)
+	if len(running) != 1 || running[0].Ended != nil || !running[0].Progress || !running[0].Started.Equal(started) {
+		t.Fatalf("running check: %+v", running)
+	}
+	ci.Phase, ci.Completed, ci.Conclusion = "completed", t0.Add(11*time.Minute), "failure"
+	failed := flowLiveSteps(ci)
+	if len(failed) != 1 || failed[0].Ended == nil || failed[0].Progress || failed[0].Outcome == nil || *failed[0].Outcome != "red" {
+		t.Fatalf("failed check: %+v", failed)
+	}
+	ci.Attempt, ci.Conclusion = 2, "success"
+	passed := flowLiveSteps(ci)
+	if len(passed) != 1 || passed[0].Kind != "rework" || passed[0].Outcome == nil || *passed[0].Outcome != "green" || passed[0].Ended == nil {
+		t.Fatalf("passed rework: %+v", passed)
+	}
+
+	queue := flowLiveRun{ID: 600, Attempt: 1, Event: "merge_group", Created: t0, Started: t0, Phase: "queued"}
+	waiting := flowLiveSteps(queue)
+	if len(waiting) != 1 || waiting[0].Key != "run/600/1/queued" || waiting[0].Kind != "wait" || waiting[0].Ended != nil || !waiting[0].Progress || waiting[0].WaitReason == nil || *waiting[0].WaitReason != "queue" {
+		t.Fatalf("queued merge group: %+v", waiting)
+	}
+	queue.Phase, queue.Started = "running", started
+	active := flowLiveSteps(queue)
+	if len(active) != 2 || active[0].Key != "run/600/1/queued" || active[0].Ended == nil || !active[0].Ended.Equal(started) || active[1].Key != "run/600/1" || active[1].StepKey != "queue" || active[1].Ended != nil || !active[1].Progress {
+		t.Fatalf("running merge group: %+v", active)
+	}
+	queue.Phase, queue.Completed, queue.Conclusion = "completed", t0.Add(12*time.Minute), "success"
+	done := flowLiveSteps(queue)
+	got := map[string]flowStepInput{}
+	for _, s := range done {
+		got[s.Key] = s
+	}
+	if len(got) != 2 || got["run/600/1/queued"].Ended == nil || got["run/600/1"].Ended == nil || got["run/600/1"].Outcome == nil || *got["run/600/1"].Outcome != "green" || got["run/600/1"].Progress {
+		t.Fatalf("completed merge group: %+v", got)
+	}
+}
+
 func TestDeliveryFlowRolloutValidation(t *testing.T) {
 	// Risk: a report stores a credential-like label for every member to read,
 	// accepts a step the page cannot draw, or a recovery step that is not in
@@ -145,14 +221,18 @@ func TestDeliveryFlowRolloutValidation(t *testing.T) {
 		t.Fatalf("valid rollout: %v", err)
 	}
 	for name, mutate := range map[string]func(*rolloutInput){
-		"schema":      func(in *rolloutInput) { in.Schema = "aeon.rollout.v2" },
-		"rollback":    func(in *rolloutInput) { in.Direction = "rollback" },
-		"release":     func(in *rolloutInput) { in.Release = "126; drop" },
-		"outcome":     func(in *rolloutInput) { in.Outcome = "maybe" },
-		"credential":  func(in *rolloutInput) { title := "Release ghp_" + strings.Repeat("A", 36); in.Title = &title },
-		"future":      func(in *rolloutInput) { cut := now.Add(time.Hour); in.CutAt = &cut },
-		"unknown key": func(in *rolloutInput) { in.Steps[0] = json.RawMessage(strings.Replace(string(in.Steps[0]), `"key"`, `"secret":"x","key"`, 1)) },
-		"bad step":    func(in *rolloutInput) { in.Steps[0] = json.RawMessage(strings.Replace(string(in.Steps[0]), `"step":"a"`, `"step":"z"`, 1)) },
+		"schema":     func(in *rolloutInput) { in.Schema = "aeon.rollout.v2" },
+		"rollback":   func(in *rolloutInput) { in.Direction = "rollback" },
+		"release":    func(in *rolloutInput) { in.Release = "126; drop" },
+		"outcome":    func(in *rolloutInput) { in.Outcome = "maybe" },
+		"credential": func(in *rolloutInput) { title := "Release ghp_" + strings.Repeat("A", 36); in.Title = &title },
+		"future":     func(in *rolloutInput) { cut := now.Add(time.Hour); in.CutAt = &cut },
+		"unknown key": func(in *rolloutInput) {
+			in.Steps[0] = json.RawMessage(strings.Replace(string(in.Steps[0]), `"key"`, `"secret":"x","key"`, 1))
+		},
+		"bad step": func(in *rolloutInput) {
+			in.Steps[0] = json.RawMessage(strings.Replace(string(in.Steps[0]), `"step":"a"`, `"step":"z"`, 1))
+		},
 		"wait reason": func(in *rolloutInput) {
 			in.Steps[0] = json.RawMessage(strings.Replace(string(in.Steps[0]), `"kind":"work"`, `"kind":"work","wait_reason":"queue"`, 1))
 		},

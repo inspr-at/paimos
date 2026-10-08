@@ -56,6 +56,10 @@ type flowStepInput struct {
 	Side        bool
 	Merge       bool
 	CloseOnly   bool
+	// Progress is a live report of one step. While the stored step is open,
+	// the report replaces it. A report with no end never reopens a step that
+	// has already ended, so a late queued delivery stays idempotent.
+	Progress bool
 }
 
 type flowIncidentInput struct {
@@ -171,6 +175,18 @@ func applyFlowTx(ctx context.Context, tx pgx.Tx, tid string, batches []flowBatch
 		if in.SetETA {
 			after.OpsP50, after.OpsP90 = flowTimePtr(in.OpsP50), flowTimePtr(in.OpsP90)
 		}
+		// A merge projected before this row existed is still the linked
+		// delivery's current state. Late creation must not leave it open.
+		if before == nil && in.Kind == "change" && after.Ended == nil {
+			mergedAt, err := flowMergedAtTx(ctx, tx, in.Ticket, after.PRs)
+			if err != nil {
+				return changes, err
+			}
+			if mergedAt != nil {
+				v := flowTime(*mergedAt)
+				after.Ended = &v
+			}
+		}
 		for _, s := range b.Steps {
 			if !s.CloseOnly && (after.Started == nil || s.Started.Before(*after.Started)) {
 				v := flowTime(s.Started)
@@ -254,6 +270,30 @@ func scanFlowItem(row pgx.Row) (flowItemRow, error) {
 	return i, nil
 }
 
+// flowMergedAtTx is the linked delivery's merge time, when that delivery is
+// already merged. A pull request match wins over another merged delivery of
+// the same ticket.
+func flowMergedAtTx(ctx context.Context, tx pgx.Tx, ticket *string, prs []int64) (*time.Time, error) {
+	var at time.Time
+	var err error
+	switch {
+	case len(prs) > 0:
+		err = tx.QueryRow(ctx, `SELECT state_since FROM delivery_items WHERE state='merged' AND pull_request = ANY($1::bigint[]) ORDER BY state_since DESC LIMIT 1`, prs).Scan(&at)
+	case ticket != nil && *ticket != "":
+		err = tx.QueryRow(ctx, `SELECT state_since FROM delivery_items WHERE state='merged' AND ticket_node_id=$1 ORDER BY state_since DESC LIMIT 1`, *ticket).Scan(&at)
+	default:
+		return nil, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	at = at.UTC()
+	return &at, nil
+}
+
 func loadFlowItemTx(ctx context.Context, tx pgx.Tx, id string, lock bool) (*flowItemRow, error) {
 	q := `SELECT ` + flowItemColumns + ` FROM delivery_flow_items WHERE id=$1`
 	if lock {
@@ -290,6 +330,9 @@ func applyFlowStepTx(ctx context.Context, tx pgx.Tx, tid string, item flowItemRo
 		return false, id, err
 	}
 	if !exists && in.CloseOnly {
+		return false, id, nil
+	}
+	if exists && in.Progress && before.EndedAt != nil && in.Ended == nil {
 		return false, id, nil
 	}
 	after := FlowStep{ID: id, ItemID: item.ID, StepKey: in.StepKey, Round: in.Round, Kind: in.Kind, Actor: in.Actor, StartedAt: flowTime(in.Started), EndedAt: flowTimePtr(in.Ended), Outcome: in.Outcome, WaitReason: in.WaitReason, WaitsFor: in.WaitsFor, Side: in.Side, Source: in.Source}

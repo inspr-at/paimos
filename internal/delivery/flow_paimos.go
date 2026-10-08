@@ -279,24 +279,53 @@ func flowFromPaimosTx(ctx context.Context, tx pgx.Tx, tid string, e flowSourceEv
 		return nil, err
 	}
 	work := flowStepInput{Source: "paimos", Key: key, StepKey: stepKey, Round: round, Kind: kind, Actor: builder, Started: at, Merge: true}
-	hold := flowStepInput{Source: "paimos", Key: key + "/parked", StepKey: "hold", Round: round, Kind: "wait", Actor: FlowActor{Type: "agent", Label: "LEAD"}, Started: at, WaitReason: flowStr("dependency"), Merge: true}
-	closeHold := hold
-	closeHold.Ended, closeHold.CloseOnly = &at, true
+	// Each parking episode has its own key. Closing matches an earlier open
+	// episode, never the row this event itself opens on replay.
+	own := key + "/parked/" + strconv.FormatInt(e.ID, 10)
+	hold := flowStepInput{Source: "paimos", Key: own, StepKey: "hold", Round: round, Kind: "wait", Actor: FlowActor{Type: "agent", Label: "LEAD"}, Started: at, WaitReason: flowStr("dependency"), Merge: true}
+	closeHold, err := flowCloseParkTx(ctx, tx, tid, t.Project, t.Key, key, own, at)
+	if err != nil {
+		return nil, err
+	}
+	steps := []flowStepInput{}
+	if closeHold != nil {
+		steps = append(steps, *closeHold)
+	}
 	switch r.State {
 	case "claimed", "running":
-		b.Steps = []flowStepInput{closeHold, work}
+		steps = append(steps, work)
 	case "done":
 		work.Ended, work.Outcome, work.CloseOnly = &at, flowStr("ok"), true
-		b.Steps = []flowStepInput{closeHold, work}
+		steps = append(steps, work)
 	case "parked":
 		work.Ended, work.CloseOnly = &at, true
-		b.Steps = []flowStepInput{work, hold}
+		steps = append(steps, work, hold)
 	case "queued":
-		b.Steps = []flowStepInput{closeHold}
+		if closeHold == nil {
+			return nil, nil
+		}
 	default:
 		return nil, nil
 	}
+	b.Steps = steps
 	return b, nil
+}
+
+// flowCloseParkTx finds the open parking episode of this round that started
+// at or before at, other than the episode this event opens. A replay of the
+// opening event must not close that row, and a later episode is still open.
+func flowCloseParkTx(ctx context.Context, tx pgx.Tx, tid, project, ref, workKey, ownKey string, at time.Time) (*flowStepInput, error) {
+	item := flowItemID(tid, project, "change", ref)
+	prefix := workKey + "/parked/"
+	var open string
+	err := tx.QueryRow(ctx, `SELECT source_key FROM delivery_flow_steps WHERE item_id=$1 AND source='paimos' AND ended_at IS NULL AND started_at<=$2 AND left(source_key,length($3::text))=$3 AND source_key<>$4 ORDER BY started_at DESC, source_key DESC LIMIT 1`, item, at, prefix, ownKey).Scan(&open)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &flowStepInput{Source: "paimos", Key: open, StepKey: "hold", Round: 1, Kind: "wait", Started: at, Ended: &at, CloseOnly: true}, nil
 }
 
 // flowFromHoldTx records delivery holds as waits and a merge as the end of

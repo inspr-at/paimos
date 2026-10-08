@@ -18,9 +18,12 @@ import (
 const (
 	flowStreamHeartbeat = 15 * time.Second
 	flowStreamLifetime  = 30 * time.Minute
-	flowStreamBatch     = 200
 	flowStreamSlots     = 64
 )
+
+// flowStreamBatch is one page of hints. A full page is fetched again at once;
+// the authorization deadline still applies before that next page.
+var flowStreamBatch = 200
 
 var flowEventTypes = []string{"delivery.step", "delivery.item", "delivery.incident"}
 
@@ -36,8 +39,9 @@ type flowHint struct {
 
 // flowStream is the Live feed of one project's flow: delivery.step,
 // delivery.item and delivery.incident hints after the event log commits them.
-// Members need delivery.read, re-checked on every heartbeat; a revoked reader
-// is disconnected. Hints carry ids only.
+// Members need delivery.read. The check is due on the heartbeat deadline,
+// including while a full page is drained or notifications keep arriving; a
+// revoked reader is disconnected before any later hint. Hints carry ids only.
 func (m *Module) flowStream(w http.ResponseWriter, r *http.Request) {
 	p, project, ok := metricProject(w, r)
 	if !ok {
@@ -124,8 +128,16 @@ func (m *Module) flowStream(w http.ResponseWriter, r *http.Request) {
 	if flush(fmt.Sprintf("id: %d\nevent: stream.ready\ndata: {\"after\":%d}\n\n", after, after)) != nil {
 		return
 	}
-	heartbeat := time.Now().Add(flowStreamHeartbeat)
+	heartbeat := m.streamNow().Add(flowStreamHeartbeat)
 	for ctx.Err() == nil {
+		// Due even when the last page was full or a notification woke the
+		// wait early. Backlog and traffic must not postpone the re-check.
+		if !m.streamNow().Before(heartbeat) {
+			if authorize() != nil || flush("event: stream.ping\ndata: {}\n\n") != nil {
+				return
+			}
+			heartbeat = m.streamNow().Add(flowStreamHeartbeat)
+		}
 		hints, err := m.flowHints(ctx, p, project, after)
 		if err != nil {
 			return
@@ -144,12 +156,17 @@ func (m *Module) flowStream(w http.ResponseWriter, r *http.Request) {
 			if !errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 				return
 			}
-			if authorize() != nil || flush("event: stream.ping\ndata: {}\n\n") != nil {
-				return
-			}
-			heartbeat = time.Now().Add(flowStreamHeartbeat)
+			// The next iteration finds the deadline due and authorizes
+			// before it sends anything further.
 		}
 	}
+}
+
+func (m *Module) streamNow() time.Time {
+	if m.flowStreamNow != nil {
+		return m.flowStreamNow()
+	}
+	return time.Now()
 }
 
 // The flow hints are read as a service: event-family visibility hides

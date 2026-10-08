@@ -3722,7 +3722,7 @@ paths:
       parameters:
         - {name: X-Hub-Signature-256, in: header, required: true, schema: {type: string}}
         - {name: X-GitHub-Delivery, in: header, required: true, schema: {type: string, maxLength: 128}}
-        - {name: X-GitHub-Event, in: header, required: true, schema: {type: string, enum: [pull_request, check_run, check_suite, merge_group, push, status]}}
+        - {name: X-GitHub-Event, in: header, required: true, schema: {type: string, enum: [pull_request, check_run, check_suite, merge_group, push, status, workflow_run]}}
       requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
       responses:
         '204': {description: 'Processed or duplicate delivery'}

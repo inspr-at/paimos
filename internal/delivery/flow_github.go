@@ -3,11 +3,15 @@ package delivery
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -127,6 +131,203 @@ func (m *Module) flowFromRuns(ctx context.Context, runs []metricRun) error {
 			}
 		}
 		return nil
+	})
+	return err
+}
+
+// flowLiveRun is one workflow-run transition. Phase is queued, running or
+// completed. Completed is the only phase with an end; metric facts stay on
+// the completed check-suite path.
+type flowLiveRun struct {
+	ID         int64
+	Attempt    int
+	Event      string
+	Workflow   string
+	Created    time.Time
+	Started    time.Time
+	Completed  time.Time
+	Conclusion string
+	Phase      string
+	PR         int64
+}
+
+// flowLiveRunFrom reads one workflow_run delivery. skip means the run is
+// well formed and not a linked check or merge-queue run. A malformed run is
+// errRead so GitHub redelivers it.
+func flowLiveRunFrom(raw []byte) (flowLiveRun, bool, error) {
+	var e struct {
+		Action string `json:"action"`
+		Run    struct {
+			ID         int64      `json:"id"`
+			Attempt    int        `json:"run_attempt"`
+			Name       string     `json:"name"`
+			Path       string     `json:"path"`
+			Event      string     `json:"event"`
+			Branch     string     `json:"head_branch"`
+			Head       string     `json:"head_sha"`
+			Status     string     `json:"status"`
+			Conclusion *string    `json:"conclusion"`
+			Created    time.Time  `json:"created_at"`
+			Started    *time.Time `json:"run_started_at"`
+			Updated    time.Time  `json:"updated_at"`
+			Pulls      []struct {
+				Number int64 `json:"number"`
+			} `json:"pull_requests"`
+		} `json:"workflow_run"`
+	}
+	if json.Unmarshal(raw, &e) != nil {
+		return flowLiveRun{}, false, errRead
+	}
+	r := e.Run
+	if r.ID <= 0 || r.Attempt < 1 || r.Attempt > 1000 || r.Name == "" || len(r.Name) > 200 || r.Path == "" || len(r.Path) > 255 || r.Event == "" || len(r.Event) > 64 || len(r.Branch) > 255 || !reviewgate.ValidSHA(r.Head) || r.Created.IsZero() || len(r.Pulls) > 100 {
+		return flowLiveRun{}, false, errRead
+	}
+	phase := ""
+	switch e.Action {
+	case "requested":
+		if r.Status == "in_progress" || r.Status == "completed" {
+			return flowLiveRun{}, false, errRead
+		}
+		phase = "queued"
+	case "in_progress":
+		if r.Status != "" && r.Status != "in_progress" {
+			return flowLiveRun{}, false, errRead
+		}
+		phase = "running"
+	case "completed":
+		if (r.Status != "" && r.Status != "completed") || r.Conclusion == nil || *r.Conclusion == "" || len(*r.Conclusion) > 32 || r.Updated.IsZero() {
+			return flowLiveRun{}, false, errRead
+		}
+		phase = "completed"
+	default:
+		return flowLiveRun{}, false, errRead
+	}
+	if r.Event != "pull_request" && r.Event != "merge_group" {
+		return flowLiveRun{}, true, nil
+	}
+	var pr int64
+	if len(r.Pulls) > 0 && r.Pulls[0].Number > 0 {
+		pr = r.Pulls[0].Number
+	} else if match := queueBranch.FindStringSubmatch(r.Branch); match != nil {
+		pr, _ = strconv.ParseInt(match[1], 10, 64)
+	}
+	if pr <= 0 {
+		return flowLiveRun{}, true, nil
+	}
+	started := r.Created
+	if r.Started != nil && !r.Started.IsZero() {
+		started = *r.Started
+	}
+	out := flowLiveRun{ID: r.ID, Attempt: r.Attempt, Event: r.Event, Workflow: r.Path, Created: r.Created.UTC(), Started: started.UTC(), Phase: phase, PR: pr}
+	if phase == "completed" {
+		out.Completed = r.Updated.UTC()
+		out.Conclusion = *r.Conclusion
+	}
+	return out, false, nil
+}
+
+func flowLiveWork(key, stepKey string, round int, kind string, actor FlowActor, start time.Time, ended *time.Time, outcome *string) flowStepInput {
+	return flowStepInput{Source: "github_app", Key: key, StepKey: stepKey, Round: round, Kind: kind, Actor: actor, Started: start, Ended: ended, Outcome: outcome, Progress: ended == nil}
+}
+
+func flowQueueWait(key string, started time.Time, ended *time.Time) flowStepInput {
+	return flowStepInput{Source: "github_app", Key: key + "/queued", StepKey: "queue", Round: 1, Kind: "wait", Actor: FlowActor{Type: "queue", Label: "Checks"}, Started: started, Ended: ended, WaitReason: flowStr("queue"), Progress: ended == nil}
+}
+
+// flowLiveSteps maps one workflow-run transition. A queued or running check
+// stays open. Completion uses the same keys as a finished suite run; a single
+// failure is red until that suite reports a later pass as flaky.
+func flowLiveSteps(r flowLiveRun) []flowStepInput {
+	stepKey, actor := "ci", FlowActor{Type: "ci", Label: "Checks"}
+	if r.Event == "merge_group" {
+		stepKey, actor = "queue", FlowActor{Type: "queue", Label: "Checks"}
+	}
+	kind := "work"
+	if r.Attempt > 1 {
+		kind = "rework"
+	}
+	round := r.Attempt
+	if round > 1000 {
+		round = 1000
+	}
+	if round < 1 {
+		round = 1
+	}
+	key := fmt.Sprintf("run/%d/%d", r.ID, r.Attempt)
+	start := r.Started
+	if start.IsZero() {
+		start = r.Created
+	}
+	switch r.Phase {
+	case "queued":
+		if r.Event == "merge_group" {
+			return []flowStepInput{flowQueueWait(key, r.Created, nil)}
+		}
+		return []flowStepInput{flowLiveWork(key, stepKey, round, kind, actor, start, nil, nil)}
+	case "running":
+		steps := []flowStepInput{}
+		if r.Event == "merge_group" {
+			ended := start
+			steps = append(steps, flowQueueWait(key, r.Created, &ended))
+		}
+		return append(steps, flowLiveWork(key, stepKey, round, kind, actor, start, nil, nil))
+	case "completed":
+		steps := flowStepsFromRuns([]metricRun{{ID: r.ID, Attempt: r.Attempt, Event: r.Event, Created: r.Created, Started: start, Completed: r.Completed, Conclusion: r.Conclusion}})
+		if r.Event == "merge_group" {
+			queued := key + "/queued"
+			found := false
+			for _, s := range steps {
+				if s.Key == queued {
+					found = true
+					break
+				}
+			}
+			if !found {
+				ended := start
+				steps = append(steps, flowQueueWait(key, r.Created, &ended))
+			}
+		}
+		return steps
+	default:
+		return nil
+	}
+}
+
+// flowFromWorkflowRun records a queued, running or completed CI or merge-queue
+// run. It does not write metric facts; those stay completed-only.
+func (m *Module) flowFromWorkflowRun(ctx context.Context, raw []byte) error {
+	run, skip, err := flowLiveRunFrom(raw)
+	if err != nil || skip {
+		return err
+	}
+	steps := flowLiveSteps(run)
+	if len(steps) == 0 {
+		return nil
+	}
+	service := db.AllProjects(ctx, "delivery flow: live GitHub checks and merge-queue runs of linked changes")
+	_, err = m.flowWrite(service, m.config.TenantID, nil, func(ctx context.Context, tx pgx.Tx, apply func([]flowBatch) error) error {
+		var project, ticket string
+		err := tx.QueryRow(ctx, `SELECT project_id::text,ticket_node_id::text FROM delivery_items WHERE repository=$1 AND pull_request=$2 AND project_id IS NOT NULL AND ticket_node_id IS NOT NULL`,
+			m.config.Repository, run.PR).Scan(&project, &ticket)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		ci := defaultCIWorkflow
+		if err = tx.QueryRow(ctx, `SELECT ci_workflow FROM delivery_metric_sources WHERE project_id=$1 AND repository=$2`, project, m.config.Repository).Scan(&ci); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if !sameWorkflow(metricRun{Workflow: run.Workflow}, ci) {
+			return nil
+		}
+		t, err := flowTicketTx(ctx, tx, ticket)
+		if err != nil || t == nil || t.Project != project {
+			return err
+		}
+		batch := flowBatch{Item: flowItemInput{Project: project, Kind: "change", Ref: t.Key, Title: t.Title, Ticket: &ticket, PRs: []int64{run.PR}}, Steps: steps}
+		return apply([]flowBatch{batch})
 	})
 	return err
 }
