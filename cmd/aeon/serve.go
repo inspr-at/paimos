@@ -382,6 +382,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	deliveryMod := delivery.New(pool, reviewApp.Config, cfg.ReviewWebhookSecret, delivery.AppReader{App: reviewApp}, reviewMod.HandlePullChange)
 	startWorker(func() { deliveryMod.Run(workerCtx) })
 	startWorker(func() { deliveryMod.RunAlerts(workerCtx) })
+	startWorker(func() { deliveryMod.RunFlow(workerCtx) })
 	startWorker(func() { deliveryMod.RunAudit(workerCtx) })
 	api := &httpapi.Server{
 		Pool:                    pool,

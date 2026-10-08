@@ -126,6 +126,98 @@
     {
       "classification": "metadata",
       "columns": {
+        "last_event_id": "metadata",
+        "tenant_id": "metadata",
+        "updated_at": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_flow_cursors"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "ended_at": "metadata",
+        "id": "metadata",
+        "item_id": "metadata",
+        "project_id": "metadata",
+        "recovery_step_ids": "metadata",
+        "severity": "metadata",
+        "source": "metadata",
+        "source_key": "metadata",
+        "started_at": "metadata",
+        "summary": "review",
+        "tenant_id": "metadata",
+        "updated_at": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_flow_incidents"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "ended_at": "metadata",
+        "gate_principal_id": "personal",
+        "gate_what": "review",
+        "id": "metadata",
+        "kind": "metadata",
+        "ops_eta_p50_at": "metadata",
+        "ops_eta_p90_at": "metadata",
+        "project_id": "metadata",
+        "prs": "metadata",
+        "ref": "metadata",
+        "started_at": "metadata",
+        "target_from_step": "metadata",
+        "target_minutes": "metadata",
+        "target_source": "metadata",
+        "tenant_id": "metadata",
+        "ticket_node_id": "metadata",
+        "title": "review",
+        "updated_at": "metadata"
+      },
+      "locator": {
+        "person_column": "gate_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_flow_items"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "actor_label": "review",
+        "actor_model": "metadata",
+        "actor_principal_id": "personal",
+        "actor_type": "metadata",
+        "ended_at": "metadata",
+        "id": "metadata",
+        "item_id": "metadata",
+        "kind": "metadata",
+        "outcome": "metadata",
+        "project_id": "metadata",
+        "recorded_at": "metadata",
+        "round": "metadata",
+        "side": "metadata",
+        "source": "metadata",
+        "source_key": "metadata",
+        "started_at": "metadata",
+        "step_key": "metadata",
+        "tenant_id": "metadata",
+        "updated_at": "metadata",
+        "wait_reason": "metadata",
+        "waits_for": "personal"
+      },
+      "locator": {
+        "person_column": "actor_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_flow_steps"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
         "action": "metadata",
         "audit_checks": "metadata",
         "delivery_id": "metadata",
