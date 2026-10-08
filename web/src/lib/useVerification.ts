@@ -78,7 +78,7 @@ export function useVerification(scope: ComputedRef<string>, signins: ComputedRef
       const response = await api(`/agent-pairing/computers/${c.computer_id}/enrollments/${e.account_id}/verify`, { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: revision, expected_verification_run_id: prior }) })
       if (!response.ok) {
         const problem = await response.json().catch(() => ({})) as { code?: string }
-        throw new Error(response.status === 403 ? 'Only the account owner may verify it again.' : problem.code === 'verification_active' ? 'The helper must confirm that the previous check stopped and settle its reports before another can start.' : response.status === 409 ? 'The account or verification changed. Refresh before verifying again.' : 'Verification could not be requested. Please try again.')
+        throw new Error(response.status === 403 ? 'Only the account owner may verify it again.' : problem.code === 'verification_active' ? 'The helper must confirm that the previous check stopped and settle its reports before another can start.' : response.status === 409 ? 'The account or verification changed. Refresh before verifying again.' : 'Verification could not be requested.')
       }
       const created = await response.json() as { account_id?: string; run_id?: string }
       if (created.account_id !== e.account_id || typeof created.run_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(created.run_id)) throw new Error('Verification response could not be confirmed. Refresh before trying again.')
