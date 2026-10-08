@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/portal
+paths:
+  /portal/market:
+    get:
+      operationId: readPortalMarket
+      summary: Read the comparison, its history and pending corrections
+      description: settings.manage, people only. Agents are refused. History and corrections are admin-only. Quotes stay off the public page until a cell is approved.
+      security: [{session: []}]
+      responses:
+        '200': {description: Comparison for the current product, content: {application/json: {schema: {$ref: '#/components/schemas/PortalMarket'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+components:

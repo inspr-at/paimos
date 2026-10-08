@@ -1,0 +1,337 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/chat
+paths:
+  /chat-threads/{id}:
+    get:
+      operationId: getChatThread
+      description: chat-v1. Person participant only, with current project authority. Explicit allowlisted readiness; registration alone grants no boundary_input, wake_idle, confirm_received or interrupt capability.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Participant conversation, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
+        '404': {description: Disabled or unauthorized conversation}
+  /chat-threads/{id}/binding:
+    post:
+      operationId: bindChatThread
+      description: chat-v1. Person participant compare-and-swap handover. Validate owner, tenant, project, external registration, live lease state and role under the final access fence. Registered native-reference digests retain private person/role/project ownership across replacement generations, including vendor aliases. Session ID is a candidate, never proof. At most 8 KiB body, read and strictly decoded before database acquisition, with a three-second body/work deadline. No automation delegation is implemented in R1.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChatBindingWrite'}
+      responses:
+        '200': {description: New binding epoch and unchanged conversation identity, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
+        '400': {description: Invalid bounded request}
+        '408': {description: Request body did not arrive before the deadline}
+        '404': {description: Disabled or unauthorized target}
+        '409': {description: Stale epoch or session already used by another role}
+  /chat-threads/{id}/messages:
+    get:
+      operationId: "listChatMessages"
+      x-aeon-package: "R2"
+      description: "Mounted opt-in chat-v1 R2 participant history contract. Default latest 50, max 100, ascending display order. before/after/around_message are mutually exclusive; opaque cursors bind caller and conversation. Page at most 1 MiB, even if fewer than the count limit. Snapshot and migration epoch accompany exact per-message person read state. Imported source audiences remain enforced."
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}}, {"name": "before", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "after", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "around_message", "in": "query", "required": false, "schema": {"type": "string", "format": "uuid"}}]
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessagePage"
+        '400':
+          description: "Invalid bounded input/cursor"
+        '404':
+          description: "Disabled, unknown, wrong tenant or unauthorized target"
+        '409':
+          description: "Stale identity or conflicting state"
+        '429':
+          description: "Rate limit reached; Retry-After supplies the retry interval"
+    post:
+      operationId: "sendChatMessage"
+      x-aeon-package: "R3"
+      description: "Reserved chat-v1 contract for R3; not mounted by R1. Accept at most 512 KiB wire bytes, 4 KiB decoded metadata and 64 KiB valid UTF-8 body without NUL. Underlying inbox keys use chat/<conversation>/<client-id> and fit the existing 128-character bound. Same client ID and digest replays; a different payload conflicts. Sender is derived. Message, membership, intent and private event commit atomically under current participant/project authorization. Capture delivery_deadline as server acceptance time plus the person's effective offline-wait policy (workspace fallback; default 3600 seconds, 600–86400). Retries replay the original deadline; policy changes, reconnect and handover never reset it. Only never-offered input may wait until it; expiry preserves history as Not delivered and requires an explicit new send. Uncertain offers are never automatically resent. Legacy deadlines are unchanged. Normal input never interrupts or grants execution authority. 30 sends/minute with burst 10. Invalid oversized body returns 413 without any writes."
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}]
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatSendResponse"
+        '400':
+          description: "Invalid bounded input/cursor"
+        '404':
+          description: "Disabled, unknown, wrong tenant or unauthorized target"
+        '409':
+          description: "Stale identity or conflicting state"
+        '429':
+          description: "Rate limit reached; Retry-After supplies the retry interval"
+        '413':
+          description: "Body or wire limit exceeded; no message, intent or event committed"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatSendRequest"
+  /chat-threads/{id}/messages/{messageId}/body-parts:
+    get:
+      operationId: "getChatBodyPart"
+      x-aeon-package: "R3"
+      description: "Reserved chat-v1 contract for R3; not mounted by R1. Exact live externally registered worker plus private lease and current binding epoch. One immutable part per request, at most 1 KiB source UTF-8 at scalar boundaries and 128 parts total. Qualified tool-output path only; unavailable paths fail closed. Retrieval records coverage, never an ACK or full Read receipt."
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "messageId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "X-Aeon-Worker-Lease", "in": "header", "required": true, "schema": {"type": "string", "minLength": 32, "maxLength": 4096}}, {"name": "session_id", "in": "query", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "binding_epoch", "in": "query", "required": true, "schema": {"$ref": "#/components/schemas/ChatPosition"}}, {"name": "cursor", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}]
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatBodyPart"
+        '400':
+          description: "Invalid bounded input/cursor"
+        '404':
+          description: "Disabled, unknown, wrong tenant or unauthorized target"
+        '409':
+          description: "Stale identity or conflicting state"
+        '429':
+          description: "Rate limit reached; Retry-After supplies the retry interval"
+  /chat-threads/{id}/messages/{messageId}/cancel:
+    post:
+      operationId: "cancelChatMessage"
+      x-aeon-package: "R3"
+      description: "Reserved chat-v1 contract for R3; not mounted by R1. Person participant only. Serialize against claims. Cancel only when preventing external injection is still safe; after a possible offer return uncertainty/too_late. An explicit resend uses a new message ID linked to the original."
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "messageId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}]
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatCancelResponse"
+        '400':
+          description: "Invalid bounded input/cursor"
+        '404':
+          description: "Disabled, unknown, wrong tenant or unauthorized target"
+        '409':
+          description: "Stale identity or conflicting state"
+        '429':
+          description: "Rate limit reached; Retry-After supplies the retry interval"
+  /chat-threads/{id}/read-marker:
+    get:
+      operationId: "getChatReadMarker"
+      x-aeon-package: "R2"
+      description: "Mounted opt-in chat-v1 R2 participant history contract. Person participant only. At most 64 exact 512-byte bitmap chunks per 128 KiB keyset page, separate from the contiguous prefix. A greatest-position watermark never implies seeing unloaded messages."
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "cursor", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 64, "default": 64}}]
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatReadMarker"
+        '400':
+          description: "Invalid bounded input/cursor"
+        '404':
+          description: "Disabled, unknown, wrong tenant or unauthorized target"
+        '409':
+          description: "Stale identity or conflicting state"
+        '429':
+          description: "Rate limit reached; Retry-After supplies the retry interval"
+    put:
+      operationId: "unionChatSeenMessages"
+      x-aeon-package: "R2"
+      description: "Mounted opt-in chat-v1 R2 participant history contract. Person participant only. Within a 16 KiB request, union up to 100 explicitly visible authorized IDs; lock chunks in increasing order, touch at most 100 chunks and compact at most 16 chunks with a five-second deadline; reads, background fetches and delivery receipts never mark messages seen. Preserve unloaded gaps and migration unknown-state provenance. Reauthorize inside the final write transaction."
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}]
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatReadMarker"
+        '400':
+          description: "Invalid bounded input/cursor"
+        '404':
+          description: "Disabled, unknown, wrong tenant or unauthorized target"
+        '409':
+          description: "Stale identity or conflicting state"
+        '429':
+          description: "Rate limit reached; Retry-After supplies the retry interval"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatSeenUnionRequest"
+components:
+  schemas:
+    ChatBindingWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_epoch, session_id]
+      properties:
+        expected_epoch: {$ref: '#/components/schemas/ChatPosition'}
+        session_id: {type: string, format: uuid}
+    ChatBodyPart:
+      type: "object"
+      additionalProperties: false
+      required: ["contract", "message_id", "body_revision", "body_digest", "part_index", "byte_offset", "text", "next_cursor"]
+      properties:
+        contract:
+          type: "string"
+          const: "chat-v1"
+        message_id:
+          type: "string"
+          format: "uuid"
+        body_revision:
+          $ref: "#/components/schemas/ChatPosition"
+        body_digest:
+          type: "string"
+          pattern: "^[a-f0-9]{64}$"
+        part_index:
+          type: "integer"
+          minimum: 0
+          maximum: 127
+        byte_offset:
+          type: "integer"
+          minimum: 0
+          maximum: 65536
+        text:
+          type: "string"
+          maxLength: 1024
+          x-aeon-max-utf8-bytes: 1024
+        next_cursor:
+          type: ["string", "null"]
+          maxLength: 4096
+    ChatHistoryItem:
+      type: "object"
+      additionalProperties: false
+      required: ["message", "person_read_state", "receipt"]
+      properties:
+        message:
+          $ref: "#/components/schemas/ChatMessage"
+        person_read_state:
+          type: "string"
+          enum: ["seen", "known_unread", "unknown", "neutral"]
+        receipt:
+          anyOf: [{"$ref": "#/components/schemas/ChatReceipt"}, {"type": "null"}]
+    ChatMessage:
+      type: object
+      additionalProperties: false
+      description: Separate future history DTO; legacy InboxMessage and ProjectMessage remain unchanged. New messages store at most 64 KiB of valid UTF-8 with no NUL; previews never imply full receipt.
+      required: [message_id, conversation_id, read_seq, sent_event_position, body, payload_mode]
+      properties:
+        message_id: {type: string, format: uuid}
+        conversation_id: {type: string, format: uuid}
+        read_seq: {$ref: '#/components/schemas/ChatPosition'}
+        sent_event_position: {$ref: '#/components/schemas/ChatPosition'}
+        body: {type: string, maxLength: 65536}
+        payload_mode: {type: string, enum: [inline, preview]}
+        reply_to: {type: [string, 'null'], format: uuid}
+    ChatMessagePage:
+      type: "object"
+      additionalProperties: false
+      required: ["contract", "items", "has_more_before", "has_more_after", "before_cursor", "after_cursor", "snapshot_cursor", "migration_epoch"]
+      properties:
+        contract:
+          type: "string"
+          const: "chat-v1"
+        items:
+          type: "array"
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/ChatHistoryItem"
+        has_more_before:
+          type: "boolean"
+        has_more_after:
+          type: "boolean"
+        before_cursor:
+          type: ["string", "null"]
+          maxLength: 4096
+        after_cursor:
+          type: ["string", "null"]
+          maxLength: 4096
+        snapshot_cursor:
+          type: "string"
+          maxLength: 4096
+        migration_epoch:
+          $ref: "#/components/schemas/ChatPosition"
+    ChatReadMarker:
+      type: "object"
+      additionalProperties: false
+      required: ["contract", "conversation_id", "contiguous_position", "seen_chunks", "next_cursor", "revision", "migration_epoch"]
+      properties:
+        contract:
+          type: "string"
+          const: "chat-v1"
+        conversation_id:
+          type: "string"
+          format: "uuid"
+        contiguous_position:
+          $ref: "#/components/schemas/ChatPosition"
+        seen_chunks:
+          type: "array"
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/ChatSeenChunk"
+        next_cursor:
+          type: ["string", "null"]
+          maxLength: 4096
+        revision:
+          $ref: "#/components/schemas/ChatPosition"
+        migration_epoch:
+          $ref: "#/components/schemas/ChatPosition"
+    ChatSeenChunk:
+      type: object
+      additionalProperties: false
+      required: [chunk_index, bitmap_base64]
+      properties:
+        chunk_index: {$ref: '#/components/schemas/ChatPosition'}
+        bitmap_base64: {type: string, minLength: 684, maxLength: 684, description: "Canonical base64 for exactly 512 bytes; fixed 4096-position block. Bits describe exact seen positions, never unloaded ranges."}
+    ChatSeenUnionRequest:
+      type: "object"
+      additionalProperties: false
+      required: ["visible_message_ids", "migration_epoch"]
+      properties:
+        visible_message_ids:
+          type: "array"
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items:
+            type: "string"
+            format: "uuid"
+        migration_epoch:
+          $ref: "#/components/schemas/ChatPosition"
+    ChatSendRequest:
+      type: "object"
+      additionalProperties: false
+      required: ["client_message_id", "body"]
+      properties:
+        client_message_id:
+          type: "string"
+          minLength: 1
+          maxLength: 64
+        body:
+          type: "string"
+          minLength: 1
+          maxLength: 65536
+          x-aeon-max-utf8-bytes: 65536
+          description: "Valid UTF-8 without NUL. Entire canonical text is retained; admission classifies inline versus preview using the final serialized envelope."
+        reply_to:
+          type: "string"
+          format: "uuid"
+    ChatSendResponse:
+      type: "object"
+      additionalProperties: false
+      required: ["contract", "message", "receipt"]
+      properties:
+        contract:
+          type: "string"
+          const: "chat-v1"
+        message:
+          $ref: "#/components/schemas/ChatMessage"
+        receipt:
+          $ref: "#/components/schemas/ChatReceipt"

@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/httpapi
+paths:
+  /health:
+    get:
+      summary: Liveness and database readiness
+      description: "Always returns liveness status 200. The database probe has a 100ms pool acquisition budget inside a 500ms overall budget; saturation or a failed ping reports db down."
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, db]
+                properties:
+                  status: {type: string, enum: [ok]}
+                  db: {type: string, enum: [ok, down]}
+components:

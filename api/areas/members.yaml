@@ -1,0 +1,260 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /members:
+    get:
+      operationId: listMembers
+      responses:
+        '200': {description: 'Workspace people, agents, invites and imported identities', content: {application/json: {schema: {$ref: '#/components/schemas/MemberDirectory'}}}}
+  /members/agents:
+    post:
+      operationId: createAgent
+      summary: Create an agent with a role ceiling and project access, before issuing its first key
+      description: People with keys.manage only. Role grants must be held by the creator. Agent, description, bindings and audit events commit atomically. New names are checked against all existing principals within the workspace (case-insensitive). Choose a workspace role or project roles; project-only agents never acquire workspace access when keys are issued.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 200}
+                description: {type: string, maxLength: 1000}
+                workspace_role_id: {type: string, format: uuid}
+                project_roles:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [project_id, role_id]
+                    properties:
+                      project_id: {type: string, format: uuid}
+                      role_id: {type: string, format: uuid}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '201': {description: Agent ready for its first key, content: {application/json: {schema: {$ref: '#/components/schemas/AgentMember'}}}}
+        '400': {description: 'Invalid name, description or role selection'}
+        '403': {description: Requires a person with keys.manage and authority to grant the requested roles}
+        '404': {description: Role or project not found in this workspace}
+        '409': {description: Name already used in this workspace}
+  /members/invites:
+    post:
+      operationId: createMemberInvite
+      summary: Create an invite and return its join link once
+      description: Aeon sends no email. With provision_account, the configured identity provider sends a sign-in setup email after the Aeon invite commits. The join URL contains a token stored only as a hash. The invited email must be verified by the identity provider before acceptance. Imported people without a sign-in identity can be invited. Acceptance links a unique active, unlinked imported person with the same email in this tenant to the new person, preserving the imported identity and history. Email matching is exact apart from ASCII letter case; Unicode characters remain distinct. Multiple unlinked matches require manual linking, including inactive records or records that already have aliases. Inactive records and existing link targets are never auto-linked. The invited roles determine access; imported roles are not inherited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/InviteWrite'}
+      responses:
+        '201':
+          description: Invite and the one-time join URL
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invite, join_url]
+                properties:
+                  invite: {$ref: '#/components/schemas/Invite'}
+                  join_url: {type: string}
+                  account: {$ref: '#/components/schemas/InviteAccountResult'}
+        '400': {description: 'Invalid email, expiry, role or project, or provisioning requested without a configured provisioner'}
+        '403': {description: Permission denied or the role exceeds the inviter}
+        '409': {description: Email already belongs to an active member with a sign-in identity}
+  /members/invites/{id}:
+    delete:
+      operationId: revokeMemberInvite
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '204': {description: Invite revoked}
+        '404': {description: No such invite}
+        '409': {description: Invite was already accepted}
+  /members/invites/{id}/provision:
+    post:
+      operationId: retryMemberInviteProvision
+      summary: Retry sign-in account provisioning for a pending invite
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Provisioning outcome, content: {application/json: {schema: {$ref: '#/components/schemas/InviteAccountResult'}}}}
+        '400': {description: No provisioner configured}
+        '403': {description: Permission denied}
+        '404': {description: Invite not found}
+        '409': {description: Invite is closed or provisioning already succeeded}
+  /members/{principal_id}/aliases:
+    post:
+      operationId: linkMemberAlias
+      parameters:
+        - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_principal_id]
+              properties:
+                from_principal_id: {type: string, format: uuid}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Person with the new alias, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '400': {description: Alias would form a chain or a self-link}
+        '403': {description: Permission denied}
+        '409': {description: 'Already linked, or the alias is the last active owner'}
+  /members/{principal_id}/aliases/{from_principal_id}:
+    delete:
+      operationId: unlinkMemberAlias
+      parameters:
+        - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: from_principal_id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '204': {description: Alias removed}
+        '404': {description: That alias is not linked to this person}
+  /members/{principal_id}/deactivate:
+    post:
+      operationId: deactivateMember
+      description: Person-only (members.manage is never agent-grantable). Works for people and for agent identities; deactivating either revokes its sessions and every non-revoked key. Internal service identities are refused with 403.
+      parameters:
+        - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Deactivated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '403': {description: Permission denied}
+        '409': {description: 'Last active owner, already deactivated, or a connected computer (disconnect it under Agents first; code connected_computer)'}
+  /members/{principal_id}/reactivate:
+    post:
+      operationId: reactivateMember
+      parameters:
+        - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Reactivated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '403': {description: Permission denied}
+        '409': {description: Already active}
+  /members/{principal_id}/workspace-role:
+    put:
+      operationId: setWorkspaceRole
+      parameters:
+        - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [role_id], properties: {role_id: {type: [string, 'null'], format: uuid}}}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Updated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '400': {description: Invalid role; Guest is a project role (code project_only_role)}
+        '403': {description: Permission denied or role escalation}
+components:
+  schemas:
+    AgentMember:
+      type: object
+      required: [principal_id, name, has_avatar, workspace_role, key_count, last_seen_at, service]
+      properties:
+        principal_id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string}
+        has_avatar: {type: boolean}
+        workspace_role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
+        project_roles: {type: array, items: {$ref: '#/components/schemas/ProjectRole'}}
+        key_count: {type: integer}
+        last_seen_at: {type: [string, 'null'], format: date-time}
+        service: {type: boolean}
+        status: {type: string, enum: [active, deactivated], description: 'Deactivated agents hold no usable key and leave the working list; POST /members/{principal_id}/reactivate brings the identity back (its revoked keys stay revoked).'}
+        connected_computer: {type: boolean, description: 'Present and true for the runtime identity of a paired computer that is still connected; disconnect the computer before deactivating it.'}
+        paired_computer: {type: boolean, description: 'Present and true for the runtime identity of any paired computer, connected or retired. It never takes an agent key; a computer is connected by pairing it afresh.'}
+        preview:
+          description: Whether this caller may preview the agent's session file (members directory). creator_name is present only for workspace owners and admins, and only when another person holds a current key.
+          type: object
+          required: [allowed]
+          properties:
+            allowed: {type: boolean}
+            reason: {type: string, enum: [not_key_creator, key_revoked, key_expired, agent_inactive]}
+            creator_name: {type: string}
+    Invite:
+      type: object
+      required: [id, email, workspace_role, project_roles, status, created_by, created_at, expires_at, accepted_by, accepted_at]
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        workspace_role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
+        project_roles: {type: array, items: {$ref: '#/components/schemas/ProjectRole'}}
+        status: {type: string, enum: [pending, expired, revoked, accepted]}
+        created_by: {$ref: '#/components/schemas/PrincipalRef'}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        accepted_by: {oneOf: [{$ref: '#/components/schemas/PrincipalRef'}, {type: 'null'}]}
+        accepted_at: {type: [string, 'null'], format: date-time}
+    InviteAccountResult:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [invited, exists, failed]}
+        reason: {type: string, description: Safe generic failure text; never includes provider responses or credentials.}
+    InviteWrite:
+      type: object
+      required: [email]
+      properties:
+        email: {type: string, format: email}
+        display_name: {type: string, maxLength: 200, description: Invitee name for a newly created sign-in account. Required when provision_account is true.}
+        provision_account: {type: boolean, default: false, description: Ask the configured provider to create a sign-in account and send its setup email after the invite commits.}
+        workspace_role_id: {type: string, format: uuid}
+        project_roles:
+          type: array
+          items:
+            type: object
+            required: [project_id, role_id]
+            properties:
+              project_id: {type: string, format: uuid}
+              role_id: {type: string, format: uuid}
+        expires_in_days: {type: integer, minimum: 1, maximum: 90, default: 14}
+    Member:
+      type: object
+      required: [principal_id, name, avatar_url, has_avatar, email, status, identity, workspace_role, project_roles, aliases, classic_role, last_active_at, last_owner]
+      properties:
+        principal_id: {type: string, format: uuid}
+        name: {type: string}
+        avatar_url: {type: [string, 'null']}
+        has_avatar: {type: boolean}
+        email: {type: [string, 'null']}
+        status: {type: string, enum: [active, deactivated]}
+        identity: {type: [string, 'null'], enum: [inspr_id, null]}
+        workspace_role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
+        project_roles: {type: array, items: {$ref: '#/components/schemas/ProjectRole'}}
+        aliases: {type: array, items: {$ref: '#/components/schemas/MemberAlias'}}
+        classic_role: {type: [string, 'null']}
+        last_active_at: {type: [string, 'null'], format: date-time}
+        last_owner: {type: boolean}
+    MemberAlias:
+      type: object
+      required: [principal_id, name, source]
+      properties:
+        principal_id: {type: string, format: uuid}
+        name: {type: string}
+        source: {type: string, enum: [classic]}
+    MemberDirectory:
+      type: object
+      required: [people, agents, invites, imported, owner_count, provisioner]
+      properties:
+        people: {type: array, items: {$ref: '#/components/schemas/Member'}}
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentMember'
+        invites: {type: array, items: {$ref: '#/components/schemas/Invite'}}
+        imported: {type: array, items: {type: object}}
+        owner_count: {type: integer}
+        provisioner:
+          oneOf:
+            - {type: 'null'}
+            - {type: object, required: [name], properties: {name: {type: string}}}
+    ProjectRole:
+      type: object
+      required: [project_id, project_key, project_title, role]
+      properties:
+        project_id: {type: string, format: uuid}
+        project_key: {type: string}
+        project_title: {type: string}
+        role: {$ref: '#/components/schemas/AuthzRoleRef'}

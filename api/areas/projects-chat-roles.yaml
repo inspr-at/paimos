@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/chat
+paths:
+  /projects/{projectId}/chat-roles:
+    post:
+      operationId: createChatRole
+      description: chat-v1, disabled by default. A person creates only their own authorized project role. Lead uses the stored person_project scope and the fixed lead slot; workers need a distinct assignment slot. At most 8 KiB body, read and strictly decoded before database acquisition, with a three-second body/work deadline. No session is started or controlled.
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChatRoleCreate'}
+      responses:
+        '200': {description: Created or existing own role, content: {application/json: {schema: {$ref: '#/components/schemas/ChatRole'}}}}
+        '400': {description: Invalid bounded request}
+        '408': {description: Request body did not arrive before the deadline}
+        '404': {description: Disabled or unauthorized target}
+        '409': {description: Slot belongs to a different role kind}
+components:
+  schemas:
+    ChatRoleCreate:
+      type: object
+      additionalProperties: false
+      required: [kind, slot_key]
+      properties:
+        kind: {type: string, enum: [lead, worker]}
+        slot_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[a-z0-9][a-z0-9._:/-]*$', description: "lead for lead roles; a distinct work assignment for each worker, never the generic worker label"}

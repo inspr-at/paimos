@@ -1,0 +1,220 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/deliveryvote
+paths:
+  /harness-sessions:
+    get:
+      operationId: listHarnessSessions
+      summary: Tenant-wide harness sessions, newest first
+      description: Requires a person session or harness.read agent key. Cursor binds tenant, principal and filters. State is stopped when stopped_at is set, otherwise phase. Node summaries retain historical bindings.
+      parameters:
+        - {name: state, in: query, schema: {type: string, enum: [starting, working, yielded, stopping, stopped, paused]}}
+        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
+        - {name: agent, in: query, schema: {type: string, format: uuid}}
+        - {name: project, in: query, schema: {type: string, format: uuid}}
+        - {name: ticket, in: query, schema: {type: string, format: uuid}}
+        - name: view
+          in: query
+          schema: {type: string, enum: [all, current], default: all}
+          description: current is the Agents list and omits sessions stopped or removed more than 24 hours ago; all keeps every generation (history). AEON-291.
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        '200':
+          description: Session page
+          headers:
+            Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/HarnessSessionSummary'}}
+                  next_cursor: {type: [string, 'null']}
+        '400': {description: Invalid filter or cursor}
+        '401': {description: Authentication required}
+        '403': {description: Scope required}
+  /harness-sessions/live:
+    get:
+      operationId: listLiveAgents
+      parameters:
+        - name: include_inactive
+          in: query
+          schema: {type: boolean, default: false}
+          description: SC1 state view includes all unfinished sessions and stops from the last 24 hours (up to 500). Heartbeat age is interpreted using viewer thresholds; false retains the existing freshness filter.
+      summary: Agents actively working right now, per visible project (AEON-184)
+      description: >-
+        One compact read for the Projects page. A session is live while it is not stopped, its heartbeat is at most
+        fresh_seconds old, its phase is starting, working or stopping, and its activity is not idle. It is listed under
+        its own project and, when its bound ticket has since moved, under the ticket's project as well. Row-level
+        security and project visibility (ADR-003 P2) decide what exists for the caller: an invisible project
+        contributes nothing. principal_id and name are present only with members.read or harness.read at that project
+        (as approval agent names, AEON-171); session_id only with harness.read in the workspace. display_label is
+        the session's own public label, present only with harness.read at that project, and omitted when unlabeled
+        or withheld. name stays the agent principal and is not replaced by the session label; members.read does not
+        grant display_label. Needs nodes.read in the workspace or any project binding; an agent key also needs harness.read. One answer holds at most 500
+        sessions, freshest heartbeat first; truncated says more were live. activity_note and activity_note_id are returned only where
+        the caller holds harness.read at the project. With include_inactive=true, heartbeat_at may be null.
+        State evidence includes pending requests/replies, run outcome, and error stops; no request contents are exposed.
+      responses:
+        '200':
+          description: Live agents, freshest heartbeat first
+          headers:
+            Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, at, fresh_seconds, truncated]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/LiveAgent'}}
+                  at: {type: string, format: date-time, description: The server clock when read}
+                  fresh_seconds: {type: integer, description: How old a heartbeat may be for its session to count as live}
+                  truncated: {type: boolean, description: More sessions were live than one answer holds; the freshest are listed}
+        '401': {description: Authentication required}
+        '403': {description: Scope required}
+  /harness-sessions/pause:
+    post:
+      operationId: pauseAllHarnessSessions
+      description: Person-only harness.control. Up to 200 owned (or administered) pause-capable generations across visible authorized projects; repeat when more is true. Managed generations without inbox delivery remain running and are reported in skipped (up to 200, with skipped_more indicating omitted reports); they do not consume the pause limit. Project permission and ownership are checked separately for each project. Coordinators use the project endpoint.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatch'}}}}
+      responses:
+        '200': {description: Durable transitions and skipped generations, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatchResult'}}}}
+        '403': {description: Person and authorized project access required}
+  /harness-sessions/resume:
+    post:
+      operationId: resumeAllHarnessSessions
+      description: Person-only harness.control. Up to 200 owned (or administered) generations across visible authorized projects; repeat when more is true. Project permission and ownership are checked separately for each project. Coordinators use the project endpoint.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatch'}}}}
+      responses:
+        '200': {description: Durable transitions, content: {application/json: {schema: {type: object, required: [items, more], properties: {items: {type: array, items: {$ref: '#/components/schemas/HarnessResume'}}, more: {type: boolean}}}}}}
+        '403': {description: Person and authorized project access required}
+  /harness-sessions/{sessionId}/delivery-rating:
+    parameters:
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getDeliveryRating
+      summary: The caller's rework mark, optional score average and objective signals
+      description: Person session only. 404 when the session or its ticket is not visible. 409 when the session has no ticket. harness, model and account_label are the session's current metadata. mine is null when this person has not marked the session.
+      security: [{session: []}]
+      responses:
+        '200': {description: Rating, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRating'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: saveDeliveryRating
+      summary: Mark this session as needing rework
+      description: >
+        Person session only. One mark per person per session. A row means an exception;
+        silence is not stored. comment is the required reason. tags and score are
+        optional. A later save replaces them and refreshes the stored model, harness
+        and account from the session. Tags are quality, rework and taste.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeliveryVoteWrite'}
+      responses:
+        '200': {description: Rating, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRating'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: clearDeliveryRating
+      summary: Withdraw the caller's rework mark
+      description: Person session only. Removes this person's exception and leaves other people's marks. Idempotent when they had not marked the session.
+      security: [{session: []}]
+      responses:
+        '200': {description: Rating, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRating'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    DeliveryVoteWrite:
+      type: object
+      additionalProperties: false
+      required: [comment]
+      properties:
+        score: {type: [integer, 'null'], minimum: 1, maximum: 5, description: Optional detail. Omit or null when the mark has no score.}
+        tags: {type: array, maxItems: 3, uniqueItems: true, items: {type: string, enum: [quality, rework, taste]}}
+        comment: {type: string, minLength: 1, maxLength: 2000, description: Required reason.}
+    HarnessSessionSummary:
+      allOf:
+        - {$ref: '#/components/schemas/HarnessSessionHierarchy'}
+        - type: object
+          required: [project, ticket, agent]
+          properties:
+            project: {$ref: '#/components/schemas/NodeSummary'}
+            activity_note_id: {type: integer, format: int64, description: Latest activity entry ID; absent until a note exists. Advances only for a new note.}
+            ticket:
+              oneOf:
+                - {$ref: '#/components/schemas/NodeSummary'}
+                - {type: 'null'}
+            agent:
+              description: The agent principal running the session (its name, not the host)
+              type: [object, 'null']
+              properties:
+                id: {type: string, format: uuid}
+                name: {type: string}
+    LiveAgent:
+      type: object
+      required: [project_id, harness, management_mode, role, phase, activity, ticket, since, heartbeat_at, finished]
+      properties:
+        vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
+        limit_window: {type: string, enum: [5h, weekly, monthly, other], description: Omitted unless current account owner sharing permits reset details.}
+        limit_resets_at: {type: string, format: date-time, description: Omitted unless current account owner sharing permits reset details.}
+        run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
+        needs_attention: {type: boolean, description: "Bound run waiting or exact bound-run approval pending; yielded phase is separate session evidence. Shared inbox attention and nonblocking replies do not set this flag; stopped sessions are false."}
+        attention_reasons: {type: array, description: "Authorized content-free reasons; withheld without harness.read at this project.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
+        has_problem: {type: boolean, description: 'Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false.'}
+        finished: {type: boolean, description: 'True when the session reported 100% and stopped with a recorded clean exit (stop reason process_exited). Derived, so it is always present, also where stop_reason is withheld; clients never derive Done from progress_pct or stop_reason (AEON-437).'}
+        stopped_at: {type: [string, 'null'], format: date-time}
+        stop_reason: {type: [string, 'null'], description: Present only with harness.read at the project.}
+        project_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid, description: Present only with harness.read in the workspace}
+        principal_id: {type: string, format: uuid, description: Present only with members.read or harness.read at the project}
+        name: {type: string, description: The agent principal's name; present with principal_id. Not the session display label.}
+        display_label: {type: string, maxLength: 128, description: Public per-session label. Present only with harness.read at the project. Omitted when the session is unlabeled or the caller lacks that permission. members.read does not reveal it.}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
+        management_mode: {type: string, enum: [managed, unmanaged]}
+        role: {type: string, enum: [worker, coordinator]}
+        phase: {type: string, enum: [starting, working, stopping, yielded, stopped]}
+        activity: {type: string, enum: [busy, unknown, idle, throttled]}
+        model: {$ref: '#/components/schemas/HarnessModel'}
+        reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
+        account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
+        harness_version: {$ref: '#/components/schemas/HarnessVersion'}
+        activity_note: {type: [string, 'null'], maxLength: 120, description: 'Current step, present only with harness.read at the project'}
+        current_activity: {$ref: '#/components/schemas/CurrentAgentActivity'}
+        agent_activity_mode: {type: string, enum: [off, tool_activity, agent_summary]}
+        activity_note_id: {type: integer, format: int64, description: Latest activity entry ID; present with the current step only where harness.read is granted.}
+        ticket:
+          description: The bound ticket and the project it lives in now
+          oneOf:
+            - allOf:
+                - {$ref: '#/components/schemas/NodeSummary'}
+                - type: object
+                  required: [project_id]
+                  properties:
+                    project_id: {type: string, format: uuid}
+            - {type: 'null'}
+        since: {type: string, format: date-time, description: When the session started}
+        heartbeat_at: {type: [string, 'null'], format: date-time}
+        eta_stale: {type: boolean, description: True when the session estimate is older than two reporting intervals. Omitted when fresh or absent. Clients derive attention from this field.}
+        progress_pct: {type: integer, minimum: 0, maximum: 100, description: The last percent the session reported. Omitted until one is reported. Reported progress alone never means finished; read finished (AEON-437).}
+    NodeSummary:
+      type: object
+      required: [id, key, title]
+      properties:
+        id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}

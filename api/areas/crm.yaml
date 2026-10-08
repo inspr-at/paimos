@@ -1,0 +1,325 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/business/crm
+paths:
+  /crm/contacts/{contactId}:
+    get:
+      operationId: getCRMContact
+      security: *auth
+      parameters: [{name: contactId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Contact, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContact'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    patch:
+      operationId: updateCRMContact
+      security: [{session: []}]
+      parameters: [{name: contactId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContactWrite'}}}}
+      responses:
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Contact, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContact'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteCRMContact
+      description: The next live contact becomes primary; a final contact leaves no primary.
+      security: [{session: []}]
+      parameters: [{name: contactId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Deleted}
+  /crm/contacts/{contactId}/principals:
+    post:
+      operationId: bindCRMContactPrincipal
+      summary: Bind an OIDC person principal to a contact node
+      description: Admin person only. Acceptance requires this explicit binding; email equality grants no authority.
+      security: [{session: []}]
+      parameters: [{name: contactId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContactPrincipalWrite'}}}}
+      responses:
+        '201': {description: Binding, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContactPrincipal'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /crm/documents/{attachmentId}/metadata:
+    put:
+      operationId: putCRMDocumentMetadata
+      security: [{session: []}]
+      parameters: [{name: attachmentId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMDocumentMetadata'}}}}
+      responses:
+        '200': {description: Metadata, content: {application/json: {schema: {$ref: '#/components/schemas/CRMDocumentMetadata'}}}}
+  /crm/organisations:
+    get:
+      operationId: listCRMOrganisations
+      summary: Search tenant customers, including their number and primary contact
+      security: *auth
+      parameters: [{name: q, in: query, schema: {type: string, maxLength: 200}}, {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}, {name: offset, in: query, schema: {type: integer, minimum: 0}}, {name: archived, in: query, description: Archived customers leave the default list, schema: {type: string, enum: ['false', 'true', all], default: 'false'}}]
+      responses:
+        '200': {description: Customer page, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/CRMOrganisation'}}, next_offset: {type: integer}}}}}}
+    post:
+      operationId: createCRMOrganisation
+      summary: Create a customer without an external provider or customer number
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisationWrite'}}}}
+      responses:
+        '201': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+  /crm/organisations/{organisationId}:
+    get:
+      operationId: getCRMOrganisation
+      security: *auth
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    patch:
+      operationId: updateCRMOrganisation
+      summary: Replace customer fields with an expected revision
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisationWrite'}}}}
+      responses:
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteCRMOrganisation
+      summary: Soft delete only when no live project or any quote belongs to customer
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Deleted}
+        '409': {$ref: '#/components/responses/Error'}
+  /crm/organisations/{organisationId}/contacts:
+    get:
+      operationId: listCRMContacts
+      security: *auth
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/CRMContact'}}}}}
+    post:
+      operationId: createCRMContact
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContactWrite'}}}}
+      responses:
+        '201': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Contact, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContact'}}}}
+  /crm/organisations/{organisationId}/note-ai:
+    get:
+      operationId: getCRMNoteAIStatus
+      summary: Admin-only availability of the optional CRM note agent tool and configured model
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Availability and disabled reason, content: {application/json: {schema: {type: object, required: [enabled], properties: {enabled: {type: boolean}, reason: {type: string}}}}}}
+  /crm/organisations/{organisationId}/note-ai/generate:
+    post:
+      operationId: generateCRMNoteAIProposal
+      summary: Generate a review draft through the tenant-enabled agent tool; never applies notes
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
+      responses:
+        '201': {description: Generated review draft, content: {application/json: {schema: {type: object}}}}
+        '409': {description: Stale customer or action disabled}
+        '503': {description: Model execution unavailable}
+  /crm/organisations/{organisationId}/note-rewrite:
+    post:
+      operationId: draftCRMNoteRewrite
+      summary: Store a proposed note for human review without applying it
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [draft_text, expected_revision], properties: {draft_text: {type: string, maxLength: 20000}, expected_revision: {type: integer}}}}}}
+      responses:
+        '201': {description: Review draft, content: {application/json: {schema: {type: object}}}}
+  /crm/organisations/{organisationId}/note-rewrite/{draftId}/apply:
+    post:
+      operationId: applyCRMNoteRewrite
+      summary: Admin explicitly applies a reviewed note draft if customer revision still matches
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}, {name: draftId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+  /crm/organisations/{organisationId}/number/reformat:
+    post:
+      operationId: reformatCRMCustomerNumber
+      summary: Convert a legacy number only when all related quotes remain drafts
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_customer_no], properties: {expected_customer_no: {type: string}}}}}}
+      responses:
+        '200': {description: New number, content: {application/json: {schema: {type: object, properties: {customer_no: {type: string}}}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /crm/organisations/{organisationId}/primary-contact:
+    post:
+      operationId: promoteCRMPrimaryContact
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [contact_node_id, expected_revision], properties: {contact_node_id: {type: string, format: uuid}, expected_revision: {type: integer, minimum: 1}}}}}}
+      responses:
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer with new primary, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /crm/organisations/{organisationId}/related:
+    get:
+      operationId: getCRMOrganisationRelated
+      summary: List associated projects, quotes, billable hours and document metadata
+      security: *auth
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Related resources, content: {application/json: {schema: {type: object}}}}
+  /crm/organisations/{organisationId}/sync:
+    post:
+      operationId: syncCRMProviderCustomer
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+  /crm/organisations/{organisationId}/sync-status:
+    get:
+      operationId: getCRMProviderSyncStatus
+      description: Admin-only status for an externally linked customer. Errors are safe categories, never provider responses or credentials.
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Latest provider sync outcome, content: {application/json: {schema: {type: object, required: [state, provider_id], properties: {state: {type: string, enum: [never, ok, error]}, provider_id: {type: string}, attempted_at: {type: [string, 'null'], format: date-time}, synced_at: {type: [string, 'null'], format: date-time}, error: {type: string}}}}}}
+  /crm/organisations/{organisationId}/visibility:
+    patch:
+      operationId: setCRMOrganisationVisibility
+      summary: Archive or restore a customer
+      description: Admin person only. An archived customer leaves the default list and keeps its contacts, number, projects and quotes. Records crm.customer_visibility_changed, reversible through POST /events/{eventId}/undo while the customer is unchanged.
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision, archived], properties: {expected_revision: {type: integer, minimum: 1}, archived: {type: boolean}}}}}}
+      responses:
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /crm/projects/{projectId}/cooperation:
+    get:
+      operationId: getCRMProjectCooperation
+      security: *auth
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Cooperation data and revision, content: {application/json: {schema: {type: object}}}}
+    put:
+      operationId: putCRMProjectCooperation
+      security: [{session: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: Cooperation data, content: {application/json: {schema: {type: object}}}}
+  /crm/projects/{projectId}/customer:
+    put:
+      operationId: setCRMProjectCustomer
+      summary: Assign one customer to a live project with a customer_of relation
+      security: [{session: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [organisation_node_id], properties: {organisation_node_id: {type: string, format: uuid}}}}}}
+      responses:
+        '200': {description: Link, content: {application/json: {schema: {type: object}}}}
+  /crm/providers:
+    get:
+      operationId: listCRMProviders
+      security: [{session: []}]
+      responses:
+        '200': {description: Configured compiled providers, content: {application/json: {schema: {type: array, items: {type: object}}}}}
+  /crm/providers/search:
+    get:
+      operationId: searchCRMProviders
+      security: [{session: []}]
+      parameters: [{name: q, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 200}}]
+      responses:
+        '200': {description: External matches, content: {application/json: {schema: {type: array, items: {type: object}}}}}
+  /crm/providers/{providerId}/config:
+    put:
+      operationId: putCRMProviderConfig
+      description: Enable a compiled adapter with an opaque secret reference; credentials and endpoints are never accepted in this API.
+      security: [{session: []}]
+      parameters: [{name: providerId, in: path, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [enabled, secret_ref, expected_revision], properties: {enabled: {type: boolean}, secret_ref: {type: string, pattern: '^secret://'}, expected_revision: {type: integer, minimum: 0}}}}}}
+      responses:
+        '200': {description: Non-secret configuration, content: {application/json: {schema: {type: object}}}}
+  /crm/providers/{providerId}/import:
+    post:
+      operationId: importCRMProviderCustomer
+      security: [{session: []}]
+      parameters: [{name: providerId, in: path, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [external_id], properties: {external_id: {type: string}}}}}}
+      responses:
+        '201': {description: Imported customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+components:
+  schemas:
+    CRMAddress:
+      type: object
+      additionalProperties: false
+      properties:
+        street: {type: string, maxLength: 500}
+        postal_code: {type: string, maxLength: 50}
+        city: {type: string, maxLength: 200}
+        country: {type: string, maxLength: 100}
+        freeform: {type: string, maxLength: 2000}
+    CRMContact:
+      allOf:
+        - {$ref: '#/components/schemas/CRMContactWrite'}
+        - {type: object, required: [id, key, organisation_node_id, revision, primary], properties: {id: {type: string, format: uuid}, key: {type: string}, organisation_node_id: {type: string, format: uuid}, revision: {type: integer}, primary: {type: boolean}}}
+    CRMContactPrincipal:
+      allOf:
+        - {$ref: '#/components/schemas/CRMContactPrincipalWrite'}
+        - {type: object, required: [contact_node_id, bound_by_principal_id, bound_at], properties: {contact_node_id: {type: string, format: uuid}, bound_by_principal_id: {type: string, format: uuid}, bound_at: {type: string, format: date-time}}}
+    CRMContactPrincipalWrite:
+      type: object
+      additionalProperties: false
+      required: [principal_id]
+      properties:
+        principal_id: {type: string, format: uuid}
+    CRMContactWrite:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        expected_revision: {type: integer, minimum: 1}
+        email: {type: string, maxLength: 320}
+        phone: {type: string, maxLength: 100}
+        role: {type: string, maxLength: 200}
+        note: {type: string, maxLength: 20000}
+        external_provider: {type: string, maxLength: 100}
+        external_id: {type: string, maxLength: 500}
+        external_url: {type: string, maxLength: 1000}
+    CRMDocumentMetadata:
+      type: object
+      additionalProperties: false
+      required: [title, category, status]
+      properties:
+        attachment_id: {type: string, format: uuid}
+        title: {type: string, maxLength: 255}
+        category: {type: string, maxLength: 100}
+        status: {type: string, enum: [draft, active, expired]}
+        valid_from: {type: [string, 'null'], format: date}
+        valid_until: {type: [string, 'null'], format: date}
+        expected_revision: {type: integer, minimum: 0}
+        revision: {type: integer, minimum: 1}
+    CRMOrganisation:
+      allOf:
+        - {$ref: '#/components/schemas/CRMOrganisationWrite'}
+        - {type: object, required: [id, key, revision], properties: {id: {type: string, format: uuid}, key: {type: string}, revision: {type: integer}, customer_no: {type: [string, 'null']}, primary_contact_node_id: {type: [string, 'null'], format: uuid}, archived: {type: boolean, description: Archived customers leave the default list}}}
+    CRMOrganisationWrite:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        expected_revision: {type: integer, minimum: 1}
+        legal_name: {type: string, maxLength: 200}
+        industry: {type: string, maxLength: 200}
+        website: {type: string, maxLength: 500}
+        domain: {type: string, maxLength: 255}
+        phone: {type: string, maxLength: 100}
+        description: {type: string, maxLength: 20000}
+        customer_notes: {type: string, maxLength: 20000}
+        vat_id: {type: string, maxLength: 100}
+        tax_id: {type: string, maxLength: 100}
+        register_no: {type: string, maxLength: 100}
+        employee_count: {type: [integer, 'null'], minimum: 0}
+        annual_revenue_minor: {type: [integer, 'null'], minimum: 0}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        billing_address: {oneOf: [{$ref: '#/components/schemas/CRMAddress'}, {type: 'null'}]}
+        visiting_address: {oneOf: [{$ref: '#/components/schemas/CRMAddress'}, {type: 'null'}]}
+        hourly_rate_minor: {type: [integer, 'null'], minimum: 0}
+        lp_rate_minor: {type: [integer, 'null'], minimum: 0}
+        external_provider: {type: string, maxLength: 100}
+        external_id: {type: string, maxLength: 500}
+        external_url: {type: string, maxLength: 1000}
