@@ -538,7 +538,7 @@
       "table": "work_kinds"
     },
     {
-      "classification": "metadata",
+      "classification": "personal",
       "columns": {
         "full_access": "metadata"
       },

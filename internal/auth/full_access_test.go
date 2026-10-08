@@ -128,4 +128,52 @@ func TestFullAccessLiveCatalogAndBoundaries(t *testing.T) {
 	if p.FullAccess || authz.KeyAllows(p, "models.report") || !authz.KeyAllows(p, "nodes.read") {
 		t.Fatal("explicit scoped mode did not take effect")
 	}
+	if w := scopesRequest(m, owner, rotated.ID, http.MethodPatch, `{"full_access":true}`); w.Code != http.StatusOK {
+		t.Fatal("full-access mode could not be restored")
+	}
+	p = authenticate(rotated)
+	rotationProjectBinding(t, m, owner, p.ID)
+	var project string
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1 AND scope_type='workspace'`, p.ID); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT scope_id::text FROM role_bindings WHERE principal_id=$1 AND scope_type='project'`, p.ID).Scan(&project)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []struct {
+		id      string
+		allowed bool
+	}{
+		{project, true}, {"", false}, {"11111111-1111-4111-8111-111111111111", false},
+	} {
+		err := authz.Require(authz.BindPool(tenant.WithPrincipal(ctx, p), m.pool), "nodes.write", authz.Scope{ProjectID: target.id})
+		if target.allowed && err != nil || !target.allowed && !errors.Is(err, authz.ErrForbidden) {
+			t.Fatal("full-access key changed project boundaries")
+		}
+		if err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+			check, err := authz.ProjectsTx(ctx, tx, p)
+			if err == nil && check("nodes.write", target.id) != target.allowed {
+				return errors.New("full-access bulk check changed project boundaries")
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	otherTenant := p
+	otherTenant.TenantID = "11111111-1111-4111-8111-111111111111"
+	if err := authz.Require(authz.BindPool(tenant.WithPrincipal(ctx, otherTenant), m.pool), "nodes.write", authz.Scope{ProjectID: project}); !errors.Is(err, authz.ErrForbidden) {
+		t.Fatal("full-access key crossed its tenant")
+	}
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, owner.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := authz.Require(authz.BindPool(tenant.WithPrincipal(ctx, p), m.pool), "nodes.write", authz.Scope{ProjectID: project}); !errors.Is(err, authz.ErrForbidden) {
+		t.Fatal("full-access key escaped its creator's current permissions")
+	}
 }
