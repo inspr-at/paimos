@@ -102,7 +102,7 @@ func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, ow
 			continue
 		}
 		var model bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$1 AND ($2::uuid[] IS NULL OR id=ANY($2::uuid[])))`, harness, a.AllowedProfileIDs).Scan(&model); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$1 AND aeon_account_allows_profile($1,$2::uuid[],id))`, harness, a.AllowedProfileIDs).Scan(&model); err != nil {
 			return EngineCapacity{}, err
 		}
 		if !model {

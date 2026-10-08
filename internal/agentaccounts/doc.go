@@ -35,6 +35,9 @@
 // retains the existing tenant-harness catalog policy; it does not assert a
 // provider entitlement. Plan names are display metadata, never inferred model
 // grants. Explicit grants are checked at run creation, reservation and claim.
+// Registered newer versions of a pinned line inherit its grant within the
+// same tenant, harness and family. Stored pins remain intact for rollback;
+// an equal version's other efforts and an explicit empty list stay denied.
 // A grant change does not stop already owned runs. Metadata is audited and an
 // identical retry is a no-op. Credentials, home paths and identities stay local.
 // Display labels accept up to 128 Unicode characters, matching session metadata.

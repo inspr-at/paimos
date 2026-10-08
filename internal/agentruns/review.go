@@ -44,7 +44,7 @@ func QueueReviewDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, o w
 	var model, harness, family string
 	err := tx.QueryRow(ctx, `SELECT p.model,p.harness,p.family FROM model_profiles p JOIN agent_accounts a ON a.tenant_id=p.tenant_id AND a.harness=p.harness
         WHERE p.id=$1 AND a.id=$2 AND a.registered_by_principal_id=$3 AND p.enabled AND p.family=$4
-        AND (a.allowed_model_profile_ids IS NULL OR p.id=ANY(a.allowed_model_profile_ids))`, profileID, accountID, agentID, *o.Review.ReviewerFamily).Scan(&model, &harness, &family)
+        AND aeon_account_allows_profile(a.harness,a.allowed_model_profile_ids,p.id)`, profileID, accountID, agentID, *o.Review.ReviewerFamily).Scan(&model, &harness, &family)
 	if err != nil {
 		return Run{}, err
 	}

@@ -488,7 +488,7 @@ func queueValidateTarget(ctx context.Context, tx pgx.Tx, in queueTarget) error {
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals p JOIN model_profiles m ON m.tenant_id=p.tenant_id
  WHERE p.id=$1 AND p.kind='agent' AND m.id=$2 AND m.enabled AND EXISTS(SELECT 1 FROM agent_accounts a
  WHERE a.registered_by_principal_id=p.id AND a.harness=m.harness AND ($3::uuid IS NULL OR a.id=$3)
- AND (a.allowed_model_profile_ids IS NULL OR m.id=ANY(a.allowed_model_profile_ids))))`, in.Agent, in.Profile, in.Account).Scan(&ok)
+ AND aeon_account_allows_profile(a.harness,a.allowed_model_profile_ids,m.id)))`, in.Agent, in.Profile, in.Account).Scan(&ok)
 	if err != nil {
 		return err
 	}

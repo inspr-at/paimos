@@ -4960,6 +4960,8 @@
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestWebhookAuthenticationReplayAndFailedRevocation","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestAccountSuccessorMigrationAuditIsolationAndRollback","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestAgentKeyPersonOwnerExpansionPreservesLegacyWriters","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestAgentRoleModelsBackfillAcrossTenantsUnderRLS","tier":"GATED-FULL"}
@@ -5295,6 +5297,8 @@
     {"kind":"go","package":"internal/demo","name":"TestDemoInterruptedRunRollsBackAndRetryConverges","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/demo","name":"TestDemoMissingHarnessRollsBack","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/demo","name":"TestDemoProfilePinsLeafSuccessor","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/demo","name":"TestDemoProfileSelectsEnabledHarness","tier":"GATED-FULL"}
     ,
@@ -6473,6 +6477,8 @@
     {"kind":"go","package":"internal/modelprovider","name":"TestSpecialUseAddressesRefusedBeforeDial","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelprovider","name":"TestWorkspaceEmbeddingsUseSameEndpointAndKey","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestAccountSuccessorsShareBoardAndLegacyQualification","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestAdditivePreparationPreservesEmptySavedRole","tier":"GATED-FULL"}
     ,
