@@ -6,7 +6,10 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -123,6 +126,12 @@ func (m *Module) refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := m.runRefresh(r.Context(), p, false)
 	if err != nil {
+		var cooldown *refreshCooldown
+		if errors.As(err, &cooldown) {
+			w.Header().Set("Retry-After", fmt.Sprint(cooldown.RetryAfter))
+			httpapi.WriteJSON(w, 429, map[string]any{"error": "model refresh cooldown", "retry_after": cooldown.RetryAfter})
+			return
+		}
 		writeErr(w, err)
 		return
 	}
@@ -149,6 +158,9 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 	inputs := []discoveryInput{}
 	reserved := false
 	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) (err error) {
+		if err := preferenceFence(ctx, tx, p); err != nil {
+			return err
+		}
 		if !scheduled {
 			if err := authz.RequireTx(ctx, tx, p, "models.refresh", authz.Scope{}); err != nil {
 				return fail(403, "permission denied")
@@ -170,14 +182,26 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 		if err != nil {
 			return err
 		}
-		if out.At, err = dbNow(ctx, tx); err != nil {
+		clock := m.validationClock
+		if clock == nil {
+			clock = validationNow
+		}
+		if out.At, err = clock(ctx, tx); err != nil {
 			return err
 		}
-		var last *time.Time
-		if err := tx.QueryRow(ctx, `SELECT last_run_at FROM model_refresh_settings FOR UPDATE`).Scan(&last); err != nil {
+		due, err := applyScheduledRetirements(ctx, tx, out.At)
+		if err != nil {
 			return err
 		}
-		if last != nil && out.At.Sub(*last) < time.Duration(cfg.IntervalMinutes)*time.Minute {
+		pending = append(pending, due...)
+		var last, manual *time.Time
+		if err := tx.QueryRow(ctx, `SELECT last_run_at,last_manual_run_at FROM model_refresh_settings FOR NO KEY UPDATE`).Scan(&last, &manual); err != nil {
+			return err
+		}
+		if !scheduled && p.Kind == tenant.Person && manual != nil && out.At.Sub(*manual) < 5*time.Minute {
+			return &refreshCooldown{RetryAfter: max(1, int(math.Ceil((5*time.Minute - out.At.Sub(*manual)).Seconds())))}
+		}
+		if (scheduled || p.Kind != tenant.Person) && last != nil && out.At.Sub(*last) < time.Duration(cfg.IntervalMinutes)*time.Minute {
 			if scheduled {
 				return nil
 			}
@@ -200,7 +224,7 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 				return err
 			}
 		}
-		_, err = tx.Exec(ctx, `UPDATE model_refresh_settings SET last_run_at=$1`, out.At)
+		_, err = tx.Exec(ctx, `UPDATE model_refresh_settings SET last_run_at=$1,last_manual_run_at=CASE WHEN $2 THEN $1 ELSE last_manual_run_at END`, out.At, !scheduled && p.Kind == tenant.Person)
 		reserved = err == nil
 		return err
 	})
@@ -235,6 +259,9 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 	}
 
 	err = m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+		if err := preferenceFence(ctx, tx, p); err != nil {
+			return err
+		}
 		if err := catalogLock(ctx, tx); err != nil {
 			return err
 		}
@@ -266,6 +293,17 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 			if cfg.APIEnabled && valid && fetched.fresh {
 				observations := discoveryObservations(input.Vendor, out.At.UTC().Format(time.RFC3339Nano)+"/"+input.AccountID, fetched.ids)
 				result.State, result.Seen = "fresh", len(fetched.ids)
+				if cfg.AutoAddProfiles {
+					var limited bool
+					var err error
+					observations, limited, err = successorObservations(ctx, tx, observations, remaining)
+					if err != nil {
+						return err
+					}
+					if limited {
+						result.State = "limited"
+					}
+				}
 				if len(observations) > remaining {
 					result.State = "limited"
 					observations = observations[:remaining]
@@ -278,6 +316,17 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 					if KnownInvalid(o.Model) {
 						continue
 					}
+					pin, mapped := observedPin(o)
+					if cfg.AutoAddProfiles && mapped {
+						accepted, err := acceptUsedSuccessor(ctx, tx, p, pin)
+						if err != nil {
+							return err
+						}
+						if accepted {
+							out.Added++
+							continue
+						}
+					}
 					var exists bool
 					if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE harness=$1 AND model=$2 AND effort=$3)`, o.Harness, o.Model, o.Effort).Scan(&exists); err != nil {
 						return err
@@ -285,7 +334,7 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 					if exists {
 						continue
 					}
-					pin, mapped := observedPin(o)
+					pin, mapped = observedPin(o)
 					if cfg.AutoAddProfiles && mapped {
 						family, line, _ := ProfileLine(Profile{Family: pin.Family, Harness: pin.Harness, Model: pin.Model})
 						id := family + ":" + line

@@ -508,7 +508,7 @@ func TestRefreshBoundsProfileAdditionsAndRejectsDisabledDiscoveryResults(t *test
 		if observed != maxRefreshObservations || granted != 0 {
 			t.Fatalf("discovery created or granted too many profiles: %d/%d", observed, granted)
 		}
-		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=NULL`)
+		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=NULL,last_manual_run_at=NULL`)
 		return err
 	})
 	disableDuringFetch = true
@@ -517,7 +517,7 @@ func TestRefreshBoundsProfileAdditionsAndRejectsDisabledDiscoveryResults(t *test
 		t.Fatalf("disabled discovery published results: %+v, %v", result, err)
 	}
 	inRegistry(t, owner, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=NULL`)
+		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=NULL,last_manual_run_at=NULL`)
 		return err
 	})
 	if _, err = m.runRefresh(ctx, owner, false); err != nil {
@@ -572,7 +572,7 @@ func TestRefreshVendorsShareDeadlineAndStopWhenDiscoveryDisabled(t *testing.T) {
 		t.Fatalf("multi-vendor refresh: %d calls, %v", calls, err)
 	}
 	inRegistry(t, owner, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=NULL`)
+		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=NULL,last_manual_run_at=NULL`)
 		return err
 	})
 	deadline = time.Time{}

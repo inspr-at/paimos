@@ -234,6 +234,30 @@ func TestUsageProbeRouteRequiresAccountManage(t *testing.T) {
 	}
 }
 
+// Simple preferences, line removal preview and line replacement are mounted
+// routes. An undeclared pattern fails closed for every caller, including a
+// person who holds the permission the handler rechecks. Reads stay models.read;
+// replacement stays models.manage.
+func TestModelLineAndSimplePreferenceRoutes(t *testing.T) {
+	person := tenant.WithPrincipal(t.Context(), tenant.Principal{ID: "caller", TenantID: "tenant", Kind: tenant.Person})
+	for _, tc := range []struct{ route, want string }{
+		{"GET /api/model-preferences/simple", "models.read"},
+		{"GET /api/models/lines/{harness}/{model}/usage", "models.read"},
+		{"PUT /api/models/lines/{harness}/{model}", "models.manage"},
+	} {
+		got, ok := PermissionForPattern(tc.route)
+		if !ok || got != tc.want {
+			t.Errorf("%s permission %q declared=%v, want %s", tc.route, got, ok, tc.want)
+		}
+		if err := RequirePattern(person, tc.route, Scope{}); !errors.Is(err, ErrNoStore) {
+			t.Errorf("%s person: %v, want store lookup", tc.route, err)
+		}
+		if err := RequirePattern(t.Context(), tc.route, Scope{}); !errors.Is(err, ErrForbidden) {
+			t.Errorf("%s anonymous: %v", tc.route, err)
+		}
+	}
+}
+
 // Every current module declares literal ServeMux patterns. This source walk
 // catches a new route even when its module is mounted only in production.
 func TestRouteSourceCoverage(t *testing.T) {
