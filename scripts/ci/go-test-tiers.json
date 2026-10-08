@@ -3476,6 +3476,8 @@
     ,
     {"kind":"go","package":"internal/authz","name":"TestDenialLayersAndDisclosureOrder","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/authz","name":"TestDomainPolicyComposition","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/authz","name":"TestEffectiveRouteMatrix","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestExitConfirmationRoutePermission","tier":"GATED-FULL"}

@@ -1,0 +1,77 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "journey.act",
+      "journey.manage",
+      "journey.read"
+    ],
+    "guest": [
+      "journey.read"
+    ],
+    "member": [
+      "journey.act",
+      "journey.read"
+    ],
+    "owner": [
+      "journey.act",
+      "journey.manage",
+      "journey.read"
+    ],
+    "viewer": [
+      "journey.read"
+    ]
+  },
+  "project_filtered": {
+    "GET /api/journey/next-actions": true
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Act journey",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Journey",
+      "key": "journey.act",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Manage journey",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Journey",
+      "key": "journey.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read journey",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Journey",
+      "key": "journey.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "routes": {
+    "GET /api/journey/next-actions": "journey.read",
+    "GET /api/projects/{projectId}/journey": "journey.read",
+    "POST /api/projects/{projectId}/journey/actions": "journey.act",
+    "PUT /api/projects/{projectId}/journey/profile": "journey.act"
+  },
+  "words": {
+    "resources": {
+      "journey": "the journey"
+    }
+  }
+}

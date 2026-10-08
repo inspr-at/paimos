@@ -1,0 +1,14 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "routes": {
+    "DELETE /api/time-entries/{id}": "hours.write",
+    "GET /api/nodes/{nodeId}/time-totals": "hours.read",
+    "GET /api/time-entries": "hours.read",
+    "GET /api/time-periods": "hours.read",
+    "GET /api/time-periods/{periodId}": "hours.read",
+    "PATCH /api/time-entries/{id}": "hours.write",
+    "POST /api/time-entries": "hours.write",
+    "POST /api/time-periods": "hours.write",
+    "POST /api/time-periods/{periodId}/approve": "hours.approve"
+  }
+}
