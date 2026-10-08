@@ -462,29 +462,11 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.tree-reuse.outputs.reuse == 'pull_request'
-        with:
-          persist-credentials: false
-          ref: ${{ github.event.merge_group.base_sha }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        if: needs.tree-reuse.outputs.reuse == 'pull_request'
-        with:
-          node-version: "24"
-      - name: Revalidate PR execution proof
-        id: pr-confirm
-        if: needs.tree-reuse.outputs.reuse == 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CI_MG_REUSE: ${{ vars.CI_MG_REUSE }}
-          CONFIRM_PR_RUN: ${{ needs.tree-reuse.outputs.run }}
-        run: node scripts/ci-tree-reuse.mjs
       - name: Require every Go shard and the static checks
+        if: needs.tree-reuse.outputs.reuse != 'pull_request'
         env:
           REUSE: ${{ needs.tree-reuse.outputs.reuse }}
           REUSE_PROOF: ${{ needs.tree-reuse.result }}
-          PR_CONFIRM_REUSE: ${{ steps.pr-confirm.outputs.reuse }}
-          PR_CONFIRM_RUN: ${{ steps.pr-confirm.outputs.run }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           CACHE_PRIME: ${{ needs.cache-prime.result }}
           TIER_PLAN: ${{ needs.tier-plan.result }}
@@ -497,22 +479,6 @@ jobs:
         run: |
           set -euo pipefail
           test "$TIER_PLAN" = success
-          if [ "$REUSE" = pull_request ]; then
-            test "$GITHUB_EVENT_NAME" = merge_group
-            test "$PR_CONFIRM_REUSE" = pull_request
-            test "$PR_CONFIRM_RUN" = "$SOURCE_RUN"
-            test "$TIER_LAYOUT" = full
-            test "$CI_PLAN" = success
-            test "$CI_LANE" = full
-            test "$REUSE_PROOF" = success
-            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
-            test "$CACHE_PRIME" = skipped
-            test "$GO_TEST" = skipped
-            test "$GO_STATIC" = success
-            test "$GO_TIMING" = success
-            echo "reused pull_request run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
           if [ "$REUSE" = merge_group ]; then
             test "$GITHUB_EVENT_NAME" = push
             test "$GITHUB_REF" = refs/heads/main
@@ -549,6 +515,56 @@ jobs:
           test "${GO_STATIC}" = "$expected"
           test "${GO_TIMING}" = "$shards"
           if [ "$expected" = skipped ]; then echo "$CI_LANE: Go checks skipped" >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.merge_group.base_sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        with:
+          node-version: "24"
+      - name: Revalidate PR execution proof
+        id: pr-confirm
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_MG_REUSE: ${{ vars.CI_MG_REUSE }}
+          CONFIRM_PR_RUN: ${{ needs.tree-reuse.outputs.run }}
+        run: node scripts/ci-tree-reuse.mjs
+      - name: Require confirmed PR execution proof
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        env:
+          REUSE: ${{ needs.tree-reuse.outputs.reuse }}
+          REUSE_PROOF: ${{ needs.tree-reuse.result }}
+          PR_CONFIRM_REUSE: ${{ steps.pr-confirm.outputs.reuse }}
+          PR_CONFIRM_RUN: ${{ steps.pr-confirm.outputs.run }}
+          SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
+          CACHE_PRIME: ${{ needs.cache-prime.result }}
+          TIER_PLAN: ${{ needs.tier-plan.result }}
+          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
+          CI_PLAN: ${{ needs.ci-plan.result }}
+          CI_LANE: ${{ needs.tier-plan.outputs.lane }}
+          GO_TEST: ${{ needs.go-test.result }}
+          GO_STATIC: ${{ needs.go-static.result }}
+          GO_TIMING: ${{ needs.go-timing.result }}
+        run: |
+          set -euo pipefail
+          test "$TIER_PLAN" = success
+          test "$REUSE" = pull_request
+          test "$GITHUB_EVENT_NAME" = merge_group
+          test "$PR_CONFIRM_REUSE" = pull_request
+          test "$PR_CONFIRM_RUN" = "$SOURCE_RUN"
+          test "$TIER_LAYOUT" = full
+          test "$CI_PLAN" = success
+          test "$CI_LANE" = full
+          test "$REUSE_PROOF" = success
+          [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
+          test "$CACHE_PRIME" = skipped
+          test "$GO_TEST" = skipped
+          test "$GO_STATIC" = success
+          test "$GO_TIMING" = success
+          echo "reused pull_request run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
 
   # OPS-257: install/build once, then fan out balanced UI specs on hosted runners.
   # The former footer-ui, status-help-ui and status-autopilot-ui jobs and the e2e

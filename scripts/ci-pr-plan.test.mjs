@@ -435,7 +435,7 @@ test('effective lane precedence and real workflow execution agree for all 90 fla
         const envBlock = gate.split('        env:\n')[1].split('        run: |\n')[0];
         const env = {PATH: process.env.PATH, GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/main', GITHUB_STEP_SUMMARY: summary};
         for (const match of envBlock.matchAll(/^          ([A-Z_]+): (.+)$/gm)) env[match[1]] = String(evaluate(match[2], context));
-        const run = gate.split('        run: |\n')[1].replace(/^          /gm, '');
+        const run = gate.split('        run: |\n')[1].split('\n      - ')[0].replace(/^          /gm, '');
         const result = spawnSync('bash', ['-c', run], {env, encoding: 'utf8', timeout: 10_000});
         assert.equal(result.status, 0, `${label}/${id}: ${result.stderr}`);
         // A full planner cannot accept omitted heavy work through an old exemption.

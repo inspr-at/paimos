@@ -41,7 +41,7 @@
     "go": {
       "kind": "not-static",
       "reason": "Hosted aggregate status gate.",
-      "runs_sha256": "b01f11513cce5bcb7b6e19c3d763e6a08a5479782b26bca53c539b30724fa68e"
+      "runs_sha256": "30b3358a9bb524872b38a4b3484b6233c82165881f3d9432f1f4d90c95df80a3"
     },
     "web-setup": {
       "kind": "static"

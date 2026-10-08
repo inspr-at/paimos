@@ -214,6 +214,12 @@ func TestQueueReuseAggregatesRejectPartialResults(t *testing.T) {
 	for _, id := range []string{"go", "web", "release-check", "e2e"} {
 		steps := reuseSteps(treeMap(jobs[id]))
 		s := treeMap(steps[len(steps)-1])
+		if id == "go" {
+			s = reuseStep(t, treeMap(jobs[id]), "Require every Go shard and the static checks")
+			if s["if"] != "needs.tree-reuse.outputs.reuse != 'pull_request'" {
+				t.Fatal("main Go gate must run for every path except confirmed PR reuse")
+			}
+		}
 		values := map[string]string{"REUSE": "merge_group", "REUSE_PROOF": "success", "SOURCE_RUN": "123", "CACHE_PRIME": "success", "CI_PLAN": "success", "CI_LANE": "full", "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main"}
 		if treeMap(s["env"])["TIER_PLAN"] != nil {
 			values["TIER_PLAN"] = "success"
@@ -752,6 +758,9 @@ func TestMergeGroupPRReuseAggregatesRequireConfirmedProof(t *testing.T) {
 		steps := reuseSteps(j)
 		gate := treeMap(steps[len(steps)-1])
 		confirm := reuseStep(t, j, "Revalidate PR execution proof")
+		if id == "go" && (gate["name"] != "Require confirmed PR execution proof" || gate["if"] != "needs.tree-reuse.outputs.reuse == 'pull_request'" || treeMap(steps[len(steps)-2])["id"] != "pr-confirm") {
+			t.Fatal("PR Go gate must run only after mandatory confirmation for PR reuse")
+		}
 		if confirm["continue-on-error"] != nil || confirm["id"] != "pr-confirm" || treeMap(confirm["env"])["CONFIRM_PR_RUN"] != "${{ needs.tree-reuse.outputs.run }}" {
 			t.Fatal("revalidation must be mandatory and bind source run")
 		}
