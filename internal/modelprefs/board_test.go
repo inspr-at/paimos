@@ -124,6 +124,22 @@ func TestRankedBoardExpertSituationThinking(t *testing.T) {
 	if !stuck.FollowsFirst || stuck.Thinking != "deep" || stuck.Rank[0] != "anthropic:opus" {
 		t.Fatalf("stuck fallback: %+v", stuck)
 	}
+	t.Run("explicit stuck column thinking stays below deep", func(t *testing.T) {
+		s := rankedFixture()
+		s.Orders = []BoardOrder{
+			{ProfileID: "person", Column: "backend", Situation: "first", Rank: []string{"openai:sol", "anthropic:opus"}, Not: []string{}, Thinking: str("standard")},
+			{ProfileID: "person", Column: "backend", Situation: "stuck", Thinking: str("standard")},
+		}
+		stuck := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "stuck", PreviousFamily: "openai"}, nil)
+		if stuck.Thinking != "standard" || !stuck.ThinkingColumn || stuck.EffortLevel != ThinkingLevel("standard") {
+			t.Fatalf("explicit stuck thinking was raised: %+v", stuck)
+		}
+		s.Orders = s.Orders[:1]
+		missing := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "stuck", PreviousFamily: "openai"}, nil)
+		if missing.Thinking != "deep" || missing.ThinkingColumn || missing.EffortLevel != 4 {
+			t.Fatalf("missing stuck row lost the deep floor: %+v", missing)
+		}
+	})
 	for _, column := range []string{"review:openai", "concept"} {
 		d := ResolveBoard(s, BoardQuery{Column: column, Situation: "fix"}, nil)
 		if d.Situation != "first" || d.FollowsFirst || column == "review:openai" && d.EffortLevel != 4 {

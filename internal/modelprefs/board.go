@@ -350,7 +350,7 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 		level--
 	}
 	if d.Situation == "stuck" {
-		if level < 4 {
+		if !d.ThinkingColumn && level < 4 {
 			level = 4
 		}
 		if !explicitSituation && q.PreviousFamily != "" {
