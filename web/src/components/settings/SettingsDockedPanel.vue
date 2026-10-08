@@ -21,6 +21,8 @@ const props = defineProps<{
   // A section embedded beside existing Settings navigation measures that
   // containing frame for the shared 1200/720 layout rule.
   layoutFrameSelector?: string
+  fullHeightSheet?: boolean
+  closeLabel?: string
 }>()
 const emit = defineEmits<{ 'update:open': [open: boolean]; close: [] }>()
 const frame = ref<HTMLElement>()
@@ -51,9 +53,10 @@ function fit() {
   width.value = rect.width
   const viewportTop = parseFloat(frame.value.style.getPropertyValue('--vv-top')) || 0
   const viewportBottom = viewportTop + (parseFloat(frame.value.style.getPropertyValue('--vv-h')) || innerHeight)
-  const top = Math.max(viewportTop, rect.top)
-  const bottom = Math.min(viewportBottom, rect.bottom)
-  overlay.value = { left: `${Math.max(0, rect.left)}px`, top: `${top}px`, width: `${Math.max(0, Math.min(innerWidth, rect.right) - Math.max(0, rect.left))}px`, height: `${Math.max(0, bottom - top)}px` }
+  const sheet = mode.value === 'sheet' && props.fullHeightSheet
+  const top = sheet ? viewportTop : Math.max(viewportTop, rect.top)
+  const bottom = sheet ? viewportBottom : Math.min(viewportBottom, rect.bottom)
+  overlay.value = sheet ? { left: '0px', top: `${top}px`, width: `${innerWidth}px`, height: `${Math.max(0, bottom - top)}px` } : { left: `${Math.max(0, rect.left)}px`, top: `${top}px`, width: `${Math.max(0, Math.min(innerWidth, rect.right) - Math.max(0, rect.left))}px`, height: `${Math.max(0, bottom - top)}px` }
   dockHeight.value = `${Math.max(0, innerHeight - Math.max(16, rect.top) - 16)}px`
   if (layoutFrame && mode.value === 'dock' && dock.value) {
     // The existing shell owns scrolling. Pin this embedded dock within its
@@ -209,7 +212,7 @@ defineExpose({ frame, close })
           <AppIcon v-if="icon" :name="icon" />
           <div class="pane-title"><h2 :id="titleId" ref="paneTitle" tabindex="-1">{{ title }}</h2><p v-if="fact">{{ fact }}</p></div>
           <slot name="overflow" />
-          <button type="button" class="btn sm ghost pane-close" aria-label="Close details" aria-keyshortcuts="Escape" @click="close()"><AppIcon name="close" :size="14" /><span>Close</span><KeyCap k="Esc" /></button>
+          <button type="button" class="btn sm ghost pane-close" :aria-label="closeLabel || 'Close details'" aria-keyshortcuts="Escape" @click="close()"><AppIcon name="close" :size="14" /><span>{{ closeLabel || 'Close' }}</span><KeyCap k="Esc" /></button>
         </header>
         <div class="pane-body"><slot name="panel" /></div>
         <footer v-if="$slots.footer" class="pane-foot"><slot name="footer" /></footer>

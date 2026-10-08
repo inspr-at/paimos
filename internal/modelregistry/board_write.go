@@ -502,13 +502,20 @@ func (m *Module) writeBoardProfile(w http.ResponseWriter, r *http.Request) {
 		if after.Person != nil && after.Person.Residency != nil {
 			newResidency = modelprefs.Strictest(newResidency, *after.Person.Residency)
 		}
-		oldCounts, err := c.residencyCounts(ctx, tx, project, oldResidency)
-		if err != nil {
-			return err
+		oldCounts, newCounts := map[string]int{}, map[string]int{}
+		if modelprefs.Strictness(oldResidency) > 0 {
+			oldCounts, err = c.residencyCounts(ctx, tx, project, oldResidency)
+			if err != nil {
+				return err
+			}
 		}
-		newCounts, err := c.residencyCounts(ctx, tx, project, newResidency)
-		if err != nil {
-			return err
+		if newResidency == oldResidency {
+			newCounts = oldCounts
+		} else if modelprefs.Strictness(newResidency) > 0 {
+			newCounts, err = c.residencyCounts(ctx, tx, project, newResidency)
+			if err != nil {
+				return err
+			}
 		}
 		for _, column := range boardColumns(s) {
 			query := modelprefs.BoardQuery{Column: column.Slug, Situation: "first"}
