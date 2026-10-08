@@ -66,6 +66,7 @@
     "receive": "receive"
   },
   "special": {
+    "delivery.route": "Record and read shadow delivery routes",
     "events.subscribe": "Subscribe to authorized changes",
     "agents.plan.read": "See their agent start plan",
     "harness.watch": "View live conversations",

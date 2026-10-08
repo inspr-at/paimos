@@ -33,6 +33,9 @@ type WorkQuery struct {
 	PreviousFamily   string
 	Concept          bool
 	Queued           bool
+	// Column and OffHarnesses are supplied by shadow round routing only.
+	Column       string
+	OffHarnesses []string
 }
 type PreferenceTrace struct {
 	PreferenceOf         *preferenceOwner           `json:"preference_of,omitempty"`

@@ -135,54 +135,9 @@ func agentsPlanOwner(ctx context.Context, tx pgx.Tx, tenantID, owner string) (st
 // effective ceilings preserves legacy shapes and treats a missing limit like
 // explicit no_limit, while never guessing between conflicting start allowances.
 func readAgentsPlanPreference(ctx context.Context, tx pgx.Tx, tenantID, owner string) ([]byte, *time.Time, error) {
-	rows, err := tx.Query(ctx, `SELECT pref.value,pref.updated_at FROM user_preferences pref
-		JOIN principals person ON person.tenant_id=pref.tenant_id AND person.id=pref.principal_id
-		WHERE pref.tenant_id=$1::uuid AND pref.key=$3 AND person.kind='person'
-		AND coalesce(person.linked_to,person.id)=$2::uuid
-		ORDER BY (person.id=$2::uuid) DESC,person.id`, tenantID, owner, agentplan.PreferenceKey)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer rows.Close()
-	var selected []byte
-	var updatedAt *time.Time
-	var selectedPlan agentplan.Plan
-	for rows.Next() {
-		var raw []byte
-		var at time.Time
-		if err := rows.Scan(&raw, &at); err != nil {
-			return nil, nil, err
-		}
-		plan, _, err := agentplan.Decode(raw)
-		if err != nil {
-			return nil, nil, err
-		}
-		if updatedAt == nil {
-			selected, updatedAt, selectedPlan = raw, &at, plan
-		} else if !sameAgentsPlan(selectedPlan, plan) {
-			return nil, nil, errors.New("conflicting linked person plans")
-		}
-	}
-	return selected, updatedAt, rows.Err()
+	return agentplan.ReadPreference(ctx, tx, tenantID, owner)
 }
 
 func sameAgentsPlan(a, b agentplan.Plan) bool {
-	if a.Total != b.Total {
-		return false
-	}
-	for _, limits := range []map[string]agentplan.Limit{a.Limits, b.Limits} {
-		for harness := range limits {
-			left, right := a.Limits[harness], b.Limits[harness]
-			if left.Mode == "" {
-				left.Mode = agentplan.NoLimit
-			}
-			if right.Mode == "" {
-				right.Mode = agentplan.NoLimit
-			}
-			if left != right {
-				return false
-			}
-		}
-	}
-	return true
+	return agentplan.SameLimits(a, b)
 }

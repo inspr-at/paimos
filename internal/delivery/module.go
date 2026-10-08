@@ -39,6 +39,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/settings/delivery", m.settings)
 	mux.HandleFunc("GET /api/projects/{projectId}/delivery-settings", m.settings)
 	mux.HandleFunc("PUT /api/projects/{projectId}/delivery-settings", m.settings)
+	mux.HandleFunc("GET /api/projects/{projectId}/routing-settings", boundedRouting(m.routingSettings))
+	mux.HandleFunc("PUT /api/projects/{projectId}/routing-settings", boundedRouting(m.routingSettings))
+	mux.HandleFunc("POST /api/projects/{projectId}/routing-decisions", boundedRouting(m.routingDecision))
+	mux.HandleFunc("GET /api/projects/{projectId}/routing-decisions/{roundId}", boundedRouting(m.routingDecision))
 }
 func (m *Module) observationTx(ctx context.Context, tx pgx.Tx, p Pull, at time.Time) (Observation, error) {
 	pr := p.Number

@@ -72,7 +72,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if err != nil {
 		return nil, err
 	}
-	query := modelprefs.BoardQuery{Area: q.Area, Labels: q.Labels, Situation: q.Situation, Review: review, Concept: q.Concept, AuthorFamily: q.AuthorFamily, PreviousFamily: q.PreviousFamily, EstimateHours: q.EstimateHours, FixRound: q.FixRound}
+	query := modelprefs.BoardQuery{Column: q.Column, Area: q.Area, Labels: q.Labels, Situation: q.Situation, Review: review, Concept: q.Concept, AuthorFamily: q.AuthorFamily, PreviousFamily: q.PreviousFamily, EstimateHours: q.EstimateHours, FixRound: q.FixRound}
 	initial := modelprefs.ResolveBoard(s, query, nil)
 	if modelprefs.Strictness(requirement) > 0 {
 		counts, err := c.residencyCounts(ctx, tx, q.ProjectID, requirement)
@@ -93,6 +93,9 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 				return false, "policy unavailable"
 			}
 			skipped := skipReasons(step, role, resolveQuery{Role: roleName, AuthorFamily: q.AuthorFamily, Harness: q.Harness}, now, health)
+			if slices.Contains(q.OffHarnesses, profile.Harness) {
+				skipped = append(skipped, "harness is off in the plan")
+			}
 			if slices.Contains(excluded, profile.ID) {
 				skipped = append(skipped, "already attempted")
 			}
