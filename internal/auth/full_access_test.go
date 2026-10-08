@@ -168,6 +168,16 @@ func TestFullAccessLiveCatalogAndBoundaries(t *testing.T) {
 		t.Fatal("full-access key crossed its tenant")
 	}
 	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		// Keep the workspace's last-owner safeguard intact while withdrawing
+		// this key creator's grants; the second person remains an active owner.
+		var backup string
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles)
+ VALUES($1,'person','Remaining owner',ARRAY['super_admin']) RETURNING id::text`, owner.TenantID).Scan(&backup); err != nil {
+			return err
+		}
+		if err := dbtest.BindLegacyTx(ctx, tx, owner.TenantID, backup); err != nil {
+			return err
+		}
 		_, err := tx.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, owner.ID)
 		return err
 	}); err != nil {
