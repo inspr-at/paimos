@@ -130,6 +130,26 @@ test('lanes zoom, pan and move the time without moving a control, and a click ne
   guard.done()
 })
 
+test('panning an incident to the right edge keeps its caption inside the lane frame', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 900 })
+  await setup(page)
+  await page.goto('/p/AEON/delivery?view=flow')
+  await expect.poll(() => windowText(page)).toBe('20:12 – 20:32')
+  await lanes(page).focus()
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowLeft')
+  await expect.poll(() => windowText(page)).toBe('19:56 – 20:16')
+  const caption = lanes(page).locator('.fl-inc-t')
+  await expect(caption).toBeVisible()
+  const frame = (await lanes(page).locator(':scope > svg').boundingBox())!
+  const text = (await caption.boundingBox())!
+  const dot = (await lanes(page).locator('.fl-inc-dot').boundingBox())!
+  expect(dot.x).toBeGreaterThanOrEqual(frame.x - 0.5)
+  expect(text.x).toBeGreaterThanOrEqual(frame.x - 0.5)
+  expect(dot.x + dot.width).toBeLessThanOrEqual(frame.x + frame.width + 0.5)
+  expect(text.x + text.width).toBeLessThanOrEqual(frame.x + frame.width + 0.5)
+  await expect(lanes(page).locator('.sr-only')).toHaveText('Live, but not working properly · since 20:14')
+})
+
 test('the overview brush pans and resizes the window, and its playhead moves the time', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1100 })
   await setup(page)

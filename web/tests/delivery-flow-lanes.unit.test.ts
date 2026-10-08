@@ -4,7 +4,7 @@
 // keys or a follow tick move the time when they should move only the window.
 import { expect, it } from 'vitest'
 import {
-  createTimeline, fitAll, fitLabel, following, followTick, keyInput, laneModel, MAX_ROWS, resetTimeline, rowPieces, setTime, timeLabel, wheelInput, zoomPreset, zoomTo,
+  CHAR_W, createTimeline, fitAll, fitLabel, following, followTick, keyInput, laneFrame, laneModel, MAX_ROWS, panBy, placeIncidentCaption, resetTimeline, rowPieces, setTime, timeLabel, wheelInput, zoomPreset, zoomTo,
   type FlowData, type FlowRun, type FlowStep, type Lane,
 } from '../src/lib/deliveryFlow'
 import { exampleLive, EXAMPLE_NOW } from '../src/lib/deliveryFlowExample'
@@ -33,10 +33,50 @@ it('a label falls back from tag and text, to the text, to the duration, to an el
   expect(fitLabel({ ...base, room: 400 })).toBe('126 · Fix being checked')
   expect(fitLabel({ ...base, room: 120 })).toBe('Fix being checked')
   expect(fitLabel({ ...base, text: 'Waiting for a reviewer', duration: '14 min', pad: 16, room: 70 })).toBe('14 min')
+  // A cut wait keeps "since" when the text no longer fits. 160 px holds
+  // "14 min · since 19:36" (140 px) and must not fall back to "14 min".
+  expect(fitLabel({ ...base, tag: '983–986', text: 'Waiting for a reviewer', since: ' · since 19:36', duration: '14 min', pad: 16, room: 160 })).toBe('14 min · since 19:36')
+  expect(fitLabel({ ...base, text: 'Fixing the notes', since: ' · since 18:33', duration: '18 min', pad: 16, room: 160 })).toBe('18 min · since 18:33')
+  expect(fitLabel({ ...base, text: 'Waiting for a reviewer', since: ' · since 19:36', duration: '14 min', pad: 16, room: 100 })).toBe('')
   const cut = fitLabel({ ...base, text: 'Being built, a bit longer than usual', since: ' · since 19:47', room: 200 })
   expect(cut).toMatch(/^126 · Being.*… · since 19:47$/)
   expect(cut.length * 5.9 + 6).toBeLessThan(200)
   expect(fitLabel({ ...base, room: 40 })).toBe('')
+})
+
+it('panning an incident onto the right edge keeps its caption inside a 320 px frame', () => {
+  const data = exampleLive()
+  const incident = data.sets[0]!.main.incident!
+  const t = createTimeline()
+  resetTimeline(t, data, { narrow: true })
+  const { x0, x1 } = laneFrame(320)
+  // The old clamp parked the text at x1 + 4 (318 in this frame) once the incident
+  // sat on the right edge. Pan there, still keeping the incident on screen.
+  panBy(t, incident.start - (t.v1 - t.v0) + 0.4 - t.v0)
+  const X = (m: number) => x0 + (m - t.v0) / (t.v1 - t.v0) * (x1 - x0)
+  const ix0 = X(incident.start)
+  expect(incident.start).toBeLessThan(t.v1)
+  expect(Math.min(Math.max(ix0 + 6, x0 + 4), x1 - 10) + 14).toBeCloseTo(318, 5)
+  const label = `Live, but not working properly · since ${timeLabel(data, incident.start)}`
+  expect(label).toBe('Live, but not working properly · since 20:14')
+  const placed = placeIncidentCaption({ text: label, x0, x1, anchor: Math.max(ix0 + 6, x0 + 4) })
+  const right = placed.x + (placed.text ? 14 + placed.text.length * CHAR_W : 10)
+  expect(placed.x).toBeGreaterThanOrEqual(x0)
+  expect(right).toBeLessThanOrEqual(x1)
+  expect(placed.x + 14).toBeLessThanOrEqual(x1)
+  expect(placed.full).toBe(label)
+  expect(placed.text === label || placed.text.endsWith('…')).toBe(true)
+  // A caption that fits stays on its incident instead of being pulled to the edge.
+  const fitted = placeIncidentCaption({ text: 'Hi · since 20:14', x0, x1, anchor: 100 })
+  expect(fitted).toMatchObject({ x: 100, text: 'Hi · since 20:14', full: 'Hi · since 20:14', healthyX: null })
+  // A closed incident's healthy note is drawn only when it fits, and stays readable either way.
+  const wide = placeIncidentCaption({ text: 'Recovered · 20 min', x0: 84, x1: 1200, anchor: 200, healthy: { text: 'healthy again', anchor: 400 } })
+  expect(wide.healthyX).toBe(400)
+  expect(wide.healthyX! + 13 + 'healthy again'.length * CHAR_W).toBeLessThanOrEqual(1200)
+  const cramped = placeIncidentCaption({ text: label, x0, x1, anchor: ix0 + 6, healthy: { text: 'healthy again', anchor: x1 - 4 } })
+  expect(cramped.healthyX).toBeNull()
+  expect(cramped.full).toBe(`${label} · healthy again`)
+  expect(cramped.x + 14 + cramped.text.length * CHAR_W).toBeLessThanOrEqual(x1)
 })
 
 it('slivers in a row merge into one "+N" cluster; a lone sliver stays a step', () => {

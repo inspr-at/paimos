@@ -93,19 +93,78 @@ export const CHAR_W = 5.9
 export interface LabelInput { tag?: string; text: string; since?: string; duration?: string; room: number; pad: number }
 /**
  * The longest label that fits: run tag + text, then the text alone, then (waits and
- * repeats) the duration, then the text cut with an ellipsis, keeping "· since HH:MM";
- * nothing when even that does not fit.
+ * repeats) the duration. A "since" suffix stays on every candidate, including the
+ * duration. Then the text cut with an ellipsis, still keeping "· since HH:MM".
+ * Nothing when even that does not fit — a cut wait never drops its suffix.
  */
 export function fitLabel({ tag, text, since = '', duration, room, pad }: LabelInput): string {
   const base = text + since
-  const options = [tag ? `${tag} · ${base}` : base, base, duration ?? ''].filter(Boolean)
+  const durationLabel = duration ? `${duration}${since}` : ''
+  const options = [tag ? `${tag} · ${base}` : base, base, durationLabel].filter(Boolean)
   const fits = options.find(option => option.length * CHAR_W + pad + 6 < room)
   if (fits) return fits
   if (room <= 46) return ''
   const source = tag ? `${tag} · ${text}` : text
   const keep = Math.floor((room - pad - 8 - since.length * CHAR_W) / CHAR_W) - 1
   if (keep > 4) return `${source.slice(0, keep).trimEnd()}…${since}`
+  if (since) return ''
   return `${source.slice(0, Math.max(3, Math.floor((room - pad - 8) / CHAR_W) - 1)).trimEnd()}…`
+}
+
+/** Plot frame for a lanes stage: actor names sit left of x0, the plot ends at x1. */
+export function laneFrame(width: number): { x0: number; x1: number } {
+  const narrow = width < 640
+  const x0 = narrow ? 84 : 156
+  return { x0, x1: Math.max(x0 + 1, width - (narrow ? 6 : 12)) }
+}
+
+const CAPTION_TEXT = 14
+const CAPTION_DOT = 10
+const HEALTHY_TEXT = 13
+export interface IncidentCaptionInput {
+  text: string
+  x0: number
+  x1: number
+  /** Preferred left edge of the marker dot. */
+  anchor: number
+  /** Drawn at the recovery point when the whole marker fits; otherwise folded into `full`. */
+  healthy?: { text: string; anchor: number } | null
+}
+export interface IncidentCaption {
+  /** Left edge of the marker dot. */
+  x: number
+  /** The words that fit. An ellipsis means `full` is longer. */
+  text: string
+  /** Every word, including a healthy note the frame could not draw. */
+  full: string
+  healthyX: number | null
+}
+/** Keep an incident caption inside the plot. The dot, the words and a healthy note all end at or before x1. */
+export function placeIncidentCaption({ text, x0, x1, anchor, healthy = null }: IncidentCaptionInput): IncidentCaption {
+  const inner = Math.max(0, x1 - x0)
+  const advance = (value: string) => value.length * CHAR_W
+  const fitText = (max: number): string => {
+    if (advance(text) <= max) return text
+    const ellipsis = '…'
+    let keep = Math.floor((max - advance(ellipsis)) / CHAR_W)
+    while (keep > 0) {
+      const shown = `${text.slice(0, keep).trimEnd()}${ellipsis}`
+      if (advance(shown) <= max) return shown
+      keep--
+    }
+    return ''
+  }
+  const shown = fitText(Math.max(0, inner - CAPTION_TEXT))
+  const width = shown ? CAPTION_TEXT + advance(shown) : Math.min(CAPTION_DOT, inner)
+  let x = Math.max(x0, anchor)
+  if (x + width > x1) x = Math.max(x0, x1 - width)
+  let healthyX: number | null = null
+  if (healthy?.text) {
+    const hWidth = HEALTHY_TEXT + advance(healthy.text)
+    const hx = Math.max(healthy.anchor, x + width + 8)
+    if (hx >= x0 && hx + hWidth <= x1) healthyX = hx
+  }
+  return { x, text: shown, full: healthy?.text && healthyX == null ? `${text} · ${healthy.text}` : text, healthyX }
 }
 
 // ---------- Slivers ----------

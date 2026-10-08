@@ -9,7 +9,7 @@ import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import type { DeliveryLanguage } from '../../lib/delivery'
 import {
-  criticalPath, fitLabel, keyInput, minutesText, pick, rowPieces, setTime, setWindow, tickStep, timeLabel, wheelInput,
+  criticalPath, fitLabel, keyInput, laneFrame, minutesText, pick, placeIncidentCaption, rowPieces, setTime, setWindow, tickStep, timeLabel, wheelInput,
   type FlowData, type FlowLevel, type FlowStep, type LaneItem, type LaneSet, type Timeline,
 } from '../../lib/deliveryFlow'
 import type { FlowText } from '../../lib/deliveryFlowText'
@@ -32,7 +32,7 @@ onBeforeUnmount(() => observer?.disconnect())
 const narrow = computed(() => width.value < 640)
 const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
 const geo = computed(() => {
-  const t = props.timeline, W = width.value, x0 = narrow.value ? 84 : 156, x1 = Math.max(x0 + 1, W - (narrow.value ? 6 : 12)), span = t.v1 - t.v0
+  const t = props.timeline, W = width.value, { x0, x1 } = laneFrame(W), span = t.v1 - t.v0
   return { W, x0, x1, span, X: (m: number) => x0 + (m - t.v0) / span * (x1 - x0), inv: (x: number) => t.v0 + (x - x0) / (x1 - x0) * span }
 })
 const rel = computed(() => props.data.origin == null)
@@ -55,7 +55,7 @@ const layout = computed(() => {
   const rowH = Math.min(32, Math.max(15, Math.floor((H - AX - 40 - headH * sets.length - laneN * GAPS - (sets.length - 1) * 10) / Math.max(1, totalRows))))
   const lanes: LaneRow[] = [], pieces: Piece[] = [], titles: { y: number; text: string }[] = []
   const incidents: { key: string; x: number; y: number; w: number; h: number; fut: boolean }[] = []
-  const incidentLabels: { key: string; x: number; y: number; text: string; healthyX: number | null }[] = []
+  const incidentLabels: { key: string; x: number; y: number; text: string; full: string; healthyX: number | null }[] = []
   const connectors: { key: string; d: string; cx: number; cy: number }[] = []
   const targets: { key: string; x: number; w: number; label: string; lx: number }[] = []
   const finishes: { key: string; x: number; y0: number; y1: number; target: boolean }[] = []
@@ -76,7 +76,11 @@ const layout = computed(() => {
       incidents.push({ key: `${si}:inc`, x: ix0, y: top - 2, w: Math.max(2, split - ix0), h: bottom - top + 22, fut: false })
       if (open) incidents.push({ key: `${si}:inc-fut`, x: split, y: top - 2, w: Math.max(2, ix1 - split), h: bottom - top + 22, fut: true })
       const label = `${pick(props.level === 'simple' ? inc.simple : inc.expert, props.lang)} · ${open ? `${props.text.since} ${at(inc.start)}` : minutesText(inc.end - inc.start)}`
-      incidentLabels.push({ key: `${si}:incl`, x: Math.min(Math.max(ix0 + 6, g.x0 + 4), g.x1 - 10), y: bottom + 10, text: label, healthyX: !open && ix1 < g.x1 - 60 ? ix1 + 4 : null })
+      const caption = placeIncidentCaption({
+        text: label, x0: g.x0, x1: g.x1, anchor: Math.max(ix0 + 6, g.x0 + 4),
+        healthy: !open ? { text: props.text.healthy, anchor: ix1 + 4 } : null,
+      })
+      incidentLabels.push({ key: `${si}:incl`, x: caption.x, y: bottom + 10, text: caption.text, full: caption.full, healthyX: caption.healthyX })
     }
     const placed = new Map<FlowStep, Piece>()
     for (const row of lanes.filter(l => l.set === set)) {
@@ -267,14 +271,15 @@ defineExpose({ focusLane, setTime: (m: number) => setTime(props.timeline, m) })
         </g>
         <path v-for="f in layout.finishes" :key="f.key" class="fl-finish" :class="{ tgt: f.target }" :d="`M${f.x},${f.y0}V${f.y1}`" />
         <rect v-if="selBox" class="ln-selbox" :x="selBox.x - 1.5" :y="selBox.y - 1.5" :width="selBox.w + 3" :height="selBox.h + 3" rx="5" />
-      </g>
-      <g v-for="l in layout.incidentLabels" :key="l.key">
-        <circle class="fl-inc-dot" :cx="l.x + 5" :cy="l.y" r="5" />
-        <path class="fl-inc-mark" :d="`M${l.x + 5} ${l.y - 2.5}v3M${l.x + 5} ${l.y + 2.4}v.1`" />
-        <text class="fl-inc-t" :x="l.x + 14" :y="l.y + 3.6">{{ l.text }}</text>
-        <g v-if="l.healthyX != null" class="fl-rec">
-          <g :transform="`translate(${l.healthyX},${l.y - 5})`"><AppIcon name="check" :size="10" /></g>
-          <text class="fl-rec-t" :x="l.healthyX + 13" :y="l.y + 3.6">{{ text.healthy }}</text>
+        <g v-for="l in layout.incidentLabels" :key="l.key">
+          <title>{{ l.full }}</title>
+          <circle class="fl-inc-dot" :cx="l.x + 5" :cy="l.y" r="5" />
+          <path class="fl-inc-mark" :d="`M${l.x + 5} ${l.y - 2.5}v3M${l.x + 5} ${l.y + 2.4}v.1`" />
+          <text v-if="l.text" class="fl-inc-t" :x="l.x + 14" :y="l.y + 3.6">{{ l.text }}</text>
+          <g v-if="l.healthyX != null" class="fl-rec">
+            <g :transform="`translate(${l.healthyX},${l.y - 5})`"><AppIcon name="check" :size="10" /></g>
+            <text class="fl-rec-t" :x="l.healthyX + 13" :y="l.y + 3.6">{{ text.healthy }}</text>
+          </g>
         </g>
       </g>
       <g v-if="nowX != null">
@@ -289,6 +294,9 @@ defineExpose({ focusLane, setTime: (m: number) => setTime(props.timeline, m) })
         <text class="ln-pht" :x="playhead.x + 5" :y="playhead.y + 12.6" text-anchor="middle">{{ playhead.label }}</text>
       </g>
     </svg>
+    <template v-if="width">
+      <span v-for="l in layout.incidentLabels" :key="`${l.key}:full`" class="sr-only">{{ l.full }}</span>
+    </template>
   </div>
 </template>
 
