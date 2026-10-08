@@ -61,7 +61,7 @@ type replay struct {
 }
 
 // Record contains only local process provenance and bounded control digests.
-// The journal is AEON v2; classic journals are never opened implicitly.
+// RecordSchemaVersion pins its persisted schema; classic is never opened implicitly.
 type Record struct {
 	WorkerPickup          *WorkerPickup    `json:"worker_pickup,omitempty"`
 	RecoveryReports       []RecoveryReport `json:"recovery_reports,omitempty"`
@@ -132,6 +132,7 @@ type owned struct {
 	replyOrder      []string
 	doneRequested   bool
 	monitorDone     chan struct{}
+	harnessWake     chan struct{}
 	stopRequested   bool
 	forceRequested  bool
 	harnessArchived bool
@@ -361,7 +362,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		}
 	}
 	j, err := localjournal.Open(localjournal.Config[Record]{
-		Directory: c.StateRoot, Prefix: "aeon-agentd-" + c.DaemonID, Version: 2,
+		Directory: c.StateRoot, Prefix: "aeon-agentd-" + c.DaemonID, Version: RecordSchemaVersion, Migrations: recordMigrations(),
 		MaxBytes: 4 << 20, MaxRecords: 4096,
 		Key: func(r Record) (string, error) {
 			if r.RunID == "" {
@@ -1377,27 +1378,40 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		binder.bindLifetime(s.lifetime)
 	}
 	go s.monitor(entry)
+	entry.mu.Lock()
+	entry.harnessWake = make(chan struct{}, 1)
+	entry.mu.Unlock()
 	go s.heartbeat(entry)
+	go s.watchHarness(entry)
 	return startErr
 }
 
 func (s *Supervisor) heartbeat(entry *owned) {
 	entry.mu.Lock()
-	done, inbox := entry.monitorDone, entry.inboxCapable
+	inbox := entry.inboxCapable
 	entry.mu.Unlock()
 	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
-	wakeTimer := time.NewTimer(time.Hour)
-	if !wakeTimer.Stop() {
-		<-wakeTimer.C
-	}
-	defer wakeTimer.Stop()
 	var inboxTicks <-chan time.Time
 	if inbox {
 		inboxTicker := time.NewTicker(2 * time.Second)
 		defer inboxTicker.Stop()
 		inboxTicks = inboxTicker.C
 	}
+	s.heartbeatLoop(entry, ticker.C, inboxTicks)
+}
+
+// Tick channels are injected so tests prove hint processing without elapsed
+// time assertions or accidentally passing via the fallback poll.
+func (s *Supervisor) heartbeatLoop(entry *owned, heartbeatTicks, inboxTicks <-chan time.Time) {
+	entry.mu.Lock()
+	done, hints := entry.monitorDone, entry.harnessWake
+	entry.mu.Unlock()
+	wakeTimer := time.NewTimer(time.Hour)
+	if !wakeTimer.Stop() {
+		<-wakeTimer.C
+	}
+	defer wakeTimer.Stop()
 	for {
 		entry.mu.Lock()
 		wake := entry.pauseWakeAt
@@ -1418,12 +1432,16 @@ func (s *Supervisor) heartbeat(entry *owned) {
 			wakeTicks = wakeTimer.C
 		}
 		beat := false
+		claimControls := false
 		select {
 		case <-done:
 			return
-		case <-ticker.C:
+		case <-heartbeatTicks:
 			beat = true
 		case <-inboxTicks:
+			claimControls = true // bounded fallback when the hint stream is unavailable
+		case <-hints:
+			claimControls = true
 		case <-wakeTicks:
 			entry.mu.Lock()
 			entry.pauseWakeAt = time.Time{}
@@ -1436,7 +1454,7 @@ func (s *Supervisor) heartbeat(entry *owned) {
 			s.flushCapacity(ctx, entry)
 			err = s.update(ctx, entry, Telemetry{Kind: "heartbeat"})
 		}
-		serviceErr := s.serviceHarnessCycle(ctx, entry, beat)
+		serviceErr := s.serviceHarnessWake(ctx, entry, beat, beat || claimControls)
 		cancel()
 		if !errors.Is(serviceErr, ErrControlUnconfirmed) {
 			err = errors.Join(err, serviceErr)
@@ -1731,6 +1749,10 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) error {
 }
 
 func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, heartbeat bool) (result error) {
+	return s.serviceHarnessWake(ctx, entry, heartbeat, heartbeat)
+}
+
+func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heartbeat, claimControls bool) (result error) {
 	entry.harnessMu.Lock()
 	defer entry.harnessMu.Unlock()
 	defer func() {
@@ -1761,7 +1783,7 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 			}
 		}()
 	}
-	if heartbeat {
+	if claimControls {
 		controls, err := s.api.YieldHarness(ctx, entry.harness)
 		if err != nil {
 			return err
@@ -1896,6 +1918,9 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 			if err := s.forgetSettledControl(entry, item.ID); err != nil {
 				return err
 			}
+			// A wake can cover several sends. Drain the next FIFO item immediately,
+			// yielding between cycles so controls always get their chance first.
+			entry.wakeHarness()
 		}
 	}
 	return nil

@@ -859,6 +859,46 @@ unless stated otherwise):
 | Supervisor | Physical workspace; `daemon/aeon-agentd-<id>.lock`, `.journal`, `.checkpoint.json`, `.checks.json`, `.capacity.json` | No daemon installation dependency; absent journal/capacity files are valid fresh state |
 | Listener | Private socket directory, lifetime `.sock.lock`, socket, `.token`, legacy `.owner.json` and recognized `.s<hex>` residue; then writes `daemon/control.json` | Socket lifetime and inode ownership checks apply to dev builds too |
 
+The supervisor checkpoint and each WAL entry carry `version`, the persisted
+`Record` schema version (`agentd.RecordSchemaVersion`), independently of the
+product release. Releases 123 and 124 both used version 2 despite 124 adding
+rejection evidence; schema version 3 reads both forms without discarding known
+fields. Startup and fenced offline lifecycle inspection migrate them forward
+under the existing exclusive instance lock. The entire checkpoint and WAL are
+validated before an atomic current-version checkpoint is saved and the WAL is
+compacted. Unknown fields and unsupported older schemas fail closed; classic
+version 1 is never migrated implicitly. Persisted PIDs remain unowned.
+
+Before upgrading, drain and stop the installed daemon through the existing
+approved lifecycle procedure. Confirm owned processes have stopped and settle
+pending reports; a missing socket or a retained PID alone is insufficient.
+Keep a private, owner-only pre-upgrade copy of **both**
+`daemon/aeon-agentd-<id>.checkpoint.json` and
+`daemon/aeon-agentd-<id>.journal` (when present), with their original permissions
+and the exact previous binary/release pin. Record the daemon identity and copy
+time without recording file contents. Forward migration does not automatically
+retain backups. Avoid copying credentials or the whole pairing root.
+
+On a downgrade, version-aware readers refuse a newer checkpoint/WAL with its
+stored and supported versions and a remedy; both state files remain intact.
+Historical 123/124 binaries still use their old generic unsupported/corrupt
+diagnostic. To roll back, stop the newer daemon and confirm its process and
+settlement state first, retain its checkpoint/WAL separately for recovery, then
+restore the **matching pair** of pre-upgrade files and the pinned earlier binary.
+If either file was absent in that saved state, restore that absence through the
+operator's approved file-retirement procedure. A version-2 copy made by 124 may
+contain fields that 123 cannot read: rolling back to 123 requires a copy saved
+before 124 first ran. Never edit a version number, strip fields, or mix a new WAL
+with an old checkpoint. Restoring old state also omits later local evidence;
+reconcile that evidence with server state before resuming dispatch. Without a
+matching backup, keep the current state and use a compatible newer daemon.
+
+`TestRecordSchemaGolden` pins the recursive JSON field/type/tag schema of
+`Record`, including nested evidence. A schema change requires a version bump,
+an explicit migration, and an appended golden hash; prior pins stay immutable.
+`TestRecordSchemaForwardRecoveryAndDowngrade` covers 123 → 124 → current,
+retained rejection/control evidence, process uncertainty, and lossless refusal.
+
 Gemini/OpenCode adapter construction only stores their approved homes and
 executable pins. Home/config checks occur when probing or launching those
 harnesses, not as a prerequisite to constructing the daemon. `service.json`,

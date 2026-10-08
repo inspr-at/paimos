@@ -415,7 +415,7 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (out 
 		Report   json.RawMessage `json:"report"`
 		Run      Run             `json:"run"`
 	}{v.ID, t.Sequence, canonical, v}
-	if before.Status == "starting" && v.Status == "running" && v.ProfileID != nil && len(v.Trace) > 0 {
+	if before.Status == "starting" && v.Status == "running" && v.ProfileID != nil && len(v.Trace) > 0 && string(v.Trace) != "null" {
 		var trace struct {
 			Placement json.RawMessage `json:"work_placement"`
 		}

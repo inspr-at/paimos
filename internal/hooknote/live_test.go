@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,6 +36,38 @@ func TestMain(m *testing.M) {
 
 func runHookHelper() {
 	switch os.Getenv("AEON_HOOK_PEER_HELPER") {
+	case "daemon-root":
+		EnableForTest(func(func()) {})
+		self, err := ObserveDaemonSelf()
+		if err != nil || self.CWD != "/" {
+			os.Exit(1)
+		}
+		caller, err := Observe(os.Getppid())
+		if err != nil {
+			os.Exit(1)
+		}
+		harness, err := Observe(caller.Parent)
+		if err != nil {
+			os.Exit(1)
+		}
+		reg := NewRegistry()
+		reg.Add(Grant{Binding: Binding{SessionID: sessionA, MessageGeneration: genA, DaemonGeneration: "daemon-root", Harness: harness, HookExecutable: caller.Executable, HookDev: caller.Dev, HookIno: caller.Ino}})
+		hook := NewServer()
+		hook.Set(&fakeSource{note: ownerNote(), nonce: serverNonce}, reg)
+		ln, err := net.Listen("unix", os.Getenv("AEON_HOOK_PEER_SOCKET"))
+		if err != nil {
+			os.Exit(1)
+		}
+		srv := &http.Server{Handler: hook, ReadHeaderTimeout: time.Second, ConnContext: Annotate}
+		done := make(chan struct{})
+		go func() { _ = srv.Serve(ln); close(done) }()
+		// Publishing the pin after listen is the readiness barrier.
+		if json.NewEncoder(os.Stdout).Encode(PinFrom(self)) != nil {
+			os.Exit(1)
+		}
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		_ = srv.Close()
+		<-done
 	case "sleep":
 		fmt.Println(os.Getpid())
 		_, _ = io.Copy(io.Discard, os.Stdin)
@@ -200,6 +233,114 @@ func runHookHelper() {
 		_ = json.NewEncoder(os.Stdout).Encode(note)
 	default:
 		os.Exit(2)
+	}
+}
+
+func TestDialRootDaemonPreservesPeerChecks(t *testing.T) {
+	// A login-service daemon must support the full exchange from cwd "/";
+	// skipping that cwd rule must not skip pin, trust, UID or identity checks.
+	EnableForTest(t.Cleanup)
+	socket := filepath.Join(shortDir(t), "root")
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0])
+	cmd.Dir = "/"
+	cmd.Env = []string{"AEON_HOOK_PEER_HELPER=daemon-root", "AEON_HOOK_PEER_SOCKET=" + socket, "GOMAXPROCS=2"}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = stdin.Close()
+		if err := cmd.Wait(); err != nil {
+			t.Error("root daemon helper failed", err)
+		}
+	}()
+	var pin DaemonPin
+	if err = json.NewDecoder(io.LimitReader(stdout, 4096)).Decode(&pin); err != nil || !pin.Valid() || pin.PID != cmd.Process.Pid {
+		t.Fatal("root daemon did not publish its pin", err)
+	}
+	session, err := dialWithTrust(ctx, socket, pin, fixtureDaemonTrust)
+	if err != nil {
+		t.Fatal("dial rejected trusted root-cwd daemon", err)
+	}
+	defer session.Close()
+	if session.peer.CWD != "/" || !MatchesPin(session.peer, pin) {
+		t.Fatal("dial did not snapshot the pinned root-cwd daemon")
+	}
+	if _, err = Snapshot(session.conn); !errors.Is(err, ErrPeer) {
+		t.Fatal("strict hook snapshot accepted root cwd", err)
+	}
+	if err = Recheck(session.conn, session.peer); !errors.Is(err, ErrPeer) {
+		t.Fatal("strict hook recheck accepted root cwd", err)
+	}
+	note, nonce, err := session.Offer(ctx, Claim{Event: "PostToolUse"})
+	if err != nil || note.Body != "inspect the gate" || nonce != serverNonce {
+		t.Fatal("root daemon exchange failed", err)
+	}
+	if err = session.Settle(ctx, nonce, OutcomeShown); err != nil {
+		t.Fatal("root daemon settlement failed", err)
+	}
+	for _, field := range []string{"pid", "uid", "started", "image", "dev", "ino", "cwd", "pid-version"} {
+		t.Run(field, func(t *testing.T) {
+			before := session.peer
+			switch field {
+			case "pid":
+				before.PID++
+			case "uid":
+				before.UID++
+			case "started":
+				before.Started += "-reused"
+			case "image":
+				before.Executable += "-replaced"
+			case "dev":
+				before.Dev++
+			case "ino":
+				before.Ino++
+			case "cwd":
+				before.CWD = socket
+			case "pid-version":
+				if before.PIDVersion == 0 {
+					return // Linux has no audit-token pid version.
+				}
+				before.PIDVersion++
+			}
+			if err := RecheckDaemon(session.conn, before); !errors.Is(err, ErrPeer) {
+				t.Fatal("daemon recheck accepted changed identity", err)
+			}
+			if field != "cwd" {
+				if _, err := dialWithTrust(ctx, socket, PinFrom(before), fixtureDaemonTrust); !errors.Is(err, ErrPeer) {
+					t.Fatal("dial accepted changed daemon pin", err)
+				}
+			}
+		})
+	}
+	if err := RecheckDaemon(session.conn, session.peer); err != nil {
+		t.Fatal("unchanged daemon failed recheck", err)
+	}
+	trustChecked := false
+	if _, err = dialWithTrust(ctx, socket, pin, func(context.Context, Process) error {
+		trustChecked = true
+		return ErrPeer
+	}); !errors.Is(err, ErrPeer) || !trustChecked {
+		t.Fatal("root cwd bypassed independent daemon trust", err)
+	}
+	if _, err = Dial(ctx, socket, pin); !errors.Is(err, ErrPeer) {
+		t.Fatal("root cwd bypassed the production digest ceiling", err)
+	}
+	previous := kernelSelfUID
+	kernelSelfUID = func() int { return os.Getuid() + 1000 }
+	_, err = SnapshotDaemon(session.conn)
+	kernelSelfUID = previous
+	if !errors.Is(err, ErrPeer) {
+		t.Fatal("daemon snapshot accepted foreign uid", err)
 	}
 }
 
@@ -600,6 +741,9 @@ func TestRecheckRejectsExecImageChange(t *testing.T) {
 	}
 	if err = Recheck(server, before); err == nil {
 		t.Fatal("peer recheck ignored the image change")
+	}
+	if err = RecheckDaemon(server, before); !errors.Is(err, ErrPeer) {
+		t.Fatal("daemon recheck ignored the image change", err)
 	}
 }
 

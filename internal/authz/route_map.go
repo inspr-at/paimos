@@ -42,6 +42,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/delivery/enqueue-allowed":               "delivery.read",
 	"GET /api/delivery":                               "delivery.read",
 	"GET /api/delivery/alerts":                        "delivery.read",
+	"GET /api/delivery/audit":                         "delivery.read",
 	"GET /api/nodes/{id}/delivery":                    "delivery.read",
 	"POST /api/delivery/{itemId}/hold":                "delivery.manage",
 	"DELETE /api/delivery/{itemId}/hold":              "delivery.manage",
@@ -344,6 +345,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/agent-keys":                                                    "keys.read",
 	"GET /api/approvals":                                                     "approvals.read",
 	"GET /api/audit":                                                         "audit.read",
+	"GET /api/attachments/{id}":                                              "attachments.read",
 	"GET /api/attachments/{id}/content":                                      "attachments.read",
 	"POST /api/attachments/{id}/preview":                                     "attachments.read",
 	"GET /api/auth/callback":                                                 "public",
@@ -364,6 +366,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/events":                                                        "events.read",
 	"GET /api/events/activity":                                               "events.read",
 	"GET /api/events/stream":                                                 "events.read",
+	"GET /api/events/subscribe":                                              "events.subscribe",
 	"GET /api/from-classic":                                                  "nodes.read",
 	"GET /api/harness-sessions":                                              "harness.read",
 	"GET /api/me/agent-pause-settings":                                       "harness.read",
@@ -763,6 +766,7 @@ var RoutePermissions = map[string]string{
 
 // Tier reads, worker reports and person decisions use the existing session permissions.
 func init() {
+	RoutePermissions["GET /api/projects/{projectId}/harness-sessions/{sessionId}/notifications"] = "harness.worker"
 	RoutePermissions["GET /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.read"
 	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.control"
 	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/report"] = "harness.worker"

@@ -14,9 +14,46 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
+
+// Risk: preparing a review or a completion must not invent a workspace board.
+// That write commits before the caller's mutation and replaces a saved role ladder.
+func TestReviewAndCompletionLeaveUnsavedBoardAlone(t *testing.T) {
+	for _, op := range []struct {
+		name string
+		op   CatalogOperation
+		path string
+	}{
+		{"review", CatalogReview, "/api/nodes/ticket/reviews"},
+		{"completion", CatalogCompletion, "/api/runs/run/telemetry"},
+	} {
+		t.Run(op.name, func(t *testing.T) {
+			useDB(t)
+			person := makePrincipal(t, "unsaved-board-"+op.name, "person", "Owner", []string{"admin"})
+			r := httptest.NewRequest("POST", op.path, nil)
+			r = r.WithContext(tenant.WithPrincipal(r.Context(), person))
+			err := PrepareCatalog(t.Context(), appPool, person, CatalogPreparation{
+				Operation: op.op, Request: r,
+				Authorize: func(context.Context, pgx.Tx, tenant.Principal) (bool, error) { return true, nil },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var profiles, initialized int
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM model_pref_profiles),(SELECT count(*) FROM events WHERE type='model.board_initialized')`).Scan(&profiles, &initialized)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if profiles != 0 || initialized != 0 {
+				t.Fatalf("unsaved %s invented a board: profiles=%d events=%d", op.name, profiles, initialized)
+			}
+		})
+	}
+}
 
 func TestPreparationExactKeyExpiryAtEveryFence(t *testing.T) {
 	for _, tc := range []struct {

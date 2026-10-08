@@ -8,6 +8,7 @@ import AppIcon from '../AppIcon.vue'
 import ColumnPicker from './ColumnPicker.vue'
 import SortEditor from './SortEditor.vue'
 import HeaderRoomyChoice from './HeaderRoomyChoice.vue'
+import type { AttentionGrouping } from '../../lib/attention'
 
 // The Display menu: grouping, sort, row height and columns of this list. In a
 // saved view these are part of the view; otherwise columns are the person's own.
@@ -20,6 +21,8 @@ defineProps<{
   headerGraph?: boolean
   sheet?: boolean
   projectHeader?: boolean
+  attentionGroup?: AttentionGrouping
+  locale?: string
 }>()
 // The header graph is on until a person turns it off. Callers that omit the
 // prop keep that default so the switch does not flash off.
@@ -29,11 +32,23 @@ const emit = defineEmits<{
   columns: [order: ColumnId[], visible: ColumnId[]]; columnsReset: []
   expandAll: []; collapseAll: []; expandGroups: []; collapseGroups: []
   headerGraph: [value: boolean]
+  attentionGroup: [value: AttentionGrouping]
 }>()
 </script>
 
 <template>
   <div class="display-panel" :class="{ sheet }">
+    <template v-if="attentionGroup !== undefined">
+      <p class="eyebrow">{{ locale === 'de' ? 'Gruppieren nach' : 'Group by' }}</p>
+      <div class="group-grid attention-groups" role="radiogroup" :aria-label="locale === 'de' ? 'Gruppieren nach' : 'Group by'">
+        <button v-for="option in ([{ value: 'project', en: 'Project', de: 'Projekt' }, { value: 'kind', en: 'Kind', de: 'Art' }, { value: 'none', en: 'None', de: 'Keine' }] as const)" :key="option.value" type="button" role="radio" class="group-option" :aria-checked="attentionGroup === option.value" :data-autofocus="attentionGroup === option.value ? '' : undefined" @click="emit('attentionGroup', option.value)">{{ locale === 'de' ? option.de : option.en }}</button>
+      </div>
+      <div class="pair">
+        <button type="button" class="btn sm" :disabled="attentionGroup === 'none'" @click="emit('expandGroups')"><AppIcon name="expand-all" :size="13" />{{ locale === 'de' ? 'Alle aufklappen' : 'Expand all' }}</button>
+        <button type="button" class="btn sm" :disabled="attentionGroup === 'none'" @click="emit('collapseGroups')"><AppIcon name="collapse-all" :size="13" />{{ locale === 'de' ? 'Alle zuklappen' : 'Collapse all' }}</button>
+      </div>
+    </template>
+    <template v-else>
     <template v-if="view === 'list'">
       <p class="eyebrow">Group by</p>
       <div class="group-grid" role="radiogroup" aria-label="Group by">
@@ -81,6 +96,7 @@ const emit = defineEmits<{
         <span>Graph in project header</span>
       </label>
     </div>
+    </template>
   </div>
 </template>
 
@@ -90,6 +106,9 @@ const emit = defineEmits<{
 .model-choice .seg { display: grid; grid-template-columns: repeat(2, 1fr); min-width: 116px; }
 .display-panel { display: grid; gap: 8px; padding: 6px 8px 8px; }
 .group-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 3px; border-radius: 12px; background: var(--seg-bg); }
+.attention-groups { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.attention-groups .group-option { height: 36px; }
+@media (pointer: coarse), (max-width: 720px) { .attention-groups .group-option, .attention-groups + .pair .btn { min-height: 44px; } }
 .group-option { height: 28px; padding: 0 4px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .group-option:hover { color: var(--ink); }
 .group-option[aria-checked="true"] { background: var(--seg-on); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-btn); }

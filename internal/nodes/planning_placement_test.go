@@ -222,7 +222,10 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 			fields := map[string]any{"area": area, "route_role": role, "complexity": "M", "estimate_hours": 2}
 			n := placementNode(t, w, fmt.Sprintf("EQUAL-%d", i*5+j+1), fields)
 			e := expected{node: n, area: area, role: role, rate: 5_000_000, cost: 10}
-			known := i >= 4
+			// full-stack is not a default kind (approved board). A stored value on a
+			// fresh tenant is not a column, so it keeps the unknown-area contract.
+			// Tenants that still have the kind are covered by the historical test.
+			known := i >= 4 && area != "full-stack"
 			switch {
 			case role == "":
 			case !known:
@@ -401,6 +404,30 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A fresh board leaves a stored full-stack area on the unknown-area path.
+// Inserting the kind migration 1104 gave existing tenants restores the
+// legacy build route. Both halves use the same numeric checks as the matrix.
+func TestPlanningHistoricalFullStackKindKeepsLegacyRoute(t *testing.T) {
+	w := planningSetup(t)
+	placementCalibration(t, w)
+	n := placementNode(t, w, "STACK-1", map[string]any{"area": "full-stack", "route_role": "build", "complexity": "M", "estimate_hours": 2})
+	path := "/api/nodes?within=" + w.root.ID + "&q=STACK-1&limit=10"
+	fresh := planningOf(t, w.admin, path)[n.Key]
+	if fresh == nil || fresh.Route != nil || fresh.RouteGap != "area" || fresh.Tokens.Calibration == nil || !fresh.Tokens.Calibration.AnyRoute || fresh.Tokens.Calibration.TokensPerHour != 5_000_000 || fresh.Tokens.Estimated == nil || *fresh.Tokens.Estimated != 10_000_000 || fresh.Cost == nil || fresh.Cost.ListEstimated == nil || *fresh.Cost.ListEstimated != "10.000000" {
+		t.Fatalf("fresh full-stack picked a column: %+v", fresh)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO work_kinds(tenant_id,slug,label,hint,position) VALUES($1,'full-stack','Full stack','both ends in one change',3)`, w.admin.TenantID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	kept := planningOf(t, w.admin, path)[n.Key]
+	if kept == nil || kept.RouteGap != "" || kept.Route == nil || kept.Route.Profile != "claude-opus-high" || kept.Route.SetBy != "" || kept.Tokens.Calibration == nil || kept.Tokens.Calibration.AnyRoute || kept.Tokens.Calibration.TokensPerHour != 8_000_000 || kept.Tokens.Estimated == nil || *kept.Tokens.Estimated != 16_000_000 || kept.Cost == nil || kept.Cost.ListEstimated == nil || *kept.Cost.ListEstimated != "16.000000" {
+		t.Fatalf("historical full-stack kind lost its route: %+v", kept)
 	}
 }
 

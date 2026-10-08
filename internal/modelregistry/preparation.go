@@ -184,11 +184,15 @@ func PrepareCatalog(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal,
 		// Review and completion stay on the legacy ladder until that board is
 		// saved or migrated. Their setup transaction must not commit
 		// model.board_initialized: completion rollback exempts only the
-		// catalog seed and upgrade events.
-		placement := in.Request.URL.Path == "/api/model-preferences/board"
-		if in.Request.URL.Path == "/api/models/resolve" {
-			for _, key := range []string{"mode", "ticket", "area", "complexity", "person_id", "situation", "fix_round", "estimate_hours", "concept"} {
-				placement = placement || in.Request.URL.Query().Has(key)
+		// catalog seed and upgrade events. That write also commits before the
+		// caller's mutation, so a nil request is not a placement read.
+		placement := false
+		if in.Request != nil {
+			placement = in.Request.URL.Path == "/api/model-preferences/board"
+			if in.Request.URL.Path == "/api/models/resolve" {
+				for _, key := range []string{"mode", "ticket", "area", "complexity", "person_id", "situation", "fix_round", "estimate_hours", "concept"} {
+					placement = placement || in.Request.URL.Query().Has(key)
+				}
 			}
 		}
 		if placement {

@@ -17,9 +17,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Snapshot reads LOCAL_PEERPID, LOCAL_PEERCRED and the audit token, then the
+// snapshot reads LOCAL_PEERPID, LOCAL_PEERCRED and the audit token, then the
 // loaded image. The audit token's pid version changes on exec and on pid reuse.
-func Snapshot(c net.Conn) (Process, error) {
+func snapshot(c net.Conn, requireProjectCWD bool) (Process, error) {
 	var pid, uid int
 	var pidVersion uint32
 	err := withFD(c, func(fd int) error {
@@ -44,7 +44,7 @@ func Snapshot(c net.Conn) (Process, error) {
 	if err != nil {
 		return Process{}, ErrPeer
 	}
-	proc, err := Observe(pid)
+	proc, err := observe(pid, requireProjectCWD)
 	if err != nil || proc.PID != pid || proc.UID != uid || proc.UID != kernelSelfUID() {
 		return Process{}, ErrPeer
 	}
