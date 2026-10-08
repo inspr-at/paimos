@@ -5166,6 +5166,18 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliverySettingsAndIngressBinding","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingAppReaderScopesBindingsAndPartialReads","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingConcurrentClaimantsOwnOneAction","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingFixDedupHoldsAndQuarantine","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingHeadBoundActionsAndInfraShards","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingRechecksRevocationAndPendingRoundsAfterRead","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingShadowOwnershipReplayAndIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryUIFactsHoldReplayAndAvailability","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookSequenceRebuildIsolationAndHolds","tier":"ESSENTIAL"}

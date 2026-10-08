@@ -242,6 +242,17 @@ type GitHubCheck struct {
 // ReadInstallation mints a separate token with read permissions only. Callers
 // never receive it. The existing publisher's token and writes are unchanged.
 func (g *GitHubApp) ReadInstallation(ctx context.Context, read func(func(string, any) error, func(int64, string) (bool, string, error)) error) error {
+	return g.readInstallation(ctx, false, read)
+}
+
+// ReadShippingInstallation additionally requests actions:read to distinguish
+// failed aggregate jobs from cancelled shards. No PR, queue or actions write
+// scope is requested in the shadow rollout, even if the App supports them.
+func (g *GitHubApp) ReadShippingInstallation(ctx context.Context, read func(func(string, any) error, func(int64, string) (bool, string, error)) error) error {
+	return g.readInstallation(ctx, true, read)
+}
+
+func (g *GitHubApp) readInstallation(ctx context.Context, shipping bool, read func(func(string, any) error, func(int64, string) (bool, string, error)) error) error {
 	if !g.Configured(g.Config.TenantID, g.Config.Repository) {
 		return errGitHub
 	}
@@ -257,6 +268,9 @@ func (g *GitHubApp) ReadInstallation(ctx context.Context, read func(func(string,
 		} `json:"repositories"`
 	}
 	scopes := map[string]string{"pull_requests": "read", "checks": "read", "contents": "read", "metadata": "read", "statuses": "read"}
+	if shipping {
+		scopes["actions"] = "read"
+	}
 	if err = g.request(ctx, jwt, "POST", "/app/installations/"+g.Config.InstallationID+"/access_tokens", map[string]any{"repositories": []string{filepath.Base(g.Config.Repository)}, "permissions": scopes}, &token); err != nil {
 		return err
 	}

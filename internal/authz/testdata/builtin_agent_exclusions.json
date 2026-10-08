@@ -9,6 +9,8 @@
     "delivery_reviews.claim",
     "delivery_reviews.manage",
     "delivery_reviews.report",
+    "delivery_ship.claim",
+    "delivery_ship.manage",
     "engine.admission",
     "engine.manage",
     "engine.read",

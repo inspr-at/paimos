@@ -29,6 +29,7 @@
     "delivery": "delivery status",
     "delivery_queue": "delivery work queue",
     "delivery_reviews": "delivery reviews",
+    "delivery_ship": "delivery shipping",
     "events": "history",
     "harness": "harness sessions",
     "hours": "hours",
