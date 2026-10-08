@@ -180,7 +180,6 @@ export const useAgents = defineStore('agents', () => {
   const threads = ref<Record<string, ProjectMessage[]>>({})
   const threadStates = ref<Record<string, Availability>>({})
   let threadGeneration = 0
-  onReset(() => { threadGeneration++; threads.value = {}; threadStates.value = {}; messagingState.value = 'idle' })
   const addresses = ref<Record<string, string>>({})
   const runs = shallowRef<Record<string, AgentRun>>({})
   const agentRuns = ref<Record<string, string[]>>({})
@@ -313,6 +312,11 @@ export const useAgents = defineStore('agents', () => {
   // caller is not stuck behind the poll and the poll cannot overwrite it.
   // Further requests join the catch-up and leave one trailing read.
   const threadFlights = new Map<string, { again: boolean; catchingUp: boolean; promise: Promise<void> }>()
+  onReset(() => {
+    threadGeneration++
+    threads.value = {}; threadStates.value = {}; messagingState.value = 'idle'
+    threadFlights.clear(); threadOrders.clear()
+  })
   function refreshThread(projectId: string, sessionId: string): Promise<void> {
     const generation = threadGeneration
     const pending = threadFlights.get(sessionId)
@@ -331,8 +335,15 @@ export const useAgents = defineStore('agents', () => {
             learnAddresses(page.items)
             if (messagingState.value !== 'ready') messagingState.value = 'ready'
           })
-        } catch (e) { if (generation === threadGeneration) { threadStates.value = { ...threadStates.value, [sessionId]: availability(e) }; if (availability(e) === 'forbidden') threads.value = { ...threads.value, [sessionId]: [] }; messagingState.value = availability(e) } }
-      } while (flight.again)
+        } catch (e) {
+          if (generation === threadGeneration) {
+            const state = availability(e)
+            threadStates.value = { ...threadStates.value, [sessionId]: state }
+            if (state === 'forbidden') threads.value = { ...threads.value, [sessionId]: [] }
+            messagingState.value = state
+          }
+        }
+      } while (flight.again && generation === threadGeneration)
     })().finally(() => { if (threadFlights.get(sessionId) === flight) threadFlights.delete(sessionId) })
     return flight.promise
   }

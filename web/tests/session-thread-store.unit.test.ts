@@ -71,10 +71,18 @@ it('an authentication reset drops both stored messages and an older response', a
   const { resetPositions } = await import('../src/lib/position')
   const store = useAgents()
   let finish!: (value: MessagePage) => void
-  vi.mocked(listMessages).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  let finishCatchUp!: (value: MessagePage) => void
+  vi.mocked(listMessages)
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    .mockImplementationOnce(() => new Promise(resolve => { finishCatchUp = resolve }))
+    .mockResolvedValueOnce(page(2))
   const stale = store.refreshThread('project', 'first')
+  const catchUp = store.refreshThread('project', 'first')
   resetPositions()
   expect(store.thread(session('first'))).toEqual([])
-  finish(page(1)); await stale
-  expect(store.thread(session('first'))).toEqual([])
+  await store.refreshThread('project', 'first')
+  expect(listMessages).toHaveBeenCalledTimes(3)
+  expect(store.thread(session('first')).map(m => m.id)).toEqual(['2'])
+  finish(page(1)); finishCatchUp(page(1)); await Promise.all([stale, catchUp])
+  expect(store.thread(session('first')).map(m => m.id)).toEqual(['2'])
 })

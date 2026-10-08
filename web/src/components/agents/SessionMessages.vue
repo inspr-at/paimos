@@ -56,7 +56,7 @@ const statusOf = (m: ProjectMessage): MessageStatus | undefined => {
             </span>
           </p>
           <p class="msg-body">{{ m.body }}</p>
-          <p v-if="!m.answered && statusOf(m)?.status === 'not_delivered'" class="undelivered" data-status="not_delivered" :data-tip="statusTip(statusOf(m)!, absoluteTime)"><AppIcon name="alert" :size="12" />{{ label(statusOf(m)!) }}<button v-if="canReply" type="button" class="retry" @click="emit('retry', m)">{{ words.retry }}</button></p>
+          <p v-if="!m.answered && statusOf(m)?.status === 'not_delivered'" class="undelivered" data-status="not_delivered" :data-tip="statusTip(statusOf(m)!, absoluteTime)"><AppIcon name="alert" :size="12" /><span>{{ label(statusOf(m)!) }}</span><button v-if="canReply" type="button" class="retry" @click="emit('retry', m)">{{ words.retry }}</button></p>
         </li>
       </template>
     </ol>

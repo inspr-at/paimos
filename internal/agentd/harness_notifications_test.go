@@ -172,7 +172,7 @@ func TestAfterTurnInputWaitsWhileSteerAndControlsStayAvailable(t *testing.T) {
 	s, api, process := testSupervisor(t)
 	entry := &owned{record: Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", Generation: s.generation, State: "running", PID: process.PID(), Controls: map[string]replay{}}, harness: HarnessSession{ID: "session", ProjectID: "project", Activity: "busy"}, process: process, inboxCapable: true, replies: map[string]InboxReplyTarget{}, harnessWake: make(chan struct{}, 1)}
 	s.runs["run"] = entry
-	hints := &levelHintAPI{hintAPI: &hintAPI{fakeAPI: api, queued: []HarnessDelivery{{ID: "later", Level: "simple", Body: "after turn"}, {ID: "now", Level: "steer", Body: "steer now"}}}}
+	hints := &levelHintAPI{hintAPI: &hintAPI{fakeAPI: api, controls: make(chan string, 1), queued: []HarnessDelivery{{ID: "later", Level: "simple", Body: "after turn"}, {ID: "now", Level: "steer", Body: "steer now"}}}}
 	s.api = hints
 	if err := s.serviceHarnessCycle(t.Context(), entry, false); err != nil {
 		t.Fatal(err)
@@ -186,6 +186,21 @@ func TestAfterTurnInputWaitsWhileSteerAndControlsStayAvailable(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("busy injection count %d", calls)
 	}
+	api.harnessControls = []HarnessControl{{ID: "interrupt", Kind: "interrupt"}}
+	if err := s.serviceHarnessCycle(t.Context(), entry, false); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-hints.controls:
+		if result != "interrupt:applied" {
+			t.Fatal(result)
+		}
+	default:
+		t.Fatal("waiting after-turn input blocked interrupt")
+	}
+	if len(hints.queued) != 1 || hints.queued[0].ID != "later" {
+		t.Fatal("interrupt released input before idle")
+	}
 	s.observe(entry, AdapterEvent{Activity: "idle"})
 	select {
 	case <-entry.harnessWake:
@@ -198,7 +213,7 @@ func TestAfterTurnInputWaitsWhileSteerAndControlsStayAvailable(t *testing.T) {
 	process.mu.Lock()
 	calls = process.calls
 	process.mu.Unlock()
-	if calls != 2 || len(hints.queued) != 0 || len(hints.levels) != 2 || hints.levels[0] != "steer" || hints.levels[1] != "" {
+	if calls != 3 || len(hints.queued) != 0 || len(hints.levels) != 3 || hints.levels[0] != "steer" || hints.levels[1] != "steer" || hints.levels[2] != "" {
 		t.Fatalf("after-turn input not released once: calls=%d levels=%v", calls, hints.levels)
 	}
 }
