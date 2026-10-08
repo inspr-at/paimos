@@ -15,10 +15,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Snapshot reads SO_PEERCRED and the loaded image. Start time comes from
+// snapshot reads SO_PEERCRED and the loaded image. Start time comes from
 // /proc/<pid>/stat and changes when the pid is reused; the exe inode changes
 // on exec, including exec of a replaced file.
-func Snapshot(c net.Conn) (Process, error) {
+func snapshot(c net.Conn, requireProjectCWD bool) (Process, error) {
 	var pid, uid int
 	err := withFD(c, func(fd int) error {
 		if err := setCloexec(fd); err != nil {
@@ -34,7 +34,7 @@ func Snapshot(c net.Conn) (Process, error) {
 	if err != nil {
 		return Process{}, ErrPeer
 	}
-	proc, err := Observe(pid)
+	proc, err := observe(pid, requireProjectCWD)
 	if err != nil || proc.PID != pid || proc.UID != uid || proc.UID != kernelSelfUID() {
 		return Process{}, ErrPeer
 	}
