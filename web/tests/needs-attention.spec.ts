@@ -638,7 +638,7 @@ test('phone selection keeps rows reachable, keys whole and zero-apply controls a
  await page.goto('/tickets?view=needs-attention')
  await head.getByRole('button', { name: 'Apply all in AEON' }).click()
  const preview = page.getByRole('dialog', { name: 'Apply all in AEON' })
- const cancel = preview.getByRole('button', { name: 'Cancel', exact: true }), moves = preview.getByRole('group', { name: 'Proposed changes', exact: true })
+ const cancel = preview.getByRole('button', { name: /^Cancel/ }), moves = preview.getByRole('group', { name: 'Proposed changes', exact: true })
  const previewGuard = await controlStability(page, { frame: preview, cancel, moves, clickedMove: moves.locator('label') })
  await previewGuard.check(async () => { await moves.getByRole('checkbox').uncheck() })
  previewGuard.done()
