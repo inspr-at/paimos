@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/search
+paths:
+  /search:
+    get:
+      operationId: searchNodes
+      description: German and English full-text plus asynchronous halfvec search fused by reciprocal rank.
+      security: *auth
+      parameters:
+        - {name: q, in: query, required: true, schema: {type: string, minLength: 1}}
+        - {name: kind_id, in: query, schema: {type: string, format: uuid}}
+        - {name: state, in: query, schema: {type: string}}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          $ref: '#/components/responses/Search'
+        '400':
+          $ref: '#/components/responses/Error'
+components:
+  schemas:
+    SearchHit:
+      type: object
+      required: [node, score]
+      properties:
+        node:
+          $ref: '#/components/schemas/Node'
+        score:
+          type: number
+          description: Reciprocal-rank-fusion score
+    SearchPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchHit'
+        next_cursor:
+          type: [string, 'null']
+  responses:
+    Search:
+      description: Search page
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SearchPage'

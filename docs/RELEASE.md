@@ -2025,7 +2025,7 @@ Node built-ins and runs from old checkouts without importing their source.
 | `web/src/router.ts` | CODE with route lists and guards: leave for AEON-982. |
 | `web/src/lib/settings.ts` | CODE with setting lists and visibility policy: leave for AEON-982. |
 | `web/src/views/SettingsView.vue` | CODE with rendering and section registration: leave for AEON-982. |
-| `api/openapi.yaml` | Authored contract: ordinary text merge and existing contract/static checks; no whole-file union or policy regeneration. |
+| `api/areas/*.yaml`, `api/openapi.base.yaml` | Authored contract sources (AEON-984): ordinary text merge per area. `api/openapi.yaml` is ignored generated output; generate before contract checks. |
 | `scripts/ci/go-shards.txt`, `scripts/ci/go-shards-4.txt` | GENERATED from measured CI logs and test JSON. Existing coverage checks run; regeneration still requires those measurements via `ci-go-shards generate -log ... -json ...`. Do not invent replacement weights during a merge. |
 
 The registry driver implements a three-way keyed merge: independent additions
@@ -2262,3 +2262,102 @@ worktree. Cleanup failures are reported without replacing the original result;
 pruning is attempted afterwards. A reported residue path is this run's detached
 worktree: inspect it, then use `git worktree remove --force <reported-path>` and
 `git worktree prune`. Do not remove other workers' worktrees.
+
+
+### OpenAPI area sources (AEON-984)
+
+The canonical contract is authored in `api/areas/*.yaml`. Each fragment owns
+complete path and component entries; shared referenced components live in
+`api/areas/shared.yaml`. `api/openapi.base.yaml` owns document metadata and
+component section order. The generator discovers fragments from the directory;
+there is no committed aggregate or fragment index. The separate messaging
+contract and harness reconciliation contract remain unchanged.
+
+```sh
+node api/generate.mjs --write
+node api/generate.mjs --check
+node --test scripts/openapi-sort.test.mjs
+# Before direct Go tests in a fresh checkout:
+node api/generate.mjs --write
+```
+
+`--stdout` returns the same complete contract for consumers and artifact export.
+`api/openapi.yaml` is ignored and is rebuilt atomically. Never edit or add it to
+Git; edit an area source and regenerate. The lossless scanner and sorter move
+whole source blocks, retain scalar bytes and comments, maintain anchor bindings,
+and reject duplicate ownership, unsafe anchors, unsupported source shapes and
+symlinks. Sources require LF and a final newline. Assembly admits at most 256
+fragments and 16 MiB in total. The sorter CLI prepares the generated contract;
+its scalar/anchor safety tests remain in place. The reporter pin command reads
+the generator's output directly, so local bundle drift cannot alter pins.
+
+The tier runner prepares the bundle once before Go execution. The local static
+check prepares the merged checkout before running checks. Other direct Go
+runners must generate first, or use
+`go test -exec "node /absolute/checkout/api/test-exec.mjs" <packages>`.
+The execution wrapper is also usable by the approved remote-test runner without
+changing its ownership or host gates.
+
+Fragment impact uses the live R2 reader scan for `api/openapi.yaml`. Area owner
+comments (`# aeon:owner internal/package`) add owning packages. Shared component
+fragments have no handler owner; route fragments with unresolved owners remain
+full. Module-local `internal/**/openapi.yaml` also selects its own package. The
+regression asserts exact package-set equality against the live scan, including
+`scripts` (the reporter tool), for all area fragments and the base. Fragment plus
+`internal/reportercontract/` remains full. No route, permission, schema pin,
+contract version, or fallback/subtree coverage changes in this slice.
+
+Consumer audit: Go tests in `cmd/aeon`, agentpairing, chat, harness, knowledge,
+modelregistry, reportercontract and themes read the generated path. Other Go
+source/documentation references, including agents, business, nodes, inbox,
+ciproof and scripts, remain in the live R2 scan. Web wire types are handwritten;
+there is no web types generator to migrate. Nix disables sandbox Go checks and
+builds the CLI without embedding OpenAPI. Image/client builds also do not embed
+it. The existing release workflow publishes no standalone OpenAPI artifact;
+any future contract artifact must use `node api/generate.mjs --stdout`, never
+`git show HEAD:api/openapi.yaml`.
+
+S0 on 2026-10-08: main ruleset 24240960 requires GitHub's MERGE queue. GitHub API
+reported PR #209 (`367ec948588b746130b52933adb7e51b28653915`) as
+`mergeable=false`, `mergeable_state=dirty`; the ordinary three-way bundle merge
+against baseline `79348b98ca1e10e861784fcfd8e3360e1585f8df` produced four conflict
+blocks. `git check-attr merge -- api/openapi.yaml` was unspecified. Custom merge
+drivers are executable definitions in local Git configuration, not installed
+by the server; no repository workflow can repair a conflict before the server
+creates its merge group. GitHub's [queue documentation](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
+confirms base conflicts remove a PR from the queue; Git's
+[driver documentation](https://git-scm.com/docs/gitattributes#_defining_a_custom_merge_driver)
+locates executable driver definitions in Git configuration. This supports
+removing the aggregate rather than relying on a client-side driver.
+
+The one-time migration proof is reproducible after fetching the pre-fragment
+baseline commit:
+
+```sh
+node api/prove.mjs 79348b98ca1e10e861784fcfd8e3360e1585f8df
+```
+
+It compares actual bytes with the historical Git blob, without committing a
+second aggregate fixture. Result: identical, 1,486,647 bytes, 587 paths, 810
+component entries, SHA-256
+`c74c3a5e81bbdaf34acf4a05547052e573a45adc03743dd36280033ea448258e`.
+The proof is a conversion check; later contract edits are checked by the
+unchanged Go safety suites rather than this frozen migration digest.
+
+OPS handoff (`.github/workflows/ci.yml` is outside the worker write set): after
+Node setup, add the following step to `go-static` before `go vet ./...`.
+The `go-test` and `go-timing` tier entrypoints already generate before tests.
+
+```yaml
+      - name: Generate OpenAPI from area sources
+        run: node api/generate.mjs --write
+```
+
+The existing release-check `ci-static.test.mjs` entry imports all generator and
+sorter regressions; it prepares its own bundle. Register the new hosted command
+in `scripts/ci/static-checks.json` as a mirrored Node check (30-second timeout),
+then run the workflow/static mirror tests. To expose a downloadable contract,
+OPS can upload the generated `api/openapi.yaml`; this is separate from current
+release behavior. Update worker contract-edit guidance to the area sources
+when integrating. Rollback is a revert of this mechanical commit plus OPS's
+preparation step; it restores the original tracked bundle and old readers.

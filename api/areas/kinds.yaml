@@ -1,0 +1,173 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/nodes
+paths:
+  /kinds:
+    get:
+      operationId: listKinds
+      security: *auth
+      responses:
+        '200':
+          $ref: '#/components/responses/Kinds'
+        '401':
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createKind
+      security: *auth
+      requestBody:
+        $ref: '#/components/requestBodies/KindWrite'
+      responses:
+        '201':
+          $ref: '#/components/responses/Kind'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /kinds/{kindId}:
+    parameters: [{$ref: '#/components/parameters/KindId'}]
+    get:
+      operationId: getKind
+      security: *auth
+      responses:
+        '200':
+          $ref: '#/components/responses/Kind'
+        '404':
+          $ref: '#/components/responses/Error'
+    patch:
+      operationId: updateKind
+      description: Slug is immutable.
+      security: *auth
+      requestBody:
+        $ref: '#/components/requestBodies/KindPatch'
+      responses:
+        '200':
+          $ref: '#/components/responses/Kind'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: deleteKind
+      description: Only unused kinds can be deleted.
+      security: *auth
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+components:
+  schemas:
+    Kind:
+      type: object
+      required: [id, slug, label, short_prefix, icon, allowed_child_kinds, field_schema]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+          pattern: '^[a-z][a-z0-9_]*$'
+        label:
+          type: string
+        short_prefix:
+          type: string
+          description: Default generated-key prefix
+        icon:
+          type: string
+          description: Symbolic SVG icon name
+        allowed_child_kinds:
+          type: [array, 'null']
+          description: Null allows any kind; empty forbids children
+          items:
+            type: string
+        field_schema:
+          type: object
+          description: JSON Schema for fields. Optional issue_family boolean marks an issue kind. When it is absent, epic, ticket and task, and kinds that use those icons, are the issue family.
+    KindList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Kind'
+    KindPatch:
+      type: object
+      minProperties: 1
+      properties:
+        label:
+          type: string
+          minLength: 1
+        short_prefix:
+          type: string
+          pattern: '^[A-Z][A-Z0-9]{1,9}$'
+        icon:
+          type: string
+          minLength: 1
+        allowed_child_kinds:
+          type: [array, 'null']
+          items:
+            type: string
+        field_schema:
+          type: object
+    KindWrite:
+      type: object
+      required: [slug, label, short_prefix, icon, field_schema]
+      properties:
+        slug:
+          type: string
+          pattern: '^[a-z][a-z0-9_]*$'
+        label:
+          type: string
+          minLength: 1
+        short_prefix:
+          type: string
+          pattern: '^[A-Z][A-Z0-9]{1,9}$'
+        icon:
+          type: string
+          minLength: 1
+        allowed_child_kinds:
+          type: [array, 'null']
+          items:
+            type: string
+        field_schema:
+          type: object
+  parameters:
+    KindId:
+      name: kindId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  requestBodies:
+    KindPatch:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/KindPatch'
+    KindWrite:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/KindWrite'
+  responses:
+    Kind:
+      description: Kind
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Kind'
+    Kinds:
+      description: Kinds
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/KindList'

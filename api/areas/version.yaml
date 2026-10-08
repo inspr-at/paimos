@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/httpapi
+paths:
+  /version:
+    get:
+      summary: Calendar version of this build
+      responses:
+        "200":
+          description: Version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, scheme, brand]
+                properties:
+                  version: {type: string, description: "YYMMDDhhmmss.0.0 or dev"}
+                  scheme: {type: string, enum: [inspr-calendar-v2, inspr-calver-3], description: "inspr-calver-3 for builds from AEON-309 on; inspr-calendar-v2 for earlier builds"}
+                  brand: {$ref: '#/components/schemas/Brand'}
+                  codename: {type: string, description: "AEON-430. Marketing name of the running release (for example Fresh Flyby), shown in the footer instead of the version. Absent for a build whose release history does not know its version, such as dev."}
+components:
+  schemas:
+    Brand:
+      description: The product's names (brand.json, schema inspr.brand.v1; AEON_BRAND_FILE overrides it). generation is a label, never a version.
+      type: object
+      additionalProperties: false
+      required: [schema, product, generation, release_name, wordmark, short_name]
+      properties:
+        schema: {type: string, enum: [inspr.brand.v1]}
+        product: {type: string, maxLength: 48}
+        generation: {type: string, maxLength: 48}
+        release_name: {type: string, maxLength: 48}
+        wordmark: {type: string, maxLength: 48}
+        short_name: {type: string, maxLength: 48}
