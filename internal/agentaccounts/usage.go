@@ -145,6 +145,26 @@ func applyUsageFloor(windows []Window, p usagePolicy) {
 	}
 }
 
+func canonicalOwnedIDs(ctx context.Context, tx pgx.Tx, personID string, ids []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if personID == "" || len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM agent_accounts WHERE id = ANY($1::uuid[]) AND NOT `+retiredSQL+` AND `+modelprefs.CanonicalPersonSQL("owner_person_id")+`=`+modelprefs.CanonicalPersonSQL("$2::uuid"), ids, personID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
 func (m *Module) usagePermissions(ctx context.Context, tx pgx.Tx, p tenant.Principal, a Account, u *usagePolicy) error {
 	if p.Kind != tenant.Person || authz.RequireTx(ctx, tx, p, "account.manage", authz.Scope{}) != nil {
 		return nil

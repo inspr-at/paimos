@@ -634,6 +634,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestBlindVendorBackoffAdmitsOneRecovery","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestBoostAppliesWithheldOwnedAccounts","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestBoostAtomicOwnerWriteAndLiveExpiry","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestBoostLocalExpiryAndSafety","tier":"ESSENTIAL"}

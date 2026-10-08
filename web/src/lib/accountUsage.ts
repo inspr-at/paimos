@@ -13,7 +13,7 @@ export interface AccountUsagePolicy {
   can_set_posture: boolean; can_set_floor: boolean
   boost_percent?: number; boost_until?: string | null
 }
-export interface UsageOverview { accounts: { account_id: string; usage_policy?: AccountUsagePolicy }[]; has_more: boolean; next_cursor?: string }
+export interface UsageOverview { accounts: { account_id: string; usage_policy?: AccountUsagePolicy; boost_withheld?: boolean }[]; has_more: boolean; next_cursor?: string }
 export const getUsageOverview = (after?: string, signal?: AbortSignal) => json<UsageOverview>(`/agent-accounts/overview${after ? `?after=${encodeURIComponent(after)}` : ''}`, 'GET', undefined, {}, signal)
 export const putAccountUsage = (policy: AccountUsagePolicy, value: { posture: UsagePosture | null } | { floor_percent: number }, signal?: AbortSignal) => json<AccountUsagePolicy>(`/agent-accounts/${encodeURIComponent(policy.account_id)}/${'posture' in value ? 'posture' : 'floor'}`, 'PUT', { ...value, revision: policy.revision, binding_revision: policy.binding_revision }, {}, signal)
-export const putAccountBoost = (policies: AccountUsagePolicy[], boost_percent: number, timezone: string, signal?: AbortSignal) => json<{ accounts: AccountUsagePolicy[] }>('/agent-accounts/boost', 'PUT', { boost_percent, timezone, accounts: policies.map(({ account_id, revision, binding_revision }) => ({ account_id, revision, binding_revision })) }, {}, signal)
+export const putAccountBoost = (policies: AccountUsagePolicy[], boost_percent: number, timezone: string, signal?: AbortSignal) => json<{ accounts: AccountUsagePolicy[]; withheld_count?: number; withheld_boost_until?: string | null }>('/agent-accounts/boost', 'PUT', { boost_percent, timezone, accounts: policies.map(({ account_id, revision, binding_revision }) => ({ account_id, revision, binding_revision })) }, {}, signal)

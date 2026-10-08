@@ -47,6 +47,28 @@ it('drops a held save on identity change and exposes no boost controls to agents
   expect(view.state.visible.value).toBe(false); expect(view.state.policies.value).toEqual([]); expect(view.emitted).toEqual([])
   const agent = setup({ kind: 'agent' }); await flush(); expect(agent.read).not.toHaveBeenCalled(); expect(agent.state.visible.value).toBe(false)
 })
+it('shows Boost today when every owned account is withheld and saves without account ids', async () => {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime('2026-10-08T12:00:00Z')
+  const view = setup({
+    read: vi.fn(async () => ({ accounts: [{ account_id: 'hidden-a', boost_withheld: true, details_redacted: true }, { account_id: first.account_id, usage_policy: first }], has_more: false })),
+    write: vi.fn(async () => ({ accounts: [{ ...first, revision: 4, boost_percent: 20, boost_until: '2026-10-08T21:59:00Z' }], withheld_count: 1, withheld_boost_until: '2026-10-08T21:59:00Z' })),
+  })
+  await flush()
+  view.state.save(20); await flush()
+  expect(view.write.mock.calls[0]![0]).toEqual([first])
+  const hidden = setup({
+    read: vi.fn(async () => ({ accounts: [{ account_id: 'hidden-a', boost_withheld: true, details_redacted: true }], has_more: false })),
+    write: vi.fn(async () => ({ accounts: [], withheld_count: 1, withheld_boost_until: '2026-10-08T21:59:00Z' })),
+  })
+  await flush()
+  expect(hidden.state.visible.value).toBe(true)
+  expect(hidden.state.policies.value).toEqual([])
+  expect(hidden.state.selected.value).toBe(null)
+  hidden.state.save(20); await flush()
+  expect(hidden.write.mock.calls[0]![0]).toEqual([])
+  expect(hidden.state.selected.value).toBe(20)
+  expect(hidden.emitted).toEqual([['changed']])
+})
 it('rejects incomplete overview pagination instead of boosting a partial account list', async () => {
   const view = setup({ read: vi.fn(async () => ({ accounts: [{ account_id: first.account_id, usage_policy: first }], has_more: true })) }); await flush()
   expect(view.state.ready.value).toBe(false); expect(view.state.policies.value).toEqual([])

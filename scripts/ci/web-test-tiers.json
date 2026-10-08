@@ -13726,6 +13726,8 @@
     ,
     {"kind":"vitest","file":"tests/agents-boost.unit.test.ts","name":"rejects incomplete overview pagination instead of boosting a partial account list","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/agents-boost.unit.test.ts","name":"shows Boost today when every owned account is withheld and saves without account ids","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/agents-boost.unit.test.ts","name":"writes only owned accounts with captured revisions and expires the confirmed selection at the local cutoff","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agents-cleanup-store.unit.test.ts","name":"a poll in flight during Cancel does not overwrite cancelled with queued","tier":"GATED-FULL"}

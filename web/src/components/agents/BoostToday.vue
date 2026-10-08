@@ -14,30 +14,43 @@ const text = (en: string, de: string) => german.value ? de : en
 const allowed = () => session.authenticationCurrent() && session.identity?.principal.kind === 'person' && can('account.read') && can('account.manage')
 const owner = () => allowed() ? scopeOwner(session.identity) : ''
 const scope = createScope(owner), lane = scope.lane()
-const policies = ref<AccountUsagePolicy[]>([]), busy = ref(false), ready = ref(false), error = ref(''), now = ref(Date.now())
+const policies = ref<AccountUsagePolicy[]>([]), withheld = ref(0), hiddenPercent = ref<number | null>(null), hiddenUntil = ref(0), busy = ref(false), ready = ref(false), error = ref(''), now = ref(Date.now())
 const options = [0, 10, 20, 30] as const
 const active = (p: AccountUsagePolicy) => p.boost_until && Date.parse(p.boost_until) > now.value ? p.boost_percent ?? 0 : 0
-const selected = computed(() => policies.value.length && policies.value.every(p => active(p) === active(policies.value[0]!)) ? active(policies.value[0]!) : null)
-const visible = computed(() => !!owner() && (policies.value.length > 0 || !!error.value))
+const selected = computed(() => {
+  if (policies.value.length) return policies.value.every(p => active(p) === active(policies.value[0]!)) ? active(policies.value[0]!) : null
+  if (hiddenPercent.value === null) return null
+  if (!hiddenPercent.value) return 0
+  return hiddenUntil.value > now.value ? hiddenPercent.value : 0
+})
+const visible = computed(() => !!owner() && (policies.value.length > 0 || withheld.value > 0 || !!error.value))
 let expiryTimer: ReturnType<typeof setTimeout> | undefined
-watch(policies, value => {
+watch([policies, hiddenUntil], () => {
   clearTimeout(expiryTimer)
-  const expires = value.map(p => p.boost_until ? Date.parse(p.boost_until) : 0).filter(at => at > Date.now())
+  const expires = policies.value.map(p => p.boost_until ? Date.parse(p.boost_until) : 0).filter(at => at > Date.now())
+  if (hiddenUntil.value > Date.now()) expires.push(hiddenUntil.value)
   if (expires.length) expiryTimer = setTimeout(() => { now.value = Date.now() }, Math.min(...expires) - Date.now())
 }, { flush: 'sync' })
-const note = computed(() => error.value || (busy.value ? text('Saving…', 'Speichern…') : !ready.value ? text('Reload before changing.', 'Vor der Änderung neu laden.') : selected.value === null ? text('Accounts have different boosts.', 'Konten haben unterschiedliche Erhöhungen.') : text('Your accounts · ends 23:59 local', 'Eigene Konten · endet 23:59 Ortszeit')))
+const note = computed(() => error.value || (busy.value ? text('Saving…', 'Speichern…') : !ready.value ? text('Reload before changing.', 'Vor der Änderung neu laden.') : policies.value.length && selected.value === null ? text('Accounts have different boosts.', 'Konten haben unterschiedliche Erhöhungen.') : text('Your accounts · ends 23:59 local', 'Eigene Konten · endet 23:59 Ortszeit')))
 function load(clear = false) {
   if (!owner() || busy.value) return Promise.resolve()
   if (clear) error.value = ''
   ready.value = false
   return lane.run(async ({ after, signal }) => {
     const all: AccountUsagePolicy[] = [], cursors = new Set<string>()
-    let cursor: string | undefined
+    let cursor: string | undefined, hidden = 0
     for (let page = 0; page < 11; page++) {
       const next = await after(getUsageOverview(cursor, signal), value => {
-        all.push(...value.accounts.flatMap(a => a.usage_policy?.can_set_posture ? [a.usage_policy] : []))
-        if (all.length > 1024 || value.has_more && (!value.next_cursor || cursors.has(value.next_cursor))) throw new Error('Incomplete account list')
-        if (!value.has_more) { policies.value = all; now.value = Date.now(); ready.value = true; return undefined }
+        for (const account of value.accounts) {
+          if (account.boost_withheld) { hidden++; continue }
+          if (account.usage_policy?.can_set_posture) all.push(account.usage_policy)
+        }
+        if (all.length + hidden > 1024 || value.has_more && (!value.next_cursor || cursors.has(value.next_cursor))) throw new Error('Incomplete account list')
+        if (!value.has_more) {
+          policies.value = all; withheld.value = hidden
+          if (all.length) { hiddenPercent.value = null; hiddenUntil.value = 0 }
+          now.value = Date.now(); ready.value = true; return undefined
+        }
         cursors.add(value.next_cursor!); return value.next_cursor
       })
       if (!next) return
@@ -47,7 +60,7 @@ function load(clear = false) {
   }, { failed: () => { error.value = text('Could not read Boost today. Reload.', 'Heute mehr nutzen konnte nicht gelesen werden. Neu laden.') } })
 }
 function save(percent: number) {
-  if (!visible.value || !policies.value.length || !ready.value || busy.value || !options.includes(percent as typeof options[number])) return
+  if (!visible.value || (!policies.value.length && !withheld.value) || !ready.value || busy.value || !options.includes(percent as typeof options[number])) return
   const before = policies.value.map(p => ({ ...p }))
   lane.cancel(); busy.value = true; error.value = ''
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -56,10 +69,17 @@ function save(percent: number) {
       const old = before.find(a => a.account_id === p.account_id)
       return !old || p.revision !== old.revision + 1 || p.binding_revision !== old.binding_revision || p.boost_percent !== percent || !p.can_set_posture
     }) || new Set(result.accounts.map(p => p.account_id)).size !== before.length) throw new Error('Save could not be confirmed')
+    if ((result.withheld_count ?? 0) > 0 && !before.length) {
+      const until = percent ? Date.parse(result.withheld_boost_until ?? '') : 0
+      if (percent && !until) throw new Error('Save could not be confirmed')
+      hiddenPercent.value = percent; hiddenUntil.value = until
+    } else if (result.accounts.length) {
+      hiddenPercent.value = null; hiddenUntil.value = 0
+    }
     policies.value = result.accounts; now.value = Date.now(); emit('changed')
   }), { failed: () => { ready.value = false; error.value = text('Could not confirm the change. Reload.', 'Änderung konnte nicht bestätigt werden. Neu laden.') }, settled: () => { busy.value = false } })
 }
-function reset() { scope.reset(); policies.value = []; busy.value = false; ready.value = false; error.value = ''; void load() }
+function reset() { scope.reset(); policies.value = []; withheld.value = 0; hiddenPercent.value = null; hiddenUntil.value = 0; busy.value = false; ready.value = false; error.value = ''; void load() }
 watch(owner, reset, { immediate: true, flush: 'sync' })
 const unsubscribe = onAccessChange(reset)
 const poller = usePoller(() => { now.value = Date.now(); return load() }, 20_000, { enabled: () => !!owner() && !busy.value })
@@ -70,7 +90,7 @@ onBeforeUnmount(() => { clearTimeout(expiryTimer); poller.stop(); scope.dispose(
   <div v-if="visible" class="boost-today" data-boost-today>
     <div class="boost-heading">{{ text('Boost today', 'Heute mehr nutzen') }}</div>
     <div class="boost-controls">
-      <div v-if="policies.length" class="seg boost-options" role="group" :aria-label="text('Boost today', 'Heute mehr nutzen')">
+      <div v-if="policies.length || withheld" class="seg boost-options" role="group" :aria-label="text('Boost today', 'Heute mehr nutzen')">
         <button v-for="percent in options" :key="percent" type="button" :data-boost="percent" :aria-pressed="selected === percent" :disabled="busy || !ready" @click="save(percent)">{{ percent ? `+${percent}%` : text('Off', 'Aus') }}</button>
       </div>
       <button type="button" class="boost-reload link-btn" :class="{ hidden: !error && ready || busy }" :disabled="busy" @click="load(true)">{{ text('Reload', 'Neu laden') }}</button>

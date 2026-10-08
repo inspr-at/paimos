@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountprivacy"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/events"
@@ -73,8 +74,8 @@ func (m *Module) writeBoost(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	if in.Percent == nil || !validBoost(*in.Percent) || len(in.Accounts) < 1 || len(in.Accounts) > 1024 {
-		writeErr(w, fail(400, "boost must be 0, 10, 20 or 30 with 1 to 1024 accounts"))
+	if in.Percent == nil || !validBoost(*in.Percent) || len(in.Accounts) > 1024 {
+		writeErr(w, fail(400, "boost must be 0, 10, 20 or 30 with at most 1024 accounts"))
 		return
 	}
 	seen := map[string]bool{}
@@ -91,7 +92,9 @@ func (m *Module) writeBoost(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	out := struct {
-		Accounts []usagePolicy `json:"accounts"`
+		Accounts      []usagePolicy `json:"accounts"`
+		Withheld      int           `json:"withheld_count,omitempty"`
+		WithheldUntil *time.Time    `json:"withheld_boost_until,omitempty"`
 	}{Accounts: []usagePolicy{}}
 	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout='5s'`); err != nil {
@@ -115,45 +118,84 @@ func (m *Module) writeBoost(w http.ResponseWriter, r *http.Request) {
 			}
 			until = &expiry
 		}
-		before := make([]usagePolicy, 0, len(in.Accounts))
-		for _, requested := range in.Accounts {
-			a, err := lockAccount(ctx, tx, requested.ID)
+		// One sorted batch. The body names the privacy-visible owned accounts.
+		// Withheld owned accounts stay locked and take the stored revision.
+		rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(owner_person_id::text,''), COALESCE(usage_revision,0), link_revision FROM agent_accounts WHERE NOT `+retiredSQL+` AND `+modelprefs.CanonicalPersonSQL("owner_person_id")+`=`+modelprefs.CanonicalPersonSQL("$1::uuid")+` ORDER BY id LIMIT 1025 FOR NO KEY UPDATE`, p.ID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		type ownedBoostRow struct {
+			ID, Owner         string
+			Revision, Binding int64
+		}
+		owned := []ownedBoostRow{}
+		for rows.Next() {
+			var row ownedBoostRow
+			if err := rows.Scan(&row.ID, &row.Owner, &row.Revision, &row.Binding); err != nil {
+				return err
+			}
+			owned = append(owned, row)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(owned) > 1024 {
+			return fail(409, "owned account list changed")
+		}
+		ids := make([]string, len(owned))
+		for i, row := range owned {
+			ids[i] = row.ID
+		}
+		policy := accountprivacy.Policy{}
+		if len(ids) > 0 {
+			policy, err = accountprivacy.Load(ctx, tx, p, ids)
 			if err != nil {
 				return err
 			}
-			u, err := loadUsagePolicy(ctx, tx, a.ID)
+		}
+		visible := make([]ownedBoostRow, 0, len(owned))
+		for _, row := range owned {
+			if policy[row.ID] {
+				visible = append(visible, row)
+			}
+		}
+		if len(visible) != len(in.Accounts) {
+			return fail(409, "owned account list changed")
+		}
+		for i, row := range visible {
+			requested := in.Accounts[i]
+			if row.ID != requested.ID {
+				return fail(409, "owned account list changed")
+			}
+			if row.Revision != *requested.Revision || row.Binding != *requested.Binding {
+				return fail(409, "account policy or binding changed")
+			}
+		}
+		if len(owned) == 0 {
+			return nil
+		}
+		before := make([]usagePolicy, 0, len(owned))
+		for _, row := range owned {
+			u, err := loadUsagePolicy(ctx, tx, row.ID)
 			if err != nil {
 				return err
 			}
-			if err := m.usagePermissions(ctx, tx, p, a, &u); err != nil {
+			if u.Revision != row.Revision || u.BindingRevision != row.Binding {
+				return fail(503, "account revision changed under lock")
+			}
+			ownerID := row.Owner
+			account := Account{ID: row.ID, OwnerPersonID: &ownerID}
+			if err := m.usagePermissions(ctx, tx, p, account, &u); err != nil {
 				return err
 			}
 			if !u.CanSetPosture {
 				return fail(403, "account owner required")
 			}
-			if u.Revision != *requested.Revision || u.BindingRevision != *requested.Binding {
-				return fail(409, "account policy or binding changed")
-			}
 			before = append(before, u)
 		}
-		// Ownership can change while the screen is open. A partial account list must
-		// not silently claim that all of the person's accounts were boosted.
-		rows, err := tx.Query(ctx, `SELECT id::text FROM agent_accounts WHERE NOT `+retiredSQL+` AND `+modelprefs.CanonicalPersonSQL("owner_person_id")+`=`+modelprefs.CanonicalPersonSQL("$1::uuid")+` ORDER BY id LIMIT 1025`, p.ID)
-		if err != nil {
-			return err
-		}
-		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
-		if err != nil {
-			return err
-		}
-		if len(ids) != len(in.Accounts) {
-			return fail(409, "owned account list changed")
-		}
-		for i, id := range ids {
-			if id != in.Accounts[i].ID {
-				return fail(409, "owned account list changed")
-			}
-		}
+		after := make([]usagePolicy, 0, len(before))
+		withheld := 0
 		for _, u := range before {
 			if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET boost_percent=$2,boost_until=$3,boost_person_id=`+modelprefs.CanonicalPersonSQL("owner_person_id")+`,boost_link_revision=link_revision,usage_revision=$4 WHERE id=$1`, u.AccountID, *in.Percent, until, u.Revision+1); err != nil {
 				return err
@@ -163,10 +205,19 @@ func (m *Module) writeBoost(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			saved.CanSetPosture, saved.CanSetFloor = u.CanSetPosture, u.CanSetFloor
-			out.Accounts = append(out.Accounts, saved)
+			after = append(after, saved)
+			if policy[u.AccountID] {
+				out.Accounts = append(out.Accounts, saved)
+				continue
+			}
+			withheld++
+		}
+		out.Withheld = withheld
+		if withheld > 0 && until != nil {
+			out.WithheldUntil = until
 		}
 		// All row locks and writes precede the single event-counter acquisition.
-		_, err = events.Append(ctx, tx, p, events.Change{Type: "account.boost_changed", Before: before, After: out.Accounts})
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "account.boost_changed", Before: before, After: after})
 		return err
 	})
 	if err != nil {
