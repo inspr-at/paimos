@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { workLevel, workLabel, workIcon, workNoun } from '../src/lib/workVocabulary.ts'
+import { workLevel, workLabel, workIcon, workNoun, vocabularyRows, vocabularyChain, vocabularyLabel, listKeyTarget, workIconChoice } from '../src/lib/workVocabulary.ts'
 import { apiParams, filtersFromQuery, filtersToQuery, filtersFromView, viewShape, facetOptions, valueLabel, groupRows } from '../src/lib/ticketList.ts'
 import type { ListItem } from '../src/lib/api.ts'
 test('workspace names depend on leaf shape first, then project-relative depth', () => {
@@ -39,4 +39,34 @@ test('type facets, selected chips and groups display the workspace leaf name', (
   assert.equal(valueLabel('type', 'work', context), 'Arbeitsschritt')
   const row = { kind_slug: 'work' } as ListItem
   assert.equal(groupRows([row], 'type', {}, context)[0].label, 'Arbeitsschritt')
+})
+test('settings rows read top-down: top level first, the leaf last, with defaults per depth', () => {
+  const vocabulary = { revision: 1, leaf: { name: '', icon: '' }, levels: [{ name: 'Vorhaben', icon: 'tree' }, { name: '', icon: '' }, { name: '', icon: '' }] }
+  const rows = vocabularyRows(vocabulary)
+  assert.deepEqual(rows.map(r => r.label), ['Top level', 'Level 2', 'Level 3', 'Leaf (work item)'])
+  assert.deepEqual(rows.map(r => r.depth), [0, 1, 2, 3])
+  assert.deepEqual(rows.map(r => r.placeholder), ['Epic', 'Story', 'Level 3', 'Ticket'])
+  assert.deepEqual(rows.map(r => r.fallback), ['epic', 'layers', 'layers', 'ticket'])
+  // Rows edit the stored objects: levels[0] stays the top level.
+  assert.equal(rows[0].level, vocabulary.levels[0]); assert.equal(rows[3].level, vocabulary.leaf)
+  assert.equal(vocabularyLabel(0), 'Top level'); assert.equal(vocabularyLabel(8), 'Level 9')
+})
+test('the preview chain names every configured level top-down, then the leaf', () => {
+  const vocabulary = { revision: 1, leaf: { name: 'Schritt', icon: 'check' }, levels: [{ name: 'Vorhaben', icon: 'tree' }, { name: '', icon: '' }, { name: 'Teil', icon: '' }, { name: '', icon: '' }] }
+  assert.deepEqual(vocabularyChain(vocabulary), [{ name: 'Vorhaben', icon: 'tree' }, { name: 'Story', icon: 'layers' }, { name: 'Teil', icon: 'layers' }, { name: 'Level 4', icon: 'layers' }, { name: 'Schritt', icon: 'check' }])
+  assert.deepEqual(vocabularyChain({ revision: 0, leaf: { name: '', icon: '' }, levels: [] }), [{ name: 'Ticket', icon: 'ticket' }])
+})
+test('an unknown stored icon draws the level default', () => {
+  assert.equal(workIconChoice('box', 'layers'), 'box')
+  assert.equal(workIconChoice('', 'epic'), 'epic')
+  assert.equal(workIconChoice('<svg>', 'epic'), 'epic')
+})
+test('list keys move within the options and stop at the ends', () => {
+  assert.equal(listKeyTarget('ArrowDown', -1, 9), 0)
+  assert.equal(listKeyTarget('ArrowDown', 3, 9), 4)
+  assert.equal(listKeyTarget('ArrowDown', 8, 9), 8)
+  assert.equal(listKeyTarget('ArrowUp', 0, 9), 0)
+  assert.equal(listKeyTarget('ArrowUp', 4, 9), 3)
+  assert.equal(listKeyTarget('Home', 4, 9), 0); assert.equal(listKeyTarget('End', 4, 9), 8)
+  assert.equal(listKeyTarget('Enter', 4, 9), undefined); assert.equal(listKeyTarget('ArrowDown', 0, 0), undefined)
 })
