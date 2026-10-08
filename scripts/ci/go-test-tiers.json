@@ -528,6 +528,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestValidateWorkingFolder","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestVerificationLogPrivateBoundedAndRejectsLinkedFiles","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestVerificationRefusalCompletesPairPolling","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestVerifyCommandOpensOnlyOwnerApprovalAndPreservesFixtureState","tier":"NIGHTLY"}
@@ -1847,6 +1849,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestUnsupportedVerificationPollProbesWithoutLaunching","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestUsageProbeOptInAndCooldownSurviveRestart","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestVerificationFailedProbeRetainsQueuedRunWithoutVendorLaunch","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestVerificationOneShotNoRepoToolsAndNoDuplicate","tier":"GATED-FULL"}
     ,

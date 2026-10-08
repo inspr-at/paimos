@@ -45,6 +45,7 @@ func (s *Supervisor) refuseVerification(run Run, reason string) error {
 	s.mu.Lock()
 	s.runs[run.ID] = &owned{record: r}
 	s.mu.Unlock()
+	s.verificationDiagnosticFor(run.ID, run.requestedAccount(), run.Purpose, "refused", reason)
 	return nil
 }
 

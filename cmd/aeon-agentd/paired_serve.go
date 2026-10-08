@@ -198,8 +198,17 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	} else {
 		defer stepUps.Close()
 	}
-	s, err := agentd.NewSupervisor(ctx, agentd.Config{StepUps: stepUps, CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1},
-		PollDiagnostic: func(reason string) { slog.Warn("agentd polling diagnostic", "reason", reason) }})
+	logStore, err := agentsetup.OpenStore(state, true)
+	if err != nil {
+		return err
+	}
+	defer logStore.Close()
+	diagnostic := verificationLog(logStore)
+	s, err := agentd.NewSupervisor(ctx, agentd.Config{VerificationDiagnostic: diagnostic, StepUps: stepUps, CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1},
+		PollDiagnostic: func(reason string) {
+			slog.Warn("agentd polling diagnostic", "reason", reason)
+			diagnostic("", "", "poll_blocked", reason)
+		}})
 	if err != nil {
 		return fmt.Errorf("initialize daemon state %s: %w", state, err)
 	}
@@ -207,6 +216,7 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	if s.TenantID() != c.TenantID || s.PrincipalID() != c.PrincipalID {
 		return errors.New("runtime identity differs from approved pairing")
 	}
+	diagnostic("", "", "daemon_ready", "")
 	watches, err := pairedAttach(root, c, remote)
 	if err != nil {
 		slog.Warn("attach disabled; restart agentd after updating agentd or Aeon to retry", "error", err)
