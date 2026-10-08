@@ -15,3 +15,7 @@ With auto-update enabled, discovery accepts registered successor versions of lin
 Fallback checks policy and capability before the shared account qualification, then walks the column, the default order on the deciding layer, and the job's role ladder. It records skip reasons without rewriting stored ranks. Native Grok supports medium, high and xhigh; the confined launcher passes and verifies the selected effort.
 
 Validation: `internal/modelregistry/simple_test.go` covers the eight server additions and fallback; `internal/agentd/grok_effort_test.go` covers native launcher arguments. Both migrations add nullable columns and retain old writers.
+
+The server contract was checked against the approved AEON-999 Models minimal v3 HTML in an isolated Playwright browser. This package implements build-map package 1; the two web cards remain assigned to their separate packages, and expert settings stay stored and active.
+
+Verification on the approved remote test machine: full model registry and OpenAPI reporter contract suites passed; model preferences, Grok/agentd, DSAR inventory and auth suites passed. Pairing contract and fence checks passed after generating OpenAPI. `ci-static --merge-main` exited 0 with 40 checks passed and zero skips. The test-tier, web-shard, ownership and expand-only migration checks passed. Verification used transferred Git bundles, with no push, deployment or worker-run model gate.
