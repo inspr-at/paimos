@@ -32,14 +32,19 @@ logs or credentials.
   merge ends the change. A parked round is a wait of its own; parking again
   opens another wait and closes only the matching open one. If a merge is
   projected before the change has a flow row, the next time that change is
-  created it takes the linked delivery's merged time. Replaying the log
-  converges on the same rows.
+  created it takes the linked delivery's merged time. A round names no
+  repository, so the delivery that links the ticket and pull request supplies
+  it; when several repositories claim the same number for the ticket, no merge
+  is assumed. Replaying the log converges on the same rows.
 - **GitHub App.** Workflow runs of a pull request that PAIMOS links to a
   ticket become `ci` steps. Merge-group runs become `queue` steps, with the
   wait in the queue before the run starts. A run stays open (`ended_at`
   empty) while it is queued or in progress, and completion sets the end and
-  the outcome. A late queued delivery does not reopen a run that has already
-  ended. A failed attempt that a later attempt passed on the same commit is
+  the outcome. A late queued delivery of a run and attempt that is already
+  stored changes neither the step nor the change's start, so it does not reopen
+  a run that has already ended. A change starts with its earliest stored step,
+  so a queued report of an earlier run that arrives after a later run still
+  moves the start back. A failed attempt that a later attempt passed on the same commit is
   `flaky`; the re-run is a repeat. Those flake facts come from the completed
   check suite, which stays separate from the live run: an in-progress
   workflow run is not written into the metric tables. Only the project's CI
