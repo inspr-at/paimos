@@ -11,6 +11,7 @@ import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { ACCOUNTS, NOW, OLD_WINDOW, TZ, capacityWorld, type CapacityOptions } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { controlStability } from './control-stability'
 
 test.use({ timezoneId: TZ })
 const world: AgentWorld = { me: me.id, now: NOW, projects: {}, tickets: {}, nodes: {} }
@@ -474,4 +475,72 @@ test.describe('screenshots', () => {
     mkdirSync(SHOTS!, { recursive: true })
     for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) await shoot(browser, shot, width, theme)
   })
+})
+
+// AEON-886: opt-in, honest errors and stable controls in the existing account detail.
+test('owner login usage switch stays put and failed saves preserve consent', async ({ page }) => {
+  const { capacity } = await setup(page, { apiKey: true })
+  const account = capacity.accounts.find(a => a.id === ACCOUNTS.main)!
+  Object.assign(account, { owner_person_id: me.id, link_revision: 3, usage_probe_enabled: false })
+  const pi = capacity.accounts.find(a => a.id === ACCOUNTS.pi)!
+  Object.assign(pi, { provider: 'openrouter', owner_person_id: me.id, link_revision: 3, usage_probe_enabled: false, usage_budget: {
+    currency: 'USD', source: 'agentd', read_at: new Date(NOW).toISOString(), key_usage_usd: 12.5, key_limit_usd: 50, key_remaining_usd: 37.5, balance_usd: null,
+  } })
+  let fail = false
+  const writes: unknown[] = []
+  await page.route('**/api/agent-accounts/*/usage-probe', async route => {
+    const body = route.request().postDataJSON(); writes.push(body)
+    if (fail) return route.fulfill({ status: 403, json: { error: 'owner permission revoked' } })
+    const id = new URL(route.request().url()).pathname.split('/')[3]
+    Object.assign(capacity.accounts.find(a => a.id === id)!, { usage_probe_enabled: body.enabled })
+    return route.fulfill({ status: 204 })
+  })
+  await open(page)
+  const detail = await details(page, ACCOUNTS.main)
+  const toggle = detail.getByRole('switch', { name: "Read usage with this CLI's own login" })
+  await expect(toggle).toHaveAttribute('aria-checked', 'false')
+  await expect(detail).toContainText("Uses unofficial provider endpoints; they may change or stop. You are responsible for following your provider's terms.")
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    // Wait for the frame's ResizeObserver to apply the new layout before
+    // measuring an interaction; resizing itself legitimately moves controls.
+    await expect.poll(() => page.locator('.settings-frame').evaluate(el => {
+      const width = (el.closest('.settings-page') ?? el).getBoundingClientRect().width
+      const mode = width >= 1200 ? 'dock' : width > 720 ? 'side' : 'sheet'
+      return el.classList.contains(`mode-${mode}`)
+    })).toBe(true)
+    const guard = await controlStability(page, { toggle, name: detail.getByRole('button', { name: 'Rename Main', exact: true }) })
+    await guard.check(async () => {
+      const before = await toggle.getAttribute('aria-checked')
+      await toggle.click()
+      await expect(toggle).toHaveAttribute('aria-checked', before === 'true' ? 'false' : 'true')
+    })
+    guard.done()
+    await page.screenshot({ path: test.info().outputPath(`usage-probe-${width}-${theme}.png`), fullPage: true })
+  }
+  expect(writes[0]).toEqual({ binding_revision: 3, enabled: true })
+  fail = true
+  const before = await toggle.getAttribute('aria-checked')
+  const guard = await controlStability(page, { toggle })
+  await guard.check(async () => {
+    await toggle.click()
+    await expect(page.getByText('Could not confirm the change. Reload accounts before trying again.', { exact: true })).toBeVisible()
+    await expect(toggle).toHaveAttribute('aria-checked', before!)
+  })
+  guard.done()
+  fail = false
+  const piDetail = await details(page, ACCOUNTS.pi)
+  await expect(piDetail).toContainText('Dollar budget')
+  await expect(piDetail).toContainText('$12.50 used · $50.00 key limit · $37.50 key remaining · Account balance unknown')
+  await expect(piDetail.locator('.fact.window')).toHaveCount(0)
+  const piToggle = piDetail.getByRole('switch', { name: "Read usage with this CLI's own login" })
+  const piGuard = await controlStability(page, { toggle: piToggle })
+  await piGuard.check(async () => {
+    await piToggle.click()
+    await expect(piToggle).toHaveAttribute('aria-checked', 'true')
+  })
+  piGuard.done()
+  expect(await noScroll(page)).toBe(true)
+  await page.screenshot({ path: test.info().outputPath('usage-probe-dollar-budget.png'), fullPage: true })
 })

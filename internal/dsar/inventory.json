@@ -399,6 +399,19 @@
         "undo_progress": "review",
         "completed_at": "metadata"
       }
+    },
+    {
+      "table": "agent_accounts",
+      "classification": "personal",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "owner_person_id"
+      },
+      "columns": {
+        "usage_probe_enabled": "personal",
+        "usage_probe_revision": "metadata",
+        "usage_budget": "personal"
+      }
     }
   ]
 }

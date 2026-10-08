@@ -10666,6 +10666,8 @@
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"old limits set by hand show as Set by you, with Make this repeat and Remove","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"owner login usage switch stays put and failed saves preserve consent","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"phone: Name it is reachable and opens the rename","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"phone: no horizontal scroll, 44 px targets, the detail stacks","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
