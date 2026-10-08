@@ -1410,6 +1410,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestGrokVerificationPlatformGate","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestHarnessHintsDrainAndStopWithoutHeartbeatOrPoll","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestHarnessHoldDoesNotBlockClaimRecovery","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestHarnessHoldReleaseRestartsProbeClockOnlyOnce","tier":"GATED-FULL"}
@@ -1637,6 +1639,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestRemoteDeployApprovalBinding","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRemoteHarnessNotificationsBoundFramesAndCredentials","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteHeartbeatExposesDurablePause","tier":"GATED-FULL"}
     ,
@@ -3129,6 +3133,10 @@
     {"kind":"go","package":"internal/auth","name":"TestAgentRoleCannotManageKeys","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestAgentScopeSeparatesProjectSubpathsAndUnknownRoutes","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestAgentSubscriptionPlanResumeAndPrivacy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestAgentSubscriptionScopeAndConnectionLimits","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestAgentsPlanRealKeyScopeCreatorAndLiveGrants","tier":"GATED-FULL"}
     ,
@@ -5258,6 +5266,12 @@
     ,
     {"kind":"go","package":"internal/events","name":"TestSSEReplayLiveResumeAndPoolCapacity","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/events","name":"TestSubscriptionHeartbeatPreservesCursorAndRevocation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestSubscriptionInputAndAdmissionBounds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestSubscriptionTopicProjectAndReferenceCeilings","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/events","name":"TestSummarizeNodeChanges","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestUUIDAndIDValidation","tier":"GATED-FULL"}
@@ -5367,6 +5381,8 @@
     {"kind":"go","package":"internal/harness","name":"TestHarnessGenerationAndOwnedControls","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHarnessInboxLeaseAndExactAck","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestHarnessNotificationsCommitWakeLeaseAndRevocation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHarnessPluginConstructor","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,

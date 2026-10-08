@@ -142,31 +142,6 @@
       }
     },
     {
-      "table": "attention_batches",
-      "classification": "personal",
-      "locator": {
-        "tenant_column": "tenant_id",
-        "person_column": "actor_id"
-      },
-      "columns": {
-        "tenant_id": "metadata",
-        "id": "metadata",
-        "actor_id": "personal",
-        "action": "metadata",
-        "scope": "review",
-        "through_event_id": "metadata",
-        "item_events": "metadata",
-        "created_at": "metadata",
-        "undone_at": "metadata",
-        "snapshot": "review",
-        "idempotency_key": "review",
-        "request": "review",
-        "progress": "review",
-        "undo_progress": "review",
-        "completed_at": "metadata"
-      }
-    },
-    {
       "table": "model_pref_profiles",
       "classification": "personal",
       "locator": {
@@ -306,6 +281,31 @@
         "provider": "metadata",
         "effort_level": "metadata",
         "introduced_at": "metadata"
+      }
+    },
+    {
+      "table": "attention_batches",
+      "classification": "personal",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "actor_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "id": "metadata",
+        "actor_id": "personal",
+        "action": "metadata",
+        "scope": "review",
+        "through_event_id": "metadata",
+        "item_events": "metadata",
+        "created_at": "metadata",
+        "undone_at": "metadata",
+        "snapshot": "review",
+        "idempotency_key": "review",
+        "request": "review",
+        "progress": "review",
+        "undo_progress": "review",
+        "completed_at": "metadata"
       }
     },
     {

@@ -4186,6 +4186,8 @@
   "taggingNote": "Retained candidates and mixed groups were reviewed under AEON-679 rule B; protected assertions stay in their existing tiers. Deletion counts and archive evidence are in the coordinator deleted.md report."
   ,
   "tests": [
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention controls and retained resolutions in light and dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: account menu in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: account menu in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
@@ -8292,7 +8294,21 @@
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a delayed action cannot resolve a different filtered record or offer stale Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a filtered empty queue says nothing matches and keeps Clear filters","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a group apply binds an offset snapshot after more than 200 later events and offers Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a group row with no matching resolution reports the refresh failure instead of staying on Apply","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a held group run cannot write a new visit or leave its Undo active there","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a missing groups route still groups the list and leaves Group by None on the list endpoint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a phone tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"an unavailable queue shows an honest error and Retry without moving its controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"attention keys select a range, preserve native field shortcuts, skip inapplicable Apply and retain confirmed Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"bulk Apply has no glow and keeps visible keyboard focus at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -8324,6 +8340,8 @@
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"coarse-pointer attention controls › expanded attention targets activate without moving controls at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"group preview, partial bulk Undo and project/rule Undo preserve scope, rights and control positions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"kind counts, project facets and search filter the URL; scrolling loads the next 50","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"partial errors leave adjacent actions unobscured and stationary at 1024px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8340,9 +8358,15 @@
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"person switch clears previous facets while the replacement read waits and fails","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"phone selection keeps rows reachable, keys whole and zero-apply controls absent","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"project groups page independently, remember folds per grouping and keep the clicked header still","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"read-only rows and unavailable release targets explain their permissions before acting","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"release receipts refresh the retained row and siblings for subsequent Apply and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"shared attention columns keep long keys whole and Since exposes the exact flag time","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"workspace switch clears previous facets while the replacement read waits and fails","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -10331,6 +10355,18 @@
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"an upward gesture on a thread that fits still follows the next post","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"displacement before a late read marker preserves the reader's position before scroll dispatch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat dark 1024: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat dark 1440: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat dark 390: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat light 1024: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat light 1440: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat light 390: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"focusing the window picks up a read from another device","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12406,6 +12442,8 @@
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: project grouping retains metadata, loaded totals, held placement and URL state","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-915: the ticket grid keeps a narrow loaded fit at the designed width","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/columns.test.ts","name":"a saved choice fixes order and visibility across desktop and phone widths","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"a saved choice retains progress and ETA when space gets tight","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -13892,9 +13930,31 @@
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a finished fallback group scan shows the scanned project, count and facets","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a resolved fallback group scan cannot restore groups, counts or facets after a filter change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a resolved fallback group scan cannot restore groups, counts or facets after an identity change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"binds an offset snapshot on a resolution-type page when ticket history is longer than 200 events","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"binds undo from undo_of on the resolution-type page","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"builds capped groups from the list cursor and stops at the page cap","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"fills kind totals from the list counts and project names from facets","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"ignores failed or incomplete release receipts","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"keeps server order across a live cursor and sorts the loaded window only when the cursor ends","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"orders every group by open flags and every row by kind then newest without mutating the visit","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"refreshes matching sibling identities and sends both resource revisions on the next action","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"returns no row identity when the resolution page has no event for this revision","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"uses saved per-group folds before big-list defaults and opens search matches without changing saved folds","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/auth-tabs.unit.test.ts","name":"a delayed storage event uses the latest generation instead of rolling back a newer local sign-in","tier":"ESSENTIAL"}
     ,
@@ -15511,6 +15571,8 @@
     {"kind":"vitest","file":"tests/session-order.unit.test.ts","name":"manual order by column > keeps families together and orders children by the same key","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/session-removal-store.unit.test.ts","name":"an in-flight poll and an older snapshot cannot resurrect a removed generation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a burst during a slow poll starts one catch-up and one trailing read","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a slow poll cannot overwrite the reply loaded after a send","tier":"ESSENTIAL"}
     ,
