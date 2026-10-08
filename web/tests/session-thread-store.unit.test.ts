@@ -30,3 +30,26 @@ it('a slow poll cannot overwrite the reply loaded after a send', async () => {
   finish(page(1)); await stale
   expect(store.thread(session('first')).map(m => m.id)).toEqual(['1', '2'])
 })
+
+// Risk: a burst of hints while a poll is outstanding either waits on that poll
+// or starts one read per hint. One catch-up starts at once; the rest share it
+// and leave a single trailing read. The slow page is not the thread that remains.
+it('a burst during a slow poll starts one catch-up and one trailing read', async () => {
+  const store = useAgents()
+  let finish!: (value: MessagePage) => void
+  vi.mocked(listMessages)
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    .mockResolvedValueOnce(page(1))
+    .mockResolvedValueOnce(page(3, 2, 1))
+  const stale = store.refreshThread('project', 'first')
+  const catchUp = store.refreshThread('project', 'first')
+  void store.refreshThread('project', 'first')
+  // The extra hint joins the catch-up. It does not start another read, and the
+  // catch-up does not wait for the slow poll.
+  expect(listMessages).toHaveBeenCalledTimes(2)
+  finish(page(1))
+  await catchUp
+  await stale
+  expect(listMessages).toHaveBeenCalledTimes(3)
+  expect(store.thread(session('first')).map(m => m.id)).toEqual(['1', '2', '3'])
+})

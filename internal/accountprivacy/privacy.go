@@ -228,7 +228,7 @@ func mask(obj map[string]any) {
 			obj[key] = ""
 		}
 	}
-	for _, key := range []string{"openrouter_credits", "probe_failure", "limiting_reset", "limit", "spend_month_usd", "learning", "same_quota_as", "resets_at", "until", "read_at", "next_attempt_at", "reading_error", "check_result", "reading_age_seconds", "credit_state", "remaining", "used_percent", "remaining_percent", "threshold_percent", "window_key", "severity", "denial_reason", "stop_kind", "backoff_step", "wait_id", "early_recovery_used", "pending_check", "result", "cap_percent", "reserve_percent", "reserve_effective_percent", "reserve_until", "awaiting_reading"} {
+	for _, key := range []string{"usage_budget", "budget", "openrouter_credits", "probe_failure", "limiting_reset", "limit", "spend_month_usd", "learning", "same_quota_as", "resets_at", "until", "read_at", "next_attempt_at", "reading_error", "check_result", "reading_age_seconds", "credit_state", "remaining", "used_percent", "remaining_percent", "threshold_percent", "window_key", "severity", "denial_reason", "stop_kind", "backoff_step", "wait_id", "early_recovery_used", "pending_check", "result", "cap_percent", "reserve_percent", "reserve_effective_percent", "reserve_until", "awaiting_reading"} {
 		delete(obj, key)
 	}
 	// Old account timestamps are nullable in the published contract.

@@ -26,8 +26,21 @@ type WorkQuery struct {
 	AuthorFamily     string
 	Harness          string
 	TicketResidency  string
+	Situation        string
+	Labels           []string
+	EstimateHours    float64
+	FixRound         int
+	PreviousFamily   string
+	Concept          bool
+	Queued           bool
 }
 type PreferenceTrace struct {
+	PreferenceOf         *preferenceOwner           `json:"preference_of,omitempty"`
+	Column               string                     `json:"column,omitempty"`
+	Situation            string                     `json:"situation,omitempty"`
+	CardIndex            int                        `json:"card_index,omitempty"`
+	Lock                 *modelprefs.BoardLock      `json:"lock,omitempty"`
+	Held                 []modelprefs.HeldLine      `json:"held,omitempty"`
 	OrderMode            string                     `json:"order_mode,omitempty"`
 	Selector             *modelprefs.Cell           `json:"selector,omitempty"`
 	Role                 string                     `json:"role,omitempty"`
@@ -141,6 +154,11 @@ func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 			return WorkResolution{}, err
 		}
 		placement := modelprefs.PlacementFields(fields)
+		parsed, parseErr := boardTicketFields(ctx, tx, q, fields)
+		if parseErr != nil {
+			return WorkResolution{}, parseErr
+		}
+		q = parsed
 		q.Area = placement.Area
 		q.Complexity = placement.Complexity
 		q.ComplexitySource = placement.ComplexitySource
@@ -156,6 +174,25 @@ func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	q.Role = strings.TrimSpace(q.Role)
 	if q.PersonID == nil {
 		q.PersonID = modelprefs.PrefsPerson(ctx, tx, p)
+	}
+	if q.Role != "review-gate" && q.Role != "review-gate-security" {
+		if escalated, err := escalationForWork(ctx, tx, p, q, now); err != nil {
+			return WorkResolution{}, err
+		} else if escalated != nil {
+			return *escalated, nil
+		}
+	}
+	if strings.HasPrefix(q.Role, "review-gate") {
+		var err error
+		q.AuthorFamily, err = NormalizeAuthorFamily(q.AuthorFamily)
+		if err != nil || q.AuthorFamily == "" {
+			return WorkResolution{}, fail(400, "review-gate requires a known author_family")
+		}
+	}
+	if board, err := resolveBoardWork(ctx, tx, p, q, now, nil); err != nil {
+		return WorkResolution{}, err
+	} else if board != nil {
+		return *board, nil
 	}
 	if q.Role == "review-gate" || q.Role == "review-gate-security" {
 		if q.AuthorFamily == "" {

@@ -30,9 +30,11 @@ import (
 	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/sessionusage"
+	"github.com/inspr-at/paimos/internal/usageprobe"
 )
 
 type Config struct {
+	UsageProbes       usageprobe.Probe
 	StepUps           *StepUpManager
 	MaxTokens         int64
 	MaxTurns          int64
@@ -134,6 +136,7 @@ type owned struct {
 	replyOrder      []string
 	doneRequested   bool
 	monitorDone     chan struct{}
+	harnessWake     chan struct{}
 	stopRequested   bool
 	forceRequested  bool
 	harnessArchived bool
@@ -147,6 +150,7 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	usageProbes            usageprobe.Probe
 	recoveryMu             sync.Mutex
 	attachedHooks          map[string]*attachedHookBinding
 	attachedHookVerifier   *AttachManager
@@ -385,7 +389,10 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	if c.UsageProbes == nil {
+		c.UsageProbes = usageprobe.Client{}
+	}
+	s := &Supervisor{usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic, verificationDiagnostic: c.VerificationDiagnostic}
 	s.capacityNow = c.Now
@@ -1382,27 +1389,40 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		binder.bindLifetime(s.lifetime)
 	}
 	go s.monitor(entry)
+	entry.mu.Lock()
+	entry.harnessWake = make(chan struct{}, 1)
+	entry.mu.Unlock()
 	go s.heartbeat(entry)
+	go s.watchHarness(entry)
 	return startErr
 }
 
 func (s *Supervisor) heartbeat(entry *owned) {
 	entry.mu.Lock()
-	done, inbox := entry.monitorDone, entry.inboxCapable
+	inbox := entry.inboxCapable
 	entry.mu.Unlock()
 	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
-	wakeTimer := time.NewTimer(time.Hour)
-	if !wakeTimer.Stop() {
-		<-wakeTimer.C
-	}
-	defer wakeTimer.Stop()
 	var inboxTicks <-chan time.Time
 	if inbox {
 		inboxTicker := time.NewTicker(2 * time.Second)
 		defer inboxTicker.Stop()
 		inboxTicks = inboxTicker.C
 	}
+	s.heartbeatLoop(entry, ticker.C, inboxTicks)
+}
+
+// Tick channels are injected so tests prove hint processing without elapsed
+// time assertions or accidentally passing via the fallback poll.
+func (s *Supervisor) heartbeatLoop(entry *owned, heartbeatTicks, inboxTicks <-chan time.Time) {
+	entry.mu.Lock()
+	done, hints := entry.monitorDone, entry.harnessWake
+	entry.mu.Unlock()
+	wakeTimer := time.NewTimer(time.Hour)
+	if !wakeTimer.Stop() {
+		<-wakeTimer.C
+	}
+	defer wakeTimer.Stop()
 	for {
 		entry.mu.Lock()
 		wake := entry.pauseWakeAt
@@ -1423,12 +1443,16 @@ func (s *Supervisor) heartbeat(entry *owned) {
 			wakeTicks = wakeTimer.C
 		}
 		beat := false
+		claimControls := false
 		select {
 		case <-done:
 			return
-		case <-ticker.C:
+		case <-heartbeatTicks:
 			beat = true
 		case <-inboxTicks:
+			claimControls = true // bounded fallback when the hint stream is unavailable
+		case <-hints:
+			claimControls = true
 		case <-wakeTicks:
 			entry.mu.Lock()
 			entry.pauseWakeAt = time.Time{}
@@ -1441,7 +1465,7 @@ func (s *Supervisor) heartbeat(entry *owned) {
 			s.flushCapacity(ctx, entry)
 			err = s.update(ctx, entry, Telemetry{Kind: "heartbeat"})
 		}
-		serviceErr := s.serviceHarnessCycle(ctx, entry, beat)
+		serviceErr := s.serviceHarnessWake(ctx, entry, beat, beat || claimControls)
 		cancel()
 		if !errors.Is(serviceErr, ErrControlUnconfirmed) {
 			err = errors.Join(err, serviceErr)
@@ -1744,6 +1768,10 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) error {
 }
 
 func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, heartbeat bool) (result error) {
+	return s.serviceHarnessWake(ctx, entry, heartbeat, heartbeat)
+}
+
+func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heartbeat, claimControls bool) (result error) {
 	entry.harnessMu.Lock()
 	defer entry.harnessMu.Unlock()
 	defer func() {
@@ -1774,7 +1802,7 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 			}
 		}()
 	}
-	if heartbeat {
+	if claimControls {
 		controls, err := s.api.YieldHarness(ctx, entry.harness)
 		if err != nil {
 			return err
@@ -1909,6 +1937,9 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 			if err := s.forgetSettledControl(entry, item.ID); err != nil {
 				return err
 			}
+			// A wake can cover several sends. Drain the next FIFO item immediately,
+			// yielding between cycles so controls always get their chance first.
+			entry.wakeHarness()
 		}
 	}
 	return nil

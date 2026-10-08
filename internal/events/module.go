@@ -55,9 +55,11 @@ func WithCausalUndoHandlers(handlers map[string]UndoFunc) Option {
 }
 
 type module struct {
-	pool       *pgxpool.Pool
-	undo       map[string]UndoFunc
-	causalUndo map[string]UndoFunc
+	pool             *pgxpool.Pool
+	undo             map[string]UndoFunc
+	causalUndo       map[string]UndoFunc
+	subscriptions    subscriptionLimits
+	subscriptionWait func(context.Context, *pgx.Conn, time.Time) error
 }
 
 // New returns a module for event history, SSE and registered resource undo.
@@ -73,6 +75,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/events", m.list)
 	mux.HandleFunc("GET /api/events/activity", m.activity)
 	mux.HandleFunc("GET /api/events/stream", m.stream)
+	mux.HandleFunc("GET /api/events/subscribe", m.subscribe)
 	mux.HandleFunc("POST /api/events/{eventId}/undo", m.handleUndo)
 	mux.HandleFunc("GET /api/events/{eventId}/undo-preview", m.handleUndoPreview)
 }
