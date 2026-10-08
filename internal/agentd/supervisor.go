@@ -61,7 +61,7 @@ type replay struct {
 }
 
 // Record contains only local process provenance and bounded control digests.
-// The journal is AEON v2; classic journals are never opened implicitly.
+// RecordSchemaVersion pins its persisted schema; classic is never opened implicitly.
 type Record struct {
 	WorkerPickup          *WorkerPickup    `json:"worker_pickup,omitempty"`
 	RecoveryReports       []RecoveryReport `json:"recovery_reports,omitempty"`
@@ -362,7 +362,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		}
 	}
 	j, err := localjournal.Open(localjournal.Config[Record]{
-		Directory: c.StateRoot, Prefix: "aeon-agentd-" + c.DaemonID, Version: 2,
+		Directory: c.StateRoot, Prefix: "aeon-agentd-" + c.DaemonID, Version: RecordSchemaVersion, Migrations: recordMigrations(),
 		MaxBytes: 4 << 20, MaxRecords: 4096,
 		Key: func(r Record) (string, error) {
 			if r.RunID == "" {

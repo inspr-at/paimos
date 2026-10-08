@@ -19,50 +19,72 @@ beforeEach(() => {
 afterEach(() => { for (const app of apps.splice(0)) app.unmount(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('S8-011: timing writes', () => {
-  it.each([403, 500, 'network'])('restores confirmed values and offers retry after %s', async failure => {
+  const readSettings = (path: string) => {
+    if (path.includes('agent-activity')) return json({ mode: 'agent_summary' })
+    if (path.includes('eta')) return json({ interval_minutes: 10 })
+    if (path.includes('heartbeat')) return json({ heartbeat_lost_minutes: 15 })
+    throw new Error(`unexpected settings read ${path}`)
+  }
+  const mount = (api: ReturnType<typeof vi.fn>, toast = vi.fn(() => 1)) => mountView('../src/components/settings/AgentActivityCard.vue', {
+    '../../lib/api': { api }, '../../lib/brand': { brand: { short_name: 'Aeon' } },
+    '../../lib/authz': { can: () => true, myWorkspaceRole: () => null, permissionsAvailable: () => true },
+    '../../lib/toast': { toast, dismiss: vi.fn() },
+    '../../stores/session': { useSession: () => ({ identity: { tenant: { id: 'tenant', name: 'Test' }, principal: { id: 'person' } } }) },
+  })
+  const type = (input: { props: Record<string, unknown> }, value: string) => {
+    ;(input.props.onInput as (event: { target: { value: string } }) => void)({ target: { value } })
+  }
+  const blur = (input: { props: Record<string, unknown> }) => (input.props.onBlur as () => Promise<void>)()
+  const puts = (api: ReturnType<typeof vi.fn>, path: string) => api.mock.calls.filter(call => call[0] === path && call[1]?.method === 'PUT')
+
+  it.each([403, 500, 'network'])('keeps the typed value, reports the save failure, and saves again after %s', async failure => {
+    const toast = vi.fn(() => 1)
     const api = vi.fn(async (path: string, init?: RequestInit) => {
-      if (!init) return json(path.includes('eta') ? { interval_minutes: 10 } : { heartbeat_lost_minutes: 15 })
+      if (!init) return readSettings(path)
       if (failure === 'network') throw new TypeError('offline')
       return json({}, failure)
     })
-    const view = mountView('../src/components/settings/WorkspaceSection.vue', {
-      '../../lib/features': { canFeature: () => true },
-      '../../lib/api': { api }, '../../lib/brand': { brand: { short_name: 'Aeon' } },
-      '../../lib/authz': { can: () => true, myWorkspaceRole: () => null, permissionsAvailable: () => true },
-      '../../stores/session': { useSession: () => ({ identity: { tenant: { name: 'Test' } } }) },
-    })
+    const view = mount(api, toast)
     apps.push(view.app); await settle()
-    for (const [id, original, requested, field] of [['eta-minutes', 10, 20, 'interval_minutes'], ['lost-minutes', 15, 30, 'heartbeat_lost_minutes']] as const) {
+    for (const [id, path, original, requested] of [
+      ['interval_minutes', '/settings/eta-interval', '10', '20'],
+      ['heartbeat_lost_minutes', '/settings/heartbeat-lost', '15', '30'],
+    ] as const) {
       const input = view.find(el => el.props.id === id)
-      ;(input.props['onUpdate:modelValue'] as (value: number) => void)(requested)
-      await (input.props.onChange as () => Promise<void>)(); await settle()
-      expect(input.props.value).toBe(original)
-      expect(textOf(view.root)).toContain('could not be confirmed')
-      const retry = view.find(el => el.tag === 'button' && textOf(el).includes(`Retry ${requested}`))
-      expect(retry).toBeDefined()
-      api.mockImplementationOnce(async () => json({ [field]: requested + 1 }))
-      await (retry.props.onClick as () => Promise<void>)(); await settle()
-      expect(input.props.value).toBe(requested + 1)
+      const notices = toast.mock.calls.length
+      type(input, requested)
+      await blur(input); await settle()
+      expect(input.props.value).toBe(requested)
+      expect(input.props.disabled).toBe(false)
+      expect(textOf(view.root)).toContain('Could not save. Try again.')
+      expect(toast.mock.calls).toHaveLength(notices)
+      expect(puts(api, path)).toHaveLength(1)
+      expect(JSON.parse(String(puts(api, path)[0][1].body))).toEqual({ [id]: Number(requested), [`expected_${id}`]: Number(original) })
+      api.mockImplementationOnce(async () => json({ [id]: Number(requested) + 1 }))
+      await blur(input); await settle()
+      expect(input.props.value).toBe(String(Number(requested) + 1))
+      expect(input.props.disabled).toBe(false)
+      expect(textOf(view.root)).not.toContain('Could not save')
+      expect(toast.mock.calls).toHaveLength(notices + 1)
+      expect(puts(api, path)).toHaveLength(2)
+      expect(JSON.parse(String(puts(api, path)[1][1].body))).toEqual({ [id]: Number(requested), [`expected_${id}`]: Number(original) })
     }
   })
   it('disables pending writes and adopts the authoritative value without overlapping requests', async () => {
     const pending = deferred<Response>()
-    const api = vi.fn(async (path: string, init?: RequestInit) => init ? pending.promise : json(path.includes('eta') ? { interval_minutes: 10 } : { heartbeat_lost_minutes: 15 }))
-    const view = mountView('../src/components/settings/WorkspaceSection.vue', {
-      '../../lib/features': { canFeature: () => true },
-      '../../lib/api': { api }, '../../lib/brand': { brand: {} },
-      '../../lib/authz': { can: () => true, myWorkspaceRole: () => null, permissionsAvailable: () => true },
-      '../../stores/session': { useSession: () => ({ identity: null }) },
-    })
+    const api = vi.fn(async (path: string, init?: RequestInit) => init ? pending.promise : readSettings(path))
+    const view = mount(api)
     apps.push(view.app); await settle()
-    const input = view.find(el => el.props.id === 'eta-minutes')
-    ;(input.props['onUpdate:modelValue'] as (value: number) => void)(20)
-    const first = (input.props.onChange as () => Promise<void>)(); await settle()
+    const input = view.find(el => el.props.id === 'interval_minutes')
+    type(input, '20')
+    const first = blur(input); await settle()
     expect(input.props.disabled).toBe(true)
-    const second = (input.props.onChange as () => Promise<void>)()
-    expect(api.mock.calls.filter(call => call[1]?.method === 'PUT')).toHaveLength(1)
+    const second = blur(input)
+    expect(puts(api, '/settings/eta-interval')).toHaveLength(1)
+    expect(JSON.parse(String(puts(api, '/settings/eta-interval')[0][1].body))).toEqual({ interval_minutes: 20, expected_interval_minutes: 10 })
     pending.resolve(json({ interval_minutes: 21 })); await first; await second; await settle()
-    expect(input.props.value).toBe(21)
+    expect(puts(api, '/settings/eta-interval')).toHaveLength(1)
+    expect(input.props.value).toBe('21')
     expect(input.props.disabled).toBe(false)
   })
 })
