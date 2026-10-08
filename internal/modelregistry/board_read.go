@@ -85,9 +85,15 @@ func loadBoardCatalog(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
 	return out, nil
 }
 func (c boardCatalog) candidates(id string, level int, review bool) []Profile {
+	return c.effortCandidates(id, "", level, review)
+}
+func (c boardCatalog) effortCandidates(id, effort string, level int, review bool) []Profile {
 	ps := c.profiles[id]
 	latest := ""
 	for _, p := range ps {
+		if !p.Enabled {
+			continue
+		}
 		_, _, v := ProfileLine(p)
 		if CompareModelVersions(v, latest) > 0 {
 			latest = v
@@ -108,8 +114,17 @@ func (c boardCatalog) candidates(id string, level int, review bool) []Profile {
 			levels = append(levels, *p.EffortLevel)
 		}
 	}
+	exact := false
+	for _, p := range out {
+		if effort != "" && p.Effort == effort {
+			exact = true
+		}
+	}
 	nearest := modelprefs.NearestEffort(level, levels)
 	out = slices.DeleteFunc(out, func(p Profile) bool {
+		if exact {
+			return p.Effort != effort
+		}
 		return !review && nearest >= 0 && (p.EffortLevel == nil || *p.EffortLevel != nearest)
 	})
 	harnessRank := map[string]int{"codex": 0, "claude": 1, "grok": 2, "pi": 3, "cursor": 4, "gemini": 5, "opencode": 6}
@@ -241,7 +256,7 @@ func (c boardCatalog) card(id string, d modelprefs.BoardDecision) boardCard {
 	if level == 0 {
 		level = modelprefs.ThinkingLevel(d.Thinking)
 	}
-	ps := c.candidates(id, level, strings.HasPrefix(d.Column, "review:"))
+	ps := c.effortCandidates(id, d.Effort, level, strings.HasPrefix(d.Column, "review:"))
 	if len(ps) == 0 {
 		ps = c.candidates(id, 4, false)
 	}

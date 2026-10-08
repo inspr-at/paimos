@@ -38,10 +38,12 @@ type boardWriteResult struct {
 	RunningOutside     []string                `json:"running_outside"`
 }
 type boardOrderWrite struct {
-	Rank     []string `json:"rank"`
-	Not      []string `json:"not"`
-	Revision *int64   `json:"revision"`
-	Thinking *string  `json:"thinking"`
+	Rank          []string `json:"rank"`
+	Not           []string `json:"not"`
+	Revision      *int64   `json:"revision"`
+	Thinking      *string  `json:"thinking"`
+	Effort        *string  `json:"effort"`
+	EffortPresent bool     `json:"-"`
 }
 
 func boardFor(r *http.Request) (string, error) {
@@ -126,7 +128,7 @@ func validateBoardLines(c boardCatalog, rank, not []string) error {
 	return nil
 }
 func putBoardOrder(ctx context.Context, tx pgx.Tx, p tenant.Principal, profile modelprefs.BoardProfile, o modelprefs.BoardOrder) error {
-	_, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,not_allowed,thinking,set_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(tenant_id,profile_id,column_key,situation) DO UPDATE SET rank=excluded.rank,not_allowed=excluded.not_allowed,thinking=excluded.thinking,set_by=excluded.set_by,set_at=now()`, p.TenantID, profile.ID, o.Column, o.Situation, o.Rank, o.Not, o.Thinking, p.ID)
+	_, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,not_allowed,thinking,effort,effort_level,set_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(tenant_id,profile_id,column_key,situation) DO UPDATE SET rank=excluded.rank,not_allowed=excluded.not_allowed,thinking=excluded.thinking,effort=excluded.effort,effort_level=excluded.effort_level,set_by=excluded.set_by,set_at=now()`, p.TenantID, profile.ID, o.Column, o.Situation, o.Rank, o.Not, o.Thinking, o.Effort, o.EffortLevel, p.ID)
 	return err
 }
 func boardResult(profile modelprefs.BoardProfile, person *string) boardWriteResult {
@@ -169,15 +171,22 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 		if thinking {
 			var body struct {
 				Thinking json.RawMessage `json:"thinking"`
+				Effort   json.RawMessage `json:"effort"`
 				Revision *int64          `json:"revision"`
 			}
 			err = decodeJSON(w, r, &body)
 			in.Revision = body.Revision
 			if err == nil {
-				if len(body.Thinking) == 0 {
+				if len(body.Thinking) == 0 && len(body.Effort) == 0 {
 					err = prefFail(422, "thinking_required")
-				} else if json.Unmarshal(body.Thinking, &in.Thinking) != nil {
+				} else if len(body.Thinking) > 0 && json.Unmarshal(body.Thinking, &in.Thinking) != nil {
 					err = prefFail(422, "invalid_thinking")
+				}
+				if len(body.Effort) > 0 {
+					in.EffortPresent = true
+					if json.Unmarshal(body.Effort, &in.Effort) != nil {
+						err = prefFail(422, "invalid_effort")
+					}
 				}
 			}
 		} else {
@@ -246,6 +255,7 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 			if before != nil && before.Thinking != nil {
 				o := *before
 				o.Rank, o.Not = nil, []string{}
+				o.Effort, o.EffortLevel = nil, nil
 				if err := putBoardOrder(ctx, tx, p, profile, o); err != nil {
 					return err
 				}
@@ -263,9 +273,22 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 					o = *before
 					o.Thinking = in.Thinking
 				}
+				if in.EffortPresent {
+					o.Effort = in.Effort
+					o.EffortLevel = nil
+					if err := setNativeEffort(s, c, level, &o); err != nil {
+						return err
+					}
+				} else {
+					o.Effort, o.EffortLevel = nil, nil
+				}
 			}
 			if !thinking && before != nil {
 				o.Thinking = before.Thinking
+				o.Effort, o.EffortLevel = before.Effort, before.EffortLevel
+				if err := carryNativeEffort(c, &o); err != nil {
+					return err
+				}
 			}
 			if err := putBoardOrder(ctx, tx, p, profile, o); err != nil {
 				return err

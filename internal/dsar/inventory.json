@@ -504,6 +504,8 @@
       "classification": "personal",
       "columns": {
         "column_key": "metadata",
+        "effort": "metadata",
+        "effort_level": "metadata",
         "not_allowed": "personal",
         "profile_id": "metadata",
         "rank": "personal",
@@ -556,6 +558,39 @@
         "tenant_column": "tenant_id"
       },
       "table": "model_profile_display"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "applied_at": "metadata",
+        "retire_at": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "model_profile_retirements"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "note": "review",
+        "registered_effort_level": "metadata",
+        "source": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "model_profiles"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "last_manual_run_at": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "model_refresh_settings"
     },
     {
       "classification": "metadata",

@@ -1,6 +1,18 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # aeon:owner internal/modelregistry
 paths:
+  /model-preferences/simple:
+    get:
+      operationId: getSimpleModelPreferences
+      description: 'Requires models.read. A bounded repeatable-read snapshot of first-build picks, overrides, locks, pending lines and qualified fallback evidence. Uses the canonical caller only. revision is the selected preference profile revision; rules_revision is the workspace rule write token. Stored expert orders and settings remain active.'
+      security: *auth
+      parameters:
+        - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
+      responses:
+        '200': {description: 'Simple preferences.', content: {application/json: {schema: {$ref: '#/components/schemas/ModelSimplePreferences'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
   /model-preferences:
     get:
       operationId: getModelPreferences
@@ -392,10 +404,70 @@ components:
     ModelColumnThinkingWrite:
       type: object
       additionalProperties: false
-      required: [thinking, revision]
+      required: [revision]
+      anyOf: [{required: [thinking]}, {required: [effort]}]
       properties:
         thinking: {type: [string, 'null'], enum: [lean, standard, deep, max, null]}
+        effort: {type: [string, 'null'], maxLength: 32, description: 'A registered effort of the effective first line. Null clears the native override. Reviews always run at xhigh.'}
         revision: {type: integer, format: int64, minimum: 0}
+    ModelSimplePick:
+      type: object
+      required: [line, effort]
+      properties:
+        line: {type: [string, 'null']}
+        effort: {type: [string, 'null']}
+        harness: {type: string}
+        model: {type: string}
+    ModelSimpleRow:
+      allOf:
+        - {$ref: '#/components/schemas/ModelSimplePick'}
+        - type: object
+          required: [column, mine, lock]
+          properties:
+            column: {type: string}
+            mine: {type: boolean}
+            lock: {type: [object, 'null'], required: [by, at, reason], properties: {by: {type: [string, 'null'], format: uuid}, at: {type: [string, 'null'], format: date-time}, reason: {type: string}}}
+    ModelSimplePreferences:
+      type: object
+      required: [all, exceptions, reviews, next, unavailable, new_lines, revision, rules_revision, person_id]
+      properties:
+        all: {$ref: '#/components/schemas/ModelSimpleRow'}
+        exceptions: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/ModelSimpleRow'}}
+        reviews: {type: object, required: [mode], properties: {mode: {type: string, const: cross_family}}}
+        next:
+          type: [object, 'null']
+          properties:
+            column: {type: string}
+            line: {type: [string, 'null']}
+            effort: {type: [string, 'null']}
+            ticket: {type: string}
+            reviewer: {$ref: '#/components/schemas/ModelSimplePick'}
+            trace: {type: array, items: {$ref: '#/components/schemas/ModelSimpleTrace'}}
+        unavailable:
+          type: array
+          maxItems: 257
+          items:
+            type: object
+            required: [column, line, runs_instead, effort, reason, ticket]
+            properties:
+              column: {type: string}
+              line: {type: string}
+              runs_instead: {type: [string, 'null']}
+              effort: {type: [string, 'null']}
+              reason: {type: string}
+              ticket: {type: [string, 'null']}
+        new_lines: {type: array, maxItems: 512, items: {type: object, required: [line, can_do], properties: {line: {type: string}, can_do: {type: array, items: {type: string}}}}}
+        revision: {type: integer, format: int64}
+        rules_revision: {type: integer, format: int64}
+        person_id: {type: [string, 'null'], format: uuid}
+    ModelSimpleTrace:
+      type: object
+      required: [line, stage, reason, selected]
+      properties:
+        line: {type: string}
+        stage: {type: string, enum: [column, default, role]}
+        reason: {type: string}
+        selected: {type: boolean}
     ModelPreferenceEffective:
       type: object
       required: [selector, profile, label, brand, follows_latest, pinned, today_version]

@@ -42,6 +42,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 // The retained legacy writer is exercised directly by compatibility tests;
 // the public module mounts only the read-only retirement response.
 func (m *Module) mount(mux *http.ServeMux, legacy http.HandlerFunc) {
+	mux.HandleFunc("GET /api/model-preferences/simple", boundedPreferenceHandler(m.simple))
+	mux.HandleFunc("PUT /api/models/lines/{harness}/{model}", boundedPreferenceHandler(m.editLine))
+	mux.HandleFunc("GET /api/models/lines/{harness}/{model}/usage", boundedPreferenceHandler(m.lineUsage))
 	mux.HandleFunc("GET /api/model-preferences/board", boundedPreferenceHandler(m.board))
 	mux.HandleFunc("PUT /api/model-preferences/orders/{column}/{situation}", boundedPreferenceHandler(m.writeBoardOrder))
 	mux.HandleFunc("DELETE /api/model-preferences/orders/{column}/{situation}", boundedPreferenceHandler(m.writeBoardOrder))

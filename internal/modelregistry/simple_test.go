@@ -1,0 +1,396 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package modelregistry
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+)
+
+// Risk: editing level 2 fails after inserting level 1, leaving a partial
+// replacement, or a successful edit loses ranked order/rules/history.
+func TestMinimalModelEditAtomicVersionAndReferences(t *testing.T) {
+	admin, _ := boardFixture(t)
+	ps := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	gemini := profileBySlug(ps, "gemini-gemini-2-5-pro-1024")
+	beforeCount := len(ps)
+	invalid := lineWrite{DisplayName: "Gemini revised", Note: "Careful reasoning", Route: "Google", Efforts: []string{"1024", "bogus"}}
+	boardDecode[map[string]any](t, boardCall(t, admin, "PUT", "/api/models/lines/gemini/gemini-2.5-pro", invalid, ""), 400)
+	after := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	if len(after) != beforeCount || profileBySlug(after, gemini.Slug).Retired || eventCount(t, admin, "model.line_edited") != 0 {
+		t.Fatal("failed edit changed the registry")
+	}
+	custom := decode[Profile](t, &admin, "POST", "/api/models", `{"slug":"manual-qwen","version":"1","harness":"pi","family":"unknown","model":"openrouter/qwen/qwen3-coder","effort":"off","tier":"standard","note":"Trial model"}`, 201)
+	oldLine := boardLineID(custom)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/first?for=default", map[string]any{"rank": []string{"openai:sol", oldLine, "anthropic:opus"}, "not": []string{}, "revision": 0}, ""), 200)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_rules(tenant_id,scope,column_key,line,lock,why,set_by) VALUES($1,'workspace','docs',$2,'top','Locked model',$3)`, admin.TenantID, oldLine, admin.ID)
+		return err
+	})
+	usage := boardDecode[lineUsageDocument](t, boardCall(t, admin, "GET", "/api/models/lines/pi/"+url.PathEscape(custom.Model)+"/usage", nil, ""), 200)
+	revision := usage.Revision
+	body := lineWrite{DisplayName: "Qwen Coder", Note: "Changed note", Route: "OpenRouter", Model: "openrouter/qwen/qwen4-coder", Efforts: []string{"off", "high"}, Revision: &revision}
+	edited := boardDecode[struct {
+		Profiles []Profile
+		Revision string
+	}](t, boardCall(t, admin, "PUT", "/api/models/lines/pi/"+url.PathEscape(custom.Model), body, ""), 200)
+	if len(edited.Profiles) != 2 || edited.Profiles[0].ID == custom.ID || edited.Revision == revision || edited.Profiles[0].Note != "Changed note" || edited.Profiles[0].Source != "manual" {
+		t.Fatal(edited)
+	}
+	newLine := boardLineID(edited.Profiles[0])
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		s, err := modelprefs.LoadBoard(t.Context(), tx, nil, "")
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(s.Orders[0].Rank, []string{"openai:sol", newLine, "anthropic:opus"}) || len(s.Rules) != 1 || s.Rules[0].Line != newLine || s.Rules[0].Why != "Locked model" {
+			t.Fatal("edit lost order or rule", s)
+		}
+		profiles, err := listProfiles(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		for _, p := range profiles {
+			if p.ID == custom.ID && (!p.Retired || p.Note != "Trial model") {
+				t.Fatal("old immutable pin changed or remained active", p)
+			}
+		}
+		return nil
+	})
+	if eventCount(t, admin, "model.line_edited") != 1 {
+		t.Fatal("missing atomic edit event")
+	}
+	boardDecode[map[string]any](t, boardCall(t, admin, "PUT", "/api/models/lines/pi/"+url.PathEscape(body.Model), body, ""), 409)
+}
+
+// Risk: callers can forge discovery source or overflow the admin-owned note.
+func TestMinimalModelSourceAndNoteOwnership(t *testing.T) {
+	admin, member := boardFixture(t)
+	payload := `{"slug":"notes","version":"1","harness":"codex","family":"openai","model":"gpt-6-sol","effort":"high","tier":"strong","note":"Useful for building"}`
+	p := decode[Profile](t, &admin, "POST", "/api/models", payload, 201)
+	if p.Source != "manual" || p.Note != "Useful for building" {
+		t.Fatal(p)
+	}
+	status, _ := call(t, &member, "POST", "/api/models", payload)
+	if status != 403 {
+		t.Fatal("member created model", status)
+	}
+	status, _ = call(t, &admin, "POST", "/api/models", strings.TrimSuffix(payload, "}")+`,"source":"auto"}`)
+	if status != 400 {
+		t.Fatal("source was writable", status)
+	}
+	status, _ = call(t, &admin, "POST", "/api/models", strings.Replace(payload, "Useful for building", strings.Repeat("x", 81), 1))
+	if status != 400 {
+		t.Fatal("oversized note", status)
+	}
+	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	if profileBySlug(profiles, "codex-6-1-sol-high").Source != "auto" {
+		t.Fatal("seed source")
+	}
+}
+
+// Risk: a scheduled retirement blocks early, never becomes effective on the
+// clock boundary, or emits the event again on each scheduler poll.
+func TestMinimalScheduledRetirementBoundaryAndUndo(t *testing.T) {
+	admin, _ := boardFixture(t)
+	ps := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	profile := profileBySlug(ps, "codex-luna-medium")
+	at := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
+	result := boardDecode[map[string]any](t, boardCall(t, admin, "POST", "/api/models/"+profile.ID+"/retire", map[string]any{"reason": "Removed in Settings › Models", "retire_at": at}, ""), 200)
+	if result["retired"] != false {
+		t.Fatal("scheduled pin immediately retired", result)
+	}
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		before, err := resolveRole(t.Context(), tx, resolveQuery{Role: "scout"}, at.Add(-time.Microsecond))
+		if err != nil {
+			return err
+		}
+		after, err := resolveRole(t.Context(), tx, resolveQuery{Role: "scout"}, at)
+		if err != nil {
+			return err
+		}
+		if before.Profile == nil || before.Profile.ID != profile.ID || after.Profile == nil || after.Profile.ID == profile.ID {
+			t.Fatal("incorrect retirement boundary", before, after)
+		}
+		pending, err := applyScheduledRetirements(t.Context(), tx, at)
+		if err != nil {
+			return err
+		}
+		if len(pending) != 1 {
+			t.Fatal(pending)
+		}
+		again, err := applyScheduledRetirements(t.Context(), tx, at.Add(time.Minute))
+		if err != nil {
+			return err
+		}
+		if len(again) != 0 {
+			t.Fatal("repeated normal retirement")
+		}
+		return flushCatalogChanges(t.Context(), tx, admin, pending)
+	})
+	if eventCount(t, admin, "model.profile_retired") != 1 {
+		t.Fatal("retirement event count")
+	}
+	boardDecode[map[string]any](t, boardCall(t, admin, "DELETE", "/api/models/"+profile.ID+"/retire", nil, ""), 200)
+	if eventCount(t, admin, "model.profile_restored") != 1 {
+		t.Fatal("undo event")
+	}
+}
+
+func minimalAccount(t *testing.T, p tenant.Principal, profile Profile) string {
+	t.Helper()
+	var id string
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var runner string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Minimal model runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,allowed_model_profile_ids) VALUES($1,$2,$3,'minimal',$4,'Minimal model',now(),true,'generation',$5,ARRAY[$6::uuid]) RETURNING id::text`, p.TenantID, profile.ID, profile.Harness, runner, p.ID, profile.ID).Scan(&id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','requests',1000,'unrestricted')`, p.TenantID, id); err != nil {
+			return err
+		}
+		schedule := capacity.DefaultSchedule()
+		schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
+		raw, _ := json.Marshal(schedule)
+		_, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, id, raw)
+		return err
+	})
+	return id
+}
+
+// Risk: preview mutates the saved order or shows a fallback that dispatch
+// would reject, and members learn other people's private picks.
+func TestMinimalRemovePreviewQualificationAndPrivacy(t *testing.T) {
+	admin, member := boardFixture(t)
+	ps := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	sol, opus := profileBySlug(ps, "codex-6-1-sol-high"), profileBySlug(ps, "claude-opus-high")
+	minimalAccount(t, admin, sol)
+	order := map[string]any{"rank": []string{"anthropic:opus", "openai:sol"}, "not": []string{}, "revision": 0}
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/first?for=default", order, ""), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/orders/docs/first", order, member.ID), 200)
+	preview := boardDecode[lineUsageDocument](t, boardCall(t, admin, "GET", "/api/models/lines/claude/"+opus.Model+"/usage", nil, ""), 200)
+	if len(preview.UsedBy) != 2 || preview.Incomplete || preview.Replacement.Line == nil || *preview.Replacement.Line != "openai:sol" {
+		t.Fatal(preview)
+	}
+	memberView := boardDecode[lineUsageDocument](t, boardCall(t, member, "GET", "/api/models/lines/claude/"+opus.Model+"/usage", nil, ""), 200)
+	if len(memberView.UsedBy) != 2 {
+		t.Fatal(memberView)
+	}
+	other := addPrincipal(t, admin.TenantID, "person", "Other", []string{"member"})
+	hidden := boardDecode[lineUsageDocument](t, boardCall(t, other, "GET", "/api/models/lines/claude/"+opus.Model+"/usage", nil, ""), 200)
+	if !hidden.Incomplete || len(hidden.UsedBy) != 1 {
+		t.Fatal("private usage leaked", hidden)
+	}
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		s, err := modelprefs.LoadBoard(t.Context(), tx, nil, "")
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(s.Orders[0].Rank, order["rank"].([]string)) {
+			t.Fatal("preview rewrote order")
+		}
+		return nil
+	})
+}
+
+// Risk: the simple view disagrees with rank[0], canonical person/revision,
+// native effort, locks or its visible inability to run the selected model.
+func TestMinimalSimpleReadPreservesFirstAndFallback(t *testing.T) {
+	admin, member := boardFixture(t)
+	ps := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	minimalAccount(t, admin, profileBySlug(ps, "codex-6-1-sol-high"))
+	order := map[string]any{"rank": []string{"anthropic:opus", "openai:sol"}, "not": []string{}, "revision": 0}
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/orders/other/first", order, member.ID), 200)
+	doc := boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple", nil, ""), 200)
+	if doc.PersonID == nil || *doc.PersonID != member.ID || doc.Revision != 1 || !doc.All.Mine || doc.All.Line == nil || *doc.All.Line != "anthropic:opus" || len(doc.Unavailable) != 1 || doc.Unavailable[0].RunsInstead == nil || *doc.Unavailable[0].RunsInstead != "openai:sol" || !strings.Contains(doc.Unavailable[0].Reason, "account") {
+		t.Fatal(doc)
+	}
+	defaultDoc := boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200)
+	if defaultDoc.All.Mine || defaultDoc.All.Line == nil || *defaultDoc.All.Line != "openai:sol" || defaultDoc.Revision != 0 {
+		t.Fatal(defaultDoc)
+	}
+}
+
+// Risk: fallback stops at a failed column/default or borrows the wrong
+// account. Every skip must explain the actual selected replacement.
+func TestMinimalFallbackColumnDefaultRoleAndSkipReasons(t *testing.T) {
+	admin, _ := boardFixture(t)
+	ps := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	sol := profileBySlug(ps, "codex-6-1-sol-high")
+	minimalAccount(t, admin, sol)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/first?for=default", map[string]any{"rank": []string{"xai:grok", "anthropic:opus"}, "not": []string{}, "revision": 0}, ""), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"anthropic:sonnet"}, "not": []string{}, "revision": 1}, ""), 200)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		now, err := dbNow(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		resolved, err := resolveBoardWork(t.Context(), tx, admin, WorkQuery{Role: "build", Column: "backend", Area: "backend", Situation: "first", WorkspaceOnly: true}, now, nil)
+		if err != nil {
+			return err
+		}
+		if resolved == nil || resolved.Profile == nil || resolved.Profile.ID != sol.ID {
+			t.Fatal("role fallback failed", resolved)
+		}
+		c, err := loadBoardCatalog(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		trace := simpleTraceFor(resolved, c)
+		reasons := map[string]string{}
+		for _, s := range trace {
+			reasons[s.Line] += s.Reason
+		}
+		if !strings.Contains(reasons["xai:grok"], "tools") || !strings.Contains(reasons["anthropic:opus"], "account") || !strings.Contains(reasons["anthropic:sonnet"], "default:") {
+			t.Fatal("skip reasons missing", trace)
+		}
+		return nil
+	})
+}
+
+// Risk: accepting an arbitrary new or retired line silently grants dispatch,
+// or the auto-accepted successor needs a manual account grant (AEON-1000).
+func TestMinimalAutoAcceptOnlyUsedSuccessors(t *testing.T) {
+	admin, _ := boardFixture(t)
+	ps := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	sol := profileBySlug(ps, "codex-6-1-sol-high")
+	account := minimalAccount(t, admin, sol)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"openai:sol"}, "not": []string{}, "revision": 0}, ""), 200)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		pin, _ := observedPin(Observation{Harness: "codex", Model: "gpt-6.2-sol", Effort: "high"})
+		accepted, err := acceptUsedSuccessor(t.Context(), tx, admin, pin)
+		if err != nil {
+			return err
+		}
+		if !accepted {
+			t.Fatal("used successor remained pending")
+		}
+		now, err := dbNow(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		resolved, err := resolveBoardWork(t.Context(), tx, admin, WorkQuery{Role: "build", Column: "other", Situation: "first", WorkspaceOnly: true}, now, nil)
+		if err != nil {
+			return err
+		}
+		if resolved.Profile == nil || resolved.Profile.Model != "gpt-6.2-sol" || !slices.Equal(resolved.Trace.QualifyingAccountIDs, []string{account}) {
+			t.Fatal("successor required a new account grant", resolved)
+		}
+		unused, _ := observedPin(Observation{Harness: "grok", Model: "grok-4.8", Effort: "high"})
+		accepted, err = acceptUsedSuccessor(t.Context(), tx, admin, unused)
+		if err != nil {
+			return err
+		}
+		if accepted {
+			t.Fatal("unused line auto accepted")
+		}
+		newLine, _ := observedPin(Observation{Harness: "codex", Model: "gpt-7-newline", Effort: "high"})
+		accepted, err = acceptUsedSuccessor(t.Context(), tx, admin, newLine)
+		if err != nil {
+			return err
+		}
+		if accepted {
+			t.Fatal("new line auto accepted")
+		}
+		return nil
+	})
+}
+
+// Risk: people remain interval-limited, concurrent checks reserve twice, or
+// 429 lacks actionable retry information. The clock never sleeps.
+func TestMinimalManualRefreshCooldownBypassesInterval(t *testing.T) {
+	admin, _ := boardFixture(t)
+	clock := time.Now().UTC().Truncate(time.Microsecond)
+	mod := &Module{pool: appPool, validationClock: func(context.Context, pgx.Tx) (time.Time, error) { return clock, nil }}
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET interval_minutes=1440,last_run_at=$1`, clock.Add(-time.Minute))
+		return err
+	})
+	result, err := mod.runRefresh(tenant.WithPrincipal(t.Context(), admin), admin, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.At.Equal(clock) {
+		t.Fatal(result)
+	}
+	_, err = mod.runRefresh(tenant.WithPrincipal(t.Context(), admin), admin, false)
+	var cooldown *refreshCooldown
+	if !errorsAsCooldown(err, &cooldown) || cooldown.RetryAfter != 300 {
+		t.Fatal("missing exact cooldown", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/models/refresh", nil)
+	request = request.WithContext(tenant.WithPrincipal(request.Context(), admin))
+	response := httptest.NewRecorder()
+	mod.refresh(response, request)
+	if response.Code != 429 || response.Header().Get("Retry-After") != "300" || !strings.Contains(response.Body.String(), `"retry_after":300`) {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	clock = clock.Add(5 * time.Minute)
+	if _, err := mod.runRefresh(tenant.WithPrincipal(t.Context(), admin), admin, false); err != nil {
+		t.Fatal("cooldown did not end at boundary", err)
+	}
+	clock = clock.Add(time.Minute)
+	scheduled, err := mod.runRefresh(tenant.WithPrincipal(t.Context(), admin), admin, true)
+	if err != nil || scheduled.Added != 0 || len(scheduled.Sources) != 0 {
+		t.Fatal("scheduler ignored interval", scheduled, err)
+	}
+}
+func errorsAsCooldown(err error, out **refreshCooldown) bool {
+	c, ok := err.(*refreshCooldown)
+	*out = c
+	return ok
+}
+
+// Risk: changing the pick loses the native name, maps an equidistant level
+// downward, or permits a native review effort below xhigh.
+func TestMinimalNativeEffortRetainedAndNearestTieUp(t *testing.T) {
+	admin, member := boardFixture(t)
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/orders/other/first", map[string]any{"rank": []string{"openai:sol"}, "not": []string{}, "revision": 0}, member.ID), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/orders/other/first/thinking", map[string]any{"effort": "medium", "revision": 1}, member.ID), 200)
+	doc := boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple", nil, ""), 200)
+	if doc.All.Effort == nil || *doc.All.Effort != "medium" {
+		t.Fatal(doc.All)
+	}
+	inRegistry(t, member, func(tx pgx.Tx) error {
+		s, err := modelprefs.LoadBoard(t.Context(), tx, &member.ID, "")
+		if err != nil {
+			return err
+		}
+		d := modelprefs.ResolveBoard(s, modelprefs.BoardQuery{Column: "backend"}, nil)
+		if d.Effort != "medium" || d.EffortLevel != 2 {
+			t.Fatal("column lost All work native effort", d)
+		}
+		return nil
+	})
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/orders/other/first", map[string]any{"rank": []string{"anthropic:sonnet"}, "not": []string{}, "revision": 2}, member.ID), 200)
+	doc = boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple", nil, ""), 200)
+	if doc.All.Effort == nil || *doc.All.Effort != "high" {
+		t.Fatal(doc.All)
+	}
+	boardError(t, boardCall(t, member, "PUT", "/api/model-preferences/orders/review:openai/first/thinking", map[string]any{"effort": "high", "revision": 3}, member.ID), 422, "review_requires_xhigh")
+	low, high := 1, 3
+	nearest := nearestProfile([]Profile{{Effort: "low", EffortLevel: &low}, {Effort: "high", EffortLevel: &high}}, "medium", ptrInt(2))
+	if nearest.Effort != "high" {
+		t.Fatal("tie mapped downward", nearest)
+	}
+	boardDecode[boardWriteResult](t, boardCall(t, member, "DELETE", "/api/model-preferences/orders/other/first?revision=3", nil, member.ID), 200)
+	doc = boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple", nil, ""), 200)
+	if doc.All.Mine {
+		t.Fatal("reset retained a native person row", doc.All)
+	}
+	_ = admin
+}
+func ptrInt(n int) *int { return &n }
