@@ -362,6 +362,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	deliveryMod := delivery.New(pool, reviewApp.Config, cfg.ReviewWebhookSecret, delivery.AppReader{App: reviewApp}, reviewMod.HandlePullChange)
 	go deliveryMod.Run(ctx)
 	go deliveryMod.RunAlerts(ctx)
+	go deliveryMod.RunFlow(ctx)
 	go deliveryMod.RunAudit(ctx)
 	api := &httpapi.Server{
 		Pool:                    pool,

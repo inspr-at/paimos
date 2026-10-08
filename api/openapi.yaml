@@ -7467,6 +7467,70 @@ paths:
       responses:
         '200': {description: 'Effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/flow:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectDeliveryFlow
+      description: 'Requires delivery.read on the project; an invisible project is absent (404). Returns the runs (releases and changes) active between from and to, the steps and incidents that touch that window, and each run''s progress, current step and ETA at the moment at. Defaults: to is now, from is 45 minutes earlier, at is now. The window is at most 31 days. At most 50 runs and 4000 steps; truncated reports a cut. ETAs come from the p50 and p90 of the same step_key over the last 30 days; with fewer than 3 finished runs per step the basis is none with the reason. Payloads carry timing facts only.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: at, in: query, required: false, schema: {type: string, format: date-time}, description: 'Moment for progress, the current step and the ETA; default now.'}
+        - {name: from, in: query, required: false, schema: {type: string, format: date-time}}
+        - {name: to, in: query, required: false, schema: {type: string, format: date-time}}
+      responses:
+        '200': {description: 'Delivery flow', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryFlow'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/flow/rollout:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: reportProjectDeliveryRollout
+      description: 'Requires delivery.manage. Records a release run from the coordinator''s aeon.rollout.v1 record: the cut, live and healthy times, the release steps a to l with gates, waits and repeats, incidents with their recovery steps, the next human gate and an optional OPS estimate. Other rollout fields are accepted and not stored. The record is authoritative: a repeated report converges on the same rows and corrects them; unchanged rows emit no event. Labels and summaries that look like a credential are refused. At most 200 steps and 20 incidents, 256 KiB.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryFlowRolloutInput'}}}}
+      responses:
+        '200': {description: 'Recorded release run', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryFlowRolloutResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/flow/runs/{itemId}:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: itemId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectDeliveryFlowRun
+      description: 'Requires delivery.read on the project. One whole run with every step and incident, for Replay and Compare; progress and the ETA are computed at the moment at (default now). A run of another project is absent (404).'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: at, in: query, required: false, schema: {type: string, format: date-time}}
+      responses:
+        '200': {description: 'Delivery flow run', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryFlowRun'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/flow/stream:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: streamProjectDeliveryFlow
+      description: 'Requires delivery.read on the project, re-checked on every 15-second heartbeat; a revoked reader is disconnected. Server-sent events delivery.step, delivery.item and delivery.incident after the event log commits them. Each frame has the event id and data with id, type, at, item_id and step_id or incident_id only, never step content; refetch the flow or the run. stream.ready names the resume cursor; stream.ping is the heartbeat. Last-Event-ID wins over after; after defaults to latest. A connection lasts at most 30 minutes; at most 64 streams per server process, excess gets 429 and Retry-After.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: Last-Event-ID, in: header, required: false, schema: {type: string, pattern: '^[0-9]{1,19}$'}}
+        - {name: after, in: query, required: false, schema: {type: string, default: latest, pattern: '^(latest|[0-9]{1,19})$'}}
+      responses:
+        '200':
+          description: 'Delivery flow hints as server-sent events.'
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/delivery/metrics:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -15444,6 +15508,200 @@ components:
         required_checks_total: {type: integer, minimum: 0, description: 'Configured required checks in the stored observation.'}
         link_source: {type: [string, 'null'], enum: [review_row, title_key, branch_key, null]}
         updated_at: {type: string, format: date-time}
+    DeliveryFlow:
+      type: object
+      additionalProperties: false
+      required: [project_id, now, at, from, to, items, steps, incidents, truncated]
+      properties:
+        project_id: {type: string, format: uuid}
+        now: {type: string, format: date-time}
+        at: {type: string, format: date-time, description: 'Moment for progress, the current step and the ETA.'}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/DeliveryFlowItem'}}
+        steps: {type: array, maxItems: 4000, description: 'Steps of the returned runs that touch the window, oldest first.', items: {$ref: '#/components/schemas/DeliveryFlowStep'}}
+        incidents: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/DeliveryFlowIncident'}}
+        truncated: {type: boolean, description: 'More runs, steps or incidents exist than returned.'}
+    DeliveryFlowActor:
+      type: object
+      additionalProperties: false
+      required: [type, principal_id, label, model]
+      properties:
+        type: {type: string, enum: [person, agent, ci, queue]}
+        principal_id: {type: [string, 'null'], format: uuid}
+        label: {type: string, maxLength: 80, description: 'Role on the page, for example Builder, Reviewer, LEAD, OPS or Checks.'}
+        model: {type: [string, 'null'], maxLength: 80}
+    DeliveryFlowIncident:
+      type: object
+      additionalProperties: false
+      required: [id, item_id, started_at, ended_at, severity, summary, recovery_step_ids]
+      properties:
+        id: {type: string, format: uuid}
+        item_id: {type: string, format: uuid}
+        started_at: {type: string, format: date-time}
+        ended_at: {type: [string, 'null'], format: date-time}
+        severity: {type: string, enum: [degraded, down]}
+        summary: {type: string, maxLength: 300}
+        recovery_step_ids: {type: array, maxItems: 50, items: {type: string, format: uuid}}
+    DeliveryFlowItem:
+      type: object
+      additionalProperties: false
+      required: [id, kind, ref, title, prs, started_at, ended_at, pct_done, current_step_id, eta, target, next_human_gate]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [release, change]}
+        ref: {type: string, description: 'Release label such as 126, or a ticket key such as AEON-991.'}
+        title: {type: string}
+        prs: {type: array, maxItems: 20, items: {type: integer, minimum: 1}}
+        started_at: {type: [string, 'null'], format: date-time}
+        ended_at: {type: [string, 'null'], format: date-time, description: 'Live and healthy for a release, merged for a change.'}
+        pct_done: {type: integer, minimum: 0, maximum: 100, description: 'Share of the critical path done at the moment: a to l for a release; build, review, ci and queue for a change.'}
+        current_step_id: {type: [string, 'null'], format: uuid}
+        eta:
+          type: object
+          additionalProperties: false
+          required: [p50_at, p90_at, basis, reason]
+          properties:
+            p50_at: {type: [string, 'null'], format: date-time}
+            p90_at: {type: [string, 'null'], format: date-time}
+            basis: {type: string, enum: [history, ops, none]}
+            reason: {type: [string, 'null'], description: 'Why there is no estimate when basis is none.'}
+        target:
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required: [minutes, from_step, source]
+              properties:
+                minutes: {type: integer, minimum: 1}
+                from_step: {type: string}
+                source: {type: string}
+        next_human_gate:
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required: [principal_id, what]
+              properties:
+                principal_id: {type: [string, 'null'], format: uuid}
+                what: {type: string, maxLength: 120}
+    DeliveryFlowRolloutInput:
+      type: object
+      additionalProperties: true
+      description: 'An aeon.rollout.v1 record with the flow extension. Fields not listed here are accepted and not stored.'
+      required: [schema, release]
+      properties:
+        schema: {type: string, enum: [aeon.rollout.v1]}
+        direction: {type: string, enum: [forward]}
+        outcome: {type: string, enum: [in_progress, live, success, failed]}
+        release: {type: string, pattern: '^[A-Za-z0-9._-]{1,32}$'}
+        version: {type: string}
+        title: {type: [string, 'null'], maxLength: 300}
+        prs: {type: array, maxItems: 20, items: {type: integer, minimum: 1}}
+        cut_at: {type: [string, 'null'], format: date-time}
+        live_at: {type: [string, 'null'], format: date-time}
+        healthy_at: {type: [string, 'null'], format: date-time, description: 'Ends the run when the outcome is live or success; live_at otherwise.'}
+        target:
+          type: [object, 'null']
+          additionalProperties: false
+          required: [minutes, from_step]
+          properties:
+            minutes: {type: integer, minimum: 1, maximum: 10080}
+            from_step: {type: string}
+        next_human_gate:
+          type: [object, 'null']
+          additionalProperties: false
+          required: [what]
+          properties:
+            principal_id: {type: [string, 'null'], format: uuid}
+            what: {type: string, maxLength: 120}
+        eta:
+          type: [object, 'null']
+          additionalProperties: false
+          required: [p50_at, p90_at]
+          properties:
+            p50_at: {type: string, format: date-time}
+            p90_at: {type: string, format: date-time}
+        steps:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, step, kind, actor, started_at]
+            properties:
+              key: {type: string, pattern: '^[A-Za-z0-9._:/+-]{1,120}$', description: 'Idempotency key of the step within this release.'}
+              step: {type: string, enum: [a, b, c, d, e, f, g, h, i, j, k, l, copy_gate, pin_gate, build, review, ci, queue, merge_round, hold, mitigation, switch, live_check]}
+              round: {type: [integer, 'null'], minimum: 1, maximum: 1000}
+              kind: {type: string, enum: [work, wait, rework, recovery]}
+              actor: {$ref: '#/components/schemas/DeliveryFlowActor'}
+              started_at: {type: string, format: date-time}
+              ended_at: {type: [string, 'null'], format: date-time}
+              outcome: {type: [string, 'null'], enum: [ok, changes, red, flaky, degraded, green, null]}
+              wait_reason: {type: [string, 'null'], enum: [reviewer, queue, dependency, human_gate, rerun, release_train, null], description: 'Only for kind wait.'}
+              waits_for: {type: [string, 'null'], format: uuid}
+              side: {type: boolean, default: false}
+        incidents:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, started_at, severity, summary]
+            properties:
+              key: {type: string, pattern: '^[A-Za-z0-9._:/+-]{1,120}$'}
+              started_at: {type: string, format: date-time}
+              ended_at: {type: [string, 'null'], format: date-time}
+              severity: {type: string, enum: [degraded, down]}
+              summary: {type: string, maxLength: 300}
+              recovery_steps: {type: array, maxItems: 50, description: 'Keys of steps in this record.', items: {type: string}}
+    DeliveryFlowRolloutResult:
+      type: object
+      additionalProperties: false
+      required: [item_id, steps, changed]
+      properties:
+        item_id: {type: string, format: uuid}
+        steps: {type: integer, minimum: 0}
+        changed: {type: integer, minimum: 0, description: 'Rows that changed; each emitted one live event.'}
+    DeliveryFlowRun:
+      type: object
+      additionalProperties: false
+      required: [project_id, now, at, item, steps, incidents, truncated]
+      properties:
+        project_id: {type: string, format: uuid}
+        now: {type: string, format: date-time}
+        at: {type: string, format: date-time}
+        item: {$ref: '#/components/schemas/DeliveryFlowItem'}
+        steps: {type: array, maxItems: 4000, items: {$ref: '#/components/schemas/DeliveryFlowStep'}}
+        incidents: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/DeliveryFlowIncident'}}
+        truncated: {type: boolean}
+    DeliveryFlowStep:
+      type: object
+      additionalProperties: false
+      required: [id, item_id, step_key, round, kind, actor, started_at, ended_at, outcome, wait_reason, waits_for, side, source, norm]
+      properties:
+        id: {type: string, format: uuid}
+        item_id: {type: string, format: uuid}
+        step_key: {type: string, enum: [a, b, c, d, e, f, g, h, i, j, k, l, copy_gate, pin_gate, build, review, ci, queue, merge_round, hold, mitigation, switch, live_check]}
+        round: {type: integer, minimum: 1}
+        kind: {type: string, enum: [work, wait, rework, recovery]}
+        actor: {$ref: '#/components/schemas/DeliveryFlowActor'}
+        started_at: {type: string, format: date-time}
+        ended_at: {type: [string, 'null'], format: date-time}
+        outcome: {type: [string, 'null'], enum: [ok, changes, red, flaky, degraded, green, null]}
+        wait_reason: {type: [string, 'null'], enum: [reviewer, queue, dependency, human_gate, rerun, release_train, null]}
+        waits_for: {type: [string, 'null'], format: uuid, description: 'A principal or a run this wait depends on.'}
+        side: {type: boolean, description: 'Runs alongside the critical path.'}
+        source: {type: string, enum: [github_app, paimos, ops_rollout]}
+        norm:
+          type: object
+          additionalProperties: false
+          required: [p50_min, p90_min, arion_min]
+          description: 'Usual duration of the same step_key over the last 30 days (null below 3 finished runs) and Arion''s target where one exists.'
+          properties:
+            p50_min: {type: [number, 'null']}
+            p90_min: {type: [number, 'null']}
+            arion_min: {type: [number, 'null']}
     DeliveryMetric:
       type: object
       additionalProperties: false
