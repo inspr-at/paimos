@@ -202,10 +202,10 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
 .page-head h1 { margin-top: 6px; }
 .summary { margin-top: 6px; font-size: 13.5px; color: var(--ink-2); }
 .layout { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 28px; align-items: start; }
-.section-nav { position: sticky; top: 16px; display: grid; gap: 2px; }
+.section-nav { position: sticky; top: 16px; display: grid; gap: 1px; }
 .theme-links { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 10px; font-size: 12px; }.theme-links a { color: var(--teal-ink); min-height: 28px; display: inline-flex; align-items: center; }
 @media (pointer: coarse) { .theme-links a { min-height: 44px; } }
-.section-link { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; height: 50px; padding: 7px 10px; border-radius: 12px; color: var(--ink); text-decoration: none; }
+.section-link { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; height: 46px; padding: 6px 10px; border-radius: 12px; color: var(--ink); text-decoration: none; }
 @media (hover: hover) { .section-link:hover { background: var(--row-hover); } }
 .section-link:focus-visible { box-shadow: var(--focus-ring); }
 /* The current section: a raised card, like the active place. */
@@ -220,7 +220,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
 /* Doctrine proposals wait (AEON-444): a small neutral dot. */
 .waiting-dot { justify-self: center; width: 7px; height: 7px; margin: 0 7px; border-radius: 50%; background: var(--ink-2); }
 .nav-col { align-self: stretch; min-width: 0; position: relative; }
-.nav-group { margin: 14px 10px 4px; font: 500 10px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+.nav-group { margin: 8px 10px 2px; font: 500 10px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
 .nav-group:first-child { margin-top: 0; }
 .nav-picker { display: none; }
 .body { min-width: 0; display: grid; gap: 14px; container: body / inline-size; }
