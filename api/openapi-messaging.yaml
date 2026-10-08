@@ -126,6 +126,7 @@ components:
     Message:
       type: object
       properties:
+        cancelled: {type: boolean, description: "Sender cancelled this session message before it was offered. Retained in inspection history; omit it from the conversation."}
         resend_of: {type: string, format: uuid, description: "Original same-sender session message for an explicit linked resend."}
         id: {type: string, format: uuid}
         sender_principal_id: {type: string, format: uuid}

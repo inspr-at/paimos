@@ -42,12 +42,14 @@ const capability = computed(() => chatCapability(s.value))
 const atPrompt = computed(() => capability.value === 'between' && awaitsInboxHook(s.value))
 const uncertain = ref<Set<string>>(new Set())
 const queuedIds = ref<Set<string>>(new Set())
-const queue = computed(() => messages.value.filter(message => message.sender_principal_id === me.value && !statuses.value[message.id]?.cancelled && isQueuedMessage({ ...message, queue_pending: message.queue_pending || queuedIds.value.has(message.id) }, statuses.value[message.id], working.value, atPrompt.value)))
+const queue = computed(() => messages.value.filter(message => message.sender_principal_id === me.value && !message.cancelled && !statuses.value[message.id]?.cancelled && isQueuedMessage({ ...message, queue_pending: message.queue_pending || queuedIds.value.has(message.id) }, statuses.value[message.id], working.value, atPrompt.value)))
 const threadMessages = computed(() => {
   const queued = new Set(queue.value.map(message => message.id))
-  return messages.value.filter(message => !queued.has(message.id) && !statuses.value[message.id]?.cancelled).sort((a, b) => {
-    const at = Date.parse(statuses.value[a.id]?.delivered_at || a.created_at || '')
-    const bt = Date.parse(statuses.value[b.id]?.delivered_at || b.created_at || '')
+  return messages.value.filter(message => !message.cancelled && !queued.has(message.id) && !statuses.value[message.id]?.cancelled).sort((a, b) => {
+    // Insert a live queue item when delivery is evidenced. Historical receipt
+    // reads must not reorder already loaded posts or move a reader's anchor.
+    const at = Date.parse((queuedIds.value.has(a.id) && statuses.value[a.id]?.delivered_at) || a.created_at || '')
+    const bt = Date.parse((queuedIds.value.has(b.id) && statuses.value[b.id]?.delivered_at) || b.created_at || '')
     return Number.isFinite(at) && Number.isFinite(bt) && at !== bt ? at - bt : a.sent_event_id - b.sent_event_id
   })
 })
@@ -261,7 +263,7 @@ const canScrollUp = () => (scroller.value?.scrollTop ?? 0) > 0
 // Input runs before the browser queues scroll. Remember the reader so a marker
 // resolved in that gap cannot reclaim the position. Clear the pinned bottom
 // only for an upward gesture that can scroll, or for a real scroll while that
-// marker is still pending. A tap or click never unpins.
+// marker is still pending. A tap or click after placement never unpins.
 function claimReader() {
   if (!props.active || !entered) return false
   userMoved = true
@@ -274,12 +276,13 @@ function onWheel(event: WheelEvent) {
   if ((event.deltaY < 0 && canScrollUp()) || pending) stick = false
 }
 function onPointerDown(event: PointerEvent) {
-  if ((event.target as HTMLElement).closest('.code-fold')) stick = false
+  if (markerPending() || (event.target as HTMLElement).closest('.code-fold')) stick = false
   claimReader()
 }
 function onTouchStart(event: TouchEvent) {
   const point = event.touches?.[0] ?? event.changedTouches?.[0]
   touchY = point?.clientY
+  if (markerPending()) stick = false
   claimReader()
 }
 function onTouchMove(event: TouchEvent) {

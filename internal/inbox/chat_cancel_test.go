@@ -32,7 +32,14 @@ func TestSessionChatCancelAndLinkedResend(t *testing.T) {
 			t.Fatalf("cancel %d %s", status, body)
 		}
 	}
-	status, body := do(t, srv, w.agent.ID, "GET", "/api/inbox/messages?wait_ms=0&exact_session=true&session="+session, "", nil)
+	// Inspection keeps the original and exposes cancellation to every permitted
+	// reader, so an already loaded participant view can remove the queue row.
+	status, body := do(t, srv, w.recipient.ID, "GET", "/api/projects/"+project+"/messages?session="+session, "", nil)
+	history := mustJSON[compatPage](t, body)
+	if status != 200 || len(history.Items) != 1 || history.Items[0].ID != original.ID || !history.Items[0].Cancelled {
+		t.Fatalf("cancelled history metadata %d %s", status, body)
+	}
+	status, body = do(t, srv, w.agent.ID, "GET", "/api/inbox/messages?wait_ms=0&exact_session=true&session="+session, "", nil)
 	if status != 200 || len(mustJSON[Page](t, body).Items) != 0 {
 		t.Fatalf("cancelled message offered %d %s", status, body)
 	}
