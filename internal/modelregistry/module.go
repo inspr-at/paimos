@@ -36,6 +36,26 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 
 // Mount registers model registry routes.
 func (m *Module) Mount(mux *http.ServeMux) {
+	m.mount(mux, m.legacyPreferencesReadOnly)
+}
+
+// The retained legacy writer is exercised directly by compatibility tests;
+// the public module mounts only the read-only retirement response.
+func (m *Module) mount(mux *http.ServeMux, legacy http.HandlerFunc) {
+	mux.HandleFunc("GET /api/model-preferences/board", boundedPreferenceHandler(m.board))
+	mux.HandleFunc("PUT /api/model-preferences/orders/{column}/{situation}", boundedPreferenceHandler(m.writeBoardOrder))
+	mux.HandleFunc("DELETE /api/model-preferences/orders/{column}/{situation}", boundedPreferenceHandler(m.writeBoardOrder))
+	mux.HandleFunc("PUT /api/model-preferences/orders/{column}/{situation}/thinking", boundedPreferenceHandler(m.writeBoardOrder))
+	mux.HandleFunc("PUT /api/model-preferences/profile", boundedPreferenceHandler(m.writeBoardProfile))
+	mux.HandleFunc("POST /api/model-preferences/tray/{line}/dismiss", boundedPreferenceHandler(m.dismissBoardLine))
+	mux.HandleFunc("GET /api/model-preferences/situations", boundedPreferenceHandler(m.situationLimits))
+	mux.HandleFunc("PUT /api/model-preferences/situations", boundedPreferenceHandler(m.writeSituationLimits))
+	mux.HandleFunc("GET /api/model-preferences/evidence", boundedPreferenceHandler(m.boardEvidence))
+	mux.HandleFunc("GET /api/model-preferences/coverage", boundedPreferenceHandler(m.boardCoverage))
+	mux.HandleFunc("GET /api/model-rules", boundedPreferenceHandler(m.modelRules))
+	mux.HandleFunc("PUT /api/model-rules/{scope}/{column}", boundedPreferenceHandler(m.writeModelRules))
+	mux.HandleFunc("PUT /api/work-kinds/order", boundedPreferenceHandler(m.orderWorkKinds))
+
 	mux.HandleFunc("GET /api/settings/lead-policy", boundedPreferenceHandler(m.leadSettings))
 	mux.HandleFunc("PUT /api/settings/lead-policy", boundedPreferenceHandler(m.writeLeadSettings))
 	mux.HandleFunc("DELETE /api/settings/lead-policy", boundedPreferenceHandler(m.writeLeadSettings))
@@ -43,10 +63,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/projects/{projectId}/lead-settings", boundedPreferenceHandler(m.writeLeadSettings))
 	mux.HandleFunc("DELETE /api/projects/{projectId}/lead-settings", boundedPreferenceHandler(m.writeLeadSettings))
 	mux.HandleFunc("GET /api/model-preferences", boundedPreferenceHandler(m.preferences))
-	mux.HandleFunc("PUT /api/model-preferences/levels/{level}", boundedPreferenceHandler(m.writePreferences))
-	mux.HandleFunc("DELETE /api/model-preferences/levels/{level}", boundedPreferenceHandler(m.writePreferences))
-	mux.HandleFunc("PUT /api/model-preferences/levels/{level}/rows/{kindId}", boundedPreferenceHandler(m.writePreferences))
-	mux.HandleFunc("DELETE /api/model-preferences/levels/{level}/rows/{kindId}", boundedPreferenceHandler(m.writePreferences))
+	mux.HandleFunc("PUT /api/model-preferences/levels/{level}", boundedPreferenceHandler(legacy))
+	mux.HandleFunc("DELETE /api/model-preferences/levels/{level}", boundedPreferenceHandler(legacy))
+	mux.HandleFunc("PUT /api/model-preferences/levels/{level}/rows/{kindId}", boundedPreferenceHandler(legacy))
+	mux.HandleFunc("DELETE /api/model-preferences/levels/{level}/rows/{kindId}", boundedPreferenceHandler(legacy))
 	mux.HandleFunc("GET /api/work-kinds", boundedPreferenceHandler(m.listWorkKinds))
 	mux.HandleFunc("POST /api/work-kinds", boundedPreferenceHandler(m.writeWorkKind))
 	mux.HandleFunc("PATCH /api/work-kinds/{kindId}", boundedPreferenceHandler(m.writeWorkKind))
@@ -184,7 +204,7 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 	}
 	// project_id predates placement resolution: it adds residency evidence to
 	// the CLI ladder without changing review ordering or account requirements.
-	for _, name := range []string{"ticket", "area", "complexity", "person_id"} {
+	for _, name := range []string{"ticket", "area", "complexity", "person_id", "situation", "fix_round", "estimate_hours", "concept", "previous_family"} {
 		if r.URL.Query().Has(name) {
 			boundedPreferenceHandler(m.resolvePreferences)(w, r)
 			return
@@ -256,6 +276,7 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+
 		out.Resolution, err = resolveRole(r.Context(), tx, q, now)
 		if err != nil {
 			return err

@@ -21,7 +21,8 @@ import (
 // Per-person UI preferences: GET and PUT /api/preferences/{key}. A value is a
 // small JSON object (at most maxPreferenceBytes) that belongs to the calling
 // principal only; agents.working follows the person's canonical identity and
-// linked aliases. Preferences are not domain changes, so no event is appended.
+// linked aliases. Plan saves append a value-free notification after all writes;
+// ordinary UI preferences remain outside the domain event log.
 // A key that was never written reads as
 // {"key": ..., "value": null} so first use needs no special case.
 const maxPreferenceBytes = 16 << 10
@@ -180,6 +181,11 @@ func (m *Module) putPreference(w http.ResponseWriter, r *http.Request) {
 				p.TenantID, owner, key, string(trimmed), at)
 		}
 		out.Value, out.UpdatedAt = value, &at
+		if err == nil && key == agentplan.PreferenceKey {
+			// Last: the event counter follows all preference/alias row writes.
+			err = m.eventSink.Append(r.Context(), tx, p.ID, "agents_plan.changed", nil,
+				map[string]any{"principal_id": owner, "updated_at": at})
+		}
 		return err
 	})
 	if errors.Is(err, errAgentsPlanChanged) {

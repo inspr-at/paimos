@@ -180,16 +180,17 @@ func TestWorkKindLifecyclePaginationAndTenantIsolation(t *testing.T) {
 	if eventCount(t, admin, "work_kind.restored") != 1 {
 		t.Fatal("restore did not record its own event")
 	}
-	for _, method := range []string{"DELETE", "PATCH", "POST"} {
+	for _, method := range []string{"DELETE", "POST"} {
 		path := "/api/work-kinds/" + kindID(t, doc, "security")
 		body := ""
-		if method == "PATCH" {
-			body = `{"label":"Renamed"}`
-		}
 		if method == "POST" {
 			path += "/restore"
 		}
 		expectPrefError(t, admin, method, path, body, 422, "system_kind")
+	}
+	renamed := decode[workKind](t, &admin, "PATCH", "/api/work-kinds/"+kindID(t, doc, "security"), `{"label":"Security checks"}`, 200)
+	if renamed.Slug != "security" || renamed.System == nil || renamed.Label != "Security checks" {
+		t.Fatal("system identity changed", renamed)
 	}
 	expectPrefError(t, other, "PATCH", "/api/work-kinds/"+first.ID, `{"hint":"foreign"}`, 404, "not found")
 	page := decode[workKindPage](t, &admin, "GET", "/api/work-kinds?limit=1", "", 200)
@@ -339,7 +340,7 @@ func TestPreferenceMutationRechecksRevokedGrant(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
 	mux := http.NewServeMux()
-	New(appPool).Mount(mux)
+	(&Module{pool: appPool}).mount(mux, (&Module{pool: appPool}).writePreferences)
 	go func() {
 		defer close(done)
 		if err := authz.Require(authz.BindPool(request.Context(), appPool), "model_prefs.manage", authz.Scope{}); err != nil {
