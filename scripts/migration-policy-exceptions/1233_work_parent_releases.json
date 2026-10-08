@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1233_work_parent_releases.sql",
+      "sha256": "2f844411751cb98a95579b79f4dcd18c392f185e00a3c1b3eda69e4c8f6d86fe",
+      "ticket": "AEON-653",
+      "reason": "Additive parent placement metadata, FORCE tenant/project RLS, bounded work-edge scope and ordinary-create inheritance. The classifier conservatively flags replacement of the existing release-note capture helper to admit work leaves; all already-frozen snapshots remain immutable and unchanged. Exact bytes require coordinator consolidated review and whole-chain previous-binary/backup gates before merge or deployment; this worker grants no acceptance or release authority."
+    }
+  ]
+}

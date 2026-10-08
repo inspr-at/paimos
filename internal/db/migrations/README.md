@@ -62,7 +62,7 @@ rejects missing, expired, future-dated or superseded evidence. The additive tabl
 does not change existing account rows or grant any account residency by default.
 
 Migration 1104's tenant-loop seed and replacement area-schema helper require an
-exact-byte exception in `scripts/migration-policy-exceptions.json`. The new
+exact-byte exception in `scripts/migration-policy-exceptions/`. The new
 slug pattern includes every previous area, and current Go area validation stays
 unchanged. Coordinator review and previous-binary compatibility CI remain
 required before merge/release. Before rolling back below this fence, set all
@@ -145,13 +145,42 @@ domain types, `MATCH FULL`, referential-action suffixes and any other unsafe
 ALTER action.
 
 Merged but unreleased contract steps must not be disguised as expansion or
-added to historical grandfathering. `scripts/migration-policy-exceptions.json`
-is a separate, explicit review artifact naming each file, its SHA-256, owning
-ticket and rollout reason. The guard prints every exception, rejects malformed
+added to historical grandfathering. `scripts/migration-policy-exceptions/`
+contains one `NNNN_name.json` review artifact per migration, naming its exact SQL
+filename, SHA-256, owning ticket and rollout reason. Each file uses the existing
+`aeon.migration-policy-exceptions.v1` schema with exactly one `exceptions` entry.
+The checker discovers and sorts these files, then assembles the v1 manifest in
+memory; no combined ledger or generated index is committed. The guard prints
+every exception, rejects malformed
 or duplicate entries and changed/removed files, and retains number uniqueness
 and published/baseline immutability checks. An exception does not make its SQL
 expand-safe and does not skip runtime compatibility. Coordinator review of
 each exception is required before merge/release; workers only measure draft CI.
+
+Migration-specific checker tests live in
+`scripts/check-migrations-cases/NNNN_name.mjs`, matching the SQL filename. The
+existing `node --test scripts/check-migrations.test.mjs` entry point discovers
+and imports every case module, so CI commands stay unchanged. Add new checks to
+that migration's module rather than extending a central case list. A case file
+without its SQL migration, a mismatched exception filename, a duplicate record,
+malformed input or missing directory fails closed. The generic classifier,
+release-evidence and immutability tests remain in the entry point.
+
+AEON-985's conversion can be rechecked against its legacy commit:
+
+```sh
+node scripts/check-migrations-proof.mjs --base-ref 79348b98ca1e10e861784fcfd8e3360e1585f8df
+```
+
+This conversion-only oracle requires the base Git objects and fails if they are
+missing. It compares every assembled exception field, all 37 original test
+names and assertion bodies (normalizing only relocated paths, the loader call
+and the two file lists), and the unchanged policy decision function. Do not run
+it as a permanent gate for later migrations: new records and test cases are
+expected to change these sets. The directory regression tests and existing
+migration guard remain the ongoing checks. Reverting AEON-985 restores the
+ledger and tests together; there is no database migration or dependent runtime
+schema change.
 
 The sole initial exception, AEON-397's `1054_confirmed_quota_pools.sql`, replaces
 the reservation guard immediately. Existing accounts start unconfirmed, so
@@ -520,7 +549,7 @@ under the same target and referenced-node visibility checks. This lets another
 person's leaf Undo refresh aggregates when the parent status is unchanged.
 
 The exact-byte policy records for 1225 and 1230 pin their owning tickets and
-source commits in `scripts/migration-policy-exceptions.json`. They expose the
+source commits in `scripts/migration-policy-exceptions/`. They expose the
 non-allowlisted function bodies, helper replacements and event-policy widening
 for the coordinator's consolidated review; they are not evidence that byte
 approval or previous-binary compatibility has passed. The owner-accepted
