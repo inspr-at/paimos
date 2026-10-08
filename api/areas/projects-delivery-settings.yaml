@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/delivery
+paths:
+  /projects/{projectId}/delivery-settings:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectDeliverySettings
+      description: 'Reads effective settings with project overrides over tenant defaults. Requires delivery.read.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putProjectDeliverySettings
+      description: 'Sets required checks and deadline durations in minutes. Requires delivery.manage; empty project settings inherit tenant defaults. Does not change GitHub behaviour.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+      responses:
+        '200': {description: 'Effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+components:

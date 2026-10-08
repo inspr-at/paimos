@@ -1,0 +1,355 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/auth
+paths:
+  /agent-keys:
+    get:
+      operationId: listAgentKeys
+      summary: List agent keys for the caller's tenant
+      security:
+        - session: []
+        - agentKey: []
+      responses:
+        "200":
+          description: Keys, without secrets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentKey"
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: keys.manage required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createAgentKey
+      summary: Create or rotate an agent key and return its secret once
+      description: Pass principal_id to mint a key for an existing agent. name alone still finds or creates an agent, for older clients. For confirmed manual rotation, pass rotate_key_id and optional expires_at; the server copies the old key's agent, name and scopes unless rotation_scopes explicitly supplies a replacement scope set. It creates the replacement and revokes the old key in one tenant transaction with audit events. Rotation may replace an expired key but never a revoked key. No automatic rotation occurs. Scopes are stored in dot notation; colon input is normalized. A key never receives a permission the creator does not hold, and never a permission that is not agent_grantable. The agent's current role ceiling and the actor's grant rules apply to rotation too. Requires a person with keys.manage. Scope codes in the dialogs select a proposed set locally and grant nothing until the person confirms.
+      security:
+        - session: []
+        - agentKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                rotate_key_id:
+                  type: string
+                  format: uuid
+                  description: Key to replace after user confirmation. Mutually exclusive with name, principal_id and scopes. The old key stops working when the replacement is created.
+                rotation_scopes:
+                  type: [array, "null"]
+                  maxItems: 256
+                  items: {type: string}
+                  description: Optional explicitly selected scopes for the replacement. Requires rotate_key_id. Omitted or null preserves the old scopes; an empty array grants no access. Every rotation rechecks the actor's live permissions and the agent's existing role ceiling, including preserved scopes. For shared roles, that ceiling combines workspace-role permissions with project-grantable and self-service permissions from the agent's project roles, restricted to agent_grantable permissions. Generated private workspace roles (non-builtin agent_<principal hex> roles) additionally cap rotation at their configured workspace permissions; project grants cannot restore scopes removed from that role. The coordinator rules.read exception remains derived from live project access. Project permissions remain confined to the agent's bound projects on requests. Rotation never creates or changes roles, role permissions or bindings, and never adds implicit permissions.
+                name:
+                  type: string
+                  description: Agent name when principal_id is omitted; otherwise the key's label
+                principal_id:
+                  type: string
+                  format: uuid
+                  description: Existing agent. Takes precedence over creating an agent by name.
+                scopes:
+                  type: array
+                  items:
+                    type: string
+                expires_at:
+                  type: [string, "null"]
+                  format: date-time
+                  description: Future expiry for the new key; omitted or null means never. The UI defaults to 90 days and offers 30, 90, 365 days or never. Rotation uses this new expiry, not the old date.
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        "201":
+          description: Key created. token is shown only in this response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentKeyCreated"
+        "400":
+          description: Invalid name, scopes or expiry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: keys.manage required, or the scopes exceed the creator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Agent or rotation key not found in this tenant
+        "409":
+          description: Rotation key was already revoked or rotated, or the agent is deactivated (reactivate it first)
+  /agent-keys/{id}:
+    delete:
+      operationId: revokeAgentKey
+      summary: Revoke an agent key
+      security:
+        - session: []
+        - agentKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        "204":
+          description: Revoked
+        "400":
+          description: id is not a uuid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: keys.manage required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: No such key in this tenant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /agent-keys/{id}/adopt:
+    post:
+      operationId: adoptAgentKey
+      summary: Make the current person the owner of a creatorless key
+      description: Requires a person session and keys.manage in the same tenant. Only creatorless keys can be adopted. Audited; no rotation or secret change. Existing ownership cannot be taken over.
+      security: [{session: []}]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Adopted key metadata, without secret material
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentKey'}
+        '400': {description: Invalid key id}
+        '401': {description: Authentication required}
+        '403': {description: Person session and keys.manage required}
+        '404': {description: Key not found in this tenant}
+        '409': {description: Key already has an owner or is inactive}
+  /agent-keys/{id}/owner-workstation:
+    put:
+      operationId: setOwnerWorkstationKey
+      summary: Mark or unmark the owner's workstation key
+      description: >-
+        Workspace Owner person session only; keys cannot mark or unmark any key.
+        Marking requires the key's active agent to be the principal of the connected,
+        redeemed computer with a pinned P-256 Secure Enclave confirmation key.
+        One unrevoked marked key per tenant (and therefore per computer).
+        Marking grants no role and changes no scopes; use the scope endpoint to grant
+        governance permissions within the agent's role and original creator ceiling.
+        Unmarking removes governance scopes and invalidates outstanding challenges.
+        Ownership transfer and customer-portal permissions remain unavailable to keys;
+        a marked agent cannot decide its own approval requests.
+      security: [{session: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [owner_workstation]
+              properties:
+                owner_workstation: {type: boolean}
+                workstation_computer_id: {type: string, format: uuid, description: Required when marking; omitted when unmarking.}
+      responses:
+        '200':
+          description: Updated key metadata; no secret
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentKey'}
+        '400': {description: Invalid request}
+        '403': {description: Owner person session required or computer binding invalid}
+        '404': {description: Key not in this tenant}
+        '409': {description: Key inactive or another marked key exists}
+  /agent-keys/{id}/scopes:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getAgentKeyScopes
+      summary: Load a key and the scopes a person may grant it
+      description: Requires a person with keys.manage. The grantable set intersects agent-grantable permissions, the agent's roles, the editor's permissions and the original key creator's live ceiling. Returns the workspace agent_role and role_grantable_scopes that a person with roles.manage may add to its custom role. Automatically prunes unknown stored scopes with an audit entry. No role is expanded and no secret is returned.
+      security: [{session: []}]
+      responses:
+        '200':
+          description: Key metadata and current scope ceiling
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key, grantable_scopes]
+                properties:
+                  key: {$ref: '#/components/schemas/AgentKey'}
+                  grantable_scopes: {type: array, items: {type: string}}
+                  agent_role:
+                    oneOf:
+                      - {$ref: '#/components/schemas/AuthzRole'}
+                      - {type: 'null'}
+                  role_grantable_scopes: {type: array, items: {type: string}}
+        '401': {description: Not signed in}
+        '403': {description: Person with keys.manage required}
+        '404': {description: Key not found in this tenant}
+        '409': {description: Key is revoked or expired}
+    patch:
+      operationId: changeAgentKeyScopes
+      summary: Edit scopes and expiry without rotating the key
+      description: Requires a person with keys.manage. Applies add/remove and optional expires_at atomically to the latest key; overlapping deltas are invalid. Omitted expires_at preserves the current expiry, null means Never, and a timestamp must be in the future. At least one of add, remove or expires_at is required. Revoked or expired keys cannot be edited. An optional role_extension requires roles.manage, must name the agent's current custom workspace role, and may add only agent-grantable permissions also present in add and held by both editor and original creator. Built-in roles cannot be expanded. A shared role affects all its bindings, while other keys retain their scopes. The resulting key set must fit the live agent role, editor permissions and original creator ceiling, including expiry-only changes. Unknown stored scopes are pruned automatically. Empty scopes grant nothing. Colon notation is normalized. The same key takes effect on its next request. Records one agent_key.scopes_changed audit entry with key before/after (including expiry), any role before/after, and pruned_scopes in the same transaction; no-op requests create no audit event. No secret is returned or changed.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              anyOf:
+                - {required: [add]}
+                - {required: [remove]}
+                - {required: [expires_at]}
+              properties:
+                add: {type: array, maxItems: 256, items: {type: string}}
+                remove: {type: array, maxItems: 256, items: {type: string}}
+                expires_at: {type: [string, 'null'], format: date-time, description: 'Omit to preserve expiry; null means Never; a timestamp must be in the future.'}
+                role_extension:
+                  type: object
+                  additionalProperties: false
+                  required: [role_id, add]
+                  properties:
+                    role_id: {type: string, format: uuid}
+                    add: {type: array, minItems: 1, maxItems: 256, items: {type: string}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200':
+          description: Updated key metadata without a secret
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentKey'}
+        '400': {description: Invalid scopes or expiry}
+        '401': {description: Not signed in}
+        '403': {description: Person with keys.manage required or resulting scopes exceed a ceiling}
+        '404': {description: Key not found in this tenant}
+        '409': {description: Key is revoked or expired}
+  /agent-keys/{id}/trim-proposals:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: proposeAgentKeyTrim
+      summary: Propose a scope reduction without changing the key
+      description: >-
+        Requires approvals.request; agents may propose. The expected scope set must
+        match the live set. Candidates must be a strict subset. Every dropped scope
+        needs evidence and a plain-language risk. Recent use is checked under the
+        key usage fence; a one-minute conservative margin covers debounce. No usage
+        record means unknown, never proof of non-use. OPS confirmation is a process
+        prerequisite for ops proposals. Exact request_id replay is idempotent.
+        No key credential, prefix or credential hash is returned or audited.
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, expected_scopes, candidate_scopes, evidence, expires_at]
+              properties:
+                request_id: {type: string, format: uuid}
+                expected_scopes: {type: array, maxItems: 256, items: {type: string, maxLength: 128}}
+                candidate_scopes: {type: array, maxItems: 256, items: {type: string, maxLength: 128}}
+                evidence: {$ref: '#/components/schemas/KeyTrimEvidence'}
+                expires_at: {type: string, format: date-time, description: Future timestamp within seven days}
+      responses:
+        '201':
+          description: Proposal recorded; scopes unchanged (also exact replay)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KeyTrimProposal'}
+        '400': {description: Invalid or oversized input}
+        '403': {description: Permission denied}
+        '404': {description: Key not found in this tenant}
+        '409': {description: 'Live scopes changed, key inactive, recent scope use, or conflicting replay'}
+components:
+  schemas:
+    AgentKey:
+      type: object
+      required: [id, principal_id, name, prefix, scopes, created_at]
+      properties:
+        created_by_principal_id: {type: [string, 'null'], format: uuid, description: Person owner; null for legacy creatorless keys}
+        owner_workstation: {type: boolean}
+        workstation_computer_id: {type: [string, 'null'], format: uuid}
+        id:
+          type: string
+          format: uuid
+        principal_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: ["string", "null"]
+          format: date-time
+        last_used_at:
+          type: ["string", "null"]
+          format: date-time
+        revoked_at:
+          type: ["string", "null"]
+          format: date-time
+    AgentKeyCreated:
+      allOf:
+        - {$ref: "#/components/schemas/AgentKey"}
+        - type: object
+          required: [token]
+          properties:
+            token:
+              type: string
+              description: Returned once. Format aeon_<prefix>_<secret>.

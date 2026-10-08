@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { main, sortOpenAPI } from './openapi-sort.mjs'
+import '../api/generate.test.mjs'
+import { generateOpenAPI } from '../api/generate.mjs'
 
 const fixture = `openapi: 3.1.0
 paths:
@@ -123,7 +125,7 @@ test('check fails on unsorted additions without writing; write fixes it and is i
 })
 
 test('canonical contract passes the executable lint and stays byte-identical after another sort', () => {
-  const contract = readFileSync(new URL('../api/openapi.yaml', import.meta.url), 'utf8')
+  const contract = generateOpenAPI()
   assert.equal(sortOpenAPI(contract), contract)
   const result = spawnSync(process.execPath, [new URL('./openapi-sort.mjs', import.meta.url).pathname, '--check'], { encoding: 'utf8' })
   assert.equal(result.status, 0, result.stderr + result.stdout)
@@ -350,7 +352,7 @@ function reverseSection(text, header, depth) {
 }
 
 test('canonical contract: every path and component entry is reachable after reversal', () => {
-  const contract = readFileSync(new URL('../api/openapi.yaml', import.meta.url), 'utf8')
+  const contract = generateOpenAPI()
   assert.ok(contract.split('\n').some(line => /^\s*- \{\$ref: ['"]/.test(line)), 'contract has flow sequence items')
   let reversed = reverseSection(contract, 'paths:', 2)
   for (const section of ['schemas', 'parameters', 'requestBodies', 'responses']) reversed = reverseSection(reversed, `  ${section}:`, 4)

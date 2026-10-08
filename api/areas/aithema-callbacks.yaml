@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/aithema/host
+paths:
+  /aithema/callbacks/{callbackId}:
+    get:
+      operationId: aithemaCallbackStatus
+      summary: Inspect bounded callback delivery without credentials or response bodies
+      security: [{session: []}]
+      parameters:
+        - {name: callbackId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: 'Delivery state, attempts and validated purge artifact acknowledgement'}
+components:

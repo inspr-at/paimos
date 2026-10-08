@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /projects/{projectId}/instruction-provenance:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: queryHarnessInstructionProvenance
+      description: Requires harness.read and project visibility. Returns instruction-source identities (logical name, hash, version) for sessions in the project, newest first, at most 200. Filter by version, content_sha256, kind or logical_name. A session with no sources contributes nothing. No rule text, file contents or paths.
+      parameters:
+        - {name: version, in: query, schema: {type: string, maxLength: 80}}
+        - {name: content_sha256, in: query, schema: {type: string, pattern: '^[0-9a-f]{64}$'}}
+        - {name: kind, in: query, schema: {type: string, enum: [agents, claude, skill, prompt_template, rules_merged, rules_set]}}
+        - {name: logical_name, in: query, schema: {type: string, maxLength: 80}}
+      responses:
+        '200': {description: Matching instruction sources, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessInstructionSourcePage'}}}}
+        '400': {description: Unknown or invalid query}
+        '404': {description: Project is not visible}
+components:
+  schemas:
+    HarnessInstructionSource:
+      type: object
+      required: [session_id, revision, kind, logical_name, hash_kind, recorded_at]
+      properties:
+        session_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        kind: {type: string, enum: [agents, claude, skill, prompt_template, rules_merged, rules_set]}
+        logical_name: {type: string, maxLength: 80, description: Allowlisted logical name or a published rule-set UUID. Not a filesystem path.}
+        hash_kind: {type: string, enum: [content, absent]}
+        content_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$'}
+        version: {type: [string, 'null'], maxLength: 80}
+        byte_size: {type: [integer, 'null'], minimum: 0, maximum: 1048576}
+        recorded_at: {type: string, format: date-time}
+    HarnessInstructionSourcePage:
+      type: object
+      required: [project_id, items, truncated]
+      properties:
+        project_id: {type: string, format: uuid}
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/HarnessInstructionSource'}}
+        truncated: {type: boolean}

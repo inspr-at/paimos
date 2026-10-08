@@ -1,0 +1,641 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/knowledge
+paths:
+  /knowledge:
+    get:
+      operationId: listKnowledge
+      description: |
+        Knowledge entries (runbook, guideline, memory, external-system,
+        related-project) across projects, or in one project. q searches title,
+        slug, key and body (German and English full text plus word matches);
+        the excerpt is plain text around the first match. counts cover the
+        project and q scope before the type and status filters.
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: type, in: query, description: Comma-separated knowledge types, schema: {type: string}}
+        - {name: status, in: query, description: 'Comma-separated active, proposed, archived', schema: {type: string}}
+        - {name: q, in: query, schema: {type: string, maxLength: 200}}
+        - {name: sort, in: query, schema: {type: string, enum: [relevance, updated, created, title, slug, type]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000, default: 500}}
+      responses:
+        '200':
+          description: Knowledge entries
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgePage'}
+        '400':
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createKnowledge
+      description: |
+        Create an entry under a project. The slug follows ^[a-z][a-z0-9_-]*$
+        (at most 64 characters) and is unique per project and type among live
+        entries; memory reserves references, stale, proposed and needs-review.
+        A missing external_system or related_project kind is created first.
+        Appends knowledge.created (undoable while nobody changed the entry).
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/KnowledgeCreate'}
+      responses:
+        '201':
+          $ref: '#/components/responses/KnowledgeEntry'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: Slug taken; conflict names the entry that holds it
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeProblem'}
+        '422':
+          $ref: '#/components/responses/Error'
+  /knowledge/graph:
+    get:
+      operationId: getKnowledgeGraph
+      description: |
+        Read-only project graph, with the same live-node and tenant visibility as
+        knowledge. Links combine directed relations and resolved body mentions:
+        wiki slugs, local knowledge Markdown links, backticked slugs and node keys.
+        Slugs resolve in the source kind first, then the project, following rename
+        events like resolve. Explicit typed links stay in that type and project.
+        Relations win over mentions of the same directed pair; degree counts unique
+        neighbours. Tickets are optional directly linked/mentioned satellites;
+        their bodies are never read. At most 2000 nodes and 8000 edges, newest
+        knowledge first, then tickets. Filters apply before the node cap.
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: types, in: query, description: Comma-separated knowledge types, schema: {type: string}}
+        - {name: status, in: query, description: 'Comma-separated active, proposed, archived; omitted means all', schema: {type: string}}
+        - {name: include, in: query, schema: {type: string, enum: [tickets]}}
+      responses:
+        '200':
+          description: Bounded graph, without entry or ticket bodies
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeGraph'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /knowledge/learnings:
+    get:
+      operationId: listMethodLearnings
+      description: |
+        Open method learnings for one project (AEON-275, AEON-288). A learning is
+        a live ticket, task or epic in that project whose tags include
+        process-learning, a comment on a node in the project whose current text
+        contains that tag as its own word (an optional leading # is allowed),
+        or a nomination from the daily tagger that is still open. A
+        nomination's line is re-derived from its live source; its stored
+        excerpt is shown only while that source is unchanged, and a source
+        that now looks like it holds a credential hides it. A review verdict
+        shows only in the project it was recorded in, while the ticket is
+        still there, to people who can read that verdict. Accepted, dismissed
+        and drafted items are omitted. At most 50, newest first. Each item
+        carries its current recommendation when an agent or person prepared
+        one (AEON-788). When truncated is true, next_cursor continues the list
+        after the last item.
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - name: cursor
+          in: query
+          description: "next_cursor of the previous page; at most 160 characters"
+          schema: {type: string, maxLength: 160}
+      responses:
+        '200':
+          description: Open method learnings
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningPage'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /knowledge/learnings/{learningId}/accept:
+    post:
+      operationId: acceptMethodLearning
+      description: |
+        A person with knowledge.write appends one dated line to the chosen
+        entry's changelog (the last heading whose text contains "changelog",
+        or a new Changelog section), links the source, and records
+        knowledge.learning_accepted. The entry must be in the same project.
+        If-Unmodified-Since is the entry's updated_at; a stale value returns
+        412 with the current entry and writes nothing. Agents cannot accept.
+        Text that looks like it holds a credential is not copied: 409
+        learning_sensitive with the matched ranges (positions only). A person
+        may repeat the request with confirm_not_sensitive; the event records
+        confirmed_not_sensitive. An agent cannot confirm (403). An optional
+        lesson (AEON-788) replaces the learning's own text in the line. With
+        learning_text, a learning whose text changed since the person
+        reviewed it is 409 learning_changed and nothing is written.
+      parameters:
+        - {name: learningId, in: path, required: true, schema: {type: string}}
+        - {name: If-Unmodified-Since, in: header, schema: {type: string}}
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MethodLearningAccept'}
+      responses:
+        '200':
+          description: Accepted; entry is the updated knowledge entry
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningDecision'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: already_decided, learning_changed, or learning_sensitive with the suspected credential ranges
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningProblem'}
+        '412':
+          description: The entry changed since it was read
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeProblem'}
+  /knowledge/learnings/{learningId}/dismiss:
+    post:
+      operationId: dismissMethodLearning
+      description: |
+        A person with knowledge.write dismisses one open method learning.
+        Records knowledge.learning_dismissed and does not change a knowledge
+        entry. Agents cannot dismiss. An optional reason (AEON-788) is
+        recorded in the event; no body or an empty object still dismisses.
+        With learning_text, a learning whose text changed since the person
+        reviewed it is 409 learning_changed. A reason that looks like it holds
+        a credential is 409 learning_sensitive with ranges in field reason.
+      parameters:
+        - {name: learningId, in: path, required: true, schema: {type: string}}
+      security: *auth
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MethodLearningDismiss'}
+      responses:
+        '200':
+          description: Dismissed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningDecision'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: already_decided, learning_changed, or learning_sensitive with the suspected credential ranges
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningProblem'}
+  /knowledge/learnings/{learningId}/draft:
+    post:
+      operationId: draftMethodLearning
+      description: |
+        A person with knowledge.write turns one open method learning into a
+        single rule in the chosen draft (AEON-288). The rule's text is the
+        learning line. Its source records the learning id and the node.
+        Publishing stays a separate person approval and is not performed.
+        Agents cannot draft. A second decision on the same learning is 409.
+        Text or a title that looks like it holds a credential is not copied:
+        409 learning_sensitive with the matched ranges (positions only). A
+        person may repeat the request with confirm_not_sensitive; the event
+        records confirmed_not_sensitive. An agent cannot confirm (403).
+      parameters:
+        - {name: learningId, in: path, required: true, schema: {type: string}}
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MethodLearningDraft'}
+      responses:
+        '200':
+          description: Drafted into the chosen rule set
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningDecision'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: already_decided, or learning_sensitive with the suspected credential ranges
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningProblem'}
+  /knowledge/learnings/{learningId}/recommendation:
+    put:
+      operationId: recommendMethodLearning
+      description: |
+        Prepares a decision on one open method learning (AEON-788): accept with
+        a target entry in the learning's project and an optional lesson line,
+        or dismiss with a reason. Agents and people with knowledge.write may
+        recommend; nothing is accepted or dismissed. A person applies it
+        through accept and dismiss. The recommendation replaces any earlier one
+        for the learning and records knowledge.learning_recommended. A decided
+        learning is 409 already_decided; a closed one is 404. Lesson or reason
+        text that looks like it holds a credential is 409 learning_sensitive
+        and cannot be confirmed here.
+      parameters:
+        - {name: learningId, in: path, required: true, schema: {type: string}}
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MethodLearningRecommend'}
+      responses:
+        '200':
+          description: The stored recommendation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningRecommendation'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: already_decided, or learning_sensitive with the suspected credential ranges
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningProblem'}
+  /knowledge/resolve:
+    get:
+      operationId: resolveKnowledge
+      description: One entry by project, type and slug. When no live entry holds the slug, the entry that renamed away from it answers with renamed_from set.
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: type, in: query, required: true, schema: {type: string}}
+        - {name: slug, in: query, required: true, schema: {type: string}}
+      responses:
+        '200':
+          $ref: '#/components/responses/KnowledgeEntry'
+        '400':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /knowledge/{knowledgeId}:
+    parameters: [{name: knowledgeId, in: path, required: true, schema: {type: string, format: uuid}}]
+    get:
+      operationId: getKnowledge
+      security: *auth
+      responses:
+        '200':
+          $ref: '#/components/responses/KnowledgeEntry'
+        '404':
+          $ref: '#/components/responses/Error'
+    patch:
+      operationId: updateKnowledge
+      description: |
+        Change title, body, status, slug or metadata (metadata replaces the
+        object; {} removes it). Type, project and key never change here.
+        If-Unmodified-Since is the exact updated_at as read; a stale value
+        returns 412 with the current entry and writes nothing. A write that
+        changes nothing appends no event. Appends knowledge.updated, whose undo
+        restores the prior values while the entry is unchanged since and its
+        old slug is free.
+      parameters:
+        - {name: If-Unmodified-Since, in: header, schema: {type: string}}
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/KnowledgePatch'}
+      responses:
+        '200':
+          $ref: '#/components/responses/KnowledgeEntry'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: Slug taken
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeProblem'}
+        '412':
+          description: Changed since it was read; entry is the current version
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeProblem'}
+        '422':
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: deleteKnowledge
+      description: Soft delete with optional If-Unmodified-Since. Appends knowledge.deleted, whose undo restores the entry while its slug is free.
+      parameters:
+        - {name: If-Unmodified-Since, in: header, schema: {type: string}}
+      security: *auth
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, event_id]
+                properties:
+                  id: {type: string, format: uuid}
+                  event_id: {type: integer, format: int64}
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '412':
+          description: Changed since it was read
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeProblem'}
+components:
+  schemas:
+    KnowledgeCreate:
+      type: object
+      required: [project_id, type, slug, title]
+      additionalProperties: false
+      properties:
+        project_id: {type: string, format: uuid}
+        type: {$ref: '#/components/schemas/KnowledgeType'}
+        slug: {type: string, pattern: '^[a-z][a-z0-9_-]*$', maxLength: 64}
+        title: {type: string, minLength: 1, maxLength: 500}
+        body: {type: string}
+        status: {$ref: '#/components/schemas/KnowledgeStatus'}
+        metadata: {type: object, additionalProperties: true}
+        key_prefix: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}$', description: 'Key prefix, usually the project''s key; default is the kind''s prefix'}
+    KnowledgeEntry:
+      allOf:
+        - $ref: '#/components/schemas/KnowledgeItem'
+        - type: object
+          required: [body, metadata, author, links]
+          properties:
+            body: {type: string}
+            metadata: {type: object, additionalProperties: true}
+            author:
+              oneOf: [{type: 'null'}, {$ref: '#/components/schemas/KnowledgePerson'}]
+            links:
+              type: array
+              items:
+                type: object
+                required: [relation_id, type, direction, node]
+                properties:
+                  relation_id: {type: string, format: uuid}
+                  type: {type: string}
+                  direction: {type: string, enum: [out, in]}
+                  node:
+                    type: object
+                    required: [id, key, title, state, kind, project_id]
+                    properties:
+                      id: {type: string, format: uuid}
+                      key: {type: string}
+                      title: {type: string}
+                      state: {type: string}
+                      kind: {type: string}
+                      project_id: {type: [string, 'null'], format: uuid}
+                      slug: {type: string}
+                      type: {$ref: '#/components/schemas/KnowledgeType'}
+            renamed_from: {type: string}
+            event_id: {type: integer, format: int64, description: The event a write appended; absent on reads and no-op writes}
+    KnowledgeGraph:
+      type: object
+      required: [nodes, edges, truncated]
+      properties:
+        truncated: {type: boolean}
+        nodes:
+          type: array
+          maxItems: 2000
+          items:
+            type: object
+            required: [id, key, type, slug, title, status, degree, updated_at, kind]
+            properties:
+              id: {type: string, format: uuid}
+              key: {type: string}
+              type: {type: string, enum: [runbook, guideline, memory, external-system, related-project, decision, ticket]}
+              kind: {type: string, enum: [knowledge, ticket]}
+              slug: {type: string}
+              title: {type: string}
+              status: {type: string, description: Knowledge status or ticket state}
+              degree: {type: integer, minimum: 0, description: Unique neighbours in the returned graph}
+              updated_at: {type: string, format: date-time}
+        edges:
+          type: array
+          maxItems: 8000
+          items:
+            type: object
+            required: [source, target, kind, label]
+            properties:
+              source: {type: string, format: uuid}
+              target: {type: string, format: uuid}
+              kind: {type: string, enum: [relation, mention]}
+              label: {type: string}
+    KnowledgeItem:
+      type: object
+      required: [id, key, type, kind, slug, title, status, state, project, excerpt, link_count, created_at, updated_at, updated_by, imported]
+      properties:
+        id: {type: string, format: uuid}
+        key: {type: string}
+        type: {$ref: '#/components/schemas/KnowledgeType'}
+        kind: {type: string, description: Node kind slug (external_system)}
+        slug: {type: string}
+        title: {type: string}
+        status: {$ref: '#/components/schemas/KnowledgeStatus'}
+        state: {type: string}
+        project:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [id, key, title]
+              properties:
+                id: {type: string, format: uuid}
+                key: {type: string}
+                title: {type: string}
+        excerpt: {type: string}
+        link_count: {type: integer}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        updated_by:
+          oneOf: [{type: 'null'}, {$ref: '#/components/schemas/KnowledgePerson'}]
+        imported: {type: boolean, description: The last write came from the classic import}
+    KnowledgePage:
+      type: object
+      required: [items, total, truncated, counts]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/KnowledgeItem'}}
+        total: {type: integer}
+        truncated: {type: boolean}
+        counts:
+          type: object
+          properties:
+            type: {type: object, additionalProperties: {type: integer}}
+            status: {type: object, additionalProperties: {type: integer}}
+    KnowledgePatch:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        title: {type: string, minLength: 1, maxLength: 500}
+        body: {type: string}
+        status: {$ref: '#/components/schemas/KnowledgeStatus'}
+        slug: {type: string, pattern: '^[a-z][a-z0-9_-]*$', maxLength: 64}
+        metadata: {type: object, additionalProperties: true}
+    KnowledgePerson:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+    KnowledgeProblem:
+      type: object
+      required: [error, code]
+      properties:
+        error: {type: string}
+        code: {type: string, enum: [slug_taken, stale]}
+        conflict: {$ref: '#/components/schemas/KnowledgeItem'}
+        entry: {$ref: '#/components/schemas/KnowledgeEntry'}
+    KnowledgeStatus:
+      type: string
+      description: active is stored as backlog, archived as cancelled; any other stored state reads as active.
+      enum: [active, proposed, archived]
+    KnowledgeType:
+      type: string
+      enum: [runbook, guideline, memory, external-system, related-project, decision]
+    MethodLearning:
+      type: object
+      required: [id, source, node_id, key, title, text, at, author, href]
+      properties:
+        id: {type: string, description: "n- plus the node id, or c- plus the node id and comment event id"}
+        source: {type: string, enum: [ticket, comment]}
+        node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        text: {type: string, description: One line for the changelog. Comment text has the tag removed.}
+        comment_id: {type: string}
+        at: {type: string, format: date-time}
+        author:
+          oneOf: [{type: 'null'}, {$ref: '#/components/schemas/KnowledgePerson'}]
+        href: {type: string}
+        recommendation: {$ref: '#/components/schemas/MethodLearningRecommendation'}
+    MethodLearningAccept:
+      type: object
+      required: [knowledge_id]
+      additionalProperties: false
+      properties:
+        knowledge_id: {type: string, format: uuid}
+        lesson: {type: string, maxLength: 240, description: "Replaces the learning's own text in the changelog line"}
+        learning_text: {type: string, maxLength: 2000, description: "The learning's text as the person reviewed it; a learning that reads differently now is 409 learning_changed"}
+        confirm_not_sensitive:
+          type: boolean
+          description: A person confirms that text flagged as a credential is not one. Agents cannot confirm.
+    MethodLearningDecision:
+      type: object
+      required: [id, decision, event_id]
+      properties:
+        id: {type: string}
+        decision: {type: string, enum: [accepted, dismissed, drafted]}
+        event_id: {type: integer, format: int64}
+        knowledge_id: {type: string, format: uuid}
+        heading: {type: string}
+        line: {type: string}
+        entry: {$ref: '#/components/schemas/KnowledgeEntry'}
+        rule_set_id: {type: string, format: uuid}
+        rule_layer_id: {type: string, format: uuid}
+        rule_identity: {type: string}
+    MethodLearningDismiss:
+      type: object
+      properties:
+        reason: {type: string, maxLength: 500}
+        learning_text: {type: string, maxLength: 2000, description: "The learning's text as the person reviewed it; a learning that reads differently now is 409 learning_changed"}
+    MethodLearningDraft:
+      type: object
+      required: [layer_id, set_id]
+      additionalProperties: false
+      properties:
+        layer_id: {type: string, format: uuid}
+        set_id: {type: string, format: uuid}
+        confirm_not_sensitive:
+          type: boolean
+          description: A person confirms that text flagged as a credential is not one. Agents cannot confirm.
+    MethodLearningPage:
+      type: object
+      required: [items, truncated]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/MethodLearning'}}
+        truncated: {type: boolean}
+        next_cursor: {type: string, description: "Present when truncated; pass as cursor for the next page"}
+    MethodLearningProblem:
+      type: object
+      required: [error, code]
+      properties:
+        error: {type: string}
+        code: {type: string}
+        ranges:
+          type: array
+          description: "With learning_sensitive, the suspected credentials as Unicode code point offsets into the learning's text or title, or into the lesson or reason sent with the request. The text itself is never returned."
+          items: {$ref: '#/components/schemas/SensitiveRange'}
+    MethodLearningRecommend:
+      type: object
+      required: [decision]
+      additionalProperties: false
+      properties:
+        decision: {type: string, enum: [accept, dismiss]}
+        knowledge_id: {type: string, format: uuid, description: "Required for accept; not allowed for dismiss"}
+        lesson: {type: string, maxLength: 240, description: "Accept only. The changelog sentence; the learning's own text when absent"}
+        reason: {type: string, maxLength: 500, description: "Required for dismiss, optional for accept"}
+    MethodLearningRecommendation:
+      type: object
+      required: [decision, by, at, event_id, stale, target_missing]
+      properties:
+        decision: {type: string, enum: [accept, dismiss]}
+        knowledge_id: {type: string, format: uuid}
+        knowledge_title: {type: string}
+        lesson: {type: string}
+        reason: {type: string}
+        by:
+          oneOf: [{type: 'null'}, {$ref: '#/components/schemas/KnowledgePerson'}]
+        at: {type: string, format: date-time}
+        event_id: {type: integer, format: int64}
+        stale: {type: boolean, description: "The learning's text changed after it was recommended"}
+        target_missing: {type: boolean, description: "The chosen entry was deleted or left the project"}
+    SensitiveRange:
+      type: object
+      required: [field, start, end]
+      additionalProperties: false
+      properties:
+        field: {type: string, enum: [text, title, lesson, reason]}
+        start: {type: integer, minimum: 0}
+        end: {type: integer, minimum: 0}
+  responses:
+
+    KnowledgeEntry:
+      description: Knowledge entry
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/KnowledgeEntry'

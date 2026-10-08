@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/engineadmission
+paths:
+  /projects/{projectId}/admission-settings:
+    parameters:
+      - in: path
+        name: projectId
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Read the project shadow admission switch
+      description: "Requires engine.read on the visible project. Missing settings mean off at revision zero."
+      security: *auth
+      responses:
+        '200':
+          description: "Current project switch."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineAdmissionSettings'
+        '403':
+          description: "Permission denied."
+        '404':
+          description: "Project not found."
+    put:
+      summary: Change the project shadow admission switch
+      description: "Person-only engine.manage authority, checked in the final tenant-fenced write. Revision must match. This switch never enables consultation or execution."
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, shadow_enabled]
+              properties:
+                expected_revision:
+                  type: integer
+                  minimum: 0
+                shadow_enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: "Updated and audited project switch."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineAdmissionSettings'
+        '400':
+          description: "Invalid request."
+        '403':
+          description: "Person management authority required."
+        '404':
+          description: "Project not found."
+        '409':
+          description: "Settings revision changed."
+components:
+  schemas:
+    EngineAdmissionSettings:
+      type: object
+      additionalProperties: false
+      required: [project_id, shadow_enabled, revision]
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        shadow_enabled:
+          type: boolean
+          description: "Default false. Enabling only records shadow evaluations."
+        revision:
+          type: integer
+          minimum: 0

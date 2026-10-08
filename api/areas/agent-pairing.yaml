@@ -1,0 +1,921 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/agentpairing
+paths:
+  /agent-pairing/account-link:
+    post:
+      operationId: accountLinkDevice
+      summary: Offer or poll one account ownership code on its paired computer
+      description: Requires the paired runtime bearer with account.probe and its installation lifecycle proof. Only its connected enrollment is accepted. A first offer returns one six-digit code valid for ten minutes; only its hash is persisted and subsequent offers never repeat the code or prompt. An explicit renew replaces an expired offer. Polls name the original request. Due pending requests become expired with one account.link_expired event in the same transaction. Computer or enrollment disconnect cancels pending requests with account.link_cancelled. No ownership, ongoing-use approval, capacity, grants or pairing changes occur here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [account_id, device_proof, operation]
+              properties:
+                account_id: {type: string, format: uuid}
+                device_proof: {type: string, pattern: '^[a-f0-9]{64}$', writeOnly: true}
+                operation: {type: string, enum: [offer, poll, renew]}
+                request_id: {type: string, format: uuid, description: Required for poll}
+      responses:
+        '200': {description: Terminal prompt or its result; no-store, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLinkDeviceView'}}}}
+        '403': {description: Paired runtime and installation proof required}
+        '404': {description: Connected enrollment or request not found}
+        '409': {description: Offer still pending or pairing not redeemed}
+        '429': {description: Persistent tenant attempt limit reached}
+  /agent-pairing/account-link/lookup:
+    post:
+      operationId: lookupAccountLink
+      summary: Review an account code as the current person
+      description: Same-origin signed-in person with profile.write. The code hash is looked up only in that person's tenant and verified with a constant-time comparison. A consumed or expired code cannot be looked up. Observing expiry persists the expired state and account.link_expired event before returning 410. No account ownership is changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [user_code], properties: {user_code: {type: string, maxLength: 16}}}
+      responses:
+        '200': {description: 'Account, computer and current person to confirm', content: {application/json: {schema: {$ref: '#/components/schemas/AccountLinkReview'}}}}
+        '403': {description: Same-origin signed-in person required}
+        '404': {description: Code not found in current tenant}
+        '410': {description: Code expired or consumed}
+        '429': {description: Persistent tenant attempt limit reached}
+        '503': {description: Account linking signing key unavailable}
+  /agent-pairing/account-link/{requestId}/approve:
+    post:
+      operationId: approveAccountLink
+      summary: Link the reviewed account to the current person in one confirmation
+      description: Same-origin signed-in person with profile.write; agent keys are rejected. Body binds the reviewed tenant, person and account revision, preventing stale reviews or changed sessions. Requires the entered user_code and verifies its server-peppered HMAC in constant time inside the transaction before atomically consuming the request and appending account.linked. Observing expiry persists the expired state and account.link_expired event before returning 410. Never transfers an owned account. Does not authorize agent spending or alter machine pairing.
+      parameters: [{name: requestId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [tenant_id, person_id, expected_revision, request_digest, user_code]
+              properties:
+                tenant_id: {type: string, format: uuid}
+                person_id: {type: string, format: uuid}
+                expected_revision: {type: integer, minimum: 0}
+                request_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+                user_code: {type: string, maxLength: 16, writeOnly: true, description: Six-digit code entered by the person; spaces and hyphens are ignored}
+      responses:
+        '200': {description: Linked account, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLinkReview'}}}}
+        '403': {description: Same-origin signed-in person required}
+        '404': {description: Request or code not found in current tenant}
+        '409': {description: Account or session changed}
+        '410': {description: Code expired or consumed}
+        '429': {description: Persistent tenant attempt limit reached}
+        '503': {description: Account linking signing key unavailable}
+  /agent-pairing/account-links:
+    get:
+      operationId: listMyAccountLinks
+      summary: Current person's linked accounts
+      responses:
+        '200': {description: Own links only, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountLinkReview'}}}}}
+        '403': {description: Signed-in person with profile.write required}
+  /agent-pairing/account-links/{accountId}/unlink:
+    post:
+      operationId: unlinkMyAccount
+      summary: Unlink one of the current person's accounts
+      description: Same-origin person with profile.write. Only its owner can unlink. Invalidates outstanding codes and increments the ownership revision; emits account.unlinked. Runs, pairing, capacity and history stay.
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 0}}}
+      responses:
+        '204': {description: Unlinked}
+        '403': {description: Same-origin signed-in owner required}
+        '404': {description: Own linked account not found}
+        '409': {description: Ownership changed; refresh first}
+
+  /agent-pairing/accounts/sign-out:
+    post:
+      operationId: signOutAccountEverywhere
+      description: Person account.manage and ownership of every sign-in required. Atomically revokes the complete revision-bound canonical quota account set. Other accounts and vendor sessions outside PAIMOS remain untouched; local cleanup stays pending.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [targets]
+              properties:
+                targets:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [computer_id, account_id, expected_revision]
+                    properties:
+                      computer_id: {type: string, format: uuid}
+                      account_id: {type: string, format: uuid}
+                      expected_revision: {type: integer, minimum: 1}
+      responses:
+        '200': {description: All reviewed sign-ins blocked; local cleanup pending}
+        '403': {description: Current owner permission required}
+        '409': {description: Reviewed sign-in set changed}
+  /agent-pairing/attach:
+    post:
+      operationId: attachDevice
+      summary: Paired daemon requests, activates, renews or ends an attached session
+      description: >-
+        The single paired-runtime attach route. At daemon startup, register requires the
+        paired bearer, computer lifecycle proof and a fresh memory-only poll_key.
+        Protocol-less registrations are acknowledged as registered with protocol 1 so older
+        daemons keep serving; every other attach operation from those keys returns 409
+        update_agentd. Only keys registered with attach_protocol=2 and
+        local_consent_proof_version=2 can attach. Omitted proof versions mean v1;
+        protocol-2 registrations with an unsupported proof version return 409 update_agentd
+        with guidance to upgrade paimos-agentd before any approval or Touch ID prompt.
+        Successful registration advertises the server's required proof version.
+        Upgrading the daemon preserves existing pairing keys; re-pairing is unnecessary.
+        Successful registration invalidates all earlier watches on that computer,
+        requiring new owner approval.
+        All other operations require the paired bearer and registered poll_key; lifecycle
+        proof alone is rejected. Neither daemon nor server persists the poll key. Codes never
+        appear in URL paths or queries; approval links use a fragment removed by the web app.
+        If process memory lost the registration, an authenticated principal for a connected
+        computer with valid attach scope receives 403 with attach_refusal=poll_key_unknown.
+        This is distinct from an incorrect key, revoked pairing, draining enrollment or
+        foreign tenant, which never authorize automatic registration. The daemon may register
+        once and replay the rejected operation once, with serialized, bounded jittered backoff.
+        Registration still ends earlier approvals and watches; recovery never resumes them.
+        Unknown-key eligibility checks have a separate in-memory budget of 30 attempts per
+        minute per authenticated computer principal, checked before database eligibility reads.
+        Recovery does not spend the tenant-wide attach request budget. A capped recovery
+        returns 429 with code=attach_recovery_limited and Retry-After in seconds; it does
+        not authorize registration. The daemon honors valid Retry-After delays before any
+        further exchange or registration. The server retains at most 4096 live recovery
+        budgets across tenants; at capacity, new principals are refused until an existing
+        slot expires, including principals from other tenants (accepted AEON-608 limitation).
+        Requests, activation and every poll
+        repeat the immutable kernel-observed snapshot. Lease is 60 seconds and cannot
+        be resurrected. The server pins the owner's consent_mode at person approval.
+        local_auth remains approved (no session or lease) until the registered daemon
+        echoes consent_digest, the server-issued local_auth_nonce and a P-256 ASN.1 DER
+        local_auth_signature from its pairing-pinned Secure Enclave key. The signature
+        covers the canonical Touch ID reason as well as the digest and nonce. A bare
+        local_confirmed boolean is refused. Nonces are single-use and expire with
+        the request. Once a pairing has a pinned key, pending approval uses local_auth
+        regardless of local_auth_capability, and the snapshot platform must match the
+        platform stored at pairing. Legacy pairings use Aeon approval until re-paired.
+        Missing confirmation never activates; request-supplied policy overrides are refused.
+        Registration may report local_auth_capability. Omission is stored as unreported.
+        That report is advisory and never satisfies local confirmation. A later poll cannot change it.
+        A snapshot with mode=lease attaches metadata only: transcript and file_id must be
+        empty, text is rejected, and no conversation stream is available. Both modes require
+        consent_digest at approval, activation and every active poll; approval is single-use.
+        The exited operation is only for a kernel confirmation that the pinned process
+        has exited; loss of contact is unreachable.
+        Snapshots without mode select the default conversation watch; status-only is an explicit local choice.
+        Owner diagnostics are additive: errors retain their existing code and error fields
+        and may include attach_refusal (version_mismatch, pairing_revoked, ticket_not_visible,
+        code_expired, draining, enrollment_unavailable, or poll_key_unknown). Draining or removed enrollments
+        refuse new attachment authority, including status-only attachment of a running process.
+        Registration authenticates the computer lifecycle proof before
+        reporting version mismatch; apart from poll_key_unknown, later operations authenticate
+        the registered poll key and computer principal before reporting a cause. Unauthenticated and foreign callers
+        receive generic refusals without attach_refusal. Revoked bearer credentials remain
+        unauthenticated; only the locally authenticated interactive helper offers pairing-repair guidance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AttachDeviceRequest'}
+      responses:
+        '200':
+          description: Registration acknowledgement or attach state; user_code is returned only to the requesting daemon
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/AttachView'}
+                  - {$ref: '#/components/schemas/AttachedMessageCapability'}
+                  - {$ref: '#/components/schemas/AttachedMessageExchange'}
+                  - type: object
+                    required: [state]
+                    additionalProperties: false
+                    properties:
+                      state: {type: string, const: registered}
+                      local_consent_proof_version: {type: integer, const: 2, description: Required consent signature version; independent of attach_protocol}
+        '400': {description: Invalid attach request; conversation text on status-only or pre-activation polls detaches the attach}
+        '403':
+          description: Registered memory-only poll key required; lifecycle proof only authorizes registration. Only an authenticated owning daemon receives a diagnostic.
+          content: {application/json: {schema: {$ref: '#/components/schemas/AttachRefusal'}}}
+        '409':
+          description: Snapshot or consent mismatch, poll sequence rejected, or update agentd required. Only an authenticated owning daemon receives a diagnostic.
+          content: {application/json: {schema: {$ref: '#/components/schemas/AttachRefusal'}}}
+        '410':
+          description: Expired or revoked; new owner approval required
+          content: {application/json: {schema: {$ref: '#/components/schemas/AttachRefusal'}}}
+        '429':
+          description: >-
+            Attempt or stream quota exceeded, or (error code attach_recovery_limited) the
+            computer recovery budget is exhausted; honor Retry-After before retrying.
+            Alternatively (error code attach_live_limit) the person
+            already has 32 attach requests waiting or approved. Declining, approving into a
+            session or letting one expire frees a slot; a retry of an existing request is
+            still answered. The daemon prints this case in plain words.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying a capped operation
+              schema: {type: string, pattern: '^[1-9][0-9]*$'}
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: {type: string}
+                  code: {type: string, examples: [attach_live_limit, attach_recovery_limited, rate_limited]}
+  /agent-pairing/attach/lookup:
+    post:
+      operationId: lookupAttach
+      summary: Paired computer owner reviews a nine-digit attach code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [user_code]
+              properties:
+                user_code: {type: string, pattern: '^[0-9]{9}$'}
+      responses:
+        '200':
+          description: Immutable approval snapshot and digest, no conversation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AttachView'}
+        '403': {description: Same-origin signed-in owner required}
+        '404': {description: Code unavailable}
+        '429': {description: Attempt cap reached}
+  /agent-pairing/attach/pending:
+    get:
+      operationId: listPendingAttach
+      summary: Paired computer owner lists their attach requests that are not a session yet
+      description: >-
+        Person-only, read-only and additive. Returns the signed-in owner's requests
+        that have not become a session, waiting ones first: every pending or approved
+        request that has not expired (newest first; admission allows at most 32 per
+        person, so none is ever cut off, whatever else ended after it), then up to four ended ones created in the last fifteen minutes,
+        detached (declined or cancelled) and unreachable (expired). An unpolled
+        request past its expiry is an ended one, reported as unreachable without
+        changing the row. Each item is
+        the same AttachView lookup returns, so the owner can approve it with the
+        request and consent digests and no code; user_code, session_id and
+        local_auth_nonce are never present. Approval keeps every existing check.
+      responses:
+        '200':
+          description: The owner's recent attach requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests]
+                additionalProperties: false
+                properties:
+                  requests:
+                    type: array
+                    maxItems: 36
+                    items: {$ref: '#/components/schemas/AttachView'}
+        '403': {description: Signed-in person with account.manage required}
+  /agent-pairing/attach/{requestId}/approve:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: approveAttach
+      summary: Same-origin paired owner approves exactly the reviewed snapshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_digest]
+              properties:
+                request_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+                consent_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: 'Optional in the legacy request shape; protocol 2 requires this binding for both watch and status-only approval, otherwise returns 409'}
+      responses:
+        '200': {description: 'Approved snapshot; activation requires the registered daemon poll key and, for local_auth, its local confirmation'}
+        '403': {description: Same-origin paired owner required}
+        '409': {description: Digest differs from reviewed snapshot or approval already consumed}
+        '410': {description: Approval expired or revoked}
+  /agent-pairing/attach/{requestId}/messages:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: attachedMessageCapability
+      summary: Owner-only content-free messaging grant and specific readiness blocker
+      responses:
+        '200': {description: Messaging capability, content: {application/json: {schema: {$ref: '#/components/schemas/AttachedMessageCapability'}}}}
+        '403': {description: Authenticated computer owner required}
+  /agent-pairing/attach/{requestId}/messages/approve:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: approveAttachedMessages
+      summary: Allow my messages at the next step for this attachment and generation
+      description: Separate single-use approval; watch consent never grants messaging. Requires an interactive same-origin owner session and the exact digest prepared by the independent local helper. Vendor context retention and the live watch audience remain outside Aeon's text-not-retained promise. Processes running as your OS user are not isolated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [message_generation, consent_digest]
+              properties:
+                message_generation: {type: string, format: uuid}
+                consent_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+      responses:
+        '200': {description: Approved; policy B still requires a messaging-specific signed local confirmation, content: {application/json: {schema: {$ref: '#/components/schemas/AttachedMessageCapability'}}}}
+        '403': {description: Same-origin interactive owner required}
+        '409': {description: 'Stale generation, replay, digest mismatch, disabled feature or hook blocker'}
+  /agent-pairing/attach/{requestId}/messages/revoke:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: revokeAttachedMessages
+      summary: Turn messages off; keep watching
+      description: Stops later offers and purges queued payloads. An already released note cannot be recalled. Re-enabling needs a new generation and explicit approval.
+      responses:
+        '200': {description: Messages off; watch lease unchanged}
+        '403': {description: Same-origin interactive owner required}
+  /agent-pairing/attach/{requestId}/revoke:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: revokeAttach
+      summary: Paired owner ends a watch without stopping the process
+      responses:
+        '200': {description: Detached; conversation access ends}
+        '403': {description: Same-origin paired owner required}
+
+  /agent-pairing/computers:
+    get:
+      operationId: listPairedComputers
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"type": "object"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/computers/{computerId}:
+    get:
+      operationId: getPairedComputer
+      parameters:
+        - {"name": "computerId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/computers/{computerId}/capacity:
+    parameters:
+      - {name: computerId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: saveComputerCapacity
+      description: Person account.manage required; current computer owner only. Revision-bound, under the pairing access fence. Off by default; changes affect only new starts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, policy]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                policy: {$ref: '#/components/schemas/HostCapacityPolicy'}
+      responses:
+        '200': {description: Saved capacity, content: {application/json: {schema: {$ref: '#/components/schemas/HostCapacityView'}}}}
+        '400': {description: Invalid or oversized policy}
+        '403': {description: Current owner permission required}
+        '409': {description: Revision changed or computer removed}
+  /agent-pairing/computers/{computerId}/disconnect:
+    post:
+      operationId: disconnectPairedComputer
+      parameters:
+        - {"name": "computerId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingDisconnect"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/computers/{computerId}/enrollments/{accountId}/disconnect:
+    post:
+      operationId: disconnectPairedEnrollment
+      parameters:
+        - {"name": "computerId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+        - {"name": "accountId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingDisconnect"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/computers/{computerId}/enrollments/{accountId}/verify:
+    post:
+      operationId: verifyPairedAccountAgain
+      summary: Authorize one fresh read-only verification of an existing account
+      description: Signed-in account owner with account.manage, same-origin. For an unlinked account the enrollment approver is its owner. Rechecks ownership, computer revision and prior verification run inside the write. Supersedes only this enrollment's unclaimed queued verification and releases its holds. Claimed nonterminal work is rejected. Keeps the account, key, pairing request, daemon generation, ongoing approval and local cleanup. Creates one run and one expiring request allowance, audited; no automatic refill. The local verify command opens this person's approval screen and grants nothing itself.
+      security: [{session: []}]
+      parameters:
+        - {name: computerId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, expected_verification_run_id]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                expected_verification_run_id: {type: [string, 'null'], format: uuid}
+      responses:
+        '200':
+          description: Fresh verification created; stale repeats are rejected without another allowance
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [account_id, run_id, expires_at]
+                properties:
+                  account_id: {type: string, format: uuid}
+                  run_id: {type: string, format: uuid}
+                  expires_at: {type: string, format: date-time}
+        '400': {description: Invalid request}
+        '403': {description: Account owner and person permission required}
+        '404': {description: Enrollment not found}
+        '409': {description: 'Stale binding, active claimed check or unavailable enrollment'}
+
+  /agent-pairing/computers/{computerId}/name:
+    parameters:
+      - {name: computerId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: renamePairedComputer
+      description: Person account.manage and computer ownership required; changes only its displayed name, using the reviewed revision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, expected_revision]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 128}
+                expected_revision: {type: integer, minimum: 1}
+      responses:
+        '200': {description: Saved computer name}
+        '400': {description: Invalid name}
+        '403': {description: Current owner permission required}
+        '409': {description: Computer changed or removed}
+  /agent-pairing/computers/{computerId}/remove:
+    post:
+      operationId: removePairedComputer
+      summary: Remove a revoked or never-confirmed computer from the list (AEON-402)
+      description: Signed-in person with account.manage, same-origin. A never-confirmed computer (approved, never redeemed or seen) is revoked first. The computer and its account bindings are archived and leave the computers list; the rows, runs and audit events stay (agent_pairing.removed). A connected or draining computer that has reported must be disconnected first (409 computer_connected); unsettled runs keep it listed (409 runs_unsettled). Repeating it returns the same view.
+      parameters:
+        - {"name": "computerId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      responses:
+        '200': {"description": "The removed computer, with archived_at", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Computer not found}
+        '409': {description: Connected computer or unsettled runs}
+  /agent-pairing/device:
+    post:
+      operationId: requestDevicePairing
+      security: []
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingDeviceRequest"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingDeviceResponse"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/guide:
+    get:
+      operationId: pairingGuide
+      security: []
+      responses:
+        '200': {description: Instance-bound bootstrap guide and candidate release targets, content: {application/json: {schema: {$ref: '#/components/schemas/PairingGuide'}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/lookup:
+    post:
+      operationId: lookupPairingCode
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingLookup"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/reconcile:
+    post:
+      operationId: reconcileDevicePairing
+      security: []
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingReconcileRequest"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields. A change of setup state or harness report appends agent_pairing.reported (computer_id and setup_state only) to /events and /events/stream. Only the person who approved the pairing reads it; other people, agent keys and other tenants do not. An unchanged heartbeat appends nothing.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/redeem:
+    post:
+      operationId: redeemDevicePairing
+      security: []
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingRedeemRequest"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/requests/{requestId}/approve:
+    post:
+      operationId: approvePairing
+      parameters:
+        - {"name": "requestId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingApproval"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/requests/{requestId}/deny:
+    post:
+      operationId: denyPairing
+      parameters:
+        - {"name": "requestId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/self:
+    get:
+      operationId: getOwnPairing
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/self/capacity:
+    post:
+      operationId: reportHostCapacity
+      description: Paired runtime run.claim required. Reports bounded, content-free host signals and returns current start admission. Server time determines freshness. Does not stop running agents. Activity is accepted only with owner opt-in.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HostCapacitySignals'}
+      responses:
+        '200': {description: Host capacity, content: {application/json: {schema: {$ref: '#/components/schemas/HostCapacityView'}}}}
+        '400': {description: Invalid or oversized signals}
+        '403': {description: Paired runtime permission required}
+  /agent-pairing/self/disconnect:
+    post:
+      operationId: disconnectOwnPairing
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingSelfDisconnect"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+components:
+  schemas:
+    AccountLinkDeviceView:
+      type: object
+      additionalProperties: false
+      required: [account_id, state, show_prompt, show_result]
+      properties:
+        account_id: {type: string, format: uuid}
+        request_id: {type: string, format: uuid}
+        state: {type: string, enum: [pending, linked, expired, revoked]}
+        show_prompt: {type: boolean}
+        show_result: {type: boolean, description: True only for the first linked poll across all watching windows}
+        user_code: {type: string, pattern: '^[0-9]{3} [0-9]{3}$', description: Only on the first offer}
+        verification_uri: {type: string, format: uri}
+        expires_at: {type: string, format: date-time}
+        person_name: {type: string}
+    AccountLinkReview:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, tenant_name, account_id, harness, account_label, computer_name, person_id, person_name, revision, state, expires_at, request_digest]
+      properties:
+        request_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        request_id: {type: string, format: uuid}
+        tenant_id: {type: string, format: uuid}
+        tenant_name: {type: string}
+        account_id: {type: string, format: uuid}
+        harness: {type: string}
+        account_label: {type: string}
+        computer_name: {type: string}
+        person_id: {type: string, format: uuid}
+        person_name: {type: string}
+        revision: {type: integer, minimum: 0}
+        state: {type: string, enum: [pending, linked]}
+        expires_at: {type: string, format: date-time}
+    AgentCompatibility:
+      type: object
+      required: [status, action]
+      properties:
+        status: {type: string, enum: [compatible, update_required, protocol_mismatch, unknown]}
+        action: {type: string, maxLength: 500, description: Server-generated advice; empty for compatible or unknown reports. Does not change enrollment or terminate work.}
+    AgentCompatibilityPolicy:
+      type: object
+      required: [protocol, min_version, version_scheme]
+      description: Server-owned inclusive agent floor; newer agents using the same pairing protocol and version scheme are supported. No maximum. The floor changes only for an incompatible agent change, never merely for a server release.
+      properties:
+        protocol: {type: string}
+        min_version: {type: string}
+        version_scheme: {type: string}
+    AgentRelease:
+      type: object
+      required: [protocol, version, version_scheme]
+      description: Advisory identity of the last reporting helper process; absent legacy reports and development builds do not prove compatibility.
+      properties:
+        protocol: {type: string, maxLength: 64}
+        version: {type: string, maxLength: 64}
+        version_scheme: {type: string, maxLength: 64}
+    AttachDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [operation, computer_id, poll_key]
+      oneOf:
+        - properties:
+            operation: {const: register}
+          required: [device_proof]
+        - properties:
+            operation: {enum: [request, poll, detach, exited, message_request, message_activate, message_observed, message_offer, message_receipt, message_validate]}
+          required: [request_id, snapshot, request_digest]
+      properties:
+        operation: {type: string, enum: [register, request, poll, detach, exited, message_request, message_activate, message_observed, message_offer, message_receipt, message_validate]}
+        request_id: {type: string, format: uuid}
+        computer_id: {type: string, format: uuid}
+        attach_protocol: {type: integer, enum: [1, 2], description: 'Registration only. Omission registers protocol 1; all later attach operations return 409 update_agentd. Protocol 2 declares paired-origin pinning, redirect refusal and kernel checks in both modes. A later request cannot upgrade a registered key.'}
+        local_consent_proof_version: {type: integer, minimum: 1, description: 'Registration-bound signature format. Omission means v1. Attach protocol 2 requires v2, which binds the canonical Touch ID reason; unsupported versions return 409 update_agentd with upgrade paimos-agentd guidance. A later request cannot upgrade a registered key. Existing pairing keys remain valid after upgrading the daemon.'}
+        device_proof: {type: string, writeOnly: true, description: 'Existing computer lifecycle proof; registration only, never watch authority'}
+        poll_key: {type: string, pattern: '^[a-f0-9]{64}$', writeOnly: true, description: Fresh daemon-start random key held only in memory; required for every operation}
+        snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
+        request_digest: {type: string, description: 'Required with the snapshot for request, activation, poll and detachment'}
+        consent_digest: {type: string, description: Echo of the server-selected consent binding; required for activation and every active poll in both modes}
+        local_confirmed: {type: boolean, deprecated: true, description: 'Retained for wire compatibility; true is refused. Supply signed local confirmation instead.'}
+        local_auth_nonce: {type: string, pattern: '^[0-9a-f]{64}$', description: Server-issued single-use challenge for the approved request}
+        local_auth_signature: {type: string, maxLength: 144, description: 'Base64 ASN.1 DER ECDSA P-256 signature over SHA-256("aeon.attach.local-consent.v2\0" + consent_digest + "\0" + local_auth_nonce + "\0" + canonical reason). The reason is "Allow " + action + " " + harness + " session PID " + pid + " on " + host. Action is "watching the conversation" or "status only (no conversation text) for". Never accepted on the local socket.'}
+        local_auth_capability:
+          type: string
+          enum: [available, unsupported, unsigned, no_gui, policy]
+          description: Registration only. An omitted registration is stored as unreported. A later poll cannot change it. This value never satisfies local confirmation.
+        message_epoch: {type: string, minLength: 1, maxLength: 128, description: Daemon per-binding epoch; first offer binds it atomically to the grant}
+        message_binding: {$ref: '#/components/schemas/AttachedMessageBinding'}
+        message_receipt: {$ref: '#/components/schemas/AttachedMessageReceipt'}
+        message_protocol: {type: string, enum: [attached_messages_v1], description: Negotiated at registration; mandatory for message operations}
+        message_generation: {type: string, format: uuid}
+        hook_release_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        hook_config_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        qualified_harness_version: {type: string, maxLength: 80}
+        message_consent_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        message_local_auth_nonce: {type: string, pattern: '^[a-f0-9]{64}$', description: Messaging-specific single-use challenge; never the watch challenge}
+        message_local_auth_signature: {type: string, maxLength: 144, description: 'P-256 DER signature in base64 over the messaging consent digest, nonce and canonical prompt; verified against the pairing-pinned key'}
+        sequence: {type: integer, minimum: 1}
+        text: {type: string, maxLength: 16384, description: Default conversation watch only; rejected for mode=lease}
+        doing: {type: string, maxLength: 60, description: Public summary on an active poll only; collected only in agent_summary mode.}
+        tool_activity: {$ref: '#/components/schemas/CurrentAgentActivity'}
+    AttachRefusal:
+      type: object
+      required: [code, error]
+      properties:
+        code: {type: string, description: "Existing error code, retained for older clients"}
+        error: {type: string}
+        attach_refusal:
+          type: string
+          enum: [version_mismatch, pairing_revoked, ticket_not_visible, code_expired, draining, enrollment_unavailable, poll_key_unknown]
+          description: Optional fixed cause. Poll_key_unknown requires the owning computer principal and valid attach scope; other causes require the computer proof and principal. Includes no identifiers or request contents.
+    AttachedMessageBinding:
+      type: object
+      description: Immutable consent tuple. Each operation rechecks every field and the live attachment lease; message operations never renew it.
+      required: [tenant_id, project_id, attach_request_id, session_id, computer_id, owner_id, message_generation, daemon_epoch, hook_release_digest, hook_config_digest, qualified_harness_version, scope, consent_policy, snapshot_digest, service_epoch]
+      properties:
+        tenant_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        attach_request_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        computer_id: {type: string, format: uuid}
+        owner_id: {type: string, format: uuid}
+        message_generation: {type: string, format: uuid}
+        daemon_epoch: {type: string, pattern: '^[a-f0-9]{64}$'}
+        hook_release_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        hook_config_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        qualified_harness_version: {type: string, maxLength: 80}
+        scope: {type: string, const: owner_messages}
+        consent_policy: {type: string, enum: [aeon, local_auth]}
+        snapshot_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        service_epoch: {type: string, format: uuid}
+    AttachedMessageCapability:
+      type: object
+      required: [ready, blocker]
+      properties:
+        ready: {type: boolean}
+        blocker: {type: string, description: 'Specific disabled, consent, owner, hook, lease, generation or qualification blocker.'}
+        grant: {$ref: '#/components/schemas/AttachedMessageGrant'}
+    AttachedMessageExchange:
+      type: object
+      required: [state]
+      description: Content-free except for the first successful offer. Empty/replayed calls never return a previous body. message_validate rechecks current consent and the released attempt without text, immediately before local disclosure. Receipt retries return only committed metadata; they cannot reopen a terminal outcome.
+      properties:
+        state: {type: string, enum: [empty, offered, completed, uncertain, revoked, expired, not_delivered, cancelled]}
+        offer: {$ref: '#/components/schemas/AttachedMessageOffer'}
+        shown_at: {type: string, format: date-time, description: Hook reported full stdout handoff; does not prove model consumption}
+        completed_at: {type: string, format: date-time, description: Transport settlement only; never task completion}
+    AttachedMessageGrant:
+      type: object
+      required: [id, binding, state, consent_digest, expires_at, snapshot, notice]
+      properties:
+        id: {type: string, format: uuid}
+        binding: {$ref: '#/components/schemas/AttachedMessageBinding'}
+        snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
+        notice: {type: string, description: 'Server-authored vendor retention, live-watch audience and same-user isolation limits'}
+        state: {type: string, enum: [pending, approved, active, revoked]}
+        consent_digest: {type: string}
+        expires_at: {type: string, format: date-time}
+        message_local_auth_nonce: {type: string, description: Present after policy B approval; consumed atomically by activation}
+    AttachedMessageOffer:
+      type: object
+      description: Single attempt committed before releasing body, never replayed. Offered only at a fresh hook invocation through the paired attach exchange; a lost response is uncertain. No lease renewal.
+      required: [binding, grant_id, delivery_id, message_id, deadline, nonce, body, owner, created_at, epoch]
+      properties:
+        binding: {$ref: '#/components/schemas/AttachedMessageBinding'}
+        grant_id: {type: string, format: uuid}
+        delivery_id: {type: string, format: uuid}
+        message_id: {type: string, format: uuid}
+        deadline: {type: string, format: date-time}
+        nonce: {type: string, pattern: '^[a-f0-9]{64}$'}
+        epoch: {type: string}
+        owner: {type: string, description: Server-authenticated owner label}
+        created_at: {type: string, format: date-time}
+        body: {type: string, maxLength: 4096, description: 'Volatile UTF-8, 4096 bytes maximum; full escaped frame at most 8000 characters and complete encoded hook output at most 10000 characters for every supported event, checked before acceptance. Never logged or persisted.'}
+    AttachedMessageReceipt:
+      type: object
+      additionalProperties: false
+      required: [delivery_id, message_id, nonce, outcome, epoch]
+      properties:
+        delivery_id: {type: string, format: uuid}
+        message_id: {type: string, format: uuid}
+        nonce: {type: string, pattern: '^[a-f0-9]{64}$'}
+        outcome: {type: string, enum: [shown, uncertain]}
+        epoch: {type: string, description: Exact daemon binding epoch captured at claim; compared atomically with the current grant and attempt at settlement}
+    HostCapacityPolicy:
+      type: object
+      additionalProperties: false
+      required: [mode, maximum_agents, maximum_load, wait_when_busy, ease_on_battery, ease_when_hot, consider_activity]
+      properties:
+        mode: {type: string, enum: [off, smart, fixed], default: off}
+        maximum_agents: {type: integer, minimum: 0, maximum: 64, default: 0, description: Zero preserves the existing unlimited policy; configured limits are 1–64.}
+        maximum_load: {type: number, minimum: 1, maximum: 200, default: 30}
+        wait_when_busy: {type: boolean, default: true}
+        ease_on_battery: {type: boolean, default: true}
+        ease_when_hot: {type: boolean, default: true}
+        consider_activity: {type: boolean, default: false, description: "Opt-in; measures activity only, never input content."}
+    HostCapacitySignals:
+      type: object
+      additionalProperties: false
+      required: [load, cores, memory_pressure, power, thermal]
+      properties:
+        load: {type: [number, 'null'], minimum: 0, maximum: 10000}
+        cores: {type: integer, minimum: 1, maximum: 4096}
+        memory_pressure: {type: string, enum: [unknown, normal, high]}
+        memory_used_gb: {type: [number, 'null'], minimum: 0, maximum: 1048576}
+        memory_total_gb: {type: [number, 'null'], minimum: 0, maximum: 1048576}
+        power: {type: string, enum: [unknown, plugged_in, battery]}
+        thermal: {type: string, enum: [unknown, normal, hot]}
+        input_active: {type: [boolean, 'null']}
+    HostCapacityView:
+      type: object
+      required: [policy, running, queued, reason, load_limit, history]
+      properties:
+        policy: {$ref: '#/components/schemas/HostCapacityPolicy'}
+        signals: {oneOf: [{$ref: '#/components/schemas/HostCapacitySignals'}, {type: 'null'}]}
+        reported_at: {type: [string, 'null'], format: date-time}
+        running: {type: integer, minimum: 0}
+        queued: {type: integer, minimum: 0}
+        reason: {type: string, description: Empty means allowed; otherwise the reason new starts wait.}
+        load_limit: {type: number, minimum: 0}
+        history:
+          type: array
+          maxItems: 60
+          items:
+            type: object
+            required: [at, load]
+            properties:
+              at: {type: string, format: date-time}
+              load: {type: number, minimum: 0}
+    PairingAccountChoice: {"type": "object", "additionalProperties": false, "required": ["account_key", "harness", "label"], "properties": {"account_key": {"type": "string", "minLength": 1, "maxLength": 128}, "harness": {"type": "string", "enum": ["claude", "codex", "cursor", "grok", "pi", "gemini", "opencode"]}, "provider": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$", "description": "Optional pi configured-provider binding; restricts the selected model profile, never a person identity or credential."}, "label": {"type": "string", "minLength": 1, "maxLength": 128}, "model_profile_id": {"type": "string", "format": "uuid"}, "config_home_id": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Opaque computer-local identifier for a separate isolated config home. Each home must have its own identifier; never send its path, contents or vendor identity. Multiple accounts per harness require it on every account."}}}
+    PairingApproval: {"type": "object", "description": "Connect only never creates verification. Repeating the same selection may withdraw queued verification by changing one_per_harness to connect_only; it never replenishes verification. A new approval for an existing computer cancels older unclaimed queued verifications.", "additionalProperties": false, "required": ["request_digest", "verification", "selected_account_keys"], "properties": {"request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verification": {"type": "string", "enum": ["one_per_harness", "connect_only"]}, "selected_account_keys": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}}}}
+    PairingDeviceRequest: {"type": "object", "additionalProperties": false, "required": ["request_id", "device_hash", "runtime_hash", "lifecycle_hash", "computer_name", "platform", "arch", "workspace_path", "capabilities", "accounts"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "tenant_slug": {"type": "string"}, "device_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "runtime_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lifecycle_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "computer_name": {"type": "string", "minLength": 1, "maxLength": 128}, "platform": {"type": "string", "enum": ["darwin", "linux"]}, "arch": {"type": "string", "enum": ["arm64", "amd64"]}, "workspace_path": {"type": "string", "maxLength": 1024}, "capabilities": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "managed_runs"}}, "accounts": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "existing_computer_id": {"type": "string", "format": "uuid"}, "existing_lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "local_auth_public_key": {"type": "string", "maxLength": 88, "description": "Optional base64 X9.63 uncompressed P-256 public key from the Secure Enclave; immutable for the computer and included in browser-reviewed pairing details. Darwin only."}}, "oneOf": [{"required": ["tenant_id"], "not": {"required": ["tenant_slug"]}}, {"required": ["tenant_slug"], "not": {"required": ["tenant_id"]}}], "dependentRequired": {"existing_computer_id": ["existing_lifecycle_secret"], "existing_lifecycle_secret": ["existing_computer_id"]}}
+    PairingDeviceResponse: {"type": "object", "additionalProperties": false, "required": ["request_id", "tenant_id", "user_code", "state", "expires_at", "interval_seconds", "verification_uri", "request_digest"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "user_code": {"type": "string"}, "state": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "interval_seconds": {"const": 5}, "verification_uri": {"type": "string"}, "request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
+    PairingDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode", "expected_revision"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
+    PairingGuide:
+      type: object
+      required: [protocol, version, instance_url, default_tenant_slug, platforms, platform_qualification, setup_command, install_targets, install_available]
+      properties:
+        verification_capabilities: {$ref: '#/components/schemas/PairingVerificationCapabilities'}
+        verification_helper_version: {type: string}
+        agent_compatibility: {$ref: '#/components/schemas/AgentCompatibilityPolicy'}
+        protocol: {type: string, const: pairing-v1}
+        version: {type: string}
+        instance_url: {type: string, format: uri}
+        default_tenant_slug: {type: string}
+        platforms: {type: array, items: {type: string}}
+        platform_qualification: {type: string, description: Candidate builds require exact-release service qualification evidence}
+        setup_command: {type: string, description: Instance-bound pair command; defaults are confirmed locally before requesting person approval}
+        homebrew_command: {type: string, description: "Always offered; installs the latest INSPR release, which may differ from this server. brew install, then env \"$(brew --prefix)/bin/aeon-agentd\" pair --url …. env is the command so the substitution stays out of command position in fish, zsh, and bash, and an older binary on PATH cannot shadow it."}
+        homebrew_formula_current:
+          type: [boolean, 'null']
+          deprecated: true
+          description: "Legacy field retained for schema compatibility. New servers omit it and never fetch the tap; new clients ignore it."
+        managed_installation: {type: string}
+        managed_setup:
+          type: object
+          description: Optional deployment-admin-configured Nix/Home Manager guide; omitted when the instance has no reviewed module configuration. Commands remain bound to the server origin and never install or change a managed service.
+          required: [command, service_option, module_url, service_note]
+          properties:
+            command: {type: string, description: "Instance-bound pair command: env \"$HOME/.nix-profile/bin/aeon-agentd\" pair --url …. env keeps the path out of command position in fish, zsh, and bash."}
+            service_option: {type: string}
+            module_url: {type: string, format: uri}
+            service_note: {type: string}
+            platform_note: {type: string, description: 'Platforms supported by the configured module, independent of the helper build targets'}
+            prerequisite_note: {type: string, description: Reviewed package pin and PATH requirements before using the pair command}
+        install_available: {type: boolean}
+        install_targets:
+          type: array
+          items:
+            type: object
+            required: [platform, arch, service, qualification, artifact_url, checksums_url, command]
+            properties:
+              platform: {type: string, enum: [darwin, linux]}
+              arch: {type: string, enum: [arm64, amd64]}
+              service: {type: string, enum: [launchd-user, systemd-user]}
+              qualification: {type: string}
+              artifact_url: {type: string, format: uri}
+              checksums_url: {type: string, format: uri}
+              command: {type: string}
+    PairingHarnessDetails: {"type": "object", "description": "Per-harness state, reason code and fix. The reason vocabulary is shared with the daemon's per-account blocked_accounts: repin_pending, dependency_invalid, pin_missing, pin_partial, pin_drifted, pin_invalid, pin_unsafe, login_required, starting, harness_failed, cli_unavailable, profile_permissions, binding_missing, probe_pending, probe_timeout, probe_failed, capacity_capture, capacity_timeout, pairing_sync_failed. pairing_sync_failed means lifecycle reconciliation or runtime refresh prevented polling; reason_detail carries only an allowlisted short cause, never a probe timeout. binding_missing means an approved enrollment has no local binding. probe_pending is bounded to 60 seconds after daemon startup; capacity_capture is expected to finish within 10 seconds. Expired waits become blocked probe_timeout or capacity_timeout reports. Gemini and OpenCode version-only probes report blocked with sign_in_unverified; this proves launcher availability only, never sign-in or readiness, and carries no guessed repair command. Newer bounded code tokens (state or reason) are retained and shown as needing attention with the raw code and no fix. Unsupported or unenrolled harnesses, malformed codes and reports that disagree with harness_statuses are ignored without interrupting fence sync or cleanup. Only allowlisted reason_detail sentences cross the host boundary; no raw diagnostics or paths. A ready, blocked or login_required harness may include attention_accounts naming enrolled accounts that need a fix. A ready harness requires a proper subset; blocked and login_required may name every enrollment. Diagnostics are scoped by account id, never copied from a harness summary to multiple accounts. attention_count is the full size of that set. attention_truncated is true when the account list is shorter than the count, or when an older report stopped at five names without a count; an omitted account is not ready. Omission clears earlier details.", "additionalProperties": {"type": "object", "required": ["state"], "properties": {"state": {"type": "string", "description": "Known states: ready, blocked, login_required, checking, draining. Other tokens come from newer daemons; harness_statuses omits them.", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$", "description": "Shared reason code; absent for ready and draining. A ready harness may still list attention_accounts for accounts that need a fix."}, "fix": {"$ref": "#/components/schemas/PairingHarnessFix"}, "attention_accounts": {"type": "array", "maxItems": 32, "description": "Enrolled accounts that need a fix, including when every account is blocked. A ready harness requires a proper subset; blocked and login_required reports may include every enrollment. At most 32 entries are kept, sorted by account id. The server drops unknown account ids, empty or malformed reasons, and any client-supplied command; the repair command is derived from the reason. A shorter list is not a claim that every omitted account is ready.", "items": {"type": "object", "additionalProperties": false, "required": ["account_id", "reason"], "properties": {"account_id": {"type": "string", "format": "uuid"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}, "reason_detail": {"type": "string", "maxLength": 160, "description": "Fixed allowlisted explanation of a failed sign-in check, confirmed sign-out, or pairing synchronization failure in the daemon view. Never vendor output, paths, identities or arbitrary error text. Omitted when ready or unknown. The server validates the phrase before storing it."}}}}, "attention_count": {"type": "integer", "minimum": 1, "maximum": 10000, "description": "Full number of enrolled accounts that still need a fix. Present with attention_accounts. Larger than that list when the list was capped. Equal to the list length when attention_truncated is true and an older report stopped at five names, so the count is only a lower bound."}, "attention_truncated": {"type": "boolean", "description": "True when attention_accounts omits accounts included in attention_count, or when a report stopped at the legacy five-name cap without proving the list is complete. An omitted account is not ready."}, "reason_detail": {"type": "string", "maxLength": 160, "description": "Fixed allowlisted explanation of a failed sign-in check, confirmed sign-out, or pairing synchronization failure in the daemon view. Never vendor output, paths, identities or arbitrary error text. Omitted when ready or unknown. The server validates the phrase before storing it."}}}}
+    PairingHarnessFix: {"type": "object", "required": ["kind", "command"], "properties": {"kind": {"type": "string", "enum": ["repin", "add_harness", "login", "restart", "permissions"]}, "command": {"type": "string", "description": "Exact CLI line, for example `aeon-agentd repin --harness claude` or `aeon-agentd add-harness --harness codex`."}}, "description": "One fix form for harness_details and local blocked_accounts: the repair kind and the exact CLI line, derived by the server from the harness and reason code, never taken from daemon text. repin: Claude pin or dependency problems (replaces the shared Node/SDK pins). add_harness: the same problems for other harnesses; for a connected account it renews only that account's blocked interpreter pin. login: the vendor's normal sign-in. restart: resume setup after restoring the approved launcher, executable or profile permissions. permissions: make the default Claude profile private; only offered for that fixed diagnostic."}
+    PairingHarnessStatuses: {"type": "object", "description": "Latest daemon-reported readiness by enrolled harness, independent of setup and process ownership. Missing entries are unreported; connectivity determines freshness. Contains status codes only, never local diagnostics. The computer stays ready while any harness is ready. Unknown, unenrolled or revoked harnesses are ignored during reconciliation so lifecycle fences and cleanup still succeed; a newer state token appears only in harness_details.", "additionalProperties": {"type": "string", "enum": ["ready", "blocked", "login_required", "checking", "draining"]}}
+    PairingHookCapability: {"type": "object", "additionalProperties": false, "required": ["harness", "version", "os", "verified", "blocker"], "properties": {"harness": {"type": "string", "enum": ["claude", "codex", "cursor", "grok", "pi"]}, "version": {"type": "string", "maxLength": 80, "pattern": "^[A-Za-z0-9._+-]{0,80}$"}, "os": {"type": "string", "enum": ["darwin", "linux"]}, "verified": {"type": "boolean"}, "blocker": {"type": "string", "enum": ["", "feature_disabled", "qualification_pending", "unsupported_harness", "unsupported_version", "unsupported_platform", "artifact_untrusted", "artifact_changed", "config_environment", "project_override", "config_provenance", "project_scope", "settings_changed", "ownership_unknown", "repair_required"]}}}
+    PairingLookup: {"type": "object", "additionalProperties": false, "required": ["user_code"], "properties": {"user_code": {"type": "string"}}}
+    PairingReconcileRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "lifecycle_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "cleanup_confirmed_account_ids": {"type": "array", "maxItems": 256, "items": {"type": "string", "format": "uuid"}}, "computer_cleanup_confirmed": {"type": "boolean"}, "progress": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string", "enum": ["provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "error_code": {"type": "string", "enum": ["", "login_required", "service_conflict", "unsupported_platform", "managed_installation", "connectivity_failed", "private_storage_failed", "installation_failed", "verification_unavailable"]}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}}}, "hook_capabilities": {"type": "array", "maxItems": 5, "items": {"$ref": "#/components/schemas/PairingHookCapability"}, "description": "Content-free local hook evidence, capped by the server qualification catalog. Never a messaging grant; absent means repair required."}}}
+    PairingRedeemRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "device_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "device_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
+    PairingSelfDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "account_id": {"type": "string", "format": "uuid"}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
+    PairingVerificationCapabilities:
+      type: object
+      description: Server-owned qualification of its matching helper release; a client cannot widen this map. Unsupported choices require explicit connect_only or exclusion.
+      additionalProperties:
+        type: object
+        required: [supported, policy, reason]
+        properties:
+          supported: {type: boolean}
+          policy: {type: string, enum: [no_tools, read_only, unavailable]}
+          reason: {type: string, description: 'One concise explanation of the missing enforcement boundary when unsupported; empty when supported. Display as text, never infer support from the reason.'}
+
+    PairingView: {"type": "object", "description": "Immutable request review and current lifecycle. Runtime prefix is returned only to initiating proof on successful redemption; never a token. Each verification has exactly one immutable run. Disconnect never asserts process termination.", "properties": {"local_auth_pinned": {"type": "boolean", "description": "A Secure Enclave confirmation key is pinned to this computer; this is a pairing prerequisite, not a live Touch ID capability report."}, "request_id": {"type": "string"}, "tenant_id": {"type": "string"}, "tenant_name": {"type": "string"}, "state": {"type": "string", "enum": ["pending", "approved", "denied", "expired", "redeemed", "revoked"]}, "request_digest": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "computer_name": {"type": "string"}, "platform": {"type": "string"}, "arch": {"type": "string"}, "workspace_path": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "requested_accounts": {"type": "array", "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "verification": {"type": "object", "properties": {"mode": {"type": ["string", "null"], "enum": ["one_per_harness", "connect_only", null]}, "policy": {"const": "read_only"}, "runs_per_account": {"const": 1}, "max_parallel_runs": {"const": 1}, "allowance": {"const": 1}, "unit": {"const": "requests"}, "max_duration_seconds": {"const": 60}, "expires_at": {"type": "string", "format": "date-time"}, "task": {"const": "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."}}}, "computer_id": {"type": ["string", "null"]}, "computer_state": {"type": ["string", "null"], "enum": ["connected", "draining", "revoked", null]}, "principal_id": {"type": ["string", "null"]}, "daemon_id": {"type": ["string", "null"]}, "runtime_prefix": {"type": "string"}, "local_cleanup": {"type": "string"}, "local_processes": {"type": "string"}, "enrollments": {"type": "array", "items": {"type": "object", "properties": {"account_id": {"type": "string"}, "account_key": {"type": "string"}, "harness": {"type": "string"}, "label": {"type": "string"}, "model_profile_id": {"type": "string"}, "state": {"type": "string"}, "local_cleanup": {"type": "string"}, "verification_run_id": {"type": ["string", "null"]}, "active_run_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}}, "verified_at": {"type":"string","format":"date-time"}, "verification_expires_at": {"type":"string","format":"date-time"}, "last_used_at": {"type":"string","format":"date-time"}, "can_verify": {"type": "boolean", "description": "This signed-in person owns the enrollment; account.manage is separately required at the final write."}, "verification_stalled": {"type": "boolean", "description": "A claimed verification exceeded its 60 second runtime plus 60 second settlement grace. Diagnostic only; process exit and accounting remain unconfirmed until the daemon reports them."}, "verification_expired_ready": {"type": "boolean", "description": "Expired verification is informational only when this enrollment has a fresh successful live probe. It does not grant ongoing use."}, "verification_state": {"type": "string"}, "verification_error": {"type": "string"}, "verification_reason": {"type": "string", "description": "Bounded no-launch cause: adapter_unsupported, binding_incomplete or local_binding_missing. Empty when no refusal was reported."}, "local_processes": {"type": "string", "enum": ["unconfirmed", "drained"]}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}}}}, "setup_state": {"type": "string", "enum": ["not_started", "approved", "provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "setup_error": {"type": "string"}, "last_seen_at": {"type": ["string", "null"], "format": "date-time"}, "archived_at": {"type": "string", "format": "date-time", "description": "Set once a person removed the computer (AEON-402); removed computers leave the list"}, "connectivity": {"type": "string", "enum": ["online", "offline", "unknown"]}, "revision": {"type": "integer"}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}, "existing_computer_id": {"type": "string", "format": "uuid"}, "verification_capabilities": {"$ref": "#/components/schemas/PairingVerificationCapabilities"}, "verification_helper_version": {"type": "string"}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}, "agent_compatibility": {"$ref": "#/components/schemas/AgentCompatibility"}, "host_capacity": {"$ref": "#/components/schemas/HostCapacityView", "description": "Present on every paired computer view from servers that offer host capacity. A daemon negotiates the capacity report and claim fence from this field on GET /api/agent-pairing/self; without it, starts follow the unchanged legacy path."}, "hook_capabilities": {"type": "array", "maxItems": 5, "items": {"$ref": "#/components/schemas/PairingHookCapability"}, "description": "Content-free local hook evidence, capped by the server qualification catalog. Never a messaging grant; absent means repair required."}}, "required": ["request_id", "tenant_id", "tenant_name", "state", "request_digest", "expires_at", "computer_name", "platform", "arch", "workspace_path", "capabilities", "requested_accounts", "verification", "computer_id", "computer_state", "principal_id", "daemon_id", "local_cleanup", "local_processes", "enrollments", "setup_state", "setup_error", "last_seen_at", "connectivity", "revision", "accounting_state"]}

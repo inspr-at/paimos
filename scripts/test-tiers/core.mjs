@@ -134,6 +134,10 @@ export function affectedRisk(path, webImports = {}) {
   if (manifestPattern.test(path)) return { full: false, rule: 'R1', layout: 'static', skip: true, manifest: tierManifestPattern.test(path), reason: `R1: manifest/static checks: ${path}` }
   if (/^scripts\/audit\//.test(path)) return { full: false, rule: 'R5', layout: 'static', skip: true, reason: `R5: audit static checks: ${path}` }
   if (alwaysOnTestPattern.test(path)) return { full: false, rule: 'R9', layout: 'static', skip: true, reason: `R9: migration-compat regression test: ${path}` }
+  // Sources of the generated bundle use the bundle's reader scan, never their
+  // own rarely-mentioned filename. Keep generic owner selection for modules.
+  if (/^api\/(?:areas\/[^/]+\.yaml|openapi\.base\.yaml)$/.test(path) || /^internal\/.+\/openapi\.yaml$/.test(path))
+    return { full: false, rule: 'R2', skip: path.startsWith('api/'), go: { substrings: ['api/openapi.yaml'] }, reason: `R2: contract consumers: ${path}` }
   if (/^api\//.test(path)) return { full: false, rule: 'R2', skip: true, go: { substrings: [path] }, reason: `R2: contract consumers: ${path}` }
   if (/^internal\/db\/migrations\/[^/]+\.sql$/.test(path)) return { full: false, rule: 'R4', sql: path, reason: `R4: migration schema consumers: ${path}` }
   if (path === 'version.json') return { full: false, rule: 'R6', skip: true, go: { substrings: ['version.json'] }, web: { substrings: ['version.json'] }, reason: `R6: release manifest consumers: ${path}` }
@@ -189,6 +193,20 @@ export function impactRisk(paths, { event, affectedLane, webImports = {}, tree, 
     if (rule.layout !== 'static') layout = 'full'
     if (rule.skip) handled.add(path)
     if (rule.reason && rule.rule !== 'docs') reasons.push(rule.reason)
+    if (rule.rule === 'R2' && /^internal\/.+\/openapi\.yaml$/.test(path)) goSeeds.add(dirname(path))
+    if (/^api\/areas\/[^/]+\.yaml$/.test(path)) {
+      let fragment
+      try { fragment = readFile?.(path) } catch { return full(`R2 full: fragment unreadable: ${path}`) }
+      if (typeof fragment !== 'string') return full(`R2 full: fragment unreadable: ${path}`)
+      const owners = [...fragment.matchAll(/^# aeon:owner ((?:internal|cmd)(?:\/[a-zA-Z0-9_-]+)+)$/gm)].map(match => match[1])
+      // Shared schemas have no handler owner. An unclassified route fragment
+      // stays full; missing metadata never narrows the old contract gate.
+      if (!owners.length && /^  \//m.test(fragment)) return full(`R2 full: fragment owner unavailable: ${path}`)
+      for (const owner of owners) {
+        if (![...(tree?.go?.keys() ?? [])].some(file => dirname(file) === owner)) return full(`R2 full: fragment owner missing from scan: ${owner}`)
+        goSeeds.add(owner)
+      }
+    }
     if (rule.sql) {
       let sql
       try { sql = readFile?.(path) } catch { return full(`R4 full: migration unreadable: ${path}`) }

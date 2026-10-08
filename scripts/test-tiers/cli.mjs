@@ -12,6 +12,7 @@ import { loadManifest as loadBrowserPolicy, tierWeights } from '../../web/script
 import { changedPaths, schedulingDecision, eventBase, sourceTree, promotionsBetween } from './diff.mjs'
 import { boundedText } from './inputs.mjs'
 import { manifestsMain, classifyManifest } from './manifests.mjs'
+import { generateOpenAPI } from '../../api/generate.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
@@ -110,6 +111,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   {execute:executeCases=execute,command:nativeCommand=command,runPlaywright:browserRunner=runPlaywright,
     loadBrowserPolicy:browserPolicy=loadBrowserPolicy,knownFlaky,saveJSON:save=saveJSON,log=console.log}={}) {
   const begin=performance.now(),batches=[],ledger=[]
+  if(kind==='go') generateOpenAPI()
   const mergeGroup=env.GITHUB_EVENT_NAME==='merge_group'
   const quarantines=knownFlakyOwners(knownFlaky)
   for(const row of selection.all) if(row.tier==='ESSENTIAL'&&quarantines.has(key(row)))

@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/decisiondesk
+# aeon:owner internal/questions
+paths:
+  /decision-desk:
+    get:
+      operationId: listDecisionDeskQuestions
+      security: [{session: []}, {agentKey: []}]
+      description: P1 question-only projection, filtered by questions.read per project and asker for agents. No counts or content from inaccessible projects. Defaults to oldest-first creation order; state=answered with order=desc lists newest current answers first (answer created_at, then question ID) using bounded keyset pagination via next_cursor. Later packages add other item types and held-work ordering.
+      parameters:
+        - {name: state, in: query, schema: {type: string, enum: [open, answered]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 100000, default: 0}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: asc}, description: desc requires state=answered and offset=0.}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 512}, description: 'Opaque next_cursor from order=desc. Bound to tenant, principal and project; permissions are rechecked on every page. Requires state=answered and order=desc.'}
+      responses:
+        '200': {description: Visible questions, content: {application/json: {schema: {$ref: '#/components/schemas/QuestionPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /decision-desk/projection:
+    get:
+      operationId: decisionDeskProjection
+      security: [{session: []}]
+      description: >-
+        Person-only canonical open desk pointers and exact counts, reauthorized per source and project.
+        Held approvals sort by expiry, then other held items by creation time, then other items by creation time;
+        stable source ID breaks ties. Merged askers count once and a question replaces its linked held request.
+        Answered questions (including grace/corrections), decided/expired approvals and resolved requests are excluded.
+        A parked/paused/stopped question is held only with a live unfinished work link; carries_on alone is quiet.
+        Key trim proposals require keys.manage and remain quiet; their own protected approval API rechecks scopes and recent use. Sign-ins count as separate chores. Doctrine retains its existing toast claim and is never pushed by this adapter.
+        Counts describe all visible open sources, independently of page size. Keyset pages recheck current access;
+        counts and ordering are a current snapshot, not a frozen review round. Coverage above 1000 projects returns 422 with an explicit coverage error.
+        The existing question-only decision-desk endpoint remains available.
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 512}}
+      responses:
+        '200': {description: Canonically ordered visible sources, content: {application/json: {schema: {$ref: '#/components/schemas/DecisionDeskProjection'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '422': {description: Decision Desk coverage exceeds 1000 projects, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '500': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    DecisionDeskItem:
+      type: object
+      required: [id, kind, revision, title, created_at, held, href, source]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim]}
+        project_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        title: {type: string}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        held: {type: boolean}
+        href: {type: string, description: App review link to the exact source}
+        source: {type: string, description: Authorized app route or API link to the exact source}
+    DecisionDeskProjection:
+      type: object
+      required: [items, counts, has_more, as_of]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DecisionDeskItem'}}
+        counts:
+          type: object
+          required: [open, held, chores]
+          properties:
+            open: {type: integer, minimum: 0}
+            held: {type: integer, minimum: 0}
+            chores: {type: integer, minimum: 0}
+        has_more: {type: boolean}
+        next_cursor: {type: string}
+        as_of: {type: string, format: date-time}
