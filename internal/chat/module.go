@@ -32,8 +32,8 @@ type Module struct {
 	enabled bool
 }
 
-// New ships disabled. Enabling R1 supplies identity only, never native wake,
-// delivery or implicit permission to launch/resume an agent.
+// New ships disabled. Enabling supplies R1 identity and R2 participant history,
+// never native wake, delivery or implicit permission to launch/resume an agent.
 func New(pool *pgxpool.Pool, options ...Options) *Module {
 	m := &Module{pool: pool}
 	if len(options) > 0 {
