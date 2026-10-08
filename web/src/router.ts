@@ -37,6 +37,7 @@ export const router = createRouter({
         { path: 'tickets', component: RouteMarker, meta: { projectSection: 'tickets' } },
         { path: 'journey', redirect: to => ({ path: `/p/${encodeURIComponent(String(to.params.projectKey))}/tickets`, hash: to.hash }) },
         { path: 'settings', component: RouteMarker, meta: { title: 'Project settings', projectSection: 'settings' } },
+        { path: 'delivery', component: RouteMarker, meta: { title: 'Delivery', projectSection: 'delivery' } },
         // A docked entry (?entry=<type>/<slug>) on a screen too narrow to dock it opens the entry's own page.
         { path: 'knowledge', component: RouteMarker, meta: { title: 'Knowledge', projectSection: 'knowledge' }, beforeEnter: to => {
           const entry = parseEntryParam(to.query.entry)

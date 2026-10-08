@@ -6536,6 +6536,34 @@
     ,
     {"kind":"browser","file":"tests/delivery-guarantee.spec.ts","name":"light 390: own posts read Sent, Delivered, Read or Not delivered, live","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery is absent without delivery.read, and its address leads to the tickets","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 1024 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 1024 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 1440 dark de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 1440 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 1440 light de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 1440 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 390 dark de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 390 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 390 light de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"Delivery numbers at 390 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"a project without data or without a repository says so in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"tiles and charts tell partial, missing and clipped data apart and never show stale numbers","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"window, level and view switches keep every control still and are the person’s own","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-rating.spec.ts","name":"a person marks rework with a reason and can undo it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/delivery-rating.spec.ts","name":"a working session on the ticket shows no mark and a stopped one does","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14445,6 +14473,22 @@
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > retains choice navigation outside the summary and Escape inside it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"retired Release Walker > is not opened by this scrolling suite","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"German numbers use the German decimal comma and impersonal words","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"a change is steady within 10 %, 3 points for shares, and better or worse by the target’s direction","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"a run of nights ends at a night without a run; only tonight may still be due","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"days before the source covers them are \"no data yet\", later empty days are not, and nothing is invented","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"long windows use the server’s weeks and months and label only some of them","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"p90 stretches the duration scale at most to twice its room, else it is clipped and named","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"the page preferences fall back to Simple and 7 days and refuse anything else","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"the paired numbers count what they say: flakes, “changes”, scripted rounds and green nights","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a denied or failed review-policy read selects no saved mode","tier":"ESSENTIAL"}
     ,
