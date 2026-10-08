@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/aithema/host
+paths:
+  /aithema/deprovision:
+    post:
+      operationId: aithemaDeprovision
+      summary: Tombstone sessions by exact issuer, tenant and subject
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [issuer, sub, idempotency_key]
+              properties:
+                issuer: {type: string, format: uri}
+                sub: {type: string, format: uuid}
+                idempotency_key: {type: string, format: uuid}
+      responses:
+        '202': {description: Matching host sessions tombstoned and service deprovision callback queued}
+        '403': {description: Person with plugins.manage required}
+components:

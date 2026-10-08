@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/auth
+paths:
+  /agentd/step-ups/{challenge_id}:
+    get:
+      operationId: getAgentdStepUp
+      summary: Fetch the original confirmation challenge through the paired daemon
+      description: >-
+        Requires the computer's exact paired runtime bearer key and lifecycle proof.
+        Agents pass only challenge_id to agentd. The daemon fetches this resource at
+        its pinned server origin and displays this server-generated summary; it must
+        never display a summary forwarded by the requesting agent. A sibling key,
+        another computer or tenant, an inactive pairing or a consumed, superseded,
+        expired or signer-mismatched challenge cannot retrieve it. No proof in URLs.
+        AEON-580 implements this endpoint; AEON-581 consumes it. The computer must
+        be the workstation bound to the challenged key, with a pinned confirmation
+        key. Never return nonce, digest or summary through the agent's 428 response.
+        The daemon shows summary verbatim and signs SHA-256(nonce || action_digest),
+        concatenating the two lowercase 64-character hex wire strings. The client
+        retries exactly once with Aeon-Step-Up: <challenge_id>.<base64 ASN.1 DER P-256 signature>.
+        The server must consume the proof atomically with the exact bound mutation.
+      security: [{agentKey: []}]
+      parameters:
+        - {name: challenge_id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Computer-ID, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Device-Proof, in: header, required: true, schema: {type: string, pattern: '^[0-9a-f]{64}$'}, description: Pairing lifecycle secret retained by agentd; never forwarded to the requesting agent or logged.}
+      responses:
+        '200':
+          description: Original challenge for this computer; Cache-Control no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [summary, nonce, action_digest, expires_at, computer_id]
+                properties:
+                  summary: {type: string, minLength: 1, maxLength: 256, description: 'Server-authored action, escaped route, canonical query and stored target names including query-selected roles; at most 256 UTF-8 bytes, no control or format characters. Names and fields are never shortened or omitted to fit; an incomplete summary fails challenge creation with 400.'}
+                  nonce: {type: string, pattern: '^[0-9a-f]{64}$'}
+                  action_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+                  expires_at: {type: string, format: date-time}
+                  computer_id: {type: string, format: uuid}
+        '403': {description: Paired runtime and device proof required}
+        '404': {description: Challenge unavailable for this computer}
+        '410': {description: Challenge expired or already consumed}
+components:

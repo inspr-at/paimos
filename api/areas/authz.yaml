@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /authz/permissions:
+    get:
+      operationId: listAuthzPermissions
+      summary: Versioned permission registry
+      responses:
+        '200': {description: Permission descriptors, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AuthzPermission'}}}}}
+        '403': {description: Permission denied}
+components:
+  schemas:
+    AuthzPermission:
+      type: object
+      required: [key, group, description, risk, grantable_at, agent_grantable]
+      properties:
+        key: {type: string}
+        group: {type: string}
+        description: {type: string}
+        risk: {type: string, enum: [low, medium, high]}
+        grantable_at: {type: array, items: {type: string, enum: [workspace, project]}}
+        agent_grantable: {type: boolean, description: A key may carry this permission. The scope picker is built from this flag.}
+        owner_workstation_grantable: {type: boolean, description: A specifically marked owner workstation key may carry this permission within its live role and creator ceilings.}

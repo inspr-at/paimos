@@ -1,0 +1,339 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /aithema/ledger/sessions/{sid}/admit:
+    post:
+      operationId: aithemaLedgerAdmitPost
+      summary: Aithema ledger admit
+      description: Requires the exact aithema.ledger capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached.
+      security: [{aithemaDelegated: []}]
+      parameters:
+        - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AithemaBudgetDocument"}
+      responses:
+        "200":
+          description: Authoritative result. Journal and admission retries return their original result; claims are single-use; recovery is idempotent.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaBudgetDocument"}
+        "400":
+          description: Malformed or invalid contract, query, or snapshot context
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "401":
+          description: Missing, invalid or expired delegated token
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "403":
+          description: Capability or scope authorization refused
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "404":
+          description: Unknown session, hold or claim
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "409":
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "413":
+          description: Encoded request exceeds 1 MiB
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "422":
+          description: Contract requires a newer reader
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "503":
+          description: Host storage or signing keys unavailable
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "402":
+          description: budget_denied; original admit_response is included as document
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+  /aithema/ledger/sessions/{sid}/claim:
+    post:
+      operationId: aithemaLedgerClaimPost
+      summary: Aithema ledger claim
+      description: Requires the exact aithema.ledger capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached. Dispatch requires a committed budget.hold journal record matching the session, worker generation, hold_id, attempt_id, lane, maximum, currency and lane_kind; absent acknowledgement returns 409 hold_not_journaled.
+      security: [{aithemaDelegated: []}]
+      parameters:
+        - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AithemaBudgetDocument"}
+      responses:
+        "200":
+          description: Authoritative result. Journal and admission retries return their original result; claims are single-use; recovery is idempotent.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaBudgetDocument"}
+        "400":
+          description: Malformed or invalid contract, query, or snapshot context
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "401":
+          description: Missing, invalid or expired delegated token
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "403":
+          description: Capability or scope authorization refused
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "404":
+          description: Unknown session, hold or claim
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "409":
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "413":
+          description: Encoded request exceeds 1 MiB
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "422":
+          description: Contract requires a newer reader
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "503":
+          description: Host storage or signing keys unavailable
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "402":
+          description: budget_denied; original admit_response is included as document
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+  /aithema/ledger/sessions/{sid}/holds:
+    get:
+      operationId: aithemaLedgerHoldsGet
+      summary: Aithema ledger holds
+      description: Requires the exact aithema.ledger capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached.
+      security: [{aithemaDelegated: []}]
+      parameters:
+        - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: state, in: query, required: true, schema: {type: string, const: open}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000, default: 1000}}
+        - {name: cursor, in: query, schema: {type: string}, description: Opaque session-bound keyset cursor. Recover each page and drain until next_cursor is null.}
+      responses:
+        "200":
+          description: Authoritative result. Journal and admission retries return their original result; claims are single-use; recovery is idempotent.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaBudgetDocument"}
+        "400":
+          description: Malformed or invalid contract, query, or snapshot context
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "401":
+          description: Missing, invalid or expired delegated token
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "403":
+          description: Capability or scope authorization refused
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "404":
+          description: Unknown session, hold or claim
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "409":
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "413":
+          description: Encoded request exceeds 1 MiB
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "422":
+          description: Contract requires a newer reader
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "503":
+          description: Host storage or signing keys unavailable
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "402":
+          description: budget_denied; original admit_response is included as document
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+  /aithema/ledger/sessions/{sid}/recover:
+    post:
+      operationId: aithemaLedgerRecoverPost
+      summary: Aithema ledger recover
+      description: Requires the exact aithema.ledger capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached.
+      security: [{aithemaDelegated: []}]
+      parameters:
+        - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AithemaBudgetDocument"}
+      responses:
+        "200":
+          description: Authoritative result. Journal and admission retries return their original result; claims are single-use; recovery is idempotent.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaBudgetDocument"}
+        "400":
+          description: Malformed or invalid contract, query, or snapshot context
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "401":
+          description: Missing, invalid or expired delegated token
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "403":
+          description: Capability or scope authorization refused
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "404":
+          description: Unknown session, hold or claim
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "409":
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "413":
+          description: Encoded request exceeds 1 MiB
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "422":
+          description: Contract requires a newer reader
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "503":
+          description: Host storage or signing keys unavailable
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "402":
+          description: budget_denied; original admit_response is included as document
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+  /aithema/ledger/sessions/{sid}/settle:
+    post:
+      operationId: aithemaLedgerSettlePost
+      summary: Aithema ledger settle
+      description: Requires the exact aithema.ledger capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; project and committed claim ownership are required. The token generation and epoch must match the claim (403 otherwise); its owner may settle after takeover, epoch change or purge, closing an open claim as unknown charged at maximum. A closed hold returns its recorded result. Exact settlement retries return that result; different bytes conflict when a settlement already committed. Responses are uncached.
+      security: [{aithemaDelegated: []}]
+      parameters:
+        - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AithemaBudgetDocument"}
+      responses:
+        "200":
+          description: Authoritative result. Journal and admission retries return their original result; claims are single-use; recovery is idempotent.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaBudgetDocument"}
+        "400":
+          description: Malformed or invalid contract, query, or snapshot context
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "401":
+          description: Missing, invalid or expired delegated token
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "403":
+          description: Capability or scope authorization refused
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "404":
+          description: Unknown session, hold or claim
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "409":
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "413":
+          description: Encoded request exceeds 1 MiB
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "422":
+          description: Contract requires a newer reader
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "503":
+          description: Host storage or signing keys unavailable
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "402":
+          description: budget_denied; original admit_response is included as document
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+components:
+  schemas:
+    AithemaBudgetDocument:
+      $ref: ../internal/aithema/journal/contracts/budget.schema.json#/$defs/message

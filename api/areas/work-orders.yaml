@@ -1,0 +1,154 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /work-orders:
+    get:
+      operationId: listWorkOrders
+      security: *auth
+      parameters: [{$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/Cursor'}]
+      responses:
+        '200': {description: Work order page, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/WorkOrder'}}}}}
+    post:
+      operationId: createWorkOrder
+      description: Atomically create a work_order node, typed work order, criteria and event. Budgets are hard ceilings across all its runs.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkOrderCreate'}}}}
+      responses:
+        '201': {description: Work order, content: {application/json: {schema: {$ref: '#/components/schemas/WorkOrder'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /work-orders/{workOrderId}:
+    get:
+      operationId: getWorkOrder
+      security: *auth
+      parameters: [{name: workOrderId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Work order, content: {application/json: {schema: {$ref: '#/components/schemas/WorkOrder'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    patch:
+      operationId: updateWorkOrder
+      description: Update assignment, status or budget with a matching revision; done requires checked criteria and evidence.
+      security: *auth
+      parameters: [{name: workOrderId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkOrderPatch'}}}}
+      responses:
+        '200': {description: Work order, content: {application/json: {schema: {$ref: '#/components/schemas/WorkOrder'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /work-orders/{workOrderId}/criteria/{criterionId}/check:
+    post:
+      operationId: checkWorkCriterion
+      description: Check or uncheck one acceptance criterion and append an event.
+      security: *auth
+      parameters:
+        - {name: workOrderId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: criterionId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [checked], properties: {checked: {type: boolean}}}}}}
+      responses:
+        '200': {description: Criterion, content: {application/json: {schema: {$ref: '#/components/schemas/WorkCriterion'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /work-orders/{workOrderId}/evidence:
+    post:
+      operationId: addWorkEvidence
+      security: *auth
+      parameters: [{name: workOrderId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkEvidenceWrite'}}}}
+      responses:
+        '201': {description: Evidence, content: {application/json: {schema: {$ref: '#/components/schemas/WorkEvidence'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /work-orders/{workOrderId}/runs:
+    post:
+      operationId: createAgentRun
+      description: Create a queued run against the remaining work-order budget. The agent daemon later claims it with a fenced generation.
+      security: *auth
+      parameters: [{name: workOrderId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunCreate'}}}}
+      responses:
+        '201': {description: Run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    RunCreate:
+      type: object
+      required: [agent_principal_id, model_profile_id]
+      properties:
+        capacity_override: {type: string, enum: [now], description: 'Person only. Skip the schedule and reserve for this run; never approval, vendor truth, sign-in, freshness or concurrency.'}
+        agent_principal_id: {type: string, format: uuid}
+        model_profile_id: {type: string, format: uuid}
+        requested_account_id:
+          type: [string, 'null']
+          format: uuid
+          description: Optional strict account choice. Must belong to the selected agent, match the model harness and allow the selected model profile. The daemon still reserves allowance and claims; an unavailable chosen account leaves the run queued without fallback. Omit or null for automatic routing.
+        recovery_brief: {type: string, maxLength: 20000, description: Last recorded handover for a person-requested restart; task context only}
+        recovery_service_tier: {type: string, enum: [default, fast, fastest]}
+        recovery_display_label: {type: [string, 'null']}
+        retry_of_run_id:
+          type: [string, 'null']
+          format: uuid
+          description: Optional earlier run of the same work order and agent. A different order, agent, or unknown run is rejected.
+    WorkCriterion:
+      type: object
+      required: [id, position, description, checked_at]
+      properties:
+        id: {type: string, format: uuid}
+        position: {type: integer, minimum: 0}
+        description: {type: string, minLength: 1}
+        checked_at: {type: [string, 'null'], format: date-time}
+        checked_by_principal_id: {type: [string, 'null'], format: uuid}
+    WorkEvidence:
+      allOf:
+        - {$ref: '#/components/schemas/WorkEvidenceWrite'}
+        - type: object
+          required: [id, work_order_id, submitted_by_principal_id, created_at]
+          properties:
+            id: {type: string, format: uuid}
+            work_order_id: {type: string, format: uuid}
+            submitted_by_principal_id: {type: string, format: uuid}
+            created_at: {type: string, format: date-time}
+    WorkEvidenceWrite:
+      type: object
+      required: [kind, reference]
+      properties:
+        kind: {type: string, enum: [url, node, text]}
+        reference: {type: string, minLength: 1}
+        criterion_id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+    WorkOrder:
+      type: object
+      required: [node_id, status, revision, criteria, created_at, updated_at]
+      properties:
+        node_id: {type: string, format: uuid}
+        kind: {type: string, enum: [build, review]}
+        review: {$ref: '#/components/schemas/ReviewBinding'}
+        status: {type: string, enum: [draft, ready, running, blocked, done, cancelled]}
+        revision: {type: integer, format: int64}
+        requested_by_principal_id: {type: string, format: uuid}
+        assignee_principal_id: {type: [string, 'null'], format: uuid}
+        max_cost_micros: {type: [integer, 'null'], format: int64}
+        max_duration_seconds: {type: [integer, 'null'], format: int64}
+        criteria: {type: array, items: {$ref: '#/components/schemas/WorkCriterion'}}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    WorkOrderCreate:
+      type: object
+      required: [title, criteria]
+      properties:
+        title: {type: string, minLength: 1}
+        body: {type: string}
+        parent_id: {type: string, format: uuid}
+        assignee_principal_id: {type: string, format: uuid}
+        max_cost_micros: {type: integer, format: int64, minimum: 0}
+        max_duration_seconds: {type: integer, format: int64, minimum: 1}
+        criteria: {type: array, minItems: 1, items: {type: string, minLength: 1}}
+    WorkOrderPatch:
+      type: object
+      required: [expected_revision]
+      properties:
+        expected_revision: {type: integer, format: int64, minimum: 1}
+        status: {type: string, enum: [draft, ready, running, blocked, done, cancelled]}
+        assignee_principal_id: {type: [string, 'null'], format: uuid}
+        max_cost_micros: {type: [integer, 'null'], format: int64, minimum: 0}
+        max_duration_seconds: {type: [integer, 'null'], format: int64, minimum: 1}
