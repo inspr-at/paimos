@@ -30,7 +30,7 @@ function menuKeys(event: KeyboardEvent) {
       <div class="off-body">
         <label v-if="group.editable" class="also"><input v-model="also" type="checkbox" :disabled="loading" /><span>{{ words(`Also dismiss the ${group.editable} flags waiting in ${name}`, `Auch die ${group.editable} Markierungen verwerfen, die in ${name} warten`) }}</span></label>
         <p>{{ words(`${name} stops getting new flags and automatic moves, from every rule, not only triage.`, `${name} bekommt keine neuen Markierungen und keine automatischen Änderungen mehr, von keiner Regel, nicht nur Triage.`) }}</p>
-        <p class="foot">{{ words('The same switch as Settings › Autopilot › Project overrides.', 'Derselbe Schalter wie Einstellungen › Autopilot › Projekt-Ausnahmen.') }}</p>
+        <p class="foot">{{ words('The same switch as', 'Derselbe Schalter wie') }} <span class="settings-path"><span>{{ words('Settings', 'Einstellungen') }}</span><AppIcon name="chevron-right" :size="11" /><span>Autopilot</span><AppIcon name="chevron-right" :size="11" /><span>{{ words('Project overrides', 'Projekt-Ausnahmen') }}</span>.</span></p>
         <p v-if="error" role="alert">{{ error }}</p>
       </div>
     </section>
@@ -60,6 +60,7 @@ h3 { font-size: 15px; overflow-wrap: anywhere; } .off-actions { display: flex; f
 .off-actions .btn.primary { box-shadow: none; }
 .off-body { min-height: 0; overflow: auto; } .also { display: flex; align-items: center; gap: 10px; min-height: 44px; padding-block: 8px; cursor: pointer; font-size: 13px; } .also input { flex: none; accent-color: var(--teal); }
 p { font-size: 13px; color: var(--ink-2); line-height: 1.5; margin: 8px 0; } .foot { font-size: 12px; color: var(--ink-3); }
+.settings-path { white-space: normal; } .settings-path svg { display: inline-block; margin: 0 3px; vertical-align: -1px; color: var(--ink-3); }
 [role=alert] { color: var(--danger); overflow-wrap: anywhere; }
 .phone { height: 100%; max-height: 100%; padding: 12px; } .phone .off-body { flex: 1; } .phone .off-actions { order: 2; border-top: 1px solid var(--line); padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
 @media (max-width: 600px), (pointer: coarse) { .off-actions .btn { min-height: 44px; } }

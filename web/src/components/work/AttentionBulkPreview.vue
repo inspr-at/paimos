@@ -44,7 +44,7 @@ watch(count, value => {
             <span class="move-label"><template v-if="move.to !== 'release'"><StatusIcon :state="move.from" :size="13" /><span>{{ stateLabel(move.from) }}</span><AppIcon name="arrow" :size="12" /><StatusIcon :state="move.to" :size="13" /><span>{{ stateLabel(move.to) }}</span></template><template v-else><AppIcon name="box" :size="13" /><span>{{ words(`Add to ${move.release_title || move.release_id}`, `Zu ${move.release_title || move.release_id} hinzufügen`) }}</span></template></span><b>{{ move.count }}</b>
           </label>
         </div>
-        <details v-if="skipped" class="skips"><summary>{{ words(`Skipped ${skipped}: why`, `${skipped} übersprungen: warum`) }}</summary><ul><li v-for="skip in preview.skipped" :key="skip.reason"><span class="keys">{{ skip.sample_keys.join(', ') }}</span> · {{ skip.count }} · {{ skip.reason }}</li></ul></details>
+        <details v-if="skipped" class="skips"><summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />{{ words(`Skipped ${skipped}: why`, `${skipped} übersprungen: warum`) }}</summary><ul><li v-for="skip in preview.skipped" :key="skip.reason"><span class="keys">{{ skip.sample_keys.join(', ') }}</span> · {{ skip.count }} · {{ skip.reason }}</li></ul></details>
         <p class="foot">{{ words('Undo stays available for 10 seconds; each ticket’s Activity keeps the record.', 'Rückgängig geht 10 Sekunden lang; die Aktivität jedes Tickets hält es fest.') }}</p>
       </div>
     </section>
@@ -65,7 +65,7 @@ h3 { display: flex; align-items: baseline; gap: 8px; font-size: 15px; overflow-w
 .move-label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; overflow-wrap: anywhere; } .move-label svg { flex: none; }
 .move b { font: 600 12px/1 var(--mono); } .excluded { color: var(--ink-3); }
 .skips { margin-top: 10px; border-block: 1px solid var(--line); font-size: 12px; color: var(--ink-2); }
-.skips summary { padding: 10px 0; cursor: pointer; } .skips ul { margin: 0; padding: 4px 0 12px 18px; line-height: 1.6; overflow-wrap: anywhere; } .keys { font-family: var(--mono); }
+.skips summary { display: flex; align-items: center; gap: 6px; width: 100%; padding: 10px 0; cursor: pointer; } .skips ul { margin: 0; padding: 4px 0 12px 18px; line-height: 1.6; overflow-wrap: anywhere; } .keys { font-family: var(--mono); }
 .foot, .limit { margin-top: 12px; color: var(--ink-3); font-size: 12px; line-height: 1.5; }
 .phone { height: 100%; max-height: 100%; padding: 12px; } .phone .preview-body { flex: 1; } .phone .preview-actions { order: 2; border-top: 1px solid var(--line); padding-bottom: calc(10px + env(safe-area-inset-bottom)); } .phone header { padding-bottom: 12px; }
 @media (max-width: 600px), (pointer: coarse) { .preview-actions .btn, .skips summary { min-height: 44px; } }

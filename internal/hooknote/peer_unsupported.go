@@ -5,8 +5,8 @@ package hooknote
 
 import "net"
 
-// Snapshot and Observe fail closed where the kernel peer calls this feature
+// snapshot and observe fail closed where the kernel peer calls this feature
 // requires are not implemented. A missing check is not a successful match.
-func Snapshot(net.Conn) (Process, error) { return Process{}, ErrPeer }
+func snapshot(net.Conn, bool) (Process, error) { return Process{}, ErrPeer }
 
 func observe(int, bool) (Process, error) { return Process{}, ErrPeer }
