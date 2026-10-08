@@ -136,4 +136,33 @@ func TestRankedBoardExpertSituationThinking(t *testing.T) {
 	if first.Source != "own" || first.Rank[0] != "anthropic:opus" {
 		t.Fatalf("workspace template concealed its column order: %+v", first)
 	}
+	t.Run("missing column situation follows Other First build", func(t *testing.T) {
+		s := rankedFixture()
+		s.Orders = []BoardOrder{
+			{ProfileID: "person", Column: "other", Situation: "first", Rank: []string{"openai:sol", "anthropic:opus"}, Not: []string{"anthropic:sonnet"}},
+			{ProfileID: "person", Column: "other", Situation: "fix", Rank: []string{"anthropic:opus", "openai:sol"}, Not: []string{"openai:sol"}},
+		}
+		first := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "first"}, nil)
+		fix := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "fix"}, nil)
+		if !fix.FollowsFirst || fix.Source != "follows" || !reflect.DeepEqual(fix.Rank, first.Rank) || !reflect.DeepEqual(fix.Not, first.Not) {
+			t.Fatalf("Other fix leaked into missing backend situation: first=%+v fix=%+v", first, fix)
+		}
+	})
+	t.Run("person without situation follows workspace First build", func(t *testing.T) {
+		s := rankedFixture()
+		s.Orders = []BoardOrder{
+			{ProfileID: "workspace", Column: "backend", Situation: "first", Rank: []string{"openai:sol", "anthropic:opus"}},
+			{ProfileID: "workspace", Column: "backend", Situation: "fix", Rank: []string{"anthropic:opus", "openai:sol"}},
+		}
+		first := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "first"}, nil)
+		fix := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "fix"}, nil)
+		if !fix.FollowsFirst || !reflect.DeepEqual(fix.Rank, first.Rank) {
+			t.Fatalf("workspace fix replaced person's First build: first=%+v fix=%+v", first, fix)
+		}
+		s.Person = nil
+		workspaceFix := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "fix"}, nil)
+		if workspaceFix.FollowsFirst || workspaceFix.Rank[0] != "anthropic:opus" {
+			t.Fatalf("workspace's explicit situation was ignored: %+v", workspaceFix)
+		}
+	})
 }

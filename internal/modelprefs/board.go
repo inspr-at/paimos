@@ -264,16 +264,25 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 	order, source, found := BoardOrder{}, "", false
 	if s.Person != nil {
 		chosen = *s.Person
-		order, source, found = profileOrder(s, chosen, d.Column, d.Situation)
-	} else {
-		order, source, found = profileOrder(s, chosen, d.Column, d.Situation)
 	}
+	rankSituation := d.Situation
+	if rankSituation != "first" {
+		// A missing situation follows this profile's complete First build
+		// resolution, including its template or the workspace First build.
+		if exact, ok := boardOrder(s, chosen, d.Column, rankSituation); !ok || exact.Rank == nil {
+			rankSituation = "first"
+		}
+	}
+	order, source, found = profileOrder(s, chosen, d.Column, rankSituation)
 	if !found && chosen.Template == nil {
 		chosen = s.Workspace
-		order, source, found = profileOrder(s, chosen, d.Column, d.Situation)
+		order, source, found = profileOrder(s, chosen, d.Column, rankSituation)
 		if source == "own" {
 			source = "default"
 		}
+	}
+	if found && rankSituation != d.Situation {
+		source = "follows"
 	}
 	if found {
 		d.Rank = slices.Clone(order.Rank)
@@ -320,7 +329,7 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 		}
 	}
 	for _, p := range profiles {
-		if o, _, ok := profileOrder(s, p, d.Column, d.Situation); ok {
+		if o, _, ok := profileOrder(s, p, d.Column, rankSituation); ok {
 			for _, id := range o.Not {
 				if !slices.Contains(d.Not, id) {
 					d.Not = append(d.Not, id)

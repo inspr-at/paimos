@@ -127,7 +127,11 @@ test('limits save current revisions and update situation definitions without mov
 
 for (const identity of ['member', 'agent']) test(`${identity} reads kinds and situations with write controls absent`, async ({ page }) => {
   const data = await open(page, { member: identity === 'member', agent: identity === 'agent' })
-  await expect(page.locator('#k-kinds button')).toHaveCount(0); await expect(page.locator('#k-kinds a')).toHaveCount(0); await expect(page.locator('#k-sits input')).toHaveCount(0)
+  await expect(page.locator('#k-kinds button')).toHaveCount(0)
+  await expect(page.locator('#k-kinds a')).toHaveCount(1)
+  await expect(page.locator('#k-kinds a')).toHaveAttribute('href', '/settings/models')
+  await expect(page.locator('#k-kinds a')).toHaveText('Open Models')
+  await expect(page.locator('#k-sits input')).toHaveCount(0)
   await expect(page.locator('.kinds-section .who')).toContainText('you can read them')
   expect(data.writes).toHaveLength(0)
 })
