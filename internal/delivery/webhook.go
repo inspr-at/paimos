@@ -171,7 +171,7 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
-	release, err := m.observationLock(ctx)
+	ctx, release, err := m.observationLock(ctx)
 	if err != nil {
 		w.WriteHeader(502)
 		return

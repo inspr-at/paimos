@@ -85,6 +85,7 @@ func (m *Module) reportStatusLane(ctx context.Context, refresh bool) {
 		return
 	}
 	defer conn.Release()
+	ctx = db.WithConnection(ctx, m.pool, conn)
 	var locked bool
 	if conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1,0))`, reporterLane(refresh)).Scan(&locked) != nil || !locked {
 		return
@@ -202,6 +203,7 @@ func (m *Module) reportTenantStatuses(ctx context.Context, conn *pgxpool.Conn, t
 // Re-read after the lock: a queued snapshot must not revive a revoked status.
 // Session locks span network I/O, but transactions and row locks never do.
 func (m *Module) publishReview(ctx context.Context, conn *pgxpool.Conn, tid string, snapshot Review, changed *pullChange) error {
+	ctx = db.WithConnection(ctx, m.pool, conn)
 	key := "aeon-review-head:" + tid + ":" + snapshot.Repository + ":" + snapshot.HeadSHA
 	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1,0))`, key); err != nil {
 		return err

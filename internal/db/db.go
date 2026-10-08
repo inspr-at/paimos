@@ -26,7 +26,7 @@ const TenantSetting = "aeon.tenant_id"
 // 350 ms /api/projects query that runs in 26 ms without it. A URL that sets
 // jit itself (options=-c jit=on) keeps its choice.
 func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
-	cfg, err := pgxpool.ParseConfig(url)
+	cfg, err := ParsePoolConfig(url)
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
@@ -83,7 +83,7 @@ func inTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, options 
 	if parent, ok := ctx.Value(transactionContextKey{}).(pgx.Tx); ok {
 		tx, err = parent.Begin(ctx)
 	} else {
-		tx, err = pool.BeginTx(ctx, options)
+		tx, err = beginTx(ctx, pool, options)
 	}
 	if err != nil {
 		return err
@@ -191,7 +191,7 @@ func HasTransaction(ctx context.Context) bool {
 // tenant operation still enters its own savepoint and sets its RLS context.
 // Callers must pass the supplied context to every operation in the unit.
 func InTransaction(ctx context.Context, pool *pgxpool.Pool, fn func(context.Context) error) error {
-	tx, err := pool.Begin(ctx)
+	tx, err := beginTx(ctx, pool, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}

@@ -70,6 +70,7 @@ func TagOnce(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 		return 0, err
 	}
 	defer conn.Release()
+	ctx = db.WithConnection(ctx, pool, conn)
 	var locked bool
 	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, taggerLockKey).Scan(&locked); err != nil || !locked {
 		return 0, err
@@ -81,7 +82,7 @@ func TagOnce(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 			_ = conn.Conn().Close(unlockCtx)
 		}
 	}()
-	rows, err := pool.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	rows, err := conn.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
 	if err != nil {
 		return 0, err
 	}
