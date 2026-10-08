@@ -2436,6 +2436,16 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
   /attachments/{id}:
     parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    get:
+      operationId: getAttachment
+      description: 'Read live attachment metadata by ID with attachments.read and current node/project visibility.'
+      security: *auth
+      responses:
+        '200': {description: 'Tenant-scoped attachment metadata', content: {application/json: {schema: {$ref: '#/components/schemas/Attachment'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
     patch:
       operationId: updateAttachment
       description: Tenant staff people only. Optional If-Unmodified-Since compares the exact updated_at timestamp under row lock; stale writes return 412.

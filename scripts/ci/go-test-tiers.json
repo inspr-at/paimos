@@ -3926,6 +3926,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestAttachedAcceptanceRejectsUndeliverableHookOutput","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestAttachmentGetCLIEndToEnd","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestAuthLoginDoesNotEchoKey","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestAuthLoginRejectsKey","tier":"GATED-FULL"}
@@ -5805,6 +5807,8 @@
     {"kind":"go","package":"internal/hooknote","name":"TestConflictingGrantRetiresTheOfferedEpoch","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/hooknote","name":"TestConsentWithdrawalAfterFetchPreventsDisclosure","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestDialRootDaemonPreservesPeerChecks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/hooknote","name":"TestExpiredOfferProducesNoOutput","tier":"GATED-FULL"}
     ,
