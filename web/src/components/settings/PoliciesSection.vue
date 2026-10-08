@@ -9,10 +9,8 @@ import { createPoliciesReader, deniedPolicy, ELSEWHERE_RULES, keyLimits, ownerLi
 import AppIcon from '../AppIcon.vue'
 import CrossFamilyReviewCard from './CrossFamilyReviewCard.vue'
 import PolicyLadderEditor from './PolicyLadderEditor.vue'
-import PolicyPreferencesEditor from './PolicyPreferencesEditor.vue'
 
 const session = useSession()
-const modelView = ref<'ladder' | 'preferences'>('ladder')
 const tab = ref<PolicyTab>('ladders'), role = ref<PolicyRole>('review-gate')
 const reader = createPoliciesReader(() => scopeOwner(session.identity))
 const { state, ladder, registry } = reader
@@ -23,7 +21,7 @@ const groups = computed(() => keyLimits(registry.value))
 const roleDetail = computed(() => POLICY_ROLES.find(item => item.id === role.value)!.detail)
 const sheet = ref<HTMLDialogElement | null>(null), detailsButton = ref<HTMLButtonElement | null>(null)
 const ready = computed(() => tab.value === 'elsewhere' || permissionsKnown())
-const statusText = computed(() => state.value === 'loading' ? 'Loading the rules…' : state.value === 'denied' ? tab.value === 'ladders' && modelView.value === 'preferences' ? 'To edit model preferences here, you also need workspace model visibility.' : deniedPolicy(tab.value) : state.value === 'failed' ? 'The rules could not be loaded. Try opening this tab again; the other tabs still work.' : ladder.value?.truncated ? truncatedLadder() : '')
+const statusText = computed(() => state.value === 'loading' ? 'Loading the rules…' : state.value === 'denied' ? deniedPolicy(tab.value) : state.value === 'failed' ? 'The rules could not be loaded. Try opening this tab again; the other tabs still work.' : ladder.value?.truncated ? truncatedLadder() : '')
 const announcement = ref('')
 // Populate the already-mounted region, including the first loading message.
 watch(statusText, async () => { await nextTick(); announcement.value = statusText.value }, { immediate: true })
@@ -33,12 +31,11 @@ function load() {
   sheet.value?.close()
   if (!ready.value) { reader.reset(); return }
   if (tab.value !== 'elsewhere' && !permissionsAvailable()) { reader.reset(); state.value = 'failed'; return }
-  if (tab.value === 'ladders' && modelView.value === 'preferences') { reader.reset(); state.value = permitted.value ? 'loaded' : 'denied'; return }
   void reader.load(tab.value, role.value, permitted.value)
 }
 // Compare each authority/source value, rather than a newly allocated tuple on
 // every permission-cache revision (including unchanged focus answers).
-watch([() => scopeOwner(session.identity), tab, modelView, role, ready, permitted, permissionsAvailable], load, { immediate: true, flush: 'sync' })
+watch([() => scopeOwner(session.identity), tab, role, ready, permitted, permissionsAvailable], load, { immediate: true, flush: 'sync' })
 const stopAccess = onAccessChange(change => {
   // Same-person refresh belongs to the mounted editor. Resetting the parent
   // would unmount it and discard its captured draft, write and confirmed Undo.
@@ -75,8 +72,8 @@ function tabKey(event: KeyboardEvent, index: number) {
       <div v-if="permitted" class="policy-controls">
         <p class="source-note">{{ tab === 'ladders' ? 'Saved job order and model preferences · owned by their model sources.' : tab === 'keys' ? 'Permission registry · owned by Access. These permissions cannot be carried by agent keys.' : 'Existing owners · this page holds no policy values of its own.' }}</p>
         <button ref="detailsButton" class="detail-link" data-testid="policies-row-link" @click="openDetails">About these rules <AppIcon name="chevron-right" :size="14" /></button>
-        <div v-if="tab === 'ladders'" class="model-views" role="group" aria-label="Model policy view"><button :aria-pressed="modelView === 'ladder'" @click="modelView = 'ladder'">Saved job order</button><button :aria-pressed="modelView === 'preferences'" @click="modelView = 'preferences'">Model preferences</button></div>
-        <div v-if="tab === 'ladders' && modelView === 'ladder'" class="role-block">
+        <nav v-if="tab === 'ladders'" class="owner-links"><RouterLink to="/settings/models?layer=rules">Model rules moved · Open Models <AppIcon name="chevron-right" :size="12" /></RouterLink></nav>
+        <div v-if="tab === 'ladders'" class="role-block">
           <div class="policy-roles" role="group" aria-label="Model role" data-testid="policies-role-group">
             <button v-for="item in POLICY_ROLES" :key="item.id" data-testid="policies-role" :aria-pressed="role === item.id" @click="role = item.id">{{ item.label }}</button>
           </div>
@@ -89,8 +86,7 @@ function tabKey(event: KeyboardEvent, index: number) {
       <div class="policy-content" :aria-busy="state === 'loading'">
         <p v-if="state === 'loading' || state === 'denied' || state === 'failed'" class="state-line">{{ statusText }}</p>
         <template v-else-if="tab === 'ladders'">
-          <PolicyLadderEditor v-if="modelView === 'ladder'" :key="`${scopeOwner(session.identity)}/${role}`" :owner="scopeOwner(session.identity)" :role="role" :person="person" />
-          <PolicyPreferencesEditor v-else :key="scopeOwner(session.identity)" :owner="scopeOwner(session.identity)" :person="person" />
+          <PolicyLadderEditor :key="`${scopeOwner(session.identity)}/${role}`" :owner="scopeOwner(session.identity)" :role="role" :person="person" />
         </template>
         <template v-else-if="tab === 'keys'">
           <section v-for="group in groups" :key="group.risk" class="risk-group" :aria-label="`${group.risk} risk permissions`">
@@ -103,7 +99,7 @@ function tabKey(event: KeyboardEvent, index: number) {
         </template>
         <div v-else class="elsewhere-rows">
           <article v-for="rule in ELSEWHERE_RULES" :key="rule.title" class="policy-row key-row">
-            <div><h3>{{ rule.title }}</h3><p>{{ rule.text }}</p><small class="owner">Owner: {{ rule.owner }}</small><button v-if="rule.title === 'Model preferences' || rule.title === 'Review ladder editing'" class="detail-link" @click="modelView = rule.title === 'Model preferences' ? 'preferences' : 'ladder'; tab = 'ladders'">Open here <AppIcon name="chevron-right" :size="12" /></button></div><span class="rule-status">{{ rule.status }}</span>
+            <div><h3>{{ rule.title }}</h3><p>{{ rule.text }}</p><small class="owner">Owner: {{ rule.owner }}</small><RouterLink v-if="rule.title === 'Model preferences'" class="detail-link" to="/settings/models?layer=rules">Open Models <AppIcon name="chevron-right" :size="12" /></RouterLink><button v-else-if="rule.title === 'Review ladder editing'" class="detail-link" @click="tab = 'ladders'">Open here <AppIcon name="chevron-right" :size="12" /></button></div><span class="rule-status">{{ rule.status }}</span>
           </article>
         </div>
       </div>
