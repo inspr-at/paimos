@@ -882,6 +882,8 @@
     ,
     "browser:tests/work-kinds.spec.ts:New kind opens the same form at the end of the list and creates once"
     ,
+    "browser:tests/work-kinds.spec.ts:a limit conflict offers Reload and the next save uses the refreshed revision"
+    ,
     "browser:tests/work-kinds.spec.ts:a rejected limit returns to the stored value and says why"
     ,
     "browser:tests/work-kinds.spec.ts:agent reads kinds with write controls absent"
@@ -11957,6 +11959,8 @@
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"Enter edits a focused row; Esc leaves the field, the next Esc cancels and returns focus to the row","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"New kind opens the same form at the end of the list and creates once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"a limit conflict offers Reload and the next save uses the refreshed revision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"a rejected limit returns to the stored value and says why","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

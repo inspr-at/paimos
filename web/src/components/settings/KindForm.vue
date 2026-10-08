@@ -51,16 +51,17 @@ onMounted(async () => {
         <label class="kf-f">{{ t('name') }}<input v-model="draft.label" class="field" name="label" maxlength="40" required :readonly="!!kind?.system" :placeholder="t('namePlaceholder')"></label>
         <label class="kf-f">{{ t('sentenceLabel') }}<small>{{ t('sentenceAsk') }}</small><input v-model="draft.hint" class="field" name="hint" maxlength="120" required :placeholder="t('sentencePlaceholder')"></label>
         <button type="button" class="kf-more" :aria-expanded="more" :aria-controls="moreId" @click="more = !more"><AppIcon name="chevron-right" :size="14" />{{ t('moreOptions') }} <span class="faint">{{ t('moreOptionsHint') }}</span></button>
-        <div v-show="more" :id="moreId" class="kf-adv">
-          <label class="kf-f">{{ t('examplesLabel') }}<small>{{ t('examplesUpTo') }}</small><textarea v-model="draft.examples" class="field" name="examples" rows="3" maxlength="362" /></label>
-          <div class="kf-2">
-            <label class="kf-f">{{ t('area') }}<small>{{ areaNote }}</small><input class="field" name="area" :value="kind?.slug ?? t('generatedArea')" readonly></label>
-            <label class="kf-f">{{ t('labels') }}<small>{{ t('labelsHint') }}</small><input v-model="draft.labels" class="field" name="labels" maxlength="1598"></label>
-          </div>
-        </div>
       </fieldset>
       <div class="kf-acts"><button class="btn ghost" type="button" @click="emit('close')">{{ t('cancel') }}<KeyCap k="Esc" /></button><button class="btn primary" type="submit" :disabled="busy || !editable">{{ kind ? t('save') : t('create') }} <KeyCap k="mod" /><KeyCap k="enter" /></button></div>
       <p v-if="error" class="feedback" role="alert">{{ error }}</p>
+      <!-- Examples grow below the actions. Above them, opening More options moves Save and Cancel (AEON-541). -->
+      <fieldset v-show="more" :id="moreId" class="kf-adv" :disabled="busy || !editable">
+        <label class="kf-f">{{ t('examplesLabel') }}<small>{{ t('examplesUpTo') }}</small><textarea v-model="draft.examples" class="field" name="examples" rows="3" maxlength="362" /></label>
+        <div class="kf-2">
+          <label class="kf-f">{{ t('area') }}<small>{{ areaNote }}</small><input class="field" name="area" :value="kind?.slug ?? t('generatedArea')" readonly></label>
+          <label class="kf-f">{{ t('labels') }}<small>{{ t('labelsHint') }}</small><input v-model="draft.labels" class="field" name="labels" maxlength="1598"></label>
+        </div>
+      </fieldset>
     </form>
   </li>
 </template>

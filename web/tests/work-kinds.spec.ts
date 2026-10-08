@@ -65,7 +65,8 @@ async function open(page: Page, options: { member?: boolean; agent?: boolean; fa
   await page.route('**/api/model-preferences/situations', route => {
     if (route.request().method() === 'PUT') {
       const body = route.request().postDataJSON(); data.writes.push({ path: '/api/model-preferences/situations', method: 'PUT', body })
-      if (data.fail) return route.fulfill({ status: 409, json: { error: 'stale_revision' } })
+      // A write for an older revision conflicts and leaves the server copy alone.
+      if (data.fail || body.revision !== data.limits.revision) return route.fulfill({ status: 409, json: { error: 'stale_revision' } })
       Object.assign(data.limits, body, { revision: data.limits.revision + 1 })
     }
     return route.fulfill({ json: data.limits })
@@ -177,11 +178,20 @@ test('invalid and failed saves keep the draft and the controls still', async ({ 
   const frontend = form(page, 'Frontend build'), more = frontend.getByRole('button', { name: /^More options/ })
   const save = frontend.getByRole('button', { name: /^Save/ }), cancel = frontend.getByRole('button', { name: /^Cancel/ })
   const name = frontend.locator('[name="label"]'), hint = frontend.locator('[name="hint"]')
-  // Typing and opening More options never move the fields or the toggle.
-  await expectStableControls({ controls: { name, hint, more, above: row(page, 'design') }, interactions: [
+  // Save and Cancel stay put while More options grows, shrinks and the examples field is resized.
+  await expectStableControls({ controls: { name, hint, more, save, cancel, above: row(page, 'design') }, interactions: [
     { name: 'typing a long sentence', run: async () => { await hint.fill('A long and careful sentence that a newcomer and an agent can both follow without asking anyone for help.') } },
     { name: 'opening More options', run: async () => { await more.click(); await expect(frontend.locator('[name="examples"]')).toBeVisible() } },
+    { name: 'resizing the examples field', run: async () => {
+      const examples = frontend.locator('[name="examples"]')
+      const before = (await examples.boundingBox())!.height
+      await examples.evaluate((el: HTMLTextAreaElement) => { el.style.height = `${el.getBoundingClientRect().height + 48}px` })
+      await expect.poll(async () => (await examples.boundingBox())?.height ?? 0).toBeGreaterThan(before + 40)
+    } },
+    { name: 'closing More options', run: async () => { await more.click(); await expect(frontend.locator('[name="examples"]')).toBeHidden() } },
   ] })
+  await more.click()
+  await expect(frontend.locator('[name="examples"]')).toBeVisible()
   // Feedback grows below the actions, so Save and Cancel stay where they are.
   await expectStableControls({ controls: { save, cancel, name, hint, more }, interactions: [
     { name: 'validation appears below the actions', run: async () => { await frontend.locator('[name="examples"]').fill('one\ntwo\nthree\nfour'); await save.click(); await expect(frontend).toContainText('Use a name') } },
@@ -321,6 +331,33 @@ test('a rejected limit returns to the stored value and says why', async ({ page 
   await expect(small).toHaveValue('2'); await expect(page.locator('#k-adv')).toContainText('changed elsewhere')
   await expect(page.locator('.toast')).toHaveCount(0)
   expect(data.writes.at(-1)!.body).toEqual({ small_hours: 4, fix_rounds: 3, revision: 7 })
+})
+
+// Risk: a conflict keeps the stale revision and hides the only way to fetch a fresh one.
+test('a limit conflict offers Reload and the next save uses the refreshed revision', async ({ page }) => {
+  const data = await open(page)
+  await advanced(page).click()
+  const small = page.getByRole('spinbutton', { name: 'Small work, hours' })
+  // Someone else saved first. The page still holds revision 7.
+  data.limits.small_hours = 5
+  data.limits.revision = 8
+  await small.fill('4'); await small.press('Tab')
+  await expect(small).toHaveValue('2')
+  await expect(page.locator('#k-adv')).toContainText('changed elsewhere')
+  await expect(page.locator('.toast')).toHaveCount(0)
+  expect(data.writes.at(-1)!.body).toEqual({ small_hours: 4, fix_rounds: 3, revision: 7 })
+  expect(data.limits).toMatchObject({ small_hours: 5, revision: 8 })
+  const reload = page.locator('#k-adv').getByRole('button', { name: 'Reload', exact: true })
+  await expect(reload).toBeVisible()
+  await reload.click()
+  await expect(small).toHaveValue('5')
+  await expect(page.locator('#k-adv')).not.toContainText('changed elsewhere')
+  await expect(reload).toBeHidden()
+  await small.fill('4'); await small.press('Tab')
+  await expect.poll(() => data.limits.revision).toBe(9)
+  expect(data.writes.at(-1)!.body).toEqual({ small_hours: 4, fix_rounds: 3, revision: 8 })
+  await expect(small).toHaveValue('4')
+  await expect(page.locator('.toast').filter({ hasText: 'Small work: 4 h or less.' })).toBeVisible()
 })
 
 // Risk: the two cards touch again (the section lost the settings body gap).

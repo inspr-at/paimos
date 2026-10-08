@@ -59,7 +59,7 @@ function change(key: 'small_hours' | 'fix_rounds', value: number | string) {
           <li><b>{{ t('smallIs') }}</b> {{ t('smallMid') }} <input v-if="editable" v-model="small" class="field num" type="number" min="1" max="8" step="1" :aria-label="t('smallHoursLabel')" :disabled="busy" :aria-invalid="invalid || undefined" @change="change('small_hours', small)"><b v-else class="val">{{ limits.small_hours }}</b> {{ t('smallEnd') }}</li>
           <li><b>{{ t('stuckLead') }}</b> {{ t('stuckMid') }} <input v-if="editable" v-model="rounds" class="field num" type="number" min="1" max="6" step="1" :aria-label="t('fixRoundsLabel')" :disabled="busy" :aria-invalid="invalid || undefined" @change="change('fix_rounds', rounds)"><b v-else class="val">{{ limits.fix_rounds }}</b> {{ t('stuckEnd') }}</li>
         </ul>
-        <p v-if="invalid || error" class="err" role="alert">{{ invalid ? t('invalidLimit') : error }}</p>
+        <div v-if="invalid || error" class="adv-err"><p class="err" role="alert">{{ invalid ? t('invalidLimit') : error }}</p><button v-if="error" type="button" class="btn sm" :disabled="busy || loading" @click="emit('reload')">{{ t('reload') }}</button></div>
       </template>
       <p class="note">{{ t('definitionsNote') }}</p>
     </div>
