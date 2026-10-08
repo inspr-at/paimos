@@ -155,6 +155,20 @@ func TestUsageOwnerOverrideSharedFloorAdmissionAndGuard(t *testing.T) {
 		if wait == nil || wait.Code != "allowance" {
 			t.Fatalf("claim bypass: %+v", wait)
 		}
+		// A hard floor also blocks a blind attempt when no numeric window is
+		// known, including an explicit Run now. Unknown never means headroom.
+		if _, err := tx.Exec(t.Context(), `DELETE FROM account_allowance_windows WHERE id=$1`, w.ID); err != nil {
+			return err
+		}
+		for _, override := range []string{"", "now"} {
+			windows, wait, err := admission(t.Context(), tx, account, nil, now, 0, runRow{Purpose: "managed", CapacityOverride: override}, false)
+			if err != nil {
+				return err
+			}
+			if windows != nil || wait == nil || wait.Code != "reading" || wait.RunNowAllowed {
+				t.Fatalf("unknown usage bypassed floor: %+v %+v", windows, wait)
+			}
+		}
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,link_revision=link_revision+1 WHERE id=$1`, a.ID, peer.ID); err != nil {
 			return err
 		}

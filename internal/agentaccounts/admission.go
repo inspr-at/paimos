@@ -140,6 +140,11 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	if err != nil {
 		return nil, nil, err
 	}
+	// A blind grant cannot prove that a configured hard floor remains. Wait
+	// for a numeric window rather than treating unknown usage as headroom.
+	if policy.Floor > 0 && !slices.ContainsFunc(active, func(w Window) bool { return !synthetic(w) }) {
+		return nil, waitFor("reading"), nil
+	}
 	applyUsageFloor(active, policy)
 	learned, err := loadLearning(ctx, tx, a.ID)
 	if err != nil {
