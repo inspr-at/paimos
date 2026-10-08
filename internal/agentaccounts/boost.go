@@ -143,6 +143,15 @@ func (m *Module) writeBoost(w http.ResponseWriter, r *http.Request) {
 		if len(owned) > 1024 {
 			return fail(409, "owned account list changed")
 		}
+		ownedIDs := map[string]bool{}
+		for _, row := range owned {
+			ownedIDs[row.ID] = true
+		}
+		for _, requested := range in.Accounts {
+			if !ownedIDs[requested.ID] {
+				return fail(403, "account owner required")
+			}
+		}
 		ids := make([]string, len(owned))
 		for i, row := range owned {
 			ids[i] = row.ID

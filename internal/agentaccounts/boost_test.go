@@ -304,7 +304,7 @@ func TestBoostAppliesWithheldOwnedAccounts(t *testing.T) {
 	request(owner, one(visible.ID, 0), 409)
 	request(owner, fmt.Sprintf(`{"boost_percent":20,"timezone":"Europe/Vienna","accounts":[{"account_id":%q,"revision":1,"binding_revision":0},{"account_id":%q,"revision":1,"binding_revision":0}]}`, hidden.ID, visible.ID), 409)
 	check(hidden.ID, 10)
-	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET archived_at=now() WHERE id=$1 OR id=$2`, visible.ID, hidden.ID); err != nil {
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET state='unavailable', archived_at=now(), archived_by_principal_id=$3 WHERE id=$1 OR id=$2`, visible.ID, hidden.ID, owner.ID); err != nil {
 		t.Fatal(err)
 	}
 	var linked Account
