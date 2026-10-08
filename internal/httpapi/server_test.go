@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/brand"
 	"github.com/inspr-at/paimos/internal/db"
@@ -654,5 +657,89 @@ func TestClassicAPIPathsAreGone(t *testing.T) {
 				t.Fatalf("%s: %d %q", method, rec.Code, rec.Body.String())
 			}
 		}
+	}
+}
+
+// Risk: saturation is misreported as a broken DB, or a broken DB is declared
+// ready. Liveness must also finish while every foreground slot is retained.
+func TestReadyPoolSaturationAndDatabaseFailure(t *testing.T) {
+	fresh := dbtest.Open(t)
+	cfg, err := pgxpool.ParseConfig(fresh.AppURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxConns = 4
+	cfg.MinConns = 0
+	if _, err := db.ConfigurePool(cfg); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	s := &Server{Pool: pool}
+	s.SetServing(true)
+	handler := s.Handler()
+	held := []*pgxpool.Conn{}
+	defer func() {
+		for _, c := range held {
+			c.Release()
+		}
+	}()
+	for range 4 {
+		c, err := pool.Acquire(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, c)
+	}
+	probe, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/api/ready", nil).WithContext(probe))
+	var ready readyBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &ready); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != 503 || ready.Reason != "pool_exhausted" || ready.Pool == nil || ready.Pool.Acquired != 4 || !strings.Contains(ready.Detail, "4 acquired") {
+		t.Fatalf("saturated readiness: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/api/health", nil).WithContext(probe))
+	var health healthBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &health); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != 200 || health.DB != "down" {
+		t.Fatalf("saturated liveness: %d %+v", rec.Code, health)
+	}
+	for _, c := range held {
+		c.Release()
+	}
+	held = nil
+	assertReady(t, handler, 200)
+	// The dialer is unreachable, so a real pgx ping cannot reach any DB. This
+	// refuses readiness rather than accepting a cached result or only pool stats.
+	brokenCfg := cfg.Copy()
+	if _, err := db.ConfigurePool(brokenCfg); err != nil {
+		t.Fatal(err)
+	}
+	brokenCfg.ConnConfig.DialFunc = func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("database unavailable in fixture")
+	}
+	broken, err := pgxpool.NewWithConfig(t.Context(), brokenCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broken.Close()
+	s = &Server{Pool: broken}
+	s.SetServing(true)
+	rec = get(t, s.Handler(), "/api/ready", "")
+	if err := json.Unmarshal(rec.Body.Bytes(), &ready); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != 503 || ready.Reason != "database_unavailable" {
+		t.Fatalf("broken readiness: %d %s", rec.Code, rec.Body.String())
 	}
 }

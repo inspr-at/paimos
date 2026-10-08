@@ -364,6 +364,8 @@
     ,
     {"kind":"go","package":"cmd/aeon","name":"TestResolveWeb","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"cmd/aeon","name":"TestServeBackgroundPoolHeadroom","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon","name":"TestServeShutdownAndBootstrap","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon","name":"TestStopServingDrainsBeforeClose","tier":"GATED-FULL"}
@@ -5022,6 +5024,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestPairingReportAudienceMigrationBoundsLockWait","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestPoolSizingAndRetainedSessionAdmission","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestPortalMigrationDoesNotResurrectDeletedStarterKinds","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestProjectAccessMigrationsRunUnderForcedRLS","tier":"GATED-FULL"}
@@ -6059,6 +6063,8 @@
     {"kind":"go","package":"internal/httpapi","name":"TestReadStatementTimeoutReturns503","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadyGate","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestReadyPoolSaturationAndDatabaseFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadyProbeDeadlineAndDrain","tier":"GATED-FULL"}
     ,

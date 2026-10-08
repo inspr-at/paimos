@@ -3895,6 +3895,7 @@ paths:
   /health:
     get:
       summary: Liveness and database readiness
+      description: "Always returns liveness status 200. The database probe has a 100ms pool acquisition budget inside a 500ms overall budget; saturation or a failed ping reports db down."
       responses:
         "200":
           description: Healthy
@@ -10333,7 +10334,7 @@ paths:
       description: >-
         Load-balancer probe. 200 only while this process is accepting HTTP,
         is not draining, and the database ping succeeds. The ping is capped
-        at 500ms so an unbounded caller cannot hold it open. A cancelled
+        at 500ms, with a 100ms pool acquisition budget, so an unbounded caller cannot hold it open. A cancelled
         request or an earlier caller deadline still cancels or shortens it.
         A drain that starts during the ping still returns 503. GET /health
         stays liveness and still returns 200 while this endpoint returns 503.
@@ -10347,6 +10348,7 @@ paths:
                 required: [status]
                 properties:
                   status: {type: string, enum: [ready]}
+                  pool: {$ref: "#/components/schemas/DatabasePoolStats"}
         "503":
           description: Do not send new requests
           content:
@@ -10356,6 +10358,9 @@ paths:
                 required: [status]
                 properties:
                   status: {type: string, enum: [unavailable]}
+                  reason: {type: string, enum: [not_accepting, database_unavailable, pool_exhausted]}
+                  detail: {type: string, description: "Content-free saturation detail with acquired and waiting counts."}
+                  pool: {$ref: "#/components/schemas/DatabasePoolStats"}
   /recurrences:
     get:
       operationId: listRecurrences
@@ -15408,6 +15413,20 @@ components:
         text: {type: string, minLength: 1, maxLength: 60, description: "Public summary or closed tool vocabulary; automatic editing includes only a safe source-file basename."}
         source: {type: string, enum: [agent, auto]}
         at: {type: string, format: date-time}
+    DatabasePoolStats:
+      type: object
+      description: "Query pool statistics; background acquisitions reserve two slots for requests and probes. Waiting includes worker admission and pool acquisition. p95 covers the last 256 completed acquisitions, including failures; zero samples means no measurements yet. Dedicated LISTEN connections are outside this pool."
+      required: [max, acquired, idle, waiting, background_limit, background_acquired, acquire_duration_p95_ms, acquire_samples, nested_acquires]
+      properties:
+        max: {type: integer, minimum: 1}
+        acquired: {type: integer, minimum: 0}
+        idle: {type: integer, minimum: 0}
+        waiting: {type: integer, minimum: 0}
+        background_limit: {type: integer, minimum: 0}
+        background_acquired: {type: integer, minimum: 0}
+        acquire_duration_p95_ms: {type: number, minimum: 0}
+        acquire_samples: {type: integer, minimum: 0, maximum: 256}
+        nested_acquires: {type: integer, minimum: 0, description: "Rejected direct pool acquisitions while a session connection was retained."}
     DecisionDeskItem:
       type: object
       required: [id, kind, revision, title, created_at, held, href, source]

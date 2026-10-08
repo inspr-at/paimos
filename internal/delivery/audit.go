@@ -41,6 +41,7 @@ func (m *Module) auditSweep(ctx context.Context) {
 		return
 	}
 	defer conn.Release()
+	ctx = db.WithConnection(ctx, m.pool, conn)
 	key := "aeon-delivery-merge-audit:" + m.config.TenantID
 	var locked bool
 	if conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1,0))`, key).Scan(&locked) != nil || !locked {
