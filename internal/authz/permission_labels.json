@@ -28,6 +28,7 @@
     "customers": "customers",
     "delivery": "delivery status",
     "delivery_queue": "delivery work queue",
+    "delivery_reviews": "delivery reviews",
     "events": "history",
     "harness": "harness sessions",
     "hours": "hours",

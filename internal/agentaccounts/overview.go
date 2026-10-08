@@ -47,6 +47,7 @@ type overviewAccount struct {
 	Routable        bool               `json:"routable"`
 	Wait            *CapacityWait      `json:"wait,omitempty"`
 	DetailsRedacted bool               `json:"details_redacted"`
+	BoostWithheld   bool               `json:"boost_withheld,omitempty"`
 }
 
 type overviewWindow struct {
@@ -147,6 +148,13 @@ func (m *Module) overview(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		owned := map[string]bool{}
+		if p.Kind == tenant.Person && authz.RequireTx(ctx, tx, p, "account.manage", authz.Scope{}) == nil {
+			owned, err = canonicalOwnedIDs(ctx, tx, p.ID, ids)
+			if err != nil {
+				return err
+			}
+		}
 		for _, a := range page {
 			route := advice[a.ID]
 			// The generic privacy boundary strips timing values on a later
@@ -156,7 +164,7 @@ func (m *Module) overview(w http.ResponseWriter, r *http.Request) {
 				wait.Timezone = ""
 				route.Wait = &wait
 			}
-			item := overviewAccount{AccountID: a.ID, Provider: overviewProvider(a), Harness: a.Harness, Label: a.Label, HostLabel: a.HostLabel, DaemonID: a.DaemonID, OwnerPersonID: a.OwnerPersonID, OwnerPersonName: a.OwnerPersonName, State: a.State, BillingMode: a.BillingMode, Windows: []overviewWindow{}, Routable: route.AvailableSlots > 0, Wait: route.Wait, DetailsRedacted: !policy[a.ID]}
+			item := overviewAccount{AccountID: a.ID, Provider: overviewProvider(a), Harness: a.Harness, Label: a.Label, HostLabel: a.HostLabel, DaemonID: a.DaemonID, OwnerPersonID: a.OwnerPersonID, OwnerPersonName: a.OwnerPersonName, State: a.State, BillingMode: a.BillingMode, Windows: []overviewWindow{}, Routable: route.AvailableSlots > 0, Wait: route.Wait, DetailsRedacted: !policy[a.ID], BoostWithheld: !policy[a.ID] && owned[a.ID]}
 			if !policy[a.ID] {
 				// Available slots and a missing or capacity wait are quota
 				// headroom. A private row has one constant shape.
