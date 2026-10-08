@@ -90,12 +90,12 @@ func TestDeliveryFlowRolloutIngestIsIdempotentAndRead(t *testing.T) {
 	cut := f.at.Add(-50 * time.Minute)
 	path := "/api/projects/" + f.project + "/delivery/flow"
 	var res RolloutResult
-	f.call(t, f.agent, "POST", path+"/rollout", release126(f, cut, nil), 200, &res)
+	f.call(t, f.person, "POST", path+"/rollout", release126(f, cut, nil), 200, &res)
 	if res.Steps != 11 || res.Changed != 13 {
 		t.Fatalf("first report: %+v", res)
 	}
 	before := flowEventCount(t, f)
-	f.call(t, f.agent, "POST", path+"/rollout", release126(f, cut, nil), 200, &res)
+	f.call(t, f.person, "POST", path+"/rollout", release126(f, cut, nil), 200, &res)
 	if res.Changed != 0 || flowEventCount(t, f) != before {
 		t.Fatalf("replay changed %d rows, events %d → %d", res.Changed, before, flowEventCount(t, f))
 	}
@@ -133,7 +133,7 @@ func TestDeliveryFlowRolloutIngestIsIdempotentAndRead(t *testing.T) {
 
 	// The healthy report ends the run: 100 %, no gate, no ETA.
 	healthy := f.at.Add(-2 * time.Minute)
-	f.call(t, f.agent, "POST", path+"/rollout", release126(f, cut, &healthy), 200, &res)
+	f.call(t, f.person, "POST", path+"/rollout", release126(f, cut, &healthy), 200, &res)
 	if res.Changed != 1 {
 		t.Fatalf("healthy report changed %d", res.Changed)
 	}
@@ -151,7 +151,7 @@ func TestDeliveryFlowRolloutIngestIsIdempotentAndRead(t *testing.T) {
 	f.call(t, f.person, "GET", path+"?from="+f.at.Format(time.RFC3339)+"&to="+cut.Format(time.RFC3339), nil, 400, nil)
 	bad := release126(f, cut, nil)
 	bad["steps"].([]any)[0].(map[string]any)["actor"].(map[string]any)["principal_id"] = f.foreign.ID
-	f.call(t, f.agent, "POST", path+"/rollout", bad, 400, nil)
+	f.call(t, f.person, "POST", path+"/rollout", bad, 400, nil)
 }
 
 func TestDeliveryFlowETAUsesThirtyDaysOfHistory(t *testing.T) {
@@ -177,7 +177,7 @@ func TestDeliveryFlowETAUsesThirtyDaysOfHistory(t *testing.T) {
 		if !open {
 			body["outcome"], body["live_at"] = "live", at
 		}
-		f.call(t, f.agent, "POST", path+"/rollout", body, 200, nil)
+		f.call(t, f.person, "POST", path+"/rollout", body, 200, nil)
 	}
 	// One run older than 30 days never counts.
 	report("old", f.at.AddDate(0, 0, -40), []int{50}, false)
@@ -408,7 +408,7 @@ func TestDeliveryFlowReadIsForProjectMembers(t *testing.T) {
 	cut := f.at.Add(-50 * time.Minute)
 	path := "/api/projects/" + f.project + "/delivery/flow"
 	var res RolloutResult
-	f.call(t, f.agent, "POST", path+"/rollout", release126(f, cut, nil), 200, &res)
+	f.call(t, f.person, "POST", path+"/rollout", release126(f, cut, nil), 200, &res)
 	var otherProject, reader, nodesOnly, outsider string
 	f.tx(t, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'OTHER-1',id,'Other project' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.person.TenantID).Scan(&otherProject); err != nil {
@@ -547,7 +547,7 @@ func TestDeliveryFlowStreamSendsValueFreeLiveHints(t *testing.T) {
 	}
 	// The ready frame is the barrier: the stream listens before this write.
 	var res RolloutResult
-	f.call(t, f.agent, "POST", "/api/projects/"+f.project+"/delivery/flow/rollout", release126(f, f.at.Add(-50*time.Minute), nil), 200, &res)
+	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/flow/rollout", release126(f, f.at.Add(-50*time.Minute), nil), 200, &res)
 	seen := map[string]int{}
 	for i := 0; i < res.Changed; i++ {
 		fr := next()
