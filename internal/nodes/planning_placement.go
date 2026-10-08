@@ -29,6 +29,8 @@ func (r planRow) placementKey() string {
 // Both pre-paging SQL and page display use these expressions. assigneeJoin
 // preserves native and imported assignees; the active-person lookup excludes
 // agent and inactive assignees before falling back to the canonical viewer.
+// full-stack is not a board kind. A stored value routes only when that kind
+// still exists. A fresh board leaves it on the unknown-area path.
 func planPlacementColumns(viewer string) string {
 	return `coalesce(n.project_id::text,'') AS project,
  coalesce(` + modelprefs.CanonicalPersonSQL("assignee.id") + `::text,` + viewer + `::text,'') AS person,

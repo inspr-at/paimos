@@ -10,7 +10,7 @@ import '../src/styles/tokens.css'
 import '../src/styles/base.css'
 import '../src/styles/settings.css'
 const router = createRouter({ history: createWebHistory(), routes: [
-  { path: '/tests/models-settings-harness.html', redirect: to => ({ path: '/settings/models', query: to.query }) },
+  { path: '/tests/models-settings-harness.html', redirect: to => ({ path: '/settings/models', query: to.query, hash: to.hash }) },
   { path: '/settings/models/board', component: ModelBoardRoute },
   { path: '/settings/:section', component: SettingsView },
 ] })

@@ -5288,7 +5288,7 @@ paths:
     delete:
       operationId: resetModelBoardOrder
       security: *auth
-      description: "Reset to the inherited order with the profile revision."
+      description: "Reset to the inherited order with the profile revision, preserving the separate column thinking override."
       parameters:
         - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
         - {name: If-Prefs-Person, in: header, description: 'Required for person writes. Equality precondition against the current canonical caller; never selects a person.', schema: {type: string, format: uuid}}
@@ -18006,7 +18006,15 @@ components:
         fixed: {type: boolean}
         hidden: {type: boolean}
         source: {type: string, enum: [own, default, template, follows]}
-        thinking: {type: object, required: [word, source], properties: {word: {type: string, enum: [lean, standard, deep, max]}, source: {type: string}}}
+        follows_first: {type: boolean, description: 'The selected situation has no effective ranked order and follows First build.'}
+        thinking:
+          type: object
+          required: [word, source]
+          properties:
+            word: {type: string, enum: [lean, standard, deep, max]}
+            source: {type: string}
+            from_column: {type: boolean, description: 'Thinking is set for this column and situation; false means auto from the knob or First build.'}
+            own: {type: [string, 'null'], enum: [lean, standard, deep, max, null], description: 'Stored thinking override in the shown profile for this column and situation; null follows the automatic setting.'}
         list: {type: array, items: {$ref: '#/components/schemas/ModelBoardCard'}}
         top: {type: array, items: {$ref: '#/components/schemas/ModelBoardCard'}}
         free: {type: array, items: {$ref: '#/components/schemas/ModelBoardCard'}}

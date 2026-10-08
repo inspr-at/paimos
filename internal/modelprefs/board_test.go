@@ -94,3 +94,91 @@ func TestRankedBoardThinkingOnlyRowPreservesInheritedRank(t *testing.T) {
 		t.Fatalf("thinking-only row erased the template: %+v", got)
 	}
 }
+
+// Risk: a sparse situation can lose First build's order or reduce explicit
+// column thinking, and reviews/concepts can accidentally acquire fix settings.
+func TestRankedBoardExpertSituationThinking(t *testing.T) {
+	s := rankedFixture()
+	s.Orders = []BoardOrder{{ProfileID: "person", Column: "backend", Situation: "first", Rank: []string{"openai:sol", "anthropic:opus"}, Not: []string{}, Thinking: str("deep")}}
+	fix := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "fix"}, nil)
+	if !fix.FollowsFirst || !reflect.DeepEqual(fix.Rank, s.Orders[0].Rank) || fix.Thinking != "standard" || fix.ThinkingColumn {
+		t.Fatalf("First build fallback: %+v", fix)
+	}
+	s.Orders = append(s.Orders, BoardOrder{ProfileID: "person", Column: "backend", Situation: "fix", Thinking: str("max")})
+	fix = ResolveBoard(s, BoardQuery{Column: "backend", Situation: "fix"}, nil)
+	if !fix.FollowsFirst || fix.Thinking != "max" || !fix.ThinkingColumn || !reflect.DeepEqual(fix.Rank, s.Orders[0].Rank) {
+		t.Fatalf("thinking-only override: %+v", fix)
+	}
+	s.Orders[1].Thinking = nil
+	s.Orders[1].Rank = []string{"anthropic:opus", "openai:sol"}
+	fix = ResolveBoard(s, BoardQuery{Column: "backend", Situation: "fix"}, nil)
+	if fix.FollowsFirst || fix.Thinking != "standard" || fix.ThinkingColumn || fix.Rank[0] != "anthropic:opus" {
+		t.Fatalf("rank must not override automatic thinking: %+v", fix)
+	}
+	s.Orders = append(s.Orders, BoardOrder{ProfileID: "workspace", Column: "backend", Situation: "fix", Thinking: str("max")})
+	fix = ResolveBoard(s, BoardQuery{Column: "backend", Situation: "fix"}, nil)
+	if fix.Thinking != "max" || !fix.ThinkingColumn || fix.ThinkingSource != "default" {
+		t.Fatalf("workspace situation lost to inherited First build: %+v", fix)
+	}
+	stuck := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "stuck", PreviousFamily: "openai"}, nil)
+	if !stuck.FollowsFirst || stuck.Thinking != "deep" || stuck.Rank[0] != "anthropic:opus" {
+		t.Fatalf("stuck fallback: %+v", stuck)
+	}
+	t.Run("explicit stuck column thinking stays below deep", func(t *testing.T) {
+		s := rankedFixture()
+		s.Orders = []BoardOrder{
+			{ProfileID: "person", Column: "backend", Situation: "first", Rank: []string{"openai:sol", "anthropic:opus"}, Not: []string{}, Thinking: str("standard")},
+			{ProfileID: "person", Column: "backend", Situation: "stuck", Thinking: str("standard")},
+		}
+		stuck := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "stuck", PreviousFamily: "openai"}, nil)
+		if stuck.Thinking != "standard" || !stuck.ThinkingColumn || stuck.EffortLevel != ThinkingLevel("standard") {
+			t.Fatalf("explicit stuck thinking was raised: %+v", stuck)
+		}
+		s.Orders = s.Orders[:1]
+		missing := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "stuck", PreviousFamily: "openai"}, nil)
+		if missing.Thinking != "deep" || missing.ThinkingColumn || missing.EffortLevel != 4 {
+			t.Fatalf("missing stuck row lost the deep floor: %+v", missing)
+		}
+	})
+	for _, column := range []string{"review:openai", "concept"} {
+		d := ResolveBoard(s, BoardQuery{Column: column, Situation: "fix"}, nil)
+		if d.Situation != "first" || d.FollowsFirst || column == "review:openai" && d.EffortLevel != 4 {
+			t.Fatalf("fixed column situation: %+v", d)
+		}
+	}
+	s.Person = nil
+	s.Orders = append(s.Orders, BoardOrder{ProfileID: "workspace", Column: "backend", Situation: "first", Rank: []string{"anthropic:opus", "openai:sol"}})
+	first := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "first"}, nil)
+	if first.Source != "own" || first.Rank[0] != "anthropic:opus" {
+		t.Fatalf("workspace template concealed its column order: %+v", first)
+	}
+	t.Run("missing column situation follows Other First build", func(t *testing.T) {
+		s := rankedFixture()
+		s.Orders = []BoardOrder{
+			{ProfileID: "person", Column: "other", Situation: "first", Rank: []string{"openai:sol", "anthropic:opus"}, Not: []string{"anthropic:sonnet"}},
+			{ProfileID: "person", Column: "other", Situation: "fix", Rank: []string{"anthropic:opus", "openai:sol"}, Not: []string{"openai:sol"}},
+		}
+		first := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "first"}, nil)
+		fix := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "fix"}, nil)
+		if !fix.FollowsFirst || fix.Source != "follows" || !reflect.DeepEqual(fix.Rank, first.Rank) || !reflect.DeepEqual(fix.Not, first.Not) {
+			t.Fatalf("Other fix leaked into missing backend situation: first=%+v fix=%+v", first, fix)
+		}
+	})
+	t.Run("person without situation follows workspace First build", func(t *testing.T) {
+		s := rankedFixture()
+		s.Orders = []BoardOrder{
+			{ProfileID: "workspace", Column: "backend", Situation: "first", Rank: []string{"openai:sol", "anthropic:opus"}},
+			{ProfileID: "workspace", Column: "backend", Situation: "fix", Rank: []string{"anthropic:opus", "openai:sol"}},
+		}
+		first := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "first"}, nil)
+		fix := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "fix"}, nil)
+		if !fix.FollowsFirst || !reflect.DeepEqual(fix.Rank, first.Rank) {
+			t.Fatalf("workspace fix replaced person's First build: first=%+v fix=%+v", first, fix)
+		}
+		s.Person = nil
+		workspaceFix := ResolveBoard(s, BoardQuery{Column: "backend", Situation: "fix"}, nil)
+		if workspaceFix.FollowsFirst || workspaceFix.Rank[0] != "anthropic:opus" {
+			t.Fatalf("workspace's explicit situation was ignored: %+v", workspaceFix)
+		}
+	})
+}

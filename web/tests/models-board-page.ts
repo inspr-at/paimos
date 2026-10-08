@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, type Page } from '@playwright/test'
 import { boardCards, boardFixture, boardPerson, boardPin } from './models-board-fixtures'
-import type { ModelRule, OrderBody } from '../src/lib/modelsBoard'
+import type { ModelRule, ThinkingWord } from '../src/lib/modelsBoard'
 
 export async function mockBoard(page: Page, options: { manage?: boolean; fail?: number; german?: boolean; noRoute?: boolean; fallback?: boolean } = {}) {
   let document = boardFixture(options.german), rules = [structuredClone(boardPin)], ruleRevision = 2
@@ -9,31 +9,43 @@ export async function mockBoard(page: Page, options: { manage?: boolean; fail?: 
   const reads: string[] = []
   let fail = options.fail, hold: (() => Promise<void>) | undefined
   const original = structuredClone(document)
-  const orders = new Map<string, OrderBody>()
+  const orders = new Map<string, { rank?: string[]; not: string[]; thinking?: ThinkingWord | null }>()
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname.replace(/^\/api/, '')
     if (options.fallback && !path.startsWith('/model-preferences/') && !path.startsWith('/model-rules')) return route.fallback()
     if (path === '/me/permissions') return route.fulfill({ json: { workspace: { id: 'board-tenant', role: 'member', permissions: ['models.read', ...(options.manage === false ? [] : ['model_prefs.manage', 'work_kinds.manage'])] }, project: url.searchParams.get('project_id') ? { id: url.searchParams.get('project_id'), role: 'member', permissions: [] } : null } })
     if (path === '/projects') return route.fulfill({ json: { items: [{ id: 'project-a', title: 'AEON', state: 'active', archived: false }], next_cursor: null } })
     if (request.method() === 'GET') {
+      if (path === '/model-preferences/situations') return route.fulfill({ json: { small_hours: 2, fix_rounds: 4, revision: 1, set_by: null, set_at: null } })
       if (path === '/model-rules') return route.fulfill({ json: { revision: ruleRevision, rules } })
       if (path === '/model-preferences/board') {
         reads.push(url.search)
         const view = structuredClone(document), project = url.searchParams.get('project_id'), layer = url.searchParams.get('layer') ?? 'mine'
         view.layer = layer as typeof view.layer
+        view.situation = url.searchParams.get('situation') === 'fix' ? 'fix' : url.searchParams.get('situation') === 'stuck' ? 'stuck' : 'first'
         if (layer === 'default') view.profile = { ...view.profile, scope: 'workspace', person_id: null, template: 'balanced', thinking: 'standard', usage: 'balanced' }
         const applicable = rules.filter(rule => rule.scope === 'workspace' || rule.project_id === project)
         for (const column of view.columns) {
-          const cards = [...boardCards, ...document.tray].map(card => column.column.startsWith('review:') ? { ...card, effort: 'xhigh' } : card)
+          const cards = [...boardCards, ...document.tray].map(card => ({ ...card, ...(column.column.startsWith('review:') ? { effort: 'xhigh' } : {}) }))
           const bans = column.not.filter(card => card.lock?.kind === 'cross_family')
-          const own = orders.get(column.column)
+          const situation = column.column.startsWith('review:') || column.column === 'concept' ? 'first' : view.situation
+          const exact = orders.get(`${layer}/${column.column}/${situation}`), first = orders.get(`${layer}/${column.column}/first`)
+          const own = exact?.rank ? exact : first
+          column.follows_first = situation !== 'first' && !exact?.rank
+          const base = exact?.thinking ?? first?.thinking ?? document.profile.thinking ?? 'standard'
+          const words: ThinkingWord[] = ['lean', 'standard', 'deep', 'max']
+          const level = Math.max(0, words.indexOf(base) - (situation === 'fix' && !exact?.thinking ? 1 : 0))
+          const word = column.column.startsWith('review:') ? 'deep' : situation === 'stuck' ? words[Math.max(2, level)]! : words[level]!
+          column.thinking = { word, source: exact?.thinking ? 'own' : 'default', from_column: !!exact?.thinking, own: exact?.thinking ?? null }
+          const effort = column.column.startsWith('review:') ? 'xhigh' : { lean: 'medium', standard: 'high', deep: 'xhigh', max: 'xhigh' }[word]
+          for (const item of cards) item.effort = item.harness === 'grok' ? 'xhigh' : item.harness === 'claude' && word === 'max' ? 'max' : effort
           const rank = own?.rank ?? original.columns.find(value => value.column === column.column)!.list.map(card => card.line)
           const free = rank.filter(line => !applicable.some(rule => rule.column === column.column && rule.line === line) && !bans.some(card => card.line === line) && !column.cant.some(item => item.line === line)).map(line => ({ ...cards.find(card => card.line === line)! }))
           const pins = (lock: string) => applicable.filter(rule => rule.column === column.column && rule.lock === lock).sort((a, b) => Number(b.scope === 'project') - Number(a.scope === 'project') || a.position - b.position).map(rule => ({ ...cards.find(card => card.line === rule.line)!, lock: { kind: 'rule' as const, value: rule.lock, who: rule.set_by, why: rule.why, at: rule.set_at, scope: rule.scope } }))
           column.top = pins('top'); column.bottom = pins('bottom'); column.free = free
           column.list = [...column.top, ...free, ...column.bottom].filter(card => !column.cant.some(item => item.line === card.line))
           column.not = [...bans, ...pins('not'), ...(own?.not ?? []).filter(line => !bans.some(card => card.line === line) && !applicable.some(rule => rule.column === column.column && rule.line === line)).map(line => ({ ...cards.find(card => card.line === line)! }))]
-          if (own) column.source = 'own'
+          if (exact?.rank) column.source = layer === 'mine' ? 'own' : 'default'; else if (own?.rank) column.source = 'follows'
           column.hidden = view.profile.hidden_kinds.includes(column.column)
           if (options.noRoute) { column.not = column.list.map(card => ({ ...card, lock: { kind: 'residency' as const, value: 'not' as const, who: null, why: 'No qualifying route', at: null, scope: 'workspace' } })).concat(column.not); column.list = [] }
         }
@@ -57,8 +69,11 @@ export async function mockBoard(page: Page, options: { manage?: boolean; fail?: 
     if (url.searchParams.get('dry_run') === 'true') return route.fulfill({ json: { person_id: document.person_id, revision: document.revision, profile: document.profile, dry_run: true, moved: [{ column: 'backend', before: ['openai:sol'], after: ['openai:astra'] }] } })
     if (path.startsWith('/model-preferences/orders/')) {
       const column = decodeURIComponent(path.split('/')[3]!)
-      if (request.method() === 'DELETE') orders.delete(column)
-      else orders.set(column, { rank: body.rank, not: body.not })
+      const key = `${url.searchParams.get('for') === 'default' ? 'default' : 'mine'}/${column}/${path.split('/')[4]}`
+      const previous = orders.get(key)
+      if (request.method() === 'DELETE') { if (previous?.thinking) orders.set(key, { not: [], thinking: previous.thinking }); else orders.delete(key) }
+      else if (path.endsWith('/thinking')) orders.set(key, { ...previous, not: previous?.not ?? [], thinking: body.thinking })
+      else orders.set(key, { rank: body.rank, not: body.not, thinking: previous?.thinking })
     } else if (path === '/model-preferences/profile') {
       for (const field of ['residency', 'hidden_kinds', 'dismissed_lines', 'template', 'thinking', 'usage']) if (field in body) Object.assign(document.profile, { [field]: body[field] })
       document.residency.own = document.profile.residency; document.residency.effective = document.profile.residency ?? 'any'

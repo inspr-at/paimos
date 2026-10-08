@@ -81,8 +81,9 @@ test('grouped navigation stays put across section changes and places policy card
   await mockAccess(page, accessWorld(), { also: ['account.read', 'rules.read', 'models.read'] })
   await page.goto('/settings/workspace')
   const nav = sections(page)
-  // Account-menu sections, plus Models, Agent rules and Accounts once those
-  // reads are granted. Kinds of work stays in the list.
+  // Kinds of work sits with Workspace once models.read is granted, beside Models,
+  // Agent rules and Accounts. The count is the whole granted list, in section order.
+  await expect(nav.getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Arten von Arbeit/, /^Access/, /^Policies/, /^Models/, /^Agents/, /^Agent rules/, /^Accounts/, /^Autopilot/, /^Business/, /^Product portal/])
   await expect(nav.getByRole('link')).toHaveCount(15)
   await expect(nav.getByRole('link', { name: /^Arten von Arbeit/ })).toBeVisible()
   await expect(nav.getByRole('link', { name: /^Models/ })).toBeVisible()

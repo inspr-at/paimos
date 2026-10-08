@@ -522,6 +522,8 @@
         ,
         {"file":"tests/models-board.spec.ts","listedTests":9,"weightSeconds":15,"weightSource":"local-single-worker-AEON-879-11.2s-plus-margin"}
         ,
+        {"file":"tests/models-expert.spec.ts","listedTests":8,"weightSeconds":17,"weightSource":"AEON-881 focused Expert behavior and viewport evidence estimate"}
+        ,
         {"file":"tests/policy-editors.spec.ts","listedTests":32,"weightSeconds":73,"weightSource":"local-single-worker-AEON-879-60.8s-plus-margin"}
         ,
         {"file":"tests/usage-posture.spec.ts","listedTests":18,"weightSeconds":20,"weightSource":"local-single-worker-AEON-880-15.8s-plus-margin"}
