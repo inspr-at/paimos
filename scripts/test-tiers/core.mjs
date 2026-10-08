@@ -8,8 +8,7 @@ export const escapeRE = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 export const exactPattern = names => `^(?:${names.map(escapeRE).join('|')})$`
 export const tiers = ['ESSENTIAL', 'GATED-FULL', 'NIGHTLY']
 
-export function validate(manifest, discovered, knownFlaky = JSON.parse(readFileSync(new URL('../ci/known-flaky.json', import.meta.url), 'utf8')), { strict = false, warn = console.warn } = {}) {
-  if (manifest.version !== 1 || !Array.isArray(manifest.tests) || !manifest.tests.length) throw new Error('Expected nonempty tier manifest version 1')
+export function knownFlakyOwners(knownFlaky = JSON.parse(readFileSync(new URL('../ci/known-flaky.json', import.meta.url), 'utf8'))) {
   if (knownFlaky.version !== 1 || !Array.isArray(knownFlaky.entries)) throw new Error('Expected known-flaky registry version 1')
   const flaky = new Map()
   for (const entry of knownFlaky.entries) {
@@ -17,6 +16,12 @@ export function validate(manifest, discovered, knownFlaky = JSON.parse(readFileS
     if (flaky.has(entry.key)) throw new Error(`Duplicate known-flaky entry: ${entry.key}`)
     flaky.set(entry.key, entry.owner)
   }
+  return flaky
+}
+
+export function validate(manifest, discovered, knownFlaky, { strict = false, warn = console.warn } = {}) {
+  if (manifest.version !== 1 || !Array.isArray(manifest.tests) || !manifest.tests.length) throw new Error('Expected nonempty tier manifest version 1')
+  const flaky = knownFlakyOwners(knownFlaky)
   const declared = new Map()
   for(const group of manifest.deleteCandidateGroups??[]) {
     if(group.tag!=='delete-candidate'||!manifest.tests.some(row=>row.file===group.file&&row.tier!=='ESSENTIAL'))throw new Error(`Invalid deletion candidate group: ${group.file}`)

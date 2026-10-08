@@ -978,6 +978,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestAdditionalHarnessAttachRequiresRecordedNativeImage","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestAfterTurnInputWaitsWhileSteerAndControlsStayAvailable","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestAgentRecoveryGenerationIdentityAndDeadlineRefuseSignals","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestAgentRecoveryReconnectRefreshesReportingWithoutStopping","tier":"ESSENTIAL"}
@@ -3846,6 +3848,8 @@
     ,
     {"kind":"go","package":"internal/chat","name":"TestOfflineWaitContractBoundsAndImmutableReceiptDeadline","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/chat","name":"TestParticipantHistoryPreservesExactSeenGapsAndCursorScope","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/chat","name":"TestRLSAndLegacyProjectionGuards","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/chat","name":"TestRegistrationAliasAgentCreatorContinuation","tier":"GATED-FULL"}
@@ -5405,6 +5409,8 @@
     {"kind":"go","package":"internal/harness","name":"TestGrokEnrollmentCannotAuthorizeCodexSessionEvidence","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHarnessBindingRevisionAndHierarchy","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestHarnessDrainSelectsBoundaryInputAndChecksCompletionLevel","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHarnessGenerationAndOwnedControls","tier":"ESSENTIAL"}
     ,

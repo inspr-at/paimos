@@ -399,6 +399,36 @@
         "usage_probe_revision": "metadata",
         "usage_budget": "personal"
       }
+    },
+    {
+      "table": "chat_seen_chunks",
+      "classification": "personal",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "person_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "conversation_id": "metadata",
+        "person_id": "personal",
+        "chunk_index": "metadata",
+        "bitmap": "personal",
+        "revision": "metadata"
+      }
+    },
+    {
+      "table": "chat_read_state",
+      "classification": "personal",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "person_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "conversation_id": "metadata",
+        "person_id": "personal",
+        "revision": "metadata"
+      }
     }
   ]
 }

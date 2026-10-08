@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, receiptBatchLimit, receiptQueryBatches, saveReadMark, saveTab, sessionBoundSends, statusDone, statusLabel, statusTip, unreadGroups } from '../src/components/agents/sessionChat.ts'
+import { advanceReceipt, chatSendLevel, awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, receiptBatchLimit, receiptQueryBatches, saveReadMark, saveTab, sessionBoundSends, statusDone, statusLabel, statusTip, unreadGroups } from '../src/components/agents/sessionChat.ts'
 import type { HarnessSession } from '../src/lib/agents.ts'
 import { collapseMessages } from '../src/components/agents/sessionMessages.ts'
 import type { ProjectMessage } from '../src/lib/agents.ts'
@@ -87,8 +87,8 @@ test('delivery wording is short and specific (AEON-280)', () => {
   const sent = { ...base, status: 'sent' as const }
   const delivered = { ...base, status: 'delivered' as const, delivered_at: '2026-09-29T06:09:00Z' }
   const read = { ...base, status: 'read' as const, delivered_at: '2026-09-29T06:09:00Z', read_at: '2026-09-29T06:10:00Z' }
-  assert.deepEqual([sent, delivered, read].map(statusLabel), ['Sent', 'Delivered', 'Read'])
-  assert.equal(statusTip(sent, at), 'Sent · waiting for the session to pick it up')
+  assert.deepEqual([sent, delivered, read].map(statusLabel), ['Sending', 'Delivered', 'Read'])
+  assert.equal(statusTip(sent, at), 'On its way to the agent.')
   assert.equal(statusTip(delivered, at), 'Delivered to the session · 06:09')
   assert.equal(statusTip(read, at), 'Read by the session · 06:10')
   for (const [reason, text] of [['session_ended', 'the session ended'], ['no_listener', 'the session was not listening'], ['deadline', 'not confirmed in time'], ['attempts', 'every attempt failed'], ['http_error', 'http error']]) {
@@ -229,4 +229,24 @@ test('a delivered receipt does not take the batch from a send that has none (AEO
 test('near the bottom allows a small slack', () => {
   assert.equal(nearBottom({ scrollHeight: 1000, scrollTop: 570, clientHeight: 400 }), true)
   assert.equal(nearBottom({ scrollHeight: 1000, scrollTop: 500, clientHeight: 400 }), false)
+})
+
+
+test('chat keys distinguish after-turn input, steer and composition', () => {
+  const enter = { key: 'Enter', shiftKey: false, altKey: false, metaKey: false, ctrlKey: false, isComposing: false }
+  assert.equal(chatSendLevel(enter, true), 'simple')
+  assert.equal(chatSendLevel({ ...enter, metaKey: true }, true), 'steer')
+  assert.equal(chatSendLevel({ ...enter, ctrlKey: true }, true), 'steer')
+  assert.equal(chatSendLevel({ ...enter, metaKey: true }, false), 'simple')
+  for (const event of [{ ...enter, isComposing: true }, { ...enter, shiftKey: true }, { ...enter, altKey: true }, { ...enter, key: 's', metaKey: true }]) assert.equal(chatSendLevel(event, true), null)
+})
+
+test('receipt catch-up cannot replace Read with Sending or a late failure', () => {
+  const sent = { message_id: 'm', status: 'sent' as const, delivered_at: null, read_at: null, deliver_by: null }
+  const delivered = { ...sent, status: 'delivered' as const }
+  const read = { ...sent, status: 'read' as const }
+  assert.equal(advanceReceipt(undefined, sent), sent)
+  assert.equal(advanceReceipt(sent, delivered), delivered)
+  assert.equal(advanceReceipt(delivered, sent), delivered)
+  assert.equal(advanceReceipt(read, { ...sent, status: 'not_delivered' }), read)
 })
