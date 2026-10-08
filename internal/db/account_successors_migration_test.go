@@ -51,7 +51,7 @@ func TestAccountSuccessorMigrationAuditIsolationAndRollback(t *testing.T) {
 					if j == 1 {
 						target = &f.next
 					}
-					if err := tx.QueryRow(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'1','codex','openai',$2,'high','strong') RETURNING id::text`, f.tenant, model).Scan(target); err != nil {
+					if err := tx.QueryRow(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'1','codex','openai',$3,'high','strong') RETURNING id::text`, f.tenant, fmt.Sprintf("model-%d", j), model).Scan(target); err != nil {
 						return err
 					}
 				}
