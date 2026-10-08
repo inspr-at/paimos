@@ -21,8 +21,8 @@ const (
 	flowStreamSlots     = 64
 )
 
-// flowStreamBatch is one page of hints. A full page is fetched again at once;
-// the authorization deadline still applies before that next page.
+// flowStreamBatch is one page of hints. The authorization deadline applies
+// before each hint of the page, not only before the next fetch.
 var flowStreamBatch = 200
 
 var flowEventTypes = []string{"delivery.step", "delivery.item", "delivery.incident"}
@@ -39,9 +39,10 @@ type flowHint struct {
 
 // flowStream is the Live feed of one project's flow: delivery.step,
 // delivery.item and delivery.incident hints after the event log commits them.
-// Members need delivery.read. The check is due on the heartbeat deadline,
-// including while a full page is drained or notifications keep arriving; a
-// revoked reader is disconnected before any later hint. Hints carry ids only.
+// Members need delivery.read. The check is due on the heartbeat deadline
+// before every hint, including the rest of a page already fetched, and
+// before the next page or a notification wait. A revoked reader is
+// disconnected before any later hint. Hints carry ids only.
 func (m *Module) flowStream(w http.ResponseWriter, r *http.Request) {
 	p, project, ok := metricProject(w, r)
 	if !ok {
@@ -129,20 +130,34 @@ func (m *Module) flowStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	heartbeat := m.streamNow().Add(flowStreamHeartbeat)
+	// due authorizes when the heartbeat has passed. A revoked reader stops
+	// the stream before the next hint or ping.
+	due := func() bool {
+		if m.streamNow().Before(heartbeat) {
+			return false
+		}
+		if authorize() != nil || flush("event: stream.ping\ndata: {}\n\n") != nil {
+			return true
+		}
+		heartbeat = m.streamNow().Add(flowStreamHeartbeat)
+		return false
+	}
 	for ctx.Err() == nil {
 		// Due even when the last page was full or a notification woke the
 		// wait early. Backlog and traffic must not postpone the re-check.
-		if !m.streamNow().Before(heartbeat) {
-			if authorize() != nil || flush("event: stream.ping\ndata: {}\n\n") != nil {
-				return
-			}
-			heartbeat = m.streamNow().Add(flowStreamHeartbeat)
+		if due() {
+			return
 		}
 		hints, err := m.flowHints(ctx, p, project, after)
 		if err != nil {
 			return
 		}
 		for _, h := range hints {
+			// Slow flushes must not keep sending the rest of this page
+			// after the deadline. The check is per hint, not per page.
+			if due() {
+				return
+			}
 			data, err := json.Marshal(h)
 			if err != nil || flush(fmt.Sprintf("id: %d\nevent: %s\ndata: %s\n\n", h.ID, h.Type, data)) != nil {
 				return

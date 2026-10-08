@@ -125,7 +125,7 @@ func (m *Module) flowFromRuns(ctx context.Context, runs []metricRun) error {
 			if len(own) == 0 || t == nil || t.Project != project {
 				continue
 			}
-			batch := flowBatch{Item: flowItemInput{Project: project, Kind: "change", Ref: t.Key, Title: t.Title, Ticket: &ticket, PRs: []int64{pr}}, Steps: flowStepsFromRuns(own)}
+			batch := flowBatch{Item: flowItemInput{Project: project, Kind: "change", Ref: t.Key, Title: t.Title, Ticket: &ticket, PRs: []int64{pr}, Repository: m.config.Repository}, Steps: flowStepsFromRuns(own)}
 			if err := apply([]flowBatch{batch}); err != nil {
 				return err
 			}
@@ -149,6 +149,7 @@ type flowLiveRun struct {
 	Conclusion string
 	Phase      string
 	PR         int64
+	Head       string
 }
 
 // flowLiveRunFrom reads one workflow_run delivery. skip means the run is
@@ -218,7 +219,7 @@ func flowLiveRunFrom(raw []byte) (flowLiveRun, bool, error) {
 	if r.Started != nil && !r.Started.IsZero() {
 		started = *r.Started
 	}
-	out := flowLiveRun{ID: r.ID, Attempt: r.Attempt, Event: r.Event, Workflow: r.Path, Created: r.Created.UTC(), Started: started.UTC(), Phase: phase, PR: pr}
+	out := flowLiveRun{ID: r.ID, Attempt: r.Attempt, Event: r.Event, Workflow: r.Path, Created: r.Created.UTC(), Started: started.UTC(), Phase: phase, PR: pr, Head: r.Head}
 	if phase == "completed" {
 		out.Completed = r.Updated.UTC()
 		out.Conclusion = *r.Conclusion
@@ -261,9 +262,13 @@ func flowLiveSteps(r flowLiveRun) []flowStepInput {
 	switch r.Phase {
 	case "queued":
 		if r.Event == "merge_group" {
-			return []flowStepInput{flowQueueWait(key, r.Created, nil)}
+			step := flowQueueWait(key, r.Created, nil)
+			step.Phase = "queued"
+			return []flowStepInput{step}
 		}
-		return []flowStepInput{flowLiveWork(key, stepKey, round, kind, actor, start, nil, nil)}
+		step := flowLiveWork(key, stepKey, round, kind, actor, start, nil, nil)
+		step.Phase = "queued"
+		return []flowStepInput{step}
 	case "running":
 		steps := []flowStepInput{}
 		if r.Event == "merge_group" {
@@ -291,6 +296,59 @@ func flowLiveSteps(r flowLiveRun) []flowStepInput {
 	default:
 		return nil
 	}
+}
+
+// flowKnownAttemptsTx reads completed attempts of one run already stored as
+// metric facts. A live completion of a single attempt classifies from these,
+// so an earlier failure stays flaky after the suite saw a later pass.
+func flowKnownAttemptsTx(ctx context.Context, tx pgx.Tx, repository string, runID int64) ([]metricRun, error) {
+	rows, err := tx.Query(ctx, `SELECT attempt,event,head_sha,created_at,started_at,completed_at,conclusion FROM delivery_metric_runs WHERE repository=$1 AND run_id=$2 ORDER BY attempt`, repository, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []metricRun
+	for rows.Next() {
+		var r metricRun
+		if err := rows.Scan(&r.Attempt, &r.Event, &r.Head, &r.Created, &r.Started, &r.Completed, &r.Conclusion); err != nil {
+			return nil, err
+		}
+		r.ID = runID
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// flowLiveStepsKeepingClass writes this transition's steps, with outcomes
+// recomputed from every known attempt of the run. The attempt in the event
+// fills a gap the metric facts do not have yet.
+func flowLiveStepsKeepingClass(run flowLiveRun, known []metricRun) []flowStepInput {
+	cur := metricRun{ID: run.ID, Attempt: run.Attempt, Event: run.Event, Head: run.Head, Created: run.Created, Started: run.Started, Completed: run.Completed, Conclusion: run.Conclusion, PR: &run.PR}
+	merged := make([]metricRun, 0, len(known)+1)
+	seen := false
+	for _, k := range known {
+		if k.Attempt == run.Attempt {
+			merged = append(merged, cur)
+			seen = true
+			continue
+		}
+		merged = append(merged, k)
+	}
+	if !seen {
+		merged = append(merged, cur)
+	}
+	classified := flowStepsFromRuns(merged)
+	outcome := map[string]*string{}
+	for _, s := range classified {
+		outcome[s.Key] = s.Outcome
+	}
+	steps := flowLiveSteps(run)
+	for i := range steps {
+		if o, ok := outcome[steps[i].Key]; ok {
+			steps[i].Outcome = o
+		}
+	}
+	return steps
 }
 
 // flowFromWorkflowRun records a queued, running or completed CI or merge-queue
@@ -326,7 +384,15 @@ func (m *Module) flowFromWorkflowRun(ctx context.Context, raw []byte) error {
 		if err != nil || t == nil || t.Project != project {
 			return err
 		}
-		batch := flowBatch{Item: flowItemInput{Project: project, Kind: "change", Ref: t.Key, Title: t.Title, Ticket: &ticket, PRs: []int64{run.PR}}, Steps: steps}
+		writeSteps := steps
+		if run.Phase == "completed" {
+			known, err := flowKnownAttemptsTx(ctx, tx, m.config.Repository, run.ID)
+			if err != nil {
+				return err
+			}
+			writeSteps = flowLiveStepsKeepingClass(run, known)
+		}
+		batch := flowBatch{Item: flowItemInput{Project: project, Kind: "change", Ref: t.Key, Title: t.Title, Ticket: &ticket, PRs: []int64{run.PR}, Repository: m.config.Repository}, Steps: writeSteps}
 		return apply([]flowBatch{batch})
 	})
 	return err

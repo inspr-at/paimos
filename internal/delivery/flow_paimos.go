@@ -283,7 +283,7 @@ func flowFromPaimosTx(ctx context.Context, tx pgx.Tx, tid string, e flowSourceEv
 	// episode, never the row this event itself opens on replay.
 	own := key + "/parked/" + strconv.FormatInt(e.ID, 10)
 	hold := flowStepInput{Source: "paimos", Key: own, StepKey: "hold", Round: round, Kind: "wait", Actor: FlowActor{Type: "agent", Label: "LEAD"}, Started: at, WaitReason: flowStr("dependency"), Merge: true}
-	closeHold, err := flowCloseParkTx(ctx, tx, tid, t.Project, t.Key, key, own, at)
+	closeHold, err := flowCloseParkTx(ctx, tx, tid, t.Project, t.Key, key, own, e.ID, at)
 	if err != nil {
 		return nil, err
 	}
@@ -311,14 +311,14 @@ func flowFromPaimosTx(ctx context.Context, tx pgx.Tx, tid string, e flowSourceEv
 	return b, nil
 }
 
-// flowCloseParkTx finds the open parking episode of this round that started
-// at or before at, other than the episode this event opens. A replay of the
-// opening event must not close that row, and a later episode is still open.
-func flowCloseParkTx(ctx context.Context, tx pgx.Tx, tid, project, ref, workKey, ownKey string, at time.Time) (*flowStepInput, error) {
+// flowCloseParkTx finds the open parking episode of this round opened by an
+// earlier event. Causal order is the event id, not the timestamp: equal
+// timestamps must not let a replay of an earlier event close a later episode.
+func flowCloseParkTx(ctx context.Context, tx pgx.Tx, tid, project, ref, workKey, ownKey string, eventID int64, at time.Time) (*flowStepInput, error) {
 	item := flowItemID(tid, project, "change", ref)
 	prefix := workKey + "/parked/"
 	var open string
-	err := tx.QueryRow(ctx, `SELECT source_key FROM delivery_flow_steps WHERE item_id=$1 AND source='paimos' AND ended_at IS NULL AND started_at<=$2 AND left(source_key,length($3::text))=$3 AND source_key<>$4 ORDER BY started_at DESC, source_key DESC LIMIT 1`, item, at, prefix, ownKey).Scan(&open)
+	err := tx.QueryRow(ctx, `SELECT source_key FROM delivery_flow_steps WHERE item_id=$1 AND source='paimos' AND ended_at IS NULL AND left(source_key,length($2::text))=$2 AND source_key<>$3 AND CASE WHEN substring(source_key from length($2::text)+1) ~ '^[0-9]+$' THEN substring(source_key from length($2::text)+1)::bigint ELSE 0 END < $4 ORDER BY CASE WHEN substring(source_key from length($2::text)+1) ~ '^[0-9]+$' THEN substring(source_key from length($2::text)+1)::bigint ELSE 0 END DESC LIMIT 1`, item, prefix, ownKey, eventID).Scan(&open)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

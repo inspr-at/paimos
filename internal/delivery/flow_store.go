@@ -36,6 +36,8 @@ type flowItemInput struct {
 	// NoCreate records nothing for a run never seen open: a close, end or
 	// merge of work that started before the Flow observed it.
 	NoCreate bool
+	// Repository scopes pull-request numbers. A number alone is not a delivery.
+	Repository string
 }
 
 // flowStepInput is one reported step. Merge keeps the earliest start and an
@@ -60,6 +62,9 @@ type flowStepInput struct {
 	// the report replaces it. A report with no end never reopens a step that
 	// has already ended, so a late queued delivery stays idempotent.
 	Progress bool
+	// Phase is the live rank: queued, then running, then completed. A queued
+	// report never overwrites a row a later phase already wrote.
+	Phase string
 }
 
 type flowIncidentInput struct {
@@ -178,7 +183,7 @@ func applyFlowTx(ctx context.Context, tx pgx.Tx, tid string, batches []flowBatch
 		// A merge projected before this row existed is still the linked
 		// delivery's current state. Late creation must not leave it open.
 		if before == nil && in.Kind == "change" && after.Ended == nil {
-			mergedAt, err := flowMergedAtTx(ctx, tx, in.Ticket, after.PRs)
+			mergedAt, err := flowMergedAtTx(ctx, tx, in.Project, in.Repository, in.Ticket, after.PRs)
 			if err != nil {
 				return changes, err
 			}
@@ -188,6 +193,11 @@ func applyFlowTx(ctx context.Context, tx pgx.Tx, tid string, batches []flowBatch
 			}
 		}
 		for _, s := range b.Steps {
+			// A late queued report must not pull a running change back to the
+			// run's creation time. The step write rejects that phase too.
+			if s.Phase == "queued" && after.Started != nil && flowTime(s.Started).Before(*after.Started) {
+				continue
+			}
 			if !s.CloseOnly && (after.Started == nil || s.Started.Before(*after.Started)) {
 				v := flowTime(s.Started)
 				after.Started = &v
@@ -271,15 +281,17 @@ func scanFlowItem(row pgx.Row) (flowItemRow, error) {
 }
 
 // flowMergedAtTx is the linked delivery's merge time, when that delivery is
-// already merged. A pull request match wins over another merged delivery of
-// the same ticket.
-func flowMergedAtTx(ctx context.Context, tx pgx.Tx, ticket *string, prs []int64) (*time.Time, error) {
+// already merged. A pull-request number is repository-scoped, so the row is
+// the delivery for this repository, project and ticket. Another repository's
+// merged pull request must not close this change. Without a pull request,
+// the ticket's own merged delivery is the link.
+func flowMergedAtTx(ctx context.Context, tx pgx.Tx, project, repository string, ticket *string, prs []int64) (*time.Time, error) {
 	var at time.Time
 	var err error
 	switch {
-	case len(prs) > 0:
-		err = tx.QueryRow(ctx, `SELECT state_since FROM delivery_items WHERE state='merged' AND pull_request = ANY($1::bigint[]) ORDER BY state_since DESC LIMIT 1`, prs).Scan(&at)
-	case ticket != nil && *ticket != "":
+	case len(prs) > 0 && repository != "" && project != "" && ticket != nil && *ticket != "":
+		err = tx.QueryRow(ctx, `SELECT state_since FROM delivery_items WHERE state='merged' AND repository=$1 AND project_id=$2 AND ticket_node_id=$3 AND pull_request = ANY($4::bigint[]) ORDER BY state_since DESC LIMIT 1`, repository, project, *ticket, prs).Scan(&at)
+	case len(prs) == 0 && ticket != nil && *ticket != "":
 		err = tx.QueryRow(ctx, `SELECT state_since FROM delivery_items WHERE state='merged' AND ticket_node_id=$1 ORDER BY state_since DESC LIMIT 1`, *ticket).Scan(&at)
 	default:
 		return nil, nil
@@ -330,6 +342,11 @@ func applyFlowStepTx(ctx context.Context, tx pgx.Tx, tid string, item flowItemRo
 		return false, id, err
 	}
 	if !exists && in.CloseOnly {
+		return false, id, nil
+	}
+	// queued → running → completed. A queued redelivery must not replace a
+	// running start with the run's creation time, or reopen a finished step.
+	if exists && in.Phase == "queued" {
 		return false, id, nil
 	}
 	if exists && in.Progress && before.EndedAt != nil && in.Ended == nil {
