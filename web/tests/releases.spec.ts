@@ -549,7 +549,12 @@ test('the cadence shows each day’s count above its bar, every bar named for sc
 // and the accessible name keeps the exact canonical version with its UTC date-time.
 test('release history renders CalVer2 history and CalVer3 versions as six-segment Pretty', async ({ page }) => {
   const { history } = await setup(page)
-  await page.goto('/')
+  // Home can still be laying out when the pill's name is already set. Calling
+  // click then wedges Chromium inside scroll-into-view for the whole timeout
+  // (CI web-shard 11). A settled project list is the same gate the other pill
+  // clicks use.
+  await page.goto('/p/PHAROS')
+  await expect(page.locator('tr.ticket-row:not(.ghost)').first()).toBeVisible()
   await pill(page).click()
   await expect(sheet(page)).toBeVisible()
   // At rest: the pointer that clicked the footer pill would otherwise hover a row.
