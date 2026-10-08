@@ -192,13 +192,21 @@ func applyFlowTx(ctx context.Context, tx pgx.Tx, tid string, batches []flowBatch
 				after.Ended = &v
 			}
 		}
+		// The item starts with its earliest accepted step. A report the stored
+		// step of the same run and attempt supersedes writes nothing, so it must
+		// not move the item either; a step of another run is always accepted.
 		for _, s := range b.Steps {
-			// A late queued report must not pull a running change back to the
-			// run's creation time. The step write rejects that phase too.
-			if s.Phase == "queued" && after.Started != nil && flowTime(s.Started).Before(*after.Started) {
+			if s.CloseOnly {
 				continue
 			}
-			if !s.CloseOnly && (after.Started == nil || s.Started.Before(*after.Started)) {
+			stored, err := loadFlowStepTx(ctx, tx, flowStepID(tid, id, s.Source, s.Key))
+			if err != nil {
+				return changes, err
+			}
+			if flowStepRejected(stored, s) {
+				continue
+			}
+			if after.Started == nil || s.Started.Before(*after.Started) {
 				v := flowTime(s.Started)
 				after.Started = &v
 			}
@@ -306,6 +314,37 @@ func flowMergedAtTx(ctx context.Context, tx pgx.Tx, project, repository string, 
 	return &at, nil
 }
 
+// flowLinkedRepositoryTx names the repository of the delivery that links this
+// ticket and pull request in the project, so a PAIMOS report reconciles a merge
+// against that delivery's own identity. A pull-request number alone is not a
+// delivery: with no linked delivery, or several repositories claiming the same
+// number for this ticket, nothing is guessed and the repository stays empty.
+func flowLinkedRepositoryTx(ctx context.Context, tx pgx.Tx, project string, ticket *string, prs []int64) (string, error) {
+	if project == "" || ticket == nil || *ticket == "" || len(prs) == 0 {
+		return "", nil
+	}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT repository FROM delivery_items WHERE project_id=$1 AND ticket_node_id=$2 AND pull_request = ANY($3::bigint[]) LIMIT 2`, project, *ticket, prs)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	var repositories []string
+	for rows.Next() {
+		var repository string
+		if err := rows.Scan(&repository); err != nil {
+			return "", err
+		}
+		repositories = append(repositories, repository)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if len(repositories) != 1 {
+		return "", nil
+	}
+	return repositories[0], nil
+}
+
 func loadFlowItemTx(ctx context.Context, tx pgx.Tx, id string, lock bool) (*flowItemRow, error) {
 	q := `SELECT ` + flowItemColumns + ` FROM delivery_flow_items WHERE id=$1`
 	if lock {
@@ -334,23 +373,47 @@ func scanFlowStep(row pgx.Row) (FlowStep, error) {
 	return s, err
 }
 
+// loadFlowStepTx reads one step under the row lock, or nil when it is not stored.
+func loadFlowStepTx(ctx context.Context, tx pgx.Tx, id string) (*FlowStep, error) {
+	s, err := scanFlowStep(tx.QueryRow(ctx, `SELECT `+flowStepColumns+` FROM delivery_flow_steps WHERE id=$1 FOR NO KEY UPDATE`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// flowStepRejected reports whether a report writes nothing, given the stored
+// step of the same run and attempt (nil when none). A close never creates a
+// row. queued → running → completed: a queued redelivery must not replace a
+// running start with the run's creation time or reopen a finished step, and a
+// live report with no end never reopens a step that has already ended.
+func flowStepRejected(stored *FlowStep, in flowStepInput) bool {
+	switch {
+	case stored == nil:
+		return in.CloseOnly
+	case in.Phase == "queued":
+		return true
+	default:
+		return in.Progress && stored.EndedAt != nil && in.Ended == nil
+	}
+}
+
 func applyFlowStepTx(ctx context.Context, tx pgx.Tx, tid string, item flowItemRow, in flowStepInput, now time.Time) (bool, string, error) {
 	id := flowStepID(tid, item.ID, in.Source, in.Key)
-	before, err := scanFlowStep(tx.QueryRow(ctx, `SELECT `+flowStepColumns+` FROM delivery_flow_steps WHERE id=$1 FOR NO KEY UPDATE`, id))
-	exists := err == nil
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	stored, err := loadFlowStepTx(ctx, tx, id)
+	if err != nil {
 		return false, id, err
 	}
-	if !exists && in.CloseOnly {
+	if flowStepRejected(stored, in) {
 		return false, id, nil
 	}
-	// queued → running → completed. A queued redelivery must not replace a
-	// running start with the run's creation time, or reopen a finished step.
-	if exists && in.Phase == "queued" {
-		return false, id, nil
-	}
-	if exists && in.Progress && before.EndedAt != nil && in.Ended == nil {
-		return false, id, nil
+	exists := stored != nil
+	var before FlowStep
+	if exists {
+		before = *stored
 	}
 	after := FlowStep{ID: id, ItemID: item.ID, StepKey: in.StepKey, Round: in.Round, Kind: in.Kind, Actor: in.Actor, StartedAt: flowTime(in.Started), EndedAt: flowTimePtr(in.Ended), Outcome: in.Outcome, WaitReason: in.WaitReason, WaitsFor: in.WaitsFor, Side: in.Side, Source: in.Source}
 	if exists && (in.Merge || in.CloseOnly) {

@@ -227,6 +227,11 @@ func flowFromPaimosTx(ctx context.Context, tx pgx.Tx, tid string, e flowSourceEv
 	b := &flowBatch{Item: flowItemInput{Project: t.Project, Kind: "change", Ref: t.Key, Title: t.Title, Ticket: &r.Ticket, NoCreate: true}}
 	if r.PR != nil && *r.PR > 0 {
 		b.Item.PRs = []int64{*r.PR}
+		// The round names no repository; the delivery linking this ticket and
+		// pull request does. A merge projected earlier still closes the change.
+		if b.Item.Repository, err = flowLinkedRepositoryTx(ctx, tx, t.Project, b.Item.Ticket, b.Item.PRs); err != nil {
+			return nil, err
+		}
 	}
 	if e.Type == "delivery.review.queued" || e.Type == "delivery.review.claim" || e.Type == "delivery.review.verdict" {
 		round := r.GateRounds + 1
