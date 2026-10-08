@@ -46,11 +46,17 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 	p := ranked{account: a, windows: windows, cap: 100, slots: a.MaxParallel - slots}
 	var short, long *time.Time
 	for _, w := range windows {
+		if w.usagePosture != "" {
+			p.posture = w.usagePosture
+		}
 		if w.capacityPresence {
 			p.presence = true
 		}
 		if !synthetic(w) {
 			end := w.EndsAt
+			if p.soonest == nil || end.Before(*p.soonest) {
+				p.soonest = &end
+			}
 			dest := &short
 			if w.capacityKind == "weekly" || w.capacityKind == "monthly" {
 				dest = &long
@@ -65,7 +71,16 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 			}
 			continue
 		}
-		available := float64(allowedUnits(w.Allowance, paceFraction(w.PaceModel, elapsedFraction(now, w.StartsAt, w.EndsAt), w.BurstRatio)) - w.Used - w.Reserved)
+		available := float64(allowedUnits(w.Allowance, windowPaceFraction(w, now)) - w.Used - w.Reserved)
+		if w.usageCeiling != nil {
+			available = math.Min(available, float64(*w.usageCeiling-w.Used-w.Reserved))
+		}
+		if w.Allowance > 0 {
+			projected, ok := addUsage(w.Used, w.Reserved, max(1, windowEstimate(w, estimates)))
+			if ok {
+				p.projected = math.Max(p.projected, float64(projected)/float64(w.Allowance))
+			}
+		}
 		if w.capacityBudget != nil {
 			available = math.Min(available, *w.capacityBudget-float64(w.Reserved))
 		}
@@ -106,26 +121,92 @@ func fingerprintPrimary(picks []ranked) map[string]int {
 	}
 	return primary
 }
+
+// orderPicks ranks each account by its own posture and does not rewrite
+// ranked.reset. That field is the long-window reset published as
+// CapacityRouting.ResetsAt. Max out is ordered by its own soonest active
+// window. Every other account keeps presence ahead of that long reset, and
+// Careful's projected use ahead of presence. The groups are sorted apart and
+// then merged: projected use is not a time, so one comparison over a mixed
+// pool is not a transitive order.
 func orderPicks(picks []ranked) {
-	sort.Slice(picks, func(i, j int) bool {
-		a, b := picks[i], picks[j]
-		if a.presence != b.presence {
-			return !a.presence
+	if len(picks) < 2 {
+		return
+	}
+	var maxout, rest []ranked
+	careful := false
+	for _, p := range picks {
+		if p.posture == "maxout" {
+			maxout = append(maxout, p)
+			continue
 		}
-		if a.reset == nil && b.reset != nil {
-			return false
-		}
-		if a.reset != nil && b.reset == nil {
-			return true
-		}
-		if a.reset != nil && b.reset != nil && !a.reset.Equal(*b.reset) {
-			return a.reset.Before(*b.reset)
-		}
-		if a.cap != b.cap {
-			return a.cap > b.cap
-		}
-		return a.account.ID < b.account.ID
+		careful = careful || p.posture == "careful"
+		rest = append(rest, p)
+	}
+	sort.Slice(rest, func(i, j int) bool { return lessRest(rest[i], rest[j], careful) })
+	sort.Slice(maxout, func(i, j int) bool {
+		return lessInstant(maxout[i].soonest, maxout[j].soonest, maxout[i], maxout[j])
 	})
+	copy(picks, mergeRanked(rest, maxout))
+}
+
+func lessRest(a, b ranked, careful bool) bool {
+	if careful && a.projected != b.projected {
+		return a.projected < b.projected
+	}
+	if a.presence != b.presence {
+		return !a.presence
+	}
+	return lessInstant(a.reset, b.reset, a, b)
+}
+
+func lessInstant(ar, br *time.Time, a, b ranked) bool {
+	if ar == nil && br != nil {
+		return false
+	}
+	if ar != nil && br == nil {
+		return true
+	}
+	if ar != nil && br != nil && !ar.Equal(*br) {
+		return ar.Before(*br)
+	}
+	if a.cap != b.cap {
+		return a.cap > b.cap
+	}
+	return a.account.ID < b.account.ID
+}
+
+func mergeRanked(rest, maxout []ranked) []ranked {
+	out := make([]ranked, 0, len(rest)+len(maxout))
+	i, j := 0, 0
+	for i < len(rest) && j < len(maxout) {
+		if maxoutBefore(maxout[j], rest[i]) {
+			out = append(out, maxout[j])
+			j++
+			continue
+		}
+		out = append(out, rest[i])
+		i++
+	}
+	out = append(out, rest[i:]...)
+	out = append(out, maxout[j:]...)
+	return out
+}
+
+func maxoutBefore(m, r ranked) bool {
+	if m.soonest == nil {
+		return false
+	}
+	if r.reset == nil {
+		return true
+	}
+	if !m.soonest.Equal(*r.reset) {
+		return m.soonest.Before(*r.reset)
+	}
+	if m.cap != r.cap {
+		return m.cap > r.cap
+	}
+	return m.account.ID < r.account.ID
 }
 
 func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile string, run runRow, now time.Time) (map[string]CapacityRouting, error) {

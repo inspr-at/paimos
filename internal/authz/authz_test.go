@@ -114,7 +114,7 @@ func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
 			t.Fatal("an explicit custom-role permission must remain agent-grantable")
 		}
 		for _, role := range []string{"owner", "admin", "member"} {
-			if (key == "delivery.manage" || key == "delivery_queue.manage" || key == "delivery_queue.claim" || key == "reviewpolicy.manage" || key == "engine.manage") && role == "member" {
+			if (key == "delivery.manage" || key == "delivery_queue.manage" || key == "delivery_queue.claim" || strings.HasPrefix(key, "delivery_reviews.") || key == "reviewpolicy.manage" || key == "engine.manage") && role == "member" {
 				if contains(builtinPermissions(role), key) {
 					t.Fatal("delivery and review-policy management should require an explicit member grant")
 				}

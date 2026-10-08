@@ -142,14 +142,18 @@ func TestDeliveryWorkQueueShadowRotationFreezeReplayAndIsolation(t *testing.T) {
 	// Merged, open, and held delivery rows decide only work/<slug>, plus this
 	// round's own pull request. A merged or open row on another branch of the
 	// same ticket must not park or keep this slug.
-	insertDelivery := func(branch, state string, pr int64) {
+	insertDeliveryObserved := func(branch, state string, pr int64, observation string) {
 		t.Helper()
 		f.tx(t, func(tx pgx.Tx) error {
 			_, err := tx.Exec(t.Context(), `INSERT INTO delivery_items(tenant_id,id,project_id,ticket_node_id,repository,pull_request,branch,head_sha,state,state_since,owner,observation,updated_at)
-				VALUES($1,gen_random_uuid(),$2,$3,'example/delivery',$4,$5,$6,$7,timestamptz '2026-10-07T00:00:00Z','person','{}'::jsonb,timestamptz '2026-10-07T00:00:00Z')`,
-				f.person.TenantID, f.project, f.ticket, pr, branch, strings.Repeat("d", 40), state)
+				VALUES($1,gen_random_uuid(),$2,$3,'example/delivery',$4,$5,$6,$7,timestamptz '2026-10-07T00:00:00Z','person',$8::jsonb,timestamptz '2026-10-07T00:00:00Z')`,
+				f.person.TenantID, f.project, f.ticket, pr, branch, strings.Repeat("d", 40), state, observation)
 			return err
 		})
+	}
+	insertDelivery := func(branch, state string, pr int64) {
+		t.Helper()
+		insertDeliveryObserved(branch, state, pr, `{}`)
 	}
 	decision := func(claim QueueClaim, id string) (QueueDecision, bool) {
 		t.Helper()
@@ -183,10 +187,22 @@ func TestDeliveryWorkQueueShadowRotationFreezeReplayAndIsolation(t *testing.T) {
 	own := roundInput(f, "open-own", "fix", 4)
 	f.call(t, f.person, "POST", path, own, 201, &stillOpen)
 	insertDelivery("work/open-own", "merged", 24)
-	insertDelivery("work/open-own", "pushed", 25)
+	// GitHub sets observation.open only while the pull request state is open.
+	insertDeliveryObserved("work/open-own", "pushed", 25, `{"open":true}`)
 	f.call(t, f.agent, "POST", path+"/claim", ClaimInput{Request: requestID(10)}, 200, &replay)
 	if replay.Execute || replay.Round == nil || replay.Round.ID != stillOpen.ID {
 		t.Fatal("open PR on this slug's branch did not keep it", replay)
+	}
+	// A closed pull request is stored as built or reviewed with open false.
+	// It must not keep a later fix round claimable once this slug has merged.
+	var closedOwn Round
+	f.call(t, f.person, "POST", path, roundInput(f, "closed-own", "fix", 8), 201, &closedOwn)
+	insertDelivery("work/closed-own", "merged", 31)
+	insertDeliveryObserved("work/closed-own", "built", 32, `{"open":false}`)
+	f.call(t, f.agent, "POST", path+"/claim", ClaimInput{Request: requestID(14)}, 200, &replay)
+	closedDecision, ok := decision(replay, closedOwn.ID)
+	if replay.Round != nil || !ok || closedDecision.Action != "park" || closedDecision.Reason != "already_merged" {
+		t.Fatal("closed pull request kept a merged slug claimable", replay)
 	}
 	insertDelivery("work/other-branch", "held", 26)
 	var clear Round

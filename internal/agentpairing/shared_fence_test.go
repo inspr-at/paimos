@@ -17,7 +17,7 @@ import (
 // This explicit caller inventory makes newly connected entry paths reviewable.
 // Actual contention and FK compatibility are exercised by boundary/recurrence tests.
 var sharedFenceCallers = map[string][]string{
-	"db.LockTree":               {"authz/project_members.go", "crossreview/policy.go", "db/fences.go", "delivery/alerts.go", "delivery/audit.go", "delivery/audit_store.go", "delivery/routing.go", "modelregistry/module.go", "modelregistry/preparation.go", "operatoractor/actor.go", "workorders/common.go"},
+	"db.LockTree":               {"authz/project_members.go", "crossreview/policy.go", "db/fences.go", "delivery/alerts.go", "delivery/audit.go", "delivery/audit_store.go", "delivery/reviews_api.go", "delivery/routing.go", "modelregistry/module.go", "modelregistry/preparation.go", "operatoractor/actor.go", "workorders/common.go"},
 	"db.LockTenant":             {"auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/alerts.go", "delivery/api.go", "delivery/audit_store.go", "delivery/audit_webhook.go", "delivery/module.go", "delivery/quarantine.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "delivery/workqueue.go", "delivery/workqueue_api.go", "engineadmission/module.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "statusautopilot/attention_bulk.go", "workorders/common.go"},
 	"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
 	"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
