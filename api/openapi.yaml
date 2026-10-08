@@ -35,6 +35,48 @@ paths:
       responses:
         '201': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/boost:
+    put:
+      operationId: putAccountBoost
+      summary: Set Boost today on the person's accounts
+      description: "Person account.manage and canonical owner only. Atomically writes every current owned account, checked against the complete account list and captured policy and binding revisions inside the mutation fence. Boost adds N/100 to pacing, never to vendor allowance; hard floors, Hold and safety guards still apply. Ends at 23:59 in the supplied IANA local timezone, computed by the server clock. Zero clears it. At most 1024 accounts and a five-second deadline."
+      tags: [agent-accounts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [boost_percent, timezone, accounts]
+              properties:
+                boost_percent: {type: integer, enum: [0, 10, 20, 30]}
+                timezone: {type: string, minLength: 1, maxLength: 128}
+                accounts:
+                  type: array
+                  minItems: 1
+                  maxItems: 1024
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [account_id, revision, binding_revision]
+                    properties:
+                      account_id: {type: string, format: uuid}
+                      revision: {type: integer, minimum: 0}
+                      binding_revision: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: "All owned account policies saved."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accounts]
+                properties:
+                  accounts: {type: array, items: {$ref: '#/components/schemas/AccountUsagePolicy'}}
+        '400': {description: "Invalid boost, timezone or account list."}
+        '403': {description: "Current person owner and account.manage required."}
+        '409': {description: "Account list, policy or binding changed; reload before retrying."}
   /agent-accounts/capacity:
     get:
       operationId: listAccountCapacity
@@ -442,48 +484,6 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
-  /agent-accounts/boost:
-    put:
-      operationId: putAccountBoost
-      summary: Set Boost today on the person's accounts
-      description: "Person account.manage and canonical owner only. Atomically writes every current owned account, checked against the complete account list and captured policy and binding revisions inside the mutation fence. Boost adds N/100 to pacing, never to vendor allowance; hard floors, Hold and safety guards still apply. Ends at 23:59 in the supplied IANA local timezone, computed by the server clock. Zero clears it. At most 1024 accounts and a five-second deadline."
-      tags: [agent-accounts]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [boost_percent, timezone, accounts]
-              properties:
-                boost_percent: {type: integer, enum: [0, 10, 20, 30]}
-                timezone: {type: string, minLength: 1, maxLength: 128}
-                accounts:
-                  type: array
-                  minItems: 1
-                  maxItems: 1024
-                  items:
-                    type: object
-                    additionalProperties: false
-                    required: [account_id, revision, binding_revision]
-                    properties:
-                      account_id: {type: string, format: uuid}
-                      revision: {type: integer, minimum: 0}
-                      binding_revision: {type: integer, minimum: 0}
-      responses:
-        '200':
-          description: "All owned account policies saved."
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [accounts]
-                properties:
-                  accounts: {type: array, items: {$ref: '#/components/schemas/AccountUsagePolicy'}}
-        '400': {description: "Invalid boost, timezone or account list."}
-        '403': {description: "Current person owner and account.manage required."}
-        '409': {description: "Account list, policy or binding changed; reload before retrying."}
   /agent-accounts/{accountId}/posture:
     put:
       operationId: putAccountPosture
