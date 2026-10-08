@@ -22,16 +22,21 @@ type Module struct {
 	fanout         func(context.Context, []byte) error
 	now            func() time.Time
 	queueAdmission QueueAdmission
+	flowSlots      chan struct{}
+	// flowStreamNow is the live stream's authorization clock. Nil uses the
+	// wall clock, so a frozen business clock cannot expire every heartbeat.
+	flowStreamNow func() time.Time
 }
 
 func New(pool *pgxpool.Pool, config crossreview.AppConfig, secret []byte, github GitHub, fanout func(context.Context, []byte) error) *Module {
-	return &Module{pool: pool, config: config, secret: append([]byte(nil), secret...), github: github, fanout: fanout, now: func() time.Time { return time.Now().UTC() }}
+	return &Module{pool: pool, config: config, secret: append([]byte(nil), secret...), github: github, fanout: fanout, now: func() time.Time { return time.Now().UTC() }, flowSlots: make(chan struct{}, flowStreamSlots)}
 }
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountWorkQueue(mux)
 	m.mountReviews(mux)
 	m.mountShipping(mux)
 	m.mountMetrics(mux)
+	m.mountFlow(mux)
 	// auditWebhook keeps the reviewed ingress and records merge-audit facts after it accepts the event.
 	mux.HandleFunc("POST /api/github/webhook", m.auditWebhook)
 	mux.HandleFunc("GET /api/delivery/audit", m.auditList)
