@@ -24,6 +24,9 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"POST /api/engine/admission":                                       "engine.admission",
+	"GET /api/projects/{projectId}/admission-settings":                 "engine.read",
+	"PUT /api/projects/{projectId}/admission-settings":                 "engine.manage",
 	"GET /api/model-preferences/board":                                 "models.read",
 	"PUT /api/model-preferences/orders/{column}/{situation}":           "models.read|model_prefs.manage",
 	"DELETE /api/model-preferences/orders/{column}/{situation}":        "models.read|model_prefs.manage",
@@ -847,7 +850,7 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 // Delivery entry checks admit project bindings; handlers fence and recheck
 // the live target project's permission and RLS before returning or changing it.
 func init() {
-	for _, pattern := range []string{"GET /api/delivery", "GET /api/delivery/alerts", "GET /api/delivery/enqueue-allowed", "GET /api/nodes/{id}/delivery", "POST /api/delivery/{itemId}/hold", "DELETE /api/delivery/{itemId}/hold"} {
+	for _, pattern := range []string{"POST /api/engine/admission", "GET /api/delivery", "GET /api/delivery/alerts", "GET /api/delivery/enqueue-allowed", "GET /api/nodes/{id}/delivery", "POST /api/delivery/{itemId}/hold", "DELETE /api/delivery/{itemId}/hold"} {
 		ProjectFilteredRoutes[pattern] = true
 	}
 }
