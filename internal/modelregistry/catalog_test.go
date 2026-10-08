@@ -9,7 +9,7 @@ import (
 
 func TestCatalogV3Ladders(t *testing.T) {
 	profiles := catalogProfiles()
-	if len(profiles) != 50 {
+	if len(profiles) != 51 {
 		t.Fatalf("catalog has %d profiles", len(profiles))
 	}
 	slugOK := regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)

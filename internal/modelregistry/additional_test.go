@@ -33,7 +33,7 @@ func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) 
 		t.Fatal(err)
 	}
 	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
-	if len(profiles) != 50 {
+	if len(profiles) != 51 {
 		t.Fatal("upgrade profiles", len(profiles))
 	}
 	readRoutes := func() []Route {
