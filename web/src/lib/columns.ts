@@ -17,7 +17,7 @@ export interface ColumnDef<Id extends string = string> { id: Id; label: string; 
 export interface ListPrefs { order?: ColumnId[]; visible?: ColumnId[]; widths?: Partial<Record<string, number>>; defaultView?: string | null }
 
 export const COLUMNS: ColumnDef<ColumnId>[] = [
-  { id: 'key', label: 'Key', sort: 'key', width: 118, min: 84, max: 220 },
+  { id: 'key', label: 'Key', sort: 'key', width: 118, min: 84, max: 480 },
   { id: 'title', label: 'Title', sort: 'title', width: 0, min: 240, max: 4000 },
   { id: 'status', label: 'Status', sort: 'state', width: 138, min: 84, max: 260 },
   { id: 'priority', label: 'Priority', sort: 'priority', width: 112, min: 72, max: 200 },

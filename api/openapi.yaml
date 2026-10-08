@@ -2436,6 +2436,16 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
   /attachments/{id}:
     parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    get:
+      operationId: getAttachment
+      description: 'Read live attachment metadata by ID with attachments.read and current node/project visibility.'
+      security: *auth
+      responses:
+        '200': {description: 'Tenant-scoped attachment metadata', content: {application/json: {schema: {$ref: '#/components/schemas/Attachment'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
     patch:
       operationId: updateAttachment
       description: Tenant staff people only. Optional If-Unmodified-Since compares the exact updated_at timestamp under row lock; stale writes return 412.
@@ -3262,6 +3272,22 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '500': {$ref: '#/components/responses/Error'}
+  /delivery/audit:
+    get:
+      operationId: listDeliveryMergeAudit
+      description: 'Observe-only merge audit visible to the caller. Requires delivery.read; project keys and flagged rows can be filtered with bounded repository and SHA keyset pagination. Does not grant merge authority.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: project, in: query, schema: {type: string, maxLength: 64}}
+        - {name: flagged, in: query, schema: {type: boolean}}
+        - {name: after, in: query, schema: {type: string, maxLength: 768}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: 'Merge audit page', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryAuditPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /delivery/enqueue-allowed:
     get:
       operationId: getDeliveryEnqueueAllowed
@@ -14704,6 +14730,28 @@ components:
       properties:
         items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeliveryAlert'}}
         next_cursor: {type: [string, 'null'], maxLength: 256}
+    DeliveryAudit:
+      type: object
+      required: [repository, merge_sha, pull_request, ticket_node_id, project_id, merged_by, via_queue, checks_passed, review_ok, flags, at, alerted_at]
+      properties:
+        repository: {type: string}
+        merge_sha: {type: string}
+        pull_request: {type: [integer, 'null'], format: int64}
+        ticket_node_id: {type: [string, 'null'], format: uuid}
+        project_id: {type: [string, 'null'], format: uuid}
+        merged_by: {type: string, maxLength: 100, description: 'GitHub merged_by for a PR or the authenticated push sender. Empty when reconciliation cannot prove the direct pusher.'}
+        via_queue: {type: boolean}
+        checks_passed: {type: boolean}
+        review_ok: {type: boolean}
+        flags: {type: array, items: {type: string, enum: [no_queue, checks_missing, no_review, direct_push]}}
+        at: {type: string, format: date-time}
+        alerted_at: {type: [string, 'null'], format: date-time, description: 'Null until an alert can be accepted by an authorized project lead. Unlinked merges remain visible in the workspace audit.'}
+    DeliveryAuditPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeliveryAudit'}}
+        next_cursor: {type: [string, 'null']}
     DeliveryEnqueueAllowed:
       type: object
       additionalProperties: false
