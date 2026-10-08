@@ -98,6 +98,7 @@ func checkBoardRevision(profile modelprefs.BoardProfile, revision *int64) error 
 	}
 	return nil
 }
+func validBoardUsage(s string) bool { return s == "careful" || s == "balanced" || s == "maxout" }
 func validThinking(s *string) bool {
 	return s == nil || *s == "lean" || *s == "standard" || *s == "deep" || *s == "max"
 }
@@ -305,7 +306,7 @@ func profilePatch(profile modelprefs.BoardProfile, raw map[string]json.RawMessag
 			return profile, false, prefFail(400, "invalid_profile")
 		}
 	}
-	if profile.Template != nil && *profile.Template != "best" && *profile.Template != "balanced" && *profile.Template != "save" || !validThinking(profile.Thinking) || profile.Residency != nil && *profile.Residency != "any" && *profile.Residency != "eu" && *profile.Residency != "local" {
+	if profile.Usage != nil && !validBoardUsage(*profile.Usage) || profile.Template != nil && *profile.Template != "best" && *profile.Template != "balanced" && *profile.Template != "save" || !validThinking(profile.Thinking) || profile.Residency != nil && *profile.Residency != "any" && *profile.Residency != "eu" && *profile.Residency != "local" {
 		return profile, false, prefFail(422, "invalid_profile")
 	}
 	if profile.HiddenKinds == nil || profile.DismissedLines == nil {
@@ -342,10 +343,6 @@ func (m *Module) writeBoardProfile(w http.ResponseWriter, r *http.Request) {
 	var revision *int64
 	if err := json.Unmarshal(raw["revision"], &revision); err != nil {
 		writePreferenceError(w, prefFail(400, "revision_required"))
-		return
-	}
-	if _, usage := raw["usage"]; usage {
-		writePreferenceError(w, prefFail(422, "usage_posture_not_available"))
 		return
 	}
 	dry := false

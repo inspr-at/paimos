@@ -133,17 +133,19 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 		s.Override = "sprint"
 		s.OverrideUntil = nil
 	}
-	// Unknown usage cannot enforce a numeric reserve, but the person's clock
-	// and explicit Hold remain real gates. Sprint/Away/Run now retain meaning.
-	if unknownOnly && s.ActiveOverride(now) != "sprint" && s.ActiveOverride(now) != "away" {
-		next := s.NextStart(now, s.OffDays == "normal")
-		if next == nil || next.After(now) {
-			return nil, &CapacityWait{Code: "schedule", Until: next, Timezone: s.Timezone, RunNowAllowed: true}, nil
-		}
-	}
 	if err := applyCapacityPacing(ctx, tx, a, active, now, s); err != nil {
 		return nil, nil, err
 	}
+	policy, err := loadUsagePolicy(ctx, tx, a.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	// A blind grant cannot prove that a configured hard floor remains. Wait
+	// for a numeric window rather than treating unknown usage as headroom.
+	if policy.Floor > 0 && !slices.ContainsFunc(active, func(w Window) bool { return !synthetic(w) }) {
+		return nil, waitFor("reading"), nil
+	}
+	applyUsageFloor(active, policy)
 	learned, err := loadLearning(ctx, tx, a.ID)
 	if err != nil {
 		return nil, nil, err
@@ -193,7 +195,11 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	need := boolInt(!claiming)
 	var hardUntil *time.Time
 	for _, w := range ordered {
-		if w.Allowance-w.Used-w.Reserved >= max(need, w.capacityHold*need) {
+		ceiling := w.Allowance
+		if w.usageCeiling != nil {
+			ceiling = *w.usageCeiling
+		}
+		if ceiling-w.Used-w.Reserved >= max(need, w.capacityHold*need) {
 			continue
 		}
 		end := w.EndsAt
@@ -203,6 +209,14 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	}
 	if hardUntil != nil {
 		return nil, &CapacityWait{Code: "allowance", Until: hardUntil, Timezone: s.Timezone}, nil
+	}
+	// Unknown vendor usage cannot enforce a numeric reserve, but manual caps
+	// and floors above still bind before the person's clock offers Run now.
+	if unknownOnly && s.ActiveOverride(now) != "sprint" && s.ActiveOverride(now) != "away" {
+		next := s.NextStart(now, s.OffDays == "normal")
+		if next == nil || next.After(now) {
+			return nil, &CapacityWait{Code: "schedule", Until: next, Timezone: s.Timezone, RunNowAllowed: true}, nil
+		}
 	}
 	// The Advanced sentence caps on top, like a window set by hand. A percent
 	// rule lowers the returned windows' budgets in place, so fits agrees.

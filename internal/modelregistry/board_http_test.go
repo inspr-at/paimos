@@ -484,3 +484,23 @@ func TestBoardMigrationAllTenantsKeepsReceiptsAndEventsIsolated(t *testing.T) {
 		}
 	}
 }
+
+// Risk: Usage saves without canonical-person/revision checks or accepts an
+// unknown posture that later opens admission.
+func TestBoardUsagePosturePersonPreconditionAndRevision(t *testing.T) {
+	admin, member := boardFixture(t)
+	path := "/api/model-preferences/profile?for=me"
+	body := map[string]any{"usage": "maxout", "revision": 0}
+	boardError(t, boardCall(t, member, "PUT", path, body, ""), 428, "person_precondition_required")
+	boardError(t, boardCall(t, member, "PUT", path, body, admin.ID), 409, "preference_person_changed")
+	saved := boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", path, body, member.ID), 200)
+	if saved.Profile.Usage == nil || *saved.Profile.Usage != "maxout" || saved.Revision != 1 {
+		t.Fatal(saved)
+	}
+	boardError(t, boardCall(t, member, "PUT", path, body, member.ID), 409, "stale_revision")
+	boardError(t, boardCall(t, member, "PUT", path, map[string]any{"usage": "buy-more", "revision": 1}, member.ID), 422, "invalid_profile")
+	saved = boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", path, map[string]any{"usage": nil, "revision": 1}, member.ID), 200)
+	if saved.Profile.Usage != nil || saved.Revision != 2 || eventCount(t, admin, "model.preferences_changed") != 2 {
+		t.Fatal("inheritance or event count wrong")
+	}
+}

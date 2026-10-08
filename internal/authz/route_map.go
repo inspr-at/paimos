@@ -338,6 +338,10 @@ var RoutePermissions = map[string]string{
 	"PUT /api/agent-accounts/{accountId}/usage-probe":                        "account.manage", // Handler re-checks the owning person inside the write.
 	"GET /api/agent-accounts":                                                "account.read",
 	"GET /api/agent-accounts/overview":                                       "account.read|account.overview.read",
+	"GET /api/agent-accounts/posture":                                        "account.read",
+	"PUT /api/agent-accounts/{accountId}/posture":                            "account.manage",
+	"PUT /api/agent-accounts/boost":                                          "account.manage",
+	"PUT /api/agent-accounts/{accountId}/floor":                              "account.manage", // Handler also requires workspace model_prefs.manage.
 	"GET /api/agent-accounts/catalog":                                        "account.read",
 	"PUT /api/agent-accounts/{accountId}/model":                              "account.manage",
 	"PUT /api/agent-accounts/quota-pool":                                     "account.manage",

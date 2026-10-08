@@ -4,9 +4,18 @@
     {
       "classification": "personal",
       "columns": {
+        "boost_link_revision": "metadata",
+        "boost_percent": "personal",
+        "boost_person_id": "personal",
+        "boost_until": "personal",
         "usage_budget": "personal",
+        "usage_floor_percent": "metadata",
+        "usage_posture": "personal",
+        "usage_posture_link_revision": "metadata",
+        "usage_posture_person_id": "personal",
         "usage_probe_enabled": "personal",
-        "usage_probe_revision": "metadata"
+        "usage_probe_revision": "metadata",
+        "usage_revision": "metadata"
       },
       "locator": {
         "person_column": "owner_person_id",
