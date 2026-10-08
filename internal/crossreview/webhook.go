@@ -124,12 +124,12 @@ func (m *Module) HandlePullChange(ctx context.Context, raw []byte) error {
 		return nil
 	}
 	if err == nil {
-		conn, e := m.pool.Acquire(ctx)
+		conn, release, e := db.Acquire(ctx, m.pool)
 		if e != nil {
 			err = e
 		} else {
 			err = m.publishReview(ctx, conn, tenantID, v, &changed)
-			conn.Release()
+			release()
 		}
 	}
 
