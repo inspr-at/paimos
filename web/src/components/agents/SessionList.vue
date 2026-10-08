@@ -718,8 +718,9 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
 .group-toggle:focus-visible { box-shadow: var(--focus-ring); }
 .chev.turned { transform: rotate(90deg); }
-/* Two label lines keep the glyph centre near the tree joint. Phones add padding. */
-.row { --tree-joint: 22px; position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
+/* Two label lines and the 10px row padding put the glyph centre near this joint.
+   Phones set their own. The stem still starts just below the fold. */
+.row { --tree-joint: 26px; position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
 .row.family { border-radius: 0; }
 .row.family-start { border-radius: 10px 10px 0 0; }
 .row.family-end { border-radius: 0 0 10px 10px; }
