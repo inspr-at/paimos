@@ -182,9 +182,10 @@ it('S8-013: a delayed session-ended send error for A cannot disable B', async ()
   const pending = deferred(), props = reactive({ view: { session: { id: 'A', project_id: 'p', agent_principal_id: 'agent', advertised_capabilities: [], management_mode: 'unmanaged' } }, now: 0, canWrite: true, active: false })
   const helpers = await import('../src/components/agents/sessionChat')
   const state = setup('components/agents/SessionChat.vue', props, {
-    '../../lib/api': { APIError }, '../../lib/agents': {}, '../../lib/agentRows': { readSessionMarker: async () => null },
-    '../../stores/agents': { useAgents: () => ({ thread: () => [], addressOf: () => 'agent', refreshThread: async () => {}, send: () => pending.promise }) },
+    '../../lib/api': { APIError }, '../../lib/agents': {}, '../../lib/agentRows': { readSessionMarker: async () => null }, '../../lib/toast': { toast: () => {} },
+    '../../stores/agents': { useAgents: () => ({ thread: () => [], threadState: () => 'idle', addressOf: () => 'agent', refreshThread: async () => {}, send: () => pending.promise }) },
     '../../stores/session': { useSession: () => ({ identity: { principal: { id: 'viewer', kind: 'agent' } } }) },
+    '../../stores/profile': { useProfile: () => ({ profile: null }) },
     './sessionMessages': { collapseMessages: () => [] }, './sessionChat': helpers,
   }).state
   await flush(); state.draft.value = 'To A'; const sending = state.send()

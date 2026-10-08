@@ -47,10 +47,17 @@ const serviceTiers = useServiceTiers()
 // One session in the docked panel: who and where, the bound ticket, then two tabs:
 // Overview (now, details, work, runs, provenance) and Messages (thread and composer).
 const actionsAnchor = ref<HTMLElement | null>(null)
+const composing = ref(false)
+function chatFocus(event: FocusEvent) {
+  if ((event.target as HTMLElement).matches('#session-panel-messages textarea')) composing.value = true
+}
+function chatBlur(event: FocusEvent) {
+  if (!(event.relatedTarget instanceof Node) || !root.value?.contains(event.relatedTarget)) composing.value = false
+}
 const props = defineProps<{ view: SessionView | undefined; loading: boolean; now: number; canWrite: boolean; controlBlock: (view: SessionView, kind: SessionControl['kind']) => string }>()
 const agentRecovery = useAgentRecovery(() => props.view?.session.id)
 const emit = defineEmits<{ close: []; control: [view: SessionView, kind: SessionControl['kind']]; review: [approval: Approval] }>()
-watch(() => props.view?.session.id, () => { actionsAnchor.value = null })
+watch(() => props.view?.session.id, () => { actionsAnchor.value = null; composing.value = false })
 const agents = useAgents()
 const auth = useSession()
 const root = ref<HTMLElement>()
@@ -172,7 +179,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </script>
 
 <template>
-  <aside ref="root" class="session-panel" aria-label="Session details" tabindex="-1">
+  <aside ref="root" class="session-panel" :class="{ composing }" aria-label="Session details" tabindex="-1" @focusin="chatFocus" @focusout="chatBlur">
     <!-- The identity stays in view while runs and messages scroll below it. -->
     <header class="panel-head">
       <div class="head-top">
@@ -325,7 +332,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <ProvenanceDetail v-if="s" :project-id="s.project_id" :session-id="s.id" :now="now" />
     </div>
     <SessionChat v-if="view && !loading && !reported?.watch" v-show="tab === 'messages'" id="session-panel-messages" :view="view" :now="now" :can-write="canWrite" :active="tab === 'messages'"
-      role="tabpanel" aria-labelledby="session-tab-messages" @unread="unread = $event" />
+      :interrupt-block="controlBlock(view, 'interrupt')" role="tabpanel" aria-labelledby="session-tab-messages" @unread="unread = $event" @interrupt="control('interrupt')" />
   </aside>
 </template>
 
@@ -434,10 +441,11 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   /* Up to four quiet controls share one row on phones. */
   .head-actions .btn { flex: 1 1 0; min-width: 0; min-height: 44px; padding-inline: 4px; }
   .head-top .icon-btn { width: 40px; height: 40px; }
-  /* While typing (keyboard open) the thread gets the room: controls and ticket step aside. */
-  .session-panel:has(#session-panel-messages textarea:focus) .head-actions,
-  .session-panel:has(#session-panel-messages textarea:focus) .head-sub,
-  .session-panel:has(#session-panel-messages textarea:focus) .managed-controls { display: none; }
+  /* Compact only after entering the composer. Keep that frame while focus
+     moves to thread actions, so focusing Retry/Copy cannot move the click. */
+  .session-panel.composing .head-actions,
+  .session-panel.composing .head-sub,
+  .session-panel.composing .managed-controls { display: none; }
   .scroll { padding: 16px 18px 24px; }
   .telemetry { grid-template-columns: 1fr 1fr; }
   .run-row { grid-template-columns: 88px minmax(0, 1fr) 56px; }

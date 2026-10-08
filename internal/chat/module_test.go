@@ -333,3 +333,50 @@ func TestDisabledAndBoundedContract(t *testing.T) {
 	f.mux.ServeHTTP(w, r)
 	expect(t, w, 400)
 }
+
+// Risk: a greatest-position watermark marks unloaded gaps as seen, or a
+// project administrator/cursor can read another person's private conversation.
+func TestParticipantHistoryPreservesExactSeenGapsAndCursorScope(t *testing.T) {
+	f := newFixture(t)
+	thread := f.thread(t, f.alice, f.role(t, f.alice, f.project, "worker", "history"))
+	session, _ := f.session(t, f.alice, f.project, "worker", "unmanaged")
+	first, _ := f.chatMessage(t, thread, session)
+	gap, _ := f.chatMessage(t, thread, session)
+	last, _ := f.chatMessage(t, thread, session)
+	path := "/api/chat-threads/" + thread.ID
+	latest := decode[historyPage](t, f.call(f.alice, "GET", path+"/messages?limit=1", nil, ""))
+	if len(latest.Items) != 1 || latest.Items[0].Message.ID != last || !latest.MoreBefore || latest.Before == nil {
+		t.Fatalf("latest page: %+v", latest)
+	}
+	marker := decode[seenMarker](t, f.call(f.alice, "PUT", path+"/read-marker", seenUnion{[]string{first, last}, "0"}, ""))
+	if marker.Prefix != "0" || len(marker.Chunks) == 0 {
+		t.Fatalf("marker inferred unloaded prefix: %+v", marker)
+	}
+	page := decode[historyPage](t, f.call(f.alice, "GET", path+"/messages", nil, ""))
+	if len(page.Items) != 3 || page.Items[0].ReadState != "seen" || page.Items[1].Message.ID != gap || page.Items[1].ReadState != "known_unread" || page.Items[2].ReadState != "seen" {
+		t.Fatalf("exact gaps lost: %+v", page)
+	}
+	prior := decode[historyPage](t, f.call(f.alice, "GET", path+"/messages?limit=1&before="+*latest.Before, nil, ""))
+	if len(prior.Items) != 1 || prior.Items[0].Message.ID != gap {
+		t.Fatalf("before cursor: %+v", prior)
+	}
+	replay := decode[seenMarker](t, f.call(f.alice, "PUT", path+"/read-marker", seenUnion{[]string{first, last}, "0"}, ""))
+	if replay.Revision != marker.Revision {
+		t.Fatal("seen replay changed revision")
+	}
+	for _, person := range []tenant.Principal{f.bob, f.admin, f.foreign, f.agent} {
+		expect(t, f.call(person, "GET", path+"/messages", nil, ""), 404)
+		expect(t, f.call(person, "PUT", path+"/read-marker", seenUnion{[]string{gap}, "0"}, ""), 404)
+	}
+	other := f.thread(t, f.alice, f.role(t, f.alice, f.project, "worker", "other-history"))
+	expect(t, f.call(f.alice, "GET", "/api/chat-threads/"+other.ID+"/messages?before="+*latest.Before, nil, ""), 400)
+	expect(t, f.call(f.alice, "GET", path+"/messages?limit=101", nil, ""), 400)
+	expect(t, f.call(f.alice, "GET", path+"/messages?before="+*latest.Before+"&after="+*latest.Before, nil, ""), 400)
+	expect(t, f.call(f.alice, "PUT", path+"/read-marker", seenUnion{[]string{gap}, "1"}, ""), 409)
+	expect(t, f.call(f.alice, "PUT", path+"/read-marker", seenUnion{[]string{uid()}, "0"}, ""), 404)
+	// A history read has no fetch/ACK/delivery side effects.
+	var changed bool
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT bool_or(acked_at IS NOT NULL OR fetched_at IS NOT NULL) FROM inbox_messages WHERE chat_thread_id=$1`, thread.ID).Scan(&changed); err != nil || changed {
+		t.Fatalf("history manufactured delivery evidence: %v %v", changed, err)
+	}
+}

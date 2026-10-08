@@ -60,10 +60,10 @@ test('send targets the selected generation and a concurrent stop disables the co
   await page.goto(`/agents/${worker.id}?tab=messages`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await panel.getByRole('textbox', { name: 'Message to Current lead' }).fill('Only this session')
-  await panel.getByRole('button', { name: 'Send', exact: true }).click()
+  await panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true }).click()
   expect(sent?.recipient_session_id).toBe(worker.id)
   await expect(panel.getByText('This session has ended.', { exact: true })).toHaveCount(1)
-  await expect(panel.getByRole('button', { name: 'Send', exact: true })).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true })).toHaveCount(0)
 })
 
 test('an accepted message reads the lists again', async ({ page }) => {
@@ -72,7 +72,7 @@ test('an accepted message reads the lists again', async ({ page }) => {
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await panel.getByRole('textbox', { name: 'Message to Current lead' }).fill('Ship it')
   const before = sessionListReads(calls)
-  await panel.getByRole('button', { name: 'Send', exact: true }).click()
+  await panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true }).click()
   await expect.poll(async () => { await page.clock.runFor(100); return sessionListReads(calls) }).toBeGreaterThan(before)
   expect(calls.filter(c => c.method === 'POST' && /\/messages$/.test(c.path))).toHaveLength(1)
 })
@@ -98,7 +98,7 @@ for (const width of [1600, 390]) {
     await expect(panel.getByText("delivered when the session's inbox hook runs")).toHaveCount(0)
     const [request] = await Promise.all([
       page.waitForRequest(r => r.method() === 'POST' && r.url().includes('/messages')),
-      composer.fill('Only this generation').then(() => panel.getByRole('button', { name: 'Send', exact: true }).click()),
+      composer.fill('Only this generation').then(() => panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true }).click()),
     ])
     expect(request.postDataJSON()).toMatchObject({ to: first.agent_principal_id, recipient_session_id: first.id, body: 'Only this generation' })
     await expect(panel.getByRole('list', { name: 'Messages', exact: true })).toContainText('Only this generation')
@@ -135,7 +135,7 @@ for (const older of ['delivered', 'read'] as const) {
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator(`.delivery.${older}`)).toHaveCount(1)
     await panel.getByRole('textbox', { name: 'Message to review-worker' }).fill('New message waiting')
-    await panel.getByRole('button', { name: 'Send', exact: true }).click()
+    await panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true }).click()
     await expect(panel.getByRole('list', { name: 'Messages', exact: true })).toContainText('New message waiting')
     await expect(panel.locator('.delivery.sent')).toHaveCount(1)
     await expect(panel.locator(`.delivery.${older}`)).toHaveCount(1)
@@ -188,7 +188,7 @@ test('a reload keeps the hook wait for the one send that is still pending', asyn
   const notice = panel.getByRole('status').filter({ hasText: "Delivered when the session's inbox hook runs." })
   for (const body of ['Failed send', 'Delivered send', 'Pending send']) {
     await panel.getByRole('textbox', { name: 'Message to review-worker' }).fill(body)
-    await panel.getByRole('button', { name: 'Send', exact: true }).click()
+    await panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true }).click()
     await expect(panel.getByRole('list', { name: 'Messages', exact: true })).toContainText(body)
   }
   await expect(panel.locator('[data-status=not_delivered]')).toHaveCount(1)
@@ -224,7 +224,7 @@ test('a send marked not_delivered shows that failure instead of the hook wait', 
   await page.goto(`/agents/${first.id}?tab=messages`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await panel.getByRole('textbox', { name: 'Message to review-worker' }).fill('New message waiting')
-  await panel.getByRole('button', { name: 'Send', exact: true }).click()
+  await panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true }).click()
   await expect(panel.getByRole('list', { name: 'Messages', exact: true })).toContainText('New message waiting')
   await expect(panel.locator('[data-status=not_delivered]')).toHaveCount(1)
   await expect(panel.getByText('Not delivered · not confirmed in time')).toBeVisible()

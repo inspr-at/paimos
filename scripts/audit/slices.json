@@ -233,7 +233,8 @@
         "web/src/views/**",
         "web/src/components/**",
         "web/src/components/work/AttentionGroupMenu.vue",
-        "web/src/components/work/AttentionBulkPreview.vue"
+        "web/src/components/work/AttentionBulkPreview.vue",
+        "web/src/components/agents/ChatCodeBlock.vue"
       ]
     },
     {
