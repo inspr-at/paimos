@@ -87,6 +87,18 @@ func TestSessionChatCancelAndLinkedResend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A terminal failure with no recipient exposure is still safe to cancel.
+	// "too_late" must not tell the person the agent has an unoffered payload.
+	failedInput := input
+	failedInput.Key = "failed-never-offered"
+	failed := mustCompatSend(t, m, w.sender, project, failedInput)
+	if _, err = w.db.Admin.Exec(t.Context(), `UPDATE inbox_receipts SET state='failed',failure_reason='deadline' WHERE message_id=$1`, failed.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, body = do(t, srv, w.sender.ID, "POST", "/api/projects/"+project+"/messages/"+failed.ID+"/cancel", "", nil)
+	if status != 200 || mustJSON[chatCancelResult](t, body).Result != "cancelled" {
+		t.Fatalf("unoffered failure could not be cancelled %d %s", status, body)
+	}
 	// Permissions are resolved again from current rows, not the principal's
 	// earlier authenticated role snapshot.
 	if _, err = w.db.Admin.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, w.sender.ID); err != nil {

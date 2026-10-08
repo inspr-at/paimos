@@ -89,10 +89,6 @@ func (m *messaging) cancelSessionMessage(w http.ResponseWriter, r *http.Request)
 			out.Receipt.State = "offered"
 			return nil
 		}
-		if state == "failed" {
-			out.Receipt.State = "failed"
-			return nil
-		}
 		// Expiry closes every existing recipient read path without extending the
 		// legacy receipt enum or inventing a receiver confirmation.
 		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET cancelled_at=clock_timestamp(),expires_at=LEAST(coalesce(expires_at,clock_timestamp()),clock_timestamp()) WHERE id=$1`, id); err != nil {
