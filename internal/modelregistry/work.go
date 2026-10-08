@@ -33,6 +33,9 @@ type WorkQuery struct {
 	PreviousFamily   string
 	Concept          bool
 	Queued           bool
+	// Column and OffHarnesses are supplied by shadow round routing only.
+	Column       string
+	OffHarnesses []string
 	// ExplicitBoard marks a caller that asked for board placement with
 	// mode=placement. A closed (revision-0) board answers it; dispatch,
 	// review and escalation callers leave it false and keep the legacy ladder

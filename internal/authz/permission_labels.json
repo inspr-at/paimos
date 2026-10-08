@@ -70,6 +70,7 @@
   "special": {
     "account.overview.read": "See all enrolled account capacity",
     "agents.plan.read": "See their agent start plan",
+    "delivery.route": "Record and read shadow delivery routes",
     "engine.admission": "Evaluate shadow start admission",
     "engine.manage": "Manage shadow admission settings",
     "engine.read": "Read shadow admission settings",
