@@ -259,7 +259,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await mkdir('test-results/aeon-694-fix3', { recursive: true })
     await page.screenshot({ path: `test-results/aeon-694-fix3/vocabulary-member-${width}-${theme}.png`, fullPage: true })
     await mkdir('test-results/aeon-996-vocabui', { recursive: true })
-    await page.screenshot({ path: `test-results/aeon-996-vocabui/readonly-${width}-${theme}.png`, fullPage: true })
+    await card.screenshot({ path: `test-results/aeon-996-vocabui/readonly-${width}-${theme}.png` })
   })
 }
 
