@@ -80,3 +80,20 @@ test('Expert full screen and German light-dark evidence preserve controls across
     await page.locator('[data-board-done]').click(); await expect(page.locator('[data-models-fullscreen]')).toBeFocused(); await expect(page.locator('[data-models-mode="expert"]')).toHaveAttribute('aria-pressed', 'true')
   }
 })
+
+// Risk: a replace is a navigation that refreshes access and reloads the board, so a view
+// written to the URL on every visit closed a Why link that had just opened and lost the
+// anchor. The URL may only change when a person chooses a view.
+test('a remembered Expert view opens a Why link and leaves the URL alone', async ({ page }) => {
+  await page.addInitScript(key => localStorage.setItem(key, 'expert'), `models-page/board-tenant/${boardPerson}/mode`)
+  await mockModelsSettings(page); await openModelsSettings(page, '?why=1&ticket=n-1')
+  await expect(page.locator('[data-models-mode="expert"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('dialog', { name: 'Why this model?' })).toBeVisible()
+  expect(new URL(page.url()).search).toBe('?why=1&ticket=n-1')
+})
+test('choosing a view writes it to the URL and keeps the anchor', async ({ page }) => {
+  await mockModelsSettings(page); await openModelsSettings(page, '#models')
+  expect(new URL(page.url()).search).toBe(''); expect(new URL(page.url()).hash).toBe('#models')
+  await page.locator('[data-models-mode="simple"]').click()
+  await expect(page).toHaveURL(url => url.pathname === '/settings/models' && url.search === '?mode=simple' && url.hash === '#models')
+})

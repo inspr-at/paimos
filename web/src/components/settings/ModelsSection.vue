@@ -43,10 +43,19 @@ const isMode = (value: unknown): value is BoardMode => value === 'auto' || value
 const urlModeOwner = () => typeof window === 'undefined' ? undefined : window.history?.state?.modelsModeOwner
 let requestedMode = isMode(route.query.mode) && (!urlModeOwner() || urlModeOwner() === owner.value) ? route.query.mode : undefined, restoredPerson = false
 const modeKey = computed(() => `models-page/${stateOwner.value}/mode`)
-watch(stateOwner, () => { mode.value = 'auto'; try { const stored = localStorage.getItem(modeKey.value); if (isMode(stored)) mode.value = stored } catch { /* Optional browser preference. */ }; if (!restoredPerson && requestedMode) mode.value = requestedMode; if (canonicalPerson.value) restoredPerson = true; if (owner.value) setMode(mode.value) }, { immediate: true, flush: 'sync' })
+watch(stateOwner, () => { mode.value = 'auto'; try { const stored = localStorage.getItem(modeKey.value); if (isMode(stored)) mode.value = stored } catch { /* Optional browser preference. */ }; if (!restoredPerson && requestedMode) mode.value = requestedMode; if (canonicalPerson.value) restoredPerson = true; if (owner.value) setMode(mode.value, false) }, { immediate: true, flush: 'sync' })
 watch(owner, (value, previous) => { if (previous && value !== previous) requestedMode = undefined }, { flush: 'sync' })
 watch(() => route.query.mode, value => { if (isMode(value) && (!urlModeOwner() || urlModeOwner() === owner.value)) { mode.value = value; if (owner.value) try { localStorage.setItem(modeKey.value, value) } catch { /* Optional browser preference. */ } } })
-function setMode(value: BoardMode) { mode.value = value; if (!owner.value) return; try { localStorage.setItem(modeKey.value, value) } catch { /* Optional browser preference. */ }; if (route.query.mode !== value || urlModeOwner() !== owner.value) void router.replace({ query: { ...route.query, mode: value }, state: { modelsModeOwner: owner.value } }) }
+// A replace is a navigation: it refreshes access, reloads the board and closes a Why
+// deep link that just opened, and it must keep the hash. The URL is rewritten only when
+// a person chooses a view or it names another one; a matching URL just gets its owner.
+function syncModeUrl(value: BoardMode, chosen: boolean) {
+  const named = route.query.mode
+  if (!owner.value || (named === undefined && !chosen)) return
+  if (named !== value) { void router.replace({ query: { ...route.query, mode: value }, hash: route.hash, state: { modelsModeOwner: owner.value } }); return }
+  if (urlModeOwner() !== owner.value && typeof window !== 'undefined') window.history.replaceState({ ...window.history.state, modelsModeOwner: owner.value }, '')
+}
+function setMode(value: BoardMode, chosen = true) { mode.value = value; if (!owner.value) return; try { localStorage.setItem(modeKey.value, value) } catch { /* Optional browser preference. */ }; syncModeUrl(value, chosen) }
 const columns = computed(() => board.value?.columns.map(column => localizeColumn(column, german.value)) ?? [])
 const orderNames = (lines: string[]) => lines.map(line => lineName({ line, version: '' }))
 const inherited = computed(() => context.value.layer === 'mine' && (!board.value?.profile.template || board.value.profile.scope === 'workspace'))
@@ -106,7 +115,7 @@ function showWhy(event: MouseEvent) { whyOpener.value = event.currentTarget as H
 watch(editor.actionKey, () => { templateOpen.value = false; menuOpen.value = false; whyOpen.value = false; templatePreview.value = null }, { flush: 'sync' })
 let deepWhyShown = false
 watch(board, value => { if (value && route.query.why === '1' && !deepWhyShown) { deepWhyShown = true; whyOpen.value = true } })
-onMounted(() => { void projects.load(); if (route.path === '/settings/models') setMode(mode.value) })
+onMounted(() => { void projects.load(); if (route.path === '/settings/models') setMode(mode.value, false) })
 onBeforeUnmount(() => scope.dispose())
 </script>
 <template>

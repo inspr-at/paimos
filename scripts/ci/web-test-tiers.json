@@ -8258,7 +8258,11 @@
     ,
     {"kind":"browser","file":"tests/models-expert.spec.ts","name":"a refused or held stale thinking write reports honestly and cannot create Undo on a new situation","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-expert.spec.ts","name":"a remembered Expert view opens a Why link and leaves the URL alone","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/models-expert.spec.ts","name":"agent readers see Expert and live situation definitions with no thinking write controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-expert.spec.ts","name":"choosing a view writes it to the URL and keeps the anchor","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-expert.spec.ts","name":"column thinking saves one captured situation, keeps inherited rank, and Undo restores auto","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
