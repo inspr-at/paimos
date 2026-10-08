@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -32,6 +33,11 @@ import (
 // Risk: background work consumes every slot and takes the entire installation
 // out of service although Postgres itself is healthy (AEON-995).
 func TestServeBackgroundPoolHeadroom(t *testing.T) {
+	t.Run("default workers", func(t *testing.T) { testServeBackgroundPoolHeadroom(t, false) })
+	t.Run("configured optional workers", func(t *testing.T) { testServeBackgroundPoolHeadroom(t, true) })
+}
+
+func testServeBackgroundPoolHeadroom(t *testing.T, configured bool) {
 	t.Setenv("AEON_ENV", "dev")
 	fresh := dbtest.Open(t)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -70,9 +76,35 @@ func TestServeBackgroundPoolHeadroom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cfg := config.Config{DatabaseURL: fresh.AppURL, Env: "dev", PublicURL: "http://127.0.0.1", BootstrapTenantSlug: "pool-headroom", BootstrapTenantName: "Pool headroom"}
+	if configured {
+		// Start optional lanes too, without any provisioned credentials or vendor
+		// traffic. Empty queues and deliberately absent App files fail closed.
+		if err := db.EnsureTenant(ctx, pool, cfg.BootstrapTenantSlug, cfg.BootstrapTenantName); err != nil {
+			t.Fatal(err)
+		}
+		var tid string
+		if err := pool.QueryRow(ctx, `SELECT id::text FROM tenants WHERE slug=$1`, cfg.BootstrapTenantSlug).Scan(&tid); err != nil {
+			t.Fatal(err)
+		}
+		cfg.PublicURL = "https://127.0.0.1"
+		cfg.MessagingKey = bytes.Repeat([]byte{1}, 32)
+		cfg.LinkKey = bytes.Repeat([]byte{2}, 32)
+		cfg.AttachedMessages, cfg.AttachedMessagesSingleInstance = true, true
+		private, public, err := webpush.GenerateVAPIDKeys()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.PhonePush = &config.PhonePushConfig{PublicKey: public, PrivateKey: private, Subject: "mailto:fixture@example.test"}
+		cfg.DoctrineGuardKey = bytes.Repeat([]byte{3}, 32)
+		cfg.DoctrineAppID, cfg.DoctrineInstallationID, cfg.DoctrineAppTenantID = "1", "1", tid
+		cfg.DoctrineAppKeyRef, cfg.DoctrineGateLogin, cfg.DoctrineDCOAcknowledged = "fixture.pem", "fixture", true
+		cfg.ReviewAppID, cfg.ReviewInstallationID, cfg.ReviewAppTenantID = "1", "1", tid
+		cfg.ReviewAppKeyFile, cfg.ReviewAppRepository = filepath.Join(t.TempDir(), "unprovisioned-app.pem"), "fixture/fixture"
+	}
 	done := make(chan error, 1)
 	go func() {
-		done <- serveWithPool(ctx, config.Config{DatabaseURL: fresh.AppURL, Env: "dev", PublicURL: "http://127.0.0.1", BootstrapTenantSlug: "pool-headroom", BootstrapTenantName: "Pool headroom"}, ln, pool, 1)
+		done <- serveWithPool(ctx, cfg, ln, pool, 1)
 	}()
 	defer func() {
 		cancel()
