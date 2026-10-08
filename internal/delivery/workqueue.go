@@ -204,7 +204,8 @@ func appendQueueChanges(ctx context.Context, tx pgx.Tx, p tenant.Principal, chan
 }
 func currentRoundTargetTx(ctx context.Context, tx pgx.Tx, r Round) error {
 	var leaf bool
-	err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM nodes c WHERE c.parent_id=n.id AND c.deleted_at IS NULL)
+	err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM nodes c WHERE c.parent_id=n.id AND c.deleted_at IS NULL
+	 AND NOT EXISTS(SELECT 1 FROM work_orders w WHERE w.node_id=c.id))
 	 FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE n.id=$1 AND n.project_id=$2 AND n.deleted_at IS NULL AND k.slug='work'
 	 AND NOT EXISTS(SELECT 1 FROM work_orders w WHERE w.node_id=n.id)`, r.Ticket, r.Project).Scan(&leaf)
 	if err != nil {
@@ -303,11 +304,13 @@ func (m *Module) claimQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 				}
 				if reason == "" {
 					var active, merged, held bool
-					// start-queue.sh drops a fix or merge round only for this slug's
-					// head, work/<slug>, or for this round's own pull request.
+					// start-queue.sh drops a fix or merge round when this slug's
+					// head, work/<slug>, or this round's own pull request has merged
+					// and GitHub has no open pull request. A closed pull request is
+					// stored as built or reviewed; only observation.open true is open.
 					if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_work_rounds WHERE project_id=$1 AND slug=$2 AND state IN ('claimed','running')),
 					 (EXISTS(SELECT 1 FROM delivery_items WHERE project_id=$1 AND (branch=('work/'||$2) OR ($3::bigint IS NOT NULL AND pull_request=$3)) AND state='merged')
-					 AND NOT EXISTS(SELECT 1 FROM delivery_items WHERE project_id=$1 AND (branch=('work/'||$2) OR ($3::bigint IS NOT NULL AND pull_request=$3)) AND pull_request IS NOT NULL AND state<>'merged')),
+					 AND NOT EXISTS(SELECT 1 FROM delivery_items WHERE project_id=$1 AND (branch=('work/'||$2) OR ($3::bigint IS NOT NULL AND pull_request=$3)) AND pull_request IS NOT NULL AND state<>'merged' AND observation->>'open' = 'true')),
 					 EXISTS(SELECT 1 FROM delivery_items WHERE project_id=$1 AND (branch=('work/'||$2) OR ($3::bigint IS NOT NULL AND pull_request=$3)) AND state='held')`, project, r.Slug, r.PR).Scan(&active, &merged, &held); err != nil {
 						return out, err
 					}

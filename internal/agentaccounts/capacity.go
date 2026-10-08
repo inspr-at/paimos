@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -915,6 +916,13 @@ func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading
 	}
 	p, err := capacity.Plan(capacity.PlanInput{Now: now, Reset: v.ResetsAt, WindowStart: start, Remaining: 100 - v.UsedPercent - drift, UsedToday: used, WindowLength: time.Duration(v.WindowMinutes) * time.Minute, AutoReserve: metric.AutoReserve, Throughput: metric.PerHour * float64(parallel)}, s)
 	p.DriftPercent = drift
+	if err == nil && v.Source != "estimate" && (v.Freshness(now) == "fresh" || v.Freshness(now) == "aging") {
+		u, loadErr := loadUsagePolicy(ctx, tx, id)
+		if loadErr != nil {
+			return p, known, loadErr
+		}
+		p = boostPacing(p, 100-v.UsedPercent-drift, u.Boost, s, now)
+	}
 	return p, known, err
 }
 
@@ -924,6 +932,7 @@ func routingSchedule(ctx context.Context, tx pgx.Tx, a Account) (capacity.Schedu
 	// with one human key creator can use that person's pool/user defaults before
 	// an account override has ever been saved. Ambiguous ownership stays unset.
 	err := tx.QueryRow(ctx, `SELECT COALESCE(
+ a.owner_person_id,
  (SELECT p.approved_by FROM agent_pairing_enrollments e JOIN agent_pairing_requests p ON p.tenant_id=e.tenant_id AND p.id=e.request_id WHERE e.account_id=a.id),
  a.capacity_owner,
  (SELECT (array_agg(DISTINCT k.created_by_principal_id))[1] FROM agent_keys k JOIN principals p ON p.tenant_id=k.tenant_id AND p.id=k.created_by_principal_id WHERE k.tenant_id=a.tenant_id AND k.principal_id=a.registered_by_principal_id AND p.kind='person' HAVING count(DISTINCT k.created_by_principal_id)=1)
@@ -931,10 +940,28 @@ func routingSchedule(ctx context.Context, tx pgx.Tx, a Account) (capacity.Schedu
 	if err != nil {
 		return capacity.Schedule{}, err
 	}
-	if person == nil {
-		return capacity.DefaultSchedule(), nil
+	s := capacity.DefaultSchedule()
+	if person != nil {
+		person, err = modelprefs.CanonicalPerson(ctx, tx, *person)
+		if err != nil {
+			return s, err
+		}
 	}
-	return effectiveSchedule(ctx, tx, *person, a)
+	if person != nil {
+		s, err = effectiveSchedule(ctx, tx, *person, a)
+		if err != nil {
+			return s, err
+		}
+	}
+	u, err := loadUsagePolicy(ctx, tx, a.ID)
+	if err != nil {
+		return s, err
+	}
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return s, err
+	}
+	return usageSchedule(s, u, now), nil
 }
 
 // applyCapacityPacing sets each measured window's derived allowance (§2.3):

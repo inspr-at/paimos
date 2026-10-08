@@ -27,6 +27,19 @@ func TestAvailabilityRedactionPreservesLegacyRequiredShapes(t *testing.T) {
 	if err != nil || !strings.Contains(string(own), `"remaining":17`) {
 		t.Fatalf("owner lost detail: %s %v", own, err)
 	}
+	guard := []byte(`{"accounts":[{"id":"` + id + `","posture":"careful","keep_for_you_percent":30}]}`)
+	ids, err := IDs(guard, "")
+	if err != nil || len(ids) != 1 || ids[0] != id {
+		t.Fatalf("guard bypassed the response identity boundary: %v %v", ids, err)
+	}
+	body, err = Redact(guard, Policy{}, "", false)
+	if err != nil || string(body) != `{"accounts":[]}` {
+		t.Fatalf("guard sharing revocation leaked policy: %s %v", body, err)
+	}
+	body, err = Redact(guard, Policy{id: true}, "", false)
+	if err != nil || !strings.Contains(string(body), `"keep_for_you_percent":30`) {
+		t.Fatalf("owner lost guard policy: %s %v", body, err)
+	}
 }
 
 func TestReadinessRedactionDoesNotPretendMeasuredZero(t *testing.T) {

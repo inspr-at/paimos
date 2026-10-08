@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -43,7 +44,13 @@ func ResolveReviewFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	return resolveReviewWithCatalog(ctx, tx, p, q, now, nil)
 }
 
-func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog) (ReviewRoute, error) {
+// ResolveReviewWithPolicyFor filters the qualified ladder before preferences
+// choose a reviewer. A policy-rejected first choice can fall back safely.
+func ResolveReviewWithPolicyFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, policy reviewgate.FamilyPolicy) (ReviewRoute, error) {
+	return resolveReviewWithCatalog(ctx, tx, p, q, now, nil, policy)
+}
+
+func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog, policies ...reviewgate.FamilyPolicy) (ReviewRoute, error) {
 	out := ReviewRoute{Ladder: []Candidate{}, Role: "review-gate"}
 	if strings.TrimSpace(q.Area) == "security" || q.Role == "review-gate-security" {
 		out.Role = "review-gate-security"
@@ -96,6 +103,11 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	qualified := map[string]*agentaccounts.Account{}
 	for _, step := range steps {
 		reasons := skipReasons(step, role, resolveQuery{Role: out.Role, AuthorFamily: author, Harness: q.Harness}, now, nil)
+		for _, policy := range policies {
+			if allowed, reason := policy.Decision(author, step.Profile.Family); !allowed {
+				reasons = append(reasons, reason)
+			}
+		}
 		if step.Profile.Effort != "xhigh" || step.Profile.Tier != "frontier" && step.Profile.Tier != "strong" {
 			reasons = append(reasons, "review requires frontier or strong at xhigh")
 		}
