@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The bundle is local build output. Only area sources belong in git.
-import { readFileSync, readdirSync, lstatSync, writeFileSync, renameSync } from 'node:fs'
+import { readdirSync, lstatSync, writeFileSync, renameSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
@@ -59,8 +59,12 @@ export function generateOpenAPI(directory = apiRoot) {
   try {
     const stat = lstatSync(path)
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Bundle output must be a regular file')
-    if (stat.size <= limit && readFileSync(path, 'utf8') === source) return source
-  } catch (error) { if (error.code !== 'ENOENT') throw error }
+    if (stat.size < limit && readInput(inputMetadata(directory, path, limit), limit) === source) return source
+  } catch (error) {
+    // Another preparation may have atomically replaced the cache after its
+    // metadata was sampled. Rebuild our own source rather than trust that read.
+    if (error.code !== 'ENOENT' && !/^input changed during (?:scan|read)$/.test(error.message)) throw error
+  }
   // Concurrent test runners can prepare the same checkout without partial reads.
   const temporary = resolve(directory, `.openapi-${randomUUID()}.tmp`)
   writeFileSync(temporary, source, { flag: 'wx', mode: 0o644 })
@@ -72,7 +76,7 @@ export function main(args) {
   if (args.length !== 1 || !['--write', '--check', '--stdout'].includes(args[0])) throw new Error('Usage: node api/generate.mjs --write|--check|--stdout')
   if (args[0] === '--stdout') { process.stdout.write(bundleOpenAPI()); return 0 }
   if (args[0] === '--write') { generateOpenAPI(); console.log('Generated api/openapi.yaml'); return 0 }
-  const expected = bundleOpenAPI(), actual = readFileSync(resolve(apiRoot, 'openapi.yaml'), 'utf8')
+  const expected = bundleOpenAPI(), actual = readInput(inputMetadata(apiRoot, 'openapi.yaml', limit), limit)
   if (actual !== expected) { console.error('OpenAPI bundle drift; run node api/generate.mjs --write'); return 1 }
   console.log('OpenAPI bundle matches its area sources')
   return 0
