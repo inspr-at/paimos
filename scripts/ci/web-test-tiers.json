@@ -872,6 +872,50 @@
     ,
     "browser:tests/webcore-recovery.spec.ts:timing failures keep typed values and controls anchored, and save again on blur"
     ,
+    "browser:tests/work-kinds.spec.ts:Advanced is folded, remembers its state, shows how kinds are recognised and saves limits with Undo"
+    ,
+    "browser:tests/work-kinds.spec.ts:Alt+↑/↓ on a focused row reorders; the ends and Everything else do not move"
+    ,
+    "browser:tests/work-kinds.spec.ts:Edit turns the row into a two-field form in the list: no dialog, no overlay, the rows above stay put"
+    ,
+    "browser:tests/work-kinds.spec.ts:Enter edits a focused row; Esc leaves the field, the next Esc cancels and returns focus to the row"
+    ,
+    "browser:tests/work-kinds.spec.ts:New kind opens the same form at the end of the list and creates once"
+    ,
+    "browser:tests/work-kinds.spec.ts:a limit conflict offers Reload and the next save uses the refreshed revision"
+    ,
+    "browser:tests/work-kinds.spec.ts:a rejected limit returns to the stored value and says why"
+    ,
+    "browser:tests/work-kinds.spec.ts:agent reads kinds with write controls absent"
+    ,
+    "browser:tests/work-kinds.spec.ts:at 400 px the count moves under the name, targets are 44 px and nothing scrolls sideways"
+    ,
+    "browser:tests/work-kinds.spec.ts:invalid and failed saves keep the draft and the controls still"
+    ,
+    "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 1024 dark"
+    ,
+    "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 1024 light"
+    ,
+    "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 1440 dark"
+    ,
+    "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 1440 light"
+    ,
+    "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 400 dark"
+    ,
+    "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 400 light"
+    ,
+    "browser:tests/work-kinds.spec.ts:member reads kinds with write controls absent"
+    ,
+    "browser:tests/work-kinds.spec.ts:only one form at a time; another Edit waits until unsaved words are saved or cancelled"
+    ,
+    "browser:tests/work-kinds.spec.ts:the cards keep the settings gap"
+    ,
+    "browser:tests/work-kinds.spec.ts:the situations link on Models still lands on the limits, opening the fold"
+    ,
+    "browser:tests/work-kinds.spec.ts:the ⋯ menu orders and archives; built-in kinds say why they cannot be archived"
+    ,
+    "browser:tests/work-kinds.spec.ts:⌘/Ctrl+Enter saves once from any field; the area stays; Undo restores the words"
+    ,
     "node:tests/agent-pause.test.ts:AEON-783: a saved handover, a confirmed stop and lost contact are different wind-down results"
     ,
     "node:tests/agent-pause.test.ts:effective agent lists override all hosts, including an explicit empty list"
@@ -4197,6 +4241,10 @@
     "vitest:tests/work-history-visibility.unit.test.ts:TicketReviews preserves ticket access"
     ,
     "vitest:tests/work-history-visibility.unit.test.ts:TicketReviews preserves work access"
+    ,
+    "vitest:tests/work-kinds.unit.test.ts:a second form waits while unsaved words are open, and never opens for a person who may not write"
+    ,
+    "vitest:tests/work-kinds.unit.test.ts:the ⋯ menu binds to the record it opened on; Archive is disabled for built-in kinds and Everything else has no Move"
     ,
     "vitest:tests/work-surfaces-fix2.unit.test.ts:detail progress counts ten completed descendant leaves and one open leaf"
     ,
@@ -11902,31 +11950,49 @@
     ,
     {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical work palette and relation key/title search at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"agent reads kinds and situations with write controls absent","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"Advanced is folded, remembers its state, shows how kinds are recognised and saves limits with Undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"failed writes retain drafts and limits; editor actions and selectors stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"Alt+↑/↓ on a focused row reorders; the ends and Everything else do not move","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"Edit turns the row into a two-field form in the list: no dialog, no overlay, the rows above stay put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"Enter edits a focused row; Esc leaves the field, the next Esc cancels and returns focus to the row","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1280 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"New kind opens the same form at the end of the list and creates once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1280 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"a limit conflict offers Reload and the next save uses the refreshed revision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"a rejected limit returns to the stored value and says why","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"agent reads kinds with write controls absent","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"at 400 px the count moves under the name, targets are 44 px and nothing scrolls sideways","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"invalid and failed saves keep the draft and the controls still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds save words, create, order, archive and restore once while preserving ticket areas","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"limits save current revisions and update situation definitions without moving selectors","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"member reads kinds and situations with write controls absent","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 400 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 400 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"member reads kinds with write controls absent","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"only one form at a time; another Edit waits until unsaved words are saved or cancelled","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"the cards keep the settings gap","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"the situations link on Models still lands on the limits, opening the fold","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"the ⋯ menu orders and archives; built-in kinds say why they cannot be archived","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"⌘/Ctrl+Enter saves once from any field; the area stays; Undo restores the words","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -19042,6 +19108,8 @@
     ,
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"Undo refuses to replace kind words changed elsewhere after the original save","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"a second form waits while unsaved words are open, and never opens for a person who may not write","tier":"NIGHTLY"}
+    ,
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"bounds kind wording without silently dropping extra examples or duplicate labels","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"bounds response bytes before JSON decoding and rejects repeated pagination cursors","tier":"ESSENTIAL"}
@@ -19061,6 +19129,8 @@
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"pins Everything else last, excludes review and preserves the hidden review row in an order write","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"system kind wording is editable while its immutable ticket area is preserved","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"the ⋯ menu binds to the record it opened on; Archive is disabled for built-in kinds and Everything else has no Move","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"accepts authoritative relation-blocker readiness, coalesces checks and fences revisions and tenant resets","tier":"GATED-FULL"}
     ,
