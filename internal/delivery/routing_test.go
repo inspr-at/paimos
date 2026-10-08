@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -215,7 +216,14 @@ func TestShadowRoutingEventReplayAndTenantBoundary(t *testing.T) {
 	}
 	for {
 		var waiting int
-		if err := f.d.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE $1::int=ANY(pg_blocking_pids(pid)) AND query=$2`, holder.Conn().PgConn().PID(), `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`).Scan(&waiting); err != nil {
+		// PostgreSQL may queue the second row-lock waiter behind the first,
+		// rather than directly behind holder. Both must be observed in the
+		// holder's wait chain before either request is allowed to proceed.
+		if err := f.d.Admin.QueryRow(ctx, `WITH RECURSIVE waiters(pid) AS (
+ SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND $1::int=ANY(pg_blocking_pids(pid))
+ UNION SELECT a.pid FROM pg_stat_activity a JOIN waiters w ON w.pid=ANY(pg_blocking_pids(a.pid))
+ WHERE a.datname=current_database())
+ SELECT count(*) FROM waiters w JOIN pg_stat_activity a ON a.pid=w.pid WHERE a.query=$2`, holder.Conn().PgConn().PID(), db.TenantFenceSQL).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if waiting == 2 {
