@@ -1001,6 +1001,7 @@ components:
       description: Linked persons use their target's name and email for display. Authenticated principal IDs and roles and OIDC identity IDs, issuers and subjects retain their original authority.
       required: [principal, tenant, identity, dev_mode]
       properties:
+        full_access: {type: boolean, description: "This authenticated key dynamically holds every current and future agent-grantable permission, subject to live role, creator, tenant and project ceilings. Person-only permissions remain excluded."}
         owner_workstation: {type: boolean}
         workstation_computer_id: {type: string, format: uuid}
         dev_mode: {type: boolean, description: True only when AEON_ENV is explicitly dev.}

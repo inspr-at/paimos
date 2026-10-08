@@ -34,35 +34,41 @@ func KeyGrantable(permission string, marked bool) bool {
 
 // WorkstationKeyTx rechecks the key's exact tenant, principal, computer and
 // pairing; reported daemon capability or a caller-supplied public key is never
-// authority. The returned scopes are live, not the authentication snapshot.
-func WorkstationKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (string, []string, error) {
+// authority. Scopes and full_access are re-read in this transaction, not taken
+// from the authentication snapshot. The stored list remains the historical
+// snapshot; callers expand a full-access key with ResolveKeyScopes.
+func WorkstationKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (string, []string, bool, error) {
 	if !OwnerWorkstation(p) {
-		return "", nil, ErrForbidden
+		return "", nil, false, ErrForbidden
 	}
 	var public string
 	var scopes []string
-	err := tx.QueryRow(ctx, `SELECT c.local_auth_public_key,k.scopes
+	var fullAccess bool
+	err := tx.QueryRow(ctx, `SELECT c.local_auth_public_key,k.scopes,coalesce(k.full_access,false)
 	 FROM agent_keys k JOIN agent_pairing_computers c ON c.tenant_id=k.tenant_id AND c.id=k.workstation_computer_id AND c.principal_id=k.principal_id
 	 JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
 	 JOIN principals a ON a.tenant_id=k.tenant_id AND a.id=k.principal_id
 	 WHERE k.tenant_id=$1::uuid AND k.id=$2::uuid AND k.principal_id=$3::uuid AND c.id=$4::uuid
 	 AND k.owner_workstation AND k.workstation_generation=$5 AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>clock_timestamp())
 	 AND c.state='connected' AND q.state='redeemed' AND c.local_auth_public_key<>'' AND a.kind='agent' AND a.status='active'`,
-		p.TenantID, p.KeyID, p.ID, p.WorkstationComputerID, p.WorkstationGeneration).Scan(&public, &scopes)
+		p.TenantID, p.KeyID, p.ID, p.WorkstationComputerID, p.WorkstationGeneration).Scan(&public, &scopes, &fullAccess)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = ErrForbidden
 	}
-	return public, scopes, err
+	return public, scopes, fullAccess, err
 }
 
 func workstationEffectiveTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, result *Effective) error {
 	if !OwnerWorkstation(p) {
 		return nil
 	}
-	_, scopes, err := WorkstationKeyTx(ctx, tx, p)
+	_, scopes, fullAccess, err := WorkstationKeyTx(ctx, tx, p)
 	if err != nil {
 		return err
 	}
+	// Full access follows the live agent-grantable catalog. ResolveKeyScopes
+	// ignores the stored snapshot, so the step-up set is not implied.
+	scopes = ResolveKeyScopes(scopes, fullAccess)
 	// The explicit mark is the owner's opt-in for conversation viewing. Ordinary
 	// Owner/Admin roles still do not implicitly receive harness.watch.
 	watch, err := WorkstationWatchCeilingTx(ctx, tx, p)

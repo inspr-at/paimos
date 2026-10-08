@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/inspr-at/paimos/internal/authz"
 	"io"
 	"net/http"
 	"strconv"
@@ -207,13 +208,14 @@ func (m *module) authorizeSend(ctx context.Context, r *http.Request, p tenant.Pr
 	sum := sha256.Sum256([]byte(secret))
 	hash := hex.EncodeToString(sum[:])
 	var scopes []string
+	var fullAccess bool
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
-			SELECT scopes FROM agent_keys
+			SELECT scopes,coalesce(full_access,false) FROM agent_keys
 			WHERE prefix = $1 AND hash = $2 AND principal_id = $3::uuid
 			  AND revoked_at IS NULL
 			  AND (expires_at IS NULL OR expires_at > now())`,
-			prefix, hash, p.ID).Scan(&scopes)
+			prefix, hash, p.ID).Scan(&scopes, &fullAccess)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return errForbidden
@@ -221,7 +223,7 @@ func (m *module) authorizeSend(ctx context.Context, r *http.Request, p tenant.Pr
 	if err != nil {
 		return err
 	}
-	for _, scope := range scopes {
+	for _, scope := range authz.ResolveKeyScopes(scopes, fullAccess) {
 		if scope == scopeInboxSend {
 			return nil
 		}

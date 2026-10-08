@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
-import { mkdir } from 'node:fs/promises'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { accessWorld, mockAccess, DEPLOYER, REGISTRY } from './access-fixtures'
 import { encodeScopeCode } from '../src/lib/scopeCode'
@@ -45,18 +44,22 @@ for (const role of ['admin', 'member'] as const) for (const mode of ['new', 'edi
     const expected = REGISTRY.filter(p => p.agent_grantable && p.key !== 'recurrences.manage' && world.roles.find(r => r.key === role)!.permissions.includes(p.key)).map(p => p.key)
     await expect(sheet.getByRole('button', { name: 'Apply Full access' })).toBeVisible()
     await sheet.getByRole('button', { name: 'Apply Full access' }).click()
-    await expect(checked(sheet)).toHaveCount(expected.length)
-    for (const key of expected) await expect(sheet.getByRole('checkbox', { name: new RegExp(key.replace('.', '\\.' )) })).toBeChecked()
+    await expect(checked(sheet)).toHaveCount(0)
+    await expect(sheet).toContainText('Full access (always all agent permissions)')
     await expect(sheet).toContainText('Person-only: managing members, roles, keys and settings')
     await expect(sheet).toContainText('approval decisions; rule publishing; conversation watching')
     await expect(sheet).toContainText('reading keys')
     await expect(sheet).toContainText('harness force-stop and recovery; ownership transfer; the customer portal')
+    // Scoped group bulk actions retain their role bounds after leaving full mode.
+    await sheet.getByRole('button', { name: 'Clear', exact: true }).click()
     const work = sheet.getByRole('group', { name: 'Work', exact: true })
     const workKeys = REGISTRY.filter(p => p.group === 'Work' && expected.includes(p.key)).map(p => p.key)
-    await work.getByRole('button', { name: 'None', exact: true }).click()
-    await expect(checked(sheet)).toHaveCount(expected.length - workKeys.length)
     await work.getByRole('button', { name: 'All', exact: true }).click()
-    await expect(checked(sheet)).toHaveCount(expected.length)
+    await expect(checked(sheet)).toHaveCount(workKeys.length)
+    await work.getByRole('button', { name: 'None', exact: true }).click()
+    await expect(checked(sheet)).toHaveCount(0)
+    await work.getByRole('button', { name: 'All', exact: true }).click()
+    await expect(checked(sheet)).toHaveCount(workKeys.length)
     // Search limits group actions; hidden selections in the same group survive.
     await sheet.getByRole('searchbox', { name: 'Find a scope' }).fill('nodes.read')
     await work.getByRole('button', { name: 'None', exact: true }).click()
@@ -69,7 +72,8 @@ for (const role of ['admin', 'member'] as const) for (const mode of ['new', 'edi
     if (mode === 'edit') {
       await sheet.getByRole('button', { name: 'Save scopes', exact: true }).click()
       await expect(sheet).toHaveCount(0)
-      expect([...world.keys.find(k => k.id === 'k2')!.scopes].sort()).toEqual([...expected].sort())
+      expect(world.keys.find(k => k.id === 'k2')).toMatchObject({ full_access: true, scopes: [] })
+      await expect(row(page)).toContainText('Full access (always all agent permissions)')
       expect(world.keys).toHaveLength(count)
       expect(world.keys.find(k => k.id === 'k2')).toMatchObject({ prefix: 'ph4r', revoked_at: null, expires_at: '2026-12-31T00:00:00Z' })
       expect(world.calls.filter(c => c.method === 'POST' && c.path === '/api/agent-keys')).toHaveLength(0)
@@ -77,7 +81,7 @@ for (const role of ['admin', 'member'] as const) for (const mode of ['new', 'edi
     } else {
       await sheet.getByRole('button', { name: 'Create key', exact: true }).click()
       await expect(page.getByRole('dialog', { name: 'Key ready' })).toBeVisible()
-      expect([...world.keys[0]!.scopes].sort()).toEqual([...expected].sort())
+      expect(world.keys[0]).toMatchObject({ full_access: true, scopes: [] })
     }
   })
 }
@@ -92,21 +96,22 @@ for (const mode of ['new', 'rotate'] as const) {
     }
     const sheet = mode === 'new' ? await create(page) : page.getByRole('dialog', { name: 'Rotate key for pharos-deployer' })
     if (mode === 'rotate') await sheet.getByLabel('Scope code', { exact: true }).fill(encodeScopeCode(['nodes.read']))
-    await sheet.getByRole('button', { name: 'Apply Full access' }).click()
     const recurrence = sheet.getByRole('checkbox', { name: /recurrences\.manage/ })
     await expect(recurrence).not.toBeChecked()
     await expect(recurrence).toBeDisabled()
     await expect(sheet.getByRole('group', { name: 'Recurrences', exact: true }).getByRole('button', { name: 'All', exact: true })).toBeDisabled()
+    await sheet.getByRole('button', { name: 'Apply Full access' }).click()
+    await expect(checked(sheet)).toHaveCount(0)
     await sheet.getByRole('button', { name: mode === 'new' ? 'Create key' : 'Rotate key', exact: true }).click()
     await expect(page.getByRole('dialog', { name: 'Key ready' })).toBeVisible()
     const calls = world.calls.filter(c => c.method === 'POST' && c.path === '/api/agent-keys')
     expect(calls).toHaveLength(1)
-    const body = calls[0]!.body as { scopes?: string[]; rotation_scopes?: string[]; rotate_key_id?: string }
+    const body = calls[0]!.body as { full_access?: boolean; scopes?: string[]; rotation_scopes?: string[]; rotate_key_id?: string }
     const sent = mode === 'new' ? body.scopes : body.rotation_scopes
     const expected = REGISTRY.filter(p => p.agent_grantable && p.key !== 'recurrences.manage' && world.roles.find(r => r.key === 'admin')!.permissions.includes(p.key)).map(p => p.key)
-    expect([...sent!].sort()).toEqual([...expected].sort())
-    expect(sent).not.toContain('recurrences.manage')
-    expect([...world.keys[0]!.scopes].sort()).toEqual([...expected].sort())
+    expect(body.full_access).toBe(true)
+    expect(sent ?? []).toEqual([])
+    expect(world.keys[0]).toMatchObject({ full_access: true, scopes: [] })
     if (mode === 'rotate') {
       expect(body.rotate_key_id).toBe('k2')
       expect(world.keys.find(k => k.id === 'k2')!.revoked_at).not.toBeNull()
@@ -142,10 +147,8 @@ for (const width of [390, 1440]) for (const mixed of [false, true]) {
       scrollAreas: { sheet, body: sheet.locator('.sheet-body') },
       interactions: [{ name: 'Select Full access while the excluded scope is visible', run: async () => {
         await sheet.getByRole('button', { name: 'Apply Full access' }).click()
-        await expect(recurrence).not.toBeChecked()
-        await expect(recurrence).toBeDisabled()
-        await expect(recurrence.locator('..')).toContainText(reason)
-        await expect(recurrence.locator('..')).not.toContainText(otherReason)
+        await expect(recurrence).toHaveCount(0)
+        await expect(sheet).toContainText('Full access (always all agent permissions)')
         await expect(sheet.getByRole('button', { name: 'Save scopes', exact: true })).toBeEnabled()
       } }],
     })
@@ -157,7 +160,9 @@ test('bulk presets never extend a dedicated role; explicit checkbox extension st
   const world = await open(page, 'admin', true)
   const sheet = await edit(page)
   await sheet.getByRole('button', { name: 'Apply Full access' }).click()
-  await expect(checked(sheet)).toHaveCount(4) // viewer: work, knowledge, quotes, member list
+  await expect(checked(sheet)).toHaveCount(0)
+  await expect(sheet.getByRole('region', { name: 'Confirm role changes' })).toHaveCount(0)
+  await sheet.getByRole('button', { name: 'Clear', exact: true }).click()
   await sheet.getByRole('group', { name: 'Work', exact: true }).getByRole('button', { name: 'All', exact: true }).click()
   await expect(sheet.getByRole('checkbox', { name: /nodes\.write/ })).not.toBeChecked()
   await expect(sheet.getByRole('region', { name: 'Confirm role changes' })).toHaveCount(0)
@@ -170,8 +175,8 @@ test('bulk presets never extend a dedicated role; explicit checkbox extension st
   expect(world.roles.find(r => r.id === 'role-private')!.permissions).toContain('nodes.write')
   const next = await create(page)
   await next.getByRole('button', { name: 'Apply Full access' }).click()
-  await expect(checked(next)).toHaveCount(5)
-  await expect(next.getByRole('checkbox', { name: /nodes\.delete/ })).not.toBeChecked()
+  await expect(checked(next)).toHaveCount(0)
+  await expect(next).toContainText('Full access (always all agent permissions)')
 })
 
 test('expiry edits including Never keep the existing key; Keep current and Cancel write nothing', async ({ page }) => {
@@ -227,12 +232,12 @@ test('expiry failure retains draft; modifier Enter saves and Escape leaves a fie
   expect(world.keys.find(k => k.id === 'k2')!.expires_at).toBeNull()
 })
 
-for (const width of [390, 1440, 1600]) for (const theme of ['light', 'dark'] as const) {
-  test(`key sheet controls stay anchored at ${width}px ${theme}`, async ({ page }) => {
+for (const width of [390, 1024, 1440, 1600]) for (const theme of ['light', 'dark'] as const) {
+  test(`key sheet controls stay anchored at ${width}px ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme })
     const errors = watchErrors(page)
-    await open(page)
+    const world = await open(page)
     for (const mode of ['new', 'edit'] as const) {
       const sheet = await (mode === 'new' ? create(page) : edit(page))
       const actions = sheet.locator('.sheet-foot')
@@ -241,7 +246,7 @@ for (const width of [390, 1440, 1600]) for (const theme of ['light', 'dark'] as 
       const closeBefore = await close.boundingBox()
       await sheet.getByRole('button', { name: 'Apply Full access' }).click()
       await sheet.locator('summary').filter({ hasText: 'Full access' }).click()
-      await sheet.getByRole('searchbox', { name: 'Find a scope' }).fill('no matching scopes')
+      await expect(sheet.getByRole('searchbox', { name: 'Find a scope' })).toBeDisabled()
       await sheet.getByRole('radio', { name: 'Never', exact: true }).click()
       expect(await actions.boundingBox()).toEqual(before)
       expect(await close.boundingBox()).toEqual(closeBefore)
@@ -249,14 +254,41 @@ for (const width of [390, 1440, 1600]) for (const theme of ['light', 'dark'] as 
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       const result = await new AxeBuilder({ page }).include('[role="dialog"]').withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()
       expect(result.violations.map(v => v.id)).toEqual([])
-      await sheet.getByRole('searchbox', { name: 'Find a scope' }).fill('')
+      await expect(sheet.getByRole('searchbox', { name: 'Find a scope' })).toBeDisabled()
       await sheet.locator('summary').filter({ hasText: 'Full access' }).click()
-      if (process.env.KEY_FULL_ACCESS_SHOTS) {
-        await mkdir(process.env.KEY_FULL_ACCESS_SHOTS, { recursive: true })
-        await page.screenshot({ path: `${process.env.KEY_FULL_ACCESS_SHOTS}/${mode}-${width}-${theme}.png` })
-      }
+      await page.screenshot({ path: testInfo.outputPath(`${mode}-${width}-${theme}-en.png`) })
+      await page.evaluate(() => { document.documentElement.lang = 'de' })
+      await sheet.getByRole('radio', { name: '90 days', exact: true }).click()
+      await expect(sheet).toContainText('Vollzugriff (immer alle Agentenberechtigungen)')
+      expect(await actions.boundingBox()).toEqual(before)
+      await page.screenshot({ path: testInfo.outputPath(`${mode}-${width}-${theme}-de.png`) })
+      await page.evaluate(() => { document.documentElement.lang = 'en' })
       await sheet.getByRole('button', { name: 'Cancel', exact: true }).click()
     }
+    const fullKey = world.keys.find(k => k.id === 'k2')!
+    fullKey.full_access = true
+    fullKey.scopes = []
+    await page.reload()
+    await row(page).getByRole('button', { name: /active key/ }).click()
+    await expect(row(page)).toContainText('Full access (always all agent permissions)')
+    await row(page).locator('table').scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`table-${width}-${theme}-en.png`) })
+    await page.goto('/settings/access/agents?lang=de')
+    await row(page).getByRole('button', { name: /active key/ }).click()
+    await expect(row(page)).toContainText('Vollzugriff (immer alle Agentenberechtigungen)')
+    await expect(row(page).locator('[data-label="Scopes"] .scope')).toHaveCount(0)
+    await row(page).locator('table').scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`table-${width}-${theme}-de.png`) })
+    await page.getByRole('button', { name: 'New agent', exact: true }).click()
+    const newAgent = page.getByRole('dialog', { name: 'New agent', exact: true })
+    await newAgent.getByLabel('Purpose preset').selectOption('full-access')
+    await expect(newAgent.locator('.preset-scopes')).toHaveCount(0)
+    await expectStableControls({
+      controls: { create: newAgent.getByRole('button', { name: 'Create agent', exact: true }), cancel: newAgent.getByRole('button', { name: 'Cancel', exact: true }), preset: newAgent.getByLabel('Purpose preset') },
+      scrollAreas: { newAgent },
+      interactions: [{ name: 'Choose a role for full access', run: async () => { await newAgent.getByLabel('Role', { exact: false }).selectOption('role-admin') } }],
+    })
+    await page.screenshot({ path: testInfo.outputPath(`new-agent-${width}-${theme}.png`) })
     expect(errors).toEqual([])
   })
 }

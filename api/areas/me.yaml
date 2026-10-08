@@ -345,7 +345,7 @@ paths:
         '413': {description: Request exceeds 8 KiB}
 components:
   headers:
-    MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.3']}}
+    MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.4']}}
   schemas:
     ActiveTheme:
       type: object
