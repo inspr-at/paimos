@@ -474,7 +474,6 @@ func (m *Module) reportRollout(w http.ResponseWriter, r *http.Request) {
 		return apply([]flowBatch{batch})
 	})
 	if err != nil {
-		println("DEBUGFLOW", err.Error())
 		respondError(w, err)
 		return
 	}

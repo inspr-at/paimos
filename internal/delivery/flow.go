@@ -304,7 +304,7 @@ func flowItemView(row flowItemRow, steps []FlowStep, h flowHistory, at time.Time
 func validFlowEnum(values []string, v string) bool { return slices.Contains(values, v) }
 
 func sortedPRs(prs []int64) []int64 {
-	out := slices.Clone(prs)
+	out := append([]int64{}, prs...)
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return slices.Compact(out)
 }
