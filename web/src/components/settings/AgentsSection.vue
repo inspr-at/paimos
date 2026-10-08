@@ -2,14 +2,13 @@
 <script setup lang="ts">
 import { can } from '../../lib/authz'
 import AgentActivityCard from './AgentActivityCard.vue'
-import ModelRefreshSettings from './ModelRefreshSettings.vue'
 </script>
 
 <template>
   <div class="section">
     <p class="who">Workspace admins see and change these settings. Applies to every project.</p>
     <AgentActivityCard v-if="can('settings.manage')" />
-    <ModelRefreshSettings v-if="can('models.read')" />
+    <RouterLink v-if="can('models.read')" to="/settings/models">Model preferences and catalog freshness</RouterLink>
   </div>
 </template>
 

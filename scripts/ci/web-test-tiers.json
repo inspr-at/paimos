@@ -98,6 +98,32 @@
     ,
     "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
     ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1440 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1440 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 390 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 390 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification errors stay honest and changing computer discards pending feedback"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1024 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1024 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1440 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1440 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 390 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 390 light"
+    ,
     "browser:tests/agent-pause.spec.ts:1440 dark: scope, preview, levels and report controls stay under the pointer"
     ,
     "browser:tests/agent-pause.spec.ts:1440 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
@@ -4654,6 +4680,32 @@
     ,
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"waiting-panel keys keep the selected release and native controls at 390 (AEON-635 fix2)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification errors stay honest and changing computer discards pending feedback","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agent-activity.spec.ts","name":"Off shows no activity line or current activity history","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/agent-activity.spec.ts","name":"activity fits phone and desktop in both themes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8186,89 +8238,11 @@
     ,
     {"kind":"browser","file":"tests/markdown-ticket-links.spec.ts","name":"the epic panel keeps the Updated line against the status chips","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"Done and its Escape keycap fit in the footer","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"Agents model preferences navigates to the page without opening the old dialog stack","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"Escape leaves a field before closing and browser shortcuts remain native","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"LiveAgents preferences keeps the project rules scope in the Models URL","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"add-kind button retains focus while saving and returns to its opener","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"add-kind field retains focus while saving and returns to its opener","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"confirmations stay by their actions at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"confirmations stay by their actions at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"confirmations stay by their actions at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"conflicts refresh honestly and read-only default keeps its explanation","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"footer lets keyboard and touch users scroll notices longer than two lines","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"footer wraps a long notice without moving controls at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"footer wraps a long notice without moving controls at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"footer wraps a long notice without moving controls at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"keyboard kind removal restores focus to the Everything else model chip","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"keyboard row reset restores focus to its normal model chip","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"picker marks the selected pinned version","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"picker restores keyboard focus to the model cell during and after its save","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"preferences keep their controls at 1024 in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"preferences keep their controls at 1024 in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"preferences keep their controls at 1440 in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"preferences keep their controls at 1440 in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"preferences keep their controls at 390 in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"preferences keep their controls at 390 in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"preferences lock retains keyboard focus and rejects extra toggles during save","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"project gear, project-only kinds, locks, reviews, add/remove and planning explanation","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"provider locks follow freeze","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"provider locks follow tighten_only","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"provider locks follow warn","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"provider-change notices link to the affected queued run","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"remove confirmation is inline, visible and focused on Keep","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"reset confirmation replaces a stale notice in a live region at default","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"reset confirmation replaces a stale notice in a live region at person","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"review picker works from server evidence when auxiliary catalogs are unavailable","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"running-run links retain the document and use distinct run labels","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"save feedback stays visible through conflict at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"save feedback stays visible through conflict at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"save feedback stays visible through conflict at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"save feedback stays visible through rollback at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"save feedback stays visible through rollback at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"save feedback stays visible through rollback at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"saving retains keyboard focus and guards controls while the write is held","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"ticket explanation uses the resolved complex column rather than the viewer matrix","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"truncated picker evidence is explicit and does not claim that work waits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"PlanningCell opens the server explanation with the captured ticket, kind and project","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/model-provider.spec.ts","name":"connection failures and stale saves remain actionable","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -8277,6 +8251,74 @@
     {"kind":"browser","file":"tests/model-provider.spec.ts","name":"workspace AI starts off, saves explicit feature choices and tests only saved configuration","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/model-refresh.spec.ts","name":"model refresh starts private, saves its interval and accepts profiles without route writes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"agent readers can inspect all layers but have no write controls or move actions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"an empty eligible list explains the provider wait and keeps held cards locked","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"capabilities stay separate from locks, rules may name incapable models, and reviews keep the author family excluded","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"column visibility persists and restores fixed ordering while mandatory columns stay visible","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"failed writes are honest, old Undo cannot overwrite a later edit, and an identity change discards a held result","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"full screen is a route with inert surroundings; popovers own Esc and Done restores scroll and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"keyboard moves write once with person and revision, keep pins and other controls still, and cross Not allowed","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"new catalog lines stay unplaced until one order places them and the tray and board height stay still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"pointer drag keeps a placeholder, pins and surrounding columns still and sends only the dropped order","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"project rules retain workspace pins, require a reason, preserve submit controls, and surface a server refusal","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"provider writes keep selectors still and support Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"rules Move to appends a second pin instead of inserting it ahead of pins already there","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"template preview writes no settings, shows Now to After, keeps personal columns and applies with guarded Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1024 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1024 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1280 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1280 dark en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1280 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1280 light en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1440 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1440 dark en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1440 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1440 light en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 390 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 390 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board.spec.ts","name":"Auto templates and Thinking save for the captured person with confirmed Undo and no dialog stack","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-board.spec.ts","name":"Simple shares one editor: keyboard and drag preserve pins, cross-family exclusions and unplaced lines","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-board.spec.ts","name":"Why uses the server trace, proof stays honest when empty, and full screen restores scroll and focus","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-board.spec.ts","name":"a 409 refusal stays on the Models page and never claims a save","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-board.spec.ts","name":"a 428 refusal stays on the Models page and never claims a save","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-board.spec.ts","name":"agent readers have no preference writes, and Auto remains readable","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-board.spec.ts","name":"approved desktop and German phone evidence in light and dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-board.spec.ts","name":"person changes discard held writes and reset mode, proof folds and pending template confirmation","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-board.spec.ts","name":"run evidence shows the actual catalog model and compares with the recorded choice in bounded pages","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8800,13 +8842,9 @@
     ,
     {"kind":"browser","file":"tests/planning-columns.spec.ts","name":"unknown planned and used effort stays undrawn and is explained to hover and screen readers","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"Project writes bind the chosen visible project and offer no project locks","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"adding to sparse priorities 1,3 saves canonical order and preserves Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"adding to sparse priorities 10,20 saves canonical order and preserves Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"canonical person change during focus refresh drops old preference drafts and Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"focus refresh preserves ladder draft, pending save, Undo and controls 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -8820,8 +8858,6 @@
     ,
     {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"focus refresh preserves ladder draft, pending save, Undo and controls 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"focus refresh preserves preference drafts, confirmed Undo and an in-flight save","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape ladder Linux x86_64 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape ladder Linux x86_64 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8829,16 +8865,6 @@
     {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape ladder MacIntel 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape ladder MacIntel 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape preferences Linux x86_64 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape preferences Linux x86_64 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape preferences MacIntel 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape preferences MacIntel 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard submits only with platform modifier and Esc first leaves a field","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"ladder geometry and conditional Undo 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -8866,20 +8892,6 @@
     ,
     {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"managed order activation and mode Undo 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"native browser shortcuts pass through the editor untouched","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"pending preference selection keeps controls and rows 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"pending preference selection keeps controls and rows 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"pending preference selection keeps controls and rows 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"pending preference selection keeps controls and rows 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"pending preference selection keeps controls and rows 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"pending preference selection keeps controls and rows 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates ladder models.manage draft","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates ladder models.manage saving","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8892,41 +8904,7 @@
     ,
     {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates ladder models.read undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates preference draft","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates preference saving","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates preference undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"person linking with equal revisions discards old draft and Undo without auto-retry","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference refusal locked_above keeps draft without success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference refusal permission_denied keeps draft without success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference refusal stale_revision keeps draft without success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference rows/scalars and geometry 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference rows/scalars and geometry 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference rows/scalars and geometry 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference rows/scalars and geometry 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference rows/scalars and geometry 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference rows/scalars and geometry 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"retired-kind Reset Undo refuses specifically without restoration","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"switching level during save cannot attach old Undo to the new record","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"truncated ladder and missing workspace model visibility have no functioning editors","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"unknown response and failed reconciliation never show success or Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"work-kind selection and lock explanation keep navigation and rows still","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/polish-round-two.spec.ts","name":"PL2 hours 390 dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
@@ -14956,6 +14934,46 @@
     ,
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > uses server review evidence, including newly qualified harnesses and per-model residency","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"a canonical-person change with equal revision invalidates old template approval and Undo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"an unconfirmed person in the write response never offers success or Undo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"cannot edit as an agent or use profile writes to bypass project rule ownership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"carries inherited workspace rules and reasons into project writes and never permits cross-family moves","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"deduplicates a project restriction of a workspace rule without dropping inherited locks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"discards a delayed template preview and its approval after the observed revision changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"drops a late board read across an identity boundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"expires Undo and rejects it after another revision or identity boundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"keeps rules out of personal writes, moves across Not allowed and retains fixed pin ownership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"refreshes a conflict without a success toast and blocks edits after a saved write whose refresh fails","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"refuses a new Not allowed on the workspace default and still stores Mine and rules bans","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"rejects a held write and its follow-up read after a context change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"saves exactly one captured order with the person and revision then undoes an inherited order by deleting it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"sends the person precondition on the real HTTP order client and surfaces a server rejection","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"a canonical-person change clears proof folds and discards a held evidence page under the same login","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"binds every legacy and ranked person write, including delete and dismiss, to the captured canonical person","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"legacy refusal 409 gives a sentence and preserves the HTTP status","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"legacy refusal 428 gives a sentence and preserves the HTTP status","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"preserves project, kind and ticket context when entry points navigate to Models","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"the page discards a held resolution when the mounted person changes and restores that person’s mode","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/pairing-live.unit.test.ts","name":"a Retry-After beyond the lifetime ends the follow instead of reading later","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/pairing-live.unit.test.ts","name":"a Retry-After inside the lifetime still waits, and one that reaches the deadline does not","tier":"GATED-FULL"}
@@ -15708,9 +15726,9 @@
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #members entry keeps the query and opens access","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #model-refresh entry keeps the query and opens agents","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #model-refresh entry keeps the query and opens models","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #models entry keeps the query and opens agents","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #models entry keeps the query and opens models","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #quota-warnings entry keeps the query and opens accounts","tier":"GATED-FULL"}
     ,
@@ -15721,6 +15739,10 @@
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #ticket-types entry keeps the query and opens vocabulary","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #work-vocabulary entry keeps the query and opens vocabulary","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Agents #model-refresh bookmark opens catalog freshness and keeps its context","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Agents #models bookmark opens catalog freshness and keeps its context","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired briefing bookmarks open Agents and keep request links","tier":"GATED-FULL"}
     ,
@@ -15740,9 +15762,9 @@
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #members opens access","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #model-refresh opens agents","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #model-refresh opens models","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #models opens agents","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #models opens models","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #quota-warnings opens accounts","tier":"GATED-FULL"}
     ,

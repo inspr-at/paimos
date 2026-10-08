@@ -682,7 +682,7 @@ func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
 		t.Fatal("pin regression tests must run in full draft PR CI")
 	}
 	worker, gate := ci.Jobs["release-check-run"], ci.Jobs["release-check"]
-	if worker.If != "always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'" || gate.If != "always()" ||
+	if worker.If != "always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'" || gate.If != "always()" ||
 		!reflect.DeepEqual(gate.Needs, []any{"ci-plan", "release-check-run", "tree-reuse", "cache-prime", "tier-plan"}) {
 		t.Fatal("pin regressions must retain classified validation and the required aggregate")
 	}

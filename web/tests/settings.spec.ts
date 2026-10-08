@@ -31,7 +31,7 @@ test('the account menu opens Settings on Personal: theme, greeting and keys', as
   await page.getByRole('menuitem', { name: 'Personal settings' }).click()
   await expect(page).toHaveURL('/settings/personal')
   await expect(page).toHaveTitle(/^Settings · /)
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Access/, /^Policies/, /^Agents/, /^Autopilot/, /^Business/, /^Product portal/])
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Access/, /^Policies/, /^Models/, /^Agents/, /^Autopilot/, /^Business/, /^Product portal/])
   await expect(sections(page).getByRole('link', { name: /^Personal/ })).toHaveAttribute('aria-current', 'page')
 
   await page.getByRole('radio', { name: 'Dark' }).click()
@@ -81,7 +81,7 @@ test('grouped navigation stays put across section changes and places policy card
   await mockAccess(page, accessWorld(), { also: ['account.read', 'rules.read', 'models.read'] })
   await page.goto('/settings/workspace')
   const nav = sections(page)
-  await expect(nav.getByRole('link')).toHaveCount(13)
+  await expect(nav.getByRole('link')).toHaveCount(14)
   await expect(nav.locator('.nav-group')).toHaveText(['You', 'Workspace', 'Agents and automation', 'Business'])
   await expect(page.locator('.body > .who')).toHaveText('Admins only see and change this section.')
   await expect(page.locator('#work-vocabulary, #model-refresh, #status-autopilot, #members, #estimates')).toHaveCount(0)
