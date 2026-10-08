@@ -334,9 +334,54 @@ func TestVendorStopAdviceRejectsUnenrolledDaemonSquatter(t *testing.T) {
 
 // Risk: a redacted overview row discloses quota headroom through routable,
 // or by omitting wait when slots remain. Private rows keep one constant shape.
+// The default schedule is weekdays 08:00–22:00 UTC with nights off, so a
+// wall-clock overview after 22:00 waits on the schedule even when the manual
+// window still has slots (CI on 9f3604f8 at 2026-10-07 22:16Z). Pin the probe,
+// the window and the overview to a Wednesday noon. The assertion is unchanged.
 // A manual allowance still follows the owner's schedule; pin both clocks and
 // allow night work so this privacy guard cannot depend on the time CI runs.
 func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
+	t.Run("schedule-band", func(t *testing.T) {
+		reset(t)
+		person := makePrincipal(t, "overview-routable", "person", "Owner", []string{"admin"})
+		other := addPrincipal(t, person.TenantID, "person", "Other", nil)
+		runner := addPrincipal(t, person.TenantID, "agent", "runtime", nil)
+		codexProfile(t, person)
+		now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+		var own, private string
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+			for _, row := range []struct{ label, owner string }{{"Own", person.ID}, {"Private", other.ID}} {
+				var id string
+				if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,owner_person_id,linked_at) VALUES($1,$2,'codex','daemon-a',$3,$2,$4,true,'g1',$5,$6,$4) RETURNING id::text`, person.TenantID, row.label, runner.ID, now, person.ID, row.owner).Scan(&id); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model) VALUES($1,$2,$3,$4,'requests',100,10,'unrestricted')`, person.TenantID, id, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+					return err
+				}
+				if row.label == "Own" {
+					own = id
+				} else {
+					private = id
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var page overviewPage
+		callStatus(t, fixedClockModule{Module: accountsMod(), at: now}, &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
+		seen := map[string]overviewAccount{}
+		for _, a := range page.Accounts {
+			seen[a.AccountID] = a
+		}
+		shared, privateRow := seen[own], seen[private]
+		if shared.AccountID == "" || shared.DetailsRedacted || !shared.Routable || shared.Wait != nil {
+			t.Fatalf("owned account with open slots was not routable: %+v wait=%+v", shared, shared.Wait)
+		}
+		if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
+			t.Fatalf("redacted overview disclosed headroom: %+v", privateRow)
+		}
+	})
 	loc, err := time.LoadLocation("Europe/Vienna")
 	if err != nil {
 		t.Fatal(err)
@@ -410,6 +455,117 @@ func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
 			}
 		})
 	}
+	// The owned account's schedule is on at every hour, so open manual slots stay
+	// routable outside the default 08:00–22:00 UTC band. The clock is pinned at
+	// the hour that previously dropped this row; the account schedule is what
+	// keeps it routable, not the wall clock.
+	t.Run("account-always-on", func(t *testing.T) {
+		reset(t)
+		person := makePrincipal(t, "overview-routable", "person", "Owner", []string{"admin"})
+		other := addPrincipal(t, person.TenantID, "person", "Other", nil)
+		runner := addPrincipal(t, person.TenantID, "agent", "runtime", nil)
+		codexProfile(t, person)
+		now := time.Date(2026, 10, 7, 23, 41, 0, 0, time.UTC)
+		mod := fixedClockModule{Module: accountsMod(), at: now}
+		var own, private string
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+			for _, row := range []struct{ label, owner string }{{"Own", person.ID}, {"Private", other.ID}} {
+				var id string
+				if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,owner_person_id,linked_at) VALUES($1,$2,'codex','daemon-a',$3,$2,$4,true,'g1',$5,$6,$4) RETURNING id::text`, person.TenantID, row.label, runner.ID, now, person.ID, row.owner).Scan(&id); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model) VALUES($1,$2,$3,$4,'requests',100,10,'unrestricted')`, person.TenantID, id, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+					return err
+				}
+				if row.label == "Own" {
+					own = id
+				} else {
+					private = id
+				}
+			}
+			schedule := capacity.DefaultSchedule()
+			for i := range schedule.Week {
+				schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+			}
+			schedule.Reserve = capacity.ReserveOff
+			raw, err := json.Marshal(schedule)
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3,$4::uuid,$5)`, person.TenantID, person.ID, own, own, raw)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var page overviewPage
+		callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
+		if !page.AsOf.Equal(now) || len(page.Accounts) != 2 {
+			t.Fatalf("overview did not use the fixture clock and accounts: %+v", page)
+		}
+		seen := map[string]overviewAccount{}
+		for _, a := range page.Accounts {
+			seen[a.AccountID] = a
+		}
+		shared, privateRow := seen[own], seen[private]
+		if shared.AccountID == "" || shared.DetailsRedacted || !shared.Routable || shared.Wait != nil || shared.Routing == nil || shared.Routing.AvailableSlots != 1 || len(shared.Windows) != 1 || shared.Windows[0].Allowance != 100 || shared.Windows[0].Used != 10 {
+			t.Fatalf("owned account with open slots was not routable: %+v wait=%+v", shared, shared.Wait)
+		}
+		if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil || privateRow.Schedule != nil {
+			t.Fatalf("redacted overview disclosed headroom: %+v", privateRow)
+		}
+	})
+	// Reviewed AEON-943 behaviour: a manual window has no reading, so the
+	// default 08:00–22:00 band refuses it outside those hours. An account-scoped
+	// round-the-clock week keeps the owned row routable at any hour; the
+	// assertion is about headroom, not the wall clock.
+	t.Run("account-always", func(t *testing.T) {
+		reset(t)
+		person := makePrincipal(t, "overview-routable", "person", "Owner", []string{"admin"})
+		other := addPrincipal(t, person.TenantID, "person", "Other", nil)
+		runner := addPrincipal(t, person.TenantID, "agent", "runtime", nil)
+		codexProfile(t, person)
+		now := time.Now().UTC()
+		var own, private string
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+			for _, row := range []struct{ label, owner string }{{"Own", person.ID}, {"Private", other.ID}} {
+				var id string
+				if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,owner_person_id,linked_at) VALUES($1,$2,'codex','daemon-a',$3,$2,$4,true,'g1',$5,$6,$4) RETURNING id::text`, person.TenantID, row.label, runner.ID, now, person.ID, row.owner).Scan(&id); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model) VALUES($1,$2,$3,$4,'requests',100,10,'unrestricted')`, person.TenantID, id, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+					return err
+				}
+				if row.label == "Own" {
+					own = id
+				} else {
+					private = id
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		always := capacity.DefaultSchedule("UTC")
+		for i := range always.Week {
+			always.Week[i].On = true
+			always.Week[i].Start = 0
+			always.Week[i].End = 24
+		}
+		callStatus(t, accountsMod(), &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: own, Schedule: &always}), 204, nil)
+		var page overviewPage
+		callStatus(t, accountsMod(), &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
+		seen := map[string]overviewAccount{}
+		for _, a := range page.Accounts {
+			seen[a.AccountID] = a
+		}
+		shared, privateRow := seen[own], seen[private]
+		if shared.AccountID == "" || shared.DetailsRedacted || !shared.Routable || shared.Wait != nil {
+			t.Fatalf("owned account with open slots was not routable: %+v", shared)
+		}
+		if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
+			t.Fatalf("redacted overview disclosed headroom: %+v", privateRow)
+		}
+	})
 }
 
 func enrollComputerAccount(t *testing.T, owner, host tenant.Principal, accountID, daemonID, profile, token string) {

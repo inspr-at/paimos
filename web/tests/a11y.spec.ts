@@ -59,6 +59,66 @@ async function signedOut(page: Page) {
   })
 }
 
+// R18: the attention grid and selection controls must remain usable by people
+// using a screen reader, including retained resolutions and view-only rows.
+test('axe: Needs attention controls and retained resolutions in light and dark', async ({ page }) => {
+  await signedIn(page)
+  const items = [0, 1, 2].map(index => ({
+    event_id: index + 1, node_id: `attention-${index}`, project_id: 'p-aeon', key: `AEON-${index + 10}`,
+    title: 'Die vollständigen Abrechnungseinstellungen für sämtliche Arbeitsbereiche aktualisieren',
+    kind: 'triage', from: 'new', to: 'backlog', reason: 'Review the current suggestion.',
+    revision: '2026-10-04T08:00:00Z', at: '2026-10-03T08:00:00Z', editable: index !== 2, applicable: index !== 2,
+    unavailable_reason: index === 2 ? 'Editing this ticket needs permission' : undefined,
+  }))
+  await page.route('**/api/status-autopilot/attention**', route => {
+    const request = route.request(), path = new URL(request.url()).pathname
+    if (path.endsWith('/actions')) return route.fulfill({ json: { items: request.postDataJSON().items.map((item: { event_id: number }) => ({ event_id: item.event_id, ok: true, resolution_event_id: 1000 + item.event_id, revision: '2026-10-05T08:00:00Z' })) } })
+    if (path.endsWith('/groups')) return route.fulfill({ json: { total: 3, truncated: false, groups: [{ id: 'p-aeon', project_id: 'p-aeon', key: 'AEON', title: 'Aeon', total: 3, counts: { triage: 3 }, applicable: 2, editable: 2, override_mode: 'on', can_manage: false }] } })
+    return route.fulfill({ json: { items, total: 3, counts: { triage: 3 }, next_cursor: null, facets: { projects: [], assignees: [] }, facets_truncated: false } })
+  })
+  for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width: theme === 'light' ? 1440 : 390, height: 1000 })
+    await page.goto('/tickets?view=needs-attention')
+    const grid = page.getByRole('grid', { name: 'Tickets needing attention' })
+    const first = grid.locator('#row-attention-1')
+    await expect(first).toBeVisible()
+    await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    await page.evaluate(() => document.fonts.ready)
+    const scan = async () => {
+      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
+      expect(results.violations.map(v => ({ rule: v.id, impact: v.impact, nodes: v.nodes.map(n => ({ target: n.target, failure: n.failureSummary })) }))).toEqual([])
+    }
+    await scan()
+    await first.getByRole('button', { name: /^Apply to/ }).click()
+    await expect(first.getByRole('button', { name: 'Undo for AEON-10' })).toBeFocused()
+    await scan()
+    await first.getByRole('button', { name: 'Undo for AEON-10' }).click()
+    await grid.locator('.group-check').check()
+    await expect(page.getByRole('toolbar', { name: 'Selected tickets' })).toBeVisible()
+    await scan()
+    await page.getByRole('toolbar', { name: 'Selected tickets' }).getByRole('button', { name: 'Clear the selection' }).click()
+    await grid.locator('#row-group-p-aeon').getByRole('button', { name: 'More for AEON' }).click()
+    const menu = page.getByRole('menu')
+    await expect(menu).toBeVisible()
+    // The phone sheet's heading, Close, and any alert sit beside the menu.
+    // Only menuitem buttons may be owned by role=menu (axe aria-required-children).
+    expect(await menu.evaluate(el => [...el.children].every(child => child.getAttribute('role') === 'menuitem'))).toBe(true)
+    await expect(menu.getByRole('heading')).toHaveCount(0)
+    await expect(menu.getByRole('button', { name: 'Close' })).toHaveCount(0)
+    await expect(menu.getByRole('alert')).toHaveCount(0)
+    if (theme === 'dark') {
+      await expect(page.getByRole('heading', { name: 'More for AEON' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Close' })).toBeVisible()
+      await page.getByRole('menuitem').first().focus()
+      await page.keyboard.press('ArrowDown')
+      await expect(page.getByRole('menuitem').nth(1)).toBeFocused()
+    }
+    await scan()
+    await page.keyboard.press('Escape')
+    await expect(grid.locator('#group-more-p-aeon')).toBeFocused()
+  }
+})
+
 // name, setup, path, then what to wait for or do before the scan
 const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => Promise<void>][] = [
   ['projects', signedIn, '/', async page => { await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible() }],

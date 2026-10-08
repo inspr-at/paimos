@@ -859,6 +859,46 @@ unless stated otherwise):
 | Supervisor | Physical workspace; `daemon/aeon-agentd-<id>.lock`, `.journal`, `.checkpoint.json`, `.checks.json`, `.capacity.json` | No daemon installation dependency; absent journal/capacity files are valid fresh state |
 | Listener | Private socket directory, lifetime `.sock.lock`, socket, `.token`, legacy `.owner.json` and recognized `.s<hex>` residue; then writes `daemon/control.json` | Socket lifetime and inode ownership checks apply to dev builds too |
 
+The supervisor checkpoint and each WAL entry carry `version`, the persisted
+`Record` schema version (`agentd.RecordSchemaVersion`), independently of the
+product release. Releases 123 and 124 both used version 2 despite 124 adding
+rejection evidence; schema version 3 reads both forms without discarding known
+fields. Startup and fenced offline lifecycle inspection migrate them forward
+under the existing exclusive instance lock. The entire checkpoint and WAL are
+validated before an atomic current-version checkpoint is saved and the WAL is
+compacted. Unknown fields and unsupported older schemas fail closed; classic
+version 1 is never migrated implicitly. Persisted PIDs remain unowned.
+
+Before upgrading, drain and stop the installed daemon through the existing
+approved lifecycle procedure. Confirm owned processes have stopped and settle
+pending reports; a missing socket or a retained PID alone is insufficient.
+Keep a private, owner-only pre-upgrade copy of **both**
+`daemon/aeon-agentd-<id>.checkpoint.json` and
+`daemon/aeon-agentd-<id>.journal` (when present), with their original permissions
+and the exact previous binary/release pin. Record the daemon identity and copy
+time without recording file contents. Forward migration does not automatically
+retain backups. Avoid copying credentials or the whole pairing root.
+
+On a downgrade, version-aware readers refuse a newer checkpoint/WAL with its
+stored and supported versions and a remedy; both state files remain intact.
+Historical 123/124 binaries still use their old generic unsupported/corrupt
+diagnostic. To roll back, stop the newer daemon and confirm its process and
+settlement state first, retain its checkpoint/WAL separately for recovery, then
+restore the **matching pair** of pre-upgrade files and the pinned earlier binary.
+If either file was absent in that saved state, restore that absence through the
+operator's approved file-retirement procedure. A version-2 copy made by 124 may
+contain fields that 123 cannot read: rolling back to 123 requires a copy saved
+before 124 first ran. Never edit a version number, strip fields, or mix a new WAL
+with an old checkpoint. Restoring old state also omits later local evidence;
+reconcile that evidence with server state before resuming dispatch. Without a
+matching backup, keep the current state and use a compatible newer daemon.
+
+`TestRecordSchemaGolden` pins the recursive JSON field/type/tag schema of
+`Record`, including nested evidence. A schema change requires a version bump,
+an explicit migration, and an appended golden hash; prior pins stay immutable.
+`TestRecordSchemaForwardRecoveryAndDowngrade` covers 123 → 124 → current,
+retained rejection/control evidence, process uncertainty, and lossless refusal.
+
 Gemini/OpenCode adapter construction only stores their approved homes and
 executable pins. Home/config checks occur when probing or launching those
 harnesses, not as a prerequisite to constructing the daemon. `service.json`,
@@ -1170,3 +1210,13 @@ The server's daily deterministic analysis runs for the configured doctrine App t
 Outcomes, exception votes and the current learnings inbox are grouped by the server-recorded merged instruction version at the observation time, harness and ticket kind. Missing provenance is left unattributed. Fixed vocabulary classes (validation, security, scope), high fix rounds, CI failures, reverts and exception votes map to one matching indexed rule. Ambiguous or absent targets become internal notes. The proposed clarification uses the AEON-319 path, creates a GitHub draft with `aeon-proposal`, and passes the same main-file and private-quotation guards. Private-text refusals become internal notes; an unavailable private guard retains its reservation for the next daily retry. Private evidence text and workspace URLs never enter the public PR; its fixed explanation includes the recurrence count, baseline and intended direction. Ticket/event references remain in Settings → Agent rules → Proposals, available only to people with workspace `rules.read`, `outcome.read` and `knowledge.read`.
 
 After an observed merge, comparison requires a later rules version with instruction provenance matching the complete changed file hash, in the same harness and ticket kind, and at least three eligible observations. A repository pin alone never proves use. If the harness does not report those bytes, the comparison stays pending. Baseline context includes review rounds, fix rounds, CI failures, reverts, exception votes and time to done. Rates include successful observations; review and fix rounds use each ticket's highest recorded round. Exception and revert rates describe observed tickets, not silent/unobserved work. A completed comparison adds one System-authored ticket comment with sample sizes and the delta; it is descriptive, not causal. Findings persist references, aggregate numbers and hashes, never proposed rule prose. Scans are bounded at 5,000 samples and 500 projects and refuse a truncated learnings page rather than propose from an incomplete scan. Tests inject a fake forge and must never contact real GitHub.
+
+## Host usage probes (AEON-886)
+
+The account owner can turn on **Read usage with this CLI's own login** in Settings → Accounts → Use and limits → Details. It is off by default, applies only to the current ownership binding, and does not approve agent execution or share private quota data. Uses unofficial provider endpoints; they may change or stop. You are responsible for following your provider's terms. This responsibility applies to use of the host probe feature under the PAIMOS terms.
+
+The daemon reads the selected Grok, Claude or Codex login on its host, makes bounded GET requests only to the fixed provider endpoints, and reports normalized usage and reset times through the existing readings endpoint. It never refreshes or writes a login, sends a login to PAIMOS, or logs vendor responses. Claude uses its private credentials file or, for the default macOS profile, a noninteractive read of the existing CLI Keychain item; access requiring a prompt stays unavailable. A 429 retains the last known reading and its age, with a persisted five-minute minimum before another attempt, including after restart.
+
+OpenRouter behind pi reports a **USD budget**, separating key usage/cap from total account balance. If `/credits` rejects an ordinary key, account balance remains unknown; no management key is requested or created. It is not a percentage window and has no invented replenishment time. Measured key caps also update the existing readiness facts: a zero cap stops work, a later unknown cap retains that stop, and a newer positive key reading can clear it. Delayed probes do not replace a newer credit snapshot.
+
+Protocol research: [steipete/CodexBar v0.73.0, commit 1d313fe](https://github.com/steipete/CodexBar/tree/1d313fe), MIT, copyright Peter Steinberger and contributors. This is an independent Go implementation of the provider shapes; fixtures contain synthetic values only. Cursor spike: the desktop `usage-summary` endpoint requires a session cookie from Cursor.app's `state.vscdb`; no verified mapping to a headless `cursor-agent` enrollment exists. Browser credential extraction, a desktop login fallback and Cursor usage polling remain disabled. Codex app-server fallback retains its existing exact-binary qualification gate; HTTP probes never launch a CLI or bypass that gate.

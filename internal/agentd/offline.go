@@ -48,7 +48,7 @@ func OfflineLifecycle(root, daemon, tenant, principal, account string) (Lifecycl
 			return LifecycleStatus{}, e
 		}
 	}
-	j, err := localjournal.Open(localjournal.Config[Record]{Directory: root, Prefix: prefix, Version: 2, MaxBytes: 4 << 20, MaxRecords: 4096, Key: func(r Record) (string, error) {
+	j, err := localjournal.Open(localjournal.Config[Record]{Directory: root, Prefix: prefix, Version: RecordSchemaVersion, Migrations: recordMigrations(), MaxBytes: 4 << 20, MaxRecords: 4096, Key: func(r Record) (string, error) {
 		if r.RunID == "" {
 			return "", ErrScope
 		}

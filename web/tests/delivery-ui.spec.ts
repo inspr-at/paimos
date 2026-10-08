@@ -19,7 +19,7 @@ async function setup(page:Page, theme:'light'|'dark'='light', lang:'en'|'de'='en
  await page.clock.install({ time: new Date(now) })
  await page.route('**/api/me/permissions*',route => {
   const answer=mockEffectivePermissions('admin',new URL(route.request().url()).searchParams.get('project_id')??undefined)
-  const grants=['delivery.read','reviewpolicy.read',...(manage?['delivery.manage','reviewpolicy.manage']:[])]
+  const grants=['delivery_queue.read','delivery.read','reviewpolicy.read',...(manage?['delivery.manage','reviewpolicy.manage']:[])]
   answer.workspace.permissions.push(...grants);answer.project?.permissions.push(...grants)
   return route.fulfill({json:answer})
  })
@@ -30,6 +30,7 @@ async function setup(page:Page, theme:'light'|'dark'='light', lang:'en'|'de'='en
  const writes:{path:string;body:unknown;revision:string|undefined}[]=[]
  const workspace:ReviewPolicy={mode:'other_family',allowed_families:[]}, overrides=new Map<string,ReviewPolicy>()
  const answer=(id:string):ReviewPolicySettings => ({project_id:id||null,policy:id?overrides.get(id)??null:{...workspace},effective:id?overrides.get(id)??{...workspace}:{...workspace},workspace:{...workspace},source:id&&overrides.has(id)?'project':'tenant',updated_by:!id||overrides.has(id)?'editor':null,updated_at:!id||overrides.has(id)?`2026-10-07T05:00:${String(policyRevision).padStart(2,'0')}Z`:null,valid_families:['openai','anthropic','xai','cursor','google','local']})
+ await page.route('**/api/projects/*/delivery-queue?*',route => route.fulfill({json:{items:[],settings:{mode:'off',freeze:false},next_cursor:null}}))
  await page.route('**/api/nodes/*/delivery*',route => failRead?route.fulfill({status:503,json:{error:'Delivery read failed'}}):route.fulfill({json:delivery}))
  await page.route('**/api/delivery/*/hold',route => {
   writes.push({path:new URL(route.request().url()).pathname,body:null,revision:route.request().headers()['if-unmodified-since']})
@@ -143,4 +144,20 @@ test('a later hold on a lifted row can be lifted again', async ({page}) => {
  await block.getByRole('button',{name:'Reload delivery status'}).click()
  await expect(held.locator('.state')).toHaveText('On hold')
  await expect(lift).toBeEnabled();await expect(held.getByRole('button',{name:'Lift hold'})).toHaveCount(1)
+})
+
+// R17/R18: shadow queue facts belong to the open ticket and grow below actions.
+test('shadow delivery rounds show holds without moving delivery controls',async ({page},info) => {
+ await page.setViewportSize({width:390,height:844});await setup(page,'dark','de')
+ let expanded=false
+ await page.route('**/api/projects/*/delivery-queue?*',route => route.fulfill({json:{items:Array.from({length:expanded?4:1},(_,i) => ({id:`round-${i}`,key:'PHAROS-11',kind:'fix',round_number:i+1,state:i?'parked':'queued',hold_reason:i?null:'Die Prüfung ist angehalten, bis die aktuelle Korrekturrunde abgeschlossen ist.',reason:i?'release_freeze':'round_hold',estimate_minutes:60})),settings:{mode:'shadow',freeze:true},next_cursor:expanded?'24':null}}))
+ await page.goto('/p/PHAROS/PHAROS-11')
+ const block=ticket(page),queue=block.locator('.work-queue'),reload=block.getByRole('button',{name:'Lieferstatus neu laden'})
+ await expect(queue).toContainText('Schattenmodus');await expect(queue).toContainText('Prüfung ist angehalten')
+ const guard=await controlStability(page,{reload,header:block.locator('.head')})
+ expanded=true
+ await guard.check(async () => {await page.clock.fastForward(30_000);await expect(queue.locator('li')).toHaveCount(4)})
+ await expect(queue).toContainText('Weitere Runden sind vorhanden');await expect(queue).toContainText('Außerhalb der eingefrorenen Liefermenge')
+ guard.done()
+ await queue.screenshot({path:info.outputPath('aeon-888/shadow-queue-390-dark-de.png')})
 })

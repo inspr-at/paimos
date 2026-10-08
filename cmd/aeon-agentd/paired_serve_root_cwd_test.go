@@ -144,8 +144,8 @@ func TestPairedServeFromRootWorkingDirectory(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestPairedServeFromRootWorkingDirectory$")
 	cmd.Dir = "/"
-	cmd.Env = append(os.Environ(), "AEON_ROOT_CWD_SERVE_HELPER=1", "AEON_ROOT_CWD_SETUP="+root,
-		"AEON_ROOT_CWD_PEER_SOCKET="+peerSocket, "AEON_ROOT_CWD_CERT="+base64.StdEncoding.EncodeToString(server.Certificate().Raw))
+	cmd.Env = []string{"HOME=" + root, "PATH=" + os.Getenv("PATH"), "GOMAXPROCS=2", "AEON_ROOT_CWD_SERVE_HELPER=1", "AEON_ROOT_CWD_SETUP=" + root,
+		"AEON_ROOT_CWD_PEER_SOCKET=" + peerSocket, "AEON_ROOT_CWD_CERT=" + base64.StdEncoding.EncodeToString(server.Certificate().Raw)}
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
 	if err := cmd.Start(); err != nil {
@@ -197,6 +197,17 @@ func TestPairedServeFromRootWorkingDirectory(t *testing.T) {
 	if json.Unmarshal(raw, &pin) != nil || !pin.Valid() || pin.PID != cmd.Process.Pid || pin.UID != os.Getuid() {
 		t.Fatal("root-cwd serve did not publish its usable kernel identity")
 	}
+	daemon, err := net.DialTimeout("unix", local.Socket, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer daemon.Close()
+	observed, err := hooknote.SnapshotDaemon(daemon)
+	if err != nil || observed.CWD != "/" || !hooknote.MatchesPin(observed, pin) || hooknote.RecheckDaemon(daemon, observed) != nil {
+		t.Fatal("published pin did not match the connected root-cwd daemon", err)
+	}
+	// This same process also connected to our separate listener as an incoming
+	// hook. That direction must retain the project-cwd rule.
 	if _, err := hooknote.Observe(cmd.Process.Pid); !errors.Is(err, hooknote.ErrPeer) {
 		t.Fatalf("incoming root-cwd process observation: got %v, want ErrPeer", err)
 	}

@@ -15,6 +15,18 @@
 // Late harness.usage_reported events attach a projection hint for the current
 // readable session binding, so spend can refresh after a session has stopped.
 //
+// Agents subscribe at /api/events/subscribe?topics=plan&after=latest with an
+// explicitly delegated events.subscribe scope and custom workspace role.
+// Built-in agent roles do not grant subscription authority. Plan hints also
+// require agents.plan.read and belong only to the key creator's canonical
+// person. Other allowlisted topics check their current resource permissions
+// and every referenced project before emitting id/type/topic/at hints. Values
+// are fetched through the existing authorized resource APIs, never the stream.
+// Numeric subscription cursors replay without the browser stream's backlog
+// cutoff. Persist stream.cursor after processing earlier hints; reconnect with
+// Last-Event-ID. Pings do not change this cursor. Listener admission, bounded
+// replay, write deadlines and live key/creator checks constrain each request.
+//
 // Every resource mutation must call Append(ctx, tx, principal, Change{...})
 // inside its existing db.InTenant callback, after taking resource locks. Append
 // runs MutationGuard when one is registered. Never

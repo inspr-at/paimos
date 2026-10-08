@@ -37,7 +37,8 @@
         "payload_sha256": "metadata",
         "fanout_done": "metadata",
         "processed_at": "metadata",
-        "observations": "review"
+        "observations": "review",
+        "audit_checks": "metadata"
       }
     },
     {
@@ -64,6 +65,28 @@
         "held_reason": "review",
         "observation": "review",
         "held_from_state": "metadata"
+      }
+    },
+    {
+      "table": "delivery_merge_audit",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "repository": "metadata",
+        "merge_sha": "metadata",
+        "pull_request": "metadata",
+        "ticket_node_id": "metadata",
+        "project_id": "metadata",
+        "merged_by": "personal",
+        "via_queue": "metadata",
+        "checks_passed": "metadata",
+        "review_ok": "metadata",
+        "flags": "metadata",
+        "at": "metadata",
+        "alerted_at": "metadata"
       }
     },
     {
@@ -119,28 +142,49 @@
       }
     },
     {
-      "table": "attention_batches",
-      "classification": "personal",
+      "table": "delivery_work_rounds",
+      "classification": "metadata",
       "locator": {
-        "tenant_column": "tenant_id",
-        "person_column": "actor_id"
+        "tenant_column": "tenant_id"
       },
       "columns": {
         "tenant_id": "metadata",
+        "project_id": "metadata",
         "id": "metadata",
-        "actor_id": "personal",
-        "action": "metadata",
-        "scope": "review",
-        "through_event_id": "metadata",
-        "item_events": "metadata",
-        "created_at": "metadata",
-        "undone_at": "metadata",
-        "snapshot": "review",
-        "idempotency_key": "review",
-        "request": "review",
-        "progress": "review",
-        "undo_progress": "review",
-        "completed_at": "metadata"
+        "ticket_node_id": "metadata",
+        "slug": "metadata",
+        "kind": "metadata",
+        "round_number": "metadata",
+        "state": "metadata",
+        "position": "metadata",
+        "snapshot": "review"
+      }
+    },
+    {
+      "table": "delivery_work_settings",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "snapshot": "review"
+      }
+    },
+    {
+      "table": "delivery_work_claims",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "claimant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "request_id": "metadata",
+        "claimant_id": "personal",
+        "snapshot": "review"
       }
     },
     {
@@ -283,6 +327,44 @@
         "provider": "metadata",
         "effort_level": "metadata",
         "introduced_at": "metadata"
+      }
+    },
+    {
+      "table": "attention_batches",
+      "classification": "personal",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "actor_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "id": "metadata",
+        "actor_id": "personal",
+        "action": "metadata",
+        "scope": "review",
+        "through_event_id": "metadata",
+        "item_events": "metadata",
+        "created_at": "metadata",
+        "undone_at": "metadata",
+        "snapshot": "review",
+        "idempotency_key": "review",
+        "request": "review",
+        "progress": "review",
+        "undo_progress": "review",
+        "completed_at": "metadata"
+      }
+    },
+    {
+      "table": "agent_accounts",
+      "classification": "personal",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "owner_person_id"
+      },
+      "columns": {
+        "usage_probe_enabled": "personal",
+        "usage_probe_revision": "metadata",
+        "usage_budget": "personal"
       }
     }
   ]
