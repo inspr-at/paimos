@@ -152,7 +152,7 @@ export const message = (error: unknown) => error instanceof Error ? error.messag
 // hints only: the caller re-reads the authorized projections. Heartbeats use the
 // periodic refresh; registration/stop and reconnect wake the consumer immediately.
 const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 'restored', 'revived', 'archived', 'metadata_changed', 'adopted', 'handed_over', 'stop_confirmed', 'control_requested', 'control_claimed', 'control_completed', 'pause_requested', 'pause_planned', 'paused', 'pause_interrupt_requested', 'pause_level_changed', 'pause_stop_requested', 'resume_requested', 'resumed', 'pause_cancelled', 'tier_requested', 'tier_declined', 'tier_reported', 'tier_changed', 'tier_cancelled', 'usage_reported']
-const OTHER_EVENTS = ['harness.leaving_requested', 'harness.leaving_cancelled', 'approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved']
+const OTHER_EVENTS = ['inbox.sent', 'harness.leaving_requested', 'harness.leaving_cancelled', 'approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved']
 // Delivery progress of sent messages (AEON-280). These only refresh message
 // status, never the whole workspace.
 export const DELIVERY_EVENTS = ['inbox.message_fetched', 'inbox.receipt_handed_off', 'inbox.receipt_failed', 'inbox.delivery_failed']
