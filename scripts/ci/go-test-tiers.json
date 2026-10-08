@@ -838,7 +838,11 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestReadinessWaitSnapshotAndNewWaitReset","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRedactedOverviewHeadroomFollowsWorkBand","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRedactedOverviewHidesRoutableHeadroom","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRedactedOverviewHidesRoutableHeadroomOnOwnerSchedule","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRenameKeepsModelGrants","tier":"GATED-FULL"}
     ,
@@ -2007,6 +2011,8 @@
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachRefusalAuthenticatesProofAndPrincipalBeforeVersion","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachRegisteredKeyStillRequiresSnapshotDigest","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachRequestEmitsOneRedactedCommittedEvent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachRevokedPairingCauseRequiresRetainedAuthentication","tier":"GATED-FULL"}
     ,
@@ -7130,11 +7136,15 @@
     ,
     {"kind":"go","package":"internal/phoneapprovals","name":"TestPhonePersonTenantOriginAndRevocation","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/phoneapprovals","name":"TestPhonePushCommittedEventsAndRecoveryTick","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/phoneapprovals","name":"TestPhonePushKeySeparatesQuoteEncryption","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/phoneapprovals","name":"TestPhonePushPointerQuietEscalationAndGone","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/phoneapprovals","name":"TestPhoneQuietHoursAndSubscriptionValidation","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/phoneapprovals","name":"TestPhoneRegistrationOptionsDoNotWaitForCredentialMutation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/phoneapprovals","name":"TestPhoneRegistrationRequiresVerifiedPlatformCeremony","tier":"ESSENTIAL"}
     ,
