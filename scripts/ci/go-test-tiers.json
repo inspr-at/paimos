@@ -5188,6 +5188,10 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsFix3ResumeIncludesNewerAttempt","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsFix4DoneRunGainsAttemptWhilePaused","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsFix4LegacyDoneRunIDStillReadsNewerAttempt","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsFromFixedFacts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsNeverReportMissingDataAsZero","tier":"ESSENTIAL"}
