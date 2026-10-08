@@ -878,7 +878,7 @@
     ,
     "browser:tests/work-kinds.spec.ts:Edit turns the row into a two-field form in the list: no dialog, no overlay, the rows above stay put"
     ,
-    "browser:tests/work-kinds.spec.ts:Enter edits a focused row; Esc cancels and returns focus to the row; unsaved words survive the first Esc"
+    "browser:tests/work-kinds.spec.ts:Enter edits a focused row; Esc leaves the field, the next Esc cancels and returns focus to the row"
     ,
     "browser:tests/work-kinds.spec.ts:New kind opens the same form at the end of the list and creates once"
     ,
@@ -889,6 +889,10 @@
     "browser:tests/work-kinds.spec.ts:at 400 px the count moves under the name, targets are 44 px and nothing scrolls sideways"
     ,
     "browser:tests/work-kinds.spec.ts:invalid and failed saves keep the draft and the controls still"
+    ,
+    "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 1024 dark"
+    ,
+    "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 1024 light"
     ,
     "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 1440 dark"
     ,
@@ -11950,7 +11954,7 @@
     ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"Edit turns the row into a two-field form in the list: no dialog, no overlay, the rows above stay put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"Enter edits a focused row; Esc cancels and returns focus to the row; unsaved words survive the first Esc","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"Enter edits a focused row; Esc leaves the field, the next Esc cancels and returns focus to the row","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"New kind opens the same form at the end of the list and creates once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11961,6 +11965,10 @@
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"at 400 px the count moves under the name, targets are 44 px and nothing scrolls sideways","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"invalid and failed saves keep the draft and the controls still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

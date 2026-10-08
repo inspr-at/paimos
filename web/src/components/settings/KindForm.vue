@@ -28,13 +28,13 @@ function save() {
   if (!words) { if (draft.value.label.trim() && draft.value.hint.trim()) more.value = true; return }
   if (form.value?.reportValidity()) emit('save', words)
 }
-// Esc cancels. From a field with unsaved words, the first Esc only leaves the
-// field, so a stray key never discards a draft; the next one cancels.
+// Esc leaves a field first and cancels on the next press, so a stray key never
+// discards a draft (repo keyboard convention, AEON-541). ⌘/Ctrl+Enter saves from anywhere.
 function keys(event: KeyboardEvent) {
   if (event.defaultPrevented) return
   if (event.key === 'Escape') {
     event.preventDefault(); event.stopPropagation()
-    if (dirty.value && isSettingsField(event.target)) { (event.target as HTMLElement).blur(); root.value?.focus({ preventScroll: true }) }
+    if (isSettingsField(event.target)) { (event.target as HTMLElement).blur(); root.value?.focus({ preventScroll: true }) }
     else emit('close')
   } else if (settingsSubmitKey(event)) { event.preventDefault(); event.stopPropagation(); save() }
 }

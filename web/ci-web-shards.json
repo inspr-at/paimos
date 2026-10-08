@@ -1040,7 +1040,7 @@
         ,
         {"file":"tests/work-integration.spec.ts","weightSeconds":70,"weightSource":"estimate"}
         ,
-        {"file":"tests/work-kinds.spec.ts","listedTests":19,"weightSeconds":14.955,"weightSource":"AEON-997 local Chromium: 19 cases, one worker, wall 14.955 s"}
+        {"file":"tests/work-kinds.spec.ts","listedTests":21,"weightSeconds":16.859,"weightSource":"AEON-997 local Chromium: 21 cases, one worker, wall 16.859 s"}
       ]
     }
     ,

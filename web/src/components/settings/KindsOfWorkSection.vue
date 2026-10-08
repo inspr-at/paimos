@@ -153,9 +153,9 @@ async function openMenu(kind: WorkKind, anchor: HTMLElement) {
   if (!editable.value || busy.value) return
   if (menuOpen.value && menu.value?.anchor === anchor) { menuOpen.value = false; return }
   // The popover binds to the record first and opens a tick later; a record change while open would close it.
-  const opened = menu.value = { kind: snapshot(kind), anchor }
+  menu.value = { kind: snapshot(kind), anchor }
   await nextTick()
-  if (menu.value === opened && editable.value) menuOpen.value = true
+  if (menu.value?.anchor === anchor && editable.value) menuOpen.value = true
 }
 const menuContext = computed(() => `${writeScope.owner.value}/${menu.value?.kind.id ?? ''}`)
 const menuItems = computed<SettingsMenuItem[]>(() => {

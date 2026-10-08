@@ -116,13 +116,16 @@ test('only one form at a time; another Edit waits until unsaved words are saved 
 })
 
 // Risk: a form that only the mouse can leave; Esc discarding a draft by accident.
-test('Enter edits a focused row; Esc cancels and returns focus to the row; unsaved words survive the first Esc', async ({ page }) => {
+test('Enter edits a focused row; Esc leaves the field, the next Esc cancels and returns focus to the row', async ({ page }) => {
   const data = await open(page)
   await row(page, 'frontend').focus(); await page.keyboard.press('Enter')
   const frontend = form(page, 'Frontend build')
   await expect(frontend).toBeVisible(); await expect(frontend.locator('[name="label"]')).toBeFocused()
   await page.keyboard.press('Escape')
+  await expect(frontend).toBeVisible(); await expect(frontend.locator('[name="label"]')).not.toBeFocused()
+  await page.keyboard.press('Escape')
   await expect(frontend).toHaveCount(0); await expect(row(page, 'frontend')).toBeFocused()
+  // Unsaved words survive the first Esc and are dropped, deliberately, by the second.
   await row(page, 'frontend').press('Enter')
   await frontend.locator('[name="hint"]').fill('Words that are not saved.')
   await page.keyboard.press('Escape')
@@ -131,6 +134,10 @@ test('Enter edits a focused row; Esc cancels and returns focus to the row; unsav
   await page.keyboard.press('Escape')
   await expect(frontend).toHaveCount(0); await expect(row(page, 'frontend')).toBeFocused()
   await expect(row(page, 'frontend')).toContainText('Vue code that implements an approved design.')
+  // A button is not a field: Esc on More options cancels at once.
+  await row(page, 'frontend').press('Enter')
+  await frontend.getByRole('button', { name: /^More options/ }).focus(); await page.keyboard.press('Escape')
+  await expect(frontend).toHaveCount(0); await expect(row(page, 'frontend')).toBeFocused()
   // A built-in kind keeps its name; focus starts at the sentence.
   await row(page, 'security').focus(); await page.keyboard.press('Enter')
   const security = form(page, 'Security')
@@ -367,7 +374,7 @@ test('at 400 px the count moves under the name, targets are 44 px and nothing sc
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
 })
 
-for (const width of [1440, 400]) for (const theme of ['light', 'dark']) test(`kinds evidence and control stability ${width} ${theme}`, async ({ page }, testInfo) => {
+for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark']) test(`kinds evidence and control stability ${width} ${theme}`, async ({ page }, testInfo) => {
   await open(page, { width, theme })
   await page.screenshot({ path: testInfo.outputPath(`kinds-${width}-${theme}.png`), fullPage: true })
   const controls = { design: row(page, 'design'), designEdit: editButton(page, 'design', 'UI design'), designMenu: menuButton(page, 'design', 'UI design'), advanced: advanced(page) }
