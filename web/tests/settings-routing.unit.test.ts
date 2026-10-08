@@ -25,7 +25,7 @@ afterEach(() => { vi.unstubAllGlobals() })
 
 const moved = [
   ['work-vocabulary', 'vocabulary'], ['ticket-types', 'vocabulary'],
-  ['models', 'agents'], ['model-refresh', 'agents'], ['estimates', 'agents'], ['silent-sessions', 'agents'], ['agent-activity', 'agents'],
+  ['models', 'models'], ['model-refresh', 'models'], ['estimates', 'agents'], ['silent-sessions', 'agents'], ['agent-activity', 'agents'],
   ['quota-warnings', 'accounts'], ['status-autopilot', 'autopilot'], ['autopilot-projects', 'autopilot'],
   ['autopilot-suggestions', 'autopilot'], ['autopilot-recent', 'autopilot'], ['autopilot-proposals', 'autopilot'], ['autopilot-changes', 'autopilot'], ['members', 'access'],
 ] as const
@@ -72,6 +72,10 @@ it('current cards and unknown bookmarks keep their section', async () => {
     expect(router.currentRoute.value.fullPath).toBe(url)
   }
 })
+it.each(['models', 'model-refresh'])('retired Agents #%s bookmark opens catalog freshness and keeps its context', async anchor => {
+  await router.push(`/settings/agents?project_id=project-a#${anchor}`)
+  expect(router.currentRoute.value.fullPath).toBe('/settings/models?project_id=project-a#model-refresh')
+})
 
 it('retired briefing bookmarks open Agents and keep request links', async () => {
   for (const path of ['/briefing', '/briefing/', '/briefing?needs=a:00000000-0000-4000-8000-000000000001#request']) {
@@ -88,4 +92,11 @@ it('retired briefing bookmarks open Agents and keep request links', async () => 
       expect(router.currentRoute.value.hash).toBe('#request')
     }
   }
+})
+
+it('Kinds of work resolves directly to the Settings route and retains definition deep links', async () => {
+  await router.push('/settings/kinds#kind-security')
+  expect(router.currentRoute.value.params.section).toBe('kinds')
+  expect(router.currentRoute.value.meta.title).toBe('Settings')
+  expect(router.currentRoute.value.hash).toBe('#kind-security')
 })

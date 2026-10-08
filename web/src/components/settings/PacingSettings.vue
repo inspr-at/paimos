@@ -80,13 +80,17 @@ async function openEditor(kind: EditorKind, event: Event) {
     editorRef.value?.focusTitle()
   }
 }
-/** Under the control that opened it, kept inside the viewport. */
+/** Choose a viewport position once on open; content grows below the controls. */
 function place() {
   const el = editorRef.value?.root
   if (!el || !root.value || !opener) return
   const box = root.value.getBoundingClientRect(), anchor = opener.getBoundingClientRect(), w = el.offsetWidth
   const left = Math.max(12 - box.left, Math.min(anchor.right - box.left - w, innerWidth - 12 - w - box.left))
-  editorStyle.value = { top: `${anchor.bottom - box.top + 8}px`, left: `${left}px`, maxHeight: `${Math.max(440, innerHeight - anchor.bottom - 64)}px` }
+  const footerGap = 88, viewportTop = 72
+  const height = Math.min(el.offsetHeight, Math.max(0, innerHeight - viewportTop - footerGap))
+  const below = anchor.bottom + 8
+  const top = below + height <= innerHeight - footerGap ? below : Math.max(viewportTop, anchor.top - height - 8)
+  editorStyle.value = { top: `${top - box.top}px`, left: `${left}px`, maxHeight: `${Math.max(0, innerHeight - top - footerGap)}px` }
 }
 let sheetReturn: HTMLElement | null = null
 function closeEditor(focus = true) {
@@ -254,7 +258,7 @@ defineExpose({ reveal })
 .tog { position: relative; display: inline-flex; align-items: center; flex: none; width: 38px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: var(--line-2); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-black) 12%, transparent); cursor: pointer; }
 .tog::after { content: ''; position: absolute; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--switch-knob); box-shadow: 0 1px 3px color-mix(in srgb, var(--shadow-black) 28%, transparent); transition: transform .18s ease; }
 .tog[aria-checked="true"] { background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo)); }
-.tog[aria-checked="true"]::after { background: var(--primary-on); transform: translateX(16px); }
+.tog[aria-checked="true"]::after { background: var(--switch-knob); transform: translateX(16px); }
 .tog:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .tog:disabled { cursor: default; opacity: .6; }
 .gear { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--ink-3); }

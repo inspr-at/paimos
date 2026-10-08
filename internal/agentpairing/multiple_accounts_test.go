@@ -44,14 +44,7 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 	for i, e := range v.Enrollments {
 		f.call("POST", "/api/agent-accounts/"+e.AccountID+"/capacity/approve", nil, true, "", 204)
 		f.probe(v, e, key, 200)
-		// Keep every 5h window already open and its reset at least an hour out.
-		// CI at 2026-10-08 01:41 Europe/Vienna (23:41 UTC) dropped the account
-		// whose window opened at now with used percent above the day's remainder.
-		readings := []capacity.Reading{
-			{WindowKind: "5h", WindowMinutes: 300, UsedPercent: float64(i + 10), ResetsAt: now.Add(time.Hour + time.Duration(i)*15*time.Minute), ReadAt: now, Source: "harness"},
-			{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: float64(i + 20), ResetsAt: now.Add(time.Duration(i+24) * time.Hour), ReadAt: now, Source: "harness"},
-		}
-		f.call("POST", "/api/agent-accounts/"+e.AccountID+"/readings", map[string]any{"readings": readings}, false, key, 204)
+		f.call("POST", "/api/agent-accounts/"+e.AccountID+"/readings", map[string]any{"readings": enrollmentReadings(i, now)}, false, key, 204)
 	}
 	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=now() WHERE daemon_id=$1`, *v.DaemonID, f.person)
@@ -60,12 +53,9 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Account eligibility must not depend on the weekday or owner's office hours.
-	schedule := capacity.DefaultSchedule()
-	schedule.Reserve = capacity.ReserveOff
-	for i := range schedule.Week {
-		schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
-	}
+	// Account eligibility must not depend on the weekday, the owner's office
+	// hours or how close the run is to the end of the paced day.
+	schedule := middayEnrollmentSchedule(time.Now())
 	for _, e := range v.Enrollments {
 		f.call("PUT", "/api/agent-accounts/capacity/schedule", map[string]any{"scope": "account", "account_id": e.AccountID, "schedule": schedule}, true, "", 204)
 	}
@@ -158,6 +148,72 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 		t.Fatal("handoff did not reserve the spare account")
 	}
 	f.call("POST", "/api/runs/"+queued[0].ID+"/claim", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "reservation_ids": reservationIDs(route)}, false, key, 200)
+}
+
+// enrollmentReadings is the fresh 5h and weekly harness reading account i of the
+// enrollment fixture reports: every account has its own reset times and use.
+func enrollmentReadings(i int, now time.Time) []capacity.Reading {
+	return []capacity.Reading{
+		{WindowKind: "5h", WindowMinutes: 300, UsedPercent: float64(i + 10), ResetsAt: now.Add(time.Duration(i+1) * time.Hour), ReadAt: now, Source: "harness"},
+		{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: float64(i + 20), ResetsAt: now.Add(time.Duration(i+24) * time.Hour), ReadAt: now, Source: "harness"},
+	}
+}
+
+// middayEnrollmentSchedule is the always-on account schedule of the enrollment
+// fixtures, without Keep for you. Pacing grants a window only its share of the
+// remaining paced day, so on a UTC clock the last hours before midnight leave a
+// long window nothing and an account drops out of routing. A fixed-offset zone
+// puts the local clock at midday whenever the test runs.
+func middayEnrollmentSchedule(now time.Time) capacity.Schedule {
+	// Etc/GMT zones carry the POSIX sign: Etc/GMT-3 is three hours east of UTC.
+	zone := "Etc/GMT"
+	if east := 12 - now.UTC().Hour(); east > 0 {
+		zone = fmt.Sprintf("Etc/GMT-%d", east)
+	} else if east < 0 {
+		zone = fmt.Sprintf("Etc/GMT+%d", -east)
+	}
+	schedule := capacity.DefaultSchedule(zone)
+	schedule.Reserve = capacity.ReserveOff
+	for i := range schedule.Week {
+		schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	return schedule
+}
+
+// Risk: the enrollment fixtures posted readings that only fit the paced day
+// when the test ran early enough, so CI lost eligible accounts at night. At
+// every hour of the day the fixture schedule must leave each reading at least
+// the one percent a fresh account holds for a run.
+func TestEnrollmentFixtureScheduleLeavesEveryReadingBudgetAtAnyHour(t *testing.T) {
+	for _, day := range []int{7, 10} { // a Wednesday and a Saturday
+		for hour := 0; hour < 24; hour++ {
+			for _, minute := range []int{0, 15, 30, 59} {
+				now := time.Date(2026, 10, day, hour, minute, 0, 0, time.UTC)
+				schedule := middayEnrollmentSchedule(now)
+				if err := schedule.Validate(); err != nil {
+					t.Fatalf("%s: %v", now.Format(time.RFC3339), err)
+				}
+				period, end := schedule.Period(now)
+				for i := 0; i < 5; i++ {
+					for _, reading := range enrollmentReadings(i, now) {
+						// The same paced share the router grants a reading
+						// that has no earlier baseline in today's period.
+						start, used := reading.StartsAt(), reading.UsedPercent
+						if start.Before(period) {
+							start, used = period, 0
+						}
+						pacing, err := capacity.Plan(capacity.PlanInput{Now: now, Reset: reading.ResetsAt, WindowStart: start, Remaining: 100 - reading.UsedPercent, UsedToday: used, WindowLength: time.Duration(reading.WindowMinutes) * time.Minute}, schedule)
+						if err != nil {
+							t.Fatalf("%s account %d %s: %v", now.Format(time.RFC3339), i, reading.WindowKind, err)
+						}
+						if pacing.AvailableNowPercent < 1 {
+							t.Fatalf("%s account %d %s window left %.1f%% (period %s to %s)", now.Format(time.RFC3339), i, reading.WindowKind, pacing.AvailableNowPercent, period.Format(time.RFC3339), end.Format(time.RFC3339))
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 func TestPairingRejectsUnisolatedAndReusedHomesAcrossRequests(t *testing.T) {

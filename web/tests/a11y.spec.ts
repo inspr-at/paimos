@@ -61,22 +61,24 @@ async function signedOut(page: Page) {
 
 // R18: the attention grid and selection controls must remain usable by people
 // using a screen reader, including retained resolutions and view-only rows.
-test('axe: Needs attention controls and retained resolutions in light and dark', async ({ page }) => {
-  await signedIn(page)
-  const items = [0, 1, 2].map(index => ({
-    event_id: index + 1, node_id: `attention-${index}`, project_id: 'p-aeon', key: `AEON-${index + 10}`,
-    title: 'Die vollständigen Abrechnungseinstellungen für sämtliche Arbeitsbereiche aktualisieren',
-    kind: 'triage', from: 'new', to: 'backlog', reason: 'Review the current suggestion.',
-    revision: '2026-10-04T08:00:00Z', at: '2026-10-03T08:00:00Z', editable: index !== 2, applicable: index !== 2,
-    unavailable_reason: index === 2 ? 'Editing this ticket needs permission' : undefined,
-  }))
-  await page.route('**/api/status-autopilot/attention**', route => {
-    const request = route.request(), path = new URL(request.url()).pathname
-    if (path.endsWith('/actions')) return route.fulfill({ json: { items: request.postDataJSON().items.map((item: { event_id: number }) => ({ event_id: item.event_id, ok: true, resolution_event_id: 1000 + item.event_id, revision: '2026-10-05T08:00:00Z' })) } })
-    if (path.endsWith('/groups')) return route.fulfill({ json: { total: 3, truncated: false, groups: [{ id: 'p-aeon', project_id: 'p-aeon', key: 'AEON', title: 'Aeon', total: 3, counts: { triage: 3 }, applicable: 2, editable: 2, override_mode: 'on', can_manage: false }] } })
-    return route.fulfill({ json: { items, total: 3, counts: { triage: 3 }, next_cursor: null, facets: { projects: [], assignees: [] }, facets_truncated: false } })
-  })
-  for (const theme of ['light', 'dark']) {
+// Keep each axe scan in its own case: eight scans and two navigations used to
+// compete for one test deadline. Every state and both themes remain covered.
+for (const theme of ['light', 'dark'] as const) for (const state of ['initial', 'resolved', 'selected', 'menu'] as const) {
+  test(`axe: Needs attention ${state} in ${theme}`, async ({ page }) => {
+    await signedIn(page)
+    const items = [0, 1, 2].map(index => ({
+      event_id: index + 1, node_id: `attention-${index}`, project_id: 'p-aeon', key: `AEON-${index + 10}`,
+      title: 'Die vollständigen Abrechnungseinstellungen für sämtliche Arbeitsbereiche aktualisieren',
+      kind: 'triage', from: 'new', to: 'backlog', reason: 'Review the current suggestion.',
+      revision: '2026-10-04T08:00:00Z', at: '2026-10-03T08:00:00Z', editable: index !== 2, applicable: index !== 2,
+      unavailable_reason: index === 2 ? 'Editing this ticket needs permission' : undefined,
+    }))
+    await page.route('**/api/status-autopilot/attention**', route => {
+      const request = route.request(), path = new URL(request.url()).pathname
+      if (path.endsWith('/actions')) return route.fulfill({ json: { items: request.postDataJSON().items.map((item: { event_id: number }) => ({ event_id: item.event_id, ok: true, resolution_event_id: 1000 + item.event_id, revision: '2026-10-05T08:00:00Z' })) } })
+      if (path.endsWith('/groups')) return route.fulfill({ json: { total: 3, truncated: false, groups: [{ id: 'p-aeon', project_id: 'p-aeon', key: 'AEON', title: 'Aeon', total: 3, counts: { triage: 3 }, applicable: 2, editable: 2, override_mode: 'on', can_manage: false }] } })
+      return route.fulfill({ json: { items, total: 3, counts: { triage: 3 }, next_cursor: null, facets: { projects: [], assignees: [] }, facets_truncated: false } })
+    })
     await page.setViewportSize({ width: theme === 'light' ? 1440 : 390, height: 1000 })
     await page.goto('/tickets?view=needs-attention')
     const grid = page.getByRole('grid', { name: 'Tickets needing attention' })
@@ -88,14 +90,14 @@ test('axe: Needs attention controls and retained resolutions in light and dark',
       const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
       expect(results.violations.map(v => ({ rule: v.id, impact: v.impact, nodes: v.nodes.map(n => ({ target: n.target, failure: n.failureSummary })) }))).toEqual([])
     }
-    await scan()
+    if (state === 'initial') { await scan(); return }
     await first.getByRole('button', { name: /^Apply to/ }).click()
     await expect(first.getByRole('button', { name: 'Undo for AEON-10' })).toBeFocused()
-    await scan()
+    if (state === 'resolved') { await scan(); return }
     await first.getByRole('button', { name: 'Undo for AEON-10' }).click()
     await grid.locator('.group-check').check()
     await expect(page.getByRole('toolbar', { name: 'Selected tickets' })).toBeVisible()
-    await scan()
+    if (state === 'selected') { await scan(); return }
     await page.getByRole('toolbar', { name: 'Selected tickets' }).getByRole('button', { name: 'Clear the selection' }).click()
     await grid.locator('#row-group-p-aeon').getByRole('button', { name: 'More for AEON' }).click()
     const menu = page.getByRole('menu')
@@ -116,8 +118,8 @@ test('axe: Needs attention controls and retained resolutions in light and dark',
     await scan()
     await page.keyboard.press('Escape')
     await expect(grid.locator('#group-more-p-aeon')).toBeFocused()
-  }
-})
+  })
+}
 
 // name, setup, path, then what to wait for or do before the scan
 const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => Promise<void>][] = [

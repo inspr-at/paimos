@@ -2784,7 +2784,7 @@ paths:
     get:
       operationId: "listChatMessages"
       x-aeon-package: "R2"
-      description: "Reserved chat-v1 contract for R2; not mounted by R1. Default latest 50, max 100, ascending display order. before/after/around_message are mutually exclusive; opaque cursors bind caller and conversation. Page at most 1 MiB, even if fewer than the count limit. Snapshot and migration epoch accompany exact per-message person read state. Imported source audiences remain enforced."
+      description: "Mounted opt-in chat-v1 R2 participant history contract. Default latest 50, max 100, ascending display order. before/after/around_message are mutually exclusive; opaque cursors bind caller and conversation. Page at most 1 MiB, even if fewer than the count limit. Snapshot and migration epoch accompany exact per-message person read state. Imported source audiences remain enforced."
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}}, {"name": "before", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "after", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "around_message", "in": "query", "required": false, "schema": {"type": "string", "format": "uuid"}}]
       responses:
         '200':
@@ -2875,7 +2875,7 @@ paths:
     get:
       operationId: "getChatReadMarker"
       x-aeon-package: "R2"
-      description: "Reserved chat-v1 contract for R2; not mounted by R1. Person participant only. At most 64 exact 512-byte bitmap chunks per 128 KiB keyset page, separate from the contiguous prefix. A greatest-position watermark never implies seeing unloaded messages."
+      description: "Mounted opt-in chat-v1 R2 participant history contract. Person participant only. At most 64 exact 512-byte bitmap chunks per 128 KiB keyset page, separate from the contiguous prefix. A greatest-position watermark never implies seeing unloaded messages."
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "cursor", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 64, "default": 64}}]
       responses:
         '200':
@@ -2895,7 +2895,7 @@ paths:
     put:
       operationId: "unionChatSeenMessages"
       x-aeon-package: "R2"
-      description: "Reserved chat-v1 contract for R2; not mounted by R1. Person participant only. Within a 16 KiB request, union up to 100 explicitly visible authorized IDs; lock chunks in increasing order, touch at most 100 chunks and compact at most 16 chunks with a five-second deadline; reads, background fetches and delivery receipts never mark messages seen. Preserve unloaded gaps and migration unknown-state provenance. Reauthorize inside the final write transaction."
+      description: "Mounted opt-in chat-v1 R2 participant history contract. Person participant only. Within a 16 KiB request, union up to 100 explicitly visible authorized IDs; lock chunks in increasing order, touch at most 100 chunks and compact at most 16 chunks with a five-second deadline; reads, background fetches and delivery receipts never mark messages seen. Preserve unloaded gaps and migration unknown-state provenance. Reauthorize inside the final write transaction."
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}]
       responses:
         '200':
@@ -3356,6 +3356,34 @@ paths:
         '200': {description: 'Released row', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryItem'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /engine/admission:
+    post:
+      summary: Evaluate shadow admission without starting or reserving work
+      description: "Requires engine.admission and agents.plan.read, plus account.read for people or explicit account.overview.read for agents when capacity is evaluated. The live person's plan, two-slot first-build finishing reserve, work PR WIP ceiling, fresh host signals and account capacity floors decide. Missing inputs deny. Every successful evaluation is an event. The result grants no launch, claim, merge or deployment authority."
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EngineAdmissionRequest'
+      responses:
+        '200':
+          description: "Durable advisory decision; enforced is always false."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineAdmissionDecision'
+        '400':
+          description: "Invalid or oversized input."
+        '403':
+          description: "Missing explicit authority or live person owner."
+        '404':
+          description: "Project not visible or not found."
+        '409':
+          description: "Request ID was reused with different input."
+        '503':
+          description: "Decision could not be durably recorded."
   /events:
     get:
       operationId: listEvents
@@ -7008,6 +7036,62 @@ paths:
         '403': {description: Permission denied}
         '404': {description: No such project or binding}
         '409': {description: Access comes from the workspace role (code via_workspace)}
+  /projects/{projectId}/admission-settings:
+    parameters:
+      - in: path
+        name: projectId
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Read the project shadow admission switch
+      description: "Requires engine.read on the visible project. Missing settings mean off at revision zero."
+      security: *auth
+      responses:
+        '200':
+          description: "Current project switch."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineAdmissionSettings'
+        '403':
+          description: "Permission denied."
+        '404':
+          description: "Project not found."
+    put:
+      summary: Change the project shadow admission switch
+      description: "Person-only engine.manage authority, checked in the final tenant-fenced write. Revision must match. This switch never enables consultation or execution."
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, shadow_enabled]
+              properties:
+                expected_revision:
+                  type: integer
+                  minimum: 0
+                shadow_enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: "Updated and audited project switch."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineAdmissionSettings'
+        '400':
+          description: "Invalid request."
+        '403':
+          description: "Person management authority required."
+        '404':
+          description: "Project not found."
+        '409':
+          description: "Settings revision changed."
   /projects/{projectId}/aithema/sessions:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -7384,7 +7468,7 @@ paths:
               properties:
                 delivery_id: {type: string, format: uuid}
                 cursor: {type: integer, minimum: 1}
-                effective_level: {type: string, enum: [simple], default: simple}
+                effective_level: {type: string, enum: [simple, steer], default: simple}
                 outcome: {type: string, enum: [handed_off, failed], default: handed_off}
                 failure_reason: {type: string, enum: [outcome_unconfirmed, child_unavailable]}
       responses:
@@ -7473,9 +7557,17 @@ paths:
     post:
       operationId: drainHarnessInbox
       description: "Existing managed inbox or an explicitly paired attached hook. Attached hooks lease only exact-session messages; an unfinished lease is replayed until the foreground hook confirms handoff. Reconnect never acknowledges messages. Requires existing harness.worker authority and this registration's worker lease."
-      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                delivery_level: {type: string, enum: [steer], description: "While a turn is busy, lease only boundary input; omitted selects the ordinary FIFO between turns."}
       responses:
-        '200': {description: Empty or one replayable delivery, content: {application/json: {schema: {type: array, maxItems: 1, items: {type: object, required: [delivery_id, message_id, cursor, sender_principal_id, body, leased_at], properties: {delivery_id: {type: string, format: uuid}, message_id: {type: string, format: uuid}, cursor: {type: integer, format: int64}, sender_principal_id: {type: string, format: uuid}, body: {type: string}, leased_at: {type: string, format: date-time}}}}}}}
+        '200': {description: Empty or one replayable delivery, content: {application/json: {schema: {type: array, maxItems: 1, items: {type: object, required: [delivery_id, message_id, cursor, sender_principal_id, body, leased_at], properties: {delivery_level: {type: string, enum: [simple, steer], description: "Requested input timing; simple waits for the current turn to end and steer uses the supported input boundary"}, delivery_id: {type: string, format: uuid}, message_id: {type: string, format: uuid}, cursor: {type: integer, format: int64}, sender_principal_id: {type: string, format: uuid}, project_id: {type: string, format: uuid, description: 'Originating project for a project message; omitted for principal inbox messages'}, reply_to_id: {type: string, format: uuid, description: 'Project message parent for replies; may differ from the inbox message ID'}, sender_session_id: {type: string, format: uuid, description: 'Original sender generation, when bound'}, body: {type: string}, leased_at: {type: string, format: date-time}}}}}}}
         '403': {description: Worker proof rejected}
         '409': {description: An existing managed inbox or paired attached hook is required}
         '410': {description: Archived generation}
@@ -8547,7 +8639,7 @@ paths:
         '409': {description: Session ended or idempotency conflict}
     get:
       operationId: inspectProjectMessages
-      description: Person admin or super_admin inspection including held messages. Ascending by sent event ID by default. In newest_first mode after is an exclusive upper bound; zero starts at the newest. Thread selects the root and all descendants of the supplied message's reply_to chain within this project. Pending selects unresolved held action requests. Resolution never releases or delivers a held message.
+      description: "People with inbox.manage may inspect the project including held messages. With session, people with harness.read in the accessible project may read that exact session thread, including its owner; held messages and attached volatile notes remain excluded. Non-admin reads require session and cannot select pending action requests. Ascending by sent event ID by default. In newest_first mode after is an exclusive upper bound; zero starts at the newest. Thread selects the root and all descendants of the supplied message's reply_to chain within this project. Resolution never releases or delivers a held message."
       parameters:
         - {name: session, in: query, schema: {type: string, format: uuid}, description: 'Exact sender or recipient session and unbound replies linked to its messages, in either direction. Other explicit generations and unrelated principal history are excluded. Omitting includes unbound history.'}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 10}}
@@ -8572,8 +8664,18 @@ paths:
                   next_after: {type: integer, format: int64}
                   preamble: {type: string}
         '400': {description: Invalid filter}
-        '403': {description: Human administrator required}
-        '404': {description: Project not found}
+        '403': {description: 'Person with inbox.manage or exact-session harness.read required'}
+        '404': {description: 'Project or session not found'}
+  /projects/{projectId}/messages/{messageId}/cancel:
+    post:
+      operationId: cancelSessionChatMessage
+      description: "P0 bridge to the chat-v1 cancel result. Authenticated person sender with current inbox.send and harness.read in the project; durable session-bound messages only. Serializes on the inbox message against hooks and daemon claims. A possible offer cannot be recalled and returns too_late. Cancellation preserves history and the accepted deadline, expires never-offered input and emits a content-free event. Native chat-v1 delivery remains reserved for R3."
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: messageId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: "Cancellation result", content: {application/json: {schema: {$ref: '#/components/schemas/ChatCancelResponse'}}}}
+        '404': {description: "Unknown or unauthorized message"}
   /projects/{projectId}/messages/{messageId}/resolution:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -15607,6 +15709,83 @@ components:
           oneOf:
             - {type: 'null'}
             - {type: object, required: [id, role, permissions], properties: {id: {type: string, format: uuid}, role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}, permissions: {type: array, items: {type: string}}}}
+    EngineAdmissionDecision:
+      type: object
+      additionalProperties: false
+      required: [request_id, project_id, allowed, reason, retry_after, mode, enforced, script_agrees, evaluated_at]
+      properties:
+        request_id:
+          type: string
+        project_id:
+          type: string
+          format: uuid
+        allowed:
+          type: boolean
+          description: "Advisory result only. A shadow allow neither reserves a slot nor authorizes a start."
+        reason:
+          type: string
+          description: "Stable reason code, with no private account or host measurements."
+        retry_after:
+          type: [integer, 'null']
+          minimum: 1
+          description: "Advisory seconds before reevaluation with a new request ID; null for allowed or configuration waits."
+        mode:
+          type: string
+          enum: [off, shadow]
+        enforced:
+          type: boolean
+          const: false
+        script_agrees:
+          type: [boolean, 'null']
+          description: "Whether the supplied script decision equals the advisory result. Null when no comparison was supplied or the project switch is off."
+        evaluated_at:
+          type: string
+          format: date-time
+    EngineAdmissionRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, project, estimate]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: "Optional idempotency identity scoped to the caller and tenant. A replay returns the original decision; use a new ID to evaluate again. Generated when omitted."
+        kind:
+          type: string
+          enum: [first_build, fix, merge, land, review]
+        harness:
+          type: string
+          enum: [claude, codex, cursor, gemini, grok, opencode, pi]
+          description: "Routed harness. Omission returns harness_required until a client has resolved routing."
+        project:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: "Visible project UUID or unambiguous project key."
+        estimate:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 168
+          description: "Estimated agent hours. Measured account burn, where known, increases the required quota hold."
+        script_allowed:
+          type: boolean
+          description: "Optional prototype decision for comparison only; never authority."
+    EngineAdmissionSettings:
+      type: object
+      additionalProperties: false
+      required: [project_id, shadow_enabled, revision]
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        shadow_enabled:
+          type: boolean
+          description: "Default false. Enabling only records shadow evaluations."
+        revision:
+          type: integer
+          minimum: 0
     Error:
       type: object
       required: [error]
@@ -16536,6 +16715,7 @@ components:
       required: [message_id, status, delivered_at, read_at, deliver_by]
       properties:
         attached: {$ref: '#/components/schemas/AttachedMessageStatus'}
+        cancelled: {type: boolean, description: "True when a never-offered session message was cancelled by its sender."}
         message_id: {type: string, format: uuid}
         status: {type: string, enum: [sent, delivered, read, not_delivered]}
         reason: {type: string, description: 'Present only for not_delivered: deadline, attempts, session_ended, no_listener or an adapter reason.'}
@@ -18733,6 +18913,7 @@ components:
       properties:
         id: {type: string, format: uuid}
         created_at: {type: string, format: date-time}
+        endpoint_hash: {type: string, pattern: '^[a-f0-9]{64}$', description: 'SHA-256 of the JSON-encoded endpoint; matches this browser without exposing the push address.'}
     PluginCapability:
       type: object
       required: [id, permission]

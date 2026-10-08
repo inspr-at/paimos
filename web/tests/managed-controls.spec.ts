@@ -57,7 +57,10 @@ test('steer is session-bound, ephemeral input with a real queued receipt', async
   await controls(page).getByRole('button', { name: 'Send steer' }).click()
   await expect(controls(page).getByRole('status')).toHaveText('Steer applied · queued for the next turn.')
   expect(requests).toHaveLength(1)
-  await expect(page.locator('.composer')).toHaveCount(0)
+  // P0·3-c keeps the managed chat composer. The steer field is the ephemeral input, and its text does not remain there.
+  await expect(controls(page).getByLabel('What should change?')).toHaveCount(0)
+  await expect(page.locator('.session-chat .composer')).toHaveCount(1)
+  await expect(page.locator('.session-chat .composer textarea')).toHaveValue('')
   expect(requests[0]).toMatchObject({ kind: 'steer', text: 'Run the focused fixtures next.', expected_ownership: ownership })
   expect(requests[0]!.request_id).toMatch(/^[a-f0-9-]{36}$/)
   await controls(page).getByRole('button', { name: 'Steer', exact: true }).click()

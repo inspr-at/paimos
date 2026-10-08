@@ -457,3 +457,51 @@ func TestGuardDiscoversNewWorkflowsAndRejectsInvalidYAML(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeGroupProofGuardRejectsUntrustedInputs(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(map[string]any){
+		func(jobs map[string]any) { mapping(jobs["tree-reuse"])["if"] = "github.event_name == 'merge_group'" },
+		func(jobs map[string]any) {
+			steps := mapping(jobs["tree-reuse"])["steps"].([]any)
+			mapping(mapping(steps[0])["with"])["ref"] = "candidate"
+		},
+		func(jobs map[string]any) {
+			mapping(jobs["go"])["permissions"] = map[string]any{"contents": "write", "actions": "read"}
+		},
+		func(jobs map[string]any) {
+			steps := mapping(jobs["web"])["steps"].([]any)
+			mapping(steps[2])["continue-on-error"] = true
+		},
+		func(jobs map[string]any) {
+			steps := mapping(jobs["e2e"])["steps"].([]any)
+			mapping(mapping(steps[2])["env"])["CONFIRM_PR_RUN"] = "another-run"
+		},
+		func(jobs map[string]any) {
+			steps := mapping(jobs["release-check"])["steps"].([]any)
+			delete(mapping(mapping(steps[3])["env"]), "PR_CONFIRM_REUSE")
+		},
+		func(jobs map[string]any) { mapping(jobs["go-static"])["if"] = mapping(jobs["go-test"])["if"] },
+	} {
+		var workflow map[string]any
+		if err := yaml.Unmarshal(body, &workflow); err != nil {
+			t.Fatal(err)
+		}
+		mutate(mapping(workflow["jobs"]))
+		if err := checkCITriggersAndRequiredChecks(workflow); err == nil {
+			t.Fatal("unsafe MG proof workflow accepted")
+		}
+	}
+	var noFlag map[string]any
+	if err := yaml.Unmarshal(body, &noFlag); err != nil {
+		t.Fatal(err)
+	}
+	delete(noFlag, "env")
+	if err := checkCITriggersAndRequiredChecks(noFlag); err == nil {
+		t.Fatal("missing full-tier fallback flag accepted")
+	}
+
+}

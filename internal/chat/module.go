@@ -32,8 +32,8 @@ type Module struct {
 	enabled bool
 }
 
-// New ships disabled. Enabling R1 supplies identity only, never native wake,
-// delivery or implicit permission to launch/resume an agent.
+// New ships disabled. Enabling supplies R1 identity and R2 participant history,
+// never native wake, delivery or implicit permission to launch/resume an agent.
 func New(pool *pgxpool.Pool, options ...Options) *Module {
 	m := &Module{pool: pool}
 	if len(options) > 0 {
@@ -46,6 +46,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{projectId}/chat-roles", handle(m, m.createRole))
 	mux.HandleFunc("POST /api/projects/{projectId}/chat-threads/resolve", handle(m, m.resolveThread))
 	mux.HandleFunc("GET /api/chat-threads/{id}", handle(m, m.getThread))
+	mux.HandleFunc("GET /api/chat-threads/{id}/messages", handle(m, m.listMessages))
+	mux.HandleFunc("GET /api/chat-threads/{id}/read-marker", handle(m, m.getSeen))
+	mux.HandleFunc("PUT /api/chat-threads/{id}/read-marker", handle(m, m.unionSeen))
 	mux.HandleFunc("POST /api/chat-threads/{id}/binding", handle(m, m.bindThread))
 	mux.HandleFunc("POST /api/chat-deliveries/binding/resolve", handle(m, m.resolveWorker))
 }
@@ -106,7 +109,11 @@ func readBody(ctx context.Context, w http.ResponseWriter, r *http.Request) ([]by
 			return nil, workorders.Fail(http.StatusRequestTimeout, "request body deadline unavailable")
 		}
 	}
-	body := http.MaxBytesReader(w, r.Body, 8192)
+	limit := int64(8192)
+	if r.Method == http.MethodPut {
+		limit = 16384
+	}
+	body := http.MaxBytesReader(w, r.Body, limit)
 	type result struct {
 		raw []byte
 		err error

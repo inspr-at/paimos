@@ -6,6 +6,16 @@ export function outputTail(text,{lines=40,characters=16_384}={}) {
   return String(text ?? '').trimEnd().split('\n').slice(-lines).join('\n').slice(-characters)
 }
 
+export function printFlakeWarnings(ledger,{log=console.log}={}) {
+  const escape=text=>String(text).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A')
+  for(const entry of ledger) {
+    const message=entry.status==='quarantined'
+      ? `Quarantined failure ${entry.key}; owner ${entry.owner}; test attempt ${entry.testAttempt}`
+      : `Flaky test ${entry.key}; passed on retry (test attempt ${entry.testAttempt})`
+    log(`::warning title=Test tier flake::${escape(message)}; run ${escape(entry.runId??'local')}, SHA ${escape(entry.sha??'unknown')}, attempt ${escape(entry.attempt??'1')}`)
+  }
+}
+
 export function goFailures(text) {
   const output=new Map(),failed=new Map()
   for(const line of text.split('\n').filter(line=>line.trim())) {

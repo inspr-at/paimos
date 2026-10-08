@@ -4,14 +4,15 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { decide, verifyRun, transport, main, requiredJobs, executionSteps, workflowPath } from './ci-tree-reuse.mjs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { decide, verifyRun, transport, main, requiredJobs, executionSteps, workflowPath, decideMergeGroup, verifyPRFacts, verifyPRRun, prProofPrefix } from './ci-tree-reuse.mjs';
 
 const repository = 'inspr-at/paimos';
 const sha = 'a'.repeat(40);
 const listPath = `actions/workflows/ci.yml/runs?event=merge_group&status=success&head_sha=${sha}&per_page=20`;
 function fixture(attempt = 1) {
   const run = { id: 123, name: 'CI', repository: { id: 10, full_name: repository }, head_repository: { full_name: repository }, workflow_id: 20, path: workflowPath, status: 'completed', conclusion: 'success', run_attempt: attempt, event: 'merge_group', head_sha: sha };
-  const workflow = { id: 20, name: 'CI', path: workflowPath };
+  const workflow = { id: 20, name: 'CI', path: workflowPath, decideMergeGroup, verifyPRFacts, verifyPRRun, prProofPrefix };
   const jobs = { total_count: requiredJobs.length + 2, jobs: requiredJobs.map(name => {
     const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard (essential plus changed area, or full on main)' : name.startsWith('web-unit (') ? 'Run selected web units without retries' : name.startsWith('web-shard (') ? 'Run selected UI cases without retries' : undefined);
     return { name, run_attempt: attempt, status: 'completed', conclusion: 'success', steps: [...(stepName ? [{ name: stepName, status: 'completed', conclusion: 'success' }] : []), ...(/^(go-test|web-unit|web-shard) \(/.test(name)?[{name:'Confirm full tier execution',status:'completed',conclusion:'success'}]:[])] };
@@ -239,4 +240,165 @@ test('full fan-out alone cannot prove full execution when the independent select
   assert.equal((await check(f)).reuse,'none');
   const web=fixture();job(web,'web-unit (1)').steps.find(step=>step.name==='Confirm full tier execution').conclusion='skipped';
   assert.equal((await check(web)).reuse,'none');
+});
+
+// OPS-257 L5: immutable API facts plus a value-free aggregate job-name proof.
+const prFixturePath = new URL('./releaseworkflow/testdata/ci-pr-tree-proof.json', import.meta.url);
+const prListPath = 'actions/workflows/ci.yml/runs?event=pull_request&status=success&per_page=20';
+function prFixture() {
+  const f = JSON.parse(readFileSync(prFixturePath, 'utf8'));
+  f.calls = [];
+  f.api = async path => {
+    f.calls.push(path);
+    if (path === prListPath) return f.listed;
+    if (path === 'actions/runs/123') return f.latest && f.calls.filter(x => x === path).length > 1 ? f.latest : f.run;
+    if (path === 'actions/workflows/ci.yml') return f.workflow;
+    if (path === 'actions/runs/123/attempts/1/jobs?per_page=100') return f.jobs;
+    if (path === `git/commits/${f.mg}`) return f.candidate;
+    if (path === `git/commits/${'c'.repeat(40)}`) return f.commit;
+    throw new Error(`Unexpected fixture path: ${path}`);
+  };
+  return f;
+}
+const prCheck = (f, options = {}) => decideMergeGroup({ event: 'merge_group', killSwitch: 'on', sha: f.mg, repository: f.repository, api: f.api, ...options });
+const prJob = f => f.jobs.jobs.find(j => j.name.startsWith(prProofPrefix));
+const prFacts = f => verifyPRFacts({ repository: f.repository, run: f.run, workflow: f.workflow, jobs: f.jobs, commit: f.commit, tree: f.candidate.tree.sha });
+
+test('MG reuses the PR checkout merge tree even when the head tree is different', async () => {
+  const f = prFixture();
+  assert.deepEqual(prFacts(f), { run: 123, attempt: 1, head: 'a'.repeat(40), base: 'b'.repeat(40), commit: 'c'.repeat(40), tree: 'd'.repeat(40) });
+  assert.equal((await prCheck(f)).reuse, 'pull_request');
+  assert(f.calls.includes(`git/commits/${f.commit.sha}`));
+  assert.equal(f.calls.filter(p => p === 'actions/runs/123').length, 2);
+  assert(!f.calls.some(p => /artifacts|pulls\//.test(p)), 'Mutable PR refs and expiring artifacts cannot supply proof');
+});
+
+for (const [name, mutate, error] of [
+  ['different repository', f => f.run.repository.full_name = 'other/repo', /wrong repository/],
+  ['fork head', f => f.run.head_repository.full_name = 'fork/paimos', /wrong repository/],
+  ['missing head repo', f => delete f.run.head_repository, /wrong repository/],
+  ['missing repo ID', f => delete f.run.repository.id, /wrong repository/],
+  ['different workflow', f => f.run.workflow_id = 2, /wrong workflow/],
+  ['different workflow path', f => f.run.path = '.github/workflows/fake.yml', /wrong workflow/],
+  ['different workflow name', f => f.workflow.name = 'fake', /wrong workflow/],
+  ['incomplete run', f => f.run.status = 'in_progress', /green PR/],
+  ['cancelled run', f => f.run.conclusion = 'cancelled', /green PR/],
+  ['failed run', f => f.run.conclusion = 'failure', /green PR/],
+  ['non-PR source', f => f.run.event = 'merge_group', /green PR/],
+  ['partial rerun with retained greens', f => f.run.run_attempt = 2, /reruns/],
+  ['full rerun deliberately rejected', f => { f.run.run_attempt = 2; f.jobs.jobs.forEach(j => j.run_attempt = 2); }, /reruns/],
+  ['missing attempt', f => delete f.run.run_attempt, /reruns/],
+  ['missing proof (including legacy/expired artifact-only evidence)', f => prJob(f).name = 'tier-measurements', /missing or duplicate PR proof/],
+  ['duplicate proof', f => { f.jobs.jobs.push(structuredClone(prJob(f))); f.jobs.total_count++; }, /duplicate PR proof/],
+  ['malformed proof', f => prJob(f).name = prProofPrefix + 'bad', /malformed/],
+  ['unsafe proof run', f => prJob(f).name = prJob(f).name.replace(':123:', ':9007199254740992:'), /unsafe/],
+  ['proof for another run', f => prJob(f).name = prJob(f).name.replace(':123:', ':124:'), /match run/],
+  ['proof for another attempt', f => prJob(f).name = prJob(f).name.replace(':123:1:', ':123:2:'), /match run/],
+  ['proof for another head', f => f.run.head_sha = 'f'.repeat(40), /match run/],
+  ['proof step skipped (essential/spec/docs)', f => prJob(f).steps[0].conclusion = 'skipped', /not emitted/],
+  ['proof step missing', f => prJob(f).steps = [], /not emitted/],
+  ['proof step unfinished', f => prJob(f).steps[0].status = 'in_progress', /not emitted/],
+  ['proof step duplicated', f => prJob(f).steps.push({ ...prJob(f).steps[0] }), /not emitted/],
+  ['different merge commit', f => f.commit.sha = 'f'.repeat(40), /proven merge/],
+  ['head tree substituted for checkout tree', f => f.commit.tree.sha = f.run.head_sha, /proven merge/],
+  ['different merge base', f => f.commit.parents[0].sha = 'f'.repeat(40), /proven merge/],
+  ['different merge head', f => f.commit.parents[1].sha = 'f'.repeat(40), /proven merge/],
+  ['head commit instead of merge checkout', f => f.commit.parents.pop(), /proven merge/],
+  ['different MG tree', f => f.candidate.tree.sha = 'f'.repeat(40), /different tested tree/],
+  ['retained job from another attempt', f => job(f, 'go').run_attempt = 2, /incomplete suite/],
+  ['green aggregate with cancelled shard', f => job(f, 'go-test (3)').conclusion = 'cancelled', /incomplete suite/],
+  ['skipped full execution', f => job(f, 'web-shard (1)').steps[0].conclusion = 'skipped', /full execution evidence/],
+  ['full fanout but essential selection', f => job(f, 'web-unit (1)').steps[1].conclusion = 'skipped', /full tier execution evidence/],
+  ['missing full Go shard', f => { f.jobs.jobs = f.jobs.jobs.filter(j => j.name !== 'go-test (7)'); f.jobs.total_count--; }, /missing or failed/],
+  ['missing full browser shard', f => { f.jobs.jobs = f.jobs.jobs.filter(j => j.name !== 'web-shard (12)'); f.jobs.total_count--; }, /missing or failed/],
+  ['truncated jobs', f => f.jobs.total_count++, /incomplete job list/],
+  ['oversized jobs', f => f.jobs.total_count = 101, /incomplete job list/],
+  ['unknown job', f => { f.jobs.jobs.push({ ...job(f, 'go'), name: 'unknown' }); f.jobs.total_count++; }, /unknown suite job/],
+  ['missing jobs', f => delete f.jobs.jobs, /missing jobs/],
+]) test(`PR tree proof fails closed: ${name}`, async () => {
+  const f = prFixture(); mutate(f);
+  assert.throws(() => prFacts(f), error);
+  assert.equal((await prCheck(f)).reuse, 'none');
+});
+
+test('every PR full-suite job and every full execution marker remains mandatory', () => {
+  for (const name of requiredJobs) {
+    const f = prFixture();
+    if (name === 'tier-measurements') prJob(f).conclusion = 'skipped';
+    else job(f, name).conclusion = 'skipped';
+    assert.throws(() => prFacts(f), /incomplete suite/, name);
+  }
+  for (const name of requiredJobs.filter(n => /^(go-test|web-unit|web-shard) \(/.test(n))) {
+    const f = prFixture(); job(f, name).steps = job(f, name).steps.filter(s => s.name !== 'Confirm full tier execution');
+    assert.throws(() => prFacts(f), /full tier execution evidence/, name);
+  }
+});
+
+test('unset/off/non-on MG flag and wrong events do no API work', async () => {
+  for (const options of [{ killSwitch: undefined }, { killSwitch: 'off' }, { killSwitch: 'ON' }, { killSwitch: 'true' }, { event: 'pull_request' }, { event: 'push' }, { event: 'workflow_dispatch' }]) {
+    assert.equal((await prCheck(prFixture(), { ...options, api: () => assert.fail('disabled lookup') })).reuse, 'none');
+  }
+});
+
+test('missing/truncated/malformed candidates, API errors and absent git objects retain full MG', async () => {
+  for (const mutate of [f => { f.listed.workflow_runs = []; f.listed.total_count = 30; }, f => delete f.listed.workflow_runs, f => f.listed.workflow_runs = Array(21).fill(f.listed.workflow_runs[0]), f => f.listed.workflow_runs[0].id = 0, f => f.listed.workflow_runs[0].event = 'push', f => f.candidate.sha = 'f'.repeat(40)]) {
+    const f = prFixture(); mutate(f); assert.equal((await prCheck(f)).reuse, 'none');
+  }
+  const f = prFixture();
+  for (const failPath of [prListPath, 'actions/runs/123', 'actions/workflows/ci.yml', 'actions/runs/123/attempts/1/jobs?per_page=100', `git/commits/${f.commit.sha}`, `git/commits/${f.mg}`]) {
+    assert.equal((await prCheck(prFixture(), { api: async path => { if (path === failPath) throw new Error('unavailable'); return f.api(path); } })).reuse, 'none', failPath);
+  }
+});
+
+test('source rerun or cancellation during proof inspection invalidates MG reuse', async () => {
+  for (const change of [{ run_attempt: 2 }, { status: 'in_progress' }, { conclusion: 'cancelled' }, { head_sha: 'f'.repeat(40) }]) {
+    const f = prFixture(); f.latest = { ...f.run, ...change };
+    await assert.rejects(verifyPRRun(f.repository, 123, f.api, f.mg), /changed during lookup/);
+    assert.equal((await prCheck(f)).reuse, 'none');
+  }
+});
+
+test('MG entry point emits proof outputs, but aggregate confirmation rejects stale or disabled proof', async () => {
+  const f = prFixture(), dir = mkdtempSync(join(tmpdir(), 'ops257-mg-'));
+  const vars = { GITHUB_EVENT_NAME: 'merge_group', GITHUB_SHA: f.mg, GITHUB_REPOSITORY: f.repository, CI_MG_REUSE: 'on', CI_TREE_REUSE: 'off', GH_TOKEN: 'fixture', GITHUB_ACTOR: 'fixture', GITHUB_OUTPUT: join(dir, 'lookup') };
+  const fetcher = async url => new Response(JSON.stringify(await f.api(url.split(`/repos/${f.repository}/`)[1])));
+  assert.equal((await main(vars, fetcher)).reuse, 'pull_request');
+  assert.equal(readFileSync(vars.GITHUB_OUTPUT, 'utf8'), 'reuse=pull_request\nrun=123\n');
+  const confirm = { ...vars, CONFIRM_PR_RUN: '123', GITHUB_OUTPUT: join(dir, 'confirm') };
+  assert.equal((await main(confirm, fetcher)).reuse, 'pull_request');
+  f.run.run_attempt = 2;
+  await assert.rejects(main(confirm, fetcher), /reruns/);
+  await assert.rejects(main({ ...confirm, CI_MG_REUSE: 'off' }, fetcher), /disabled/);
+  await assert.rejects(main({ ...confirm, CONFIRM_PR_RUN: 'not-a-run' }, fetcher), /invalid confirmation/);
+});
+
+
+test('the actual inline PR capture binds HEAD, parents, run and tree without candidate code', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const step = workflow.split('      - name: Capture PR checkout identity\n')[1].split(/\n\n  [a-z][a-z-]*:/)[0];
+  const script = step.split('        run: |\n')[1].replace(/^          /gm, '');
+  const dir = mkdtempSync(join(tmpdir(), 'ops257-capture-'));
+  const fixtureEnv = { PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+    GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid' };
+  const git = (args, input) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: fixtureEnv, input }).trim();
+  git(['init', '-q']);
+  const tree = git(['mktree'], '');
+  const base = git(['commit-tree', tree], 'base');
+  const head = git(['commit-tree', tree, '-p', base], 'head');
+  const commit = git(['commit-tree', tree, '-p', base, '-p', head], 'merge');
+  git(['update-ref', 'HEAD', commit]);
+  const values = { ...fixtureEnv, GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: commit, PR_BASE_SHA: base, PR_HEAD_SHA: head };
+  for (const [label, changes, success] of [
+    ['valid', {}, true], ['wrong-checkout', { GITHUB_SHA: 'f'.repeat(40) }, false],
+    ['wrong-base', { PR_BASE_SHA: 'f'.repeat(40) }, false], ['wrong-head', { PR_HEAD_SHA: 'f'.repeat(40) }, false],
+    ['invalid-run', { GITHUB_RUN_ID: '123\nreuse=pull_request' }, false],
+  ]) {
+    const output = join(dir, label);
+    const result = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8', env: { ...values, ...changes, GITHUB_OUTPUT: output }, timeout: 10000 });
+    assert.equal(result.status === 0, success, result.stderr);
+    if (success) {
+      assert.equal(readFileSync(output, 'utf8'), `proof=pr-tree-v1:123:1:${head}:${base}:${commit}:${tree}\n`);
+    }
+  }
 });
