@@ -11,6 +11,7 @@ import AppIcon from '../AppIcon.vue'
 import FoldSection from './FoldSection.vue'
 import HarnessMark from './HarnessMark.vue'
 import WorkingStepper from './WorkingStepper.vue'
+import BoostToday from './BoostToday.vue'
 
 const agents = useAgents(), capacity = useCapacity(), session = useSession(), sections = useSectionPrefs()
 const viewer = () => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : ''
@@ -97,6 +98,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
           <WorkingStepper :value="total" :effective="total" :viewer="viewer()" :revision="snapshot.updated_at" :interrupt="interrupts" label="Agents at once" total @step="changeTotal" @edit="editTotal" @hold="hold" />
           <span class="f-unit"><span><span class="f-opt">{{ total === 1 ? 'agent ' : 'agents ' }}</span>at once.</span><span class="f-ghost" aria-hidden="true"><span class="f-opt">{{ 'agents ' }}</span>at once.</span></span>
         </div>
+        <BoostToday @changed="agents.afterWrite()" />
         <div v-if="folded" class="f-chips" role="group" aria-label="Each harness">
           <span class="f-vsep" aria-hidden="true" />
           <div v-for="row in rows" :key="row.key" class="f-chip" :class="`is-${row.mode}`" :data-harness="row.key">
@@ -145,7 +147,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
 /* AEON-781: the dial in the fold pattern. Only the chevron moved, from the right end to the start. */
 .working { border-radius: 20px; container: working / inline-size; min-width: 0; }
 /* Lines stack from the top: chips wrapping onto a second line never move the first. */
-.working :deep(.fs-head) { flex-wrap: wrap; align-content: flex-start; gap: 6px 12px; min-height: 0; padding: 13px 18px 13px 8px; }
+.working :deep(.fs-head) { flex-wrap: wrap; align-content: flex-start; align-items: flex-start; gap: 6px 12px; min-height: 0; padding: 13px 18px 13px 8px; }
 .f-dial { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--ink); font: 600 16px/1.3 var(--font); letter-spacing: -.005em; white-space: nowrap; }
 /* Revision 10: the shared stepper keeps its round buttons and value slot in every mode. */
 .f-bot { flex: none; width: 22px; height: 22px; margin-right: 3px; overflow: visible; --rim: var(--teal); --face: color-mix(in srgb, var(--teal) 9%, var(--surface-raised)); }

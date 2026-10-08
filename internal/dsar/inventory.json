@@ -320,7 +320,11 @@
         "usage_posture_person_id": "personal",
         "usage_posture_link_revision": "metadata",
         "usage_floor_percent": "metadata",
-        "usage_revision": "metadata"
+        "usage_revision": "metadata",
+        "boost_percent": "personal",
+        "boost_until": "personal",
+        "boost_person_id": "personal",
+        "boost_link_revision": "metadata"
       }
     }
   ]
