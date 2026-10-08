@@ -175,6 +175,10 @@ func (u user) WebAuthnName() string                       { return u.p.ID }
 func (u user) WebAuthnDisplayName() string                { return "Aeon approver" }
 func (u user) WebAuthnCredentials() []webauthn.Credential { return u.creds }
 func loadUser(ctx context.Context, tx pgx.Tx, p tenant.Principal) (user, error) {
+	return loadUserCredentials(ctx, tx, p, true)
+}
+
+func loadUserCredentials(ctx context.Context, tx pgx.Tx, p tenant.Principal, lock bool) (user, error) {
 	u := user{p: p}
 	var kind string
 	if err := tx.QueryRow(ctx, `SELECT kind FROM principals WHERE id=$1`, p.ID).Scan(&kind); err != nil {
@@ -183,7 +187,11 @@ func loadUser(ctx context.Context, tx pgx.Tx, p tenant.Principal) (user, error) 
 	if kind != "person" {
 		return u, fail(403, "person required")
 	}
-	rows, err := tx.Query(ctx, `SELECT credential FROM phone_passkeys WHERE person_id=$1 AND revoked_at IS NULL ORDER BY id FOR UPDATE`, p.ID)
+	query := `SELECT credential FROM phone_passkeys WHERE person_id=$1 AND revoked_at IS NULL ORDER BY id`
+	if lock {
+		query += " FOR UPDATE"
+	}
+	rows, err := tx.Query(ctx, query, p.ID)
 	if err != nil {
 		return u, err
 	}

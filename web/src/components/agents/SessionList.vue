@@ -718,8 +718,9 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
 .group-toggle:focus-visible { box-shadow: var(--focus-ring); }
 .chev.turned { transform: rotate(90deg); }
-/* Two label lines keep the glyph centre near the tree joint. Phones add padding. */
-.row { --tree-joint: 22px; position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
+/* Two label lines and the 10px row padding put the glyph centre near this joint.
+   Phones set their own. The stem still starts just below the fold. */
+.row { --tree-joint: 26px; position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
 .row.family { border-radius: 0; }
 .row.family-start { border-radius: 10px 10px 0 0; }
 .row.family-end { border-radius: 0 0 10px 10px; }
@@ -732,12 +733,16 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 .row.worker .c-agent { padding-left: calc(8px + var(--depth) * var(--tree-step)); }
 /* The track hangs from each parent's fold button (AEON-784). Each visible
    descendant carries its ancestors' tracks across row boundaries; the elbow
-   ends at the child's own fold slot, and the last child closes its track. */
+   ends on the child's fold centre, and the last child closes its track.
+   The name column starts after the state column. The row's 6px margin and the
+   name cell's 8px padding put the 24px fold's centre at state-width + 14px,
+   which is where the 1px stem sits (its centre stays within half a pixel).
+   One tree step reaches the next fold's centre. */
 .row > .tree-lines { position: absolute; inset: 0 0 0 calc(var(--state-width) + 14px); padding: 0; pointer-events: none; color: var(--ink-3); }
 .tree-guide, .tree-stem { position: absolute; left: calc(var(--level) * var(--tree-step)); top: 0; bottom: 0; width: var(--tree-step); }
 .tree-guide.continues::before, .tree-guide.elbow::before { content: ''; position: absolute; top: 0; bottom: 0; width: 1px; background: currentColor; }
 .tree-guide.last::before { bottom: auto; height: calc(var(--tree-joint) - 4px); }
-.tree-guide.elbow::after { content: ''; position: absolute; top: calc(var(--tree-joint) - 4px); left: 0; width: calc(var(--tree-step) - 15px); height: 5px; border: solid currentColor; border-width: 0 0 1px 1px; border-radius: 0 0 0 5px; }
+.tree-guide.elbow::after { content: ''; position: absolute; top: calc(var(--tree-joint) - 4px); left: 0; width: var(--tree-step); height: 5px; border: solid currentColor; border-width: 0 0 1px 1px; border-radius: 0 0 0 5px; }
 .tree-stem { top: calc(var(--tree-joint) + 9px); bottom: 0; width: 1px; background: currentColor; }
 /* Every row keeps the fold slot, so names stay on one edge when a parent appears. */
 .tree-fold, .tree-fold-space { flex: none; width: 24px; height: 24px; }
@@ -776,7 +781,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 
 .state-label { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.needs .state-label { color: var(--warn-ink); font-weight: 600; }
-.row > .c-agent { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; padding-block: 6px; }
+.row > .c-agent { align-self: start; display: inline-flex; align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; min-width: 0; padding-block: 10px; }
 .agent-link { display: inline-flex; flex: 1 1 0; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
 .agent-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 6px; }
 .bot { position: relative; display: inline-grid; width: 30px; height: 30px; flex: none; }
@@ -798,7 +803,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 .exec-model { font-size: 12.5px; color: var(--ink); }
 .exec-account { font-size: 11.5px; color: var(--ink-3); }
 /* The estimate follows the key on its line and wraps below it only when the column is narrow. */
-.row > .c-ticket { display: flex; flex-wrap: wrap; align-items: center; align-content: center; gap: 3px 8px; padding-block: 6px; }
+.row > .c-ticket { display: flex; flex-wrap: wrap; align-items: center; align-content: center; gap: 3px 8px; padding-block: 10px; }
 .row-eta { font-size: 12px; }
 .ticket-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); text-decoration: none; font-variant-ligatures: none; white-space: nowrap; }
 .ticket-chip:hover { filter: brightness(1.04); text-decoration: underline; }
@@ -884,9 +889,11 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
   .session-context { margin-top: 2px; }
   .ctx-beat { display: inline; }
   .ctx-beat::before { content: '·'; margin-right: 6px; }
-  /* Lines run beside the fold buttons: 16 px per level, the elbow ends at the child's fold slot. */
-  .row > .tree-lines { left: 18px; }
-  .tree-guide.elbow::after { width: calc(var(--tree-step) - 8px); }
+  /* Lines run beside the fold buttons: 16 px per level. Content inset 10px and a
+     44px fold put its centre at 32px, on the stem. The elbow is one step long,
+     so it ends on the child fold's centre. */
+  .row > .tree-lines { left: 32px; }
+  .tree-guide.elbow::after { width: var(--tree-step); }
   .tree-stem { top: calc(var(--tree-joint) + 22px); }
   .row:has(.lineage) { grid-template-rows: auto auto auto auto auto; }
   .row:has(.lineage) > .c-agent { grid-row: 1 / 6; }
@@ -894,7 +901,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
   .worker-tools ~ .lineage { grid-row: 5; }
   .worker-tools { grid-column: 2 / -1; grid-row: 4; flex-wrap: nowrap; white-space: nowrap; min-height: 44px; margin: 0 0 0 -4px; padding: 0; }
   /* The 44 px line closes a lead's row by itself. */
-  .row:has(> .c-agent > .worker-tools) { padding-bottom: 0; }
+  .row:has(> .c-agent > .worker-tools) { padding-bottom: 10px; }
   .worker-toggle { min-height: 44px; padding-inline: 6px; }
   /* Reserve every available action on the title line. A silent session can
      offer Pause, Remove and Actions together; Host owns the line below. */

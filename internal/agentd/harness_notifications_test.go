@@ -57,7 +57,7 @@ func TestHarnessHintsDrainAndStopWithoutHeartbeatOrPoll(t *testing.T) {
 	s, api, process := testSupervisor(t)
 	hints := &hintAPI{fakeAPI: api, connected: make(chan func(), 1), deliveries: make(chan struct{}, 2), controls: make(chan string, 2)}
 	s.api = hints
-	entry := &owned{record: Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", Generation: s.generation, State: "running", PID: process.PID(), Controls: map[string]replay{}}, harness: HarnessSession{ID: "session", ProjectID: "project"}, process: process, inboxCapable: true, replies: map[string]string{}, monitorDone: make(chan struct{}), harnessWake: make(chan struct{}, 1)}
+	entry := &owned{record: Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", Generation: s.generation, State: "running", PID: process.PID(), Controls: map[string]replay{}}, harness: HarnessSession{ID: "session", ProjectID: "project"}, process: process, inboxCapable: true, replies: map[string]InboxReplyTarget{}, monitorDone: make(chan struct{}), harnessWake: make(chan struct{}, 1)}
 	s.runs["run"] = entry
 	ended := make(chan struct{})
 	go func() { defer close(ended); s.heartbeatLoop(entry, nil, nil) }()
@@ -139,5 +139,81 @@ func TestRemoteHarnessNotificationsBoundFramesAndCredentials(t *testing.T) {
 				t.Fatalf("wake parsing: count=%d error=%v", wakes, err)
 			}
 		})
+	}
+}
+
+type levelHintAPI struct {
+	*hintAPI
+	levels []string
+}
+
+func (a *levelHintAPI) DrainHarnessInput(_ context.Context, _ HarnessSession, level string) ([]HarnessDelivery, error) {
+	a.levels = append(a.levels, level)
+	for _, item := range a.queued {
+		if level == "" || item.Level == level {
+			return []HarnessDelivery{item}, nil
+		}
+	}
+	return nil, nil
+}
+func (a *levelHintAPI) CompleteHarnessDelivery(ctx context.Context, session HarnessSession, item HarnessDelivery) error {
+	for i, queued := range a.queued {
+		if queued.ID == item.ID {
+			a.queued = append(a.queued[:i], a.queued[i+1:]...)
+			break
+		}
+	}
+	return a.fakeAPI.CompleteHarnessDelivery(ctx, session, item)
+}
+
+// Risk: after-turn input is injected while busy, or blocks a later steer and
+// controls. Explicit adapter activity, with no timers, establishes the boundary.
+func TestAfterTurnInputWaitsWhileSteerAndControlsStayAvailable(t *testing.T) {
+	s, api, process := testSupervisor(t)
+	entry := &owned{record: Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", Generation: s.generation, State: "running", PID: process.PID(), Controls: map[string]replay{}}, harness: HarnessSession{ID: "session", ProjectID: "project", Activity: "busy"}, process: process, inboxCapable: true, replies: map[string]InboxReplyTarget{}, harnessWake: make(chan struct{}, 1)}
+	s.runs["run"] = entry
+	hints := &levelHintAPI{hintAPI: &hintAPI{fakeAPI: api, controls: make(chan string, 1), queued: []HarnessDelivery{{ID: "later", Level: "simple", Body: "after turn"}, {ID: "now", Level: "steer", Body: "steer now"}}}}
+	s.api = hints
+	if err := s.serviceHarnessCycle(t.Context(), entry, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(hints.queued) != 1 || hints.queued[0].ID != "later" {
+		t.Fatalf("busy drain took after-turn input: %+v", hints.queued)
+	}
+	process.mu.Lock()
+	calls := process.calls
+	process.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("busy injection count %d", calls)
+	}
+	api.harnessControls = []HarnessControl{{ID: "interrupt", Kind: "interrupt"}}
+	if err := s.serviceHarnessWake(t.Context(), entry, false, true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-hints.controls:
+		if result != "interrupt:applied" {
+			t.Fatal(result)
+		}
+	default:
+		t.Fatal("waiting after-turn input blocked interrupt")
+	}
+	if len(hints.queued) != 1 || hints.queued[0].ID != "later" {
+		t.Fatal("interrupt released input before idle")
+	}
+	s.observe(entry, AdapterEvent{Activity: "idle"})
+	select {
+	case <-entry.harnessWake:
+	default:
+		t.Fatal("idle did not wake queued input")
+	}
+	if err := s.serviceHarnessCycle(t.Context(), entry, false); err != nil {
+		t.Fatal(err)
+	}
+	process.mu.Lock()
+	calls = process.calls
+	process.mu.Unlock()
+	if calls != 3 || len(hints.queued) != 0 || len(hints.levels) != 3 || hints.levels[0] != "steer" || hints.levels[1] != "steer" || hints.levels[2] != "" {
+		t.Fatalf("after-turn input not released once: calls=%d levels=%v", calls, hints.levels)
 	}
 }

@@ -69,6 +69,7 @@ export interface ModelProfile { id: string; slug: string; harness: string; famil
 export interface ModelResolution { role: string; profile: ModelProfile | null; owner_required: boolean; source: string }
 export interface MessageTarget { id: string; principal_id: string; address: string; adapter: string; target_kind: string; maximum_level: string; role: string; enabled: boolean }
 export interface ProjectMessage {
+  optimistic?: boolean; send_failed?: boolean; client_id?: string; resend_of?: string; queue_pending?: boolean; cancelled?: boolean
   recipient_session_id?: string; sender_session_id?: string; sender_label?: string; from?: string
   id: string; sender_principal_id: string; recipient_principal_id: string; to: string; body: string; reply_to?: string | null
   sent_event_id: number; is_action_request: boolean; expects_reply: boolean; delivery_level: 'simple' | 'steer'
@@ -77,7 +78,7 @@ export interface ProjectMessage {
 }
 export interface HeldResolution { message_id: string; decision: 'resolved' | 'dismissed'; created_at: string }
 export interface MessagePage { items: ProjectMessage[]; next_after: number; preamble?: string }
-export interface MessageSend { recipient_session_id?: string; sender_session_id?: string; to: string; body: string; idempotency_key: string; reply_to?: string; expects_reply: boolean; is_action_request: boolean; delivery_level: 'simple' | 'steer' }
+export interface MessageSend { resend_of?: string; recipient_session_id?: string; sender_session_id?: string; to: string; body: string; idempotency_key: string; reply_to?: string; expects_reply: boolean; is_action_request: boolean; delivery_level: 'simple' | 'steer' }
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const start = tick()
@@ -142,7 +143,9 @@ export const resolveMessage = (projectId: string, messageId: string, decision: H
   request<HeldResolution>(`/projects/${enc(projectId)}/messages/${enc(messageId)}/resolution`, 'POST', { decision, note })
 export const sendMessage = (projectId: string, body: MessageSend) => request<ProjectMessage>(`/projects/${enc(projectId)}/messages`, 'POST', body)
 // AEON-280: the sender's delivery progress per message (sender-only; others omitted).
-export interface MessageStatus { message_id: string; status: 'sent' | 'delivered' | 'read' | 'not_delivered'; reason?: string; delivered_at: string | null; read_at: string | null; deliver_by: string | null }
+export interface MessageStatus { cancelled?: boolean; message_id: string; status: 'sent' | 'delivered' | 'read' | 'not_delivered'; reason?: string; delivered_at: string | null; read_at: string | null; deliver_by: string | null }
+export interface ChatCancelResult { contract: 'chat-v1'; message_id: string; result: 'cancelled' | 'too_late' | 'uncertain'; receipt: { state: string } }
+export const cancelSessionMessage = (projectId: string, messageId: string) => request<ChatCancelResult>(`/projects/${enc(projectId)}/messages/${enc(messageId)}/cancel`, 'POST')
 export const messageStatuses = (ids: string[]) => request<{ items: MessageStatus[] }>(`/inbox/message-status?ids=${ids.map(enc).join(',')}`)
 
 export const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed. Please retry.'
@@ -152,10 +155,10 @@ export const message = (error: unknown) => error instanceof Error ? error.messag
 // hints only: the caller re-reads the authorized projections. Heartbeats use the
 // periodic refresh; registration/stop and reconnect wake the consumer immediately.
 const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 'restored', 'revived', 'archived', 'metadata_changed', 'adopted', 'handed_over', 'stop_confirmed', 'control_requested', 'control_claimed', 'control_completed', 'pause_requested', 'pause_planned', 'paused', 'pause_interrupt_requested', 'pause_level_changed', 'pause_stop_requested', 'resume_requested', 'resumed', 'pause_cancelled', 'tier_requested', 'tier_declined', 'tier_reported', 'tier_changed', 'tier_cancelled', 'usage_reported']
-const OTHER_EVENTS = ['inbox.sent', 'harness.leaving_requested', 'harness.leaving_cancelled', 'approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved']
+const OTHER_EVENTS = ['inbox.sent', 'harness.leaving_requested', 'harness.leaving_cancelled', 'approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved', 'inbox.message_cancelled']
 // Delivery progress of sent messages (AEON-280). These only refresh message
 // status, never the whole workspace.
-export const DELIVERY_EVENTS = ['inbox.message_fetched', 'inbox.receipt_handed_off', 'inbox.receipt_failed', 'inbox.delivery_failed']
+export const DELIVERY_EVENTS = ['inbox.message_fetched', 'inbox.receipt_handed_off', 'inbox.receipt_failed', 'inbox.delivery_failed', 'inbox.message_cancelled']
 export function subscribeAgents(changed: (event?: string, identity?: AgentEventIdentity) => void, connection: (live: boolean) => void = () => {}, delivery: () => void = () => {}, telemetry = false, recover: () => void = changed): () => void {
   if (typeof EventSource === 'undefined') return () => {}
   let stream: EventSource

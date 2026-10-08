@@ -93,3 +93,10 @@ it('retired briefing bookmarks open Agents and keep request links', async () => 
     }
   }
 })
+
+it('Kinds of work resolves directly to the Settings route and retains definition deep links', async () => {
+  await router.push('/settings/kinds#kind-security')
+  expect(router.currentRoute.value.params.section).toBe('kinds')
+  expect(router.currentRoute.value.meta.title).toBe('Settings')
+  expect(router.currentRoute.value.hash).toBe('#kind-security')
+})

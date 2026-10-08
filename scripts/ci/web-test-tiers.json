@@ -98,6 +98,32 @@
     ,
     "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
     ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1440 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1440 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 390 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 390 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification errors stay honest and changing computer discards pending feedback"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1024 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1024 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1440 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1440 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 390 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 390 light"
+    ,
     "browser:tests/agent-pause.spec.ts:1440 dark: scope, preview, levels and report controls stay under the pointer"
     ,
     "browser:tests/agent-pause.spec.ts:1440 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
@@ -739,6 +765,20 @@
     "browser:tests/service-tier.spec.ts:320: phone Change tier menu opens and restores its actual trigger"
     ,
     "browser:tests/service-tier.spec.ts:390: phone Change tier menu opens and restores its actual trigger"
+    ,
+    "browser:tests/session-chat.spec.ts:a held-request 403 keeps the session composer (AEON-942)"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle dark 1024"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle dark 1440"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle dark 390"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle light 1024"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle light 1440"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle light 390"
     ,
     "browser:tests/settings-account-pacing.spec.ts:Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them"
     ,
@@ -4186,7 +4226,21 @@
   "taggingNote": "Retained candidates and mixed groups were reviewed under AEON-679 rule B; protected assertions stay in their existing tiers. Deletion counts and archive evidence are in the coordinator deleted.md report."
   ,
   "tests": [
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention controls and retained resolutions in light and dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention initial in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention initial in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention menu in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention menu in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention resolved in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention resolved in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention selected in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention selected in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: account menu in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
@@ -4470,9 +4524,19 @@
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Agents at once saves one ceiling and independent harness limits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away stays in the head with Back now, and one click ends it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 1020 to 950px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away stays put when unfolding removes Verify again beside it, even with a wide status","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 1100 to 1030px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 700 to 700px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 780 to 710px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 860 to 790px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 940 to 870px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away stays in the head with Back now, and one click ends it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away with an expired verification keeps the head inside the card and its controls put at 640, 720 and 800","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -4519,6 +4583,8 @@
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head keeps its height, and the toggle stays put, whether or not Verify again is shown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the row menu carries Sprint, Hold and Remove; the computer menu its own actions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the wide status scan encounters Away beside Verify again","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"warning pills and fixes clear 4.5:1 in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -4639,6 +4705,32 @@
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"waiting-panel keys keep the selected release and native controls at 1440 (AEON-635 fix2)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"waiting-panel keys keep the selected release and native controls at 390 (AEON-635 fix2)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification errors stay honest and changing computer discards pending feedback","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-activity.spec.ts","name":"Off shows no activity line or current activity history","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -7674,6 +7766,18 @@
     ,
     {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"rotate Full access on built-in Admin never sends recurrence automation","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"edit scopes stay in their columns at 1280px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"edit scopes stay in their columns at 1280px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"edit scopes stay in their columns at 360px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"edit scopes stay in their columns at 360px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"edit scopes stay in their columns at 768px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"edit scopes stay in their columns at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/key-layout.spec.ts","name":"first key and key ready fit at 1280px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/key-layout.spec.ts","name":"first key and key ready fit at 1280px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -7686,17 +7790,29 @@
     ,
     {"kind":"browser","file":"tests/key-layout.spec.ts","name":"first key and key ready fit at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 1280px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new scopes stay in their columns at 1280px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 1280px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new scopes stay in their columns at 1280px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 360px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new scopes stay in their columns at 360px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 360px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new scopes stay in their columns at 360px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 768px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new scopes stay in their columns at 768px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new scopes stay in their columns at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"rotate scopes stay in their columns at 1280px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"rotate scopes stay in their columns at 1280px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"rotate scopes stay in their columns at 360px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"rotate scopes stay in their columns at 360px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"rotate scopes stay in their columns at 768px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-layout.spec.ts","name":"rotate scopes stay in their columns at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8668,13 +8784,21 @@
     ,
     {"kind":"browser","file":"tests/performance.spec.ts","name":"cold ticket page has bounded API requests","config":"playwright.perf.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"account pause stays available when this browser has no Web Push","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"device notifications replace Enable with state and stable Pause in both themes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"ended requests offer context without a decision button","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"personal phone settings save quiet hours and revoke a device","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"phone Settings shell renders before its personal section and phone data","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"phone decline sends a bound assertion and announces the recorded result","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"phone review requires an explicit tap and fresh passkey; cancellation records nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"registration awaits one fresh options response before platform verification and keeps actions still","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"Compare works by pointer with long German captions at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10338,15 +10462,55 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"?tab=messages deep-links to the thread; an ended session starts read on a new browser","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 Stop: Esc leaves the field then interrupts with captured process ownership","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 history: more than 200 posts remain reachable and a late refresh retains the reader anchor","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls dark 1024: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls dark 1440: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls dark 390: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls light 1024: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls light 1440: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls light 390: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 shell updates: follow newest output until the reader scrolls up inside the pane","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 Gemini holds normal input and interrupts only via Stop and send","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 empty, offline and no-permission states preserve drafts and controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions dark 1024: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions dark 1440: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions dark 390: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions light 1024: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions light 1440: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions light 390: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 refused queue edit keeps the draft and the editing state","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 refused stop and send keeps the draft","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"Messages is its own tab with an unread badge; seeing the posts clears it and the tab is remembered","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a failed read marker is sent again on the next flush, without an error","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a held-request 403 keeps the session composer (AEON-942)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a late read marker never moves a reader who scrolled up","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a late server read marker opens the thread at the first unread message","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a managed session has no composer or Reply; Steer lives in the session controls (AEON-260)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a managed session keeps its composer and Reply alongside the session controls (AEON-975)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a tap at the bottom keeps following new posts","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10374,6 +10538,30 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"keydown before a late read marker preserves the reader's position before scroll dispatch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1024 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1440 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 390 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1024 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1440 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 390 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"own posts show quiet delivery ticks from the sender status","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"phone screenshots › dark 390: screenshots of both tabs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10385,6 +10573,18 @@
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"scrolling a 40-message thread sends at most two read markers at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"scrolling a 40-message thread sends at most two read markers at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"the thread renders before the read marker answers","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11680,6 +11880,32 @@
     ,
     {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical work palette and relation key/title search at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"agent reads kinds and situations with write controls absent","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"failed writes retain drafts and limits; editor actions and selectors stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1280 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1280 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds save words, create, order, archive and restore once while preserving ticket areas","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"limits save current revisions and update situation definitions without moving selectors","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"member reads kinds and situations with write controls absent","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -11915,6 +12141,8 @@
     {"kind":"node","file":"tests/access.test.ts","name":"built-in agent roles exclude recurrence automation in every key mode; custom grants remain explicit","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"built-in ceilings keep review policy read and leave manage to an explicit custom role","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/access.test.ts","name":"built-in ceilings keep shadow admission on the person and off agent keys","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"client/server scope ceiling parity, including project self-service and person-only exclusions","tier":"ESSENTIAL"}
     ,
@@ -13308,9 +13536,15 @@
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"a reload rebuilds the hook wait from the loaded thread and its receipts (AEON-369)","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/sessionChat.test.ts","name":"chat keys distinguish after-turn input, steer and composition","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/sessionChat.test.ts","name":"chat queue placement respects evidence and the static harness capability","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"delivery wording is short and specific (AEON-280)","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"near the bottom allows a small slack","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/sessionChat.test.ts","name":"receipt catch-up cannot replace Read with Sending or a late failure","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"the hook notice follows each pending send, including a terminal failure (AEON-369)","tier":"GATED-FULL"}
     ,
@@ -15578,9 +15812,19 @@
     ,
     {"kind":"vitest","file":"tests/session-removal-store.unit.test.ts","name":"an in-flight poll and an older snapshot cannot resurrect a removed generation","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"AEON-976 clears only the denied history when project access is revoked during paging","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"AEON-976 fills a multi-page reconnect gap without dropping loaded history","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"AEON-976 retains earlier keyset pages across newest refreshes and drops paging after auth reset","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a burst during a slow poll starts one catch-up and one trailing read","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a denied session read clears its thread without changing another thread","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a slow poll cannot overwrite the reply loaded after a send","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"an authentication reset drops both stored messages and an older response","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"filters before limiting and keeps two sessions of one principal separate","tier":"ESSENTIAL"}
     ,
@@ -15617,6 +15861,8 @@
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"same-owner refresh keeps mounted state, but lost permission closes Access","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"Back returns to the previous section after following a legacy bookmark","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"Kinds of work resolves directly to the Settings route and retains definition deep links","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"a hash-only change on Workspace redirects and keeps its query","tier":"GATED-FULL"}
     ,
@@ -18741,6 +18987,28 @@
     {"kind":"vitest","file":"tests/work-history-visibility.unit.test.ts","name":"TicketReviews preserves ticket access","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/work-history-visibility.unit.test.ts","name":"TicketReviews preserves work access","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"Undo cannot send an inverse write after identity changes during its freshness read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"Undo refuses to replace kind words changed elsewhere after the original save","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"bounds kind wording without silently dropping extra examples or duplicate labels","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"bounds response bytes before JSON decoding and rejects repeated pagination cursors","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"drops a pending kind response and its toast when the person changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"failed kind writes keep the editor and saved words; revoked permissions cannot write or archive system kinds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"failed limit writes retain the last server values and stale revisions are explained","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"kinds of work names the registered Models page and links to no board","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"paginates with explicit bounds and reports truncation instead of a complete list","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"pins Everything else last, excludes review and preserves the hidden review row in an order write","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"system kind wording is editable while its immutable ticket area is preserved","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"accepts authoritative relation-blocker readiness, coalesces checks and fences revisions and tenant resets","tier":"GATED-FULL"}
     ,

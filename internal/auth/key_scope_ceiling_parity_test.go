@@ -360,3 +360,81 @@ func TestKeyScopeCeilingFixtureMatchesBuiltinRoles(t *testing.T) {
 		t.Fatal("reviewpolicy.manage must stay agent-grantable for a custom role")
 	}
 }
+
+func TestEngineAdmissionCeilingFixtureExcludesBuiltinAgents(t *testing.T) {
+	// Risk: engine.admission, engine.read and engine.manage stay on the person
+	// and off every built-in agent key. The shared client fixture has to carry
+	// both halves or the key editor drifts from the server.
+	keys := []string{"engine.admission", "engine.read", "engine.manage"}
+	var fixture struct {
+		Registry []authz.Permission `json:"registry"`
+		Cases    []struct {
+			Name                string     `json:"name"`
+			Workspace           []string   `json:"workspace"`
+			Projects            [][]string `json:"projects"`
+			Want                []string   `json:"want"`
+			BuiltinRole         string     `json:"builtin_role"`
+			ProjectBuiltinRoles []string   `json:"project_builtin_roles"`
+		} `json:"cases"`
+	}
+	data, err := os.ReadFile("testdata/key_scope_ceiling.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.Registry) != len(authz.Registry) {
+		t.Fatalf("fixture registry %d, live catalog %d", len(fixture.Registry), len(authz.Registry))
+	}
+	for _, key := range keys {
+		live, ok := authz.Lookup(key)
+		if !ok || !live.AgentGrantable || !slices.Equal(live.GrantableAt, []string{"workspace", "project"}) {
+			t.Fatalf("%s drifted from the agent-grantable project catalog", key)
+		}
+		var saw bool
+		for _, permission := range fixture.Registry {
+			if permission.Key == key && permission.AgentGrantable && slices.Equal(permission.GrantableAt, live.GrantableAt) {
+				saw = true
+			}
+		}
+		if !saw {
+			t.Fatalf("shared ceiling fixture omitted %s", key)
+		}
+	}
+	var sawBuiltin bool
+	for _, tc := range fixture.Cases {
+		person := tc.Workspace
+		role := tc.BuiltinRole
+		if len(tc.ProjectBuiltinRoles) > 0 {
+			person = tc.Projects[0]
+			role = tc.ProjectBuiltinRoles[0]
+		}
+		if role == "" {
+			continue
+		}
+		live, ok := authz.BuiltinPermissions(role)
+		if !ok || !slices.Equal(person, live) {
+			t.Fatalf("%s person list drifted from built-in %s", tc.Name, role)
+		}
+		switch role {
+		case "owner", "admin":
+			if !slices.Contains(person, "engine.admission") || !slices.Contains(person, "engine.read") || !slices.Contains(person, "engine.manage") {
+				t.Fatalf("%s must keep shadow admission on the person", role)
+			}
+		case "member":
+			if !slices.Contains(person, "engine.admission") || !slices.Contains(person, "engine.read") || slices.Contains(person, "engine.manage") {
+				t.Fatal("members evaluate and read shadow admission and cannot manage it")
+			}
+		}
+		for _, key := range keys {
+			if slices.Contains(tc.Want, key) {
+				t.Fatalf("%s built-in agent ceiling must exclude %s", tc.Name, key)
+			}
+		}
+		sawBuiltin = true
+	}
+	if !sawBuiltin {
+		t.Fatal("fixture lost the built-in shadow-admission split")
+	}
+}

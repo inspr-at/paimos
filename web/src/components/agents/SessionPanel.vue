@@ -10,12 +10,13 @@ import { RUN_OUTCOME, approvalRun, cost, elapsed, runDuration, runModel, scopeLa
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
+import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
 import { useRoute, useRouter } from 'vue-router'
 import SessionChat from './SessionChat.vue'
 import SessionTabs from './SessionTabs.vue'
-import { initialTab, saveTab, type SessionTab } from './sessionChat'
+import { capabilityWords, chatCapability, initialTab, saveTab, type SessionTab } from './sessionChat'
 import { useVisualViewport } from '../../lib/visualViewport'
 import AgentStateLabel from './AgentStateLabel.vue'
 import AgentGlyph from './AgentGlyph.vue'
@@ -47,12 +48,24 @@ const serviceTiers = useServiceTiers()
 // One session in the docked panel: who and where, the bound ticket, then two tabs:
 // Overview (now, details, work, runs, provenance) and Messages (thread and composer).
 const actionsAnchor = ref<HTMLElement | null>(null)
+const composing = ref(false)
+function chatFocus(event: FocusEvent) {
+  if ((event.target as HTMLElement).matches('#session-panel-messages textarea')) composing.value = true
+}
+function chatBlur(event: FocusEvent) {
+  // Removing Reply/Edit feedback blurs its button to the body. Keep the
+  // compact frame until focus explicitly leaves this panel.
+  if (event.relatedTarget instanceof Node && !root.value?.contains(event.relatedTarget)) composing.value = false
+}
 const props = defineProps<{ view: SessionView | undefined; loading: boolean; now: number; canWrite: boolean; controlBlock: (view: SessionView, kind: SessionControl['kind']) => string }>()
 const agentRecovery = useAgentRecovery(() => props.view?.session.id)
 const emit = defineEmits<{ close: []; control: [view: SessionView, kind: SessionControl['kind']]; review: [approval: Approval] }>()
-watch(() => props.view?.session.id, () => { actionsAnchor.value = null })
+watch(() => props.view?.session.id, () => { actionsAnchor.value = null; composing.value = false })
 const agents = useAgents()
 const auth = useSession()
+const profile = useProfile()
+const capability = computed(() => s.value ? chatCapability(s.value) : 'between')
+const capText = computed(() => capabilityWords[profile.profile?.locale.startsWith('de') ? 'de' : 'en'][capability.value])
 const root = ref<HTMLElement>()
 const thread = ref<HTMLElement>()
 const recovery = ref<{ open: () => void }>()
@@ -172,7 +185,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </script>
 
 <template>
-  <aside ref="root" class="session-panel" aria-label="Session details" tabindex="-1">
+  <aside ref="root" class="session-panel" :class="{ composing }" aria-label="Session details" tabindex="-1" @focusin="chatFocus" @focusout="chatBlur">
     <!-- The identity stays in view while runs and messages scroll below it. -->
     <header class="panel-head">
       <div class="head-top">
@@ -188,8 +201,12 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <TicketPeekLink v-if="view.ticket" class="ticket-detail" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title"><span class="ticket-chip">{{ view.ticket.key }}</span><span class="head-ticket">{{ view.ticket.title }}</span></TicketPeekLink>
         <span v-if="ticketState" class="ticket-status">{{ ticketState }}</span>
       </div>
+      <div v-if="view && !loading && !reported?.watch" class="chat-identity">
+        <span class="chat-setup" :title="[view.harness, view.model, view.session.host].filter(Boolean).join(' · ')">{{ view.harness }}<template v-if="view.model"> · {{ view.model }}</template><template v-if="view.session.host"> · {{ view.session.host }}</template></span>
+        <button type="button" class="capability" :class="capability" :data-tip="capText[1]" :aria-label="capText[0]"><AppIcon :name="capability === 'native' ? 'bolt' : capability === 'abort' ? 'alert' : 'queue'" :size="12" /><span>{{ capText[0] }}</span></button>
+      </div>
       <div v-if="view && !loading && !compactControls" class="head-actions">
-        <span class="host-meta">{{ view.harness }}<template v-if="view.session.host"> on {{ view.session.host }}</template></span>
+
         <span class="spacer" />
         <button v-if="agentRecovery.action(view.session)" class="btn sm ghost" type="button" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name)"><AppIcon name="refresh" :size="14" />{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</button>
         <SessionPauseActions v-if="!reported?.watch" :session="reported || view.session" />
@@ -325,7 +342,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <ProvenanceDetail v-if="s" :project-id="s.project_id" :session-id="s.id" :now="now" />
     </div>
     <SessionChat v-if="view && !loading && !reported?.watch" v-show="tab === 'messages'" id="session-panel-messages" :view="view" :now="now" :can-write="canWrite" :active="tab === 'messages'"
-      role="tabpanel" aria-labelledby="session-tab-messages" @unread="unread = $event" />
+      :interrupt-block="controlBlock(view, 'interrupt')" role="tabpanel" aria-labelledby="session-tab-messages" @unread="unread = $event" @interrupt="control('interrupt')" />
   </aside>
 </template>
 
@@ -393,6 +410,14 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .commits { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .commits li { display: flex; gap: 8px; flex-wrap: wrap; }
 .commits code { font: 12px var(--mono); color: var(--ink-2); }
+.chat-identity { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; margin-top: 8px; }
+.chat-setup { min-width: 0; font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
+.capability { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; min-height: 28px; padding: 3px 9px; border: 0; border-radius: 999px; color: var(--teal-ink); background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); font: 600 12px/1.4 var(--font); cursor: help; text-align: left; }
+.capability svg { flex: none; }
+.capability.queue, .capability.between { color: var(--ink-2); background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--line); }
+.capability.abort { color: var(--warn-ink); background: var(--gold-wash); box-shadow: inset 0 0 0 1px var(--warn-line); }
+.capability:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+@media (max-width: 720px) { .capability { min-height: 44px; } }
 .muted { color: var(--ink-3); }
 .evidence { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--chip-teal-bg); color: var(--teal-ink); }
 .project-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
@@ -434,10 +459,11 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   /* Up to four quiet controls share one row on phones. */
   .head-actions .btn { flex: 1 1 0; min-width: 0; min-height: 44px; padding-inline: 4px; }
   .head-top .icon-btn { width: 40px; height: 40px; }
-  /* While typing (keyboard open) the thread gets the room: controls and ticket step aside. */
-  .session-panel:has(#session-panel-messages textarea:focus) .head-actions,
-  .session-panel:has(#session-panel-messages textarea:focus) .head-sub,
-  .session-panel:has(#session-panel-messages textarea:focus) .managed-controls { display: none; }
+  /* Compact only after entering the composer. Keep that frame while focus
+     moves to thread actions, so focusing Retry/Copy cannot move the click. */
+  .session-panel.composing .head-actions,
+  .session-panel.composing .head-sub,
+  .session-panel.composing .managed-controls { display: none; }
   .scroll { padding: 16px 18px 24px; }
   .telemetry { grid-template-columns: 1fr 1fr; }
   .run-row { grid-template-columns: 88px minmax(0, 1fr) 56px; }
