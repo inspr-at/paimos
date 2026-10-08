@@ -49,13 +49,14 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if err := inbox.MarkSessionSeen(ctx, tx, s.ID, inbox.SeenDrain); err != nil {
 		return nil, err
 	}
-	// Existing uncompleted lease must be replayed before taking later work.
+	// Replay an open lease of the requested level before taking later work.
+	// A lease of another level stays open. The supervisor leaves an after-turn
+	// lease uncompleted when the turn goes busy before injection, and a steer
+	// drain must still lease Send now. An empty level returns the earliest
+	// open lease, so that waiting after-turn input is replayed once idle.
 	var d Delivery
-	err = tx.QueryRow(ctx, `SELECT d.id::text,m.id::text,d.cursor,m.sender_principal_id::text,m.body,d.leased_at,(SELECT c.project_id::text FROM inbox_compat_messages c WHERE c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id LIMIT 1),(SELECT c.id::text FROM inbox_compat_messages c WHERE c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id LIMIT 1),m.sender_session_id::text,coalesce((SELECT c.delivery_level FROM inbox_compat_messages c WHERE c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id LIMIT 1),'simple') FROM harness_deliveries d JOIN inbox_messages m ON m.tenant_id=d.tenant_id AND m.id=d.message_id WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND d.session_id=$1 AND d.mode='managed' AND d.completed_at IS NULL AND d.released_at IS NULL AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) ORDER BY d.cursor LIMIT 1 FOR UPDATE OF m`, s.ID).Scan(&d.ID, &d.MessageID, &d.Cursor, &d.SenderPrincipalID, &d.Body, &d.LeasedAt, &d.ProjectID, &d.ReplyToID, &d.SenderSessionID, &d.Level)
+	err = tx.QueryRow(ctx, `SELECT d.id::text,m.id::text,d.cursor,m.sender_principal_id::text,m.body,d.leased_at,(SELECT c.project_id::text FROM inbox_compat_messages c WHERE c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id LIMIT 1),(SELECT c.id::text FROM inbox_compat_messages c WHERE c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id LIMIT 1),m.sender_session_id::text,coalesce((SELECT c.delivery_level FROM inbox_compat_messages c WHERE c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id LIMIT 1),'simple') FROM harness_deliveries d JOIN inbox_messages m ON m.tenant_id=d.tenant_id AND m.id=d.message_id WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND d.session_id=$1 AND d.mode='managed' AND d.completed_at IS NULL AND d.released_at IS NULL AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) AND ($2='' OR EXISTS(SELECT 1 FROM inbox_compat_messages c WHERE c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id AND c.delivery_level=$2)) ORDER BY d.cursor LIMIT 1 FOR UPDATE OF m`, s.ID, in.Level).Scan(&d.ID, &d.MessageID, &d.Cursor, &d.SenderPrincipalID, &d.Body, &d.LeasedAt, &d.ProjectID, &d.ReplyToID, &d.SenderSessionID, &d.Level)
 	if err == nil {
-		if in.Level != "" && d.Level != in.Level {
-			return []Delivery{}, nil
-		}
 		return []Delivery{d}, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
