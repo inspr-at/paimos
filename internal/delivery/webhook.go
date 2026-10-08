@@ -103,7 +103,7 @@ func uniqueJSON(d *json.Decoder, depth int) error {
 }
 func authenticate(name, id, signature string, raw, secret []byte) (envelope, error) {
 	var e envelope
-	if len(secret) < 32 || len(raw) == 0 || len(raw) > 2<<20 || !deliveryID.MatchString(id) || !slices.Contains([]string{"pull_request", "check_run", "check_suite", "merge_group", "push", "status"}, name) {
+	if len(secret) < 32 || len(raw) == 0 || len(raw) > 2<<20 || !deliveryID.MatchString(id) || !slices.Contains([]string{"pull_request", "check_run", "check_suite", "merge_group", "push", "status", "workflow_run"}, name) {
 		return e, fmt.Errorf("invalid envelope")
 	}
 	want, err := hex.DecodeString(strings.TrimPrefix(signature, "sha256="))
@@ -132,6 +132,8 @@ func validAction(name, action string) bool {
 		return action == "checks_requested" || action == "destroyed"
 	case "status", "push":
 		return action == ""
+	case "workflow_run":
+		return action == "requested" || action == "in_progress" || action == "completed"
 	}
 	return false
 }
@@ -167,6 +169,12 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if name == "pull_request" && e.Pull.Base.Repo.FullName != m.config.Repository {
 		w.WriteHeader(404)
+		return
+	}
+	// A workflow run is a flow fact, not a delivery observation. The audit
+	// handler records the live checks after this acceptance.
+	if name == "workflow_run" {
+		w.WriteHeader(204)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
