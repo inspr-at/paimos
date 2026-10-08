@@ -205,6 +205,52 @@
     {
       "classification": "metadata",
       "columns": {
+        "project_id": "metadata",
+        "request_id": "metadata",
+        "snapshot": "review",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_review_claims"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "author_run_id": "metadata",
+        "head_sha": "metadata",
+        "id": "metadata",
+        "position": "metadata",
+        "project_id": "metadata",
+        "repository": "metadata",
+        "slug": "metadata",
+        "snapshot": "review",
+        "source_round_id": "metadata",
+        "state": "metadata",
+        "tenant_id": "metadata",
+        "ticket_node_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_review_rounds"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "project_id": "metadata",
+        "snapshot": "review",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_review_settings"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
         "deadlines": "metadata",
         "project_id": "metadata",
         "required_checks": "metadata",

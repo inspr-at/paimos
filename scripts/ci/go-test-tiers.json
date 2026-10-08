@@ -5158,6 +5158,12 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryReconciliationHealsMissedWebhooksAndFanoutRetry","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryReviewsConcurrentClaimsHaveOneOwner","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryReviewsSeverityFloorAndBoundedObservations","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryReviewsShadowFixCapFollowUpReplayAndIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliverySettingsAndIngressBinding","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryUIFactsHoldReplayAndAvailability","tier":"ESSENTIAL"}
