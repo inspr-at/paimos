@@ -26,6 +26,8 @@ test('guided setup preserves controls and own columns, saves once with exact Und
   await rankGuard.check(async () => { await opus.press('Alt+ArrowUp'); await expect(opus).toBeFocused() }); rankGuard.done()
   const from = await opus.boundingBox(), to = await rank.locator('li').first().boundingBox()
   await guard.check(async () => { await page.mouse.move(from!.x + 30, from!.y + 20); await page.mouse.down(); await page.mouse.move(to!.x + 30, to!.y + 20, { steps: 8 }); await page.mouse.up(); await expect(rank.locator('li').first()).toHaveAttribute('data-setup-line', 'anthropic:opus') })
+  await guard.check(async () => { await opus.press('Enter'); await page.getByRole('menuitem', { name: 'Move to the bottom', exact: true }).click(); await expect(rank.locator('li').last()).toHaveAttribute('data-setup-line', 'anthropic:opus') })
+  await guard.check(async () => { await opus.click(); await page.getByRole('menuitem', { name: 'Move to the top', exact: true }).click(); await expect(rank.locator('li').first()).toHaveAttribute('data-setup-line', 'anthropic:opus') })
   await guard.check(async () => { await forward(page); await panel(page).locator('input[value="deep"]').check() })
   await guard.check(async () => { await forward(page); await page.getByLabel('Whatever the workspace allows').check() })
   await guard.check(async () => { await forward(page); await expect(page.locator('[data-setup-diff]')).toContainText('Now'); await expect(next(page)).toContainText('Apply') }); guard.done()

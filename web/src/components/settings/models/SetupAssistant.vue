@@ -3,6 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, useId } from 'vue'
 import AppIcon from '../../AppIcon.vue'
 import ModelCard from './ModelCard.vue'
+import SettingsPopover, { type SettingsMenuItem } from '../SettingsPopover.vue'
 import { lineName, localizeColumn, type ModelBoardDocument } from '../../../lib/modelsBoard'
 import { firstChoiceChanges, moveSetupCard, setupCards, setupProviderAllowed, type SetupAnswers, type SetupPreview } from '../../../lib/modelsSetup'
 const props = defineProps<{ source: ModelBoardDocument; workspace: ModelBoardDocument; step: number; preview: SetupPreview | null; german: boolean; busy: boolean }>()
@@ -69,6 +70,24 @@ function keys(line: string, event: KeyboardEvent) {
   if (event.altKey) void move(line, next)
   else rankElement.value?.querySelectorAll<HTMLElement>('.mc')[next]?.focus({ preventScroll: true })
 }
+const moveOpen = ref(false), moveAnchor = ref<HTMLElement | null>(null), moveLine = ref('')
+const moveContext = computed(() => JSON.stringify([props.source.person_id, props.source.revision, props.step, props.busy, answers.value.rank]))
+const moveItems = computed<SettingsMenuItem[]>(() => [
+  { id: 'first', label: text('Move to the top', 'Ganz nach oben'), icon: 'to-top' }, { id: 'up', label: text('Move up', 'Nach oben'), icon: 'arrow-up' },
+  { id: 'down', label: text('Move down', 'Nach unten'), icon: 'arrow-down' }, { id: 'last', label: text('Move to the bottom', 'Ganz nach unten'), icon: 'arrow-down' },
+])
+let suppressClick = false, clickTimer: ReturnType<typeof setTimeout> | undefined
+function openMove(line: string, event: MouseEvent) {
+  if (suppressClick || props.busy || props.step !== 2) return
+  moveLine.value = line; moveAnchor.value = event.currentTarget as HTMLElement; moveOpen.value = true
+}
+function chooseMove(action: string, captured: string | undefined) {
+  if (captured !== moveContext.value || props.busy || props.step !== 2) return
+  const index = answers.value.rank.indexOf(moveLine.value)
+  if (index < 0) return
+  const target = action === 'first' ? 0 : action === 'last' ? answers.value.rank.length - 1 : index + (action === 'up' ? -1 : 1)
+  moveOpen.value = false; void move(moveLine.value, target)
+}
 let dragStart: { line: string; x: number; y: number; pointer: number } | null = null
 function press(line: string, event: PointerEvent) {
   if (props.busy || event.button !== 0) return
@@ -82,8 +101,8 @@ function pointerMove(event: PointerEvent) {
   over.value = row && rankElement.value?.contains(row) ? row.dataset.setupLine ?? null : null
 }
 function cancel() { dragStart = null; dragging.value = null; over.value = null; window.removeEventListener('pointermove', pointerMove); window.removeEventListener('pointerup', release); window.removeEventListener('pointercancel', cancel) }
-function release() { const line = dragging.value, target = over.value; cancel(); if (line && target) void move(line, answers.value.rank.indexOf(target)) }
-onBeforeUnmount(cancel)
+function release() { const line = dragging.value, target = over.value; cancel(); if (line) { suppressClick = true; clickTimer = setTimeout(() => { suppressClick = false }, 0) }; if (line && target) void move(line, answers.value.rank.indexOf(target)) }
+onBeforeUnmount(() => { cancel(); if (clickTimer) clearTimeout(clickTimer) })
 </script>
 <template>
   <div data-setup-body>
@@ -92,7 +111,7 @@ onBeforeUnmount(cancel)
       <fieldset class="question"><legend>{{ title }}</legend>
         <p v-if="step === 2" class="note" :id="`${id}-rank-help`">{{ text('Drag them into order, or use Alt+↑/↓. The top runs first; the bottom only if nothing above can run. This fills your Everything else column; UI design keeps the workspace pin (Opus first), and reviews always go to another family.', 'In Reihenfolge ziehen oder Alt+↑/↓. Oben läuft zuerst; unten nur, wenn nichts darüber laufen kann. Das füllt Ihre Spalte Alles andere; UI-Design behält die Anheftung (Opus zuerst), und Prüfungen gehen immer an eine andere Familie.') }}</p>
         <p v-if="step === 4" class="note">{{ text('You can only narrow what the workspace allows.', 'Sie können nur einschränken, was der Arbeitsbereich erlaubt.') }}</p>
-        <ol v-if="step === 2" ref="rankElement" class="rank" data-setup-rank :aria-describedby="`${id}-rank-help`"><li v-for="(card, index) in cards" :key="card.line" :data-setup-line="card.line" :class="{ over: over === card.line }"><ModelCard :card="card" :number="index + 1" :movable="!busy" :placeholder="dragging === card.line" :german="german" @keys="keys(card.line, $event)" @press="press(card.line, $event)" /></li></ol>
+        <ol v-if="step === 2" ref="rankElement" class="rank" data-setup-rank :aria-describedby="`${id}-rank-help`"><li v-for="(card, index) in cards" :key="card.line" :data-setup-line="card.line" :class="{ over: over === card.line }"><ModelCard :card="card" :number="index + 1" :movable="!busy" :placeholder="dragging === card.line" :german="german" @open="openMove(card.line, $event)" @keys="keys(card.line, $event)" @press="press(card.line, $event)" /></li></ol>
         <div v-else class="options" data-setup-options><label v-for="option in options" :key="option.value" class="option"><input type="radio" :name="`${id}-${field}`" :value="option.value" :checked="(answers[field] ?? '') === option.value" :disabled="busy || (step === 4 && !setupProviderAllowed(option.value === '' ? null : option.value as SetupAnswers['residency'], workspace))" @change="choose(option.value)" /><span><strong>{{ option.label }}</strong><small>{{ option.detail }}</small></span></label></div>
       </fieldset>
     </template>
@@ -102,6 +121,7 @@ onBeforeUnmount(cancel)
       <p class="set-note"><AppIcon name="info" :size="14" /><span>{{ text('Columns you ordered yourself stay as they are. Rules still bound everything.', 'Spalten, die Sie selbst geordnet haben, bleiben. Regeln begrenzen weiterhin alles.') }}</span></p>
     </template>
     <p v-else class="note" role="status">{{ text('Checking the changes…', 'Änderungen werden geprüft…') }}</p>
+    <SettingsPopover v-model:open="moveOpen" :anchor="moveAnchor" :label="text('Move to…', 'Verschieben nach…')" :items="moveItems" :context-key="moveContext" @select="chooseMove" />
     <span class="sr-only" aria-live="polite">{{ announcement }}</span>
   </div>
 </template>

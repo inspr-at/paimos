@@ -17457,13 +17457,6 @@ components:
         other_order: {anyOf: [{$ref: '#/components/schemas/ModelSetupOrder'}, {type: 'null'}], description: 'Personal Everything else First build order, saved atomically with the profile. Omitted leaves it unchanged; null restores inheritance. Cannot combine with replace_own.'}
         replace_own: {type: boolean, default: false}
         revision: {type: integer, format: int64, minimum: 0}
-    ModelSetupOrder:
-      type: object
-      additionalProperties: false
-      required: [rank, not]
-      properties:
-        rank: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
-        not: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
     ModelBoardRevisionWrite:
       type: object
       additionalProperties: false
@@ -17907,6 +17900,13 @@ components:
         line: {type: string, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
         effort: {type: string, maxLength: 32}
         harness: {type: string, enum: [codex, claude, grok, pi, cursor, gemini, opencode]}
+    ModelSetupOrder:
+      type: object
+      additionalProperties: false
+      required: [rank, not]
+      properties:
+        rank: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
+        not: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
     ModelSituationLimits:
       type: object
       required: [small_hours, fix_rounds, revision, set_by, set_at]
