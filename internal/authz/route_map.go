@@ -28,6 +28,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/delivery/enqueue-allowed":               "delivery.read",
 	"GET /api/delivery":                               "delivery.read",
 	"GET /api/delivery/alerts":                        "delivery.read",
+	"GET /api/delivery/audit":                         "delivery.read",
 	"GET /api/nodes/{id}/delivery":                    "delivery.read",
 	"POST /api/delivery/{itemId}/hold":                "delivery.manage",
 	"DELETE /api/delivery/{itemId}/hold":              "delivery.manage",
