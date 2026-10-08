@@ -44,6 +44,7 @@
     {"key": "delivery_ship.manage", "grantable_at": ["workspace", "project"], "agent_grantable": true},
     {"key": "delivery_ship.read", "grantable_at": ["workspace", "project"], "agent_grantable": true},
     {"key": "events.read", "grantable_at": ["workspace", "project"], "agent_grantable": true},
+    {"key": "events.subscribe", "grantable_at": ["workspace"], "agent_grantable": true},
     {"key": "events.undo", "grantable_at": ["workspace", "project"], "agent_grantable": true},
     {"key": "events.undo_other", "grantable_at": ["workspace", "project"], "agent_grantable": true},
     {"key": "harness.control", "grantable_at": ["workspace", "project"], "agent_grantable": true},
