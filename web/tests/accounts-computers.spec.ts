@@ -10,6 +10,7 @@ import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { ACCOUNTS, NOW, TZ, capacityWorld, type CapacityOptions } from './capacity-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { controlStability } from './control-stability'
 import type { PairingView } from '../src/lib/agentPairing'
 import { mockEffectivePermissions } from './authz-fixtures'
 
@@ -112,12 +113,14 @@ test('a problem: the line names the first thing and counts the rest, and Verify 
   await open(page)
   // Claude on mbp2607 plus Codex low (9% left this week, early warning at 10%).
   await expect(status(page)).toHaveText('5 of 6 ready · Claude needs verifying on mbp2607 · +1')
-  const verify = section(page).getByRole('button', { name: 'Verify again' })
-  await verify.click()
-  await expect(page.locator('.toast').filter({ hasText: 'Verification requested for Claude on mbp2607.' })).toBeVisible()
+  const verify = section(page).locator('.fs-act .verify-button')
+  const guard = await controlStability(page, { verify, toggle: title(page), manage: section(page).getByRole('link', { name: /Manage/ }) })
+  await guard.check(async () => { await verify.click(); await expect(verify).toHaveAttribute('aria-busy', 'true') })
+  await expect(section(page).getByRole('status').filter({ hasText: 'Waiting for the computer to start' })).toBeVisible()
+  guard.done()
   expect(posted).toEqual({ expected_revision: c.revision, expected_verification_run_id: null })
-  // The check is queued: the sign-in no longer blocks agents, so the fix goes away; the line stops short of ready until it passes.
-  await expect(verify).toHaveCount(0)
+  // The queued check stays visible and disabled; readiness still awaits its result.
+  await expect(verify).toBeDisabled()
   await expect(status(page)).toHaveText('5 of 6 ready · Codex is low: 9% left this week')
 })
 
@@ -130,7 +133,7 @@ test('Needs you lists what blocks agents with the fix or its details; a low-quot
   await expect(needs).toBeVisible()
   const rows = section(page).locator('.att-row')
   await expect(rows).toHaveCount(2)
-  await expect(rows.nth(0)).toContainText('Claude needs verifying on mbp2607')
+  await expect(rows.nth(0)).toContainText('Claude verification on mbp2607')
   await expect(rows.nth(0)).toContainText('Verification expired. New agents wait until the sign-in passes again.')
   await expect(rows.nth(0).getByRole('button', { name: 'Verify again' })).toBeVisible()
   await expect(rows.nth(1)).toContainText('Codex is low: 9% left this week')
@@ -162,7 +165,7 @@ test('a name, a cell and Details open the right panel in Settings', async ({ pag
   await expect(page).toHaveURL(/\/settings\/accounts$/)
   await expect(page.locator('section.pane')).toContainText('Shared quota')
   await page.goBack()
-  await section(page).getByRole('link', { name: 'Claude needs verifying on mbp2607' }).click()
+  await section(page).getByRole('link', { name: 'Claude verification on mbp2607' }).click()
   await expect(page).toHaveURL(/\/settings\/accounts$/)
   const panel = page.locator('section.pane')
   await expect(panel).toContainText('mbp2607')
@@ -193,7 +196,7 @@ test('an approval link shows the folded section once and offers that account\'s 
   const { work } = await setup(page)
   await page.goto(`/agents?verify_account=${ACCOUNTS.claude}`)
   await expect(title(page)).toHaveAttribute('aria-expanded', 'true')
-  await expect(section(page).locator('.att-row').first()).toContainText('Verify Claude on mbp2607')
+  await expect(section(page).locator('.att-row').first()).toContainText('Claude verification on mbp2607')
   expect(work.preferences['ui.agents.sections']).toBeUndefined()
   // An explicit fold wins while the link is still in the address.
   await title(page).click()
@@ -366,7 +369,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       scrollAreas: { page: page.locator('html') },
       interactions: [
         { name: 'unfold', run: async () => { await title(page).click(); await expect(section(page).getByRole('table')).toBeVisible(); await info.attach('unfolded', { body: await section(page).screenshot({ animations: 'disabled' }), contentType: 'image/png' }) } },
-        { name: 'verify from Needs you', run: async () => { await section(page).locator('.att-row').first().getByRole('button', { name: 'Verify again' }).click(); await expect(page.locator('.toast').filter({ hasText: 'Verification requested' })).toBeVisible() } },
+        { name: 'verify from Needs you', run: async () => { await section(page).locator('.att-row').first().getByRole('button', { name: 'Verify again' }).click(); await expect(section(page)).toContainText('Waiting for the computer to start the check.'); await expect(section(page).locator('.verify-button')).toHaveAttribute('aria-busy', 'true') } },
         { name: 'fold again', run: async () => { await toggle.click(); await expect(section(page).getByRole('table')).toBeHidden() } },
       ],
     })

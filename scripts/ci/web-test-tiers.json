@@ -98,6 +98,32 @@
     ,
     "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
     ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1440 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1440 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 390 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 390 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification errors stay honest and changing computer discards pending feedback"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1024 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1024 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1440 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1440 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 390 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 390 light"
+    ,
     "browser:tests/agent-pause.spec.ts:1440 dark: scope, preview, levels and report controls stay under the pointer"
     ,
     "browser:tests/agent-pause.spec.ts:1440 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
@@ -4653,6 +4679,32 @@
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"waiting-panel keys keep the selected release and native controls at 1440 (AEON-635 fix2)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"waiting-panel keys keep the selected release and native controls at 390 (AEON-635 fix2)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification errors stay honest and changing computer discards pending feedback","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-activity.spec.ts","name":"Off shows no activity line or current activity history","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,

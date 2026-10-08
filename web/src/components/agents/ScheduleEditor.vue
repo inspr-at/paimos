@@ -350,7 +350,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 .ed-head { display: flex; align-items: center; gap: 10px; padding: 14px 12px 2px 20px; }
 .ed-head h3 { margin: 0 auto 0 0; font: 600 16px/1.3 var(--font); color: var(--ink); }
 .ed-head h3:focus, .ed-head h3:focus-visible { outline: none; box-shadow: none; }
-.ed-body { flex: 1; scrollbar-gutter: stable; align-content: start; display: grid; gap: 16px; padding: 2px 20px 18px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.ed-body { flex: 1; scrollbar-gutter: stable; align-content: start; display: grid; gap: 16px; padding: 16px 20px 28px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .ed p { margin: 0; }
 .ed-help { color: var(--ink-3); font-size: 12.5px; line-height: 1.45; }
 .ed-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
@@ -372,7 +372,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 .tog { position: relative; display: inline-flex; align-items: center; width: 32px; height: 18px; padding: 0; border: 0; border-radius: 999px; background: var(--line-2); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-black) 12%, transparent); cursor: pointer; }
 .tog::after { content: ''; position: absolute; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--switch-knob); box-shadow: 0 1px 3px color-mix(in srgb, var(--shadow-black) 28%, transparent); transition: transform .18s ease; }
 .tog[aria-checked="true"] { background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo)); }
-.tog[aria-checked="true"]::after { background: var(--primary-on); transform: translateX(14px); }
+.tog[aria-checked="true"]::after { background: var(--switch-knob); transform: translateX(14px); }
 .tog:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .tog::before { content: ''; position: absolute; inset: -9px -4px; }
 @media (prefers-reduced-motion: reduce) { .tog::after { transition: none; } }
