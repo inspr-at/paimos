@@ -44,8 +44,11 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 	for i, e := range v.Enrollments {
 		f.call("POST", "/api/agent-accounts/"+e.AccountID+"/capacity/approve", nil, true, "", 204)
 		f.probe(v, e, key, 200)
+		// Keep every 5h window already open and its reset at least an hour out.
+		// CI at 2026-10-08 01:41 Europe/Vienna (23:41 UTC) dropped the account
+		// whose window opened at now with used percent above the day's remainder.
 		readings := []capacity.Reading{
-			{WindowKind: "5h", WindowMinutes: 300, UsedPercent: float64(i + 10), ResetsAt: now.Add(time.Duration(i+1) * time.Hour), ReadAt: now, Source: "harness"},
+			{WindowKind: "5h", WindowMinutes: 300, UsedPercent: float64(i + 10), ResetsAt: now.Add(time.Hour + time.Duration(i)*15*time.Minute), ReadAt: now, Source: "harness"},
 			{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: float64(i + 20), ResetsAt: now.Add(time.Duration(i+24) * time.Hour), ReadAt: now, Source: "harness"},
 		}
 		f.call("POST", "/api/agent-accounts/"+e.AccountID+"/readings", map[string]any{"readings": readings}, false, key, 204)
