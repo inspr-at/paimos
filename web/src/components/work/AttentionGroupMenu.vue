@@ -34,15 +34,17 @@ function menuKeys(event: KeyboardEvent) {
         <p v-if="error" role="alert">{{ error }}</p>
       </div>
     </section>
-    <div v-else class="group-menu" role="menu" :aria-label="words(`More for ${name}`, `Mehr zu ${name}`)" @keydown="menuKeys">
+    <div v-else class="group-menu">
       <div v-if="phone" class="menu-head"><h3>{{ words(`More for ${name}`, `Mehr zu ${name}`) }}</h3><button type="button" class="icon-btn" :aria-label="words('Close', 'Schließen')" @click="emit('close', true)"><AppIcon name="close" :size="16" /></button></div>
-      <button v-if="group.editable" type="button" role="menuitem" @click="emit('dismiss')"><AppIcon name="close" :size="15" /><span>{{ words(`Dismiss all ${group.editable}`, `Alle ${group.editable} verwerfen`) }}<small>{{ words('The tickets stay as they are; these suggestions do not return.', 'Die Tickets bleiben, wie sie sind; diese Vorschläge kommen nicht wieder.') }}</small></span></button>
-      <template v-if="group.project_id && group.can_manage">
-        <button v-if="group.override_mode === 'off'" type="button" role="menuitem" :disabled="loading" @click="emit('follow')"><AppIcon name="play" :size="15" /><span>{{ words('Follow the workspace again', 'Wieder dem Workspace folgen') }}</span></button>
-        <button v-else type="button" role="menuitem" :disabled="loading" @click="emit('off')"><AppIcon name="pause" :size="15" /><span>{{ words(`Turn autopilot off in ${name}`, `Autopilot in ${name} ausschalten`) }}<small>{{ words('Project override: no new flags or automatic moves here.', 'Projekt-Ausnahme: hier keine neuen Markierungen oder automatischen Änderungen.') }}</small></span></button>
-      </template>
-      <button v-if="group.kind && group.can_manage && labels[group.kind]" type="button" role="menuitem" :disabled="loading || ruleEnabled === undefined || !!error" @click="emit('rule')"><AppIcon :name="ruleEnabled === false ? 'play' : 'pause'" :size="15" /><span>{{ ruleLabel }}<small>{{ words('Workspace rule, for every project.', 'Workspace-Regel, für alle Projekte.') }}</small></span></button>
-      <button type="button" role="menuitem" @click="emit('open')"><AppIcon name="arrow" :size="15" /><span>{{ words(group.project_id ? `Open ${name} tickets` : 'Open Autopilot settings', group.project_id ? `Tickets von ${name} öffnen` : 'Autopilot-Einstellungen öffnen') }}</span></button>
+      <div role="menu" :aria-label="words(`More for ${name}`, `Mehr zu ${name}`)" @keydown="menuKeys">
+        <button v-if="group.editable" type="button" role="menuitem" @click="emit('dismiss')"><AppIcon name="close" :size="15" /><span>{{ words(`Dismiss all ${group.editable}`, `Alle ${group.editable} verwerfen`) }}<small>{{ words('The tickets stay as they are; these suggestions do not return.', 'Die Tickets bleiben, wie sie sind; diese Vorschläge kommen nicht wieder.') }}</small></span></button>
+        <template v-if="group.project_id && group.can_manage">
+          <button v-if="group.override_mode === 'off'" type="button" role="menuitem" :disabled="loading" @click="emit('follow')"><AppIcon name="play" :size="15" /><span>{{ words('Follow the workspace again', 'Wieder dem Workspace folgen') }}</span></button>
+          <button v-else type="button" role="menuitem" :disabled="loading" @click="emit('off')"><AppIcon name="pause" :size="15" /><span>{{ words(`Turn autopilot off in ${name}`, `Autopilot in ${name} ausschalten`) }}<small>{{ words('Project override: no new flags or automatic moves here.', 'Projekt-Ausnahme: hier keine neuen Markierungen oder automatischen Änderungen.') }}</small></span></button>
+        </template>
+        <button v-if="group.kind && group.can_manage && labels[group.kind]" type="button" role="menuitem" :disabled="loading || ruleEnabled === undefined || !!error" @click="emit('rule')"><AppIcon :name="ruleEnabled === false ? 'play' : 'pause'" :size="15" /><span>{{ ruleLabel }}<small>{{ words('Workspace rule, for every project.', 'Workspace-Regel, für alle Projekte.') }}</small></span></button>
+        <button type="button" role="menuitem" @click="emit('open')"><AppIcon name="arrow" :size="15" /><span>{{ words(group.project_id ? `Open ${name} tickets` : 'Open Autopilot settings', group.project_id ? `Tickets von ${name} öffnen` : 'Autopilot-Einstellungen öffnen') }}</span></button>
+      </div>
       <p v-if="error" role="alert">{{ error }}</p>
     </div>
   </FloatingPanel>

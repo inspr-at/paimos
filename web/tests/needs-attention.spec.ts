@@ -598,14 +598,35 @@ test('phone selection keeps rows reachable, keys whole and zero-apply controls a
  await page.goto('/tickets?view=needs-attention')
  await expect(first(page)).toBeVisible()
  const head = page.locator('#row-group-p-aeon')
- await expect.soft(head.getByRole('button', { name: 'Apply all in AEON' })).toHaveCount(0)
+ const groupApply = head.locator('.group-apply')
+ await expect(head.getByRole('button', { name: 'Apply all in AEON' })).toHaveCount(0)
+ await expect(groupApply).toHaveAttribute('aria-hidden', 'true')
+ await expect(groupApply).toHaveAttribute('tabindex', '-1')
+ const groupApplyRect = await groupApply.evaluate(el => {
+  const box = el.getBoundingClientRect()
+  return { right: box.right, width: box.width, height: box.height, hidden: getComputedStyle(el).visibility === 'hidden' }
+ })
+ expect(groupApplyRect.hidden).toBe(true)
+ expect(groupApplyRect.width).toBeGreaterThanOrEqual(44)
+ expect(groupApplyRect.height).toBeGreaterThanOrEqual(28)
+ expect((await head.getByRole('button', { name: 'More for AEON' }).boundingBox())!.x).toBeGreaterThanOrEqual(groupApplyRect.right - 1)
  const initial = await controlStability(page, { clickedRow: first(page), key: first(page).locator('.key-btn'), actions: first(page).locator('.action-stack') })
  await initial.check(async () => { await chooseRows(page, [1]) })
  initial.done()
  await table(page).locator('#row-attention-2').getByRole('checkbox').click()
  const bar = page.getByRole('toolbar', { name: 'Selected tickets' })
  await expect(bar).toContainText('2 selected')
- await expect.soft(bar.getByRole('button', { name: /^Apply/ })).toHaveCount(0)
+ const selectionApply = bar.locator('button[aria-label^="Apply "]')
+ await expect(bar.getByRole('button', { name: /^Apply/ })).toHaveCount(0)
+ await expect(selectionApply).toHaveAttribute('aria-hidden', 'true')
+ await expect(selectionApply).toHaveAttribute('tabindex', '-1')
+ const selectionApplyRect = await selectionApply.evaluate(el => {
+  const box = el.getBoundingClientRect()
+  return { width: box.width, height: box.height, hidden: getComputedStyle(el).visibility === 'hidden' }
+ })
+ expect(selectionApplyRect.hidden).toBe(true)
+ expect(selectionApplyRect.width).toBeGreaterThanOrEqual(44)
+ expect(selectionApplyRect.height).toBeGreaterThanOrEqual(28)
  const clear = bar.getByRole('button', { name: 'Clear the selection' })
  // The dock is fixed to the viewport. Its DOM ancestors scroll, so sample its
  // viewport box directly; the shared guard measures the rows in scroll space.
@@ -625,10 +646,27 @@ test('phone selection keeps rows reachable, keys whole and zero-apply controls a
   expect(box.height).toBeGreaterThanOrEqual(44)
  }
  await table(page).locator('#row-attention-20').scrollIntoViewIfNeeded()
- const barTop = (await bar.boundingBox())!.y
- expect.soft(await page.locator('#main').evaluate(el => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(barTop + .5)
- const last = (await table(page).locator('#row-attention-20').boundingBox())!
- expect.soft(last.y + last.height).toBeLessThanOrEqual(barTop + .5)
+ const dockFit = async () => {
+  const barBox = (await bar.boundingBox())!
+  const row = (await table(page).locator('#row-attention-20').boundingBox())!
+  const metrics = await page.locator('#main').evaluate(el => {
+   const style = getComputedStyle(el)
+   return { bottom: el.getBoundingClientRect().bottom, pad: parseFloat(style.scrollPaddingBottom), margin: parseFloat(style.marginBottom) }
+  })
+  return { barTop: barBox.y, barHeight: barBox.height, rowBottom: row.y + row.height, ...metrics }
+ }
+ const fit = await dockFit()
+ expect(fit.bottom).toBeLessThanOrEqual(fit.barTop + .5)
+ expect(fit.barTop - fit.bottom).toBeLessThanOrEqual(1.5)
+ expect(fit.rowBottom).toBeLessThanOrEqual(fit.barTop + .5)
+ expect(Math.abs(fit.pad - fit.margin)).toBeLessThanOrEqual(.5)
+ expect(Math.abs(fit.margin - fit.barHeight)).toBeLessThanOrEqual(1.5)
+ await page.locator('.app-shell').evaluate(el => el.classList.add('footer-hidden'))
+ await expect.poll(async () => {
+  const next = await dockFit()
+  return next.bottom <= next.barTop + .5 && next.barTop - next.bottom <= 1.5 && next.rowBottom <= next.barTop + .5 && Math.abs(next.margin - next.barHeight) <= 1.5
+ }).toBe(true)
+ await page.locator('.app-shell').evaluate(el => el.classList.remove('footer-hidden'))
  await page.screenshot({ path: testInfo.outputPath(`attention-phone-selection.png`), fullPage: true })
  await clear.click()
  expect(data.actions).toEqual([])
@@ -642,7 +680,19 @@ test('phone selection keeps rows reachable, keys whole and zero-apply controls a
  const previewGuard = await controlStability(page, { frame: preview, cancel, moves, clickedMove: moves.locator('label') })
  await previewGuard.check(async () => { await moves.getByRole('checkbox').uncheck() })
  previewGuard.done()
- await expect.soft(preview.locator('.run')).toBeHidden()
+ const run = preview.locator('.run')
+ await expect(run).toBeHidden()
+ await expect(run).toHaveAttribute('aria-hidden', 'true')
+ await expect(run).toHaveAttribute('tabindex', '-1')
+ await expect(preview.getByRole('button', { name: /^Apply/ })).toHaveCount(0)
+ const runRect = await run.evaluate(el => {
+  const box = el.getBoundingClientRect()
+  return { right: box.right, width: box.width, height: box.height, hidden: getComputedStyle(el).visibility === 'hidden' }
+ })
+ expect(runRect.hidden).toBe(true)
+ expect(runRect.width).toBeGreaterThanOrEqual(44)
+ expect(runRect.height).toBeGreaterThanOrEqual(28)
+ expect((await cancel.boundingBox())!.x).toBeGreaterThanOrEqual(runRect.right - 1)
  await page.screenshot({ path: testInfo.outputPath(`attention-phone-no-moves.png`), fullPage: true })
  await cancel.click()
 })

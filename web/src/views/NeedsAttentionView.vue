@@ -32,6 +32,7 @@ const running = ref(new Set<string>())
 const overlay = ref<{ group: Group; anchor: HTMLElement; mode: 'menu' | 'off' | AttentionBulkAction; query: AttentionFilters; preview?: BulkPreview; override?: ProjectOverride; settings?: AutopilotSettings; loading: boolean; error: string }>()
 const ruleFor: Partial<Record<Row['kind'], RuleKey>> = { triage: 'new', cancel: 'backlog', blocked: 'blocked', missed: 'done' }
 const groupName = (group: Group) => group.key || group.title || (locale === 'de' ? kinds.get(group.kind!)?.labelDe : kinds.get(group.kind!)?.label) || group.id
+const concealGroupApply = (group: Group) => running.value.has(group.id) || !!group.retry || (group.batch?.changed ?? 0) > 0 || group.editable < 1 || group.applicable < 1
 const rowBusy = (row: Row) => busy.value || groupRows.value.some(group => running.value.has(group.id) && group.items.includes(row))
 const rows = computed(() => grouping.value === 'none' ? flatRows.value : groupRows.value.flatMap(group => group.items))
 const counts = ref<AttentionPage['counts']>({}), total = ref(0)
@@ -46,10 +47,28 @@ const locale = document.documentElement.lang.toLowerCase().startsWith('de') ? 'd
 const words = (en: string, de: string) => locale === 'de' ? de : en
 let pendingGroups: { group: Group; query: AttentionFilters; after?: string }[] = [], activeGroupReads = 0
 let generation = 0, selectionResize: ResizeObserver | undefined, rangeAnchor: number | undefined, groupsFromList = false
+function clearDockInset() {
+  const main = document.getElementById('main')
+  if (!main) return
+  main.style.marginBottom = ''
+  main.style.scrollPaddingBottom = ''
+}
 function measureSelection() {
   const bar = selectionBar.value
   const footer = bar ? parseFloat(getComputedStyle(bar).getPropertyValue('--footer-h')) || 0 : 0
   toastBottomClearance.value = bar ? window.innerHeight - bar.getBoundingClientRect().top - footer : 0
+  const main = document.getElementById('main')
+  if (!main) return
+  if (!bar) { clearDockInset(); return }
+  const dock = bar.closest('.selection-dock') ?? bar
+  const applied = parseFloat(main.style.marginBottom) || 0
+  // The dock is position:fixed with bottom: var(--footer-h), so this overlap
+  // stays aligned when the phone footer hides and --footer-h falls to 0.
+  const overlap = Math.ceil(Math.max(0, main.getBoundingClientRect().bottom + applied - dock.getBoundingClientRect().top))
+  if (Math.abs(applied - overlap) <= 0.5 && Math.abs((parseFloat(main.style.scrollPaddingBottom) || 0) - overlap) <= 0.5) return
+  const px = `${overlap}px`
+  main.style.marginBottom = px
+  main.style.scrollPaddingBottom = px
 }
 watch(selectionBar, bar => {
   selectionResize?.disconnect(); measureSelection()
@@ -94,7 +113,7 @@ function setGrouping(value: 'project' | 'kind' | 'none') { void router.replace({
 function clearFilters() { void router.replace({ path: '/tickets', query: { view: 'needs-attention', ...(route.query.group ? { group: route.query.group } : {}) } }) }
 function resetVisit() {
   closeOverlay(false); running.value.clear(); stats.cancel()
-  generation++; reads.cancel(); pendingGroups = []; activeGroupReads = 0; groupsFromList = false; flatRows.value = []; groupRows.value = []; selected.value.clear(); counts.value = {}; facets.value = { projects: [], assignees: [] }; truncated.value = false; groupsTruncated.value = false; toastBottomClearance.value = 0; total.value = 0; next.value = null; error.value = ''; busy.value = false; loading.value = false; cursor.value = null; collapsed.value = new Set(); rangeAnchor = undefined
+  generation++; reads.cancel(); pendingGroups = []; activeGroupReads = 0; groupsFromList = false; flatRows.value = []; groupRows.value = []; selected.value.clear(); counts.value = {}; facets.value = { projects: [], assignees: [] }; truncated.value = false; groupsTruncated.value = false; toastBottomClearance.value = 0; clearDockInset(); total.value = 0; next.value = null; error.value = ''; busy.value = false; loading.value = false; cursor.value = null; collapsed.value = new Set(); rangeAnchor = undefined
   if (undoToast.value) dismiss(undoToast.value)
 }
 function acceptPage(page: AttentionPage) { counts.value = page.counts; total.value = page.total; facets.value = page.facets; truncated.value = page.facets_truncated }
@@ -482,7 +501,7 @@ function keys(event: KeyboardEvent) {
   }
 }
 onMounted(() => { void projects.load(); window.addEventListener('keydown', keys); window.addEventListener('resize', measureSelection) })
-onBeforeUnmount(() => { closeOverlay(false); generation++; scope.dispose(); selectionResize?.disconnect(); toastBottomClearance.value = 0; window.removeEventListener('resize', measureSelection); window.removeEventListener('keydown', keys); if (undoToast.value) dismiss(undoToast.value) })
+onBeforeUnmount(() => { closeOverlay(false); generation++; scope.dispose(); selectionResize?.disconnect(); toastBottomClearance.value = 0; clearDockInset(); window.removeEventListener('resize', measureSelection); window.removeEventListener('keydown', keys); if (undoToast.value) dismiss(undoToast.value) })
 </script>
 
 <template>
@@ -527,7 +546,7 @@ onBeforeUnmount(() => { closeOverlay(false); generation++; scope.dispose(); sele
         </span>
         <span class="group-actions" @click.stop>
           <span class="group-slot">
-            <button :id="`group-apply-${group.id}`" type="button" class="btn sm group-apply" :class="{ hidden: running.has(group.id) || group.retry || (group.batch?.changed ?? 0) > 0 || !group.editable }" :tabindex="running.has(group.id) || group.retry || (group.batch?.changed ?? 0) > 0 || !group.editable ? -1 : 0" :aria-hidden="running.has(group.id) || !!group.retry || (group.batch?.changed ?? 0) > 0 || !group.editable" :disabled="busy || !group.applicable" :aria-label="words(`Apply all in ${groupName(group)}`, `Alles anwenden in ${groupName(group)}`)" aria-haspopup="dialog" :aria-expanded="overlay?.group.id === group.id && overlay.mode === 'apply'" @click="openGroup(group.id, 'apply', $event.currentTarget as HTMLElement)">{{ words('Apply all', 'Alle anwenden') }} <b>{{ group.applicable }}</b></button>
+            <button :id="`group-apply-${group.id}`" type="button" class="btn sm group-apply" :class="{ hidden: concealGroupApply(group) }" :tabindex="concealGroupApply(group) ? -1 : 0" :aria-hidden="concealGroupApply(group)" :disabled="busy || group.applicable < 1" :aria-label="words(`Apply all in ${groupName(group)}`, `Alles anwenden in ${groupName(group)}`)" aria-haspopup="dialog" :aria-expanded="overlay?.group.id === group.id && overlay.mode === 'apply'" @click="openGroup(group.id, 'apply', $event.currentTarget as HTMLElement)">{{ words('Apply all', 'Alle anwenden') }} <b>{{ group.applicable }}</b></button>
             <span v-if="running.has(group.id)" class="group-state" role="status">{{ overlay?.group.id === group.id && overlay.loading ? words('Loading preview…', 'Vorschau wird geladen…') : words('Applying…', 'Wird angewendet…') }}</span>
             <span v-else-if="group.retry" class="group-state"><button type="button" class="link-btn" @click="runGroup(group, group.retry!)">{{ words('Retry', 'Erneut versuchen') }}</button><template v-if="group.batch?.changed"> · <button :id="`group-undo-${group.id}`" type="button" class="link-btn" :disabled="busy" @click="undoGroup(group, group.batch!.id)">{{ words('Undo', 'Rückgängig') }}</button></template></span>
             <span v-else-if="group.batch?.changed" class="group-state">{{ group.batch.changed }} {{ words(group.batch.action === 'apply' ? 'applied' : 'dismissed', group.batch.action === 'apply' ? 'angewendet' : 'verworfen') }} · <button :id="`group-undo-${group.id}`" type="button" class="link-btn" :disabled="busy" @click="undoGroup(group, group.batch!.id)">{{ words('Undo', 'Rückgängig') }}</button></span>
@@ -544,7 +563,7 @@ onBeforeUnmount(() => { closeOverlay(false); generation++; scope.dispose(); sele
       <p v-if="groupsTruncated" role="status">{{ words('Only the first 500 groups are shown. Narrow the list with filters.', 'Nur die ersten 500 Gruppen werden gezeigt. Die Liste mit Filtern eingrenzen.') }}</p>
       <button v-if="grouping === 'none' && next" type="button" class="btn sm" :disabled="loading" @click="load(true)">{{ loading ? words('Loading…', 'Wird geladen…') : words('Load 50 more', '50 weitere laden') }}</button>
     </div>
-    <div v-if="chosen.length" class="selection-dock"><div ref="selectionBar" class="selection-bar" role="toolbar" aria-label="Selected tickets"><span><b>{{ chosen.length }}</b> {{ words('selected', 'ausgewählt') }}</span><span class="selection-hint">{{ chosen.length - applicableChosen.length ? `${chosen.length - applicableChosen.length} cannot be applied; they stay selected` : words('Apply uses each row’s own suggestion', 'Anwenden nutzt den Vorschlag jeder Zeile') }}</span><button type="button" class="btn sm primary" :aria-label="`Apply ${chosen.length}`" :disabled="busy || !applicableChosen.length" @click="applySelection">{{ words('Apply', 'Anwenden') }} {{ chosen.length }}<KeyCap k="A" /></button><button type="button" class="btn sm" :aria-label="`Dismiss ${chosen.length}`" :disabled="busy" @click="act('dismiss', chosen)">{{ words('Dismiss', 'Verwerfen') }} {{ chosen.length }}<KeyCap k="D" /></button><button type="button" class="btn sm ghost" aria-label="Clear the selection" :disabled="busy" @click="selected.clear()"><AppIcon name="close" :size="13" />{{ words('Clear', 'Löschen') }}<KeyCap k="esc" /></button></div></div>
+    <div v-if="chosen.length" class="selection-dock"><div ref="selectionBar" class="selection-bar" role="toolbar" aria-label="Selected tickets"><span><b>{{ chosen.length }}</b> {{ words('selected', 'ausgewählt') }}</span><span class="selection-hint">{{ chosen.length - applicableChosen.length ? `${chosen.length - applicableChosen.length} cannot be applied; they stay selected` : words('Apply uses each row’s own suggestion', 'Anwenden nutzt den Vorschlag jeder Zeile') }}</span><button type="button" class="btn sm primary" :class="{ hidden: !applicableChosen.length }" :aria-hidden="!applicableChosen.length || undefined" :tabindex="applicableChosen.length ? 0 : -1" :aria-label="`Apply ${chosen.length}`" :disabled="busy || !applicableChosen.length" @click="applySelection">{{ words('Apply', 'Anwenden') }} {{ chosen.length }}<KeyCap k="A" /></button><button type="button" class="btn sm" :aria-label="`Dismiss ${chosen.length}`" :disabled="busy" @click="act('dismiss', chosen)">{{ words('Dismiss', 'Verwerfen') }} {{ chosen.length }}<KeyCap k="D" /></button><button type="button" class="btn sm ghost" aria-label="Clear the selection" :disabled="busy" @click="selected.clear()"><AppIcon name="close" :size="13" />{{ words('Clear', 'Löschen') }}<KeyCap k="esc" /></button></div></div>
   </section>
 </template>
 

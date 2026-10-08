@@ -98,7 +98,21 @@ test('axe: Needs attention controls and retained resolutions in light and dark',
     await scan()
     await page.getByRole('toolbar', { name: 'Selected tickets' }).getByRole('button', { name: 'Clear the selection' }).click()
     await grid.locator('#row-group-p-aeon').getByRole('button', { name: 'More for AEON' }).click()
-    await expect(page.getByRole('menu')).toBeVisible()
+    const menu = page.getByRole('menu')
+    await expect(menu).toBeVisible()
+    // The phone sheet's heading, Close, and any alert sit beside the menu.
+    // Only menuitem buttons may be owned by role=menu (axe aria-required-children).
+    expect(await menu.evaluate(el => [...el.children].every(child => child.getAttribute('role') === 'menuitem'))).toBe(true)
+    await expect(menu.getByRole('heading')).toHaveCount(0)
+    await expect(menu.getByRole('button', { name: 'Close' })).toHaveCount(0)
+    await expect(menu.getByRole('alert')).toHaveCount(0)
+    if (theme === 'dark') {
+      await expect(page.getByRole('heading', { name: 'More for AEON' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Close' })).toBeVisible()
+      await page.getByRole('menuitem').first().focus()
+      await page.keyboard.press('ArrowDown')
+      await expect(page.getByRole('menuitem').nth(1)).toBeFocused()
+    }
     await scan()
     await page.keyboard.press('Escape')
     await expect(grid.locator('#group-more-p-aeon')).toBeFocused()

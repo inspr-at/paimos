@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { AttentionBulkAction, AttentionBulkPreview } from '../../lib/attention'
 import { statusMeta } from '../../lib/work'
 import FloatingPanel from './FloatingPanel.vue'
@@ -20,14 +20,19 @@ onMounted(() => window.addEventListener('resize', resized))
 onBeforeUnmount(() => window.removeEventListener('resize', resized))
 const stateLabel = (state: string) => words(statusMeta(state).label, ({ new: 'Neu', backlog: 'Backlog', open: 'Offen', in_progress: 'In Arbeit', blocked: 'Blockiert', done: 'Erledigt', delivered: 'Ausgeliefert', accepted: 'Abgenommen', cancelled: 'Abgebrochen' } as Record<string, string>)[state] || statusMeta(state).label)
 function toggle(id: string, on: boolean) { if (on) excluded.value.delete(id); else excluded.value.add(id) }
+watch(count, value => {
+  if (value) return
+  const active = document.activeElement
+  if (active instanceof HTMLElement && active.classList.contains('run')) active.closest('.preview-actions')?.querySelector<HTMLButtonElement>('button:not(.run)')?.focus({ preventScroll: true })
+})
 </script>
 <template>
   <FloatingPanel :anchor="anchor" align="end" :width="520" :tallest="640" :sheet="phone" :label="title" cycle @close="restore => emit('close', restore)">
     <section class="bulk-preview" :class="{ phone }" data-attention-preview>
       <header><h3><AppIcon :name="action === 'apply' ? 'check' : 'close'" :size="16" />{{ title }}</h3></header>
       <div class="preview-actions">
-        <button type="button" class="btn sm primary run" data-autofocus :disabled="!count" @click="emit('run', [...excluded])"><span>{{ words(action === 'apply' ? 'Apply' : 'Dismiss', action === 'apply' ? 'Anwenden' : 'Verwerfen') }}</span><b>{{ count }}</b></button>
-        <button type="button" class="btn sm ghost" @click="emit('close', true)">{{ words('Cancel', 'Abbrechen') }}<KeyCap k="esc" /></button>
+        <button type="button" class="btn sm primary run" :class="{ hidden: count === 0 }" :aria-hidden="count === 0 || undefined" :tabindex="count === 0 ? -1 : 0" :data-autofocus="count === 0 ? undefined : true" :disabled="count === 0" @click="emit('run', [...excluded])"><span>{{ words(action === 'apply' ? 'Apply' : 'Dismiss', action === 'apply' ? 'Anwenden' : 'Verwerfen') }}</span><b>{{ count }}</b></button>
+        <button type="button" class="btn sm ghost" :data-autofocus="count === 0 ? true : undefined" @click="emit('close', true)">{{ words('Cancel', 'Abbrechen') }}<KeyCap k="esc" /></button>
       </div>
       <div class="preview-body">
         <p class="lead" v-if="action === 'apply'">{{ words(`Moves ${count} tickets in ${name}.`, `Ändert ${count} Tickets in ${name}.`) }} {{ skipped ? words(`${skipped} are skipped.`, `${skipped} werden übersprungen.`) : '' }}</p>
@@ -49,6 +54,7 @@ function toggle(id: string, on: boolean) { if (on) excluded.value.delete(id); el
 .bulk-preview { display: flex; flex-direction: column; max-height: calc(var(--floating-max) - 12px); padding: 10px; text-align: left; font-weight: 400; }
 h3 { display: flex; align-items: baseline; gap: 8px; font-size: 15px; overflow-wrap: anywhere; } h3 svg { flex: none; align-self: center; }
 .preview-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0; flex: none; }
+.hidden { visibility: hidden; pointer-events: none; }
 .preview-actions .btn.primary { box-shadow: none; }
 .run b { min-width: 4ch; text-align: right; font-family: var(--mono); }
 .preview-body { min-height: 0; overflow: auto; overscroll-behavior: contain; }
