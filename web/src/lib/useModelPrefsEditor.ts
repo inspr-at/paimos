@@ -50,7 +50,7 @@ export function useModelPrefsEditor(project: string | undefined, initial: PrefLe
     // Level PUT replaces its section flags; omitted flags would clear a lock.
     const update = { revision: stored.revision, residency: stored.residency, residency_locked: stored.residency_locked, prefs_locked: stored.prefs_locked, ...body }
     if (update.residency_locked && update.residency === null) update.residency = doc.value!.views[target]!.residency.value
-    return mutate(() => putPreferenceScope(target, update, project))
+    return mutate(() => putPreferenceScope(target, update, project, doc.value!.person_id))
   }
   function row(kind: string, selector?: { bucket: 'normal' | 'complex'; value: ModelSelector }, toggleLock = false) {
     const target = level.value, stored = doc.value?.levels[target], effective = doc.value?.views[target]?.rows.find(r => r.kind_id === kind)
@@ -60,7 +60,7 @@ export function useModelPrefsEditor(project: string | undefined, initial: PrefLe
     const normal = selector?.bucket === 'normal' ? selector.value : own?.normal ?? effective.normal.selector
     const complex = selector?.bucket === 'complex' ? selector.value : own?.complex ?? effective.complex.selector
     const body = toggleLock && !own ? { revision: stored.revision, locked: true } : { revision: stored.revision, normal, complex, locked: toggleLock ? !own?.locked : own?.locked ?? false }
-    return mutate(() => putPreferenceRow(target, kind, body, project), selector ? () => {
+    return mutate(() => putPreferenceRow(target, kind, body, project, doc.value!.person_id), selector ? () => {
       const model = effective[selector.bucket]
       model.selector = selector.value
       const selection = selector.value
@@ -72,7 +72,7 @@ export function useModelPrefsEditor(project: string | undefined, initial: PrefLe
   function reset(kind?: string) {
     const target = level.value, revision = doc.value?.levels[target]?.revision
     if (revision === undefined) return
-    return mutate(() => resetPreference(target, revision, project, kind))
+    return mutate(() => resetPreference(target, revision, project, kind, doc.value!.person_id))
   }
   function addKind(label: string) {
     const target = level.value

@@ -2402,6 +2402,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotContinuationGuards","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotDeadlineWriteRollsBack","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotDuplicatesEligibilityAndCancellation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotHiddenMovedLeaf","tier":"GATED-FULL"}
@@ -8906,6 +8908,8 @@
     ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestMatrixRunnerLabels","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/ci-runner-guard","name":"TestMergeGroupProofGuardRejectsUntrustedInputs","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestNightlyFullCannotNarrowTiersOrAcquirePRRunnerAuthority","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestNightlyFullRequiresAllThreeTiers","tier":"GATED-FULL"}
@@ -8963,6 +8967,8 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestImmutabilityGuardsFailClosed","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestLoadedImageResolverFailsClosed","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestMergeGroupPRReuseAggregatesRequireConfirmedProof","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestNativePlatformsAndIndexPublication","tier":"GATED-FULL"}
     ,
