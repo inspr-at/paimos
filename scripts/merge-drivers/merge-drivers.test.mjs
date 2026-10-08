@@ -27,6 +27,7 @@ const fixtures = [
   { file: registryPaths[1], doc: rows => ({ resources: Object.fromEntries(rows.map(name => [name, name])), actions: {}, special: {} }), entry: name => name, rows: doc => Object.keys(doc.resources) },
   { file: registryPaths[2], doc: rows => ({ _license: license, registry: rows, cases: [row('base')] }), entry: name => grant(`${name}.manage`), rows: doc => doc.registry.map(value => value.key) },
   { file: registryPaths[3], doc: rows => ({ _license: license, version: 1, tables: rows }), entry: name => table(name), rows: doc => doc.tables.map(value => value.table) },
+  { file: registryPaths[4], doc: rows => ({ _license: license, permissions: rows }), entry: name => `${name}.manage`, rows: doc => doc.permissions },
 ]
 function invoke(t, inputs, file, { program = driver, extra = [] } = {}) {
   const directory = temporary(t)

@@ -1981,7 +1981,7 @@ and now writes canonical form. Web discovery lists cases without launching brows
 
 ### Central registry merge drivers (AEON-981)
 
-The four authored JSON registries below use `merge=registries`. Install a
+The five authored JSON registries below use `merge=registries`. Install a
 reviewed copy outside the repository, alongside the tier driver. A branch being
 merged must never supply the executable that decides its own merge. Installation
 is a coordinator action; workers test configuration in a disposable clone only.
@@ -2002,6 +2002,7 @@ internal/authz/builtin_agent_exclusions.json merge=registries
 internal/authz/permission_labels.json merge=registries
 internal/auth/testdata/key_scope_ceiling.json merge=registries
 internal/dsar/inventory.json merge=registries
+internal/authz/testdata/builtin_agent_exclusions.json merge=registries
 ```
 
 Resolve `$GIT_COMMON_DIR` with
@@ -2012,13 +2013,14 @@ Node built-ins and runs from old checkouts without importing their source.
 | Hotspot | Classification and merge policy |
 | --- | --- |
 | `internal/authz/builtin_agent_exclusions.json` | DATA: permission strings form a keyed set. Independent exclusions survive, sorted. |
+| `internal/authz/testdata/builtin_agent_exclusions.json` | DATA: the independent expected exclusion definition, extracted from the existing Go test. The same set driver preserves additions and deletions; the Go test still checks exact equality and live grant behavior. |
 | `internal/authz/permission_labels.json` | DATA: labels merge by group and key; divergent labels conflict. |
 | `internal/auth/testdata/key_scope_ceiling.json` | DATA: permissions key by `key`, cases by `name`. Each record is atomic; divergent grant flags, locations or case expectations conflict. |
 | `internal/dsar/inventory.json` | DATA: tables key by `table`, columns by name. Independent columns survive, including on a concurrently introduced table. Each table's classification and locator form one atomic safety header; divergent headers or column classifications conflict. |
 | `scripts/ci/go-test-tiers.json`, `scripts/ci/web-test-tiers.json`, `web/ci-web-shards.json` | DATA with regenerated canonical layout: retain the existing `tiers` driver and authored test tiers, weights and launch policy. |
 | `internal/authz/route_map.go` | CODE holding route lists: leave for AEON-982. |
 | `internal/authz/registry.go` | CODE constructing the permission catalog and grant rules: leave for AEON-982. |
-| `internal/authz/authz_test.go` | CODE with policy assertions and fixtures: leave for AEON-982. |
+| `internal/authz/authz_test.go` | CODE with policy assertions and fixtures: only the literal expected exclusion list moves to data, with a strict test loader. Remaining lists and assertions stay for AEON-982. |
 | `internal/agentpairing/shared_fence_test.go` | CODE with call-site inventory and lock-order assertions: leave for AEON-982. |
 | `web/src/router.ts` | CODE with route lists and guards: leave for AEON-982. |
 | `web/src/lib/settings.ts` | CODE with setting lists and visibility policy: leave for AEON-982. |
@@ -2053,7 +2055,7 @@ node scripts/merge-main.mjs --regenerate
 ```
 
 The command refuses an unmerged index or unresolved diff markers before writing.
-It validates all four registries and three tier manifests before canonicalizing
+It validates all five registries and three tier manifests before canonicalizing
 their layouts, runs the driver regressions, then runs the existing full fast
 static pre-filter with `--here` against the actual working tree. The canonical
 layouts are the only regenerated outputs in this scope; none of the safety

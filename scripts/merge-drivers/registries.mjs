@@ -10,6 +10,7 @@ export const registryPaths = Object.freeze([
   'internal/authz/permission_labels.json',
   'internal/auth/testdata/key_scope_ceiling.json',
   'internal/dsar/inventory.json',
+  'internal/authz/testdata/builtin_agent_exclusions.json',
 ])
 const absent = Symbol('absent')
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0
@@ -41,7 +42,7 @@ function permissions(rows) {
 
 export function validateRegistry(data, file) {
   require(registryPaths.includes(file), `Unsupported registry: ${file}`)
-  if (file === registryPaths[0]) {
+  if (file === registryPaths[0] || file === registryPaths[4]) {
     fields(data, ['_license', 'permissions'])
     require(data._license === license, 'Invalid license')
     permissions(data.permissions)
