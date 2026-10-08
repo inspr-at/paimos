@@ -220,8 +220,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await page.goto('/settings/vocabulary')
     await page.evaluate(value => document.documentElement.setAttribute('data-theme', value), theme)
     const card = page.locator('#work-vocabulary')
-    await expect(card.locator('.read-only-levels dd')).toHaveText(names)
-    await expect(card.locator('input, select, .actions')).toHaveCount(0)
+    // Top-down: the two levels first, the leaf last.
+    await expect(card.locator('.read-only-levels dd')).toHaveText([names[1], names[2], names[0]])
+    await expect(card.locator('input, select, button, .actions')).toHaveCount(0)
     await expect(card.locator('.preview')).toHaveText(`${names[1]} / ${names[2]} / ${names[0]}`)
 
     const bounds = await card.evaluate(el => {
@@ -257,6 +258,8 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     guard.done()
     await mkdir('test-results/aeon-694-fix3', { recursive: true })
     await page.screenshot({ path: `test-results/aeon-694-fix3/vocabulary-member-${width}-${theme}.png`, fullPage: true })
+    await mkdir('test-results/aeon-996-vocabui', { recursive: true })
+    await page.screenshot({ path: `test-results/aeon-996-vocabui/readonly-${width}-${theme}.png`, fullPage: true })
   })
 }
 

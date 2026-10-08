@@ -53,7 +53,7 @@ for (const width of [1440, 390]) {
     await page.screenshot({ path: info.outputPath(`agent-names-${width}.png`), fullPage: true })
 
     // The work levels save next, on the revision the names advanced, and never send the names back.
-    await work.getByLabel('Leaf name', { exact: true }).fill('Schritt')
+    await work.getByLabel('Leaf (work item)', { exact: true }).fill('Schritt')
     await work.getByRole('button', { name: /Save names/ }).click()
     await expect(work.getByRole('status')).toContainText('Workspace names saved')
     expect(server.puts[1]).not.toHaveProperty('lead')

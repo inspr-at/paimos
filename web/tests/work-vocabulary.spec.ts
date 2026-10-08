@@ -49,19 +49,24 @@ for (const width of sizes) for (const theme of ['light', 'dark']) {
     await page.goto('/settings/vocabulary')
     const screenshot = async (surface: string) => { await expect(page.locator('html')).toHaveAttribute('data-theme', theme); await page.screenshot({ path: `${shots}/${surface}-${width}-${theme}.png`, fullPage: true }) }
     const card = page.locator('#work-vocabulary')
-    await expect(card.getByLabel('Leaf name')).toHaveValue('Arbeitsschritt')
+    await expect(card.getByLabel('Leaf (work item)', { exact: true })).toHaveValue('Arbeitsschritt')
     await card.scrollIntoViewIfNeeded()
     const stability = await controlStability(page, {
       actions: card.getByLabel('Vocabulary actions'), save: card.getByRole('button', { name: /Save names/ }),
-      leaf: card.getByLabel('Leaf name', { exact: true }), icon: card.getByLabel('Leaf icon'), clickedRow: card.locator('.vocab-row').first(),
+      leaf: card.getByLabel('Leaf (work item)', { exact: true }), icon: card.getByRole('button', { name: /^Leaf icon/ }), clickedRow: card.locator('.vocab-row').last(),
     })
-    await stability.check(() => card.getByLabel('Leaf name', { exact: true }).fill('Schritt mit ausführlicher deutscher Beschreibung'))
-    await stability.check(() => card.getByLabel('Leaf icon').selectOption('ticket'))
+    await stability.check(() => card.getByLabel('Leaf (work item)', { exact: true }).fill('Schritt mit ausführlicher deutscher Beschreibung'))
+    await stability.check(async () => { await card.getByRole('button', { name: /^Leaf icon/ }).click(); await page.getByRole('option', { name: 'Ticket', exact: true }).click() })
+    await expect(card.getByRole('button', { name: 'Leaf icon: Ticket' })).toBeVisible()
     await stability.check(() => card.getByRole('button', { name: /Save names/ }).click())
     await expect(card.getByRole('status')).toContainText('Workspace names saved')
     w.fail(); await stability.check(() => card.getByRole('button', { name: /Save names/ }).click())
     await expect(card.getByRole('status')).toContainText('reload before saving')
-    await stability.check(() => card.getByRole('button', { name: 'Add level' }).click()); stability.done()
+    stability.done()
+    // A new level lands directly above the leaf, so only controls above it are still.
+    const adding = await controlStability(page, { actions: card.getByLabel('Vocabulary actions'), save: card.getByRole('button', { name: /Save names/ }), top: card.getByLabel('Top level', { exact: true }), clickedRow: card.locator('.vocab-row').first() })
+    await adding.check(() => card.getByRole('button', { name: 'Add level' }).click()); adding.done()
+    await expect(card.locator('.vocab-row label')).toHaveText(['Top level', 'Level 2', 'Level 3', 'Leaf (work item)'])
     await screenshot('workspace')
     await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
     const outline = page.getByRole('treegrid', { name: 'Ticket outline' })
@@ -169,6 +174,94 @@ for (const width of sizes) for (const theme of ['light', 'dark']) for (const cus
     expect(writes).toHaveLength(1)
     expect(writes[0].body).toMatchObject({ kind_id: 'k-work', parent_id: 'p-pharos', title: 'Workspace naming regression' })
     await expect(type).toHaveAttribute('aria-label', `Type: ${name}`)
+    expect(errors).toEqual([])
+  })
+}
+
+// AEON-996: levels read as they nest, the icon picker shows the icons, the preview names every level.
+// Risks: the leaf listed first (upside down), icons invisible in the choice, and the
+// chain preview naming only three levels. The server answers like the real one: the
+// saved levels come back in the order sent, levels[0] being the top level.
+for (const width of sizes) for (const theme of ['light', 'dark']) {
+  test(`work vocabulary reads top-down with an icon picker ${width} ${theme}`, async ({ page }) => {
+    const shots = 'test-results/aeon-996-vocabui'
+    await mkdir(shots, { recursive: true }); await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    const data = fixtures(); data.preferences.theme = { choice: theme }
+    await mockWork(page, data, { admin: true })
+    await mockBusiness(page, businessData({ role: 'admin' }), { role: 'admin' })
+    await mockSettings(page, settingsData())
+    const errors = watchErrors(page), puts: { revision: number; leaf: { name: string; icon: string }; levels: { name: string; icon: string }[] }[] = []
+    let vocabulary = { revision: 1, leaf: { name: 'Arbeitsschritt mit ausführlicher deutscher Beschreibung', icon: 'check' }, levels: [{ name: 'Arbeitsvorhaben', icon: 'epic' }, { name: 'Teilprojekt', icon: '' }, { name: 'Geschichte', icon: 'layers' }] }
+    await page.route('**/api/settings/work-vocabulary', route => {
+      if (route.request().method() === 'PUT') { const body = route.request().postDataJSON(); puts.push(body); vocabulary = { ...body, revision: vocabulary.revision + 1 } }
+      return route.fulfill({ json: vocabulary })
+    })
+    await page.goto('/settings/vocabulary')
+    const card = page.locator('#work-vocabulary'), rows = card.locator('.vocab-row')
+    const picker = (name: string) => card.getByRole('button', { name: new RegExp(`^${name} icon`) })
+    await expect(card.getByLabel('Top level', { exact: true })).toHaveValue('Arbeitsvorhaben')
+    await card.scrollIntoViewIfNeeded()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+
+    // Top level first, the leaf last; each level one light step in from the one above.
+    await expect(rows.locator('label')).toHaveText(['Top level', 'Level 2', 'Level 3', 'Leaf (work item)'])
+    const lefts = await rows.locator('label').evaluateAll(labels => labels.map(label => label.getBoundingClientRect().left + parseFloat(getComputedStyle(label).paddingLeft)))
+    for (let i = 1; i < lefts.length; i++) expect(lefts[i], `label ${i} is indented`).toBeGreaterThan(lefts[i - 1])
+    await expect(card.locator('.preview')).toHaveText('Arbeitsvorhaben / Teilprojekt / Geschichte / Arbeitsschritt mit ausführlicher deutscher Beschreibung')
+    await expect(card.locator('.preview svg')).toHaveCount(4)
+    // The triggers show the chosen icon and its name; a blank choice shows the level default.
+    for (const [name, label] of [['Top level', 'Epic'], ['Level 2', 'Default'], ['Level 3', 'Layers'], ['Leaf', 'Check']]) {
+      const trigger = picker(name)
+      await expect(trigger).toHaveAccessibleName(`${name} icon: ${label}`)
+      await expect(trigger.locator('svg').first()).toBeVisible()
+      expect(await trigger.evaluate(el => el.scrollWidth - el.clientWidth), `${name} trigger text fits`).toBeLessThanOrEqual(0)
+    }
+
+    const guard = await controlStability(page, {
+      actions: card.getByLabel('Vocabulary actions'), save: card.getByRole('button', { name: /Save names/ }),
+      top: card.getByLabel('Top level', { exact: true }), topIcon: picker('Top level'), level2Icon: picker('Level 2'), level3: card.getByLabel('Level 3', { exact: true }), clickedRow: rows.nth(1),
+    })
+    await guard.check(() => picker('Level 2').click())
+    const list = page.getByRole('listbox', { name: 'Level 2 icon' })
+    await expect(list.getByRole('option')).toHaveCount(9)
+    expect(await list.getByRole('option').evaluateAll(options => options.map(option => option.querySelector('svg')!.getBoundingClientRect().width))).toEqual(Array(9).fill(16))
+    const box = (await page.getByRole('dialog', { name: 'Choose level 2 icon' }).boundingBox())!
+    expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(width)
+    // The choice opens on the current icon; arrows move, Home and End jump.
+    const option = (name: string) => list.getByRole('option', { name: new RegExp(`^${name}`) })
+    await expect(option('Default')).toBeFocused()
+    const optionGuard = await controlStability(page, { first: option('Default'), last: option('Box'), listbox: list })
+    await optionGuard.check(() => page.keyboard.press('ArrowDown')); await expect(option('Ticket')).toBeFocused()
+    await optionGuard.check(() => page.keyboard.press('End')); await expect(option('Box')).toBeFocused()
+    await optionGuard.check(() => page.keyboard.press('Home')); await expect(option('Default')).toBeFocused()
+    await optionGuard.check(() => option('Epic').hover()); optionGuard.done()
+    await page.screenshot({ path: `${shots}/picker-${width}-${theme}.png`, fullPage: true })
+    await guard.check(async () => { await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter') })
+    await expect(list).toBeHidden()
+    await expect(picker('Level 2')).toHaveAccessibleName('Level 2 icon: Ticket'); await expect(picker('Level 2')).toBeFocused()
+    // Esc closes the choice without changing it and returns to the trigger.
+    await guard.check(async () => { await picker('Level 2').press('ArrowDown'); await expect(list).toBeVisible(); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Escape') })
+    await expect(list).toBeHidden()
+    await expect(picker('Level 2')).toHaveAccessibleName('Level 2 icon: Ticket'); await expect(picker('Level 2')).toBeFocused()
+    await guard.check(() => picker('Top level').click()); await page.getByRole('option', { name: 'Default Epic', exact: true }).click()
+    await expect(picker('Top level')).toHaveAccessibleName('Top level icon: Default')
+    guard.done()
+    await expect(card.locator('.preview')).toContainText('Arbeitsvorhaben / Teilprojekt / Geschichte')
+
+    // A new level lands directly above the leaf and shows in the preview chain.
+    const adding = await controlStability(page, { actions: card.getByLabel('Vocabulary actions'), top: card.getByLabel('Top level', { exact: true }), clickedRow: rows.first() })
+    await adding.check(() => card.getByRole('button', { name: 'Add level' }).click()); adding.done()
+    await expect(rows.locator('label')).toHaveText(['Top level', 'Level 2', 'Level 3', 'Level 4', 'Leaf (work item)'])
+    await card.getByLabel('Level 4', { exact: true }).fill('Aufgabe')
+    await expect(card.locator('.preview')).toHaveText('Arbeitsvorhaben / Teilprojekt / Geschichte / Aufgabe / Arbeitsschritt mit ausführlicher deutscher Beschreibung')
+    await card.getByRole('button', { name: /Save names/ }).click()
+    await expect(card.getByRole('status')).toContainText('Workspace names saved')
+    expect(puts).toHaveLength(1)
+    expect(puts[0].levels).toEqual([{ name: 'Arbeitsvorhaben', icon: '' }, { name: 'Teilprojekt', icon: 'ticket' }, { name: 'Geschichte', icon: 'layers' }, { name: 'Aufgabe', icon: '' }])
+    expect(puts[0].leaf).toEqual({ name: 'Arbeitsschritt mit ausführlicher deutscher Beschreibung', icon: 'check' })
+    // Tall enough for the whole card, so the preview below the rows is in the picture.
+    await page.setViewportSize({ width, height: 1400 }); await card.scrollIntoViewIfNeeded()
+    await card.screenshot({ path: `${shots}/card-${width}-${theme}.png` })
     expect(errors).toEqual([])
   })
 }
