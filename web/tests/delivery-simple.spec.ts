@@ -13,10 +13,79 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en
   work.preferences.theme = { choice: options.theme ?? 'light' }
   await mockWork(page, work)
   if (options.lang === 'de') { const data = settingsData(); data.profile.locale = 'de-AT'; await mockSettings(page, data) }
-  await mockDelivery(page, () => ({ status: 200, body: deliveryMetrics() }))
+  let answer: { status: number; body: unknown } = { status: 200, body: deliveryMetrics() }
+  await mockDelivery(page, async () => answer)
+  return {
+    answer: (status: number, body: unknown) => { answer = { status, body } },
+    metrics: (metricOptions: Parameters<typeof deliveryMetrics>[0] = {}) => { answer = { status: 200, body: deliveryMetrics(metricOptions) } },
+  }
 }
 const head = (page: Page) => page.locator('.dl-head')
 const simpleTile = (page: Page, name: string) => page.getByTestId('delivery-simple').getByRole('listitem').filter({ has: page.getByRole('heading', { name, level: 4 }) })
+
+for (const lang of ['en', 'de'] as const) {
+  test(`a failed preference save keeps the choice and shows a ${lang === 'de' ? 'German' : 'English'} warning with retry`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await setup(page, { lang })
+    let reject = true
+    await page.route('**/api/preferences/delivery*', async route => {
+      if (route.request().method() !== 'PUT') return route.fallback()
+      if (reject) return route.fulfill({ status: 500, json: { error: 'not saved' } })
+      return route.fallback()
+    })
+    await page.goto('/p/AEON/delivery')
+    const windows = head(page).getByRole('radiogroup', { name: lang === 'de' ? 'Zeitraum der Diagramme' : 'Chart window' })
+    const levels = head(page).getByRole('radiogroup', { name: lang === 'de' ? 'Detailgrad' : 'Level of detail' })
+    const chosen = windows.getByRole('radio', { name: lang === 'de' ? '30 Tage' : '30 days' })
+    const warning = page.getByTestId('delivery-pref-error')
+    await expect(windows.getByRole('radio', { name: lang === 'de' ? '7 Tage' : '7 days' })).toHaveAttribute('aria-checked', 'true')
+    const guard = await controlStability(page, { windows, levels })
+    await guard.check(async () => {
+      await chosen.click()
+      await expect(warning).toBeVisible()
+    })
+    guard.done()
+    await expect(chosen).toHaveAttribute('aria-checked', 'true')
+    await expect(warning).toContainText(lang === 'de'
+      ? 'Zeitraum und Detailgrad konnten nicht gespeichert werden. Die Auswahl bleibt auf dieser Seite.'
+      : 'The window and level could not be saved. This choice stays on this page.')
+    reject = false
+    await warning.getByRole('button', { name: lang === 'de' ? 'Erneut speichern' : 'Save again', exact: true }).click()
+    await expect(warning).toHaveCount(0)
+    await expect(chosen).toHaveAttribute('aria-checked', 'true')
+  })
+}
+
+test('a failed refresh keeps Learn still through the error and the retry', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const world = await setup(page)
+  await page.goto('/p/AEON/delivery')
+  const simple = page.getByTestId('delivery-simple')
+  const learn = simple.getByRole('button', { name: 'Learn: How long the PR checks take' })
+  const last = simple.getByRole('button', { name: 'Learn: Full test run each night' })
+  const summary = page.getByTestId('delivery-summary')
+  await expect(summary).toContainText('Last 7 days vs. the 7 before')
+  const guard = await controlStability(page, {
+    learn, last, summary,
+    windows: head(page).getByRole('radiogroup', { name: 'Chart window' }),
+    levels: head(page).getByRole('radiogroup', { name: 'Level of detail' }),
+  })
+  world.answer(500, { error: 'boom' })
+  await guard.check(async () => {
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+    await expect(page.getByRole('alert')).toContainText('Delivery numbers could not be loaded.')
+    await expect(simple.locator('.s-val.empty').first()).toHaveText('Not loaded')
+    await expect(summary).toContainText('Delivery numbers could not be loaded.')
+  })
+  world.metrics({})
+  await guard.check(async () => {
+    await page.getByRole('button', { name: 'Retry', exact: true }).click()
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(summary).toContainText('Last 7 days vs. the 7 before')
+    await expect(simple.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'How long the PR checks take', level: 4 }) }).locator('.s-val')).toHaveText('16min')
+  })
+  guard.done()
+})
 
 test('Simple explains each number in plain words, and its controls stay still through every window', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })

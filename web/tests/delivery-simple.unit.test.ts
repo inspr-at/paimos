@@ -77,6 +77,31 @@ it('the summary counts numbers on target and names the closest and the biggest g
   expect(failed.sections.flatMap(section => section.tiles).every(tile => tile.value === null && tile.empty === 'Not loaded' && tile.verdict.word === 'Not loaded')).toBe(true)
 })
 
+it('a partial window with full calendar coverage names the missing facts beside the source', () => {
+  // Risk: truncated facts are "partial" while every calendar day is covered, and Simple
+  // then says only "Partial · Measured from GitHub" (AEON-1003 fix 2).
+  const reason = 'Some facts are missing: a day had more runs than GitHub lists (1 000).'
+  const data = deliveryMetrics()
+  const wall = data.metrics.find(metric => metric.key === 'pr_ci_wall')!
+  wall.reason = reason
+  wall.status = 'partial'
+  const seven = wall.windows.find(window => window.days === 7)!
+  seven.status = 'partial'
+  seven.coverage = { ...seven.coverage, full: true }
+  const tile = simpleNumbersOf(data as never, 7, 'ready', false, 'en').sections.flatMap(section => section.tiles).find(item => item.key === 'pr_ci_wall')!
+  expect(tile.partial).toBe(true)
+  expect(tile.foot).toBe(`Measured from GitHub · ${reason}`)
+  expect(tile.learn.body).toContain('p50 (median)')
+  expect(tile.learn.body).toContain(reason)
+  const german = simpleNumbersOf(data as never, 7, 'ready', false, 'de').sections.flatMap(section => section.tiles).find(item => item.key === 'pr_ci_wall')!
+  expect(german.foot).toBe(`Gemessen über GitHub · ${reason}`)
+  expect(german.learn.body).toContain(reason)
+  // A short calendar span keeps its coverage phrase. This reason belongs to the full-coverage case.
+  const merge = simpleNumbersOf(deliveryMetrics() as never, 7, 'ready', false, 'en').sections.flatMap(section => section.tiles).find(item => item.key === 'merge_rounds_model_share')!
+  expect(merge.foot).toContain('covers 4 of 7 days')
+  expect(merge.foot).not.toContain(reason)
+})
+
 const spark = (values: (number | null)[], statuses: SparkModel['statuses'], target: SparkModel['target']): SparkModel =>
   ({ kind: 'line', percent: false, values, statuses, target, nights: [], unit: 'day', mode: 'ready' })
 

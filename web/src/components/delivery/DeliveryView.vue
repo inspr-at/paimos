@@ -17,8 +17,9 @@ import WindowSwitch from './WindowSwitch.vue'
 import { deliveryLanguage } from '../../lib/delivery'
 import { bucketOf, clockTime, DEFAULT_PREFS, DELIVERY_PREFS_KEY, hasAnyData, numbersOf, readDeliveryMetrics, readPrefs, shortDate, type DeliveryMetrics, type DeliveryPrefs, type Level, type TileModel, type WindowDays } from '../../lib/deliveryNumbers'
 import { deliveryText, fill } from '../../lib/deliveryNumbersText'
-import { usePreference } from '../../lib/preferences'
+import { onPreferenceFailure, preferenceSaves, usePreference } from '../../lib/preferences'
 import { usePoller } from '../../lib/usePolledData'
+import { vClipTip } from '../../directives/clipTip'
 import { useProfile } from '../../stores/profile'
 
 const props = defineProps<{ project: { id: string; routeKey: string; title: string } }>()
@@ -48,10 +49,22 @@ const prefsReady = ref(false)
 void pref.ready.then(() => { prefsReady.value = true })
 const chosen = ref<DeliveryPrefs | null>(null)
 const prefs = computed<DeliveryPrefs>(() => chosen.value ?? (prefsReady.value ? readPrefs(pref.value.value) : DEFAULT_PREFS))
+// The listener fires inside the failed write, before the set records it. The watch only
+// clears the warning, so a retry does not flash the failure that is still in the set.
+const prefFailed = ref(false)
+onBeforeUnmount(onPreferenceFailure(key => { if (key === DELIVERY_PREFS_KEY) prefFailed.value = true }))
+watch(() => [...preferenceSaves.failed], ids => {
+  if (!ids.some(id => id.endsWith(`/${DELIVERY_PREFS_KEY}`))) prefFailed.value = false
+})
 function choose(next: Partial<DeliveryPrefs>) {
   const value = { ...prefs.value, ...next }
   chosen.value = value
+  prefFailed.value = false
   pref.save(value, 0)
+}
+function retryPrefs() {
+  prefFailed.value = false
+  pref.save(chosen.value ?? prefs.value, 0)
 }
 const setWindow = (window: WindowDays) => choose({ window })
 const setLevel = (level: Level) => choose({ level })
@@ -177,6 +190,11 @@ watch([() => prefs.value.window, () => prefs.value.level, view, lang], closeTip)
         <span class="dl-updated" data-testid="delivery-updated">{{ updated || ' ' }}</span>
       </div>
     </div>
+    <p v-if="prefFailed" class="banner err pref-warn" role="alert" data-testid="delivery-pref-error">
+      <AppIcon name="alert" :size="16" />
+      <span v-clip-tip class="grow">{{ text.prefErr }}</span>
+      <button type="button" class="btn sm" @click="retryPrefs">{{ text.prefRetry }}</button>
+    </p>
 
     <template v-if="view === 'numbers'">
       <div class="dl-status">
@@ -185,16 +203,16 @@ watch([() => prefs.value.window, () => prefs.value.level, view, lang], closeTip)
         </div>
         <div v-else-if="state === 'error'" class="banner err" role="alert">
           <AppIcon name="alert" :size="16" />
-          <span class="grow"><b>{{ text.errT }}</b> {{ text.errB }}</span>
+          <span v-clip-tip class="grow"><b>{{ text.errT }}</b> {{ text.errB }}</span>
           <button type="button" class="btn sm" @click="retry"><AppIcon name="refresh" :size="14" />{{ text.retry }}</button>
         </div>
         <div v-else-if="!source" class="banner" role="status">
           <AppIcon name="info" :size="16" />
-          <span class="grow"><b>{{ text.norepoT }}</b> {{ text.norepoB }}</span>
+          <span v-clip-tip class="grow"><b>{{ text.norepoT }}</b> {{ text.norepoB }}</span>
         </div>
         <div v-else-if="noData" class="banner" role="status">
           <AppIcon name="info" :size="16" />
-          <span class="grow"><b>{{ text.nodataT }}</b> {{ fill(text.nodataB, { repo: source.repository }) }}</span>
+          <span v-clip-tip class="grow"><b>{{ text.nodataT }}</b> {{ fill(text.nodataB, { repo: source.repository }) }}</span>
         </div>
         <div v-else class="sources">
           <span v-for="chip in chips" :key="chip.b" class="src"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span></span>
@@ -273,6 +291,9 @@ watch([() => prefs.value.window, () => prefs.value.level, view, lang], closeTip)
 .banner.err { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .banner.err svg { color: var(--danger); }
 .banner .btn { flex: none; gap: 6px; }
+/* The status row keeps the sources' height in every state, so the tiles' Learn buttons do not jump (AEON-541). */
+.dl-status .banner { min-height: 28px; padding-block: 0; flex-wrap: nowrap; }
+.dl-status .banner .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flow-empty { margin-top: 16px; }
 .tiles-cap { margin: 18px 0 0; font: 500 10.5px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
 .tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 8px; }
@@ -315,6 +336,8 @@ watch([() => prefs.value.window, () => prefs.value.level, view, lang], closeTip)
   .defs { grid-template-columns: minmax(0, 1fr); }
   .banner { flex-wrap: wrap; }
   .banner .btn { min-height: 44px; }
+  .dl-status .sources, .dl-status .banner { min-height: 44px; }
+  .dl-status .banner { flex-wrap: nowrap; }
 }
 @container delivery (max-width: 460px) { .tiles { grid-template-columns: minmax(0, 1fr); } }
 </style>

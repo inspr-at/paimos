@@ -125,7 +125,11 @@ export function simpleTile(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
   const cover = ready ? coverText(window?.coverage, deliveryText(lang)) : ''
   const partial = ready && !!window && window.n > 0 && (window.status === 'partial' || !!cover)
   const part = words.part && (!words.part.includes('{d}') || from) ? fill(words.part, { d: from }) : ''
-  const foot = partial && (cover || part) ? cover || part : words.src
+  // Full calendar coverage still leaves a partial window when facts were truncated.
+  // The coverage phrase is empty then; the server's reason is what is missing.
+  const reason = ready && window?.status === 'partial' && window.coverage.full && metric?.reason?.trim() ? metric.reason.trim() : ''
+  const footBase = partial && (cover || part) ? cover || part : words.src
+  const foot = reason ? `${footBase} · ${reason}` : footBase
 
   // The sentence, the Learn text and the nightly verdict's gap, all from this window's numbers.
   const n = window?.n ?? 0
@@ -178,6 +182,7 @@ export function simpleTile(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
     learn = fill(words.learn, { ...values, n: def.kind === 'release' ? (n === 1 ? text.releaseOne : fill(text.releaseMany, { n: num(n, lang) })) : def.kind === 'review' ? values.n : num(n, lang) })
       + (partial && words.learnPart && from ? fill(words.learnPart, { d: from }) : '')
   }
+  if (reason && !learn.includes(reason)) learn = `${learn} ${reason}`
 
   const { buckets, samples } = bucketsOf(metric, days, lang)
   const spark: SparkModel = {

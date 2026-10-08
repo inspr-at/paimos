@@ -4,46 +4,62 @@
 // card, then the ten numbers in three plain sections along the path, then the
 // technical words explained simply. Everything sits below the page head's
 // controls and grows downward.
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import SimpleTile from './SimpleTile.vue'
 import type { DeliveryLanguage } from '../../lib/delivery'
 import type { DeliveryMetrics, WindowDays } from '../../lib/deliveryNumbers'
+import { deliveryText } from '../../lib/deliveryNumbersText'
 import { simpleNumbersOf } from '../../lib/deliverySimple'
 import { simpleText } from '../../lib/deliverySimpleText'
 
 const props = defineProps<{ data: DeliveryMetrics | null; window: WindowDays; state: 'loading' | 'error' | 'ready'; noData: boolean; lang: DeliveryLanguage }>()
 const text = computed(() => simpleText(props.lang))
+const pageText = computed(() => deliveryText(props.lang))
 const page = computed(() => simpleNumbersOf(props.state === 'ready' ? props.data : null, props.window, props.state, props.noData, props.lang))
+// Leaving a ready summary keeps its box until the next ready paint, so Learn below does not jump.
+const summaryEl = ref<HTMLElement>()
+const summaryHold = ref(0)
+watch(() => props.state, (next, prev) => {
+  if (prev === 'ready' && next !== 'ready') summaryHold.value = summaryEl.value?.getBoundingClientRect().height ?? 0
+  else if (next === 'ready') summaryHold.value = 0
+}, { flush: 'pre' })
 const LEVELS = ['on', 'close', 'far', 'none'] as const
 const ICON = { on: 'v-on', close: 'v-close', far: 'v-far', none: 'v-none' } as const
 </script>
 
 <template>
   <div class="simple" data-testid="delivery-simple">
-    <div v-if="page.summary.kind === 'loading'" class="s-sum" aria-busy="true">
-      <span class="sk" style="width: 60%; height: 22px" /><span class="sk" style="width: 80%; height: 14px" /><span class="sk" style="width: 70%; height: 14px" />
-    </div>
-    <div v-else-if="page.summary.kind === 'nodata'" class="s-sum" data-testid="delivery-summary">
-      <p class="big">{{ page.summary.title }}</p>
-      <p class="line">{{ page.summary.body }}</p>
-    </div>
-    <div v-else-if="page.summary.kind === 'ready'" class="s-sum" data-testid="delivery-summary">
-      <p class="big">{{ page.summary.big }}</p>
-      <p v-if="page.summary.gaps.length" class="line">
-        <template v-for="(gap, index) in page.summary.gaps" :key="gap.label">{{ index ? ' ' : '' }}{{ gap.label }}: <b>{{ gap.name }}</b> ({{ gap.gap }}).</template>
-      </p>
-      <p class="line">{{ page.summary.week }}</p>
-      <p class="line">{{ page.summary.charts }}</p>
-      <div class="s-legend" role="list" :aria-label="text.legend">
-        <span v-for="level in LEVELS" :key="level" role="listitem" :class="`v-${level}`"><AppIcon :name="ICON[level]" :size="14" />{{ level === 'none' ? text.none : text[level] }}</span>
-      </div>
+    <div ref="summaryEl" class="s-sum" data-testid="delivery-summary" :aria-busy="page.summary.kind === 'loading' ? true : undefined" :style="summaryHold > 0 ? { minHeight: `${summaryHold}px` } : undefined">
+      <template v-if="page.summary.kind === 'loading'">
+        <span class="sk" style="width: 60%; height: 22px" /><span class="sk" style="width: 80%; height: 14px" /><span class="sk" style="width: 70%; height: 14px" />
+      </template>
+      <template v-else-if="page.summary.kind === 'nodata'">
+        <p class="big">{{ page.summary.title }}</p>
+        <p class="line">{{ page.summary.body }}</p>
+      </template>
+      <template v-else-if="page.summary.kind === 'ready'">
+        <p class="big">{{ page.summary.big }}</p>
+        <p v-if="page.summary.gaps.length" class="line">
+          <template v-for="(gap, index) in page.summary.gaps" :key="gap.label">{{ index ? ' ' : '' }}{{ gap.label }}: <b>{{ gap.name }}</b> ({{ gap.gap }}).</template>
+        </p>
+        <p class="line">{{ page.summary.week }}</p>
+        <p class="line">{{ page.summary.charts }}</p>
+        <div class="s-legend" role="list" :aria-label="text.legend">
+          <span v-for="level in LEVELS" :key="level" role="listitem" :class="`v-${level}`"><AppIcon :name="ICON[level]" :size="14" />{{ level === 'none' ? text.none : text[level] }}</span>
+        </div>
+      </template>
+      <template v-else>
+        <p class="big">{{ pageText.errT }}</p>
+        <p class="line">{{ pageText.errB }}</p>
+      </template>
     </div>
 
     <section v-for="(section, index) in page.sections" :key="index" class="s-sec" :aria-labelledby="`s-sec-${index}`">
       <div class="s-sec-head">
         <h3 :id="`s-sec-${index}`">{{ section.title }}</h3>
-        <span v-if="section.count" class="cnt">{{ section.count }}</span>
+        <!-- An empty count still occupies the line, so its baseline cannot shift Learn. -->
+        <span class="cnt" :aria-hidden="section.count ? undefined : true">{{ section.count || ' ' }}</span>
         <p>{{ section.sub }}</p>
       </div>
       <div class="s-grid" role="list">

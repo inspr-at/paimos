@@ -6636,6 +6636,12 @@
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"Simple explains each number in plain words, and its controls stay still through every window","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows a English warning with retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows a German warning with retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed refresh keeps Learn still through the error and the retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"a failed refresh keeps the delivery rows and notes the failure","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"a later hold on a lifted row can be lifted again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -14575,6 +14581,8 @@
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"Learn opens on focus, pins with Enter or a click, and Esc closes it and keeps focus on the button","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"TileSpark draws the green target zone, the dashed target, \"better\" on the axis and hatched days","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"a partial window with full calendar coverage names the missing facts beside the source","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"a verdict is on target up to 1×, close up to 1.5×, far off beyond, with a word and its own shape for each","tier":"ESSENTIAL"}
     ,
