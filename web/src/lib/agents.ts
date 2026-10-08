@@ -36,6 +36,8 @@ export interface AllowanceWindow extends AllowanceWrite {
   set_by_you?: boolean
 }
 export interface AgentAccount {
+  usage_probe_enabled?: boolean
+  usage_budget?: import('./capacity').CapacityBudget
   owner_person_id?: string; owner_person_name?: string; linked_at?: string; link_revision?: number
   ongoing_use_approved?: boolean
   reading_support?: 'every_5_min' | 'first_run' | 'statusline' | 'none'; quota_fingerprint?: string; quota_pool_fingerprint?: string; statusline_enabled?: boolean
@@ -195,3 +197,5 @@ export function putQuotaPool(account_ids: string[], quota_fingerprint: string, c
 export const readPauseDefault = () => request<{ default_level: import('./agentPause').PauseLevel }>('/me/agent-pause-settings')
 export const savePauseDefault = (default_level: import('./agentPause').PauseLevel) => request<{ default_level: import('./agentPause').PauseLevel }>('/me/agent-pause-settings', 'PUT', { default_level })
 export const readEstimateInterval = () => request<{ interval_minutes: number }>('/settings/eta-interval')
+
+export const setUsageProbe = (id: string, binding_revision: number, enabled: boolean) => request<void>(`/agent-accounts/${enc(id)}/usage-probe`, 'PUT', { binding_revision, enabled })

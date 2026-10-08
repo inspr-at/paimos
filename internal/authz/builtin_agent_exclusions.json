@@ -3,6 +3,8 @@
   "permissions": [
     "recurrences.manage",
     "delivery.manage",
+    "delivery_queue.manage",
+    "delivery_queue.claim",
     "reviewpolicy.manage",
     "account.overview.read",
     "engine.admission",

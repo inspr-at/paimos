@@ -90,6 +90,7 @@
         "internal/piprobe/**",
         "internal/grokprobe/**",
         "internal/capacity/**",
+        "internal/usageprobe/**",
         "internal/agentplan/**",
         "internal/sessionusage/**",
         "internal/agentruns/**",
