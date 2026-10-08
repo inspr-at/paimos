@@ -540,6 +540,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "relations":
 		return scope("relations")
 	case "events":
+		if len(parts) >= 2 && parts[1] == "subscribe" {
+			if len(parts) == 2 && read {
+				return "events.subscribe", true
+			}
+			return "", false
+		}
 		if read {
 			return "events.read", true
 		}
