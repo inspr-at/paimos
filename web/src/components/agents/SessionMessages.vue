@@ -10,6 +10,7 @@ import type { MessageStatus } from '../../lib/agents'
 import { chatWords, statusLabel, statusTip } from './sessionChat'
 import AppIcon from '../AppIcon.vue'
 import Avatar from '../Avatar.vue'
+import MarkdownBody from '../MarkdownBody.vue'
 
 // newFrom places the "New" divider above that message; statuses carry the delivery
 // progress of the viewer's own messages (AEON-280) when the server has one.
@@ -55,7 +56,8 @@ const statusOf = (m: ProjectMessage): MessageStatus | undefined => {
               <span class="delivery-word">{{ label(statusOf(m)!) }}</span>
             </span>
           </p>
-          <p class="msg-body">{{ m.body }}</p>
+          <p v-if="m.sender_principal_id === me" class="msg-body">{{ m.body }}</p>
+          <MarkdownBody v-else :body="m.body" chat />
           <p v-if="!m.answered && statusOf(m)?.status === 'not_delivered'" class="undelivered" data-status="not_delivered" :data-tip="statusTip(statusOf(m)!, absoluteTime)"><AppIcon name="alert" :size="12" /><span>{{ label(statusOf(m)!) }}</span><button v-if="canReply" type="button" class="retry" @click="emit('retry', m)">{{ words.retry }}</button></p>
         </li>
       </template>

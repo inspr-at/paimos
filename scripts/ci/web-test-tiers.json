@@ -10450,6 +10450,24 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"?tab=messages deep-links to the thread; an ended session starts read on a new browser","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 Stop: Esc leaves the field then interrupts with captured process ownership","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 history: more than 200 posts remain reachable and a late refresh retains the reader anchor","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls dark 1024: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls dark 1440: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls dark 390: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls light 1024: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls light 1440: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls light 390: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 shell updates: follow newest output until the reader scrolls up inside the pane","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"Messages is its own tab with an unread badge; seeing the posts clears it and the tab is remembered","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a failed read marker is sent again on the next flush, without an error","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -15685,6 +15703,12 @@
     {"kind":"vitest","file":"tests/session-order.unit.test.ts","name":"manual order by column > keeps families together and orders children by the same key","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/session-removal-store.unit.test.ts","name":"an in-flight poll and an older snapshot cannot resurrect a removed generation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"AEON-976 clears only the denied history when project access is revoked during paging","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"AEON-976 fills a multi-page reconnect gap without dropping loaded history","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"AEON-976 retains earlier keyset pages across newest refreshes and drops paging after auth reset","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a burst during a slow poll starts one catch-up and one trailing read","tier":"ESSENTIAL"}
     ,
