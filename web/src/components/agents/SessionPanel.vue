@@ -417,7 +417,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .capability.queue, .capability.between { color: var(--ink-2); background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--line); }
 .capability.abort { color: var(--warn-ink); background: var(--gold-wash); box-shadow: inset 0 0 0 1px var(--warn-line); }
 .capability:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-@media (max-width: 720px) { .capability { min-height: 44px; } .session-panel.composing .chat-setup { display: none; } }
+@media (max-width: 720px) { .capability { min-height: 44px; } }
 .muted { color: var(--ink-3); }
 .evidence { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--chip-teal-bg); color: var(--teal-ink); }
 .project-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }

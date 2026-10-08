@@ -185,7 +185,8 @@ test('Messages is its own tab with an unread badge; seeing the posts clears it a
   await messagesTab(page).click()
   await expect(messagesTab(page)).toHaveAttribute('aria-selected', 'true')
   await expect(panel.getByRole('separator', { name: '2 new' })).toBeVisible()
-  await expect(panel.locator('.msg').nth(2).getByText('You')).toBeVisible() // Own post after the watermark, above the divider.
+  await expect(panel.locator('.msg').nth(2)).toHaveClass(/mine/) // Own post after the watermark, above the divider.
+  await expect(panel.locator('.msg').nth(2)).toContainText('Good. Keep the fix small and ship it behind the release gate.')
   await expect(messagesTab(page).locator('.count')).toHaveCount(0)
   // Everything is in view, so the watermark reaches the newest post.
   await expect.poll(() => page.evaluate(key => JSON.parse(localStorage.getItem('aeon.session-read.v1') ?? '{}')[key]?.event, `${me.id}:${worker.id}`)).toBe(204)

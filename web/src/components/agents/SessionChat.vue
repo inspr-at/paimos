@@ -727,7 +727,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
     <footer v-if="!noPermission" class="composer">
       <SessionRequests v-if="unmanaged" :key="s.id" :session="s" :now="now" />
       <ul v-if="queue.length" class="chat-queue" :aria-label="words.queued">
-        <li v-for="message in queue" :key="message.id" class="queue-item" :class="{ editing: editing?.id === message.id }" :data-id="message.id">
+        <li v-for="message in queue" :key="message.id" class="queue-item" :class="{ editing: editing?.id === message.id }" :data-id="message.id" :data-status="message.send_failed ? 'not_delivered' : statuses[message.id]?.status ?? 'sent'">
           <AppIcon :name="message.delivery_level === 'steer' ? 'bolt' : 'queue'" :size="14" />
           <span class="queue-text" tabindex="0" :data-tip="message.body" :title="message.body">{{ message.body }}</span><span class="queue-when">{{ queueWhen(message) }}</span>
           <button v-if="message.send_failed || statuses[message.id]?.status === 'not_delivered'" type="button" class="icon-btn flat" :aria-label="words.retry" :disabled="queueBusy || !canWrite || offline" @click="retry(message)"><AppIcon name="refresh" :size="14" /></button>
