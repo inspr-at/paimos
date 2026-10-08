@@ -1,0 +1,15 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_agent_exclusions": [
+    "engine.admission",
+    "engine.manage",
+    "engine.read"
+  ],
+  "words": {
+    "special": {
+      "engine.admission": "Evaluate shadow start admission",
+      "engine.manage": "Manage shadow admission settings",
+      "engine.read": "Read shadow admission settings"
+    }
+  }
+}

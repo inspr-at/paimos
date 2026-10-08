@@ -1,0 +1,12 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_agent_exclusions": [
+    "delivery_queue.claim",
+    "delivery_queue.manage"
+  ],
+  "words": {
+    "resources": {
+      "delivery_queue": "delivery work queue"
+    }
+  }
+}

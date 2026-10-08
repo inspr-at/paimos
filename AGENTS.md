@@ -39,6 +39,7 @@ scripts/             release checks
 12. **INSPR Flow / Journey is retired** (Markus, 2026-10-05, AEON-723): don't build on, extend or fix journey or stage features; route such tickets to retirement.
 13. **Shared files.** New source files get a slice in `scripts/audit/slices.json`. When merging main, the tier manifests merge through the merge driver; on a real conflict take main's version and re-apply your rows with `node scripts/test-tiers/cli.mjs manifests --write`; never commit conflict markers. A change to this file updates `existing_agents_sha256` in `scripts/rules-bootstrap/rollout.json` in the same commit.
 14. **Design and release copy.** The design source is the HTML attached to the ticket. Release-note copy (pills, benefits) must be true for the code that ships; use marketing release names; German in impersonal form.
+15. **Feature docs.** A new feature gets its own file in `docs/features/`; README.md carries no feature prose.
 
 ## Code health (AEON-574)
 

@@ -5,8 +5,7 @@
 // contract's rules (last owner, no escalation, roles in use, field reasons), so
 // specs see the answers the real server gives. Register after the work mocks.
 import type { Page, Route } from '@playwright/test'
-import projectSelfPermissions from '../../internal/authz/project_self_permissions.json' with { type: 'json' }
-import builtinAgentExclusions from '../../internal/authz/builtin_agent_exclusions.json' with { type: 'json' }
+import { projectSelfPermissions, builtinAgentExclusions } from '../../internal/authz/permission_data.mjs'
 
 export const ME = '11111111-1111-4111-8111-111111111111'
 export const MIRA = '22222222-2222-4222-8222-222222222222'

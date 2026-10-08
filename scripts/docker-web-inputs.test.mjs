@@ -51,11 +51,36 @@ function externalTarget(path, specifier) {
   return relative(root, file);
 }
 
+// AEON-983: web/src imports the composed module. The three legacy JSON files
+// stay in the tree for other readers, but they are not Docker web inputs.
+const requiredSharedImports = [
+  'internal/agentactivity/privacy.json',
+  'internal/authz/permission_data.mjs',
+  'internal/nodes/status_definitions.json',
+];
+
 test('production external web compilation resolves every shared import in the full checkout', () => {
   const targets = externalImports();
-  for (const input of ['internal/agentactivity/privacy.json', 'internal/authz/permission_labels.json',
-    'internal/authz/project_self_permissions.json', 'internal/authz/builtin_agent_exclusions.json',
-    'internal/nodes/status_definitions.json']) assert.ok(targets.has(input), `missing shared import ${input}`);
+  for (const input of requiredSharedImports) assert.ok(targets.has(input), `missing shared import ${input}`);
+});
+
+test('AEON-983 permission data is one shared module import', () => {
+  const legacy = [
+    'internal/authz/permission_labels.json',
+    'internal/authz/project_self_permissions.json',
+    'internal/authz/builtin_agent_exclusions.json',
+  ];
+  assert.deepEqual(requiredSharedImports, [
+    'internal/agentactivity/privacy.json',
+    'internal/authz/permission_data.mjs',
+    'internal/nodes/status_definitions.json',
+  ]);
+  const targets = externalImports();
+  assert.ok(targets.has('internal/authz/permission_data.mjs'), 'missing shared import internal/authz/permission_data.mjs');
+  for (const input of legacy) {
+    assert.equal(requiredSharedImports.includes(input), false, input);
+    assert.equal(targets.has(input), false, `web/src still imports ${input}`);
+  }
 });
 
 test('assembly Dockerfile only copies prebuilt production artifacts into the frozen runtime', () => {

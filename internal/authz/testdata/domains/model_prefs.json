@@ -1,0 +1,30 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "model_prefs.manage"
+    ],
+    "owner": [
+      "model_prefs.manage"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": false,
+      "description": "Manage model prefs",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Model Prefs",
+      "key": "model_prefs.manage",
+      "owner_workstation_grantable": false,
+      "risk": "high"
+    }
+  ],
+  "words": {
+    "resources": {
+      "model_prefs": "model preferences"
+    }
+  }
+}
