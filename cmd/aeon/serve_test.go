@@ -19,9 +19,94 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/config"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/web"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Risk: background work consumes every slot and takes the entire installation
+// out of service although Postgres itself is healthy (AEON-995).
+func TestServeBackgroundPoolHeadroom(t *testing.T) {
+	t.Setenv("AEON_ENV", "dev")
+	fresh := dbtest.Open(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	poolCfg, err := pgxpool.ParseConfig(fresh.AppURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poolCfg.MaxConns = 4 // Old pgx default on the affected four-CPU host.
+	poolCfg.MinConns = 0
+	var armed atomic.Bool
+	held := make(chan struct{}, 4)
+	release := make(chan struct{})
+	defer close(release)
+	poolCfg.PrepareConn = func(ctx context.Context, _ *pgx.Conn) (bool, error) {
+		if armed.Load() && db.IsBackground(ctx) {
+			held <- struct{}{}
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+		}
+		return true, nil
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- serveWithPool(ctx, config.Config{DatabaseURL: fresh.AppURL, Env: "dev", PublicURL: "http://127.0.0.1", BootstrapTenantSlug: "pool-headroom", BootstrapTenantName: "Pool headroom"}, ln, pool, 1)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-time.After(20 * time.Second):
+			t.Error("server did not stop")
+		}
+	}()
+	client := &http.Client{Timeout: 10 * time.Second}
+	base := "http://" + ln.Addr().String()
+	resp, err := client.Get(base + "/api/ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("initial readiness = %d", resp.StatusCode)
+	}
+	armed.Store(true)
+	for range 4 {
+		select {
+		case <-held:
+		case err := <-done:
+			t.Fatalf("server stopped: %v", err)
+		case <-time.After(20 * time.Second):
+			t.Fatal("real workers did not reach acquisition barrier")
+		}
+	}
+	resp, err = client.Get(base + "/api/ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("readiness with real background workers = %d %s (acquired=%d max=%d)", resp.StatusCode, body, pool.Stat().AcquiredConns(), pool.Stat().MaxConns())
+	}
+}
 
 func TestLoggerJSONInProd(t *testing.T) {
 	record := slog.NewRecord(time.Now(), slog.LevelInfo, "listening", 0)
