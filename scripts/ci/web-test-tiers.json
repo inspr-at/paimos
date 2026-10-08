@@ -10440,6 +10440,22 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 shell updates: follow newest output until the reader scrolls up inside the pane","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 Gemini holds normal input and interrupts only via Stop and send","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 empty, offline and no-permission states preserve drafts and controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions dark 1024: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions dark 1440: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions dark 390: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions light 1024: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions light 1440: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions light 390: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"Messages is its own tab with an unread badge; seeing the posts clears it and the tab is remembered","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a failed read marker is sent again on the next flush, without an error","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13415,6 +13431,8 @@
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"a reload rebuilds the hook wait from the loaded thread and its receipts (AEON-369)","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"chat keys distinguish after-turn input, steer and composition","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/sessionChat.test.ts","name":"chat queue placement respects evidence and the static harness capability","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"delivery wording is short and specific (AEON-280)","tier":"GATED-FULL"}
     ,

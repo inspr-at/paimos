@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { advanceReceipt, chatSendLevel, awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, receiptBatchLimit, receiptQueryBatches, saveReadMark, saveTab, sessionBoundSends, statusDone, statusLabel, statusTip, unreadGroups } from '../src/components/agents/sessionChat.ts'
 import type { HarnessSession } from '../src/lib/agents.ts'
 import { collapseMessages } from '../src/components/agents/sessionMessages.ts'
+import { chatCapability, isQueuedMessage } from '../src/components/agents/sessionChat.ts'
 import type { ProjectMessage } from '../src/lib/agents.ts'
 
 function memory() {
@@ -249,4 +250,20 @@ test('receipt catch-up cannot replace Read with Sending or a late failure', () =
   assert.equal(advanceReceipt(sent, delivered), delivered)
   assert.equal(advanceReceipt(delivered, sent), delivered)
   assert.equal(advanceReceipt(read, { ...sent, status: 'not_delivered' }), read)
+})
+
+// AEON-977: harness presentation must not turn a Gemini prompt into implicit interruption.
+test('chat queue placement respects evidence and the static harness capability', () => {
+  for (const harness of ['claude', 'codex', 'pi']) assert.equal(chatCapability({ harness, management_mode: 'managed' }), 'native')
+  assert.equal(chatCapability({ harness: 'gemini', management_mode: 'managed' }), 'abort')
+  assert.equal(chatCapability({ harness: 'opencode', management_mode: 'managed' }), 'next')
+  assert.equal(chatCapability({ harness: 'grok', management_mode: 'managed' }), 'queue')
+  assert.equal(chatCapability({ harness: 'claude', management_mode: 'unmanaged' }), 'between')
+  const m = message('q', 1, 'me')
+  const sent = { message_id: 'q', status: 'sent' as const, delivered_at: null, read_at: null, deliver_by: null }
+  assert.equal(isQueuedMessage(m, sent, true, false), true)
+  assert.equal(isQueuedMessage(m, sent, false, false), false)
+  assert.equal(isQueuedMessage(m, sent, false, true), true)
+  assert.equal(isQueuedMessage({ ...m, queue_pending: true }, { ...sent, status: 'delivered' }, true, true), false)
+  assert.equal(isQueuedMessage({ ...m, queue_pending: true }, { ...sent, cancelled: true }, true, true), false)
 })

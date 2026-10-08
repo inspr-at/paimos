@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { APIError } from '../../lib/api'
-import { messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
+import { cancelSessionMessage, messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
 import { readSessionMarker, writeSessionMarker } from '../../lib/agentRows'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
@@ -13,7 +13,7 @@ import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import SessionRequests from './SessionRequests.vue'
 import { collapseMessages } from './sessionMessages'
-import { advanceReceipt, chatSendLevel, chatWords, awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
+import { advanceReceipt, chatCapability, isQueuedMessage, chatSendLevel, chatWords, awaitsInboxHook, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
@@ -27,6 +27,7 @@ const me = computed(() => identity.identity?.principal.id ?? '')
 const person = computed(() => identity.identity?.principal.kind === 'person')
 const s = computed(() => props.view.session)
 const localSends = ref<ProjectMessage[]>([])
+const statuses = ref<Record<string, MessageStatus>>({})
 const messages = computed(() => {
   if (!me.value) return []
   const server = agents.thread(s.value)
@@ -36,9 +37,25 @@ const messages = computed(() => {
 const address = computed(() => agents.addressOf(s.value.agent_principal_id))
 // A registered address is sent when one exists. Otherwise the recipient is the session's principal.
 const recipient = computed(() => address.value || s.value.agent_principal_id)
-const current = computed(() => collapseMessages(messages.value))
+const working = computed(() => s.value.activity === 'busy')
+const capability = computed(() => chatCapability(s.value))
+const atPrompt = computed(() => capability.value === 'between' && awaitsInboxHook(s.value))
+const uncertain = ref<Set<string>>(new Set())
+const queuedIds = ref<Set<string>>(new Set())
+const queue = computed(() => messages.value.filter(message => message.sender_principal_id === me.value && !statuses.value[message.id]?.cancelled && isQueuedMessage({ ...message, queue_pending: message.queue_pending || queuedIds.value.has(message.id) }, statuses.value[message.id], working.value, atPrompt.value)))
+const threadMessages = computed(() => {
+  const queued = new Set(queue.value.map(message => message.id))
+  return messages.value.filter(message => !queued.has(message.id) && !statuses.value[message.id]?.cancelled).sort((a, b) => {
+    const at = Date.parse(statuses.value[a.id]?.delivered_at || a.created_at || '')
+    const bt = Date.parse(statuses.value[b.id]?.delivered_at || b.created_at || '')
+    return Number.isFinite(at) && Number.isFinite(bt) && at !== bt ? at - bt : a.sent_event_id - b.sent_event_id
+  })
+})
+const current = computed(() => collapseMessages(threadMessages.value))
 const ended = computed(() => s.value.phase === 'stopped' || !!s.value.stopped_at || !!s.value.archived_at)
-const canSteer = computed(() => s.value.management_mode === 'managed' && s.value.advertised_capabilities.includes('steer'))
+const canSteer = computed(() => working.value && ['native', 'next'].includes(capability.value) && s.value.advertised_capabilities.includes('steer'))
+const alternative = computed(() => capability.value === 'next' ? words.value.next : words.value.now)
+const primaryLabel = computed(() => editing.value ? words.value.save : working.value && capability.value !== 'between' ? words.value.after : words.value.send)
 // Unmanaged sessions take rename/model requests next to the composer (AEON-225).
 const unmanaged = computed(() => s.value.management_mode === 'unmanaged')
 
@@ -47,6 +64,11 @@ watch(() => agents.thread(s.value).map(message => message.id).join(), () => {
   localSends.value = localSends.value.filter(message => !known.has(message.id))
 })
 const draft = ref('')
+const editing = ref<ProjectMessage | null>(null)
+const queueBusy = ref(false)
+const online = ref(navigator.onLine)
+const offline = computed(() => !online.value || ['stale', 'offline'].includes(props.view.status.state))
+const noPermission = computed(() => agents.threadState(s.value) === 'forbidden')
 const replyTo = ref<ProjectMessage | null>(null)
 const sendError = ref('')
 const historyLoading = ref(false)
@@ -57,6 +79,7 @@ function chatKeys(event: KeyboardEvent) {
   if (!props.active || event.key !== 'Escape' || event.repeat || event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
   if (document.querySelector('dialog[open], .floating, .ticket-peek-host')) return
   if (event.target instanceof HTMLElement && event.target !== document.body && !root.value?.contains(event.target)) return
+  if (editing.value) { event.preventDefault(); event.stopPropagation(); editing.value = null; return }
   if (replyTo.value) { event.preventDefault(); event.stopPropagation(); replyTo.value = null; return }
   // The repo keyboard convention takes precedence over the mock: the first
   // Escape leaves a text field; the next press can interrupt the turn.
@@ -466,7 +489,6 @@ onBeforeUnmount(() => {
 // Outstanding sends are asked in batches the status route will accept. A
 // delivered receipt on screen is asked again so it can become read, after
 // every send that still has no terminal receipt.
-const statuses = ref<Record<string, MessageStatus>>({})
 // Session-bound sends from the loaded thread. Receipts, not memory, decide
 // which of them still wait on the inbox hook, so a reload matches the server.
 const boundHookIds = computed(() => sessionBoundSends(messages.value, s.value.id, me.value))
@@ -486,6 +508,11 @@ function refreshReceipts() {
       const next = { ...statuses.value }
       for (const item of page.items) next[item.message_id] = advanceReceipt(next[item.message_id], item)
       statuses.value = next
+      const held = new Set(queuedIds.value)
+      for (const message of messages.value) {
+        if (message.sender_principal_id === me.value && isQueuedMessage(message, next[message.id], working.value, atPrompt.value)) held.add(message.id)
+      }
+      queuedIds.value = held
     }
   })().catch(() => { /* The status simply stays as it was. */ }).finally(() => {
     statusFlight = undefined
@@ -516,7 +543,7 @@ watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
   touchY = undefined
   markerHold = viewer && person.value && !local ? generation : 0
   seen?.disconnect()
-  draft.value = ''; replyTo.value = null; sendError.value = ''; localSends.value = []
+  draft.value = ''; replyTo.value = null; editing.value = null; queueBusy.value = false; uncertain.value = new Set(); queuedIds.value = new Set(); sendError.value = ''; localSends.value = []
   historyLoading.value = false; historyError.value = ''; paging = false
   const projectId = s.value.project_id
   boundProject = projectId
@@ -536,48 +563,51 @@ watch(() => props.active, active => { if (active && loaded) void refresh().then(
 
 // ---------- Composer ----------
 const composeBlock = computed(() => {
-  if (ended.value || sendError.value === 'This session has ended.') return 'This session has ended.'
-  if (agents.threadState(s.value) === 'error') return 'Messages could not be loaded right now. Close and reopen the session to try again.'
-  if (agents.threadState(s.value) === 'forbidden') return 'Reading this session requires access to its project and permission to read agent sessions.'
+  if (ended.value || sendError.value === words.value.ended) return words.value.ended
+  if (agents.threadState(s.value) === 'error') return words.value.loadError
+  if (agents.threadState(s.value) === 'forbidden') return words.value.noPermission
   // Only a message with no session still needs a registered target.
   if (!s.value.id && !address.value) return `${props.view.name} has no message address yet. It gets one when it registers a message target.`
   return ''
 })
 const hookReceipt = computed(() => hookReceipts(boundHookIds.value, statuses.value))
-const showHookNotice = computed(() => hookNoticeVisible(awaitsInboxHook(s.value), hookReceipt.value))
+const showHookNotice = computed(() => unmanaged.value && hookNoticeVisible(awaitsInboxHook(s.value), hookReceipt.value))
 async function deliver(local: ProjectMessage) {
   const session = s.value, viewer = me.value, generation = readGeneration
   const stillHere = () => generation === readGeneration && session.id === s.value.id && viewer === me.value
   local.send_failed = false
   try {
-    const accepted = await agents.send(session, recipient.value, local.body, local.delivery_level, local.reply_to ?? undefined, local.client_id)
+    const accepted = await agents.send(session, recipient.value, local.body, local.delivery_level, local.reply_to ?? undefined, local.client_id, local.resend_of)
     if (!stillHere()) return
-    localSends.value = localSends.value.map(message => message.client_id === local.client_id ? { ...accepted, client_id: local.client_id } : message)
+    if (local.queue_pending) queuedIds.value = new Set([...queuedIds.value, accepted.id])
+    localSends.value = localSends.value.map(message => message.client_id === local.client_id ? { ...accepted, client_id: local.client_id, queue_pending: local.queue_pending } : message)
     refreshReceipts()
   } catch (error) {
     if (!stillHere()) return
     localSends.value = localSends.value.map(message => message.client_id === local.client_id ? { ...message, send_failed: true } : message)
-    if (error instanceof APIError && error.status === 409 && error.body.code === 'session_ended') sendError.value = 'This session has ended.'
+    if (error instanceof APIError && error.status === 409 && error.body.code === 'session_ended') sendError.value = words.value.ended
   }
 }
 async function send(level: 'simple' | 'steer' = 'simple', source?: ProjectMessage) {
   const body = source?.body ?? draft.value.trim()
-  if (!body || !props.canWrite || composeBlock.value) return
+  if (!body || !props.canWrite || composeBlock.value || offline.value || queueBusy.value) return
+  if (editing.value && !source) { await saveEdit(); return }
   if (localSends.value.length >= 100) { toast(words.value.pendingLimit); return }
   const clientId = crypto.randomUUID()
   const local: ProjectMessage = {
-    id: clientId, client_id: clientId, optimistic: true, body, sender_principal_id: me.value,
+    id: clientId, client_id: clientId, optimistic: true, queue_pending: source?.queue_pending ?? (working.value || atPrompt.value), resend_of: source?.id, body, sender_principal_id: me.value,
     recipient_principal_id: s.value.agent_principal_id, recipient_session_id: s.value.id, to: recipient.value,
     sent_event_id: Number.MAX_SAFE_INTEGER, is_action_request: false, expects_reply: false,
-    delivery_level: level, reply_to: source?.reply_to ?? replyTo.value?.id, status: 'accepted', reply_obligation: 'none', created_at: new Date().toISOString(),
+    delivery_level: level, reply_to: source ? source.reply_to : replyTo.value?.id, status: 'accepted', reply_obligation: 'none', created_at: new Date().toISOString(),
   }
+  if (local.queue_pending) queuedIds.value = new Set([...queuedIds.value, local.id])
   localSends.value = [...localSends.value, local]
   if (!source) { draft.value = ''; replyTo.value = null }
   void deliver(local)
-  await nextTick(); toBottom(true)
+  await nextTick(); if (stick) keepBottom()
 }
 function retry(message: ProjectMessage) {
-  if (!props.canWrite || composeBlock.value) return
+  if (!props.canWrite || composeBlock.value || offline.value) return
   if (message.send_failed && message.client_id) {
     // An ambiguous POST reuses its idempotency key. A confirmed terminal
     // delivery failure is a new explicit send, never automatic reinjection.
@@ -587,11 +617,73 @@ function retry(message: ProjectMessage) {
     void send(message.delivery_level, message)
   }
 }
+function queueWhen(message: ProjectMessage) {
+  if (uncertain.value.has(message.id)) return words.value.unclear
+  if (message.send_failed || statuses.value[message.id]?.status === 'not_delivered') return words.value.failed
+  if (capability.value === 'between') return words.value.queueBetween
+  return message.delivery_level === 'steer' ? capability.value === 'next' ? words.value.queueNext : words.value.queueNow : words.value.after
+}
+function editQueued(message: ProjectMessage) {
+  if (queueBusy.value || !props.canWrite || message.optimistic) return
+  editing.value = { ...message }; replyTo.value = null; draft.value = message.body
+  void nextTick(() => textarea.value?.focus())
+}
+async function cancelQueued(message: ProjectMessage, forEdit = false) {
+  if (queueBusy.value || !props.canWrite || message.optimistic) return false
+  const session = s.value, viewer = me.value, generation = readGeneration
+  queueBusy.value = true
+  try {
+    const result = await cancelSessionMessage(session.project_id, message.id)
+    if (generation !== readGeneration || session.id !== s.value.id || viewer !== me.value) return false
+    if (result.result === 'cancelled') {
+      statuses.value = { ...statuses.value, [message.id]: { message_id: message.id, status: 'not_delivered', cancelled: true, delivered_at: null, read_at: null, deliver_by: statuses.value[message.id]?.deliver_by ?? null } }
+      if (!forEdit) { toast(words.value.cancelled); if (editing.value?.id === message.id) editing.value = null }
+      return true
+    }
+    if (result.result === 'uncertain') uncertain.value = new Set([...uncertain.value, message.id])
+    toast(result.result === 'too_late' ? words.value.tooLate : words.value.unclear)
+    refreshReceipts()
+    return false
+  } catch {
+    if (generation === readGeneration) toast(words.value.cancelFailed, { tone: 'error' })
+    return false
+  } finally { if (generation === readGeneration) queueBusy.value = false }
+}
+async function saveEdit() {
+  const message = editing.value, body = draft.value.trim(), generation = readGeneration
+  if (!message || !body) return
+  const cancelled = await cancelQueued(message, true)
+  if (generation !== readGeneration || editing.value?.id !== message.id) return
+  editing.value = null
+  if (!cancelled) return // The edited text stays in the composer on too_late or uncertainty.
+  await send(message.delivery_level, { ...message, body, queue_pending: true })
+  if (draft.value.trim() === body) draft.value = ''
+}
+async function stopAndSend() {
+  if (!canStop.value || !draft.value.trim() || editing.value || queueBusy.value || offline.value) return
+  const view = props.view, generation = readGeneration, body = draft.value.trim(), parent = replyTo.value?.id
+  queueBusy.value = true
+  try {
+    await agents.control(view, 'interrupt')
+    if (generation !== readGeneration || view.session.id !== s.value.id) return
+    queueBusy.value = false
+    // After-turn delivery waits for the explicit interrupt to end the turn.
+    await send('simple', { body, reply_to: parent, queue_pending: true } as ProjectMessage)
+    if (draft.value.trim() === body) { draft.value = ''; replyTo.value = null }
+  } catch {
+    if (generation === readGeneration) toast(words.value.cancelFailed, { tone: 'error' })
+  } finally { if (generation === readGeneration) queueBusy.value = false }
+}
+function connectionChanged() { online.value = navigator.onLine; if (online.value) void refresh().then(refreshReceipts) }
+onMounted(() => { window.addEventListener('online', connectionChanged); window.addEventListener('offline', connectionChanged) })
+onBeforeUnmount(() => { window.removeEventListener('online', connectionChanged); window.removeEventListener('offline', connectionChanged) })
+function suggest(text: string) { if (props.canWrite && !composeBlock.value) { draft.value = text; void nextTick(() => textarea.value?.focus()) } }
 function composerKeys(event: KeyboardEvent) {
   const level = chatSendLevel(event, canSteer.value)
   if (level) { event.preventDefault(); void send(level) }
 }
 function reply(message: ProjectMessage) {
+  editing.value = null
   replyTo.value = message
   void nextTick(() => textarea.value?.focus())
 }
@@ -611,9 +703,14 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
           <span v-else-if="agents.threadState(s) === 'ready' && messages.length">{{ words.start }}</span>
           <span v-if="historyError" class="history-error" role="alert">{{ historyError }}</span>
         </div>
-        <SessionMessages :messages="messages" :principal-id="s.agent_principal_id" :now="now"
-          :can-reply="canWrite && !composeBlock" :new-from="newFrom" :new-count="newCount" :statuses="statuses" @reply="reply" @retry="retry" />
+        <div v-if="noPermission" class="empty-state"><AppIcon name="lock" :size="32" /><h3>{{ words.noPermissionTitle }}</h3><p>{{ words.noPermission }}</p></div>
+        <div v-else-if="agents.threadState(s) === 'ready' && !messages.length" class="empty-state"><AppIcon name="agent" :size="32" /><h3>{{ words.emptyTitle }} {{ view.name }}</h3><p>{{ words.emptyBody }}</p><div class="suggestions"><button v-for="text in [words.suggest1, words.suggest2, words.suggest3]" :key="text" type="button" :disabled="!canWrite || ended" @click="suggest(text)">{{ text }}</button></div></div>
+        <SessionMessages v-else :messages="threadMessages" :principal-id="s.agent_principal_id" :session-id="s.id" :now="now"
+          :can-reply="canWrite && !composeBlock" :new-from="newFrom" :new-count="newCount" :statuses="statuses" :queued-ids="queuedIds" @reply="reply" @retry="retry" />
       </div>
+        <p v-if="editing" class="replying" role="status"><AppIcon name="edit" :size="13" /><span>{{ words.editing }}</span><button type="button" class="icon-btn sm flat" :aria-label="words.cancel" @click="editing = null"><AppIcon name="close" :size="12" /></button></p>
+        <p v-else-if="replyTo" class="replying"><span :title="replyTo.body">{{ words.replying }} “{{ replyTo.body }}”</span><button type="button" class="icon-btn sm flat" :aria-label="words.cancelReply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
+      <p v-if="offline" class="offline-banner" role="status"><AppIcon name="refresh" :size="14" />{{ words.offline }}</p>
       <Transition name="jump">
         <button v-if="jump" type="button" class="jump" :class="{ labelled: below > 0 }"
           :aria-label="below > 0 ? `${words.newCount(below)}, ${words.latest}` : words.latest"
@@ -624,19 +721,30 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
       </Transition>
     </div>
 
-    <footer class="composer">
+    <footer v-if="!noPermission" class="composer">
       <SessionRequests v-if="unmanaged" :key="s.id" :session="s" :now="now" />
+      <ul v-if="queue.length" class="chat-queue" :aria-label="words.queued">
+        <li v-for="message in queue" :key="message.id" class="queue-item" :class="{ editing: editing?.id === message.id }" :data-id="message.id">
+          <AppIcon :name="message.delivery_level === 'steer' ? 'bolt' : 'queue'" :size="14" />
+          <span class="queue-text" tabindex="0" :data-tip="message.body" :title="message.body">{{ message.body }}</span><span class="queue-when">{{ queueWhen(message) }}</span>
+          <button v-if="message.send_failed || statuses[message.id]?.status === 'not_delivered'" type="button" class="icon-btn flat" :aria-label="words.retry" :disabled="queueBusy || !canWrite || offline" @click="retry(message)"><AppIcon name="refresh" :size="14" /></button>
+          <button type="button" class="icon-btn flat" :aria-label="words.edit" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="editQueued(message)"><AppIcon name="edit" :size="14" /></button>
+          <button type="button" class="icon-btn flat" :aria-label="words.cancel" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="cancelQueued(message)"><AppIcon name="close" :size="14" /></button>
+        </li>
+      </ul>
       <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
       <form v-else class="compose" @submit.prevent="send()">
-        <p v-if="showHookNotice" class="compose-block" role="status">{{ hookDeliveryNotice }}</p>
-        <p v-if="replyTo" class="replying"><span>Replying to “{{ replyTo.body.slice(0, 80) }}{{ replyTo.body.length > 80 ? '…' : '' }}”</span><button type="button" class="icon-btn sm flat" aria-label="Cancel the reply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
+        <p v-if="showHookNotice" class="compose-block" role="status">{{ view.name }} {{ words.unmanagedNote }}</p>
+
         <label class="sr-only" :for="`compose-${s.id}`">{{ words.message }} {{ view.name }}</label>
         <textarea :id="`compose-${s.id}`" ref="textarea" v-model="draft" class="field" rows="2" :placeholder="`${words.placeholder} ${view.name}`" :disabled="!canWrite" @keydown="composerKeys" @focus="toBottom(true)" />
+        <p v-if="capability === 'abort'" class="gemini-note">{{ words.geminiNote }}</p>
         <p v-if="sendError" class="send-error" role="alert"><AppIcon name="alert" :size="12" />{{ sendError }}</p>
         <div class="compose-row">
           <span class="compose-hint"><KeyCap k="shift" /><KeyCap k="enter" />{{ words.newline }}</span>
-          <button v-if="canSteer" type="button" class="btn sm steer-send" :aria-label="words.now" :disabled="!draft.trim() || !canWrite" @click="send('steer')"><AppIcon name="bolt" :size="13" />{{ words.now }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
-          <button type="submit" class="btn sm primary send" :aria-label="canSteer ? words.after : words.send" :disabled="!draft.trim() || !canWrite"><AppIcon name="send" :size="13" /><span>{{ canSteer ? words.after : words.send }}</span><KeyCap k="enter" /></button>
+          <button v-if="canSteer" type="button" class="btn sm steer-send" :aria-label="alternative" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || offline" @click="send('steer')"><AppIcon name="bolt" :size="13" />{{ alternative }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
+          <button v-if="capability === 'abort' && working" type="button" class="btn sm stop-send" :aria-label="words.stopSend" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || !canStop || offline" @click="stopAndSend"><AppIcon name="alert" :size="13" />{{ words.stopSend }}</button>
+          <button type="submit" class="btn sm primary send" :aria-label="primaryLabel" :disabled="!draft.trim() || !canWrite || queueBusy || offline"><AppIcon name="send" :size="13" /><span class="send-label"><span>{{ primaryLabel }}</span><span aria-hidden="true" class="label-size">{{ words.after }}</span></span><KeyCap k="enter" /></button>
           <button v-if="s.management_mode === 'managed' && s.advertised_capabilities.includes('interrupt')" type="button" class="btn sm chat-stop" :aria-label="words.stop" :data-tip="canStop ? words.stopTip : interruptBlock || words.stopTip" :disabled="!canStop" @click="stop"><AppIcon name="stop" :size="13" /><span>{{ words.stop }}</span><KeyCap k="Esc" /></button>
         </div>
       </form>
@@ -645,6 +753,24 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 </template>
 
 <style scoped>
+.offline-banner { position: absolute; z-index: 2; top: 8px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: var(--surface-raised); box-shadow: var(--shadow-pop); font-size: 12px; white-space: nowrap; }
+.empty-state { display: grid; justify-items: center; gap: 10px; max-width: 340px; margin: 24px auto; text-align: center; color: var(--ink-2); }
+.empty-state h3 { font-size: 17px; color: var(--ink); }
+.empty-state p { font-size: 13.5px; }
+.suggestions { display: grid; justify-items: center; }
+.suggestions button { min-height: 44px; border: 0; background: none; color: var(--teal-ink); font: inherit; font-size: 13px; }
+.chat-queue { display: grid; gap: 6px; max-height: 180px; overflow-y: auto; padding: 0; margin: 0 0 8px; list-style: none; }
+.queue-item { display: flex; align-items: center; gap: 6px; min-height: 44px; min-width: 0; padding: 2px 3px 2px 10px; border-radius: 12px; background: var(--code-bg); box-shadow: inset 0 0 0 1px var(--line); }
+.queue-item > svg { flex: none; color: var(--ink-3); }
+.queue-item.editing { background: var(--chip-teal-bg); }
+.queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.queue-when { flex: 0 1 auto; font-size: 11.5px; color: var(--ink-3); }
+.queue-item .icon-btn { flex: none; width: 44px; height: 44px; }
+.send-label { display: grid; }
+.send-label > span { grid-area: 1 / 1; }
+.label-size { visibility: hidden; }
+.gemini-note { font-size: 12px; color: var(--ink-2); }
+.stop-send { color: var(--warn-ink); background: var(--gold-wash); }
 .session-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .thread-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .thread-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 18px 24px 20px; }
@@ -668,10 +794,10 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 .compose-hint { margin-left: auto; display: inline-flex; gap: 2px; }
 .compose-block { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); padding: 6px 2px; overflow-wrap: anywhere; }
 .compose-block svg { flex: none; }
-.replying { position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 10px; border-radius: 8px; background: var(--code-bg); font-size: 12px; color: var(--ink-2); }
+.replying { position: absolute; bottom: 12px; left: 14px; right: 14px; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 10px; border-radius: 8px; background: var(--code-bg); font-size: 12px; color: var(--ink-2); }
 .replying span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .compose > .compose-block { pointer-events: none; position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; margin: 0; padding: 8px 12px; background: var(--surface-raised); box-shadow: var(--shadow-pop); }
-.send-error { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--danger); overflow-wrap: anywhere; }
+.send-error { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--danger); overflow-wrap: anywhere; position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; background: var(--surface-raised); }
 @media (max-width: 720px) {
   .thread-scroll { padding: 14px 16px 16px; }
   .composer { border-radius: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: var(--surface-raised); }
@@ -679,6 +805,9 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
   .compose textarea { font-size: 16px; min-height: 48px; resize: none; }
   .compose-hint { display: none; }
   .compose-row .send { margin-left: auto; min-height: 44px; }
-  .compose-row .steer-send { min-height: 44px; }
+  .compose-row .steer-send, .stop-send { min-height: 44px; }
+  .compose-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+  .compose-row .send { margin-left: 0; }
+  .compose-row .steer-send, .compose-row .stop-send { grid-column: 1 / -1; }
 }
 </style>

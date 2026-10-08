@@ -429,6 +429,28 @@
         "person_id": "personal",
         "revision": "metadata"
       }
+    },
+    {
+      "table": "inbox_messages",
+      "classification": "personal",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "sender_principal_id"
+      },
+      "columns": {
+        "cancelled_at": "metadata"
+      }
+    },
+    {
+      "table": "inbox_compat_messages",
+      "classification": "personal",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "sender_principal_id"
+      },
+      "columns": {
+        "resend_of_id": "metadata"
+      }
     }
   ]
 }

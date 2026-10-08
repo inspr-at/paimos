@@ -32,7 +32,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.goto(`/agents/${worker.id}`)
     const panel = page.getByRole('complementary', { name: 'Session details' })
     // Messages live in their own tab (AEON-273).
-    await panel.getByRole('tab', { name: /Messages/ }).click()
+    await panel.getByRole('tab', { name: /Chat/ }).click()
     const thread = panel.getByRole('list', { name: 'Messages', exact: true })
     await expect(thread.getByRole('listitem')).toHaveCount(1)
     await expect(thread).toContainText('Original lead')
@@ -273,7 +273,7 @@ for (const count of [100, 101, 200]) {
       await expect(panel.locator('.delivery.delivered')).toHaveCount(100)
       await expect(notice).toBeVisible()
       await panel.getByRole('tab', { name: 'Overview', exact: true }).click()
-      await panel.getByRole('tab', { name: /Messages/ }).click()
+      await panel.getByRole('tab', { name: /Chat/ }).click()
     }
     await expect(notice).toHaveCount(0)
     await expect.poll(() => new Set(requests.flat()).size).toBe(count)
@@ -307,7 +307,7 @@ test('a delivered send on screen is asked again and can become read', async ({ p
   await expect(panel.locator('.delivery.delivered')).toHaveCount(1)
   promote = true
   await panel.getByRole('tab', { name: 'Overview', exact: true }).click()
-  await panel.getByRole('tab', { name: /Messages/ }).click()
+  await panel.getByRole('tab', { name: /Chat/ }).click()
   await expect(panel.locator('.delivery.read')).toHaveCount(1)
   expect(asked.flat()).toContain(id)
   expect(asked.length).toBeGreaterThan(1)
