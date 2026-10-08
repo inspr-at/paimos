@@ -113,9 +113,10 @@ func runWithFirstAttempt(get func(string, any) error, r githubRun) ([]metricRun,
 
 // readRunAttempts returns attempts of one completed run. from is the next
 // attempt number still to fetch (1 reads every earlier attempt). The latest
-// attempt is r itself and is included only when includeLatest is set, so a
-// resumed read does not emit it twice. allow gates each fetch; a false allow
-// returns the attempt number to resume from.
+// attempt is r itself and is included only when includeLatest is set.
+// Backfill always includes it: the row is an idempotent upsert, and a newer
+// attempt may have completed since the cursor was stored. allow gates each
+// fetch; a false allow returns the attempt number to resume from.
 func readRunAttempts(get func(string, any) error, r githubRun, from int, includeLatest bool, allow func() bool) ([]metricRun, int, error) {
 	latest, ok, err := metricRunFrom(r)
 	if err != nil || !ok {
@@ -200,8 +201,9 @@ type backfillCursor struct {
 	// begin. Backfill keeps the same pulls the webhook does: base == default.
 	DefaultBranch string `json:"default_branch,omitempty"`
 	// AttemptRun is the listed run whose earlier attempts are still unread.
-	// Attempt is the next attempt number to fetch. DoneRuns are runs on this
-	// page whose attempts are already stored.
+	// Attempt is the next attempt number to fetch. The listed attempt is
+	// upserted again on resume. DoneRuns are runs on this page whose
+	// attempts are already stored.
 	AttemptRun int64   `json:"attempt_run,omitempty"`
 	Attempt    int     `json:"attempt,omitempty"`
 	DoneRuns   []int64 `json:"done_runs,omitempty"`
@@ -222,9 +224,12 @@ const (
 // backfillStep reads from the cursor until the call budget is spent or the
 // backfill is done. A page of runs can span steps: the cursor keeps the run
 // and the next attempt, and runs already stored on that page, so a retry
-// repeats only the unread attempts. A failed step leaves the stored cursor
-// alone. Pulls into other base branches are not facts. Hitting the last pull
-// page while recent pulls remain is truncated, not done.
+// repeats only the unread attempts. Each visit upserts the listed attempt, so
+// a newer attempt that landed between steps is kept. Finishing another run
+// on the page leaves the paused run's identity in place until that run is
+// read. A failed step leaves the stored cursor alone. Pulls into other base
+// branches are not facts. Hitting the last pull page while recent pulls
+// remain is truncated, not done.
 func backfillStep(get func(string, any) error, repository string, workflows []string, cursor backfillCursor, now time.Time) (backfillCursor, backfillBatch, error) {
 	batch := backfillBatch{}
 	today := dayStart(now)
@@ -269,9 +274,9 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 					}
 					continue
 				}
-				from, includeLatest := 1, true
+				from := 1
 				if cursor.AttemptRun == r.ID && cursor.Attempt > 0 {
-					from, includeLatest = cursor.Attempt, false
+					from = cursor.Attempt
 					foundResume = true
 				}
 				allow := func() bool {
@@ -281,7 +286,10 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 					batch.Calls++
 					return true
 				}
-				runs, next, err := readRunAttempts(get, r, from, includeLatest, allow)
+				// The listed attempt is upserted on every visit, including a
+				// resume. Suppressing it would drop an attempt that completed
+				// between steps and still report the backfill as complete.
+				runs, next, err := readRunAttempts(get, r, from, true, allow)
 				if err != nil {
 					return cursor, batch, err
 				}
@@ -290,11 +298,14 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 					cursor.AttemptRun, cursor.Attempt = r.ID, next
 					return cursor, batch, nil
 				}
+				cursor.DoneRuns = append(cursor.DoneRuns, r.ID)
+				// A different run that finished on this page must not clear the
+				// paused run. Losing that identity makes the step fail, and the
+				// stored cursor then retries the same page forever.
 				if r.ID == cursor.AttemptRun {
 					foundResume = true
+					cursor.AttemptRun, cursor.Attempt = 0, 0
 				}
-				cursor.DoneRuns = append(cursor.DoneRuns, r.ID)
-				cursor.AttemptRun, cursor.Attempt = 0, 0
 			}
 			if !foundResume {
 				return cursor, batch, errRead

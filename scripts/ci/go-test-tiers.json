@@ -5180,6 +5180,10 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsFix2ReadBindsTenantAndActionsScope","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsFix3InsertedRunKeepsPausedResume","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsFix3ResumeIncludesNewerAttempt","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsFromFixedFacts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsNeverReportMissingDataAsZero","tier":"ESSENTIAL"}
