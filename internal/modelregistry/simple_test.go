@@ -243,6 +243,18 @@ func TestMinimalSimpleReadPreservesFirstAndFallback(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,queue_node_id,queue_by_principal_id,queue_at,queue_security_review_required) VALUES($1,$2,$3,$4,$5,now(),false)`, admin.TenantID, order, runner, ticket, member.ID)
 		return err
 	})
+	inRegistry(t, member, func(tx pgx.Tx) error {
+		c, err := loadBoardCatalog(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		now, err := dbNow(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		_, err = simpleNextFor(t.Context(), tx, member, &member.ID, false, now, c)
+		return err
+	})
 	doc = boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple", nil, ""), 200)
 	if doc.Next == nil || doc.Next.Ticket != "MINIMAL-1" || doc.Next.Line == nil || *doc.Next.Line != "openai:sol" || doc.Next.Reviewer.Line == nil || *doc.Next.Reviewer.Line != "anthropic:opus" || doc.Next.Reviewer.Effort == nil || *doc.Next.Reviewer.Effort != "xhigh" {
 		t.Fatal("queued work or independent reviewer differs", doc.Next)

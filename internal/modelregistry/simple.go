@@ -348,7 +348,7 @@ func sameSimplePick(a, b simplePick) bool {
 func simpleNextFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, person *string, workspace bool, now time.Time, c boardCatalog) (*simpleNext, error) {
 	var id, key, project string
 	var fields []byte
-	err := tx.QueryRow(ctx, `SELECT r.queue_node_id::text,n.key,n.project_id::text,CASE WHEN octet_length(n.fields::text)<=1048576 THEN n.fields END
+	err := tx.QueryRow(ctx, `SELECT r.queue_node_id::text,n.key,coalesce(n.project_id::text,''),CASE WHEN octet_length(n.fields::text)<=1048576 THEN n.fields END
  FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.queue_node_id
  WHERE r.status='queued' AND n.deleted_at IS NULL AND lower(btrim(n.state)) IN ('new','open','backlog')
  ORDER BY r.queue_target_agent_id NULLS FIRST,
