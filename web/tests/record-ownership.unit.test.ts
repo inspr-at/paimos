@@ -189,6 +189,9 @@ it('S8-013: a delayed session-ended send error for A cannot disable B', async ()
     './sessionMessages': { collapseMessages: () => [] }, './sessionChat': helpers,
   }).state
   await flush(); state.draft.value = 'To A'; const sending = state.send()
+  // The ended rejection is only caught when the send actually leaves. A missing
+  // navigator.onLine must not refuse it and leave this rejection unhandled.
+  expect(state.sending.value).toBe(true)
   props.view.session = { ...props.view.session, id: 'B' }; await flush(); state.draft.value = 'To B'
   pending.reject(new APIError(409, 'ended', { code: 'session_ended' })); await sending
   expect(state.sendError.value).toBe('')

@@ -76,8 +76,11 @@ watch(() => agents.thread(s.value).map(message => message.id).join(), forgetSett
 const draft = ref('')
 const editing = ref<ProjectMessage | null>(null)
 const queueBusy = ref(false)
-const online = ref(navigator.onLine)
-const offline = computed(() => !online.value || ['stale', 'offline'].includes(props.view.status.state))
+// A missing navigator.onLine is not a reported outage. Only an explicit false,
+// or a stale/offline session state, closes the composer (streamHealth).
+const browserOnline = () => typeof navigator === 'undefined' || navigator.onLine !== false
+const online = ref(browserOnline())
+const offline = computed(() => !online.value || ['stale', 'offline'].includes(props.view.status?.state ?? ''))
 const noPermission = computed(() => agents.threadState(s.value) === 'forbidden')
 const replyTo = ref<ProjectMessage | null>(null)
 const sendError = ref('')
@@ -693,7 +696,7 @@ async function stopAndSend() {
     if (generation === readGeneration) toast(words.value.cancelFailed, { tone: 'error' })
   } finally { if (generation === readGeneration) queueBusy.value = false }
 }
-function connectionChanged() { online.value = navigator.onLine; if (online.value) void refresh().then(refreshReceipts) }
+function connectionChanged() { online.value = browserOnline(); if (online.value) void refresh().then(refreshReceipts) }
 onMounted(() => { window.addEventListener('online', connectionChanged); window.addEventListener('offline', connectionChanged) })
 onBeforeUnmount(() => { window.removeEventListener('online', connectionChanged); window.removeEventListener('offline', connectionChanged) })
 function suggest(text: string) { if (props.canWrite && !composeBlock.value) { draft.value = text; void nextTick(() => textarea.value?.focus()) } }
