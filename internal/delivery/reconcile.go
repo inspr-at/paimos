@@ -24,17 +24,17 @@ func unlock(conn *pgxpool.Conn, key string) {
 
 // observationLock serializes network snapshots between webhook/reconciliation
 // replicas. Session locks span reads; no row transaction spans network I/O.
-func (m *Module) observationLock(ctx context.Context) (func(), error) {
-	conn, err := m.pool.Acquire(ctx)
+func (m *Module) observationLock(ctx context.Context) (context.Context, func(), error) {
+	conn, release, err := db.Acquire(ctx, m.pool)
 	if err != nil {
-		return nil, err
+		return ctx, nil, err
 	}
 	key := "aeon-delivery-observation:" + m.config.TenantID
 	if _, err = conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1,0))`, key); err != nil {
-		conn.Release()
-		return nil, err
+		release()
+		return ctx, nil, err
 	}
-	return func() { unlock(conn, key); conn.Release() }, nil
+	return db.WithConnection(ctx, m.pool, conn), func() { unlock(conn, key); release() }, nil
 }
 func (m *Module) Run(ctx context.Context) {
 	app := &crossreview.GitHubApp{Config: m.config}
@@ -59,6 +59,7 @@ func (m *Module) sweep(ctx context.Context) {
 		return
 	}
 	defer conn.Release()
+	ctx = db.WithConnection(ctx, m.pool, conn)
 	key := "aeon-delivery-reconciliation"
 	var locked bool
 	if conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1,0))`, key).Scan(&locked) != nil || !locked {
@@ -100,7 +101,7 @@ func (m *Module) Reconcile(ctx context.Context, tid string) error {
 	if tid != m.config.TenantID || m.github == nil {
 		return errNotConfigured
 	}
-	release, err := m.observationLock(ctx)
+	ctx, release, err := m.observationLock(ctx)
 	if err != nil {
 		return err
 	}

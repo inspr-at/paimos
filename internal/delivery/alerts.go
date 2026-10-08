@@ -59,6 +59,7 @@ func (m *Module) SweepAlerts(ctx context.Context, tid string) (int, error) {
 		return 0, err
 	}
 	defer conn.Release()
+	ctx = db.WithConnection(ctx, m.pool, conn)
 	lock := "aeon-delivery-stall-alerts:" + tid
 	var locked bool
 	if err = conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1,0))`, lock).Scan(&locked); err != nil || !locked {
