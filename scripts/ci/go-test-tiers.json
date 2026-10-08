@@ -5802,6 +5802,8 @@
     ,
     {"kind":"go","package":"internal/hooknote","name":"TestConsentWithdrawalAfterFetchPreventsDisclosure","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/hooknote","name":"TestDialRootDaemonPreservesPeerChecks","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/hooknote","name":"TestExpiredOfferProducesNoOutput","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/hooknote","name":"TestFakeDaemonSocketIsNotRead","tier":"GATED-FULL"}
