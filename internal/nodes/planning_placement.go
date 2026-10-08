@@ -29,13 +29,12 @@ func (r planRow) placementKey() string {
 // Both pre-paging SQL and page display use these expressions. assigneeJoin
 // preserves native and imported assignees; the active-person lookup excludes
 // agent and inactive assignees before falling back to the canonical viewer.
-// full-stack is not a board kind. Stored tickets and route suggestions still
-// use that area, and planning keeps it routable.
+// full-stack is not a board kind. A stored value routes only when that kind
+// still exists. A fresh board leaves it on the unknown-area path.
 func planPlacementColumns(viewer string) string {
 	return `coalesce(n.project_id::text,'') AS project,
  coalesce(` + modelprefs.CanonicalPersonSQL("assignee.id") + `::text,` + viewer + `::text,'') AS person,
- coalesce(CASE WHEN btrim(coalesce(n.fields->>'area',''))='full-stack' THEN 'full-stack' END,
-  (SELECT wk.slug FROM work_kinds wk WHERE wk.archived_at IS NULL
+ coalesce((SELECT wk.slug FROM work_kinds wk WHERE wk.archived_at IS NULL
   AND wk.slug=btrim(coalesce(n.fields->>'area','')) AND wk.slug NOT IN ('review','other')
   AND (wk.project_id IS NULL OR wk.project_id=n.project_id) LIMIT 1),'') AS area,
  CASE WHEN btrim(coalesce(n.fields->>'complexity',''))='L'

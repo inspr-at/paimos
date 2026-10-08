@@ -202,7 +202,11 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
 .page-head h1 { margin-top: 6px; }
 .summary { margin-top: 6px; font-size: 13.5px; color: var(--ink-2); }
 .layout { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 28px; align-items: start; }
-.section-nav { position: sticky; top: 16px; display: grid; gap: 2px; }
+/* The list is taller than the shell once Kinds and Models are both shown.
+   Cap it to the space under the page head so a lower section scrolls inside
+   the nav. main would otherwise scroll, and a sticky list taller than main
+   cannot stay put. 130px is the settings padding, the page head and its margin. */
+.section-nav { position: sticky; top: 16px; display: grid; gap: 2px; max-height: calc(100dvh - var(--header-h) - var(--footer-h) - 130px); overflow-y: auto; overscroll-behavior: contain; }
 .theme-links { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 10px; font-size: 12px; }.theme-links a { color: var(--teal-ink); min-height: 28px; display: inline-flex; align-items: center; }
 @media (pointer: coarse) { .theme-links a { min-height: 44px; } }
 .section-link { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; height: 50px; padding: 7px 10px; border-radius: 12px; color: var(--ink); text-decoration: none; }
