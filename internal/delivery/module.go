@@ -15,19 +15,23 @@ import (
 )
 
 type Module struct {
-	pool   *pgxpool.Pool
-	config crossreview.AppConfig
-	secret []byte
-	github GitHub
-	fanout func(context.Context, []byte) error
-	now    func() time.Time
+	pool           *pgxpool.Pool
+	config         crossreview.AppConfig
+	secret         []byte
+	github         GitHub
+	fanout         func(context.Context, []byte) error
+	now            func() time.Time
+	queueAdmission QueueAdmission
 }
 
 func New(pool *pgxpool.Pool, config crossreview.AppConfig, secret []byte, github GitHub, fanout func(context.Context, []byte) error) *Module {
 	return &Module{pool: pool, config: config, secret: append([]byte(nil), secret...), github: github, fanout: fanout, now: func() time.Time { return time.Now().UTC() }}
 }
 func (m *Module) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/github/webhook", m.webhook)
+	m.mountWorkQueue(mux)
+	// auditWebhook keeps the reviewed ingress and records merge-audit facts after it accepts the event.
+	mux.HandleFunc("POST /api/github/webhook", m.auditWebhook)
+	mux.HandleFunc("GET /api/delivery/audit", m.auditList)
 	mux.HandleFunc("GET /api/delivery", m.list)
 	mux.HandleFunc("GET /api/delivery/alerts", m.listAlerts)
 	mux.HandleFunc("GET /api/delivery/enqueue-allowed", m.enqueueAllowed)
@@ -38,6 +42,28 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/settings/delivery", m.settings)
 	mux.HandleFunc("GET /api/projects/{projectId}/delivery-settings", m.settings)
 	mux.HandleFunc("PUT /api/projects/{projectId}/delivery-settings", m.settings)
+}
+
+func (m *Module) mountWorkQueue(mux *http.ServeMux) {
+	mount := func(pattern string, handler http.HandlerFunc) {
+		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+			if r.Method != http.MethodGet {
+				controller := http.NewResponseController(w)
+				_ = controller.SetReadDeadline(time.Now().Add(5 * time.Second))
+				defer controller.SetReadDeadline(time.Time{})
+			}
+			handler(w, r.WithContext(ctx))
+		})
+	}
+	mount("GET /api/projects/{projectId}/delivery-queue", m.listRounds)
+	mount("POST /api/projects/{projectId}/delivery-queue", m.enqueueRound)
+	mount("GET /api/projects/{projectId}/delivery-queue/settings", m.workQueueSettings)
+	mount("PUT /api/projects/{projectId}/delivery-queue/settings", m.workQueueSettings)
+	mount("POST /api/projects/{projectId}/delivery-queue/claim", m.claimRound)
+	mount("PATCH /api/projects/{projectId}/delivery-queue/{roundId}", m.changeRound)
+	mount("POST /api/projects/{projectId}/delivery-queue/{roundId}/progress", m.changeRound)
 }
 func (m *Module) observationTx(ctx context.Context, tx pgx.Tx, p Pull, at time.Time) (Observation, error) {
 	pr := p.Number

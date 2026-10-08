@@ -90,6 +90,7 @@
         "internal/piprobe/**",
         "internal/grokprobe/**",
         "internal/capacity/**",
+        "internal/usageprobe/**",
         "internal/agentplan/**",
         "internal/sessionusage/**",
         "internal/agentruns/**",
@@ -229,7 +230,9 @@
       "title": "Web UI: views and components",
       "paths": [
         "web/src/views/**",
-        "web/src/components/**"
+        "web/src/components/**",
+        "web/src/components/work/AttentionGroupMenu.vue",
+        "web/src/components/work/AttentionBulkPreview.vue"
       ]
     },
     {

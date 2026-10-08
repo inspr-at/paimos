@@ -419,7 +419,7 @@ func TestColdRevokedDaemonReconcilesWithoutRuntimeAuthentication(t *testing.T) {
 					t.Fatal(err)
 				}
 				s.Close()
-				j, err := localjournal.Open(localjournal.Config[agentd.Record]{Directory: state, Prefix: "aeon-agentd-fixture", Version: 2, MaxBytes: 4 << 20, MaxRecords: 4096, Key: func(r agentd.Record) (string, error) { return r.RunID, nil }, Validate: func(agentd.Record) error { return nil }})
+				j, err := localjournal.Open(localjournal.Config[agentd.Record]{Directory: state, Prefix: "aeon-agentd-fixture", Version: agentd.RecordSchemaVersion, MaxBytes: 4 << 20, MaxRecords: 4096, Key: func(r agentd.Record) (string, error) { return r.RunID, nil }, Validate: func(agentd.Record) error { return nil }})
 				if err != nil {
 					t.Fatal(err)
 				}

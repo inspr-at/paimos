@@ -23,7 +23,7 @@ const json = (body:unknown, status=200) => new Response(JSON.stringify(body), { 
 const deferred = () => { let release!:(value:Response) => void; const promise = new Promise<Response>(resolve => { release=resolve }); return {promise,release} }
 async function settle() { for(let i=0;i<15;i++) await Promise.resolve(); await Vue.nextTick() }
 function setup<T>(file:string,props:object):T {
- const modules:Record<string,unknown> = { vue:{...Vue,onBeforeUnmount:(fn:() => void) => unmounts.push(fn)}, '../../lib/api':api, '../../lib/authz':{can:(key:string) => key.endsWith('.read') ? access.read : access.manage,onAccessChange:() => () => {}}, '../../lib/delivery':delivery,'../../lib/reviewPolicy':policy,'../../lib/reviews':reviews,'../../lib/identityScope':identity,'../../lib/toast':{toast:(_text:string,options:{action:{run:() => void}}) => actions.push(options.action.run)},'../../stores/session':{useSession:() => session},'../../stores/profile':{useProfile:() => profile}, '../AppIcon.vue':{}, '../KeyCap.vue':{}, './DeliveryRow.vue':{}, './SettingsCard.vue':{} }
+ const modules:Record<string,unknown> = { vue:{...Vue,onBeforeUnmount:(fn:() => void) => unmounts.push(fn)}, '../../lib/api':api, '../../lib/authz':{can:(key:string) => key.endsWith('.read') ? access.read : access.manage,onAccessChange:() => () => {}}, '../../lib/delivery':delivery,'../../lib/reviewPolicy':policy,'../../lib/reviews':reviews,'../../lib/identityScope':identity,'../../lib/toast':{toast:(_text:string,options:{action:{run:() => void}}) => actions.push(options.action.run)},'../../stores/session':{useSession:() => session},'../../stores/profile':{useProfile:() => profile}, '../AppIcon.vue':{}, '../KeyCap.vue':{}, './DeliveryRow.vue':{}, './DeliveryQueue.vue':{}, './SettingsCard.vue':{} }
  const {descriptor}=parse(readFileSync(new URL(`../src/components/${file}`,import.meta.url),'utf8'))
  const {content}=compileScript(descriptor,{id:file})
  const exports:{default?:{setup:(props:object,context:object) => T}}={}
@@ -110,4 +110,25 @@ it('a policy save cannot report success after the person changes', async () => {
  const saving=card.save();session.identity.principal.id='different';await settle()
  pending.release(json({...settings(),effective:{mode:'off',allowed_families:[]}}));await saving
  expect(card.message.value).not.toContain('Saved.');expect(card.base.value?.effective.mode).not.toBe('off')
+})
+
+it('delivery queue reads stay with the ticket and person and expose refresh failures', async () => {
+ const props=Vue.reactive({nodeId:'ticket',projectId:'project',de:false}), pending=deferred()
+ const first={items:[{id:'round',key:'AEON-888',slug:'held-branch',pull_request:null,kind:'fix',round_number:1,state:'queued',hold_reason:null,reason:'slug_hold',estimate_minutes:60}],settings:{mode:'shadow',freeze:true,held_slugs:[] as string[],held_pull_requests:[] as number[],release_set:['ready-']},next_cursor:null}
+ http.handle=async path => path.includes('ticket=ticket') ? pending.promise : json({...first,items:[]})
+ const queue=setup<{result:Vue.Ref<typeof first|null>;error:Vue.Ref<string>;load:() => Promise<unknown>;reason:(value:string) => string;holdReason:(round:object) => string}>('work/DeliveryQueue.vue',props)
+ props.nodeId='other';await settle();pending.release(json(first));await settle()
+ expect(queue.result.value?.items).toEqual([])
+ http.handle=async () => json(first);props.nodeId='ticket';await settle()
+ expect(queue.result.value?.items[0]?.id).toBe('round')
+ expect(queue.reason('Finishing reserve is full')).toBe('Finishing reserve is full')
+ expect(queue.holdReason(first.items[0]!)).toBe('Outside the frozen release set')
+ expect(queue.holdReason({...first.items[0],state:'done'})).toBe('')
+ queue.result.value!.settings.held_slugs=['held-branch']
+ expect(queue.holdReason(first.items[0]!)).toBe('Branch on hold')
+ http.handle=async () => json({error:'Unavailable'},503);await queue.load()
+ expect(queue.error.value).toContain('could not be loaded');expect(queue.result.value?.items[0]?.id).toBe('round')
+ const late=deferred();http.handle=async () => late.promise;const loading=queue.load()
+ session.identity.principal.id='new-person';await settle();late.release(json(first));await loading
+ expect(queue.result.value).toBeNull()
 })

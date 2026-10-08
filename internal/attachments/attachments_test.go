@@ -74,6 +74,7 @@ func TestAttachmentRoutesRejectCustomersAndAgents(t *testing.T) {
 	for _, route := range []struct{ method, path string }{
 		{"GET", "/api/nodes/" + id + "/attachments"},
 		{"POST", "/api/nodes/" + id + "/attachments"},
+		{"GET", "/api/attachments/" + id},
 		{"PATCH", "/api/attachments/" + id},
 		{"DELETE", "/api/attachments/" + id},
 		{"GET", "/api/attachments/" + id + "/content"},
@@ -145,6 +146,11 @@ func TestUploadDedupeVariantsETagIsolationUndoAndOps(t *testing.T) {
 	if a.Name != "image.png" || a.Width == nil || *a.Width != 640 || a.Height == nil || *a.Height != 400 {
 		t.Fatalf("attachment %+v", a)
 	}
+	w = request(t, mux, p, "GET", "/api/attachments/"+a.ID, "", nil)
+	var metadata Attachment
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &metadata) != nil || metadata.ID != a.ID || metadata.NodeID != node || metadata.SHA256 != a.SHA256 || metadata.Name != a.Name || metadata.Size != int64(len(body)) {
+		t.Fatalf("metadata %d %s", w.Code, w.Body.String())
+	}
 	for _, v := range []string{"original", "thumb", "preview"} {
 		f, err := store.Open(p.TenantID, a.SHA256, v)
 		if err != nil {
@@ -200,6 +206,10 @@ func TestUploadDedupeVariantsETagIsolationUndoAndOps(t *testing.T) {
 	if w.Code != 404 {
 		t.Fatalf("cross tenant %d", w.Code)
 	}
+	w = request(t, mux, foreign, "GET", "/api/attachments/"+a.ID, "", nil)
+	if w.Code != 404 {
+		t.Fatalf("cross tenant metadata %d", w.Code)
+	}
 	w = request(t, mux, p, "DELETE", "/api/attachments/"+a.ID, "", nil)
 	if w.Code != 204 {
 		t.Fatalf("delete %d %s", w.Code, w.Body.String())
@@ -207,6 +217,10 @@ func TestUploadDedupeVariantsETagIsolationUndoAndOps(t *testing.T) {
 	w = request(t, mux, p, "GET", "/api/attachments/"+a.ID+"/content", "", nil)
 	if w.Code != 404 {
 		t.Fatalf("deleted content %d", w.Code)
+	}
+	w = request(t, mux, p, "GET", "/api/attachments/"+a.ID, "", nil)
+	if w.Code != 404 {
+		t.Fatalf("deleted metadata %d", w.Code)
 	}
 	var eventID int64
 	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {

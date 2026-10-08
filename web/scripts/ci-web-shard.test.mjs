@@ -24,7 +24,7 @@ const effective = () => reconcileManifest(loadManifest(), discoverSpecs()).manif
 test('AEON-697 screenshots use per-test output paths for hosted Linux artifacts', () => {
   const source = readFileSync(new URL('../tests/needs-attention.spec.ts', import.meta.url), 'utf8')
   const screenshots = [...source.matchAll(/await page\.screenshot\(\{ path: (.+), fullPage: true \}\)/g)]
-  assert.equal(screenshots.length, 5, 'Check every attention screenshot site')
+  assert.equal(screenshots.length, 14, 'Check every attention screenshot site')
   for (const [, path] of screenshots) {
     assert.match(path, /^testInfo\.outputPath\(`attention-[^/`]+\.png`\)$/, 'Screenshots must stay in each test output directory')
   }
