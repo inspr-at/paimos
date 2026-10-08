@@ -4,7 +4,7 @@ import { computed, ref, watch } from 'vue'
 import SettingsCard from './SettingsCard.vue'
 import type { SituationLimits } from '../../lib/workKinds'
 import { validLimit } from '../../lib/workKinds'
-import type { KindsText } from '../../lib/workKindsCopy'
+import { situationDefinition, type KindsText } from '../../lib/workKindsCopy'
 const props = defineProps<{ limits: SituationLimits | null; editable: boolean; busy: boolean; loading: boolean; error: string; german: boolean; t: KindsText }>()
 const emit = defineEmits<{ change: [key: 'small_hours' | 'fix_rounds', value: number]; reload: [] }>()
 const small = ref<number | string>(2), rounds = ref<number | string>(3), invalid = ref(false)
@@ -14,8 +14,8 @@ function change(key: 'small_hours' | 'fix_rounds', value: number | string) {
   invalid.value = !validLimit(number, key === 'small_hours' ? 8 : 6)
   if (!invalid.value && props.limits && !props.busy && props.editable && number !== props.limits[key]) emit('change', key, number)
 }
-const fixDefinition = computed(() => props.german ? `Runden 1 bis ${props.limits?.fix_rounds ?? 3}: Der Agent behebt, was eine Prüfung gefunden hat.` : `Rounds 1 to ${props.limits?.fix_rounds ?? 3}: the agent fixes what a review found.`)
-const stuckDefinition = computed(() => props.german ? `Nach ${props.limits?.fix_rounds ?? 3} Korrekturrunden scheitert die Prüfung noch; eine andere Modellfamilie übernimmt.` : `After ${props.limits?.fix_rounds ?? 3} fix rounds review still fails; another model family takes over.`)
+const fixDefinition = computed(() => situationDefinition('fix', props.limits?.fix_rounds ?? 3, props.german))
+const stuckDefinition = computed(() => situationDefinition('stuck', props.limits?.fix_rounds ?? 3, props.german))
 </script>
 <template>
   <SettingsCard :title="t('situations')" icon="tree" anchor="k-sits">

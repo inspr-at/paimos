@@ -136,6 +136,7 @@ function newKind(event: MouseEvent) { edit(null, event.currentTarget as HTMLElem
     <p class="who"><AppIcon :name="editable ? 'shield' : 'eye'" :size="14" /><span>{{ t(editable ? 'intro' : 'introRead') }}</span></p>
     <SettingsCard :title="t('title')" icon="list" anchor="k-kinds">
       <template #lead>{{ t('lead') }}</template>
+      <template #aside><RouterLink class="btn sm" to="/settings/models">{{ t('openModels') }}</RouterLink></template>
       <div v-if="editable || kindsError" class="kind-toolbar"><button v-if="editable" class="btn" type="button" :disabled="busy || loadingKinds || loadingLimits || !loaded" @click="newKind"><AppIcon name="plus" :size="14" />{{ t('newKind') }}</button><button v-if="kindsError" class="btn sm" type="button" :disabled="busy || loadingKinds" @click="loadKinds">{{ t('retry') }}</button></div>
       <p v-if="loadingKinds && !loaded" role="status">{{ t('loading') }}</p>
       <p v-else-if="kindsError" class="err" role="alert">{{ kindsError }}</p>

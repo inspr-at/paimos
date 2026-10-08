@@ -4,7 +4,7 @@ import { ref } from 'vue'
 import { APIError, api } from '../src/lib/api'
 import { boardFixture, boardPin } from './models-board-fixtures'
 import { canMove, moveOrder, moveRule, orderBody, rulesBody, stepTarget } from '../src/lib/modelsBoard'
-import { getBoard, getBoardRules, putBoardOrder, putBoardProfile, putBoardRules, resetBoardOrder } from '../src/lib/modelsBoardApi'
+import { getBoard, getBoardRules, putBoardOrder, putBoardProfile, putBoardRules, putColumnThinking, resetBoardOrder } from '../src/lib/modelsBoardApi'
 import { useModelsBoard } from '../src/lib/useModelsBoard'
 import { toasts, resetToasts } from '../src/lib/toast'
 const state = vi.hoisted(() => ({ session: { identity: { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } } as { tenant: { id: string }; principal: { id: string; kind: string } } | null, authenticationCurrent: () => true }, cleanups: [] as (() => void)[], access: undefined as (() => void) | undefined }))
@@ -12,7 +12,7 @@ vi.mock('../src/stores/session', () => ({ useSession: () => state.session }))
 vi.mock('../src/lib/authz', () => ({ can: () => true, onAccessChange: (listener: () => void) => { state.access = listener; return () => {} } }))
 vi.mock('vue', async original => ({ ...await original<typeof import('vue')>(), onBeforeUnmount: (cleanup: () => void) => state.cleanups.push(cleanup) }))
 vi.mock('../src/lib/api', async original => ({ ...await original<typeof import('../src/lib/api')>(), api: vi.fn() }))
-vi.mock('../src/lib/modelsBoardApi', async original => ({ ...await original<typeof import('../src/lib/modelsBoardApi')>(), getBoard: vi.fn(), getBoardRules: vi.fn(), putBoardOrder: vi.fn(), putBoardProfile: vi.fn(), putBoardRules: vi.fn(), resetBoardOrder: vi.fn() }))
+vi.mock('../src/lib/modelsBoardApi', async original => ({ ...await original<typeof import('../src/lib/modelsBoardApi')>(), getBoard: vi.fn(), getBoardRules: vi.fn(), putBoardOrder: vi.fn(), putBoardProfile: vi.fn(), putBoardRules: vi.fn(), resetBoardOrder: vi.fn(), putColumnThinking: vi.fn() }))
 const settle = async () => { for (let index = 0; index < 12; index++) await Promise.resolve() }
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { resolve, promise } }
 beforeEach(() => { state.cleanups.forEach(cleanup => cleanup()); state.cleanups = []; vi.resetAllMocks(); resetToasts(); state.session.identity = { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } }; vi.mocked(getBoard).mockResolvedValue(boardFixture()); vi.mocked(getBoardRules).mockResolvedValue({ revision: 2, rules: [boardPin] }) })
@@ -164,4 +164,24 @@ it('an unconfirmed person in the write response never offers success or Undo', a
   vi.mocked(putBoardProfile).mockResolvedValue({ person_id: 'another-person', revision: 4, dry_run: false, moved: [], profile: boardFixture().profile })
   expect(await editor.profile({ thinking: 'deep' })).toBe(false)
   expect(editor.error.value).toContain('Could not confirm the save'); expect(toasts).toHaveLength(0); expect(putBoardProfile).toHaveBeenCalledTimes(1)
+})
+
+// Risk: thinking Undo could freeze inherited thinking or write a newly selected situation.
+it('column thinking captures the situation and person, restores auto with Undo, and discards held stale writes', async () => {
+  const context = ref({ layer: 'mine' as const, situation: 'fix' as 'first' | 'fix' | 'stuck' }), editor = useModelsBoard(context, ref(false)); await settle()
+  const column = editor.document.value!.columns.find(column => column.column === 'backend')!, next = boardFixture(); next.revision = 4
+  vi.mocked(putColumnThinking).mockResolvedValue({ person_id: next.person_id, revision: 4, dry_run: false, moved: [], profile: next.profile }); vi.mocked(getBoard).mockResolvedValue(next)
+  await editor.thinking(column, 'max')
+  expect(putColumnThinking).toHaveBeenCalledWith({ layer: 'mine', situation: 'fix' }, 'backend', 'max', 3, next.person_id)
+  vi.mocked(putColumnThinking).mockResolvedValue({ person_id: next.person_id, revision: 5, dry_run: false, moved: [], profile: next.profile }); vi.mocked(getBoard).mockResolvedValue({ ...next, revision: 5 })
+  toasts.at(-1)!.actions[0]!.run(); await settle()
+  expect(putColumnThinking).toHaveBeenLastCalledWith({ layer: 'mine', situation: 'fix' }, 'backend', null, 4, next.person_id)
+  resetToasts()
+  const held = deferred<Awaited<ReturnType<typeof putColumnThinking>>>()
+  vi.mocked(putColumnThinking).mockReturnValue(held.promise)
+  const writing = editor.thinking(column, 'deep')
+  context.value = { ...context.value, situation: 'stuck' }; await settle()
+  const reads = vi.mocked(getBoard).mock.calls.length
+  held.resolve({ person_id: next.person_id, revision: 6, dry_run: false, moved: [], profile: next.profile }); await writing
+  expect(getBoard).toHaveBeenCalledTimes(reads); expect(toasts).toHaveLength(0)
 })

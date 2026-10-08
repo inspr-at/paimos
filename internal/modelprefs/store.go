@@ -133,7 +133,7 @@ func LookupKind(ctx context.Context, tx pgx.Tx, area, projectID string) (Kind, b
 func SeedKinds(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	// Replay and bootstrap before migration 1276 still have aeon_seed_work_kinds.
 	// Naming the missing function in the same statement fails at parse time and
-	// aborts the transaction, so choose the call before invoking it.
+	// aborts the transaction, so choose the name before calling it.
 	var board bool
 	if err := tx.QueryRow(ctx, `SELECT to_regprocedure('aeon_seed_model_board_kinds(uuid)') IS NOT NULL`).Scan(&board); err != nil {
 		return err
