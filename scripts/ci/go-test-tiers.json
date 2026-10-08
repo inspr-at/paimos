@@ -2100,6 +2100,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestEnclaveMigrationEndsLegacyStrictWatchesUnderForcedRLS","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestEngineAdmissionJoinsSharedTenantFence","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestExactAPIConnectOnlySixAndSevenAccounts","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestGeneratedInstallerIPv6Origin","tier":"GATED-FULL"}
@@ -3183,6 +3185,8 @@
     {"kind":"go","package":"internal/auth","name":"TestDoctrineRulesReadKeyAtMiddleware","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestEmptyAgentKeyDeniedAcrossRegisteredAPIRoutes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestEngineAdmissionCeilingFixtureExcludesBuiltinAgents","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestExitConfirmationAgentRouteCeiling","tier":"GATED-FULL"}
     ,
@@ -5203,6 +5207,12 @@
     {"kind":"go","package":"internal/embedding","name":"TestWorkerKeepsStaleVectorOffTheRow","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/embedding","name":"TestWorkerStoresRewritesAndIsolates","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionExplicitAuthorityFinalWriteAndIdempotentReplay","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionShadowLimitsFloorsFreshnessAndTenantIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionWIPInventoryRejectsPartialReads","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/escalation","name":"TestCICheckIdentityAndBounds","tier":"ESSENTIAL"}
     ,
@@ -7755,6 +7765,8 @@
     {"kind":"go","package":"internal/reportercontract","name":"TestDeployTargetBytesMatchStable100","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestDeployTargetProducerSchemas","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestEngineAdmissionPathsAreServerRelativeAndAuthenticated","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestFix3AvailabilitySchemaEnums","tier":"GATED-FULL"}
     ,
