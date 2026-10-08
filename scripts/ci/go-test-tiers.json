@@ -5240,6 +5240,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsNeverReportMissingDataAsZero","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsQueueRunsCountOnlyMergedPulls","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsReadCutKeepsShortWindowsWhole","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsReadIsProjectMembersOnly","tier":"ESSENTIAL"}

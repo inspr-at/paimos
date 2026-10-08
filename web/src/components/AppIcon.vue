@@ -15,6 +15,7 @@ export type IconName =
   | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash' | 'graph'
   | 'leaf' | 'bookmark' | 'pin' | 'lock' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift' | 'thumbs-down'
   | 'merge' | 'person-check' | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
+  | 'bars' | 'flow' | 'half'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -144,6 +145,9 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'help'"><circle cx="8" cy="8" r="6.2" /><path d="M6.2 6.3a1.9 1.9 0 0 1 3.7.5c0 1.3-1.9 1.6-1.9 2.8M8 11.4v.05" /></template>
     <path v-else-if="name === 'pulse'" d="M1.8 8.4h2.6l1.6-4 2.6 8 1.8-5.2.9 1.2h2.9" />
     <path v-else-if="name === 'message'" d="M2.4 4.2c0-.9.7-1.6 1.6-1.6h8c.9 0 1.6.7 1.6 1.6v5.4c0 .9-.7 1.6-1.6 1.6H7l-3 2.4v-2.4a1.6 1.6 0 0 1-1.6-1.6Z" />
+    <path v-else-if="name === 'bars'" d="M3 13.2V8.6M8 13.2V3M13 13.2V6.2" />
+    <template v-else-if="name === 'flow'"><circle cx="3.4" cy="8" r="1.7" /><circle cx="12.6" cy="8" r="1.7" /><path d="M5.1 8h5.8M8 4.6V3M8 13v-1.6" /></template>
+    <template v-else-if="name === 'half'"><circle cx="8" cy="8" r="5.4" /><path d="M8 2.6v10.8A5.4 5.4 0 0 0 8 2.6Z" fill="currentColor" /></template>
     <template v-else-if="name === 'info'"><circle cx="8" cy="8" r="6.2" /><path d="M8 7.4v3.8M8 4.9v.05" /></template>
     <template v-else><circle cx="8" cy="8" r="6.2" /><path d="M10.6 5.4 9.2 9.2l-3.8 1.4 1.4-3.8Z" /></template>
   </svg>

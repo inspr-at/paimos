@@ -105,7 +105,10 @@ func TestDeliveryMetricsFix2KeepsIntermediateAttempts(t *testing.T) {
 		t.Fatalf("webhook attempts: %+v %v", one, err)
 	}
 	covered := now.AddDate(0, 0, -60)
-	metrics := computeMetrics(metricInput{CIWorkflow: defaultCIWorkflow, NightlyWorkflow: defaultNightlyWorkflow, Covered: &covered, Runs: runs}, now)
+	// PR 9 merged, so its three queue attempts stay in the merged-PR count.
+	merged := day.Add(4 * time.Hour)
+	metrics := computeMetrics(metricInput{CIWorkflow: defaultCIWorkflow, NightlyWorkflow: defaultNightlyWorkflow, Covered: &covered, Runs: runs,
+		Pulls: []metricPull{{Number: 9, Opened: day, Merged: &merged}}}, now)
 	wantWindow(t, metricByKey(t, metrics, "flaked_failures"), 30, "ok", 1, f64(100), nil, nil)
 	wantWindow(t, metricByKey(t, metrics, "time_to_first_green"), 30, "ok", 1, f64(40), f64(40), f64(40))
 	wantWindow(t, metricByKey(t, metrics, "queue_runs_per_pr"), 30, "ok", 1, f64(3), f64(3), f64(3))

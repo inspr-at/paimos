@@ -7,7 +7,7 @@ import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey
 import { APIError, createNode, listNodes, type BulkChange, type BulkResult, type ListItem, type SavedView } from '../lib/api'
 import { askDoneGate } from '../lib/doneGateAsk'
 import { benefitGateError, benefitSkip, benefitStepSummary, completionFields, needsBenefitPrompt, skippedStatusLabel } from '../lib/doneGate'
-import { can } from '../lib/authz'
+import { can, ensurePermissions } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
@@ -81,12 +81,15 @@ const RecurringWorkCard = defineAsyncComponent(() => import('../components/recur
 // Knowledge loads with its tab, not with every project page.
 const KnowledgeTab = defineAsyncComponent(() => import('../components/knowledge/KnowledgeTab.vue'))
 const KnowledgeEntryPage = defineAsyncComponent(() => import('../components/knowledge/KnowledgeEntryPage.vue'))
+// Delivery (AEON-994) loads with its tab.
+const DeliveryView = defineAsyncComponent(() => import('../components/delivery/DeliveryView.vue'))
 
 const route = useRoute()
 const router = useRouter()
 const projects = useProjects()
 const session = useSession()
-const projectSections = computed(() => PROJECT_SECTIONS)
+// Delivery is absent, not disabled, for people who may not read it (AEON-994).
+const projectSections = computed(() => PROJECT_SECTIONS.filter(item => item.id !== 'delivery' || (!!project.value && can('delivery.read', project.value.id))))
 
 const projectKey = computed(() => String(route.params.projectKey ?? ''))
 const ticketKey = computed(() => typeof route.params.ticketKey === 'string' ? route.params.ticketKey : '')
@@ -247,7 +250,7 @@ async function fetchWorkList(query: ListQuery) {
 const list = useTicketList(projectId, filters, { review: row => openRow(row), fetchList: fetchWorkList })
 const now = ref(Date.now())
 // Sections own their views. The registry also supplies TG1's optional renderer.
-type ViewMode = TicketView | 'knowledge' | 'settings'
+type ViewMode = TicketView | 'knowledge' | 'settings' | 'delivery'
 const activeTicketView = computed(() => ticketView(route.query.view))
 // Knowledge has its own address: /p/KEY/knowledge, and /p/KEY/knowledge/<type>/<slug> for one entry.
 const knowledgeActive = computed(onKnowledge)
@@ -300,6 +303,7 @@ watch([dockEntry, knowledgeWide], ([entry]) => {
 const fullViewQuery = computed(() => !!ticketKey.value && (route.query.panel === 'full' || route.query.view === 'full'))
 const viewMode = computed<ViewMode>(() => section.value === 'tickets' ? activeTicketView.value.id as TicketView : section.value)
 const settingsActive = computed(() => section.value === 'settings')
+const deliveryActive = computed(() => section.value === 'delivery')
 const graphActive = computed(() => viewMode.value === 'graph')
 const graphState = ref<TicketGraphState>({ data: { nodes: [], links: [], truncated: false }, visible: { nodes: [], links: [], truncated: false }, loading: true })
 const ticketGraphView = ref<{ focus: () => void }>()
@@ -506,6 +510,12 @@ watch(() => [filters.value.status, filters.value.statusScope, filters.value.hide
 })
 // Remember each section's filters and view while moving around this project.
 watch(section, () => { creating.value = false; openedFromList = false })
+// A Delivery address without delivery.read leads to the project's tickets once permissions are known.
+watch([deliveryActive, projectId], async ([active, id]) => {
+  if (!active || !id) return
+  if (await ensurePermissions(id) !== 'known' || !deliveryActive.value || projectId.value !== id || can('delivery.read', id)) return
+  void router.replace({ path: sectionPath('tickets'), hash: route.hash })
+}, { immediate: true })
 const sectionQueries: Partial<Record<ProjectSection, typeof route.query>> = {}
 watch(projectKey, () => { for (const key of Object.keys(sectionQueries)) delete sectionQueries[key as ProjectSection] })
 function setSection(id: string) {
@@ -588,9 +598,9 @@ const viewFilters = computed(() => activeView.value ? filtersFromView(activeView
 const savedFilters = computed(() => ({ ...filters.value, mode: activeTicketView.value.id as ListFilters['mode'], cols: toolbarColumns.value.order.filter(id => toolbarColumns.value.visible.includes(id) && !PINNED.includes(id)) }))
 const customised = computed(() => !!listPrefs.value?.visible || filters.value.mode !== 'list' || hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed || !!filters.value.hideStates)
 const viewDirty = computed(() => !!viewFilters.value && !sameListState(savedFilters.value, viewFilters.value))
-const canSaveView = computed(() => !knowledgeActive.value && !settingsActive.value && (activeView.value ? viewDirty.value : customised.value))
+const canSaveView = computed(() => !knowledgeActive.value && !settingsActive.value && !deliveryActive.value && (activeView.value ? viewDirty.value : customised.value))
 // The saved-view strip shows once there is a view to pick or a list worth keeping; the plain list alone needs no strip.
-const showViewBar = computed(() => !knowledgeActive.value && !settingsActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
+const showViewBar = computed(() => !knowledgeActive.value && !settingsActive.value && !deliveryActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
 const defaultViewId = computed(() => listPrefs.value?.defaultView ?? null)
 function viewQuery(view: SavedView | null): Record<string, string> {
   return view ? filtersToQuery(filtersFromView(view)) : {}
@@ -641,7 +651,7 @@ watch(projectId, async id => {
 const queryKey = computed(() => projectId.value && entryResolved.value ? JSON.stringify(apiParams(projectId.value, filters.value)) : '')
 // The Outline without filters loads its own levels; the list query then only supplies
 // counts. With filters or Hide closed, the Outline needs the list's whole match set.
-const listLoadMode = computed(() => graphActive.value ? 'graph' : knowledgeActive.value || settingsActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
+const listLoadMode = computed(() => graphActive.value ? 'graph' : knowledgeActive.value || settingsActive.value || deliveryActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
 watch([queryKey, listLoadMode], async ([value, mode], old) => {
   if (!value || mode === 'graph') return
   // Switching views on the same query reuses the rows already loaded.
@@ -1217,7 +1227,7 @@ async function remove(view: SavedView) {
 }
 
 // ---------- Selection and bulk changes ----------
-const selectable = computed(() => writable.value && !knowledgeActive.value && !settingsActive.value && !graphActive.value && !fullView.value)
+const selectable = computed(() => writable.value && !knowledgeActive.value && !settingsActive.value && !deliveryActive.value && !graphActive.value && !fullView.value)
 const selected = ref(new Set<string>())
 // Phone selection can be armed before the first card is chosen.
 const phoneQuery = window.matchMedia('(max-width: 720px)')
@@ -1591,7 +1601,7 @@ function extendSelection(step: number) {
 function keydown(event: KeyboardEvent) {
   if (event.altKey && event.key === 'ArrowLeft' && ticketKey.value && trail.value.length && !typing(event.target as HTMLElement | null)) { event.preventDefault(); trailBack(); return }
   // The Knowledge tab and its entries have their own keys.
-  if ((knowledgeActive.value || settingsActive.value) && !ticketKey.value) return
+  if ((knowledgeActive.value || settingsActive.value || deliveryActive.value) && !ticketKey.value) return
   // Command or Control A in the list selects every loaded row.
   if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'a' && selectable.value && !event.defaultPrevented
     && !typing(event.target) && !document.querySelector('dialog[open], .floating') && !panel.value?.el?.contains(document.activeElement)) {
@@ -1788,14 +1798,14 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </div>
       </div>
       <div ref="stickMark" class="stick-mark" aria-hidden="true" />
-      <div v-if="!settingsActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
+      <div v-if="!settingsActive && !deliveryActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
         <ListToolbar
           ref="toolbar" :summary="project" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
           :facet-loading="facetLoading" :settings-target="ticketsHeader ? '#project-view-settings' : undefined" :project-header="ticketsHeader"
           @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
           @show-closed="manualShowClosed" @hide-states="setHideStates" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
           @open-sheet="filterSheet?.open()" @need-options="needOptions" @create="startCreate()"
-          :view="viewMode === 'settings' ? 'list' : viewMode" :knowledge-view="knowledgeView" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
+          :view="viewMode === 'settings' || viewMode === 'delivery' ? 'list' : viewMode" :knowledge-view="knowledgeView" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
           @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
           :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
           :header-graph="headerGraph" @header-graph="setHeaderGraph"
@@ -1812,6 +1822,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </div>
 
       <RecurringWorkCard v-if="settingsActive" :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" />
+      <DeliveryView v-else-if="deliveryActive" :key="`${project.id}/${me?.id ?? ''}`" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" />
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
         :filters="knowledgeFilters" :can-write="knowledgeWritable" :person="session.identity?.principal.kind === 'person'" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge" @accepted="learningAccepted" @reverted="learningReverted"
@@ -1848,7 +1859,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
         @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @release="anchor => openRelease(anchor, liveSelection())" @queue="bulkQueue" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
       />
-      <p v-if="!knowledgeActive && !settingsActive && !graphActive" class="hint">
+      <p v-if="!knowledgeActive && !settingsActive && !deliveryActive && !graphActive" class="hint">
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·
         <button type="button" class="hint-link" @click="run({ name: 'shortcuts' })"><kbd class="keycap">?</kbd> all shortcuts</button>
       </p>

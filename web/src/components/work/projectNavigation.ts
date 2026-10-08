@@ -7,6 +7,7 @@ export interface ProjectTab { id: string; label: string; icon: IconName }
 export const PROJECT_SECTIONS = [
   { id: 'tickets', label: 'Tickets', icon: 'ticket' },
   { id: 'knowledge', label: 'Knowledge', icon: 'book' },
+  { id: 'delivery', label: 'Delivery', icon: 'gauge' },
   { id: 'settings', label: 'Settings', icon: 'gear' },
 ] as const satisfies readonly ProjectTab[]
 export type ProjectSection = typeof PROJECT_SECTIONS[number]['id']
@@ -33,5 +34,5 @@ export const KNOWLEDGE_VIEWS = [
 
 export function projectSection(route: Pick<RouteLocationNormalizedLoaded, 'meta' | 'query'>): ProjectSection {
   const section = route.meta.projectSection ?? route.query.section
-  return section === 'knowledge' || section === 'settings' ? section : 'tickets'
+  return section === 'knowledge' || section === 'delivery' || section === 'settings' ? section : 'tickets'
 }
