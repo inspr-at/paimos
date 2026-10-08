@@ -9142,6 +9142,8 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestTagMatchesVersionFailsClosed","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/rules-bootstrap","name":"TestAgentsOpenAPIContractNamesAuthoredFragments","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"scripts/rules-bootstrap","name":"TestBindingRejectsMalformedAndMismatchedInputs","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/rules-bootstrap","name":"TestCheckCannotBeRedirectedToAnotherIndex","tier":"GATED-FULL"}

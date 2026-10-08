@@ -1,0 +1,204 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/chat
+paths:
+  /chat-deliveries/binding/resolve:
+    post:
+      operationId: resolveChatWorkerBinding
+      description: chat-v1. Authenticate an existing external registration with the principal and its private worker lease, then verify exact current conversation, binding epoch and lasting native-context ownership. A reference, label, X-session-id or shared principal alone never suffices. At most 8 KiB body, read and strictly decoded before database acquisition, with a three-second body/work deadline. This read does not claim, ACK, extend a lease or alter native execution authority.
+      parameters:
+        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 4096}, description: Private existing registration proof; never returned or logged}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChatWorkerBindingRequest'}
+      responses:
+        '200': {description: Verified exact binding, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
+        '400': {description: Invalid bounded request}
+        '408': {description: Request body did not arrive before the deadline}
+        '404': {description: Disabled or unavailable proof/binding}
+  /chat-deliveries/claim:
+    post:
+      operationId: "claimChatDelivery"
+      x-aeon-package: "R3"
+      description: "Reserved chat-v1 contract for R3; not mounted by R1. Private external lease, exact current binding and scoped key proof. One never-offered intent at a time, with exact attempt/session/epoch and single-flight offer boundary. Successor cannot replay offered/uncertain input. Reauthorize under tenant, role/thread, ordered session, message and attempt locks; event counter last. Null envelope means no eligible intent."
+      parameters: [{"name": "X-Aeon-Worker-Lease", "in": "header", "required": true, "schema": {"type": "string", "minLength": 32, "maxLength": 4096}}]
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatClaimResponse"
+        '400':
+          description: "Invalid bounded input/cursor"
+        '404':
+          description: "Disabled, unknown, wrong tenant or unauthorized target"
+        '409':
+          description: "Stale identity or conflicting state"
+        '429':
+          description: "Rate limit reached; Retry-After supplies the retry interval"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatClaimRequest"
+  /chat-deliveries/stream:
+    get:
+      operationId: "streamChatPendingHints"
+      x-aeon-package: "R3"
+      description: "Reserved chat-v1 contract for R3; not mounted by R1. Authenticated content-free pending-intent hints for the exact registration, conversation and binding epoch. Stream or bounded long-poll never drains, ACKs or wakes a native process by itself. Every keepalive/query revalidates lease, binding and permissions."
+      parameters: [{"name": "X-Aeon-Worker-Lease", "in": "header", "required": true, "schema": {"type": "string", "minLength": 32, "maxLength": 4096}}, {"name": "conversation_id", "in": "query", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "session_id", "in": "query", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "binding_epoch", "in": "query", "required": true, "schema": {"$ref": "#/components/schemas/ChatPosition"}}, {"name": "after", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "wait_ms", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 0, "maximum": 25000, "default": 0}}]
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            text/event-stream:
+              schema:
+                type: "string"
+                description: "Content-free SSE frames containing ChatEvent only."
+        '400':
+          description: "Invalid bounded input/cursor"
+        '404':
+          description: "Disabled, unknown, wrong tenant or unauthorized target"
+        '409':
+          description: "Stale identity or conflicting state"
+        '429':
+          description: "Rate limit reached; Retry-After supplies the retry interval"
+  /chat-deliveries/{attemptId}/receipt:
+    post:
+      operationId: "reportChatReceipt"
+      x-aeon-package: "R3"
+      description: "Reserved chat-v1 contract for R3; not mounted by R1. Exact attempt, binding epoch, external lease and prior-offer correlation. Monotonic evidence transitions and identical idempotent settlements. Preview/digest echo/listing/queue ACK never implies full agent_confirmed. Full confirmation requires explicit agent action after full inline delivery or qualified complete body-part coverage."
+      parameters: [{"name": "attemptId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "X-Aeon-Worker-Lease", "in": "header", "required": true, "schema": {"type": "string", "minLength": 32, "maxLength": 4096}}]
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatReceipt"
+        '400':
+          description: "Invalid bounded input/cursor"
+        '404':
+          description: "Disabled, unknown, wrong tenant or unauthorized target"
+        '409':
+          description: "Stale identity or conflicting state"
+        '429':
+          description: "Rate limit reached; Retry-After supplies the retry interval"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatReceiptReport"
+components:
+  schemas:
+    ChatClaimRequest:
+      type: "object"
+      additionalProperties: false
+      required: ["conversation_id", "session_id", "binding_epoch"]
+      properties:
+        conversation_id:
+          type: "string"
+          format: "uuid"
+        session_id:
+          type: "string"
+          format: "uuid"
+        binding_epoch:
+          $ref: "#/components/schemas/ChatPosition"
+    ChatClaimResponse:
+      type: "object"
+      additionalProperties: false
+      required: ["contract", "envelope"]
+      properties:
+        contract:
+          type: "string"
+          const: "chat-v1"
+        envelope:
+          anyOf: [{"$ref": "#/components/schemas/ChatDeliveryEnvelope"}, {"type": "null"}]
+    ChatDeliveryEnvelope:
+      type: "object"
+      additionalProperties: false
+      required: ["contract", "conversation_id", "message_id", "attempt_id", "session_id", "binding_epoch", "offer_correlation", "lease_until", "payload_mode", "context", "body_digest", "envelope_digest", "body_bytes"]
+      properties:
+        contract:
+          type: "string"
+          const: "chat-v1"
+        conversation_id:
+          type: "string"
+          format: "uuid"
+        message_id:
+          type: "string"
+          format: "uuid"
+        attempt_id:
+          type: "string"
+          format: "uuid"
+        session_id:
+          type: "string"
+          format: "uuid"
+        binding_epoch:
+          $ref: "#/components/schemas/ChatPosition"
+        offer_correlation:
+          type: "string"
+          minLength: 1
+          maxLength: 128
+        lease_until:
+          type: "string"
+          format: "date-time"
+        payload_mode:
+          type: "string"
+          enum: ["inline", "preview"]
+        context:
+          type: "string"
+          maxLength: 9000
+          x-aeon-max-utf16-units: 9000
+          x-aeon-max-utf8-bytes: 65536
+        body_digest:
+          type: "string"
+          pattern: "^[a-f0-9]{64}$"
+        envelope_digest:
+          type: "string"
+          pattern: "^[a-f0-9]{64}$"
+        body_bytes:
+          type: "integer"
+          minimum: 1
+          maximum: 65536
+    ChatReceiptReport:
+      type: "object"
+      additionalProperties: false
+      required: ["conversation_id", "session_id", "binding_epoch", "offer_correlation", "payload_mode", "state", "envelope_digest"]
+      properties:
+        conversation_id:
+          type: "string"
+          format: "uuid"
+        session_id:
+          type: "string"
+          format: "uuid"
+        binding_epoch:
+          $ref: "#/components/schemas/ChatPosition"
+        offer_correlation:
+          type: "string"
+          minLength: 1
+          maxLength: 128
+        payload_mode:
+          type: "string"
+          enum: ["inline", "preview"]
+        state:
+          type: "string"
+          enum: ["queued", "offered", "handed_off", "preview_received", "agent_confirmed", "replying", "replied", "failed", "uncertain"]
+        envelope_digest:
+          type: "string"
+          pattern: "^[a-f0-9]{64}$"
+        reason:
+          type: "string"
+          maxLength: 128
+    ChatWorkerBindingRequest:
+      type: object
+      additionalProperties: false
+      required: [conversation_id, session_id, binding_epoch]
+      properties:
+        conversation_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        binding_epoch: {$ref: '#/components/schemas/ChatPosition'}

@@ -1,0 +1,226 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /queue:
+    get:
+      operationId: listWorkQueue
+      description: Visible queued ticket runs, ordered by priority then FIFO until a manual move. Targeted Start now lines are separate. Positions are relative to the caller's visible queue. No hard cap; hours are advisory. People need nodes.read; coordinator agents need their live coordinator binding.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    post:
+      operationId: addWorkQueue
+      description: Idempotently queue a ticket. People need run.create in its project; a live coordinator may queue visible tickets. Workers cannot. New and Backlog become Open; In progress with no assignee and no live run/session is stale and also becomes Open. Stale additions return a revision-bound Undo token. Blocked keeps its state and waits. Missing estimates are suggested by readiness and must be explicitly applied before queueing. Acceptance criteria and a named blocker are required. A target pins Start now to that agent and profile without overriding allowances; daemon claim performs pickup. Moving to done, cancelled, archived, delivered or accepted, or soft-deleting the ticket, cancels still-queued work and releases its holds atomically; reopening requires a new queue request.
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [node_id]
+              properties:
+                node_id: {type: string, format: uuid}
+                agent_principal_id: {type: string, format: uuid}
+                model_profile_id: {type: string, format: uuid}
+                requested_account_id: {type: string, format: uuid}
+      responses:
+        '200': {description: Queued entry, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueueEntry'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '409': {description: Active run or changed target conflicts}
+        '422': {description: 'Not ready; code queue_not_ready, error text and structured readiness with missing field names and suggested_estimate_hours'}
+  /queue/next:
+    post:
+      operationId: nextWorkQueue
+      description: >-
+        Coordinator or permitted person routes the first ready run to an eligible agent using existing allowance admission. Targeted work precedes shared work for its agent. Blocked work keeps its place and is skipped. No capacity returns entry null. This selects a run; pickup and In progress occur atomically on the daemon's fenced claim. Repeated selection returns the same assigned run until claim. Explicit leads share one owner dial: oldest eligible project demand gets one new route per turn, then goes behind waiting projects. Within each project targeted and manual order are preserved. Missing or stale mandatory gates and unusable worker model/account routes never qualify a contender. Fairness waits return entry null and a redacted wait_reason; no project/account identities escape. Lead pickup queries return at most 201 rows to detect a 200-entry overflow, cap each ticket fields payload at 64 KiB before decoding, and enforce a five-second deadline. Scheduling overflow returns 409 explicitly.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {in: header, name: X-Aeon-Lead-Session, required: false, schema: {type: string, format: uuid}, description: Required for projects with an explicit lead intent; the current lead must prove its session lease. Legacy manual routing in unconfigured projects remains compatible.}
+        - {in: header, name: X-Aeon-Lead-Generation, required: false, schema: {type: integer, minimum: 1}, description: Exact current project lead generation. All mandatory start checks are repeated; unavailable checks return an admission wait.}
+        - {in: header, name: X-Aeon-Worker-Lease, required: false, schema: {type: string, minLength: 32, maxLength: 256}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QueueTarget'}
+      responses:
+        '200': {description: Selection, content: {application/json: {schema: {type: object, required: [entry], properties: {wait_reason: {type: string}, entry: {oneOf: [{$ref: '#/components/schemas/WorkQueueEntry'}, {type: 'null'}]}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '409': {description: 'Lead proof missing, stale assignment, paused/revoked/archived lead, mandatory admission unavailable, or bounded scheduling snapshot overflow'}
+  /queue/reset:
+    post:
+      operationId: resetWorkQueue
+      description: Reset the full shared partition to priority then original FIFO. Requires queue management authority for every visible shared ticket; clears hidden ranks internally under the tree lock without exposing hidden entries. Targeted lines are untouched.
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /queue/{nodeId}:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    delete:
+      operationId: removeWorkQueue
+      description: Idempotently cancel only a queued ticket run and release its capacity holds. Cancel its generated work order and soft-delete that work-order node in the same transaction. The ticket stays Open or Blocked. Same queue permissions as add.
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Removed, content: {application/json: {schema: {type: object, properties: {removed: {type: boolean}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '409': {description: Run has already started}
+  /queue/{nodeId}/estimate:
+    post:
+      operationId: applyWorkQueueEstimate
+      description: Explicitly apply an estimate to a queueable ticket that has no valid estimate. Preserves existing estimates, stamps actor provenance and audits the change. Same queue management permission as add.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [estimate_hours], properties: {estimate_hours: {type: number, exclusiveMinimum: 0, maximum: 200}}}
+      responses:
+        '200': {description: Readiness after estimate, content: {application/json: {schema: {$ref: '#/components/schemas/QueueReadiness'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /queue/{nodeId}/move:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: moveWorkQueue
+      description: Move to a one-based position in the visible shared queue. All affected visible entries must be manageable. The full shared partition is renumbered under the tree lock; hidden entries retain their slots and relative order. Targeted entries cannot move into the shared queue. Manual order lasts until Reset; new arrivals append after the full shared partition while manual order is active.
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [position], properties: {position: {type: integer, minimum: 1}}}
+      responses:
+        '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '409': {description: Targeted entry cannot be reordered}
+  /queue/{nodeId}/readiness:
+    get:
+      operationId: workQueueReadiness
+      description: Check a visible ticket without modifying it. Missing estimate returns a conservative complexity-based suggestion, not an invented acceptance criterion.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Readiness, content: {application/json: {schema: {$ref: '#/components/schemas/QueueReadiness'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /queue/{nodeId}/snapshots:
+    post:
+      operationId: captureParentQueueSnapshot
+      summary: Capture visible open executable leaves without starting work
+      description: Captures at most 100 leaves, traversing at most 256 visible work nodes and 32 levels within 5 seconds. Hidden branches are omitted without counts. The server retains leaf identities, revisions and ancestry; later descendants are never added. When continuation_available is true, capture a fresh snapshot with continuation_of set to this snapshot id to advance beyond visited nodes. Continuations retain bounded traversal and explicit page membership; they are owned by the caller and must use the same parent. A fresh capture without continuation_of starts at the beginning. The depth limit remains 32 levels. Queue presence grants no launch authority.
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision]
+              properties:
+                expected_revision: {type: string, format: date-time}
+                continuation_of: {type: string, format: uuid, description: Prior owned snapshot whose server-held traversal cursor advances this capture}
+      responses:
+        '200': {description: Owner-bound snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/ParentQueueSnapshot'}}}}
+        '400': {description: Invalid revision or id}
+        '403': {description: Queue permission denied}
+        '404': {description: Parent unavailable}
+        '409': {description: 'Parent changed, is not a work parent, or continuation is cancelled, exhausted or its ancestry changed'}
+  /queue/{nodeId}/undo:
+    post:
+      operationId: undoStaleWorkQueue
+      description: Undo a stale ticket addition by its original actor with current queue management permission. Atomically cancel the same still-queued run and restore the prior In progress status. Refuses a changed ticket revision, assignment, live work, another queue entry or a started run. Records the removal and restoration.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QueueUndoToken'}
+      responses:
+        '200': {description: Queue addition undone, content: {application/json: {schema: {type: object, required: [removed], properties: {removed: {type: boolean}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Ticket or run changed since queueing}
+components:
+  schemas:
+    QueueReadiness:
+      type: object
+      required: [queueable, ready, missing, suggested_estimate_hours, security_review_required]
+      properties:
+        stale: {type: boolean, description: In progress with no assignee and no live run or session.}
+        queueable: {type: boolean}
+        ready: {type: boolean}
+        missing: {type: array, items: {type: string, enum: [status, estimate, criteria, blocker]}}
+        suggested_estimate_hours: {type: number, exclusiveMinimum: 0, maximum: 200}
+        security_review_required: {type: boolean}
+    QueueTarget:
+      type: object
+      additionalProperties: false
+      properties:
+        agent_principal_id: {type: string, format: uuid}
+        model_profile_id: {type: string, format: uuid}
+        requested_account_id: {type: string, format: uuid}
+    QueueUndoToken:
+      type: object
+      additionalProperties: false
+      required: [run_id, revision]
+      properties:
+        run_id: {type: string, format: uuid}
+        revision: {type: string, format: date-time}
+    WorkQueue:
+      type: object
+      required: [items, count, manual_order, capacity]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/WorkQueueEntry'}}
+        count: {type: integer, minimum: 0}
+        manual_order: {type: boolean}
+        capacity:
+          type: object
+          required: [queued_hours, parallel_runs, work_hours, warning]
+          properties:
+            queued_hours: {type: number, minimum: 0}
+            parallel_runs: {type: integer, minimum: 0}
+            work_hours: {type: [number, 'null'], minimum: 0}
+            warning: {type: boolean, description: 'True from approximately four hours, or when no capacity is available'}
+    WorkQueueEntry:
+      type: object
+      required: [node_id, key, title, state, priority, estimate_hours, queued]
+      properties:
+        undo: {$ref: '#/components/schemas/QueueUndoToken'}
+        node_id: {type: string, format: uuid}
+        project_id: {type: [string, 'null'], format: uuid}
+        key: {type: string}
+        title: {type: string}
+        state: {type: string}
+        priority: {type: string}
+        estimate_hours: {type: number, exclusiveMinimum: 0}
+        queued: {$ref: '#/components/schemas/QueuedTicket'}
+        run: {allOf: [{$ref: '#/components/schemas/AgentRun'}], description: Present only with run.read permission or coordinator queue authority.}

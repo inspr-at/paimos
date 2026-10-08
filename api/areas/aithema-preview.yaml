@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/aithema/host
+# aeon:owner internal/httpapi
+paths:
+  /aithema/preview/{design_rev}:
+    get:
+      operationId: aithemaPreview
+      summary: Capability-only preview document or stylesheet through the host proxy
+      servers: [{url: /}]
+      security: []
+      description: A service-signed EdDSA cap binds tid, sid and design_rev with a maximum 300-second lifetime. Missing, invalid, expired, foreign or revoked caps return the same 404 before upstream access. Cookies and Authorization headers never substitute for cap. Final document CSP is default-src 'none'; style-src 'self'; img-src data:; font-src data:; script-src the configured picker SHA-256; form-action 'none'; base-uri 'none'; frame-ancestors 'self'. Stylesheets use the same route with resource=base.css or resource=tokens.css. They require the same cap. Cache-Control is private, no-store; Referrer-Policy is no-referrer; X-Frame-Options is SAMEORIGIN.
+      parameters:
+        - {name: design_rev, in: path, required: true, schema: {type: string, pattern: '^[0-9a-f]{64}$'}}
+        - {name: cap, in: query, required: true, schema: {type: string, maxLength: 16384}}
+        - {name: resource, in: query, schema: {type: string, enum: [base.css, tokens.css]}}
+      responses:
+        '200': {description: Capability-authorized HTML or CSS with exact host-owned headers}
+        '404': {description: Preview unavailable; no existence oracle}
+components:

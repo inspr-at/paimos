@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/questions
+paths:
+  /questions/{questionId}:
+    parameters:
+      - {name: questionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getQuestion
+      security: [{session: []}, {agentKey: []}]
+      description: Requires current questions.read permission; agents must be an asker. Inaccessible questions return 404 at the service boundary.
+      responses:
+        '200': {description: Question, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /questions/{questionId}/decision:
+    parameters:
+      - {name: questionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: decideQuestion
+      security: [{session: []}]
+      description: >-
+        Person-only questions.decide plus questions.read; key-backed callers cannot decide.
+        Serializes on the question and requires expected_revision (initial revision 1).
+        An identical decision request_id replays even with its old expected_revision; altered input conflicts.
+        Appends an immutable answer revision and durable pending effect/delivery rows due database-now + 10 seconds.
+        Re-deciding replaces pending work and restarts the deadline; dispatched revisions require the P3 correction adapter.
+        P1 accepts Once only. Always, Requirement and Doctrine return outcome_unavailable until their P4 adapters exist;
+        their suggestions remain available on asks. No active Always authority, external side effect or delivery is claimed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QuestionDecisionInput'}
+      responses:
+        '200': {description: Recorded answer with pending delivery, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: 'code revision_conflict or replay_conflict'}
+        '422': {description: 'code outcome_unavailable'}
+  /questions/{questionId}/status:
+    parameters:
+      - {name: questionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: questionStatus
+      security: [{session: []}, {agentKey: []}]
+      description: Same authorized durable projection as getQuestion; works after the original session ends and never waits for an answer.
+      responses:
+        '200': {description: Current durable state, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    QuestionDecisionInput:
+      type: object
+      additionalProperties: false
+      required: [request_id, expected_revision, outcome]
+      properties:
+        request_id: {type: string, format: uuid}
+        expected_revision: {type: integer, minimum: 1}
+        option_id: {type: string, maxLength: 40}
+        answer: {type: string, maxLength: 8000, description: Required for a custom answer; omit to use the option answer}
+        reason: {type: string, maxLength: 2000}
+        outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        ticket_revision: {type: string, format: date-time, description: Optional ticket updated_at from the screen; changes before commit conflict. The server also snapshots it for delayed application.}
+        doctrine: {$ref: '#/components/schemas/QuestionDoctrineTarget'}

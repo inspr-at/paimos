@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /queue-snapshots/{snapshotId}:
+    get:
+      operationId: getParentQueueSnapshot
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Current visible results only, content: {application/json: {schema: {$ref: '#/components/schemas/ParentQueueSnapshot'}}}}
+        '404': {description: Snapshot unavailable or owned by another principal}
+    delete:
+      operationId: cancelParentQueueSnapshot
+      description: Cancels only a pending snapshot. Applied queue entries remain; remove those with the existing per-leaf queue removal API. Cancellation and application serialize; repeated cancellation is idempotent.
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Cancelled snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/ParentQueueSnapshot'}}}}
+        '404': {description: Snapshot unavailable}
+        '409': {description: Snapshot already applied}
+  /queue-snapshots/{snapshotId}/apply:
+    post:
+      operationId: applyParentQueueSnapshot
+      description: Rechecks each current leaf and ancestry under the tenant access and tree fences. Changed, closed, ineligible, active or unavailable leaves are skipped. Existing shared queue membership is idempotent. All new entries and audit events commit atomically; retries replay results without re-adding removed work. No routing, capacity reservation or automatic start is performed. Mandatory launch gates remain on the existing launch path.
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Honest per-leaf outcomes, content: {application/json: {schema: {$ref: '#/components/schemas/ParentQueueSnapshot'}}}}
+        '404': {description: Snapshot or parent unavailable}
+        '409': {description: Snapshot cancelled}
+components:

@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/chat
+paths:
+  /projects/{projectId}/chat-threads/resolve:
+    post:
+      operationId: resolveChatThread
+      description: chat-v1. Idempotently resolve the person's durable thread for an already authorized role. At most 8 KiB body, read and strictly decoded before database acquisition, with a three-second body/work deadline. No newest-session selection or principal-wide fallback.
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [role_id]
+              properties:
+                role_id: {type: string, format: uuid}
+      responses:
+        '200': {description: Durable conversation, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
+        '400': {description: Invalid bounded request}
+        '408': {description: Request body did not arrive before the deadline}
+        '404': {description: Disabled or unauthorized target}
+components:

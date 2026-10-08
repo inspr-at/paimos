@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /projects/{projectId}/review-policy:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectReviewPolicy
+      description: "Requires reviewpolicy.read. Returns the local policy and effective project override over tenant default; absent rows use other_family."
+      responses:
+        "200":
+          description: "Current local and effective review policy"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReviewPolicySettings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "Project is unavailable for policy changes"}
+    put:
+      operationId: putProjectReviewPolicy
+      parameters:
+        - {in: header, name: If-Unmodified-Since, required: false, schema: {type: string, maxLength: 64}, description: 'Current scope updated_at as RFC3339; none asserts that no local override exists. A mismatch returns 412.'}
+      description: "Requires reviewpolicy.manage in the current scope, rechecked inside the final tenant and tree fence. Built-in agent roles exclude manage; an explicit custom role and key scope may grant it. Replaces the policy and appends review_policy.changed with Before/After."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ReviewPolicy"}
+      responses:
+        '412': {description: 'The current revision changed; reload before writing.'}
+        "200":
+          description: "Current local and effective review policy"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReviewPolicySettings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "Project is unavailable for policy changes"}
+    delete:
+      operationId: deleteProjectReviewPolicy
+      parameters:
+        - {in: header, name: If-Unmodified-Since, required: false, schema: {type: string, maxLength: 64}, description: 'Current scope updated_at as RFC3339; none asserts that no local override exists. A mismatch returns 412.'}
+      description: "Requires reviewpolicy.manage in the current project inside the final tenant and tree fence. Deletes the project override, falls back to the tenant default and appends review_policy.changed with Before/After."
+      responses:
+        '412': {description: 'The current revision changed; reload before writing.'}
+        "200":
+          description: "Current local and effective review policy"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReviewPolicySettings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "Project is unavailable for policy changes"}
+components:

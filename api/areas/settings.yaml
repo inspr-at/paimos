@@ -1,0 +1,640 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/delivery
+# aeon:owner internal/features
+# aeon:owner internal/inbox
+# aeon:owner internal/modelprovider
+# aeon:owner internal/modelregistry
+# aeon:owner internal/nodes
+# aeon:owner internal/statusautopilot
+# aeon:owner internal/tenantbrand
+paths:
+  /settings/agent-activity:
+    get:
+      operationId: getAgentActivityMode
+      description: Workspace Agent activity policy inherited by projects. Requires settings.manage.
+      responses:
+        '200': {description: Current policy, content: {application/json: {schema: {$ref: '#/components/schemas/AgentActivitySetting'}}}}
+    put:
+      operationId: putAgentActivityMode
+      description: Change the workspace policy. Off collects no summaries, tool activity or legacy notes and hides stored activity; tool_activity collects automatic activity only. Requires settings.manage. Changed values append tenant.agent_work_settings_changed with before and after values.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [mode]
+              properties:
+                mode: {type: string, enum: [off, tool_activity, agent_summary]}
+                expected_mode: {type: string, enum: [off, tool_activity, agent_summary], description: Optional current value required for a conditional save or reverse write}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Saved policy, content: {application/json: {schema: {$ref: '#/components/schemas/AgentActivitySetting'}}}}
+        '400': {description: Unknown mode}
+        '403': {description: Settings permission required}
+        '409': {description: Current policy differs from the expected value}
+  /settings/brand:
+    get:
+      operationId: getBrandSettings
+      description: The workspace's header brand, a short name and a logo with an optional dark-mode logo (AEON-431). Person only; requires settings.manage.
+      responses:
+        '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
+        '403': {description: 'Not a person, or settings.manage missing'}
+    put:
+      operationId: putBrandShortName
+      description: Sets the short name shown next to the logo; an empty string clears it. At most 32 characters, whitespace collapsed. Person only; requires settings.manage. A change appends tenant.brand_updated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [short_name]
+              properties:
+                short_name: {type: string, maxLength: 32}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
+        '400': {description: Invalid short name}
+        '403': {description: 'Not a person, or settings.manage missing'}
+  /settings/brand/logo/{variant}:
+    parameters:
+      - {name: variant, in: path, required: true, schema: {type: string, enum: [light, dark]}, description: light is the logo; dark is the optional logo for dark mode.}
+    put:
+      operationId: putBrandLogo
+      description: >-
+        Uploads a logo as the raw request body. The declared Content-Type must match the bytes: PNG, WebP or SVG, at most 256 KB.
+        Raster logos need at least 32 px and at most 4096 px on each side and at most 4 megapixels; every logo is between 1:2 and 8:1.
+        A raster's size is read from every header before it is decoded: a WebP frame must match its VP8X canvas, and animated
+        PNG or WebP files and bytes after the image's end are refused.
+        SVG accepts a static logo profile of paths, basic shapes, groups, text, titles, descriptions and gradients, with defs as
+        an inert definitions container. Attributes and inline style properties use an allowlist. Unsupported features refuse
+        the whole upload with a 400 and a reason; they are never silently stripped. Masks, clip paths, filters, patterns, markers,
+        use, symbol, images, foreignObject, style elements, scripts, event handlers, animation and all href/xlink:href are refused.
+        Only fill and stroke may contain one url() naming a unique gradient in this file, with an optional static colour fallback;
+        gradient inheritance and inherit/initial/unset/revert/revert-layer on fill or stroke are refused. Size, nesting and element
+        limits remain enforced. Harmless comments, non-drawing attributes (role, aria-*, focusable, data-*, xml:space, class,
+        enable-background), metadata and known editor-namespace subtrees may be removed (reported by cleaned and svg_cleanup);
+        active features still reject even inside metadata. Inline styles become attributes.
+        Person only; requires settings.manage.
+        A change appends tenant.brand_updated.
+      requestBody:
+        required: true
+        content:
+          image/png: {schema: {type: string, format: binary}}
+          image/webp: {schema: {type: string, format: binary}}
+          image/svg+xml: {schema: {type: string, format: binary}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
+        '400': {description: 'Wrong type, unreadable or animated image, unsupported static SVG feature, or outside the pixel bounds; includes a reason'}
+        '403': {description: 'Not a person, or settings.manage missing'}
+        '413': {description: 'Larger than 256 KB as uploaded, or an SVG once rewritten; code logo_too_large', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    delete:
+      operationId: deleteBrandLogo
+      description: Removes the logo; the header falls back to the product mark (or, for dark, to the light logo). Person only; requires settings.manage.
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
+        '403': {description: 'Not a person, or settings.manage missing'}
+  /settings/delivery:
+    get:
+      operationId: getTenantDeliverySettings
+      description: 'Reads effective settings with project overrides over tenant defaults. Requires delivery.read.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putTenantDeliverySettings
+      description: 'Sets required checks and deadline durations in minutes. Requires delivery.manage; empty project settings inherit tenant defaults. Does not change GitHub behaviour.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+      responses:
+        '200': {description: 'Effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /settings/eta-interval:
+    get:
+      operationId: getEtaInterval
+      description: Minutes between fresh estimates. Ten minutes when the workspace has not chosen one. Requires settings.manage.
+      responses:
+        '200':
+          description: Reporting interval
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [interval_minutes]
+                properties:
+                  interval_minutes: {type: integer, minimum: 1, maximum: 240}
+    put:
+      operationId: putEtaInterval
+      description: Sets how often working agents must refresh an estimate. Requires settings.manage. One through 240 minutes. Changed values append tenant.agent_work_settings_changed with before and after values.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [interval_minutes]
+              properties:
+                interval_minutes: {type: integer, minimum: 1, maximum: 240}
+                expected_interval_minutes: {type: integer, minimum: 1, maximum: 240, description: Optional current value required for a conditional save or reverse write}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200':
+          description: Updated interval
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [interval_minutes]
+                properties:
+                  interval_minutes: {type: integer, minimum: 1, maximum: 240}
+        '400': {description: Interval outside 1 to 240 minutes}
+        '409': {description: Current interval differs from the expected value}
+  /settings/features:
+    get:
+      operationId: listFeatureSettings
+      description: Person with settings.manage only. Lists the shipped catalog, effective state and override/revision in the selected tenant or visible project scope. No overrides are created by reading.
+      security: [{session: []}]
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Feature settings (no-store)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project_id, items]
+                properties:
+                  project_id: {type: [string, 'null'], format: uuid}
+                  items: {type: array, items: {$ref: '#/components/schemas/FeatureSetting'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /settings/features/{key}:
+    parameters:
+      - {name: key, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}}
+      - {name: project_id, in: query, schema: {type: string, format: uuid}}
+    put:
+      operationId: setFeatureOverride
+      description: Person with workspace settings.manage only. Set ON/OFF, or null to inherit (tenant inheritance is OFF). expected_revision is required, zero for an untouched scope. Stale writes return 409. Changed overrides append feature.updated atomically with actor and before/after snapshots; identical writes produce no event. Reset retains its revision to prevent stale writes after reset. Only shipped feature keys are accepted.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled, expected_revision]
+              properties:
+                enabled: {type: [boolean, 'null']}
+                expected_revision: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: Saved override (no-store)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [feature, event_id]
+                properties:
+                  feature: {$ref: '#/components/schemas/FeatureSetting'}
+                  event_id: {type: [integer, 'null']}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /settings/heartbeat-lost:
+    get:
+      operationId: getHeartbeatLost
+      description: Minutes without a heartbeat (or, before the first one, since registration) after which the server closes an unmanaged session as stop_reason heartbeat_lost, shown as Lost contact. Fifteen when the workspace has not chosen one. Managed sessions are left to their daemon. Requires settings.manage (AEON-291).
+      responses:
+        '200':
+          description: Lost-contact threshold
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [heartbeat_lost_minutes]
+                properties:
+                  heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
+    put:
+      operationId: putHeartbeatLost
+      description: Sets the lost-contact threshold for unmanaged sessions. Requires settings.manage. Five through 1440 minutes. The server sweeps once a minute; no process is signalled. Changed values append tenant.agent_work_settings_changed with before and after values.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [heartbeat_lost_minutes]
+              properties:
+                heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
+                expected_heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440, description: Optional current value required for a conditional save or reverse write}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200':
+          description: Updated threshold
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [heartbeat_lost_minutes]
+                properties:
+                  heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
+        '400': {description: Threshold outside 5 to 1440 minutes}
+        '409': {description: Current threshold differs from the expected value}
+  /settings/inbox-delivery:
+    get:
+      operationId: getInboxDeliverySettings
+      description: 'AEON-280. Deadlines and the adapter attempt cap for inbox delivery; defaults when the workspace has not chosen (300, 1800, 8). A message to an agent not confirmed by its deadline fails with a system notice to its sender. Requires settings.read.'
+      responses:
+        '200': {description: Delivery settings, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
+    put:
+      operationId: putInboxDeliverySettings
+      description: Requires settings.manage. Applies to messages sent afterwards; queued messages keep the deadline they were accepted with. Changes atomically append inbox.delivery_settings_changed with the actor and effective before/after policy. Unchanged policies append no event.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Saved settings, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+  /settings/lead-policy:
+    get:
+      operationId: getWorkspaceLeadPolicy
+      summary: Get inherited lead policy
+      security: [{session: []}]
+      description: "Project members see redacted policy; only the owning person sees host/account IDs. Workspace policy requires a person with model_prefs.manage. No read or edit grants execution."
+      responses:
+        "200":
+          description: "Current policy; automatic launch remains disabled pending separately owned acceptance"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LeadSettingsView"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    put:
+      operationId: putWorkspaceLeadPolicy
+      summary: Put inherited lead policy
+      security: [{session: []}]
+      description: "Revision-checked replacement or reset by a person with current model_prefs.manage; project edits also require the existing owning person. Project restrictions intersect workspace restrictions; recovery ceilings cannot increase them. Reset retains ownership and advances revision."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/LeadSettingsWrite"}
+      responses:
+        "200":
+          description: "Current policy; automatic launch remains disabled pending separately owned acceptance"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LeadSettingsView"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "Stale revision or unavailable project"}
+        "422": {description: "Invalid override or owner/host/account binding"}
+    delete:
+      operationId: deleteWorkspaceLeadPolicy
+      summary: Delete inherited lead policy
+      security: [{session: []}]
+      description: "Revision-checked replacement or reset by a person with current model_prefs.manage; project edits also require the existing owning person. Project restrictions intersect workspace restrictions; recovery ceilings cannot increase them. Reset retains ownership and advances revision."
+      parameters:
+        - {name: revision, in: query, required: true, schema: {type: integer, minimum: 0}}
+      responses:
+        "200":
+          description: "Current policy; automatic launch remains disabled pending separately owned acceptance"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LeadSettingsView"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "Stale revision or unavailable project"}
+        "422": {description: "Invalid override or owner/host/account binding"}
+  /settings/model-provider:
+    get:
+      operationId: getWorkspaceModelProvider
+      tags: [Settings]
+      description: Person with settings.manage required. Workspace in-app AI is disabled by default. Returns configuration and key presence only, never a credential. Delegated agent harnesses and Aithema retain their separate controls.
+      responses:
+        '200': {description: Workspace provider settings, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceModelProvider'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putWorkspaceModelProvider
+      tags: [Settings]
+      description: Person with settings.manage required. Uses revision compare-and-swap. API keys use the existing tenant-bound encrypted vault, never JSON settings or events. Omit api_key to preserve it; empty clears it. Changing base_url clears an omitted key. Saving makes no model request.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceModelProviderWrite'}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Saved configuration, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceModelProvider'}}}}
+        '400': {description: Invalid configuration}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: Configuration changed; reload before saving}
+        '503': {description: Credential storage unavailable}
+  /settings/model-provider/test:
+    post:
+      operationId: testWorkspaceModelProvider
+      tags: [Settings]
+      description: Person with settings.manage required. Explicitly sends a small synthetic chat prompt to the saved endpoint, even while the provider is disabled. No workspace content is sent. Redirects are refused; request and response size and time are bounded. No provider means no outbound request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 0}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Chat endpoint responded, content: {application/json: {schema: {type: object, required: [ok], properties: {ok: {const: true}}}}}}
+        '400': {description: Invalid request}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: Unconfigured or stale configuration}
+        '502': {description: Connection test failed; provider details are never returned}
+  /settings/quota-warnings:
+    get:
+      summary: Workspace low-quota warning thresholds
+      operationId: getQuotaWarningSettings
+      security: [{session: []}, {agentKey: []}]
+      tags: [Agents]
+      responses:
+        '200':
+          description: Thresholds in percent remaining; defaults are 10 and 3.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QuotaWarningSettings'}
+        '403': {description: Account read permission required}
+    put:
+      summary: Configure workspace low-quota warning thresholds
+      operationId: putQuotaWarningSettings
+      security: [{session: []}]
+      tags: [Agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QuotaWarningSettings'}
+      responses:
+        '200':
+          description: Saved thresholds. urgent_percent must be lower than early_percent.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QuotaWarningSettings'}
+        '400': {description: Both integer thresholds must be 1–50 and urgent must be lower than early}
+        '403': {description: Person with settings management permission required}
+  /settings/review-policy:
+    get:
+      operationId: getTenantReviewPolicy
+      description: "Requires reviewpolicy.read. Returns the local policy and effective project override over tenant default; absent rows use other_family."
+      responses:
+        "200":
+          description: "Current local and effective review policy"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReviewPolicySettings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      operationId: putTenantReviewPolicy
+      parameters:
+        - {in: header, name: If-Unmodified-Since, required: false, schema: {type: string, maxLength: 64}, description: 'Current scope updated_at as RFC3339; none asserts that no local override exists. A mismatch returns 412.'}
+      description: "Requires reviewpolicy.manage in the current scope, rechecked inside the final tenant and tree fence. Built-in agent roles exclude manage; an explicit custom role and key scope may grant it. Replaces the policy and appends review_policy.changed with Before/After."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ReviewPolicy"}
+      responses:
+        '412': {description: 'The current revision changed; reload before writing.'}
+        "200":
+          description: "Current local and effective review policy"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReviewPolicySettings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /settings/status-autopilot:
+    get:
+      operationId: getStatusAutopilot
+      summary: Read workspace status autopilot and live rule limits
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200':
+          description: Default On for new tenants; existing tenants suggest for 24 hours after upgrade or until owner confirmation. Server mode caps workspace and project policy. Triage autopilot is separate.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusAutopilotSettings'}
+    put:
+      operationId: putStatusAutopilot
+      summary: Save status autopilot as a workspace admin
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/StatusAutopilotSettings'}
+                - type: object
+                  required: [expected_revision]
+                  properties:
+                    expected_revision: {type: integer, minimum: 0}
+                    confirm_upgrade: {type: boolean, default: false, description: Explicit owner confirmation ends the upgrade suggestion period; requires ownership.transfer and never overrides server mode.}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200':
+          description: Saved settings and new revision
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusAutopilotSettings'}
+        '400': {description: Rules must contain all seven keys; day limits are integers from 1 to 365}
+        '403': {description: Person with workspace settings.manage required}
+        '409': {description: Settings changed since they were read}
+  /settings/work-vocabulary:
+    get:
+      summary: Read workspace work names and icons
+      description: Requires nodes.read in the workspace or any bound project. Names and icons are tenant configuration needed to display and create work in visible projects.
+      operationId: getWorkVocabulary
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200':
+          description: Vocabulary and revision; empty names use stable fallbacks
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkVocabulary'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    put:
+      summary: Replace workspace vocabulary (person with settings.manage)
+      operationId: putWorkVocabulary
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WorkVocabulary'}
+      responses:
+        '200':
+          description: Saved vocabulary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkVocabulary'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409':
+          description: Revision changed; reload before saving
+components:
+  schemas:
+    AgentActivitySetting:
+      type: object
+      required: [mode]
+      properties:
+        mode: {type: string, enum: [off, tool_activity, agent_summary], default: agent_summary}
+    BrandLogoInfo:
+      allOf:
+        - $ref: "#/components/schemas/TenantBrandLogo"
+        - type: object
+          required: [content_type, size, sha256, uploaded_at]
+          properties:
+            content_type: {type: string, enum: [image/png, image/webp, image/svg+xml]}
+            size: {type: integer, minimum: 1, maximum: 262144}
+            sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+            uploaded_at: {type: string, format: date-time}
+    BrandSettings:
+      type: object
+      required: [short_name, logo, logo_dark]
+      properties:
+        short_name: {type: string, maxLength: 32, description: Empty when unset.}
+        logo:
+          oneOf: [{$ref: "#/components/schemas/BrandLogoInfo"}, {type: "null"}]
+        logo_dark:
+          oneOf: [{$ref: "#/components/schemas/BrandLogoInfo"}, {type: "null"}]
+        updated_at: {type: string, format: date-time}
+        cleaned: {type: boolean, description: 'Set when harmless SVG comments, non-drawing attributes or metadata were removed. Unsupported drawing and active SVG features reject the upload.'}
+        svg_cleanup:
+          type: object
+          description: Upload-only report of removed non-drawing attributes and metadata; omitted when neither was removed.
+          required: [removed_attribute_count, removed_attributes, removed_element_count]
+          properties:
+            removed_attribute_count: {type: integer, minimum: 0, description: Number of attribute occurrences removed.}
+            removed_attributes: {type: array, items: {type: string}, uniqueItems: true, description: Unique removed attribute names in document order; never their values.}
+            removed_element_count: {type: integer, minimum: 0, description: Number of metadata or editor elements removed including descendants.}
+    FeatureSetting:
+      allOf:
+        - {$ref: '#/components/schemas/FeatureEvaluation'}
+        - type: object
+          required: [override, revision]
+          properties:
+            override: {type: [boolean, 'null'], description: Override in the selected scope; null means inherit.}
+            revision: {type: integer, minimum: 0}
+    InboxDeliverySettings:
+      type: object
+      additionalProperties: false
+      required: [session_deadline_seconds, unbound_deadline_seconds, max_attempts]
+      properties:
+        session_deadline_seconds: {type: integer, minimum: 60, maximum: 86400, description: Deadline for a message bound to one session. Default 300.}
+        unbound_deadline_seconds: {type: integer, minimum: 60, maximum: 604800, description: 'Deadline for any other message to an agent (adapter target, blocked or principal inbox). Default 1800.'}
+        max_attempts: {type: integer, minimum: 1, maximum: 50, description: Adapter claims before a delivery fails with reason attempts. Default 8.}
+    LeadNames:
+      type: object
+      additionalProperties: false
+      required: [singular, plural]
+      description: 'The word people read for a project lead (AEON-791). Inside PAIMOS it is always the lead. Absent when unset; blank names use Lead and Leads. A PUT without lead keeps the saved names.'
+      properties:
+        singular: {type: string, maxLength: 40, description: 'Empty uses Lead.'}
+        plural: {type: string, maxLength: 40, description: 'Empty derives the plural from singular, or Leads.'}
+    QuotaWarningSettings:
+      type: object
+      additionalProperties: false
+      required: [early_percent, urgent_percent]
+      properties:
+        expected_early_percent: {type: integer, minimum: 1, maximum: 50, description: "Optional compare-and-set guard, paired with expected_urgent_percent."}
+        expected_urgent_percent: {type: integer, minimum: 1, maximum: 50}
+        early_percent: {type: integer, minimum: 1, maximum: 50, default: 10}
+        urgent_percent: {type: integer, minimum: 1, maximum: 50, default: 3}
+    StatusAutopilotRule:
+      type: object
+      required: [enabled]
+      additionalProperties: false
+      properties:
+        enabled: {type: boolean, default: true}
+        days: {type: integer, minimum: 1, maximum: 365, description: Absent on publish}
+    StatusAutopilotSettings:
+      type: object
+      required: [enabled, rules, revision]
+      properties:
+        enabled: {type: boolean, default: true}
+        revision: {type: integer, minimum: 0, readOnly: true}
+        server_mode: {type: string, enum: [off, suggest, on], readOnly: true}
+        effective_mode: {type: string, enum: [off, suggest, on], readOnly: true}
+        suggest_until: {type: [string, 'null'], format: date-time, readOnly: true, description: Upgrade grace deadline; null for new or owner-confirmed tenants.}
+        rules:
+          type: object
+          additionalProperties: false
+          required: [new, backlog, blocked, progress, done, publish, accept]
+          properties:
+            new: {$ref: '#/components/schemas/StatusAutopilotRule', description: Untriaged 7 days to triage list}
+            backlog: {$ref: '#/components/schemas/StatusAutopilotRule', description: Untouched 90 days to cancellation suggestion}
+            blocked: {$ref: '#/components/schemas/StatusAutopilotRule', description: Reminder after 14 days}
+            progress: {$ref: '#/components/schemas/StatusAutopilotRule', description: No session or branch or PR activity for 3 days to Open}
+            done: {$ref: '#/components/schemas/StatusAutopilotRule', description: Merged but not released for 14 days to missed-release flag}
+            publish: {$ref: '#/components/schemas/StatusAutopilotRule', description: On release publish to Delivered}
+            accept: {$ref: '#/components/schemas/StatusAutopilotRule', description: Delivered 30 days without objection to Accepted}
+    WorkLevel:
+      type: object
+      additionalProperties: false
+      required: [name, icon]
+      properties:
+        name: {type: string, maxLength: 60, description: 'Empty uses Ticket, Epic, Story or Level N.'}
+        icon: {type: string, enum: ['', ticket, epic, task, layers, tree, folder, check, box]}
+    WorkVocabulary:
+      type: object
+      additionalProperties: false
+      required: [revision, leaf, levels]
+      properties:
+        revision: {type: integer, minimum: 0}
+        leaf: {$ref: '#/components/schemas/WorkLevel'}
+        levels:
+          type: array
+          maxItems: 32
+          items: {$ref: '#/components/schemas/WorkLevel'}
+        lead: {$ref: '#/components/schemas/LeadNames'}
+    WorkspaceModelProvider:
+      allOf:
+        - {$ref: '#/components/schemas/WorkspaceModelProviderSettings'}
+        - type: object
+          required: [provider_id, revision, has_api_key]
+          properties:
+            provider_id: {type: string, description: Stable workspace provider identity; empty before first save.}
+            revision: {type: integer, minimum: 0}
+            has_api_key: {type: boolean}
+    WorkspaceModelProviderSettings:
+      type: object
+      required: [enabled, base_url, chat_model, embedding_model, features]
+      properties:
+        enabled: {type: boolean, default: false}
+        base_url: {type: string, maxLength: 2048, description: 'OpenAI-compatible API base, for example http://localhost:11434/v1. Resolved from the Aeon server. No userinfo, query or fragment. Public, loopback and LAN endpoints are supported; link-local, unspecified and multicast addresses are refused.'}
+        chat_model: {type: string, maxLength: 200}
+        embedding_model: {type: string, maxLength: 200, description: Separate embedding model at the same base; must return 1536-dimensional vectors.}
+        features:
+          type: object
+          additionalProperties: false
+          required: [crm_note_rewrite, embeddings]
+          properties:
+            crm_note_rewrite: {type: boolean, default: false, description: Also requires the business_crm plugin and tools.invoke grant; generation creates a draft for human review.}
+            parent_benefits: {type: boolean, default: false, description: Summarises completed parents from their leaves in English and German behind work-parent-status. Never delays Done or edits published snapshots.}
+            embeddings: {type: boolean, default: false, description: Allows background node indexing and semantic search queries for this workspace.}
+    WorkspaceModelProviderWrite:
+      allOf:
+        - {$ref: '#/components/schemas/WorkspaceModelProviderSettings'}
+        - type: object
+          required: [expected_revision]
+          properties:
+            expected_revision: {type: integer, minimum: 0}
+            api_key: {type: string, writeOnly: true, maxLength: 16384, description: Optional replacement. Empty clears; omitted preserves unless the base URL changes.}

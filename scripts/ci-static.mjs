@@ -386,8 +386,14 @@ export async function main(args, { root = sourceRoot, stdout = console.log } = {
       stdout(options.json ? JSON.stringify(selected) : selected.map(c => `${c.id}: ${c.command} (cwd=${c.cwd}; CI=${c.ci.job}/${c.ci.step ?? '(unnamed)'})`).join('\n'))
       return 0
     }
-    const execute = tree => {
+    const execute = async tree => {
       warnings.push(...versionWarnings(readFileSync(join(tree, workflowPath), 'utf8')))
+      // Prepare the merged checkout, not the caller's tree. Go checks still
+      // read the longstanding bundle path; the aggregate is never committed.
+      if (existsSync(join(tree, 'api/generate.mjs'))) {
+        const prepared = await runCommand('node api/generate.mjs --write', { cwd: tree, timeout_seconds: 30, signal: controller.signal })
+        if (prepared.status !== 'passed') return [{ ...prepared, id: 'openapi-generate', command: 'node api/generate.mjs --write', cwd: '.' }]
+      }
       return runChecks(selectChecks(tree), tree, { ...options, signal: controller.signal })
     }
     const merged = options.mode === 'merge-main' ? await mergedTree(root, execute, { signal: controller.signal, warn: s => warnings.push(s) }) : undefined

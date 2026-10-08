@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/features
+paths:
+  /features:
+    get:
+      operationId: evaluateFeatures
+      description: Evaluate shipped feature flags for the caller's tenant and optional visible project. Project override wins over tenant override; otherwise OFF. Flags never grant permissions. Read at request time, without a deployment or restart. Requires nodes.read in the selected project or any project for the tenant baseline.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Effective feature flags (no-store)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project_id, items]
+                properties:
+                  project_id: {type: [string, 'null'], format: uuid}
+                  items: {type: array, items: {$ref: '#/components/schemas/FeatureEvaluation'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+components:
