@@ -142,6 +142,52 @@
       }
     },
     {
+      "table": "delivery_work_rounds",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "id": "metadata",
+        "ticket_node_id": "metadata",
+        "slug": "metadata",
+        "kind": "metadata",
+        "round_number": "metadata",
+        "state": "metadata",
+        "position": "metadata",
+        "snapshot": "review"
+      }
+    },
+    {
+      "table": "delivery_work_settings",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "snapshot": "review"
+      }
+    },
+    {
+      "table": "delivery_work_claims",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "claimant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "request_id": "metadata",
+        "claimant_id": "personal",
+        "snapshot": "review"
+      }
+    },
+    {
       "table": "model_pref_profiles",
       "classification": "personal",
       "locator": {
@@ -320,7 +366,10 @@
         "usage_posture_person_id": "personal",
         "usage_posture_link_revision": "metadata",
         "usage_floor_percent": "metadata",
-        "usage_revision": "metadata"
+        "usage_revision": "metadata",
+        "usage_probe_enabled": "personal",
+        "usage_probe_revision": "metadata",
+        "usage_budget": "personal"
       }
     }
   ]
