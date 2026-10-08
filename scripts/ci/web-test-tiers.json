@@ -8346,6 +8346,10 @@
     ,
     {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"Agents model preferences navigates to the page without opening the old dialog stack","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"LiveAgents preferences keeps the project scope in the Models URL","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/model-prefs.spec.ts","name":"PlanningCell opens the Models page with the captured context and the Why? trace for the next queued ticket","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/model-provider.spec.ts","name":"connection failures and stale saves remain actionable","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/model-provider.spec.ts","name":"members do not receive provider controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8353,6 +8357,10 @@
     {"kind":"browser","file":"tests/model-provider.spec.ts","name":"workspace AI starts off, saves explicit feature choices and tests only saved configuration","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/model-refresh.spec.ts","name":"model refresh starts private, saves its interval and accepts profiles without route writes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"card at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"card at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"card at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -8362,6 +8370,10 @@
     ,
     {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"card at 400 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"for everyone with the lock at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"for everyone with the lock at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"for everyone with the lock at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"for everyone with the lock at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8369,6 +8381,10 @@
     {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"for everyone with the lock at 400 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"for everyone with the lock at 400 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"why at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"why at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"why at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -8395,6 +8411,10 @@
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a pick that cannot run says so in words under its row, and Why? shows the skipped step","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a pick that has no tools here is still offered, with its reason, and the row says what runs instead","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a very long kind name wraps and keeps every picker in line at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a very long kind name wraps and keeps every picker in line at 400","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"admins switch between For everyone and Just me; the lock lives in the picker and follows the row","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

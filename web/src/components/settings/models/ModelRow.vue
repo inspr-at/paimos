@@ -25,12 +25,12 @@ const mark = computed(() => props.row.entry?.harness ?? props.harness ?? '')
     </div>
     <button v-if="row.editable" :id="`pk-${row.key}`" type="button" class="pick" :data-pick="row.key" aria-haspopup="listbox" :aria-expanded="expanded" :aria-label="`${name}: ${summary.replace(' · ', ', ')}. Change`" @click="emit('open', $event.currentTarget as HTMLElement)">
       <span class="hg" aria-hidden="true"><HarnessMark :harness="mark" :size="13" /></span>
-      <span class="pn">{{ model }}<span v-if="effort" class="pe"> · {{ effort }}</span></span>
+      <span v-clip-tip="summary" class="pn">{{ model }}<span v-if="effort" class="pe"> · {{ effort }}</span></span>
       <AppIcon class="chev" name="chevron" :size="14" />
     </button>
     <span v-else :id="`pk-${row.key}`" class="pick ro" :data-pick="row.key">
       <span class="hg" aria-hidden="true"><HarnessMark :harness="mark" :size="13" /></span>
-      <span class="pn">{{ model }}<span v-if="effort" class="pe"> · {{ effort }}</span></span>
+      <span v-clip-tip="summary" class="pn">{{ model }}<span v-if="effort" class="pe"> · {{ effort }}</span></span>
     </span>
     <div class="c3"><span v-if="row.lock" class="lock" data-lock tabindex="0" role="img" :data-tip="lockTip" :aria-label="`Locked for everyone. ${lockTip}`"><AppIcon name="lock" :size="15" /></span></div>
     <div class="c4"><button v-if="row.remove" type="button" class="icon-btn flat x" data-remove :aria-label="`Remove ${row.label}; it uses the default again`" data-tip="Use the default again" @click="emit('remove')"><AppIcon name="close" :size="14" /></button></div>

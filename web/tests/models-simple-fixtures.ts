@@ -45,6 +45,8 @@ export interface MockOptions {
   /** The caller is a person with only their own choices (a member) who already overrides concepts. */
   member?: boolean
   noQueue?: boolean
+  /** A workspace-authored kind with a very long name. */
+  longLabels?: boolean
   /** Another person set the design lock (and the member list names them). */
   lockedByOther?: boolean
   /** Refuse every write with this status. */
@@ -125,7 +127,7 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     }
   }
   function tail(layer: 'mine' | 'default'): TailBoard {
-    const columns: TailColumn[] = [['other', 'Everything else'], ...KINDS, ...REVIEWS.map(column => [column, `Review of ${column.split(':')[1]}`] as [string, string])].map(([column, label]) => {
+    const columns: TailColumn[] = [['other', 'Everything else'], ...KINDS.map(([column, label]) => [column, options.longLabels && column === 'design' ? 'UI design for the customer-facing marketing site and every campaign landing page' : label] as [string, string]), ...REVIEWS.map(column => [column, `Review of ${column.split(':')[1]}`] as [string, string])].map(([column, label]) => {
       const order = inherited(layer, column!), lock = lockOf(column!), direct = own(layer, column!)
       const rank = lock ? [lock.line, ...order.rank!.filter(id => id !== lock.line)] : order.rank!
       return { column: column!, label: label!, fixed: column === 'other' || column!.startsWith('review:'), hidden: false, source: direct?.rank ? (layer === 'mine' ? 'own' : 'default') : 'template',

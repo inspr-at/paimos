@@ -111,7 +111,7 @@ watch(() => [route.hash, shown.value], async () => {
 </script>
 <template>
   <div v-if="readable" class="models-section" data-models-section :data-models-ready="shown ? 'true' : 'false'">
-    <section class="glass-card m-card" aria-labelledby="m-title">
+    <section class="glass-card m-card" aria-labelledby="m-title" :aria-busy="busy || undefined">
       <div class="m-head">
         <div class="titles"><h2 id="m-title">Models</h2><p class="lead">One default for all work, overrides only where you care.</p></div>
         <div v-if="admin" class="seg scope" role="group" aria-label="Who this changes" data-scope-group>

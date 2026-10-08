@@ -10,10 +10,16 @@ const row = (page: Page, key: string) => page.locator(`[data-row="${key}"]`)
 const pick = (page: Page, key: string) => page.locator(`[data-pick="${key}"]`)
 const option = (page: Page, line: string) => page.locator(`.mdl-pop [data-line="${line}"]`)
 const toast = (page: Page, text: string) => page.locator('.toast').filter({ hasText: text }).first()
-async function open(page: Page, options: MockOptions = {}, query = '') { const state = await mockModels(page, options); await openModelsSettings(page, query); return state }
+// Console errors and Vue warnings are failures of the flows below that expect none.
+async function open(page: Page, options: MockOptions = {}, query = '') {
+  const problems: string[] = []
+  page.on('console', message => { if (['error', 'warning'].includes(message.type())) problems.push(message.text()) }); page.on('pageerror', error => problems.push(String(error)))
+  const state = await mockModels(page, options); await openModelsSettings(page, query)
+  return Object.assign(state, { problems })
+}
 
 test('the default leads, overrides read as exceptions, reviews pick themselves and one line says what runs next', async ({ page }) => {
-  await open(page)
+  const state = await open(page)
   // Admins open on Just me; nothing here is stored for them yet, so the workspace default shows through.
   await expect(page.getByRole('button', { name: 'Just me' })).toHaveAttribute('aria-pressed', 'true')
   await expect(row(page, 'all')).toContainText('Default · all work'); await expect(row(page, 'all')).toContainText('Used unless a row below overrides it.')
@@ -27,6 +33,7 @@ test('the default leads, overrides read as exceptions, reviews pick themselves a
   await expect(page.getByRole('button', { name: 'Why?' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Different model for…' })).toBeVisible()
   await expect(page.locator('[data-models-section] dialog')).toHaveCount(0)
+  expect(state.problems).toEqual([])
 })
 
 test('the picker lists every model by harness with its own thinking levels, and a click on a level picks both', async ({ page }) => {
@@ -58,7 +65,8 @@ test('the picker lists every model by harness with its own thinking levels, and 
   await expect(toast(page, 'Saved')).toBeVisible()
   await page.getByRole('button', { name: 'Undo', exact: true }).last().click()
   await expect(pick(page, 'all')).toContainText('GPT-6.1 Sol · xhigh'); await expect(row(page, 'all').locator('.mine')).toHaveCount(0)
-  expect(state.writes.at(-1)).toMatchObject({ method: 'DELETE', path: '/model-preferences/orders/other/first', search: '?for=default&revision=5'.replace('default', 'me'), person: simplePerson })
+  expect(state.writes.at(-1)).toMatchObject({ method: 'DELETE', path: '/model-preferences/orders/other/first', search: '?for=me&revision=5', person: simplePerson })
+  expect(state.problems).toEqual([])
 })
 
 test('the keyboard picks without the mouse: arrows choose the model and its level, Enter keeps both, Esc gives focus back', async ({ page }) => {
@@ -98,6 +106,7 @@ test('admins switch between For everyone and Just me; the lock lives in the pick
   await pick(page, 'concept').click(); await page.locator('.mdl-pop .pm-lock input').click()
   await expect(row(page, 'concept').locator('[data-lock]')).toBeVisible()
   expect(state.rules.map(rule => [rule.column, rule.line, rule.why])).toEqual([['concept', 'anthropic:opus', 'Locked in Settings › Models by Markus']])
+  expect(state.problems).toEqual([])
   // Back on Just me the locked row reads as plain text with its lock; the pick is not editable there.
   await page.getByRole('button', { name: 'Just me' }).click()
   await expect(row(page, 'concept').locator('[data-lock]')).toBeVisible(); expect(await pick(page, 'concept').evaluate(element => element.tagName)).toBe('SPAN')
@@ -258,6 +267,16 @@ test('the card holds its layout on a phone', async ({ page }) => {
   await guard.check(async () => { await page.getByRole('button', { name: 'Undo', exact: true }).last().click(); await expect(row(page, 'concept').locator('.mine')).toHaveCount(0) }); guard.done()
   await page.getByRole('button', { name: 'For everyone' }).click(); await expect(row(page, 'design').locator('[data-remove]')).toBeVisible()
   for (const key of ['all', 'design', 'concept']) { const box = await pick(page, key).boundingBox(); expect(box!.height, key).toBeGreaterThanOrEqual(44) }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+})
+
+for (const width of [1440, 400]) test(`a very long kind name wraps and keeps every picker in line at ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 })
+  await open(page, { longLabels: true, bare: false })
+  await expect(row(page, 'design')).toContainText('UI design for the customer-facing marketing site and every campaign landing page')
+  const boxes = await Promise.all(['design', 'concept'].map(key => pick(page, key).boundingBox()))
+  if (width > 560) expect(Math.abs(boxes[0]!.x - boxes[1]!.x)).toBeLessThanOrEqual(.5)
+  expect(Math.abs(boxes[0]!.width - boxes[1]!.width)).toBeLessThanOrEqual(width > 560 ? .5 : 1)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
 })
 

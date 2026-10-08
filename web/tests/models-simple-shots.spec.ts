@@ -5,7 +5,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { mockModels, type MockOptions } from './models-simple-fixtures'
 import { openModelsSettings } from './models-settings-page'
 
-const sizes = [{ width: 1440, height: 1100 }, { width: 400, height: 900 }]
+const sizes = [{ width: 1440, height: 1100 }, { width: 1024, height: 1000 }, { width: 400, height: 900 }]
 async function show(page: Page, options: MockOptions, theme: string, size: { width: number; height: number }, query = '') {
   await page.setViewportSize(size)
   await mockModels(page, options); await openModelsSettings(page, query)
@@ -13,7 +13,7 @@ async function show(page: Page, options: MockOptions, theme: string, size: { wid
 }
 for (const size of sizes) for (const theme of ['light', 'dark']) {
   test(`card at ${size.width} ${theme}`, async ({ page }, testInfo) => {
-    await show(page, { down: true, fresh: true }, theme, size)
+    await show(page, { down: true, fresh: true, longLabels: true }, theme, size)
     await expect(page.locator('[data-unavailable]').first()).toBeVisible()
     await page.screenshot({ path: testInfo.outputPath(`models-${size.width}-${theme}.png`), fullPage: true })
     await page.locator('[data-pick="all"]').click()
