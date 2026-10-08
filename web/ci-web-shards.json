@@ -216,7 +216,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/key-layout.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":7.039,"median":3.522,"min":2.322},"seconds":49.120865,"selectedTests":12},"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/key-layout.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":7.039,"median":3.522,"min":2.322},"seconds":49.120865,"selectedTests":12},"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -318,7 +318,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/accounts-computers.spec.ts","listedTests":26,"tierTiming":{"caseSeconds":{"max":4.348,"median":2.018,"min":1.197},"seconds":30.144583,"selectedTests":13},"weightSeconds":32.233918,"weightSource":"web-13"}
+        {"file":"tests/accounts-computers.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":4.348,"median":2.018,"min":1.197},"seconds":30.144583,"selectedTests":13},"weightSeconds":32.233918,"weightSource":"web-13"}
         ,
         {"file":"tests/agent-recovery.spec.ts","listedTests":9,"weightSeconds":20}
         ,
@@ -692,7 +692,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/a11y.spec.ts","listedTests":73,"weightSeconds":230.829268,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/a11y.spec.ts","listedTests":80,"weightSeconds":230.829268,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/accounts-card-fit.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
         ,
@@ -701,6 +701,8 @@
         {"file":"tests/add-account.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/aeon-908-polish.spec.ts","weightSeconds":120}
         ,
         {"file":"tests/agent-done-state.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
         ,
@@ -974,7 +976,7 @@
         ,
         {"file":"tests/session-chat-cli.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/session-chat.spec.ts","listedTests":34,"weightSeconds":62.146341,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/session-chat.spec.ts","listedTests":43,"weightSeconds":95.439023,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/session-ended.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
@@ -1109,7 +1111,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/phone-approvals.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/phone-approvals.spec.ts","listedTests":8,"weightSeconds":7.48,"weightSource":"aeon-903-local-serial-wall"}
       ]
     }
     ,
@@ -1364,6 +1366,8 @@
     "OPS-257 round 4 L3: refresh measured per-case browser and per-owner Go/unit costs from full PR run 37377299349 (b2f9935a4264e932eae0fa2acd07c71e8d1fc417). The 39 clip cases split into planning/touch (27) and settings/rules (12), with shared imported fixtures and unchanged policies/tiers. Browser costs include group and tier execution residuals; each clip half conservatively retains the full original launch overhead. Go costs include terminal package elapsed plus each shard's residual native enumeration/launch time shared equally by its owners. Unit costs include Vitest elapsed or top-level Node durations plus shared residual launch time. Runner setup and unit shard 1's separate safety checks are excluded; hosted CI must validate total wall time. Exact-spec weightSeconds retain their historical allocation model; only the old clip allocation is divided proportionally between the two new files. The full-gate tier scheduler uses the refreshed tierTiming costs. Unit tie preference assigns shard 1 last on equal loads, moving the largest file to shard 2 without estimating the separate safety-check duration."
     ,
     "AEON-878: models-board-controls stays gated at 1s, the largest weight that keeps the twelve-shard prior maximum under 300 (1.1s reaches 300.01). The 12 screenshot cases moved to ungated models-board-evidence.spec.ts carry the other 15s of the original 16s estimate. Behavior cases remain in the gate."
+    ,
+    "AEON-903: Phone approvals has seven native cases. The local one-worker run passed all seven in 7.480 seconds including browser/server startup; aeon-903-local-serial-wall records that observation as a scheduling estimate, not a hosted-runtime promise."
   ]
   ,
   "originalNpmScripts": {

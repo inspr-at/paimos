@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -474,5 +476,137 @@ func TestPhonePushPointerQuietEscalationAndGone(t *testing.T) {
 	newAged()
 	if err := f.m.dispatch(t.Context()); err != nil || sent != 4 {
 		t.Fatalf("notification leaked after permission loss: sent=%d %v", sent, err)
+	}
+}
+
+// Risk: a committed proposal or attach request waits for the recovery ticker,
+// or event-driven wakeups bypass durable deduplication and recipient checks.
+func TestPhonePushCommittedEventsAndRecoveryTick(t *testing.T) {
+	f := fixtureFor(t)
+	key, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := webpush.Subscription{Endpoint: "https://web.push.apple.com/event-test", Keys: webpush.Keys{P256dh: base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), Auth: base64.RawURLEncoding.EncodeToString(make([]byte, 16))}}
+	status(t, f.call(t, f.p, "POST", "/api/me/phone-approvals/subscriptions", sub, testOrigin), 200)
+	status(t, f.call(t, f.p, "PUT", "/api/me/phone-approvals/settings", Preferences{Enabled: true, Zone: "UTC", Escalation: 5}, testOrigin), 200)
+	settings := f.call(t, f.p, "GET", "/api/me/phone-approvals", nil, "")
+	status(t, settings, 200)
+	if !strings.Contains(settings.Body.String(), digest(sub.Endpoint)) || strings.Contains(settings.Body.String(), sub.Endpoint) {
+		t.Fatal("device matching exposed an endpoint or omitted its digest")
+	}
+	sent := make(chan string, 8)
+	f.m.send = func(_ context.Context, b []byte, _ *webpush.Subscription, _ *webpush.Options) (*http.Response, error) {
+		var pointer map[string]string
+		if err := json.Unmarshal(b, &pointer); err != nil || len(pointer) != 1 {
+			return nil, fmt.Errorf("invalid pointer payload: %s", b)
+		}
+		sent <- pointer["url"]
+		return &http.Response{StatusCode: 201, Body: io.NopCloser(strings.NewReader(""))}, nil
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	ticks := make(chan time.Time)
+	scans, done := make(chan struct{}, 8), make(chan struct{})
+	go func() { defer close(done); f.m.run(ctx, ticks, func() { scans <- struct{}{} }) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("dispatcher did not stop")
+		}
+	})
+	waitScan := func() {
+		t.Helper()
+		select {
+		case <-scans:
+		case <-time.After(10 * time.Second):
+			t.Fatal("dispatcher never completed the scan")
+		}
+	}
+	waitScan() // Connected, subscribed and completed its recovery scan.
+	emit := func(typ, id string) {
+		t.Helper()
+		ctx := db.AllProjects(t.Context(), "committed phone event fixture")
+		if err := db.InTenant(ctx, f.db.App, f.p.TenantID, func(tx pgx.Tx) error {
+			_, err := events.Append(t.Context(), tx, f.agent, events.Change{Type: typ, After: map[string]string{"request_id": id}})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	receive := func(kind, id string) {
+		t.Helper()
+		select {
+		case path := <-sent:
+			if path != "/phone-approvals/"+kind+"/"+id {
+				t.Fatalf("sent %q, want %s/%s", path, kind, id)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("committed request never reached the push sender")
+		}
+	}
+	first := f.request(t)
+	emit("approval.proposed", first)
+	receive("approval", first) // No tick has been sent: only the committed event can wake this.
+	waitScan()
+	attach := f.attachRequest(t)
+	// Retain a real enrollment/ticket and prove the owner is eligible before
+	// exercising dispatch. A permission failure cannot masquerade as no push.
+	status(t, f.call(t, f.p, "GET", "/api/phone-approvals/attach/"+attach, nil, ""), 200)
+	emit("harness.attach_requested", attach)
+	receive("attach", attach)
+	waitScan()
+	// Repeat hints exercise the durable lease; a request with no hint exercises
+	// the injected recovery tick without waiting thirty real seconds.
+	emit("approval.proposed", first)
+	waitScan() // Drain the duplicate hint before creating the unannounced request.
+	missed := f.request(t)
+	select {
+	case ticks <- time.Time{}:
+	case <-time.After(10 * time.Second):
+		t.Fatal("recovery tick was not consumed")
+	}
+	receive("approval", missed)
+	waitScan()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("dispatcher did not stop")
+	}
+	select {
+	case extra := <-sent:
+		t.Fatalf("duplicate notification %q", extra)
+	default:
+	}
+	var decisions int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM approval_decisions`).Scan(&decisions); err != nil || decisions != 0 {
+		t.Fatal("push granted approval", err)
+	}
+}
+
+// Risk: preparing Face ID waits behind an unrelated credential mutation.
+// Hold the row lock until the HTTP response has arrived to prove overlap.
+func TestPhoneRegistrationOptionsDoNotWaitForCredentialMutation(t *testing.T) {
+	f := fixtureFor(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	holder, err := f.db.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback(context.Background())
+	if _, err = holder.Exec(ctx, `SELECT id FROM phone_passkeys WHERE id=$1 FOR UPDATE`, f.keyID); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest("POST", "/api/me/phone-approvals/passkeys/options", nil).WithContext(tenant.WithPrincipal(ctx, f.p))
+	request.Header.Set("Origin", testOrigin)
+	response := httptest.NewRecorder()
+	f.mux.ServeHTTP(response, request)
+	status(t, response, 200)
+	var c ceremony
+	if err = json.Unmarshal(response.Body.Bytes(), &c); err != nil || c.ID == "" || c.Key.Challenge == "" {
+		t.Fatal("options omitted a durable fresh challenge", err)
 	}
 }
