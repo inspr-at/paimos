@@ -3,7 +3,7 @@ import { expect, type Page } from '@playwright/test'
 import { boardCards, boardFixture, boardPerson, boardPin } from './models-board-fixtures'
 import type { ModelRule, OrderBody } from '../src/lib/modelsBoard'
 
-export async function mockBoard(page: Page, options: { manage?: boolean; fail?: number; german?: boolean; noRoute?: boolean } = {}) {
+export async function mockBoard(page: Page, options: { manage?: boolean; fail?: number; german?: boolean; noRoute?: boolean; fallback?: boolean } = {}) {
   let document = boardFixture(options.german), rules = [structuredClone(boardPin)], ruleRevision = 2
   const writes: { path: string; body: Record<string, unknown>; person?: string; method: string }[] = []
   const reads: string[] = []
@@ -12,6 +12,7 @@ export async function mockBoard(page: Page, options: { manage?: boolean; fail?: 
   const orders = new Map<string, OrderBody>()
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname.replace(/^\/api/, '')
+    if (options.fallback && !path.startsWith('/model-preferences/') && !path.startsWith('/model-rules')) return route.fallback()
     if (path === '/me/permissions') return route.fulfill({ json: { workspace: { id: 'board-tenant', role: 'member', permissions: ['models.read', ...(options.manage === false ? [] : ['model_prefs.manage', 'work_kinds.manage'])] }, project: url.searchParams.get('project_id') ? { id: url.searchParams.get('project_id'), role: 'member', permissions: [] } : null } })
     if (path === '/projects') return route.fulfill({ json: { items: [{ id: 'project-a', title: 'AEON', state: 'active', archived: false }], next_cursor: null } })
     if (request.method() === 'GET') {
@@ -20,6 +21,7 @@ export async function mockBoard(page: Page, options: { manage?: boolean; fail?: 
         reads.push(url.search)
         const view = structuredClone(document), project = url.searchParams.get('project_id'), layer = url.searchParams.get('layer') ?? 'mine'
         view.layer = layer as typeof view.layer
+        if (layer === 'default') view.profile = { ...view.profile, scope: 'workspace', person_id: null, template: 'balanced', thinking: 'standard', usage: 'balanced' }
         const applicable = rules.filter(rule => rule.scope === 'workspace' || rule.project_id === project)
         for (const column of view.columns) {
           const cards = [...boardCards, ...document.tray].map(card => column.column.startsWith('review:') ? { ...card, effort: 'xhigh' } : card)
@@ -42,6 +44,7 @@ export async function mockBoard(page: Page, options: { manage?: boolean; fail?: 
     }
     const body = request.postDataJSON() ?? {}, person = request.headers()['if-prefs-person']
     writes.push({ path, body, person, method: request.method() })
+    if (url.searchParams.get('for') === 'me' && person !== document.person_id) return route.fulfill({ status: 428, json: { error: 'person_precondition_required' } })
     if (hold) await hold()
     if (fail) return route.fulfill({ status: fail, json: { error: fail === 409 ? 'stale_revision' : 'looser_than_workspace' } })
     if (path.startsWith('/model-rules/')) {
@@ -51,22 +54,22 @@ export async function mockBoard(page: Page, options: { manage?: boolean; fail?: 
       rules = rules.filter(rule => rule.scope !== scope || rule.column !== column).concat(desired.filter(pin => scope !== 'project' || !rules.some(rule => rule.scope === 'workspace' && rule.column === column && rule.line === pin.line && rule.lock === pin.lock)).map(pin => ({ ...pin, column, scope, project_id: scope === 'project' ? url.searchParams.get('project_id') : null, set_by: 'Markus', set_at: '2026-10-07T13:00:00Z' }) as ModelRule))
       return route.fulfill({ json: { rules, revision: ++ruleRevision } })
     }
-    if (url.searchParams.get('dry_run') === 'true') return route.fulfill({ json: { person_id: boardPerson, revision: document.revision, profile: document.profile, dry_run: true, moved: [{ column: 'backend', before: ['openai:sol'], after: ['openai:astra'] }] } })
+    if (url.searchParams.get('dry_run') === 'true') return route.fulfill({ json: { person_id: document.person_id, revision: document.revision, profile: document.profile, dry_run: true, moved: [{ column: 'backend', before: ['openai:sol'], after: ['openai:astra'] }] } })
     if (path.startsWith('/model-preferences/orders/')) {
       const column = decodeURIComponent(path.split('/')[3]!)
       if (request.method() === 'DELETE') orders.delete(column)
       else orders.set(column, { rank: body.rank, not: body.not })
     } else if (path === '/model-preferences/profile') {
-      for (const field of ['residency', 'hidden_kinds', 'dismissed_lines', 'template']) if (field in body) Object.assign(document.profile, { [field]: body[field] })
+      for (const field of ['residency', 'hidden_kinds', 'dismissed_lines', 'template', 'thinking', 'usage']) if (field in body) Object.assign(document.profile, { [field]: body[field] })
       document.residency.own = document.profile.residency; document.residency.effective = document.profile.residency ?? 'any'
     } else if (path.includes('/tray/')) document.profile.dismissed_lines.push(decodeURIComponent(path.split('/')[3]!))
     document.revision++; document.profile.revision = document.revision
-    return route.fulfill({ json: { person_id: boardPerson, revision: document.revision, profile: document.profile, dry_run: false, moved: [] } })
+    return route.fulfill({ json: { person_id: document.person_id, revision: document.revision, profile: document.profile, dry_run: false, moved: [] } })
   })
-  return { writes, reads, setFail: (status?: number) => { fail = status }, holdNext: () => {
+  return { writes, reads, getDocument: () => structuredClone(document), setFail: (status?: number) => { fail = status }, holdNext: () => {
     let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve }); hold = () => barrier
     return () => { hold = undefined; release() }
-  }, addProjectRule: (rule: ModelRule) => { rules.push(rule) }, clearTray: () => { document.tray = [] } }
+  }, setPerson: (person: string) => { document.person_id = person; document.profile.person_id = person }, addProjectRule: (rule: ModelRule) => { rules.push(rule) }, clearTray: () => { document.tray = [] } }
 }
 export async function open(page: Page, query = '') { await page.goto(`/tests/models-board-harness.html${query}`); await expect(page.locator('[data-board-ready="true"]')).toBeVisible() }
 export const col = (page: Page, column = 'backend') => page.locator(`[data-column="${column}"]`)

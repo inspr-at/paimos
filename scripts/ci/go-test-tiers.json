@@ -528,6 +528,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestValidateWorkingFolder","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestVerificationLogPrivateBoundedAndRejectsLinkedFiles","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestVerificationRefusalCompletesPairPolling","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestVerifyCommandOpensOnlyOwnerApprovalAndPreservesFixtureState","tier":"NIGHTLY"}
@@ -1644,6 +1646,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteProbeStatusSendsOnlyTheCause","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRemoteReplyRetainsProjectAndSession","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteRunToolsUseScopedExistingRoutes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteTelemetryErrorClassification","tier":"GATED-FULL"}
@@ -1847,6 +1851,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestUnsupportedVerificationPollProbesWithoutLaunching","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestUsageProbeOptInAndCooldownSurviveRestart","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestVerificationFailedProbeRetainsQueuedRunWithoutVendorLaunch","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestVerificationOneShotNoRepoToolsAndNoDuplicate","tier":"GATED-FULL"}
     ,
@@ -2099,6 +2105,8 @@
     {"kind":"go","package":"internal/agentpairing","name":"TestEnclaveConsentRejectsWrongKeyNonceReplayAndExpiredApproval","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestEnclaveMigrationEndsLegacyStrictWatchesUnderForcedRLS","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestEngineAdmissionJoinsSharedTenantFence","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestExactAPIConnectOnlySixAndSevenAccounts","tier":"GATED-FULL"}
     ,
@@ -2387,6 +2395,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotChangedLeavesAndRetry","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotContinuationGuards","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotDeadlineWriteRollsBack","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotDuplicatesEligibilityAndCancellation","tier":"GATED-FULL"}
     ,
@@ -3183,6 +3193,8 @@
     {"kind":"go","package":"internal/auth","name":"TestDoctrineRulesReadKeyAtMiddleware","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestEmptyAgentKeyDeniedAcrossRegisteredAPIRoutes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestEngineAdmissionCeilingFixtureExcludesBuiltinAgents","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestExitConfirmationAgentRouteCeiling","tier":"GATED-FULL"}
     ,
@@ -4610,6 +4622,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestSessionFullWorkCollections","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestSessionIdleCompanionWakesExactGeneration","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestSessionIndexEnumerationFdNotInherited","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestSessionIndexRefusesLiveConflict","tier":"GATED-FULL"}
@@ -5203,6 +5217,12 @@
     {"kind":"go","package":"internal/embedding","name":"TestWorkerKeepsStaleVectorOffTheRow","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/embedding","name":"TestWorkerStoresRewritesAndIsolates","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionExplicitAuthorityFinalWriteAndIdempotentReplay","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionShadowLimitsFloorsFreshnessAndTenantIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionWIPInventoryRejectsPartialReads","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/escalation","name":"TestCICheckIdentityAndBounds","tier":"ESSENTIAL"}
     ,
@@ -6117,6 +6137,8 @@
     {"kind":"go","package":"internal/inbox","name":"TestSessionMessagesIsolationAndLegacyWire","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestSessionThreadIncludesBothDirectionsAndUnboundReplies","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestSessionThreadParticipantReadsAndManagedReply","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestStreamAndPoll","tier":"GATED-FULL"}
     ,
@@ -7756,6 +7778,8 @@
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestDeployTargetProducerSchemas","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestEngineAdmissionPathsAreServerRelativeAndAuthenticated","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/reportercontract","name":"TestFix3AvailabilitySchemaEnums","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestFix3ReadinessPackageComment","tier":"GATED-FULL"}
@@ -8874,6 +8898,8 @@
     ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestMatrixRunnerLabels","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/ci-runner-guard","name":"TestMergeGroupProofGuardRejectsUntrustedInputs","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestNightlyFullCannotNarrowTiersOrAcquirePRRunnerAuthority","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestNightlyFullRequiresAllThreeTiers","tier":"GATED-FULL"}
@@ -8931,6 +8957,8 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestImmutabilityGuardsFailClosed","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestLoadedImageResolverFailsClosed","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestMergeGroupPRReuseAggregatesRequireConfirmedProof","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestNativePlatformsAndIndexPublication","tier":"GATED-FULL"}
     ,

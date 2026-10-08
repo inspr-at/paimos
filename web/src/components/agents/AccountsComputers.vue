@@ -8,7 +8,7 @@ import type { PairingPermissions } from '../../lib/agentPairing'
 import { overviewAccounts, type SignInReference } from '../../lib/accountsOverview'
 import { computerCaptionParts, DEFAULT_QUOTA_THRESHOLDS, glanceItems, glanceSummary, isProblemSignin, onlineComputers, signinStatus, windowLabel, type GlanceItem } from '../../lib/accountsGlance'
 import { pacingSummary } from '../../lib/computerAccounts'
-import { when, whenFull } from '../../lib/capacity'
+import { HARNESS_NAME, when, whenFull } from '../../lib/capacity'
 import { validQuotaThresholds, type QuotaWarningSettings } from '../../lib/quotaWarnings'
 import { toast } from '../../lib/toast'
 import { usePoller } from '../../lib/usePolledData'
@@ -21,6 +21,8 @@ import AppIcon from '../AppIcon.vue'
 import NeedsYouList, { type NeedsYouItem } from '../settings/NeedsYouList.vue'
 import FoldSection from './FoldSection.vue'
 import HarnessMark from './HarnessMark.vue'
+import VerificationButton from './VerificationButton.vue'
+import { signinKey, useVerification } from '../../lib/useVerification'
 
 // Accounts and computers on the Agents page (AEON-782): its state in one status
 // line and what blocks agents in the body, as the approved design (AEON-721)
@@ -38,14 +40,26 @@ const now = computed(() => agents.now)
 // An approval link (?verify_account=…) shows the section once; an explicit fold wins afterwards.
 watch(() => route.query.verify_account, id => { if (id) reveal() }, { immediate: true })
 
-const verifying = ref(''), busy = ref(false)
+const busy = ref(false)
 
 // ---------- What the page knows ----------
 const computers = computed(() => props.permissions.canListComputers ? capacity.computers.filter(c => c.computer_id && !c.archived_at) : [])
 const accounts = computed(() => props.showAccounts ? overviewAccounts(agents.accounts, capacity.rows, computers.value) : [])
 const thresholds = ref<QuotaWarningSettings>({ ...DEFAULT_QUOTA_THRESHOLDS })
-const items = computed(() => glanceItems(accounts.value, computers.value, thresholds.value, now.value, typeof route.query.verify_account === 'string' ? route.query.verify_account : ''))
-const summary = computed(() => glanceSummary(accounts.value, computers.value, items.value, now.value))
+const baseItems = computed(() => glanceItems(accounts.value, computers.value, thresholds.value, now.value, typeof route.query.verify_account === 'string' ? route.query.verify_account : ''))
+const allSignins = computed(() => accounts.value.flatMap(a => a.signins))
+const verification = useVerification(identityKey, allSignins, canVerify, () => capacity.refreshComputers())
+const attemptedItems = ref<{ item: GlanceItem; index: number }[]>([])
+watch(identityKey, () => { attemptedItems.value = [] })
+const items = computed(() => {
+  const retained = new Map(verification.retained.value.map(s => [signinKey(s), s]))
+  const remembered = attemptedItems.value.filter(x => x.item.signin && retained.has(signinKey(x.item.signin)))
+  const keys = new Set(remembered.map(x => signinKey(x.item.signin!)))
+  const out = baseItems.value.filter(i => !i.signin || !keys.has(signinKey(i.signin)))
+  for (const { item, index } of remembered) out.splice(Math.min(index, out.length), 0, { ...item, signin: retained.get(signinKey(item.signin!))! })
+  return out
+})
+const summary = computed(() => glanceSummary(accounts.value, computers.value, baseItems.value, now.value))
 const pacingLine = computed(() => pacingSummary(capacity.schedule))
 const loaded = computed(() => capacity.loaded || !props.showAccounts)
 const failed = computed(() => !loaded.value && capacity.state === 'error')
@@ -71,7 +85,7 @@ async function readThresholds() {
     if (turn === generation && owner === identityKey.value && validQuotaThresholds(body)) thresholds.value = body
   } catch { /* the defaults keep the early and urgent lines the server starts with */ }
 }
-watch(identityKey, () => { thresholds.value = { ...DEFAULT_QUOTA_THRESHOLDS }; verifying.value = ''; busy.value = false; void readThresholds() }, { immediate: true })
+watch(identityKey, () => { thresholds.value = { ...DEFAULT_QUOTA_THRESHOLDS }; busy.value = false; void readThresholds() }, { immediate: true })
 const poller = usePoller(readThresholds, 120_000)
 onMounted(() => { poller.start(false); window.addEventListener('focus', readThresholds) })
 onBeforeUnmount(() => { generation++; poller.stop(); window.removeEventListener('focus', readThresholds) })
@@ -81,31 +95,11 @@ function canVerify(s: SignInReference) {
   return mayManage.value && s.computer.computer_state === 'connected' && s.enrollment.state === 'connected' && s.enrollment.can_verify === true
     && s.computer.verification_capabilities?.[s.enrollment.harness]?.supported === true
 }
-const verifyBusy = (s: SignInReference) => !!verifying.value || !s.enrollment.verification_stalled && ['starting', 'running', 'waiting', 'ownership_lost'].includes(s.enrollment.verification_state ?? '')
+const verifyBusy = (s: SignInReference) => verification.pending(s)
 async function verifyAgain(item: GlanceItem) {
-  const found = item.signin && accounts.value.flatMap(a => a.signins).find(s => s.computer.computer_id === item.signin!.computer.computer_id && s.enrollment.account_id === item.signin!.enrollment.account_id)
-  if (!found || !canVerify(found) || verifyBusy(found)) return
-  const c = found.computer, e = found.enrollment
-  const owner = identityKey.value, account = e.account_id, computer = c.computer_id, revision = c.revision, priorRun = e.verification_run_id
-  if (!computer || !revision) return
-  verifying.value = account
-  try {
-    const response = await api(`/agent-pairing/computers/${computer}/enrollments/${account}/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: revision, expected_verification_run_id: priorRun }) })
-    if (!response.ok) {
-      const problem = await response.json().catch(() => ({})) as { code?: string }
-      throw new Error(response.status === 403 ? 'Only the account owner may verify it again.' : response.status === 409 && problem.code === 'verification_active' ? 'The helper must confirm that the previous check stopped and settle its reports before another can start.' : response.status === 409 ? 'The account or verification changed. Refresh before verifying again.' : 'Verification could not be requested. Please try again.')
-    }
-    const created = await response.json() as { account_id?: string; run_id?: string }
-    if (created.account_id !== account || typeof created.run_id !== 'string') throw new Error('Verification response could not be confirmed. Refresh the account list.')
-    const current = computers.value.find(x => x.computer_id === computer)
-    const currentEnrollment = current?.enrollments.find(x => x.account_id === account)
-    if (identityKey.value !== owner || current?.revision !== revision || !currentEnrollment?.can_verify || ![priorRun, created.run_id].includes(currentEnrollment.verification_run_id)) return
-    toast(`Verification requested for ${item.name.replace(/ needs verifying on .*/, '')} on ${c.computer_name}.`)
-    const result = await capacity.refreshComputers()
-    if (identityKey.value === owner && !result.ok) toast('Verification was queued, but the account list could not refresh.', { tone: 'error' })
-  } catch (error) {
-    if (identityKey.value === owner) toast(error instanceof Error ? error.message : 'Verification could not be requested.', { tone: 'error' })
-  } finally { if (identityKey.value === owner) verifying.value = '' }
+  if (!item.signin) return
+  if (!attemptedItems.value.some(x => x.item.id === item.id)) attemptedItems.value.push({ item, index: items.value.findIndex(i => i.id === item.id) })
+  await verification.request(item.signin)
 }
 // The folded head's one-click fix: the first sign-in a person may verify right now.
 const firstFix = computed(() => items.value.find(i => i.kind === 'verify' && i.signin && canVerify(i.signin)))
@@ -128,14 +122,22 @@ const linkOf = (i: GlanceItem) => i.kind === 'quota' ? linkAccount(i.accountId!)
 // The computer's own report says how to fix a blocked sign-in: its hint, and the one command to run there.
 function detailOf(i: GlanceItem): string {
   const readiness = (i.kind === 'attention' || i.kind === 'verify') && i.signinId ? capacity.accountLines.get(i.signinId)?.readiness : undefined
+  const feedback = i.signin && verification.message(i.signin)
+  if (feedback) return feedback
   const words = readiness?.hint ? `${i.detail}. ${readiness.hint}` : i.detail
   return readiness?.command ? `${words}${/[.!?]$/.test(words) ? '' : '.'} On ${i.signin?.computer.computer_name ?? 'its computer'}, run ${readiness.command}.` : words
 }
-const needs = computed<NeedsYouItem[]>(() => items.value.map(i => ({
-  id: i.id, name: i.name, detail: detailOf(i), count: 1, icon: i.kind === 'quota' ? 'gauge' : i.kind === 'cleanup' ? 'shield' : 'alert', tone: i.kind === 'cleanup' ? 'waiting' : undefined,
-  href: linkOf(i),
-  action: i.kind === 'verify' && i.signin && canVerify(i.signin) ? { label: 'Verify again', fixesProblem: true, disabled: verifyBusy(i.signin) } : { label: 'Details' },
-})))
+const needs = computed<NeedsYouItem[]>(() => items.value.map(i => {
+  const resolved = !!i.signin && !isProblemSignin(i.signin) && verification.retained.value.some(s => signinKey(s) === signinKey(i.signin!))
+  return {
+    id: i.id,
+    name: i.kind === 'verify' && i.signin ? `${HARNESS_NAME[i.signin.enrollment.harness] ?? 'Account'} verification on ${i.signin.computer.computer_name}` : i.name,
+    detail: detailOf(i), count: resolved ? 0 : 1,
+    icon: i.kind === 'quota' ? 'gauge' : i.kind === 'cleanup' ? 'shield' : 'alert', tone: i.kind === 'cleanup' ? 'waiting' : undefined,
+    href: linkOf(i),
+    action: i.kind === 'verify' && i.signin && canVerify(i.signin) ? { label: 'Verify again', fixesProblem: true, disabled: verifyBusy(i.signin), busy: verifyBusy(i.signin) } : { label: 'Details' },
+  }
+}))
 function act(id: string) {
   const item = items.value.find(i => i.id === id)
   if (!item) return
@@ -165,21 +167,22 @@ const grid = computed(() => accounts.value.map(a => ({
         <span v-if="!loaded && !failed" class="stat-skel" aria-hidden="true"></span><span v-if="!loaded && !failed" class="sr-only">Reading accounts and computers…</span>
         <span v-else-if="failed" class="st warn"><span class="dot warn" aria-hidden="true"></span><span class="t">Accounts could not be read · <button type="button" class="link-btn" @click="retry">Try again</button></span></span>
         <span v-else-if="empty" class="st warn"><span class="dot wait" aria-hidden="true"></span><span class="t">No accounts yet · <RouterLink class="link-btn" to="/agents/register-agent">Connect a computer</RouterLink></span></span>
-        <span v-else class="st" :class="{ warn: tone === 'warn' }"><span class="dot" :class="tone" aria-hidden="true"></span><span class="t" :data-tip="statusText">{{ statusText }}</span></span>
+        <span v-else class="st" :class="{ warn: tone === 'warn' }"><span class="dot" :class="tone" aria-hidden="true"></span><span class="t" v-clip-tip>{{ statusText }}</span></span>
       </span>
       <span v-if="capacity.away" class="away" :data-tip="`Away: agents use everything left until ${whenFull(capacity.away)}`">
         <span>Away until {{ when(capacity.away, now) }}</span>
         <button v-if="mayManage" type="button" class="link-btn" :disabled="busy" aria-label="Back now: end Away" @click="endAway">Back now</button>
       </span>
-      <span v-if="!open && firstFix?.signin" class="fs-act"><button type="button" class="btn sm" :disabled="verifyBusy(firstFix.signin)" :aria-busy="verifying === firstFix.signin.enrollment.account_id" @click="verifyAgain(firstFix)">Verify again</button></span>
+      <span v-if="!open && firstFix?.signin" class="fs-act"><VerificationButton class="sm" :busy="verifyBusy(firstFix.signin)" @click="verifyAgain(firstFix)" /></span>
       <span class="fs-tools"><RouterLink class="btn sm ghost" :to="SETTINGS" aria-label="Manage accounts and computers" title="Accounts, computers, capacity and warnings in Settings"><AppIcon name="gear" :size="14" /><span class="tl">Manage</span></RouterLink></span>
     </template>
 
+    <template #feedback><p v-if="!open && firstFix?.signin && verification.message(firstFix.signin)" class="verification-feedback" role="status">{{ verification.message(firstFix.signin) }}</p></template>
     <div class="acc-pad acc">
       <p v-if="failed" class="empty" role="alert">Accounts could not be read. <button type="button" class="btn sm" @click="retry">Try again</button></p>
       <p v-else-if="empty" class="empty">No accounts or computers yet. <RouterLink to="/agents/register-agent">Connect a computer</RouterLink>, sign in to a harness there, and it appears here.</p>
       <template v-else-if="loaded">
-        <NeedsYouList v-if="props.showAccounts" :items="needs" :aside="!stale && allReady ? 'Everything else is working.' : 'Based on the last available reports.'" @action="act" />
+        <NeedsYouList v-if="props.showAccounts" :items="needs" :show-calm="verification.retained.value.length > 0" :aside="!stale && allReady ? 'Everything else is working.' : 'Based on the last available reports.'" @action="act" />
         <p v-if="stale" class="stale" role="status">Some readings may be out of date. <button type="button" class="btn sm" @click="retry">Refresh</button></p>
         <section v-if="accounts.length && computers.length" class="grid-wrap" aria-labelledby="acc-grid-title">
           <div class="zone-head"><h3 id="acc-grid-title" class="eyebrow">Sign-ins at a glance</h3><p>Each cell is one account on one computer</p></div>
@@ -255,6 +258,7 @@ const grid = computed(() => accounts.value.map(a => ({
 .fs-tools .btn.ghost:hover, .fs-tools .btn.ghost:hover svg { color: var(--teal-ink); }
 
 /* The body: Needs you, then the grid, then the pacing line. */
+.verification-feedback { margin: 0; padding: 0 20px 12px; color: var(--ink-2); font-size: 13px; }
 .acc-pad { display: grid; gap: 18px; padding: 4px 20px 16px; border-top: 1px solid var(--line); padding-top: 16px; }
 .acc :deep(.needs-head) { margin: 0 0 10px; }
 .acc :deep(.needs-head h2) { font: 650 13.5px/1.3 var(--font); letter-spacing: 0; }
@@ -297,13 +301,11 @@ const grid = computed(() => accounts.value.map(a => ({
   .fs-act { order: 5; margin: 0 0 4px auto; }
 }
 
-/* Phone: line 1 chevron, title, Manage (44 px); line 2 the status, wrapping; line 3 Verify again. */
+/* Phone: summary keeps one line with a full-text clip tip, above the fix. */
 @container acc (width <= 640px) {
   .acc-section :deep(.fs-head) { flex-wrap: wrap; gap: 6px 8px; padding: 6px 10px 6px 4px; }
   .fs-sum { order: 3; flex: 1 1 100%; padding-left: 40px; }
-  .fs-sum .t { white-space: normal; overflow: visible; }
-  .fs-sum .st { align-items: flex-start; }
-  .fs-sum .st .dot { margin-top: 6px; }
+  .fs-sum .st { min-height: 20px; }
   .fs-tools, .fs-act + .fs-tools { margin-left: auto; }
   .fs-tools .btn { min-height: 44px; width: 44px; padding: 0; }
   .fs-tools .tl { display: none; }

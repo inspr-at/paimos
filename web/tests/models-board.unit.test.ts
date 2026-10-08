@@ -59,7 +59,7 @@ it('refreshes a conflict without a success toast and blocks edits after a saved 
   vi.mocked(putBoardOrder).mockRejectedValue(new APIError(409, 'stale_revision')); await editor.move(column, column.list[1]!, 'list', 0)
   expect(editor.error.value).toContain('not saved'); expect(toasts).toHaveLength(0)
   column = editor.document.value!.columns.find(column => column.column === 'backend')!
-  vi.mocked(putBoardOrder).mockResolvedValue({ person_id: 'person', revision: 4, dry_run: false, moved: [], profile: boardFixture().profile }); vi.mocked(getBoard).mockRejectedValue(new Error('offline'))
+  vi.mocked(putBoardOrder).mockResolvedValue({ person_id: boardFixture().person_id, revision: 4, dry_run: false, moved: [], profile: boardFixture().profile }); vi.mocked(getBoard).mockRejectedValue(new Error('offline'))
   await editor.move(column, column.list[1]!, 'list', 0); expect(editor.error.value).toContain('Saved, but'); expect(editor.document.value).toBeNull(); expect(toasts).toHaveLength(0)
 })
 it('expires Undo and rejects it after another revision or identity boundary', async () => {
@@ -88,7 +88,7 @@ it('discards a delayed template preview and its approval after the observed revi
   vi.mocked(putBoardProfile).mockReturnValue(held.promise)
   const previewing = editor.previewTemplate('best')
   editor.document.value!.revision = 9
-  held.resolve({ person_id: 'person', revision: 3, dry_run: true, moved: [], profile: boardFixture().profile })
+  held.resolve({ person_id: boardFixture().person_id, revision: 3, dry_run: true, moved: [], profile: boardFixture().profile })
   expect(await previewing).toBeNull()
   expect(await editor.applyTemplate({ template: 'best', revision: 3, key: editor.actionKey.value, moved: [] })).toBe(false)
   expect(putBoardProfile).toHaveBeenCalledTimes(1)
@@ -145,4 +145,23 @@ it('cannot edit as an agent or use profile writes to bypass project rule ownersh
   const project = useModelsBoard(ref({ layer: 'rules', situation: 'first', project: 'project' }), ref(false)); await settle()
   expect(await project.profile({ residency: 'local' })).toBe(false)
   expect(putBoardProfile).not.toHaveBeenCalled()
+})
+it('a canonical-person change with equal revision invalidates old template approval and Undo', async () => {
+  const editor = useModelsBoard(ref({ layer: 'mine', situation: 'first' }), ref(false)); await settle()
+  const next = boardFixture(); next.revision = 4
+  vi.mocked(putBoardProfile).mockResolvedValue({ person_id: next.person_id, revision: 4, dry_run: false, moved: [], profile: next.profile }); vi.mocked(getBoard).mockResolvedValue(next)
+  await editor.profile({ thinking: 'deep' })
+  const undo = toasts.at(-1)!.actions[0]!.run, previousKey = editor.actionKey.value
+  vi.mocked(getBoard).mockResolvedValue({ ...next, person_id: 'new-canonical-person', profile: { ...next.profile, person_id: 'new-canonical-person' } })
+  expect(await editor.load()).toBe(false)
+  expect(editor.actionKey.value).not.toBe(previousKey); expect(editor.error.value).toContain('old change and Undo were discarded')
+  undo(); await settle()
+  expect(await editor.applyTemplate({ template: 'best', revision: 4, key: previousKey, moved: [] })).toBe(false)
+  expect(putBoardProfile).toHaveBeenCalledTimes(1); expect(editor.document.value?.person_id).toBe('new-canonical-person')
+})
+it('an unconfirmed person in the write response never offers success or Undo', async () => {
+  const editor = useModelsBoard(ref({ layer: 'mine', situation: 'first' }), ref(false)); await settle()
+  vi.mocked(putBoardProfile).mockResolvedValue({ person_id: 'another-person', revision: 4, dry_run: false, moved: [], profile: boardFixture().profile })
+  expect(await editor.profile({ thinking: 'deep' })).toBe(false)
+  expect(editor.error.value).toContain('Could not confirm the save'); expect(toasts).toHaveLength(0); expect(putBoardProfile).toHaveBeenCalledTimes(1)
 })

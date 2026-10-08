@@ -139,10 +139,10 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
 }
 .switch input::after {
   content: ''; position: absolute; top: 2px; left: 2px; height: calc(100% - 4px); aspect-ratio: 1; border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, var(--surface-highlight), var(--switch-knob-low)); box-shadow: 0 1px 3px color-mix(in srgb, var(--shadow-color) 30%, transparent);
+  background: var(--switch-knob); box-shadow: 0 1px 3px color-mix(in srgb, var(--shadow-color) 30%, transparent);
 }
 .switch input:checked { background: linear-gradient(90deg, var(--primary), var(--primary-hi)); box-shadow: none; }
-.switch input:checked::after { background: var(--primary-on); transform: translateX(calc(100cqw - 100% - 4px)); }
+.switch input:checked::after { background: var(--switch-knob); transform: translateX(calc(100cqw - 100% - 4px)); }
 /* Mixed: half the track and a centred knob. A full tint read as on in dark mode. */
 .switch input:indeterminate {
   background: linear-gradient(90deg, var(--primary-hi) 0 50%, var(--track) 50% 100%);

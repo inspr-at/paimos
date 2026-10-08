@@ -6,6 +6,7 @@ import { toast } from './toast'
 import { canMove, contextKey, moveOrder, moveRule, orderBody, rulesBody, type BoardCard, type BoardColumn, type BoardContext, type BoardProfile, type BoardZone, type ModelBoardDocument, type RulesDocument } from './modelsBoard'
 import { dismissBoardLine, getBoard, getBoardRules, putBoardOrder, putBoardProfile, putBoardRules, resetBoardOrder } from './modelsBoardApi'
 import { useSession } from '../stores/session'
+import { preferenceFailure } from './modelsSettings'
 
 export function useModelsBoard(context: Ref<BoardContext>, german: Ref<boolean>) {
   const session = useSession(), document = ref<ModelBoardDocument | null>(null), rules = ref<RulesDocument | null>(null)
@@ -23,7 +24,10 @@ export function useModelsBoard(context: Ref<BoardContext>, german: Ref<boolean>)
     try {
       const [board, locks] = await Promise.all([getBoard(target, abort.signal), target.layer === 'rules' ? getBoardRules(target, abort.signal) : Promise.resolve(null)])
       if (!current() || turn !== read) return false
-      document.value = board; rules.value = locks; error.value = ''; return true
+      const changedPerson = document.value && document.value.person_id !== board.person_id
+      document.value = board; rules.value = locks; error.value = ''
+      if (changedPerson) { generation++; epoch.value++; busy.value = false; loading.value = false; error.value = text('Your identity changed. The board was refreshed; the old change and Undo were discarded.', 'Die Person wurde geändert. Das Board wurde aktualisiert; die alte Änderung und Rückgängig wurden verworfen.'); return false }
+      return true
     } catch (failure) {
       if (current() && turn === read) { document.value = null; rules.value = null; error.value = failure instanceof Error ? failure.message : text('Could not load the board.', 'Das Board konnte nicht geladen werden.') }
       return false
@@ -47,7 +51,7 @@ export function useModelsBoard(context: Ref<BoardContext>, german: Ref<boolean>)
     if (preview.key !== actionKey.value || preview.revision !== document.value?.revision) return false
     return profile({ template: preview.template })
   }
-  type Operation = (revision: number) => Promise<{ revision: number }>
+  type Operation = (revision: number) => Promise<{ revision: number; person_id?: string | null }>
   async function write(operation: Operation, undo: Operation | null, rule = false) {
     const board = document.value, locks = rules.value
     if (!board || !editable.value || busy.value || (rule && !locks)) return false
@@ -56,6 +60,11 @@ export function useModelsBoard(context: Ref<BoardContext>, german: Ref<boolean>)
     try {
       const result = await operation(rule ? locks!.revision : board.revision)
       if (!current()) return false
+      if (!Number.isSafeInteger(result.revision) || result.revision <= (rule ? locks!.revision : board.revision) || (!rule && result.person_id !== board.person_id)) {
+        await load()
+        if (current()) error.value = text('Could not confirm the save. Reload before making another change; Undo is unavailable.', 'Speichern konnte nicht bestätigt werden. Vor der nächsten Änderung neu laden; Rückgängig ist nicht verfügbar.')
+        return false
+      }
       const loaded = await load()
       if (!current()) return false
       if (!loaded) { error.value = text('Saved, but the board could not be refreshed. Reload before making another change.', 'Gespeichert, aber das Board konnte nicht aktualisiert werden. Vor der nächsten Änderung neu laden.'); return true }
@@ -74,7 +83,7 @@ export function useModelsBoard(context: Ref<BoardContext>, german: Ref<boolean>)
       if (failure instanceof APIError && failure.status === 409) {
         await load()
         if (current()) error.value = text('Changed elsewhere. The board was refreshed; the change was not saved.', 'Andernorts geändert. Das Board wurde aktualisiert; die Änderung wurde nicht gespeichert.')
-      } else error.value = message
+      } else error.value = failure instanceof APIError && (failure.status === 428 || failure.status === 403) ? preferenceFailure(failure.status, german.value) : message
       return false
     } finally { if (current()) busy.value = false }
   }

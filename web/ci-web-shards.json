@@ -216,7 +216,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/key-layout.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":7.039,"median":3.522,"min":2.322},"seconds":49.120865,"selectedTests":12},"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/key-layout.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":7.039,"median":3.522,"min":2.322},"seconds":49.120865,"selectedTests":12},"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -318,7 +318,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/accounts-computers.spec.ts","listedTests":26,"tierTiming":{"caseSeconds":{"max":4.348,"median":2.018,"min":1.197},"seconds":30.144583,"selectedTests":13},"weightSeconds":32.233918,"weightSource":"web-13"}
+        {"file":"tests/accounts-computers.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":4.348,"median":2.018,"min":1.197},"seconds":30.144583,"selectedTests":13},"weightSeconds":32.233918,"weightSource":"web-13"}
         ,
         {"file":"tests/agent-recovery.spec.ts","listedTests":9,"weightSeconds":20}
         ,
@@ -520,7 +520,9 @@
         ,
         {"file":"tests/model-refresh.spec.ts","listedTests":1,"tierTiming":{"caseSeconds":{"max":4.248,"median":4.248,"min":4.248},"seconds":7.561739,"selectedTests":1},"weightSeconds":3.5,"weightSource":"e2e-4"}
         ,
-        {"file":"tests/policy-editors.spec.ts","listedTests":64,"weightSeconds":114.485,"weightSource":"local-chromium-single-worker-AEON-633-fix6"}
+        {"file":"tests/models-board.spec.ts","listedTests":9,"weightSeconds":15,"weightSource":"local-single-worker-AEON-879-11.2s-plus-margin"}
+        ,
+        {"file":"tests/policy-editors.spec.ts","listedTests":32,"weightSeconds":73,"weightSource":"local-single-worker-AEON-879-60.8s-plus-margin"}
       ]
     }
     ,
@@ -614,7 +616,7 @@
         ,
         {"file":"tests/key-trim.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":3.607,"median":2.179,"min":1.115},"seconds":17.02266,"selectedTests":7},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/model-prefs.spec.ts","listedTests":42,"tierTiming":{"caseSeconds":{"max":25.747,"median":3.2395,"min":2.114},"seconds":200.889631,"selectedTests":42},"weightSeconds":93.219512,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/model-prefs.spec.ts","listedTests":3,"weightSeconds":29,"weightSource":"local-single-worker-AEON-879-23.8s-plus-margin"}
       ]
     }
     ,
@@ -688,7 +690,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/a11y.spec.ts","listedTests":73,"weightSeconds":230.829268,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/a11y.spec.ts","listedTests":80,"weightSeconds":230.829268,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/accounts-card-fit.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
         ,
@@ -697,6 +699,8 @@
         {"file":"tests/add-account.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/aeon-908-polish.spec.ts","weightSeconds":120}
         ,
         {"file":"tests/agent-done-state.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
         ,
@@ -970,7 +974,7 @@
         ,
         {"file":"tests/session-chat-cli.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/session-chat.spec.ts","listedTests":34,"weightSeconds":62.146341,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/session-chat.spec.ts","listedTests":41,"weightSeconds":90.999999,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/session-ended.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,

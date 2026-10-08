@@ -79,6 +79,12 @@ func (e *queueError) ErrorCode() string { return e.Code }
 func queueLock(ctx context.Context, tx pgx.Tx) error {
 	return db.LockWorkTreeTx(ctx, tx)
 }
+func (m *module) queueDeadline(ctx context.Context, duration time.Duration) (context.Context, context.CancelFunc) {
+	if m.queueTimeout != nil {
+		return m.queueTimeout(ctx, duration)
+	}
+	return context.WithTimeout(ctx, duration)
+}
 func (m *module) mountQueue(mux *http.ServeMux) {
 	for _, route := range []struct {
 		pattern string
@@ -102,7 +108,7 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 		mux.HandleFunc(route.pattern, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-store")
 			if strings.Contains(route.pattern, "snapshot") {
-				ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+				ctx, cancel := m.queueDeadline(r.Context(), 5*time.Second)
 				defer cancel()
 				r = r.WithContext(ctx)
 				if id := r.PathValue("snapshotId"); id != "" && !workorders.UUID(id) {
@@ -119,7 +125,7 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 				httpapi.WriteError(w, 400, "invalid node id")
 				return
 			}
-			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			ctx, cancel := m.queueDeadline(r.Context(), 30*time.Second)
 			defer cancel()
 			r = r.WithContext(ctx)
 			// Decode only buffered memory inside the write, never transport
