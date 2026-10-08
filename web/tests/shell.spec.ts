@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
-import { mkdir } from 'node:fs/promises'
 import { controlStability } from './control-stability'
 
 const canonical = '260923120000.0.0'
@@ -64,7 +63,7 @@ async function noOverflow(page: Page) {
 for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) {
   for (const colorScheme of ['light', 'dark'] as const) {
     for (const screen of ['home', 'signin', 'signin-dev', '404'] as const) {
-      test(`${screen} ${viewport.width} ${colorScheme}`, async ({ page }) => {
+      test(`${screen} ${viewport.width} ${colorScheme}`, async ({ page }, testInfo) => {
         const errors: string[] = []
         page.on('pageerror', error => errors.push(error.message))
         await page.setViewportSize(viewport)
@@ -93,8 +92,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
           expect(bounds.height).toBeGreaterThanOrEqual(min)
           expect(bounds.width).toBeGreaterThanOrEqual(min)
         }
-        await mkdir('/tmp/aeon-p05-shots', { recursive: true })
-        await page.screenshot({ path: `/tmp/aeon-p05-shots/${screen}-${viewport.width}-${colorScheme}.png`, fullPage: true })
+        await page.screenshot({ path: testInfo.outputPath(`${screen}-${viewport.width}-${colorScheme}.png`), fullPage: true })
         expect(errors).toEqual([])
       })
     }
@@ -107,9 +105,24 @@ for (const width of [390, 1024, 1440]) {
       await page.setViewportSize({ width, height: 844 })
       await page.emulateMedia({ colorScheme })
       await mockAPI(page)
+      // The header and its link render before the project data and preferences.
+      // Hold the summaries to exercise that order on every run, then measure
+      // the loaded list rather than the taller loading skeletons.
+      let releaseProjects!: () => void
+      const projectsGate = new Promise<void>(resolve => { releaseProjects = resolve })
+      await page.route(/\/api\/projects(?:\?|$)/, async route => { await projectsGate; await route.fallback() })
+      const projectsRequested = page.waitForRequest(request => new URL(request.url()).pathname === '/api/projects')
       await page.goto('/')
+      await projectsRequested
+      const loading = page.getByRole('status', { name: 'Loading projects' })
+      await expect(loading).toBeVisible()
       const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
       await expect(attention).toHaveAttribute('href', '/tickets?view=needs-attention')
+      const projectsLoaded = page.waitForResponse(response => response.ok() && new URL(response.url()).pathname === '/api/projects')
+      releaseProjects()
+      await projectsLoaded
+      await expect(page.getByRole('list', { name: 'Projects' }).getByRole('listitem')).toHaveCount(projects.length)
+      await expect(loading).toHaveCount(0)
       await page.evaluate(() => document.fonts.ready)
       await noOverflow(page)
       const bounds = await attention.boundingBox()
