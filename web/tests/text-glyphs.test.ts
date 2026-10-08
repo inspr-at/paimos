@@ -24,6 +24,7 @@ const ALLOW: { file: string; includes: string; why: string }[] = [
   { file: 'components/business/QuoteLines.vue', includes: 'class="rate-hint">× ', why: 'rate × quantity, a multiplication in text' },
   { file: 'components/work/AttachmentLightbox.vue', includes: '.width} × ${', why: 'image dimensions, 1200 × 800' },
   { file: 'lib/releaseStats.ts', includes: '${rate(r)}×`', why: 'a multiple in text, "3× the median gap" (AEON-488)' },
+  { file: 'lib/modelRegistry.ts', includes: "in Settings › Models'", why: 'the retirement reasons stored with a removed or undone model (AEON-1012); a breadcrumb in data the registry keeps, not an icon' },
   { file: 'lib/workKindsCopy.ts', includes: 'Settings › Models', why: 'approved AEON-854 breadcrumb in the kinds lead; it names the Models board in a sentence and is not an icon' },
 ]
 
