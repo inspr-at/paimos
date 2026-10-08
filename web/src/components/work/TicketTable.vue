@@ -502,7 +502,7 @@ let pressOrigin: { x: number; y: number } | null = null
 let pointerDown = false
 let swallowClick = false
 function pressBegin(event: PointerEvent, row: ListItem) {
-  if (!props.selectable || !phone.value || selecting.value || event.button !== 0) return
+  if (!props.selectable || props.selectionDisabled || props.rowSelectable?.(row) === false || !phone.value || selecting.value || event.button !== 0) return
   if ((event.target as HTMLElement).closest('button, input')) return
   pointerDown = true
   swallowClick = false
@@ -510,8 +510,10 @@ function pressBegin(event: PointerEvent, row: ListItem) {
   window.clearTimeout(pressTimer)
   pressTimer = window.setTimeout(() => {
     pressTimer = 0
+    const current = props.rowsById.get(row.id)
+    if (!current || current.updated_at !== row.updated_at || props.selectionDisabled || props.rowSelectable?.(current) === false) return
     swallowClick = true
-    emit('select', row, 'toggle')
+    emit('select', current, 'toggle')
   }, HOLD_MS)
 }
 function pressMove(event: PointerEvent) {
@@ -527,7 +529,7 @@ function pressFinish(fromPointerUp: boolean) {
   if (fromPointerUp) swallowClick = false
 }
 function longPress(event: Event, row: ListItem) {
-  if (!props.selectable || !phone.value) return
+  if (!props.selectable || props.selectionDisabled || props.rowSelectable?.(row) === false || !phone.value) return
   event.preventDefault()
   if (swallowClick) return
   if (pressTimer) { window.clearTimeout(pressTimer); pressTimer = 0 }
@@ -661,7 +663,7 @@ defineExpose({
       <tbody v-for="section in sections" v-else :key="section.key" :class="{ dim: loading }">
         <template v-for="entry in section.entries" :key="entry.key">
           <!-- List grouping header (status or epic) -->
-          <tr v-if="entry.type === 'list-group'" :id="`row-group-${entry.group.key}`" :aria-expanded="!collapsed.has(entry.group.key)" class="group-row" :class="{ collapsed: collapsed.has(entry.group.key) }">
+          <tr v-if="entry.type === 'list-group'" :id="`row-group-${entry.group.key}`" class="group-row" :class="{ collapsed: collapsed.has(entry.group.key) }">
             <th :colspan="columns.length" scope="rowgroup">
               <div class="group-head">
                 <button type="button" class="group-toggle" :aria-expanded="!collapsed.has(entry.group.key)" :aria-label="german ? `${groupName(entry.group)} ${collapsed.has(entry.group.key) ? 'aufklappen' : 'zuklappen'}` : `${collapsed.has(entry.group.key) ? 'Expand' : 'Collapse'} ${groupName(entry.group)}`" @click="toggleGroup(entry.group.key)">
@@ -814,7 +816,7 @@ defineExpose({
               stale: !!liveLabels?.has(entry.row.id), 'live-flash': !!liveFlash?.has(entry.row.id),
             }"
             :style="entry.tree ? { '--depth': entry.tree.depth } : undefined"
-            :aria-selected="cursorId === entry.row.id" :aria-level="entry.tree ? entry.tree.depth + 1 : undefined"
+            :aria-selected="selectable ? !!selected?.has(entry.row.id) : cursorId === entry.row.id" :aria-level="entry.tree ? entry.tree.depth + 1 : undefined"
             :aria-describedby="planningDescribedBy(entry.row) || undefined"
             :aria-expanded="entry.tree?.hasChildren ? entry.tree.expanded : undefined"
             :draggable="draggable(entry) ? 'true' : undefined"
@@ -824,9 +826,9 @@ defineExpose({
             @dragover="isWorkParent(entry.row) && entry.tree ? dragOver($event, entry.row) : undefined"
             @dragleave="dragLeave($event, entry.row.id)" @drop="isWorkParent(entry.row) && entry.tree ? drop($event, entry.row) : undefined"
           >
-            <td v-if="phone && selecting" class="c-check">
+            <td v-if="phone && selectable" class="c-check" :aria-hidden="!selecting">
               <button
-                type="button" class="phone-check" role="checkbox" :aria-checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" :disabled="selectionDisabled || (rowSelectable ? !rowSelectable(entry.row) : false)"
+                type="button" class="phone-check" :class="{ 'check-placeholder': !selecting }" :tabindex="selecting ? 0 : -1" role="checkbox" :aria-checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" :disabled="selectionDisabled || (rowSelectable ? !rowSelectable(entry.row) : false)"
                 @click.stop="emit('select', entry.row, 'toggle')"
               >
                 <span class="mark" aria-hidden="true"><AppIcon v-if="selected?.has(entry.row.id)" name="check" :size="13" /></span>
@@ -1254,7 +1256,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .group-more .cell { gap: 12px; color: var(--ink-3); font-size: 12px; }
 .c-host.end .cell { justify-content: flex-end; }
 @media (pointer: coarse), (max-width: 720px) {
-  .group-toggle, .group-check-target { width: 44px; height: 44px; }
+  .group-toggle, .group-check-target { min-width: 44px; min-height: 44px; }
+  .key-btn { min-width: 44px; min-height: 44px; height: auto; }
   .group-more .more-btn { min-height: 44px; }
 }
 .group-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -1323,7 +1326,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .table-card.compact .ticket-row { padding-top: 11px; }
   /* Native boxes stay for the wide layout. A phone uses the round mark instead. */
   .row-check { display: none; }
-  .table-card.selecting .ticket-row {
+  .table-card.selectable .ticket-row {
     grid-template-columns: 44px auto auto minmax(0, 1fr) auto;
     grid-template-areas: "check key status prio updated" "check title title title title";
     padding-left: 2px; column-gap: 6px;
@@ -1339,6 +1342,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   }
   .phone-check[aria-checked="true"] .mark { background: linear-gradient(180deg, var(--primary-hi), var(--primary)); box-shadow: none; }
   .phone-check:focus-visible { box-shadow: var(--focus-ring); }
+  .phone-check.check-placeholder { visibility: hidden; pointer-events: none; }
   .ticket-row.selected { background: var(--row-selected); }
   .ticket-row td { display: block !important; height: auto; padding: 0; border: 0; background: none !important; box-shadow: none !important; }
   .ticket-row td:first-child { padding-left: 0; }
@@ -1351,17 +1355,17 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .c-estimate .cell { height: auto; }
   .ticket-row:not(:has(.c-estimate .mono)) .c-estimate { display: none !important; }
   .table-card:not(.customised) .ticket-row:has(.c-estimate .mono) { grid-template-areas: "key status prio updated" "title title title estimate"; }
-  .table-card.selecting:not(.customised) .ticket-row:has(.c-estimate .mono) { grid-template-areas: "check key status prio updated" "check title title title estimate"; }
+  .table-card.selectable:not(.customised) .ticket-row:has(.c-estimate .mono) { grid-template-areas: "check key status prio updated" "check title title title estimate"; }
   .c-progress { grid-area: progress; justify-self: end; min-width: 0; }
   .ticket-row:not(:has(.progress-read)) .c-progress { display: none !important; }
   .table-card:not(.customised) .ticket-row:has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress"; }
-  .table-card.selecting:not(.customised) .ticket-row:has(.progress-read) {
+  .table-card.selectable:not(.customised) .ticket-row:has(.progress-read) {
     grid-template-columns: 44px auto auto minmax(0, 1fr) auto;
     grid-template-areas: "check key status prio updated" "check title title title progress";
   }
   /* With both, the title spans two lines beside progress over the estimate. */
   .table-card:not(.customised) .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress" "title title title estimate"; }
-  .table-card.selecting:not(.customised) .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "check key status prio updated" "check title title title progress" "check title title title estimate"; }
+  .table-card.selectable:not(.customised) .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "check key status prio updated" "check title title title progress" "check title title title estimate"; }
   /* A ready time shows where Updated sits; it is the fresher answer to "when". */
   .ticket-row:not(:has(.eta-cell)) .c-eta, .ticket-row:has(.eta-cell) .c-updated { display: none !important; }
   .c-eta { grid-area: updated; justify-self: end; min-width: 0; }
@@ -1412,22 +1416,29 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .group-toggle, .group-check-target { width: 44px; height: 44px; }
   .group-more, .group-more td { display: block; }
   .group-more .cell { height: auto; min-height: 44px; flex-wrap: wrap; white-space: normal; }
-  .table-card.selecting .ticket-row.tree-row { padding-left: calc(2px + var(--depth, 0) * 10px); }
+  .table-card.selectable .ticket-row.tree-row { padding-left: calc(2px + var(--depth, 0) * 10px); }
   /* Saved columns read as labelled metadata below Key and Title, in the chosen
      order. Automatic cards retain their compact layout above. No optional
      value is hidden or placed in an implicit off-screen grid column. */
   .table-card.customised .tickets .ticket-row {
     grid-template-columns: minmax(0, 1fr); grid-template-areas: none;
   }
-  .table-card.customised.selecting .tickets .ticket-row { grid-template-columns: 44px minmax(0, 1fr); }
+  .table-card.customised.selectable .tickets .ticket-row { grid-template-columns: 44px minmax(0, 1fr); }
   .table-card.customised .ticket-row td { grid-area: auto; min-width: 0; justify-self: stretch; }
-  .table-card.customised.selecting .ticket-row td { grid-column: 2; }
-  .table-card.customised.selecting .ticket-row .c-check { grid-column: 1; grid-row: 1 / span 2; }
+  /* Copy remains a complete, separate touch target even while checks take
+     the first column. Long project keys wrap instead of escaping the card. */
+  .key-btn { min-width: 44px; min-height: 44px; height: auto; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+  .table-card.customised.selectable .ticket-row td { grid-column: 2; }
+  .table-card.customised.selectable .ticket-row .c-check { grid-column: 1; grid-row: 1 / span 2; }
   .table-card.customised .ticket-row td[data-column-label] {
     display: grid !important; grid-template-columns: minmax(7em, 30%) minmax(0, 1fr); align-items: center; gap: 8px;
   }
   .table-card.customised td[data-column-label]::before { content: attr(data-column-label); color: var(--ink-3); font-size: 11.5px; }
   .table-card.customised td[data-column-label] .cell { min-width: 0; flex-wrap: wrap; justify-content: flex-start; white-space: normal; }
+  .table-card.customised .c-key .cell { min-width: 0; }
+  .table-card.customised td.c-host[data-column-label] { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .table-card.customised td.c-host[data-column-label] .cell { overflow: visible; }
+  .table-card.customised .c-host[data-column-label]::before { white-space: normal; }
   .table-card.customised .c-prio .empty, .table-card.customised .prio-label { display: inline; }
   .table-card.customised .cost-name, .table-card.customised .epic-name, .table-card.customised .person-name { white-space: normal; overflow-wrap: anywhere; }
   @media (pointer: coarse) {

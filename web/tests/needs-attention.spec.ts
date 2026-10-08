@@ -483,13 +483,13 @@ test('project groups page independently, remember folds per grouping and keep th
  const data = await setup(page, Array.from({ length: 112 }, (_, index) => row(index)))
  await page.goto('/tickets?view=needs-attention')
  const aeon = page.locator('#row-group-p-aeon'), pharos = page.locator('#row-group-p-pharos')
- await expect(aeon).toHaveAttribute('aria-expanded', 'true')
- await expect(pharos).toHaveAttribute('aria-expanded', 'false')
+ await expect(aeon.locator('.group-toggle')).toHaveAttribute('aria-expanded', 'true')
+ await expect(pharos.locator('.group-toggle')).toHaveAttribute('aria-expanded', 'false')
  await expect(table(page).locator('.ticket-row:not(.fit-row)')).toHaveCount(50)
  expect(data.queries.filter(query => query.get('project_id') === 'p-pharos')).toHaveLength(0)
  const guard = await controlStability(page, { search: page.getByRole('searchbox'), display: page.getByRole('button', { name: /^Display:/ }), header: aeon, toggle: aeon.locator('.group-toggle') })
- await guard.check(async () => { await aeon.getByRole('button', { name: 'Collapse AEON' }).click(); await expect(aeon).toHaveAttribute('aria-expanded', 'false') })
- await guard.check(async () => { await aeon.getByRole('button', { name: 'Expand AEON' }).click(); await expect(aeon).toHaveAttribute('aria-expanded', 'true') })
+ await guard.check(async () => { await aeon.getByRole('button', { name: 'Collapse AEON' }).click(); await expect(aeon.locator('.group-toggle')).toHaveAttribute('aria-expanded', 'false') })
+ await guard.check(async () => { await aeon.getByRole('button', { name: 'Expand AEON' }).click(); await expect(aeon.locator('.group-toggle')).toHaveAttribute('aria-expanded', 'true') })
  guard.done()
  await page.getByRole('button', { name: 'Show 50 more in AEON' }).click()
  await expect(table(page).locator('.ticket-row:not(.fit-row)')).toHaveCount(56)
@@ -501,13 +501,13 @@ test('project groups page independently, remember folds per grouping and keep th
  await page.getByRole('button', { name: /^Display:/ }).click()
  const display = page.getByRole('dialog', { name: 'Display options' })
  const choices = await controlStability(page, { project: display.getByRole('radio', { name: 'Project', exact: true }), kind: display.getByRole('radio', { name: 'Kind', exact: true }), none: display.getByRole('radio', { name: 'None', exact: true }), expand: display.getByRole('button', { name: 'Expand all' }), collapse: display.getByRole('button', { name: 'Collapse all' }) })
- await choices.check(async () => { await display.getByRole('radio', { name: 'Kind', exact: true }).click(); await expect(page).toHaveURL(/group=kind/); await expect(page.locator('#row-group-cancel')).toHaveAttribute('aria-expanded', 'false') })
- await choices.check(async () => { await display.getByRole('radio', { name: 'Project', exact: true }).click(); await expect(page).toHaveURL(/group=project/); await expect(aeon).toHaveAttribute('aria-expanded', 'false'); await expect(pharos).toHaveAttribute('aria-expanded', 'true') })
+ await choices.check(async () => { await display.getByRole('radio', { name: 'Kind', exact: true }).click(); await expect(page).toHaveURL(/group=kind/); await expect(page.locator('#row-group-cancel').locator('.group-toggle')).toHaveAttribute('aria-expanded', 'false') })
+ await choices.check(async () => { await display.getByRole('radio', { name: 'Project', exact: true }).click(); await expect(page).toHaveURL(/group=project/); await expect(aeon.locator('.group-toggle')).toHaveAttribute('aria-expanded', 'false'); await expect(pharos.locator('.group-toggle')).toHaveAttribute('aria-expanded', 'true') })
  choices.done()
  await page.keyboard.press('Escape')
  await page.getByRole('searchbox').fill('Ticket')
- await expect(aeon).toHaveAttribute('aria-expanded', 'true')
- await expect(pharos).toHaveAttribute('aria-expanded', 'true')
+ await expect(aeon.locator('.group-toggle')).toHaveAttribute('aria-expanded', 'true')
+ await expect(pharos.locator('.group-toggle')).toHaveAttribute('aria-expanded', 'true')
 })
 
 test('attention keys select a range, preserve native field shortcuts, skip inapplicable Apply and retain confirmed Undo', async ({ page }) => {
@@ -554,6 +554,7 @@ test('shared attention columns keep long keys whole and Since exposes the exact 
   expect(await key.evaluate(el => { const key = el.getBoundingClientRect(), cell = el.closest('td')!.getBoundingClientRect(); return key.right <= cell.right + 1 })).toBe(true)
   await expect(first(page).locator('time')).toHaveAttribute('data-tip', /2026|Oct|October/)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+  await key.scrollIntoViewIfNeeded()
   await page.screenshot({ path: testInfo.outputPath(`attention-grid-${width}-${theme}-de.png`), fullPage: true })
  }
 })
@@ -587,6 +588,63 @@ test('a phone tap opens the ticket', async ({ page }) => {
  await first(page).locator('.attention-title').click()
  await expect(page).toHaveURL(/\/projects\/AEON\/tickets\/AEON-10/)
  await expect(page.getByRole('toolbar', { name: 'Selected tickets' })).toHaveCount(0)
+})
+
+// R18: a held selection must keep all phone actions reachable, expose the
+// complete key and leave the scroll viewport above the pinned selection bar.
+test('phone selection keeps rows reachable, keys whole and zero-apply controls absent', async ({ page }, testInfo) => {
+ await page.setViewportSize({ width: 390, height: 844 })
+ const data = await setup(page, Array.from({ length: 20 }, (_, index) => row(index, { project_id: 'p-aeon', applicable: false, key: index === 0 ? 'VERY-LONG-PROJECT-KEY-123456789' : `AEON-${index + 10}` })))
+ await page.goto('/tickets?view=needs-attention')
+ await expect(first(page)).toBeVisible()
+ const head = page.locator('#row-group-p-aeon')
+ await expect.soft(head.getByRole('button', { name: 'Apply all in AEON' })).toHaveCount(0)
+ const initial = await controlStability(page, { clickedRow: first(page), key: first(page).locator('.key-btn'), actions: first(page).locator('.action-stack') })
+ await initial.check(async () => { await chooseRows(page, [1]) })
+ initial.done()
+ await table(page).locator('#row-attention-2').getByRole('checkbox').click()
+ const bar = page.getByRole('toolbar', { name: 'Selected tickets' })
+ await expect(bar).toContainText('2 selected')
+ await expect.soft(bar.getByRole('button', { name: /^Apply/ })).toHaveCount(0)
+ const clear = bar.getByRole('button', { name: 'Clear the selection' })
+ // The dock is fixed to the viewport. Its DOM ancestors scroll, so sample its
+ // viewport box directly; the shared guard measures the rows in scroll space.
+ const dock = (await bar.boundingBox())!, clearBox = (await clear.boundingBox())!
+ const guard = await controlStability(page, { clickedRow: first(page), rowActions: first(page).locator('.action-stack') })
+ await guard.check(async () => { await table(page).locator('#row-attention-3').getByRole('checkbox').click(); await expect(bar).toContainText('3 selected') })
+ guard.done()
+ for (const [control, before] of [[bar, dock], [clear, clearBox]] as const) {
+  const after = (await control.boundingBox())!
+  for (const dimension of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(after[dimension] - before[dimension]), `selection ${dimension}`).toBeLessThanOrEqual(.5)
+ }
+ const key = first(page).getByRole('button', { name: 'Copy VERY-LONG-PROJECT-KEY-123456789' })
+ expect(await key.evaluate(el => { const box = el.getBoundingClientRect(), cell = el.closest('td')!.getBoundingClientRect(); return el.scrollWidth <= el.clientWidth + 1 && box.right <= cell.right + 1 })).toBe(true)
+ for (const target of [key, first(page).getByRole('checkbox'), head.locator('.group-toggle'), head.locator('.group-check-target')]) {
+  const box = (await target.boundingBox())!
+  expect(box.width).toBeGreaterThanOrEqual(44)
+  expect(box.height).toBeGreaterThanOrEqual(44)
+ }
+ await table(page).locator('#row-attention-20').scrollIntoViewIfNeeded()
+ const barTop = (await bar.boundingBox())!.y
+ expect.soft(await page.locator('#main').evaluate(el => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(barTop + .5)
+ const last = (await table(page).locator('#row-attention-20').boundingBox())!
+ expect.soft(last.y + last.height).toBeLessThanOrEqual(barTop + .5)
+ await page.screenshot({ path: testInfo.outputPath(`attention-phone-selection.png`), fullPage: true })
+ await clear.click()
+ expect(data.actions).toEqual([])
+ await head.getByRole('button', { name: 'Collapse AEON' }).click()
+ await expect(head.locator('.group-toggle')).toHaveAttribute('aria-expanded', 'false')
+ await groupActions(page, [row(0, { project_id: 'p-aeon' })])
+ await page.goto('/tickets?view=needs-attention')
+ await head.getByRole('button', { name: 'Apply all in AEON' }).click()
+ const preview = page.getByRole('dialog', { name: 'Apply all in AEON' })
+ const cancel = preview.getByRole('button', { name: 'Cancel', exact: true }), moves = preview.getByRole('group', { name: 'Proposed changes', exact: true })
+ const previewGuard = await controlStability(page, { frame: preview, cancel, moves, clickedMove: moves.locator('label') })
+ await previewGuard.check(async () => { await moves.getByRole('checkbox').uncheck() })
+ previewGuard.done()
+ await expect.soft(preview.locator('.run')).toBeHidden()
+ await page.screenshot({ path: testInfo.outputPath(`attention-phone-no-moves.png`), fullPage: true })
+ await cancel.click()
 })
 
 test('a filtered empty queue says nothing matches and keeps Clear filters', async ({ page }) => {

@@ -4186,6 +4186,8 @@
   "taggingNote": "Retained candidates and mixed groups were reviewed under AEON-679 rule B; protected assertions stay in their existing tiers. Deletion counts and archive evidence are in the coordinator deleted.md report."
   ,
   "tests": [
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: Needs attention controls and retained resolutions in light and dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: account menu in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: account menu in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
@@ -8361,6 +8363,8 @@
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"partial results keep toasts above selection controls at 390px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"person switch clears previous facets while the replacement read waits and fails","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"phone selection keeps rows reachable, keys whole and zero-apply controls absent","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"project groups page independently, remember folds per grouping and keep the clicked header still","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
