@@ -438,10 +438,13 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		return fmt.Errorf("merge queue check requests must run CI: %v", events["merge_group"])
 	}
 
+	if mapping(workflow["env"])["CI_MG_REUSE"] != "${{ vars.CI_MG_REUSE }}" {
+		return fmt.Errorf("queue reuse flag must bind full-tier fallback in every execution job")
+	}
 	// These are the active main ruleset's contexts. Renaming or conditionally
 	// skipping them would strand a PR or merge queue waiting for its checks.
 	jobs := mapping(workflow["jobs"])
-	// A push-only proof must fail open to full validation, with read-only authority.
+	// Proof lookup failures must retain full validation, with read-only authority.
 	proof := mapping(jobs["tree-reuse"])
 	if proof == nil || proof["continue-on-error"] != true {
 		return fmt.Errorf("tree-reuse must continue on error so proof failure cannot skip required CI jobs")
@@ -449,11 +452,46 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 	if timeout, ok := proof["timeout-minutes"].(int); !ok || timeout < 5 || timeout > 10 {
 		return fmt.Errorf("tree-reuse needs a bounded 5–10 minute timeout")
 	}
-	if proof["if"] != "github.event_name == 'push' && github.ref == 'refs/heads/main'" || mapping(proof["outputs"])["reuse"] != "${{ steps.proof.outputs.reuse }}" {
-		return fmt.Errorf("tree-reuse must run only on main pushes and expose only its proof step output")
+	if proof["if"] != "github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'merge_group' && vars.CI_MG_REUSE == 'on'" || mapping(proof["outputs"])["reuse"] != "${{ steps.proof.outputs.reuse }}" {
+		return fmt.Errorf("tree-reuse must retain main lookup and opt-in merge-group lookup with proof outputs")
 	}
 	if !reflect.DeepEqual(mapping(proof["permissions"]), map[string]any{"contents": "read", "actions": "read"}) {
 		return fmt.Errorf("tree-reuse needs read-only proof permissions")
+	}
+	proofSteps, _ := proof["steps"].([]any)
+	if len(proofSteps) != 2 || mapping(proofSteps[0])["if"] != "github.event_name != 'merge_group' || github.event.merge_group.base_sha != ''" || mapping(proofSteps[1])["if"] != "github.event_name != 'merge_group' || github.event.merge_group.base_sha != ''" || mapping(mapping(proofSteps[0])["with"])["ref"] != "${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.sha }}" || mapping(mapping(proofSteps[0])["with"])["persist-credentials"] != false || mapping(mapping(proofSteps[1])["env"])["CI_MG_REUSE"] != "${{ vars.CI_MG_REUSE }}" {
+		return fmt.Errorf("merge-group proof must use trusted base code and explicit on flag")
+	}
+	if mapping(jobs["ci-plan"]) == nil {
+		return fmt.Errorf("required CI job %q is missing", "ci-plan")
+	}
+	plan := mapping(jobs["ci-plan"])
+	if mapping(plan["outputs"])["pr_tree_proof"] != "${{ steps.pr-tree.outputs.proof }}" {
+		return fmt.Errorf("PR checkout identity must bind the capture step")
+	}
+	planSteps, _ := plan["steps"].([]any)
+	var capture map[string]any
+	for _, step := range planSteps {
+		if mapping(step)["id"] == "pr-tree" {
+			capture = mapping(step)
+		}
+	}
+	if capture == nil || capture["continue-on-error"] != true || capture["if"] != "github.event_name == 'pull_request' && vars.CI_MG_REUSE == 'on'" {
+		return fmt.Errorf("PR checkout proof must be optional and flag guarded")
+	}
+	measurement := mapping(jobs["tier-measurements"])
+	if measurement["name"] != "${{ github.event_name == 'pull_request' && vars.CI_MG_REUSE == 'on' && needs.ci-plan.outputs.pr_tree_proof != '' && format('tier-measurements / {0}', needs.ci-plan.outputs.pr_tree_proof) || 'tier-measurements' }}" {
+		return fmt.Errorf("PR tree proof must retain merge-group measurement identity")
+	}
+	measurementSteps, _ := measurement["steps"].([]any)
+	var receipt map[string]any
+	for _, step := range measurementSteps {
+		if mapping(step)["name"] == "Confirm PR tree proof" {
+			receipt = mapping(step)
+		}
+	}
+	if receipt == nil || receipt["if"] != "github.event_name == 'pull_request' && vars.CI_MG_REUSE == 'on' && needs.tier-plan.result == 'success' && needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.layout == 'full' && needs.tier-plan.outputs.mode == 'full' && needs.go.result == 'success' && needs.web.result == 'success' && needs.release-check.result == 'success' && needs.e2e.result == 'success' && needs.migration-compat.result == 'success'" || receipt["continue-on-error"] != nil || !hasNeed(measurement["needs"], "tier-plan") {
+		return fmt.Errorf("PR tree proof must be emitted only by the full successful aggregate")
 	}
 	for _, id := range []string{"runner-route", "ci-plan", "migration-compat"} {
 		job := mapping(jobs[id])
@@ -504,6 +542,9 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			return fmt.Errorf("required CI job %q must gate tier planning", id)
 		}
 		condition = "always() && needs.ci-plan.result == 'success' && " + tierGuard + "(" + condition + ") && needs.tree-reuse.outputs.reuse != 'merge_group'"
+		if id != "go-static" && id != "go-timing" {
+			condition += " && needs.tree-reuse.outputs.reuse != 'pull_request'"
+		}
 		switch id {
 		case "go-test":
 			condition += " && needs.runner-route.result == 'success'"
@@ -550,6 +591,42 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		}
 		if name, exists := job["name"]; exists && name != context {
 			return fmt.Errorf("required check %q renamed to %v", context, name)
+		}
+		steps, _ := job["steps"].([]any)
+		stepCount := 4
+		if context == "go" {
+			stepCount++ // Main's gate precedes the PR-only proof sequence.
+		}
+		if len(steps) != stepCount || !reflect.DeepEqual(mapping(job["permissions"]), map[string]any{"contents": "read", "actions": "read"}) {
+			return fmt.Errorf("required check %q must retain read-only PR proof revalidation", context)
+		}
+		proofSteps := steps
+		if context == "go" {
+			mainGate := mapping(steps[0])
+			mainBody, _ := mainGate["run"].(string)
+			mainEnv := mapping(mainGate["env"])
+			if mainGate["name"] != "Require every Go shard and the static checks" || mainGate["if"] != "needs.tree-reuse.outputs.reuse != 'pull_request'" || mainGate["continue-on-error"] != nil ||
+				mainEnv["GO_TEST"] != "${{ needs.go-test.result }}" || mainEnv["GO_STATIC"] != "${{ needs.go-static.result }}" || mainEnv["GO_TIMING"] != "${{ needs.go-timing.result }}" ||
+				!strings.Contains(mainBody, `full) expected=success`) || !strings.Contains(mainBody, `full) shards="$expected"`) || !strings.Contains(mainBody, `test "${GO_TIMING}" = "$shards"`) {
+				return fmt.Errorf("go must retain main's full timing gate outside PR reuse")
+			}
+			proofSteps = steps[1:]
+			if mapping(proofSteps[3])["if"] != "needs.tree-reuse.outputs.reuse == 'pull_request'" || mapping(proofSteps[3])["continue-on-error"] != nil {
+				return fmt.Errorf("go must require confirmed PR proof only for PR reuse")
+			}
+		}
+		for _, step := range proofSteps[:3] {
+			if mapping(step)["if"] != "needs.tree-reuse.outputs.reuse == 'pull_request'" {
+				return fmt.Errorf("required check %q must revalidate every reused PR proof", context)
+			}
+		}
+		if mapping(mapping(proofSteps[0])["with"])["ref"] != "${{ github.event.merge_group.base_sha }}" || mapping(mapping(proofSteps[0])["with"])["persist-credentials"] != false || mapping(proofSteps[2])["run"] != "node scripts/ci-tree-reuse.mjs" || mapping(mapping(proofSteps[2])["env"])["CONFIRM_PR_RUN"] != "${{ needs.tree-reuse.outputs.run }}" || mapping(mapping(proofSteps[2])["env"])["CI_MG_REUSE"] != "${{ vars.CI_MG_REUSE }}" || mapping(proofSteps[2])["continue-on-error"] != nil {
+			return fmt.Errorf("required check %q PR proof revalidation must fail closed from trusted base", context)
+		}
+		gate := mapping(proofSteps[3])
+		body, _ := gate["run"].(string)
+		if mapping(proofSteps[2])["id"] != "pr-confirm" || mapping(gate["env"])["PR_CONFIRM_REUSE"] != "${{ steps.pr-confirm.outputs.reuse }}" || mapping(gate["env"])["PR_CONFIRM_RUN"] != "${{ steps.pr-confirm.outputs.run }}" || !strings.Contains(body, `test "$PR_CONFIRM_REUSE" = pull_request`) || !strings.Contains(body, `test "$PR_CONFIRM_RUN" = "$SOURCE_RUN"`) {
+			return fmt.Errorf("required check %q must bind aggregate acceptance to confirmed PR proof outputs", context)
 		}
 		if context == "go" {
 			if job["if"] != "always()" {

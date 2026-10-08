@@ -4,9 +4,9 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectGo, collectWeb, command, root, web, evidence, saveJSON, saveManifest } from './collect.mjs'
-import { validate, select, shard, key, counts, exactPattern, webGraph, measuredWeights, tierManifestPattern } from './core.mjs'
+import { validate, select, shard, key, counts, exactPattern, webGraph, measuredWeights, tierManifestPattern, knownFlakyOwners } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
-import { goFailures, nodeFailures, vitestFailures, outputTail, printFailures } from './failures.mjs'
+import { goFailures, nodeFailures, vitestFailures, outputTail, printFailures, printFlakeWarnings } from './failures.mjs'
 import { runPlaywright } from '../playwright-safe.mjs'
 import { loadManifest as loadBrowserPolicy, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import { changedPaths, schedulingDecision, eventBase, sourceTree, promotionsBetween } from './diff.mjs'
@@ -95,7 +95,7 @@ function execute(bin,args,path,{cwd=root,env=process.env}={}) {
   writeFileSync(path,result.stdout??'')
   writeFileSync(`${path}.stderr`,result.stderr??'')
   if(result.error) console.error(`${bin}: ${result.error.code}`)
-  return {code:result.status??1,output:result.stdout??'',stderr:result.stderr??''}
+  return {code:result.status??1,output:result.stdout??'',stderr:result.stderr??'',error:result.error?.code,signal:result.signal}
 }
 
 function diagnostics(kind,owner,result,failures,env) {
@@ -104,50 +104,63 @@ function diagnostics(kind,owner,result,failures,env) {
   printFailures(failures.map(failure=>({...failure,output:failure.output||outputTail(result.stderr)})),{summary:env.GITHUB_STEP_SUMMARY})
 }
 
-export async function run(kind,selection,{unit=false,job='local',env=process.env}={}) {
-  const begin=performance.now(),outcomes=[]
-  let code=0
-  const owners=new Map()
-  for(const row of selection.tests.filter(row=>row.active!==false)) {
-    const owner=row.kind==='go'?row.package:row.file
-    if(!owners.has(owner)) owners.set(owner,[])
-    owners.get(owner).push(row)
+// Inject native runners for policy tests; production retains the supervised
+// browser runner and the same bounded native commands/evidence paths.
+export async function run(kind,selection,{unit=false,job='local',env=process.env}={},
+  {execute:executeCases=execute,command:nativeCommand=command,runPlaywright:browserRunner=runPlaywright,
+    loadBrowserPolicy:browserPolicy=loadBrowserPolicy,knownFlaky,saveJSON:save=saveJSON,log=console.log}={}) {
+  const begin=performance.now(),batches=[],ledger=[]
+  const mergeGroup=env.GITHUB_EVENT_NAME==='merge_group'
+  const quarantines=knownFlakyOwners(knownFlaky)
+  for(const row of selection.all) if(row.tier==='ESSENTIAL'&&quarantines.has(key(row)))
+    throw new Error(`Known-flaky case cannot be ESSENTIAL: ${key(row)} (${quarantines.get(key(row))})`)
+  mkdirSync(evidence,{recursive:true})
+
+  const finish=(owner,rows,result,outcomes,failures,reportError=false)=>{
+    const expected=new Set(rows.map(key)),seen=new Set()
+    let runnerFailure=reportError||!!(result.error||result.signal||result.metrics?.signal)||![0,1].includes(result.code)
+    for(const outcome of outcomes) {
+      if(!expected.has(outcome.key)||seen.has(outcome.key)) runnerFailure=true
+      if(outcome.status!=='skipped'&&!outcome.started) runnerFailure=true
+      seen.add(outcome.key)
+    }
+    if(rows.some(row=>!seen.has(key(row)))) runnerFailure=true
+    const failed=outcomes.some(outcome=>outcome.status==='failed')
+    if(result.code===1&&!failed||result.code===0&&failed) runnerFailure=true
+    if(failures.some(failure=>failure.name==='(package)')) runnerFailure=true
+    diagnostics(rows[0].kind,owner,result,failures,env)
+    return {rows,result,outcomes,runnerFailure}
   }
-  for(const [owner,rows] of owners) {
-    const stem=resolve(evidence,`${job}-${owner.replaceAll('/','-')}`)
+  const executeOwner=(owner,rows,stem)=>{
+    let result,outcomes=[],failures=[],reportError=false
     if(kind==='go') {
-      // Native enumeration proves the AST/current-platform inventory is exact.
-      const listed=command('go',['test','-p','2','-list','^(Test|Fuzz)',`./${owner}`],{env:{...env,GOMAXPROCS:'2'}})
-        .split('\n').filter(name=>/^(?:Test|Fuzz)\w+$/.test(name)).sort()
-      const wanted=selection.all.filter(row=>row.package===owner&&row.active).map(row=>row.name).sort()
-      if(JSON.stringify(listed)!==JSON.stringify(wanted)) throw new Error(`Native Go inventory mismatch: ${owner}`)
-      const result=execute('go',['test','-p','2','-count=1','-timeout=25m','-json','-run',exactPattern(rows.map(row=>row.name)),`./${owner}`],`${stem}.jsonl`,{env:{...env,GOMAXPROCS:'2'}})
-      code ||= result.code
-      outcomes.push(...goOutcomes(result.output))
-      diagnostics('go',owner,result,goFailures(result.output),env)
+      result=executeCases('go',['test','-p','2','-count=1','-timeout=25m','-json','-run',exactPattern(rows.map(row=>row.name)),`./${owner}`],`${stem}.jsonl`,{env:{...env,GOMAXPROCS:'2'}})
+      outcomes=goOutcomes(result.output)
+      failures=goFailures(result.output)
     } else if(rows[0].kind==='node') {
-      const result=execute(process.execPath,['--test','--test-concurrency=1',`--test-reporter=${resolve(root,'scripts/test-tiers/node-reporter.mjs')}`,
+      result=executeCases(process.execPath,['--test','--test-concurrency=1',`--test-reporter=${resolve(root,'scripts/test-tiers/node-reporter.mjs')}`,
         '--test-name-pattern',exactPattern(rows.map(row=>row.name)),owner],`${stem}.jsonl`,{cwd:web,env})
-      code ||= result.code
-      diagnostics('node',owner,result,nodeFailures(result.output,owner,result.stderr),env)
+      failures=nodeFailures(result.output,owner,result.stderr)
       const consumed=new Set()
       for(const line of result.output.split('\n').filter(Boolean)) {
         const event=JSON.parse(line)
         if(!['test:pass','test:fail'].includes(event.type))continue
         const row=rows.find(row=>row.name===event.fullName&&!consumed.has(key(row)))
-        if(!row) continue
+        if(!row) {
+          if(event.type==='test:fail'&&!event.skip) reportError=true
+          continue
+        }
         consumed.add(key(row))
         outcomes.push({key:key(row),status:event.skip?'skipped':event.type==='test:pass'?'passed':'failed',started:!event.skip})
       }
     } else if(rows[0].kind==='vitest') {
       const reportPath=`${stem}.json`
       writeFileSync(reportPath,'')
-      const result=execute(process.execPath,['node_modules/vitest/vitest.mjs','run',owner,'--maxWorkers=1','--no-fileParallelism','--retry=0',
+      result=executeCases(process.execPath,['node_modules/vitest/vitest.mjs','run',owner,'--maxWorkers=1','--no-fileParallelism','--retry=0',
         '--testNamePattern',exactPattern(rows.map(row=>row.name)),'--reporter=json',`--outputFile=${reportPath}`],`${stem}.log`,{cwd:web,env})
-      code ||= result.code
-      let failures=[]
       try {
         const report=JSON.parse(readFileSync(reportPath,'utf8'))
+        reportError=!!(report.numRuntimeErrorTestSuites||report.unhandledErrors?.length)
         failures=vitestFailures(report,owner,`${result.output}\n${result.stderr}`)
         const consumed=new Set()
         for(const file of report.testResults) for(const result of file.assertionResults) {
@@ -157,35 +170,109 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
           consumed.add(key(row))
           outcomes.push({key:key(row),status:['pending','skipped','todo','disabled'].includes(result.status)?'skipped':result.status==='passed'?'passed':'failed',started:result.status==='passed'||result.status==='failed'})
         }
-      } catch { code ||= 1 }
-      diagnostics('vitest',owner,result,failures,env)
+      } catch { reportError=true }
     }
+    return finish(owner,rows,result,outcomes,failures,reportError)
+  }
+  const owners=new Map()
+  for(const row of selection.tests.filter(row=>row.active!==false&&row.kind!=='browser')) {
+    const owner=row.kind==='go'?row.package:row.file
+    if(!owners.has(owner)) owners.set(owner,[])
+    owners.get(owner).push(row)
+  }
+  for(const [owner,rows] of owners) {
+    const stem=resolve(evidence,`${job}-${owner.replaceAll('/','-')}`)
+    if(kind==='go') {
+      // Native enumeration proves the AST/current-platform inventory is exact.
+      const listed=nativeCommand('go',['test','-p','2','-list','^(Test|Fuzz)',`./${owner}`],{env:{...env,GOMAXPROCS:'2'}})
+        .split('\n').filter(name=>/^(?:Test|Fuzz)\w+$/.test(name)).sort()
+      const wanted=selection.all.filter(row=>row.package===owner&&row.active).map(row=>row.name).sort()
+      if(JSON.stringify(listed)!==JSON.stringify(wanted)) throw new Error(`Native Go inventory mismatch: ${owner}`)
+    }
+    const batch=executeOwner(owner,rows,stem)
+    batch.retry=failed=>executeOwner(owner,failed,`${stem}-retry`)
+    batches.push(batch)
   }
   if(kind==='web'&&!unit) {
     if(env.RUNNER_ENVIRONMENT!=='github-hosted') throw new Error('Tier browser execution requires hosted CI; collection is safe locally')
     // Original OPS-257 configuration/env owns launches. Only the case list is
     // replaced. Nightly/changed-area cases retain their original launch policy.
-    const policy=loadBrowserPolicy()
+    const policy=browserPolicy()
     for(const group of policy.groups) {
       const files=new Set(group.specs.map(spec=>spec.file))
-      const rows=selection.tests.filter(row=>row.kind==='browser'&&files.has(row.file))
+      const rows=selection.tests.filter(row=>row.kind==='browser'&&row.active!==false&&files.has(row.file))
       if(!rows.length) continue
-      const stem=resolve(evidence,`${job}-${group.id}`),listPath=`${stem}.txt`,reportPath=`${stem}.json`
-      saveJSON(reportPath,{})
-      const descriptions=browserList(rows,selection.all)
-      writeFileSync(listPath,descriptions.join('\n')+'\n')
-      const groupEnv=Object.fromEntries(Object.entries(group.env).map(([k,v])=>[k,v.replaceAll('${RUNNER_TEMP}',env.RUNNER_TEMP??evidence)]))
-      const args=['--config',group.config,...group.flags,...(group.project?['--project',group.project]:[]),'--test-list',listPath,'--workers=1','--retries=0','--forbid-only']
-      const collected=JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test',...args,'--list','--reporter=json'],{cwd:web,env:{...env,...groupEnv}}))
-      const actual=collected.suites.flatMap(function walk(suite) { return [...(suite.specs??[]).flatMap(spec=>(spec.tests??[]).map(test=>`${spec.id}:${test.projectName??''}`)),...(suite.suites??[]).flatMap(walk)] }).sort()
-      if(JSON.stringify(actual)!==JSON.stringify(rows.map(row=>`${row.id}:${row.project}`).sort())) throw new Error(`Browser selection mismatch: ${group.id}`)
-      const result=await runPlaywright([...args,
-        '--reporter=line,json','--output',`test-results/test-tiers/${job}/${group.id}`],{cwd:web,env:{...env,...groupEnv,PW_RETRIES:'0',PLAYWRIGHT_JSON_OUTPUT_FILE:reportPath}})
-      code ||= result.code
-      try { outcomes.push(...browserOutcomes(JSON.parse(readFileSync(reportPath,'utf8')),rows)) } catch(error) { console.error(error.message);code ||= 1 }
-      if([129,130,143].includes(result.code)) break
+      const executeBrowser=async(rows,retry=false)=>{
+        const stem=resolve(evidence,`${job}-${group.id}${retry?'-retry':''}`),listPath=`${stem}.txt`,reportPath=`${stem}.json`
+        saveJSON(reportPath,{})
+        // A retry always identifies individual cases, even if all cases in a
+        // spec failed. Native collection checks line/title/project identity.
+        const descriptions=retry?rows.map(row=>`[${row.project}] › ${row.file.replace(/^tests\//,'')}:${row.line} › ${row.name}`):browserList(rows,selection.all)
+        writeFileSync(listPath,descriptions.join('\n')+'\n')
+        const groupEnv=Object.fromEntries(Object.entries(group.env).map(([k,v])=>[k,v.replaceAll('${RUNNER_TEMP}',env.RUNNER_TEMP??evidence)]))
+        const browserEnv={...env,...groupEnv,PW_RETRIES:'0'}
+        const args=['--config',group.config,...group.flags,...(group.project?['--project',group.project]:[]),'--test-list',listPath,'--workers=1','--retries=0','--forbid-only']
+        const collected=JSON.parse(nativeCommand(process.execPath,['node_modules/@playwright/test/cli.js','test',...args,'--list','--reporter=json'],{cwd:web,env:browserEnv}))
+        if(collected.errors?.length) throw new Error(`Browser collection failed: ${group.id}`)
+        const actual=collected.suites.flatMap(function walk(suite) { return [...(suite.specs??[]).flatMap(spec=>(spec.tests??[]).map(test=>`${spec.id}:${test.projectName??''}`)),...(suite.suites??[]).flatMap(walk)] }).sort()
+        if(JSON.stringify(actual)!==JSON.stringify(rows.map(row=>`${row.id}:${row.project}`).sort())) throw new Error(`Browser selection mismatch: ${group.id}`)
+        const result=await browserRunner([...args,
+          '--reporter=line,json','--output',`test-results/test-tiers/${job}/${group.id}${retry?'-retry':''}`],{cwd:web,env:{...browserEnv,PLAYWRIGHT_JSON_OUTPUT_FILE:reportPath}})
+        let outcomes=[],reportError=false
+        try {
+          const report=JSON.parse(readFileSync(reportPath,'utf8'))
+          reportError=!!report.errors?.length
+          outcomes=browserOutcomes(report,rows)
+        } catch(error) { console.error(JSON.stringify(error.message));reportError=true }
+        const failures=outcomes.filter(outcome=>outcome.status==='failed').map(outcome=>{
+          const row=rows.find(row=>key(row)===outcome.key)
+          return {kind:'browser',owner:row.file,name:row.name,output:'See supervised Playwright output and JSON evidence.'}
+        })
+        return finish(group.id,rows,{output:'',stderr:'',...result},outcomes,failures,reportError)
+      }
+      const batch=await executeBrowser(rows)
+      batch.retry=failed=>executeBrowser(failed,true)
+      batches.push(batch)
+      if([129,130,143].includes(batch.result.code)) break
     }
   }
+
+  // Count first-pass failures across the whole job, before any retry. Subtests
+  // belong to their top-level Go case; quarantine does not shrink the cap.
+  const failedCount=batches.reduce((sum,batch)=>sum+batch.outcomes.filter(outcome=>outcome.status==='failed').length,0)
+  let retryAllowed=mergeGroup&&failedCount>0&&failedCount<=3&&!batches.some(batch=>batch.result.signal||batch.result.metrics?.signal||[129,130,143].includes(batch.result.code))
+  const outcomes=[]
+  let code=0
+  for(const batch of batches) {
+    const final=new Map(batch.outcomes.map(outcome=>[outcome.key,outcome]))
+    const failed=batch.rows.filter(row=>final.get(key(row))?.status==='failed')
+    let retry
+    if(retryAllowed&&failed.length&&!batch.runnerFailure) {
+      retry=await batch.retry(failed)
+      if(retry.result.signal||retry.result.metrics?.signal||[129,130,143].includes(retry.result.code)) retryAllowed=false
+      for(const outcome of retry.outcomes) {
+        // Only a completed, clean retry that passed proves a flake. A skipped
+        // or absent retry never converts the original failure into success.
+        if(!retry.runnerFailure&&outcome.status==='passed') {
+          final.set(outcome.key,{...outcome,flaky:true})
+          ledger.push({key:outcome.key,status:'flaky',runId:env.GITHUB_RUN_ID,sha:env.GITHUB_SHA,
+            attempt:env.GITHUB_RUN_ATTEMPT,testAttempt:2})
+        }
+      }
+    }
+    if(batch.runnerFailure||retry?.runnerFailure) code ||= batch.result.code||retry?.result.code||1
+    for(const row of failed) {
+      const id=key(row),outcome=final.get(id)
+      if(mergeGroup&&outcome.status==='failed'&&quarantines.has(id)) {
+        final.set(id,{...outcome,status:'quarantined'})
+        ledger.push({key:id,status:'quarantined',owner:quarantines.get(id),runId:env.GITHUB_RUN_ID,
+          sha:env.GITHUB_SHA,attempt:env.GITHUB_RUN_ATTEMPT,testAttempt:retry?2:1})
+      }
+    }
+    if(!mergeGroup) code ||= batch.result.code
+    outcomes.push(...final.values())
+  }
+  printFlakeWarnings(ledger,{log})
   const report=reportCases(selection.tests,outcomes,(performance.now()-begin)/1000,job)
   report.runId=env.GITHUB_RUN_ID
   report.attempt=env.GITHUB_RUN_ATTEMPT
@@ -194,10 +281,11 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   report.reason=selection.reason
   report.scope=selection.scope??'changed-area'
   report.deferredBrowserCases=selection.deferredBrowserCases??0
+  report.flakeLedger=ledger
   report.exitCode=code
   if(Object.values(report.classes).some(c=>c.notRun||c.failed)) report.exitCode ||= 1
-  saveJSON(resolve(evidence,`${job}-measurement.json`),report)
-  console.log(JSON.stringify(report))
+  save(resolve(evidence,`${job}-measurement.json`),report)
+  log(JSON.stringify(report))
   if(env.GITHUB_STEP_SUMMARY) writeFileSync(env.GITHUB_STEP_SUMMARY,`\nTest tier measurement (${job}):\n\n\`\`\`json\n${JSON.stringify(report,null,2)}\n\`\`\`\n`,{flag:'a'})
   return report.exitCode
 }

@@ -31,6 +31,7 @@ function settle(event: TransitionEvent) {
       <h2 v-if="slots.title" class="fs-heading"><button type="button" class="fs-title" :aria-expanded="open" :aria-controls="`${id}-body`" @click="toggle"><slot name="title" /></button></h2>
       <slot name="head" />
     </div>
+    <slot name="feedback" />
     <div :id="`${id}-body`" class="fs-body" :inert="!open || undefined" @transitionend="settle" @transitioncancel="settle">
       <div class="fs-inner"><slot /></div>
     </div>

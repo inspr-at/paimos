@@ -14,7 +14,7 @@ export function deferred<T = void>() {
 export async function flush() { for (let i = 0; i < 12; i++) await Promise.resolve(); await Vue.nextTick() }
 // Imports are replaced at the boundary; every tested action/watcher is from the
 // source file, not a second implementation. No sleeps or elapsed-time assertions.
-function sourceText(path: string) {
+export function sourceText(path: string) {
   const baseline = process.env.AEON_RECORD_BASELINE
   return baseline ? execFileSync('git', ['show', `${baseline === '1' ? 'HEAD' : baseline}:web/src/${path}`], { encoding: 'utf8', cwd: new URL('../../', import.meta.url) }) : readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
 }

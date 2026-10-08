@@ -18,6 +18,7 @@ import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs
 import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import './manifests.test.mjs'
 import './tiers-merge-driver.test.mjs'
+import '../merge-drivers/merge-drivers.test.mjs'
 
 const g=(pkg,name,tier='NIGHTLY')=>({kind:'go',package:pkg,name,tier,active:true})
 const w=(file,name,tier='NIGHTLY')=>({kind:'node',file,name,tier})
@@ -684,8 +685,10 @@ test('offline replay CLI prints every real PR with selected counts, effective la
   assert.equal(report.replay.length,80)
   // Measured on the current tree (consumers, migrations); deleted files replay as full.
   // The merge keeps PR 200 and PR 245 over the 1000-case Go consumer bound (openapi fan-out).
-  assert.deepEqual(report.transitions,{'full->full':50,'full->essential':16,'essential->essential':14})
-  assert.equal(report.summary.newNarrowed,30)
+  // AEON-879 retires the dialog files: historical PR 208 now safely widens
+  // because those deleted paths have no dependency metadata in this tree.
+  assert.deepEqual(report.transitions,{'full->full':51,'full->essential':15,'essential->essential':14})
+  assert.equal(report.summary.newNarrowed,29)
   assert.equal(report.summary.oldEssential,14)
   assert.ok(report.summary.fullReasons['CI machinery']>=15)
   for(const row of report.replay) {
@@ -1223,14 +1226,17 @@ test('AEON-732 measurement CLI fixtures expose upstream skips in JSON, summary a
     {lane:'full',status:1,coverage:'incomplete',reason:'skipped after upstream failure'},
     {lane:'docs-only',planned:true,status:0,coverage:'reported'},
     {lane:'full',planned:true,reuse:'merge_group',status:0,coverage:'reused'},
+    {lane:'full',planned:true,reuse:'pull_request',status:0,coverage:'reused'},
     {lane:'spec-only',planned:true,status:0,coverage:'untiered'},
     {lane:'spec-only',status:1,coverage:'incomplete',reason:'upstream jobs did not succeed'},
   ]) {
-    const fixtureJobs=jobs.map(job=>fixture.planned&&(job.name==='tier-plan'||fixture.lane==='spec-only'&&job.name.startsWith('web-'))
+    const fixtureEvidence=mkdtempSync(resolve(root,'case-evidence-'))
+    if(fixture.reuse==='pull_request')writeFileSync(resolve(fixtureEvidence,'go-timing-measurement.json'),JSON.stringify({version:1,job:'go-timing',classes:{},runId:'123',attempt:'2',sha:'a'.repeat(40)}))
+    const fixtureJobs=jobs.map(job=>fixture.reuse==='pull_request'&&job.name==='go-timing'?{...job,...finished,conclusion:'success'}:fixture.planned&&(job.name==='tier-plan'||fixture.lane==='spec-only'&&job.name.startsWith('web-'))
       ? {...job,...finished,conclusion:'success'}:job)
     writeFileSync(resolve(root,'gh'),`#!${process.execPath}\nif (process.argv[2] !== 'api' || process.argv[3] !== 'repos/example/aeon/actions/runs/123/attempts/2/jobs?per_page=100&page=1') process.exit(2)\nprocess.stdout.write(${JSON.stringify(JSON.stringify({total_count:fixtureJobs.length,jobs:fixtureJobs}))})\n`,{mode:0o755})
     writeFileSync(summary,'')
-    const result=spawnSync(process.execPath,[fileURLToPath(new URL('./measure.mjs',import.meta.url)),evidence],{
+    const result=spawnSync(process.execPath,[fileURLToPath(new URL('./measure.mjs',import.meta.url)),fixtureEvidence],{
       cwd:root,encoding:'utf8',timeout:10_000,
       env:{PATH:root,GITHUB_REPOSITORY:'example/aeon',GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:'a'.repeat(40),
         GITHUB_STEP_SUMMARY:summary,CI_LANE:fixture.lane,REUSE:fixture.reuse??'',SOURCE_RUN:fixture.reuse?'456':''},
@@ -1584,6 +1590,45 @@ test('three-tier full proof rejects incomplete gated results and old two-tier ev
   for(const counts of [{...gated,notRun:1},{...gated,failed:1}])assert.throws(()=>checkFull({...report,classes:{...report.classes,'GATED-FULL':counts}},env),/Full execution/)
 })
 
+
+test('MG reuse lookup misses retain main full scheduling and case selection',()=>{
+  const exists=()=>true
+  for(const paths of [[],['internal/nodes/module.go'],undefined]) {
+    for(const mgReuse of [undefined,'off','ON','true','on']) {
+      assert.equal(schedulingMode('merge_group',paths,exists,{mgReuse}),'full')
+      const selected=runnerSelection([g('internal/nodes','TestEssential','ESSENTIAL'),g('internal/nodes','TestFull','GATED-FULL')],
+        {event:'merge_group',paths},schedulingDecision('merge_group',paths,exists),{mode:'essential',layout:'static'})
+      assert.equal(selected.full,true)
+      assert.equal(selected.tests.length,2)
+    }
+  }
+  assert.equal(schedulingMode('pull_request',['internal/nodes/module.go'],exists),'essential')
+  const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
+  assert.match(ci,/^  CI_MG_REUSE: \$\{\{ vars.CI_MG_REUSE \}\}$/m)
+  assert.match(ci,/^  CI_AFFECTED_LANE: \$\{\{ vars.CI_AFFECTED_LANE \}\}$/m)
+})
+
+
+test('MG measurements count only fresh timing guards beside reused PR evidence',()=>{
+  const selected=[g('internal/budget','TestClock','GATED-FULL')]
+  const timing={...reportCases(selected,[{key:key(selected[0]),status:'passed',started:true}],1,'go-timing'),runId:'2',attempt:'1',sha:'a'}
+  const jobs=[{name:'go-timing',status:'completed',conclusion:'success',started_at:'2026-10-05T10:00:00Z',completed_at:'2026-10-05T10:01:00Z'},
+    {name:'go-test (1)',status:'completed',conclusion:'skipped'}]
+  const options={runId:'2',attempt:'1',sha:'a',reusedFrom:'123',freshTiming:true}
+  const report=aggregate([timing],jobs,options)
+  assert.equal(report.coverage,'reused')
+  assert.equal(report.classes['GATED-FULL'].passed,1)
+  assert.equal(report.reusedFrom,'123')
+  assert.match(report.caseScope,/Only freshly executed timing guard cases/)
+  assert.throws(()=>aggregate([{...timing,job:'go-test-1'}],jobs,options),/must not report fresh test passes/)
+  assert.throws(()=>aggregate([timing],jobs,{...options,freshTiming:false}),/must not report fresh test passes/)
+  for(const reports of [[],[{...timing,attempt:'2'}]]) {
+    const missing=aggregate(reports,jobs,options)
+    assert.equal(missing.coverage,'incomplete')
+    assert.deepEqual(missing.missingEvidence,['go-timing'])
+  }
+})
+
 test('web collection is reused within a process only while the stamped tree is unchanged', () => {
   const base = mkdtempSync(resolve(tmpdir(), 'aeon-724-stamp-'))
   mkdirSync(resolve(base, 'src/deep'), { recursive: true }); mkdirSync(resolve(base, 'tests'))
@@ -1717,4 +1762,256 @@ test('AEON-642 theme editor state model registrations are exactly the cases the 
   const ids = new Set(declared.map(key))
   const extraPostGate = manifest.postGateCases.filter(id => id.includes(prefix) && !ids.has(id))
   assert.deepEqual(extraPostGate, [])
+})
+
+// R13 release integrity: retry/quarantine must never turn a real regression,
+// missing execution or runner failure into successful merge-queue evidence.
+test('AEON-980 merge-group Go retry and quarantine preserve the blocking gate and exact evidence',async t=>{
+  const {run}=await import('./cli.mjs')
+  const rows=[g('internal/auth','TestFailed','GATED-FULL'),g('internal/auth','TestPassed','GATED-FULL'),
+    g('internal/nodes','TestOther','GATED-FULL'),g('internal/nodes','TestSibling','GATED-FULL')]
+  const identity={GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:'a'.repeat(40)}
+  const selection={tests:rows,all:rows,full:true,scope:'gated-full',reason:'fixture'}
+  const simulate=async({event='merge_group',failed=[rows[0],rows[2]],again=[],skipped=[],known=noFlaky,
+    resultCode,error,missing=[],retryError=false,tests=rows}={})=>{
+    const calls=[],logs=[],attempts=new Map()
+    let report
+    const selected={...selection,tests,all:tests}
+    const env={...identity,...(event===null?{}:{GITHUB_EVENT_NAME:event})}
+    const code=await run('go',selected,{env,job:'aeon980-go-fixture'}, {
+      knownFlaky:known,saveJSON:(_path,value)=>{report=value},log:line=>logs.push(line),
+      command:(_bin,args)=>tests.filter(row=>`./${row.package}`===args.at(-1)).map(row=>row.name).join('\n'),
+      execute:(_bin,args,path)=>{
+        const owner=args.at(-1).slice(2),pattern=new RegExp(args[args.indexOf('-run')+1])
+        const chosen=tests.filter(row=>row.package===owner&&pattern.test(row.name))
+        calls.push({owner,keys:chosen.map(key),args,path})
+        const attempt=(attempts.get(owner)??0)+1
+        attempts.set(owner,attempt)
+        const output=[]
+        let failedAny=false
+        for(const row of chosen) {
+          if(missing.some(candidate=>key(candidate)===key(row))) continue
+          const status=attempt===1
+            ? failed.some(candidate=>key(candidate)===key(row))?'fail':'pass'
+            : again.some(candidate=>key(candidate)===key(row))?'fail':skipped.some(candidate=>key(candidate)===key(row))?'skip':'pass'
+          const Package=`github.com/inspr-at/paimos/${owner}`
+          output.push({Package,Test:row.name,Action:'run'})
+          if(status==='fail') {
+            failedAny=true
+            // Nested failures count as the one registered top-level case.
+            output.push({Package,Test:`${row.name}/nested`,Action:'fail'})
+          }
+          output.push({Package,Test:row.name,Action:status})
+        }
+        output.push({Package:`github.com/inspr-at/paimos/${owner}`,Action:failedAny?'fail':'pass'})
+        return {code:attempt===1?resultCode??(failedAny?1:0):retryError?2:failedAny?1:0,
+          output:output.map(JSON.stringify).join('\n'),stderr:'',error:attempt===1?error:undefined}
+      },
+    })
+    return {code,report,calls,logs,env}
+  }
+  await t.test('only merge_group retries only failed top-level cases once and records warnings',async()=>{
+    const {code,report,calls,logs,env}=await simulate()
+    assert.equal(code,0)
+    assert.deepEqual(calls.map(call=>call.keys),[[key(rows[0]),key(rows[1])],[key(rows[2]),key(rows[3])],[key(rows[0])],[key(rows[2])]])
+    for(const call of calls.slice(2)) {
+      assert.ok(call.args.includes('-count=1'))
+      assert.match(call.path,/-retry\.jsonl$/)
+    }
+    assert.deepEqual(report.flakeLedger,[rows[0],rows[2]].map(row=>({key:key(row),status:'flaky',runId:'123',sha:identity.GITHUB_SHA,attempt:'2',testAttempt:2})))
+    assert.equal(report.classes['GATED-FULL'].passed,4)
+    assert.equal(report.classes['GATED-FULL'].flaky,2)
+    assert.equal(report.classes['GATED-FULL'].failed,0)
+    assert.equal(logs.filter(line=>line.startsWith('::warning title=Test tier flake::')).length,2)
+    assert.ok(logs.some(line=>line.startsWith('::warning')&&line.includes(key(rows[0]))))
+    assert.equal(checkFull(report,env),true)
+    const measured=aggregate([report],[],{runId:'123',attempt:'2',sha:identity.GITHUB_SHA})
+    assert.deepEqual(measured.flakeCounts,{[key(rows[0])]:1,[key(rows[2])]:1})
+    assert.equal(measured.flakeLedger[0].job,'aeon980-go-fixture')
+    assert.equal(measured.classes['GATED-FULL'].flaky,2)
+    const repeated=aggregate([report,{...report,job:"another-shard"}],[])
+    assert.deepEqual(repeated.flakeCounts,{[key(rows[0])]:2,[key(rows[2])]:2})
+    const stale=aggregate([report],[],{runId:'123',attempt:'3',sha:identity.GITHUB_SHA})
+    assert.deepEqual(stale.flakeLedger,[])
+    assert.deepEqual(stale.flakeCounts,{})
+  })
+  await t.test('PR, push, schedule, manual and absent event retain the original failure',async()=>{
+    for(const event of ['pull_request','push','schedule','workflow_dispatch',null]) {
+      const {code,report,calls}=await simulate({event,known:{version:1,entries:[{key:key(rows[0]),owner:'AEON-675'}]}})
+      assert.equal(code,1,event)
+      assert.equal(calls.length,2,event)
+      assert.equal(report.classes['GATED-FULL'].failed,2,event)
+      assert.equal(report.classes['GATED-FULL'].quarantined,0,event)
+      assert.deepEqual(report.flakeLedger,[],event)
+    }
+  })
+  await t.test('three failures retry; four across packages exceed the job-wide cap',async()=>{
+    const capped=await simulate({failed:rows})
+    assert.equal(capped.code,1)
+    assert.equal(capped.calls.length,2)
+    assert.deepEqual(capped.report.flakeLedger,[])
+    const boundary=await simulate({failed:rows.slice(0,3)})
+    assert.equal(boundary.code,0)
+    assert.equal(boundary.calls.length,4)
+    assert.equal(boundary.report.flakeLedger.length,3)
+    const known={version:1,entries:rows.map(row=>({key:key(row),owner:'AEON-675'}))}
+    const quarantine=await simulate({failed:rows,known})
+    assert.equal(quarantine.code,0)
+    assert.equal(quarantine.calls.length,2,'quarantine cannot shrink the cap')
+    assert.equal(quarantine.report.classes['GATED-FULL'].passed,0)
+    assert.equal(quarantine.report.classes['GATED-FULL'].quarantined,4)
+    assert.ok(quarantine.report.flakeLedger.every(entry=>entry.testAttempt===1))
+  })
+  await t.test('second failure stays red; skips, missing execution and runner errors cannot prove a flake',async()=>{
+    const repeated=await simulate({again:[rows[0]]})
+    assert.equal(repeated.code,1)
+    assert.equal(repeated.calls.length,4)
+    assert.equal(repeated.report.classes['GATED-FULL'].failed,1)
+    assert.deepEqual(repeated.report.flakeLedger.map(entry=>entry.key),[key(rows[2])])
+    const skip=await simulate({skipped:[rows[0]]})
+    assert.equal(skip.code,1)
+    assert.equal(skip.report.classes['GATED-FULL'].failed,1)
+    for(const options of [{resultCode:2},{error:'ETIMEDOUT'},{missing:[rows[1]]},{retryError:true}]) {
+      const {code,report}=await simulate(options)
+      assert.notEqual(code,0,JSON.stringify(options))
+      assert.ok(!report.flakeLedger.some(entry=>entry.key===key(rows[0])),JSON.stringify(options))
+    }
+    const emptyFailure=await simulate({failed:[],resultCode:1})
+    assert.equal(emptyFailure.code,1)
+    assert.equal(emptyFailure.calls.length,2)
+  })
+  await t.test('quarantine runs and reports its owner; ESSENTIAL and malformed ownership are refused',async()=>{
+    const known={version:1,entries:[{key:key(rows[0]),owner:'AEON-675'}]}
+    const {code,report,calls,logs,env}=await simulate({failed:[rows[0]],again:[rows[0]],known})
+    assert.equal(code,0)
+    assert.equal(calls.length,3)
+    assert.equal(report.classes['GATED-FULL'].passed,3)
+    assert.equal(report.classes['GATED-FULL'].failed,0)
+    assert.equal(report.classes['GATED-FULL'].quarantined,1)
+    assert.deepEqual(report.flakeLedger,[{key:key(rows[0]),status:'quarantined',owner:'AEON-675',runId:'123',sha:identity.GITHUB_SHA,attempt:'2',testAttempt:2}])
+    assert.ok(logs.some(line=>line.startsWith('::warning')&&line.includes(key(rows[0]))&&line.includes('AEON-675')))
+    assert.equal(checkFull(report,env),true)
+    assert.equal(aggregate([report],[]).classes['GATED-FULL'].quarantined,1)
+    assert.notEqual((await simulate({failed:[rows[0]],known,resultCode:2})).code,0,'quarantine does not forgive runner errors')
+    await assert.rejects(simulate({known:{version:1,entries:[{key:key(rows[0])}]}}),/owner ticket/)
+    await assert.rejects(simulate({known,tests:[{...rows[0],tier:'ESSENTIAL'}]}),/Known-flaky case cannot be ESSENTIAL/)
+  })
+})
+
+test('AEON-980 web retry uses exact browser registrations and native unit patterns without weakening supervision',async t=>{
+  const {run}=await import('./cli.mjs')
+  const identity={GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:'a'.repeat(40)}
+  const rows=[11,12,21,22].map((line,index)=>({kind:'browser',file:`tests/${index<2?'a':'b'}.spec.ts`,
+    name:index===0?'failed %\n::error::title':`case ${index}`,tier:'GATED-FULL',id:`id-${index}`,project:'chromium',line,active:true}))
+  const policy={groups:['a','b'].map(id=>({id,config:'playwright.ui.config.ts',project:'chromium',flags:[],env:{FIXTURE_ROOT:'${RUNNER_TEMP}/fixture'},specs:[{file:`tests/${id}.spec.ts`}]}))}
+  const simulate=async({event='merge_group',failed=[rows[0],rows[2]],again=[],known=noFlaky,reportErrors=false,automaticRetries=false,missing=false,collectionMismatch=false,interrupted=false,retryInterrupted=false}={})=>{
+    const calls=[],collections=[],attempts=new Map(),logs=[]
+    let report
+    // Match native --test-list descriptors including embedded title newlines;
+    // never split titles or match a sibling just because it shares a spec.
+    const chosen=args=>{
+      const list=readFileSync(args[args.indexOf('--test-list')+1],'utf8')
+      return rows.filter(row=>list.includes(`[${row.project}] › ${row.file.slice(6)}\n`)||
+        list.includes(`[${row.project}] › ${row.file.slice(6)}:${row.line} › ${row.name}\n`))
+    }
+    const nativeReport=(selected,status='passed')=>({errors:reportErrors?[{message:'global setup failed'}]:[],suites:[{specs:selected.map(row=>({id:row.id,title:row.name,
+      tests:[{projectName:row.project,results:missing?[]:automaticRetries?[{status:'failed'},{status:'passed'}]:[{status:interrupted?'interrupted':typeof status==='function'?status(row):status}]}]}))}]})
+    const code=await run('web',{tests:rows,all:rows,full:true,scope:'gated-full',reason:'fixture'},
+      {env:{...identity,GITHUB_EVENT_NAME:event,RUNNER_ENVIRONMENT:'github-hosted'},job:'aeon980-browser-fixture'}, {
+        knownFlaky:known,loadBrowserPolicy:()=>policy,saveJSON:(_path,value)=>{report=value},log:line=>logs.push(line),
+        command:(_bin,args,{env})=>{
+          const selected=chosen(args)
+          collections.push(selected.map(key))
+          assert.equal(env.PW_RETRIES,'0')
+          const report=nativeReport(selected)
+          report.errors=[] // Runtime errors do not alter safe collection.
+          if(collectionMismatch&&collections.length>2)report.suites[0].specs=[]
+          return JSON.stringify(report)
+        },
+        runPlaywright:async(args,{env})=>{
+          const selected=chosen(args),group=selected[0].file
+          const attempt=(attempts.get(group)??0)+1
+          attempts.set(group,attempt)
+          const failures=attempt===1?failed:again
+          calls.push({keys:selected.map(key),args,env,list:readFileSync(args[args.indexOf('--test-list')+1],'utf8')})
+          assert.equal(env.PW_RETRIES,'0')
+          assert.ok(args.includes('--workers=1'))
+          assert.ok(args.includes('--retries=0'))
+          assert.ok(args.includes('--forbid-only'))
+          assert.equal(env.FIXTURE_ROOT.endsWith('/fixture'),true)
+          writeFileSync(env.PLAYWRIGHT_JSON_OUTPUT_FILE,JSON.stringify(nativeReport(selected,row=>failures.some(candidate=>key(candidate)===key(row))?'failed':'passed')))
+          return {code:retryInterrupted&&attempt===2?130:selected.some(row=>failures.some(candidate=>key(candidate)===key(row)))?1:0}
+        },
+      })
+    return {code,report,calls,collections,logs}
+  }
+  await t.test('browser retry selects spec:line/title/project cases and escapes Actions commands in titles',async()=>{
+    const {code,report,calls,collections,logs}=await simulate()
+    assert.equal(code,0)
+    assert.deepEqual(calls.map(call=>call.keys),[[key(rows[0]),key(rows[1])],[key(rows[2]),key(rows[3])],[key(rows[0])],[key(rows[2])]])
+    assert.deepEqual(collections,calls.map(call=>call.keys),'every initial/retry selection is verified natively')
+    assert.ok(calls[2].list.includes('a.spec.ts:11'))
+    assert.ok(calls[2].args.at(-1).endsWith('/a-retry'),'retry artifacts cannot overwrite the first attempt')
+    assert.deepEqual(report.flakeLedger.map(entry=>entry.key),[key(rows[0]),key(rows[2])])
+    const warnings=logs.filter(line=>line.startsWith('::warning'))
+    assert.equal(warnings.length,2)
+    assert.ok(warnings[0].includes('%25%0A::error::title'))
+    assert.ok(warnings.every(line=>!line.includes('\n')))
+  })
+  await t.test('browser retry respects other events, the cap, repeat failures and quarantine ownership',async()=>{
+    for(const event of ['pull_request','push','schedule','workflow_dispatch']) {
+      const result=await simulate({event})
+      assert.equal(result.code,1)
+      assert.equal(result.calls.length,2)
+      assert.deepEqual(result.report.flakeLedger,[])
+    }
+    const capped=await simulate({failed:rows})
+    assert.equal(capped.code,1)
+    assert.equal(capped.calls.length,2)
+    const repeated=await simulate({again:[rows[0]]})
+    assert.equal(repeated.code,1)
+    assert.equal(repeated.report.classes['GATED-FULL'].failed,1)
+    const known={version:1,entries:[{key:key(rows[0]),owner:'AEON-676'}]}
+    const quarantined=await simulate({failed:[rows[0]],again:[rows[0]],known})
+    assert.equal(quarantined.code,0)
+    assert.equal(quarantined.report.classes['GATED-FULL'].quarantined,1)
+    assert.equal(quarantined.report.flakeLedger[0].owner,'AEON-676')
+    assert.ok(quarantined.logs.some(line=>line.startsWith('::warning')&&line.includes('AEON-676')))
+    for(const options of [{reportErrors:true,known},{automaticRetries:true},{missing:true},{interrupted:true,known}]) {
+      const result=await simulate(options)
+      assert.notEqual(result.code,0)
+      assert.equal(result.calls.length,2,'invalid first-pass evidence cannot trigger retries')
+      assert.ok(!result.report.flakeLedger.some(entry=>entry.status==='flaky'))
+    }
+    const cancelled=await simulate({retryInterrupted:true})
+    assert.notEqual(cancelled.code,0)
+    assert.equal(cancelled.calls.length,3,'an interrupted retry must stop later retries')
+    assert.deepEqual(cancelled.report.flakeLedger,[])
+    await assert.rejects(simulate({collectionMismatch:true}),/Browser selection mismatch/)
+  })
+  await t.test('Node and Vitest units retry only the failed native name in merge_group',async()=>{
+    for(const kind of ['node','vitest']) for(const event of ['merge_group','pull_request']) {
+      const file=kind==='node'?'tests/fixture.test.ts':'tests/fixture.unit.test.ts'
+      const unitRows=['failed (case)','passed sibling'].map(name=>({kind,file,name,tier:'GATED-FULL',active:true}))
+      const calls=[]
+      let report
+      const code=await run('web',{tests:unitRows,all:unitRows,full:true,scope:'gated-full'},
+        {unit:true,job:`aeon980-${kind}-fixture`,env:{...identity,GITHUB_EVENT_NAME:event}}, {
+          knownFlaky:noFlaky,saveJSON:(_path,value)=>{report=value},log:()=>{},
+          execute:(_bin,args)=>{
+            const flag=kind==='node'?'--test-name-pattern':'--testNamePattern'
+            const selected=unitRows.filter(row=>new RegExp(args[args.indexOf(flag)+1]).test(row.name))
+            const first=calls.length===0
+            calls.push(selected.map(key))
+            const results=selected.map(row=>({row,status:first&&row===unitRows[0]?'failed':'passed'}))
+            if(kind==='vitest') writeFileSync(args.find(arg=>arg.startsWith('--outputFile=')).slice('--outputFile='.length),
+              JSON.stringify({testResults:[{assertionResults:results.map(({row,status})=>({title:row.name,ancestorTitles:[],status,failureMessages:[]}))}]}))
+            return {code:first?1:0,stderr:'',output:kind==='vitest'?'':results.map(({row,status})=>JSON.stringify({type:status==='failed'?'test:fail':'test:pass',fullName:row.name})).join('\n')}
+          },
+        })
+      assert.equal(code,event==='merge_group'?0:1,`${kind} ${event}`)
+      assert.deepEqual(calls,event==='merge_group'?[[key(unitRows[0]),key(unitRows[1])],[key(unitRows[0])]]:[[key(unitRows[0]),key(unitRows[1])]])
+      assert.equal(report.flakeLedger.length,event==='merge_group'?1:0)
+    }
+  })
 })

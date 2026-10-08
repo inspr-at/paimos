@@ -1,15 +1,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import type { SessionTab } from './sessionChat'
+import { computed } from 'vue'
+import { useProfile } from '../../stores/profile'
+import { chatWords, type SessionTab } from './sessionChat'
 
 // Overview and Messages for one session; Messages carries the unread count.
 const props = defineProps<{ selected: SessionTab; unread: number }>()
 const emit = defineEmits<{ select: [tab: SessionTab] }>()
-const tabs: { id: SessionTab; label: string }[] = [{ id: 'overview', label: 'Overview' }, { id: 'messages', label: 'Messages' }]
+const profile = useProfile()
+const words = computed(() => chatWords[profile.profile?.locale.startsWith('de') ? 'de' : 'en'])
+const tabs = computed<{ id: SessionTab; label: string }[]>(() => [{ id: 'overview', label: words.value.overview }, { id: 'messages', label: words.value.chat }])
 function move(event: KeyboardEvent) {
   if (event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
   event.preventDefault()
-  const next = event.key === 'Home' ? tabs[0]! : event.key === 'End' ? tabs[tabs.length - 1]! : tabs.find(t => t.id !== props.selected)!
+  const next = event.key === 'Home' ? tabs.value[0]! : event.key === 'End' ? tabs.value[tabs.value.length - 1]! : tabs.value.find(t => t.id !== props.selected)!
   emit('select', next.id)
   ;(event.currentTarget as HTMLElement).querySelector<HTMLElement>(`#session-tab-${next.id}`)?.focus()
 }

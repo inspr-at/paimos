@@ -384,6 +384,21 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		add("renamed-check-context/"+id, "ci.yml", "renamed to", func(w map[string]any) { mapping(mapping(w["jobs"])[id])["name"] = "other" })
 	}
 	add("missing-go-dependency", "ci.yml", "effective lane publisher", func(w map[string]any) { mapping(mapping(w["jobs"])["go"])["needs"] = []any{"go-test", "go-timing"} })
+	for _, condition := range []any{nil, false, "always()", "needs.tree-reuse.outputs.reuse != 'merge_group'"} {
+		add(fmt.Sprintf("go-main-gate-condition/%v", condition), "ci.yml", "main's full timing gate", func(w map[string]any) {
+			steps := mapping(mapping(w["jobs"])["go"])["steps"].([]any)
+			mapping(steps[0])["if"] = condition
+		})
+		add(fmt.Sprintf("go-pr-gate-condition/%v", condition), "ci.yml", "confirmed PR proof", func(w map[string]any) {
+			steps := mapping(mapping(w["jobs"])["go"])["steps"].([]any)
+			mapping(steps[len(steps)-1])["if"] = condition
+		})
+	}
+	add("go-main-timing-skipped", "ci.yml", "main's full timing gate", func(w map[string]any) {
+		steps := mapping(mapping(w["jobs"])["go"])["steps"].([]any)
+		gate := mapping(steps[0])
+		gate["run"] = strings.Replace(gate["run"].(string), `full) expected=success`, `full) expected=skipped`, 1)
+	})
 	add("missing-web-dependency", "ci.yml", "effective lane publisher", func(w map[string]any) { mapping(mapping(w["jobs"])["web"])["needs"] = []any{"web-setup"} })
 	add("web-skipped-on-failure", "ci.yml", "web must report failures", func(w map[string]any) { delete(mapping(mapping(w["jobs"])["web"]), "if") })
 	add("web-full-shards-omitted", "ci.yml", "web shard matrix must retain", func(w map[string]any) {
@@ -523,6 +538,9 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 	for _, id := range []string{"go", "web", "release-check", "e2e"} {
 		steps := mapping(jobs[id])["steps"].([]any)
 		step := mapping(steps[len(steps)-1])
+		if id == "go" {
+			step = mapping(steps[0])
+		}
 		run, ok := step["run"].(string)
 		if !ok {
 			t.Fatalf("%s has no executable gate", id)
@@ -564,7 +582,7 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 					t.Fatalf("legitimate %s gate rejected: %v", lane, err)
 				}
 				for name, expected := range values {
-					if name == "CI_LANE" || name == "REUSE" || name == "REUSE_PROOF" || name == "SOURCE_RUN" || name == "CACHE_PRIME" || name == "TIER_LAYOUT" {
+					if name == "CI_LANE" || name == "REUSE" || name == "REUSE_PROOF" || name == "SOURCE_RUN" || name == "CACHE_PRIME" || name == "TIER_LAYOUT" || strings.HasPrefix(name, "PR_CONFIRM_") {
 						continue
 					}
 					wrong := "success"
@@ -719,6 +737,9 @@ func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
 	for id, c := range cases {
 		steps := mapping(jobs[id])["steps"].([]any)
 		step := mapping(steps[len(steps)-1])
+		if id == "go" {
+			step = mapping(steps[0])
+		}
 		run := step["run"].(string)
 		if _, exists := mapping(step["env"])["TIER_LAYOUT"]; !exists {
 			t.Fatalf("%s must read the tier layout", id)

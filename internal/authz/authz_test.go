@@ -4,7 +4,9 @@ package authz
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -80,8 +82,31 @@ func TestViewerReadsStoredReviewPolicy(t *testing.T) {
 }
 
 func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
-	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage", "delivery.manage", "delivery_queue.manage", "delivery_queue.claim", "delivery_reviews.manage", "delivery_reviews.claim", "delivery_reviews.report", "delivery_ship.manage", "delivery_ship.claim", "reviewpolicy.manage", "account.overview.read", "events.subscribe"}) {
-		t.Fatal("built-in agent exclusions drifted from the explicit recurrence, delivery, review, overview and subscription policies")
+	// Keep the independently reviewed expected policy in data, while retaining
+	// exact equality and the live person/agent grant assertions below.
+	raw, err := os.ReadFile("testdata/builtin_agent_exclusions.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var expected struct {
+		License     string   `json:"_license"`
+		Permissions []string `json:"permissions"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&expected); err != nil {
+		t.Fatal(err)
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF || expected.License != "SPDX-License-Identifier: AGPL-3.0-only" || len(expected.Permissions) == 0 || !slices.IsSorted(expected.Permissions) {
+		t.Fatal("expected exclusion policy must be a nonempty canonical JSON fixture")
+	}
+	for i := 1; i < len(expected.Permissions); i++ {
+		if expected.Permissions[i-1] == expected.Permissions[i] {
+			t.Fatal("expected exclusion policy has a duplicate permission")
+		}
+	}
+	if !slices.Equal(builtinAgentExclusions, expected.Permissions) {
+		t.Fatal("built-in agent exclusions drifted from the explicit recurrence, delivery, queue, review, overview, engine and subscription policies")
 	}
 	for _, key := range builtinAgentExclusions {
 		permission, ok := Lookup(key)
@@ -89,7 +114,7 @@ func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
 			t.Fatal("an explicit custom-role permission must remain agent-grantable")
 		}
 		for _, role := range []string{"owner", "admin", "member"} {
-			if (key == "delivery.manage" || key == "delivery_queue.manage" || key == "delivery_queue.claim" || strings.HasPrefix(key, "delivery_reviews.") || strings.HasPrefix(key, "delivery_ship.") || key == "reviewpolicy.manage") && role == "member" {
+			if (key == "delivery.manage" || key == "delivery_queue.manage" || key == "delivery_queue.claim" || key == "reviewpolicy.manage" || key == "engine.manage" || strings.HasPrefix(key, "delivery_reviews.") || strings.HasPrefix(key, "delivery_ship.")) && role == "member" {
 				if contains(builtinPermissions(role), key) {
 					t.Fatal("delivery and review-policy management should require an explicit member grant")
 				}

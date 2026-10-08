@@ -107,6 +107,34 @@ test('built-in agent roles exclude recurrence automation in every key mode; cust
   }
 })
 
+test('built-in ceilings keep shadow admission on the person and off agent keys', () => {
+  const keys = ['engine.admission', 'engine.read', 'engine.manage']
+  const catalog: Permission[] = ceilingParity.registry.map(p => ({ ...P(p.key, 'Access', 'low'), ...p, grantable_at: p.grantable_at as Permission['grantable_at'] }))
+  for (const key of keys) {
+    const permission = ceilingParity.registry.find(p => p.key === key)
+    assert.ok(permission, key)
+    assert.equal(permission.agent_grantable, true)
+    assert.deepEqual(permission.grantable_at, ['workspace', 'project'])
+  }
+  const admin = ceilingParity.cases.find(fixture => fixture.builtin_role === 'admin')
+  const member = ceilingParity.cases.find(fixture => 'project_builtin_roles' in fixture && fixture.project_builtin_roles[0] === 'member')
+  if (!admin || !member) throw new Error('shadow admission ceiling fixtures missing')
+  for (const key of keys) {
+    assert.ok(admin.workspace.includes(key), key)
+    assert.equal(admin.want.includes(key), false, key)
+    assert.equal(member.want.includes(key), false, key)
+  }
+  assert.equal(member.projects[0].includes('engine.manage'), false)
+  assert.ok(member.projects[0].includes('engine.admission') && member.projects[0].includes('engine.read'))
+  const workspace = role('workspace', 'admin', admin.workspace, true)
+  const ceiling = agentScopeCeiling(agent('worker', { workspace_role: workspace }), [workspace], catalog, 'existing')!
+  for (const key of keys) assert.equal(ceiling.has(key), false, key)
+  assert.deepEqual([...ceiling].sort(), admin.want)
+  const custom = role('custom', 'explicit-admission', keys, false)
+  const explicit = agentScopeCeiling(agent('custom', { workspace_role: custom }), [custom], catalog, 'existing')!
+  for (const key of keys) assert.equal(explicit.has(key), true, key)
+})
+
 test('built-in ceilings keep review policy read and leave manage to an explicit custom role', () => {
   const catalog: Permission[] = ceilingParity.registry.map(p => ({ ...P(p.key, 'Access', 'low'), ...p, grantable_at: p.grantable_at as Permission['grantable_at'] }))
   const admin = ceilingParity.cases.find(fixture => fixture.builtin_role === 'admin')
