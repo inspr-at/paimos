@@ -113,7 +113,7 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
       const requestControls = await controlStability(page, {
         more, close: panel.getByRole('button', { name: 'Close session details' }),
         overview: panel.getByRole('tab', { name: 'Overview', exact: true }),
-        messages: panel.getByRole('tab', { name: /Messages/ }),
+        messages: panel.getByRole('tab', { name: /Chat/ }),
       })
       await requestControls.check(() => restart.click())
       await expect(restart).toBeHidden()
@@ -131,7 +131,7 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     const controls = await controlStability(page, {
       close: panel.getByRole('button', { name: 'Close session details' }),
       overview: panel.getByRole('tab', { name: 'Overview', exact: true }),
-      messages: panel.getByRole('tab', { name: /Messages/ }),
+      messages: panel.getByRole('tab', { name: /Chat/ }),
       managed: panel.locator('.managed-controls'),
     })
     await controls.check(() => fixture.diagnosis('Reporting is current.'))

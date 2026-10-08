@@ -9,6 +9,7 @@ vi.mock('../src/lib/authz', () => ({ can: () => true }))
 vi.mock('../src/lib/agentRows', () => ({ requestAgentRecovery: mocks.request, readAgentRecovery: mocks.read }))
 vi.mock('../src/lib/toast', () => ({ toast: mocks.toast }))
 import { useAgentRecovery } from '../src/lib/agentRecovery'
+import { capabilityWords } from '../src/components/agents/sessionChat'
 
 const session = { id: 'session-1', project_id: 'project-1', archived_at: null, agent_recovery: { session_id: 'session-1', observed_revision: 'a'.repeat(64), cause: 'heartbeat_overdue', detail: 'Heartbeat overdue', action: 'restart' } } as HarnessSession
 let scope = effectScope()
@@ -105,12 +106,16 @@ test('changing diagnosis remains below every session control and tab', async () 
       agentRecovery: { action: () => 'restart', busy: {} }, pausingSession: () => false, works: () => false,
       actionsAnchor: null, showRecover: false, showRemove: false, quick: true, tab: 'overview', unread: 0, now: 0,
       ticketState: '', selectTab: () => {}, serviceTiers: { unavailable: () => true },
+      capability: 'native', capText: capabilityWords.en.native,
     }) })
     for (const name of ['SessionPauseActions', 'ManagedSessionControls', 'SessionTabs']) app.component(name, { render: () => Vue.h('button', { 'data-control': name }, name) })
     for (const name of ['AgentGlyph', 'AgentStateLabel', 'AppIcon', 'TicketPeekLink', 'SessionRecovery', 'RemoveSessionDialog', 'FloatingPanel']) app.component(name, { render: () => Vue.h('span') })
     const html = await renderToString(app)
     const feedback = html.indexOf(detail)
+    const chip = html.indexOf(capabilityWords.en.native[0])
     expect(feedback).toBeGreaterThan(0)
+    expect(chip).toBeGreaterThan(0)
+    expect(chip).toBeLessThan(feedback)
     for (const name of ['SessionPauseActions', 'ManagedSessionControls', 'SessionTabs']) {
       const control = html.indexOf(`data-control="${name}"`)
       expect(control).toBeGreaterThan(0)
