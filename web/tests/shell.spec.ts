@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
-import { mkdir } from 'node:fs/promises'
 import { controlStability } from './control-stability'
 
 const canonical = '260923120000.0.0'
@@ -72,7 +71,7 @@ async function noOverflow(page: Page) {
 for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) {
   for (const colorScheme of ['light', 'dark'] as const) {
     for (const screen of ['home', 'signin', 'signin-dev', '404'] as const) {
-      test(`${screen} ${viewport.width} ${colorScheme}`, async ({ page }) => {
+      test(`${screen} ${viewport.width} ${colorScheme}`, async ({ page }, testInfo) => {
         const errors: string[] = []
         page.on('pageerror', error => errors.push(error.message))
         await page.setViewportSize(viewport)
@@ -103,8 +102,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
           expect(bounds.height).toBeGreaterThanOrEqual(min)
           expect(bounds.width).toBeGreaterThanOrEqual(min)
         }
-        await mkdir('/tmp/aeon-p05-shots', { recursive: true })
-        await page.screenshot({ path: `/tmp/aeon-p05-shots/${screen}-${viewport.width}-${colorScheme}.png`, fullPage: true })
+        await page.screenshot({ path: testInfo.outputPath(`${screen}-${viewport.width}-${colorScheme}.png`), fullPage: true })
         expect(errors).toEqual([])
       })
     }
@@ -116,18 +114,31 @@ for (const width of [390, 1024, 1440]) {
     test(`home attention entry fits and stays still at ${width}px in ${colorScheme}`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 844 })
       await page.emulateMedia({ colorScheme })
+      // Branch gate holds project and node payloads. Main holds /api/projects one
+      // layer above that so the header link renders before either response, on
+      // every run. Release both before measuring the loaded list: skeleton rows
+      // are taller than the shell and are not the layout under test.
       let release!: () => void
       const gate = new Promise<void>(resolve => { release = resolve })
       await mockAPI(page, { gate })
+      let releaseProjects!: () => void
+      const projectsGate = new Promise<void>(resolve => { releaseProjects = resolve })
+      await page.route(/\/api\/projects(?:\?|$)/, async route => { await projectsGate; await route.fallback() })
+      const projectsRequested = page.waitForRequest(request => new URL(request.url()).pathname === '/api/projects')
       await page.goto('/')
+      await projectsRequested
+      const loading = page.getByRole('status', { name: 'Loading projects' })
+      await expect(loading).toBeVisible()
       const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
       await expect(attention).toHaveAttribute('href', '/tickets?view=needs-attention')
-      // The entry renders before the list: its eight skeleton rows are taller than
-      // the shell and are not the layout under test. Hold that state, then measure
-      // only once the loaded projects are on screen.
       await expect(page.getByRole('status', { name: 'Loading projects' })).toBeVisible()
+      const projectsLoaded = page.waitForResponse(response => response.ok() && new URL(response.url()).pathname === '/api/projects')
+      releaseProjects()
       release()
+      await projectsLoaded
       await expect(page.getByRole('list', { name: 'Projects' }).getByRole('link')).toHaveCount(2)
+      await expect(page.getByRole('list', { name: 'Projects' }).getByRole('listitem')).toHaveCount(projects.length)
+      await expect(loading).toHaveCount(0)
       await expect(page.getByRole('status', { name: 'Loading projects' })).toHaveCount(0)
       await page.evaluate(() => document.fonts.ready)
       await noOverflow(page)
