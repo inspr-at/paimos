@@ -311,6 +311,8 @@
     "scripts/releaseworkflow:TestParallelWebUnitsShareRuntimeAndRunOnce"
     ,
     "scripts/releaseworkflow:TestRehearsedBuilderPins"
+    ,
+    "scripts/releaseworkflow:TestRootAptTimeoutReapsBeforeRetry"
   ]
   ,
   "source": "AEON-678 zb-go essential allowlist (332 including two dispatch helpers)"
@@ -686,6 +688,10 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestExpiredReadingRestoresUnknownSlots","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestFactOnlyReportsExhaustTheDailyShare","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestFiveHourFirstReadingNearUTCMidnightStaysEligible","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestFix2KnownKeyCapKeepsTotalBalanceUnknown","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestFix2LegacyReadinessFactsUseMembershipAndUnknownBalance","tier":"GATED-FULL"}
@@ -833,6 +839,8 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestRedactedOverviewHeadroomFollowsWorkBand","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRedactedOverviewHidesRoutableHeadroom","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRedactedOverviewHidesRoutableHeadroomOnOwnerSchedule","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRenameKeepsModelGrants","tier":"GATED-FULL"}
     ,
@@ -8881,6 +8889,8 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReleaseBinariesRefuseWarmOrUnverifiedGo","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReuseAlwaysPrimesMatchingMainCacheKeys","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestRootAptTimeoutReapsBeforeRetry","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestRuntimeClosurePreparedColdAndNeverCached","tier":"ESSENTIAL"}
     ,
