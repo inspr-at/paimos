@@ -30,6 +30,8 @@ async function setup(page: Page, owns = true) {
 }
 
 test('Boost today preserves the header controls through every option in both themes and languages', async ({ page }, info) => {
+  // Two languages, four widths and both themes, each with a full header measurement, exceed the 30s default on CI.
+  test.setTimeout(90_000)
   const errors = watchErrors(page), { writes } = await setup(page)
   await page.goto('/agents')
   const dial = page.getByRole('region', { name: 'Agents at once' }), boost = dial.locator('[data-boost-today]')
