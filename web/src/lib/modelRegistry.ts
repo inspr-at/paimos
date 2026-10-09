@@ -19,11 +19,11 @@ export interface RegistryProfile {
 }
 export interface RefreshSettings { agent_reports_enabled: boolean; auto_add_profiles: boolean; api_enabled: boolean; interval_minutes: number }
 export interface DiscoverySourceResult { state?: string; seen?: number; vendor?: string; account_id?: string }
-export interface CheckResult { new_lines?: string[]; added?: number; proposed?: number; sources?: DiscoverySourceResult[] }
+export interface CheckResult { new_lines?: string[]; added?: number; proposed?: number; accepted_models?: string[]; sources?: DiscoverySourceResult[] }
 export interface RefreshStatus { settings: RefreshSettings; last_run_at: string | null; last_result?: CheckResult }
 export interface LinePick { line: string | null; effort: string | null; harness?: string; model?: string }
 export interface LineUse { column: string; layer: 'default' | 'person' | 'workspace' | 'project'; person?: string; replacement: LinePick }
-export interface LineUsage { used_by: LineUse[]; replacement: LinePick; revision: string; incomplete: boolean }
+export interface LineUsage { used_by: LineUse[]; replacement: LinePick; revision: string; incomplete: boolean; line_profiles?: RegistryProfile[] }
 export interface LineWrite { display_name: string; note: string; efforts: string[]; route: string; model?: string; revision?: string }
 
 /** A failed request. `retryAfter` is the manual-check cooldown in seconds (429). */
@@ -316,16 +316,39 @@ export async function restoreLine(ids: string[], scope?: WriteScope): Promise<st
   return failed ? `${failed} of ${ids.length} levels could not be restored` : null
 }
 
-/** What Check now may say. A 200 can still be a partial or stale discovery, and a version taken on is not a new line. */
+/** Distinct models the server accepted. A missing list means acceptance was not established; duplicates count once. */
+export function acceptedModelCount(models: string[] | undefined): number {
+  if (!Array.isArray(models)) return 0
+  const seen = new Set<string>()
+  for (const id of models) if (typeof id === 'string' && id && !seen.has(id)) seen.add(id)
+  return seen.size
+}
+
+/** The line read with a usage revision, or null when that answer did not bring its own profiles. */
+export function lineFromUsage(current: RegistryProfile[], harness: string, model: string, usage: LineUsage): RegistryLine | null {
+  if (!Array.isArray(usage.line_profiles) || !usage.revision) return null
+  const fresh = usage.line_profiles.filter(profile => profile && profile.harness === harness && profile.model === model && !profile.retired)
+  if (!fresh.length) return null
+  const kept = current.filter(profile => profile.retired || profile.harness !== harness || profile.model !== model)
+  return buildLines(kept.concat(fresh)).find(line => line.harness === harness && line.model === model) ?? null
+}
+
+export function draftsMatch(a: LineDraft, b: LineDraft): boolean {
+  return a.name === b.name && a.note === b.note && a.slug === b.slug && a.harness === b.harness && a.route === b.route && a.level === b.level && a.efforts.join('\u0000') === b.efforts.join('\u0000')
+}
+
+/** What Check now may say. A 200 can still be a partial or stale discovery, and a version taken on is not a new line. `added` counts profiles, so it is not acceptance. */
 export function checkReport(result: CheckResult, apiEnabled: boolean): string {
   const sources = Array.isArray(result.sources) ? result.sources : []
   const limited = sources.some(source => source?.state === 'limited')
   const staleSource = sources.some(source => source?.state === 'stale')
   const found = result.new_lines?.length ?? 0
   const added = typeof result.added === 'number' && result.added > 0 ? result.added : 0
+  const accepted = acceptedModelCount(result.accepted_models)
   const sentences: string[] = []
   if (found > 0) sentences.push(`${found} new ${found === 1 ? 'model' : 'models'} found`)
-  else if (added > 0) sentences.push(added === 1 ? 'A newer version already in use was taken on' : `${added} newer versions already in use were taken on`)
+  else if (accepted > 0) sentences.push(accepted === 1 ? 'A newer version already in use was taken on' : `${accepted} newer versions already in use were taken on`)
+  else if (added > 0) sentences.push(added === 1 ? '1 profile was added' : `${added} profiles were added`)
   else sentences.push(apiEnabled ? 'Up to date · nothing new' : 'Checked · vendor model lists are off, so nothing new could be found')
   if (limited || staleSource) {
     const discovery = limited && staleSource

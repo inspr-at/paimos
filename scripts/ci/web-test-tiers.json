@@ -8486,6 +8486,8 @@
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Check now shows the wait the server names after a 429, and a failed check says so without a cooldown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit binds the revision to the line read with it when that line changed before the revision was captured","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit creates a new version with only the changed fields; an auto-discovered entry keeps harness, route and slug","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit of a hand-added entry can change its slug and route, and a server refusal is shown in the form","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -15297,6 +15299,8 @@
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > uses server review evidence, including newly qualified harnesses and per-model residency","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"answers that are not what the page expects > is an error, not a crash, when the list or the refresh status has the wrong shape","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"copy > does not call a profile addition accepted, and counts one accepted model once however many efforts it has","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"copy > names each visible use by its own replacement and effort, and a null one is no qualified fallback","tier":"GATED-FULL"}
     ,

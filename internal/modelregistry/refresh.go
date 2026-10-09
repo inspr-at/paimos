@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -39,12 +40,13 @@ type SourceResult struct {
 	Seen  int    `json:"seen"`
 }
 type RefreshResult struct {
-	At            time.Time      `json:"at"`
-	NewLines      []string       `json:"new_lines"`
-	Added         int            `json:"added"`
-	Proposed      int            `json:"proposed"`
-	Sources       []SourceResult `json:"sources"`
-	LadderChanged bool           `json:"ladder_changed"`
+	At             time.Time      `json:"at"`
+	NewLines       []string       `json:"new_lines"`
+	Added          int            `json:"added"`
+	AcceptedModels []string       `json:"accepted_models,omitempty"`
+	Proposed       int            `json:"proposed"`
+	Sources        []SourceResult `json:"sources"`
+	LadderChanged  bool           `json:"ladder_changed"`
 }
 
 // NewWithVault uses an independent derivation of the existing server key.
@@ -324,6 +326,12 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 						}
 						if accepted {
 							out.Added++
+							// added counts profiles, one per effort. Acceptance is the
+							// distinct model, so four efforts of one successor are one version.
+							id := boardLineID(Profile{Family: pin.Family, Harness: pin.Harness, Model: pin.Model})
+							if !slices.Contains(out.AcceptedModels, id) {
+								out.AcceptedModels = append(out.AcceptedModels, id)
+							}
 							continue
 						}
 					}

@@ -421,11 +421,21 @@ test('Check now reports a partial or stale discovery, and a taken-on version is 
 
   await page.clock.runFor('05:02')
   await expect(check).toHaveAccessibleName('Check now')
-  world.check = { status: 200, added: 2, sources: [{ state: 'fresh' }] }
+  world.check = { status: 200, added: 4, sources: [{ state: 'fresh' }] }
   await check.click()
-  await expect(last()).toContainText('2 newer versions already in use were taken on')
+  await expect(last()).toContainText('4 profiles were added')
+  await expect(last()).not.toContainText('taken on')
+  await expect(last()).not.toContainText('newer version')
   await expect(last()).not.toContainText('new model')
   await expect(last()).not.toContainText('nothing new')
+
+  await page.clock.runFor('05:02')
+  world.check = { status: 200, added: 4, acceptedModels: ['openai:sol'], sources: [{ state: 'fresh' }] }
+  await check.click()
+  await expect(last()).toContainText('A newer version already in use was taken on')
+  await expect(last()).not.toContainText('4 newer')
+  await expect(last()).not.toContainText('4 profiles')
+  await expect(last()).not.toContainText('new model')
 
   await page.clock.runFor('05:02')
   world.check = { status: 200, newLines: ['openai:gpt-7'], added: 1, sources: [{ state: 'limited' }] }
@@ -441,6 +451,32 @@ test('Check now reports a partial or stale discovery, and a taken-on version is 
   await check.click()
   await expect(last()).toContainText('Discovery was partial: some lists were incomplete and some could not be checked')
   await expect(last()).not.toContainText('Up to date')
+})
+
+test('Edit binds the revision to the line read with it when that line changed before the revision was captured', async ({ page }) => {
+  const world = await setup(page)
+  let release = () => {}
+  world.gateUsage = new Promise<void>(resolve => { release = resolve })
+  const opening = row(page, 'gpt-6.1-sol').getByRole('button', { name: /^Edit/ }).click()
+  await expect.poll(() => world.reads.some(path => path.endsWith('/models/lines/codex/gpt-6.1-sol/usage'))).toBe(true)
+  for (const profile of world.profiles) {
+    if (profile.model !== 'gpt-6.1-sol' || profile.retired) continue
+    profile.note = 'changed before capture'
+    if (profile.effort === 'xhigh') profile.retired = true
+  }
+  world.usageRevision = 'r-captured'
+  release()
+  await opening
+  const note = editor(page).getByLabel('Note', { exact: true })
+  await expect(note).toHaveValue('changed before capture')
+  await expect(editor(page).getByRole('button', { name: 'Remove level xhigh' })).toHaveCount(0)
+  await editor(page).getByLabel('Name', { exact: true }).fill('GPT Sol renamed')
+  await editor(page).getByRole('button', { name: /^Save/ }).click()
+  await expect(editor(page)).toHaveCount(0)
+  expect(world.writes[0]).toEqual({ method: 'PUT', path: '/models/lines/codex/gpt-6.1-sol', body: { display_name: 'GPT Sol renamed', note: 'changed before capture', efforts: ['low', 'medium', 'high'], route: 'openai', revision: 'r-captured' } })
+  expect(world.writes[0]!.body).not.toMatchObject({ note: 'strongest for building' })
+  await expect(toasts(page).filter({ hasText: 'Saved' }).last()).toBeVisible()
+  await expect(toasts(page).filter({ hasText: 'Saved' }).last()).not.toContainText('changed somewhere else')
 })
 
 test('Edit sends the revision captured with the form, Undo sends the revision the edit returned, and a conflict reloads', async ({ page }) => {
