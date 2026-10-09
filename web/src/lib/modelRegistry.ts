@@ -2,6 +2,7 @@
 // Settings › Models › Model registry (AEON-1012): one line per model, derived
 // from the registry's immutable profiles (one profile per thinking level).
 import { api } from './api'
+import { StaleScopeError } from './identityScope'
 import { compareModelVersions, profileLine } from './modelPrefs'
 import { validPiModel } from './piModel'
 import { fullModelName } from './planning'
@@ -17,7 +18,9 @@ export interface RegistryProfile {
   source?: 'auto' | 'manual'; retire_at?: string | null; retired?: boolean; effort_level?: number | null; provider?: string
 }
 export interface RefreshSettings { agent_reports_enabled: boolean; auto_add_profiles: boolean; api_enabled: boolean; interval_minutes: number }
-export interface RefreshStatus { settings: RefreshSettings; last_run_at: string | null; last_result?: { added?: number; proposed?: number; new_lines?: string[] } }
+export interface DiscoverySourceResult { state?: string; seen?: number; vendor?: string; account_id?: string }
+export interface CheckResult { new_lines?: string[]; added?: number; proposed?: number; sources?: DiscoverySourceResult[] }
+export interface RefreshStatus { settings: RefreshSettings; last_run_at: string | null; last_result?: CheckResult }
 export interface LinePick { line: string | null; effort: string | null; harness?: string; model?: string }
 export interface LineUse { column: string; layer: 'default' | 'person' | 'workspace' | 'project'; person?: string; replacement: LinePick }
 export interface LineUsage { used_by: LineUse[]; replacement: LinePick; revision: string; incomplete: boolean }
@@ -55,13 +58,13 @@ export async function getRefreshStatus(signal?: AbortSignal): Promise<RefreshSta
 }
 // The whole settings object is written back so the parked settings (agent reports, discovery, interval) keep their values.
 export const putRefreshSettings = (settings: RefreshSettings) => request<RefreshSettings>('/models/refresh/settings', 'PUT', settings)
-export const checkNow = () => request<{ new_lines?: string[]; added?: number; proposed?: number }>('/models/refresh', 'POST')
-export const createProfile = (body: Record<string, unknown>) => request<RegistryProfile>('/models', 'POST', body)
+export const checkNow = (signal?: AbortSignal) => request<CheckResult>('/models/refresh', 'POST', undefined, signal)
+export const createProfile = (body: Record<string, unknown>, signal?: AbortSignal) => request<RegistryProfile>('/models', 'POST', body, signal)
 const linePath = (harness: string, model: string) => `/models/lines/${encodeURIComponent(harness)}/${encodeURIComponent(model)}`
-export const editLine = (harness: string, model: string, body: LineWrite) => request<{ profiles: RegistryProfile[]; revision: string }>(linePath(harness, model), 'PUT', body)
+export const editLine = (harness: string, model: string, body: LineWrite, signal?: AbortSignal) => request<{ profiles: RegistryProfile[]; revision: string }>(linePath(harness, model), 'PUT', body, signal)
 export const previewRemoval = (harness: string, model: string, signal?: AbortSignal) => request<LineUsage>(`${linePath(harness, model)}/usage`, 'GET', undefined, signal)
-export const retireProfile = (id: string, reason: string) => request<{ profile_id: string; retired: boolean }>(`/models/${encodeURIComponent(id)}/retire`, 'POST', { reason })
-export const restoreProfile = (id: string) => request<{ profile_id: string; retired: boolean }>(`/models/${encodeURIComponent(id)}/retire`, 'DELETE')
+export const retireProfile = (id: string, reason: string, signal?: AbortSignal) => request<{ profile_id: string; retired: boolean }>(`/models/${encodeURIComponent(id)}/retire`, 'POST', { reason }, signal)
+export const restoreProfile = (id: string, signal?: AbortSignal) => request<{ profile_id: string; retired: boolean }>(`/models/${encodeURIComponent(id)}/retire`, 'DELETE', undefined, signal)
 
 // ---------- lines ----------
 
@@ -228,6 +231,16 @@ export function isDirty(draft: LineDraft, line: RegistryLine | null): boolean {
 
 // ---------- writes ----------
 
+/** The run that started a chained write: every request uses its signal and is refused once the captured person or workspace is gone. */
+export interface WriteScope { signal?: AbortSignal; live?: () => boolean }
+const current = (scope?: WriteScope) => !scope?.signal?.aborted && scope?.live?.() !== false
+function stillCurrent(scope?: WriteScope) {
+  if (!current(scope)) throw new StaleScopeError()
+}
+function stale(error: unknown, scope?: WriteScope) {
+  if (error instanceof StaleScopeError || !current(scope)) throw error instanceof StaleScopeError ? error : new StaleScopeError()
+}
+
 const FAMILY_BY_NAMESPACE: Record<string, string> = { openai: 'openai', anthropic: 'anthropic', xai: 'xai', google: 'google', ollama: 'local' }
 const CURSOR_FAMILIES: [string, string][] = [['gpt-', 'openai'], ['claude-', 'anthropic'], ['grok-', 'xai'], ['gemini-', 'google'], ['composer-', 'cursor']]
 /** Mirrors the server's family check; a mismatch is rejected there, never trusted here. */
@@ -251,17 +264,20 @@ export interface AddResult { profiles: RegistryProfile[]; failed: string | null 
  * order of the person's own level names. A failure after the first step leaves
  * a line with its first level; the caller reports it, it is never called saved.
  */
-export async function addLine(draft: LineDraft, now = new Date()): Promise<AddResult> {
+export async function addLine(draft: LineDraft, now = new Date(), scope?: WriteScope): Promise<AddResult> {
   const model = modelSlug(draft), efforts = splitLevels(draft.level, draft.efforts), name = draft.name.trim(), note = draft.note.trim()
+  stillCurrent(scope)
   const first = await createProfile({
     slug: pinSlug(draft.harness, model, efforts[0]!), version: pinVersion(now), harness: draft.harness, family: familyOf(draft.harness, model), model, effort: efforts[0], tier: 'standard',
     display_name: name, short_name: name, ...(note ? { note } : {}),
-  })
+  }, scope?.signal)
   if (efforts.length === 1) return { profiles: [first], failed: null }
   try {
-    const edited = await editLine(draft.harness, model, { display_name: name, note, efforts, route: routeOf(draft.harness, model) })
+    stillCurrent(scope)
+    const edited = await editLine(draft.harness, model, { display_name: name, note, efforts, route: routeOf(draft.harness, model) }, scope?.signal)
     return { profiles: edited.profiles, failed: null }
   } catch (error) {
+    stale(error, scope)
     return { profiles: [first], failed: error instanceof Error ? error.message : 'The remaining levels could not be saved.' }
   }
 }
@@ -279,17 +295,63 @@ export function changeOf(line: RegistryLine, next: LineWrite): boolean {
 export const REMOVED_REASON = 'Removed in Settings › Models'
 export const UNDONE_REASON = 'Undone in Settings › Models'
 /** Retire every level of a line; stops at the first failure and says how far it got. */
-export async function removeLine(ids: string[], reason = REMOVED_REASON): Promise<{ done: string[]; error: string | null }> {
+export async function removeLine(ids: string[], reason = REMOVED_REASON, scope?: WriteScope): Promise<{ done: string[]; error: string | null }> {
   const done: string[] = []
   for (const id of ids) {
-    try { await retireProfile(id, reason); done.push(id) } catch (error) { return { done, error: error instanceof Error ? error.message : 'Could not remove it.' } }
+    try { stillCurrent(scope); await retireProfile(id, reason, scope?.signal); done.push(id) } catch (error) {
+      stale(error, scope)
+      return { done, error: error instanceof Error ? error.message : 'Could not remove it.' }
+    }
   }
   return { done, error: null }
 }
-export async function restoreLine(ids: string[]): Promise<string | null> {
+export async function restoreLine(ids: string[], scope?: WriteScope): Promise<string | null> {
   let failed = 0
-  for (const id of ids) { try { await restoreProfile(id) } catch { failed++ } }
+  for (const id of ids) {
+    try { stillCurrent(scope); await restoreProfile(id, scope?.signal) } catch (error) {
+      stale(error, scope)
+      failed++
+    }
+  }
   return failed ? `${failed} of ${ids.length} levels could not be restored` : null
+}
+
+/** What Check now may say. A 200 can still be a partial or stale discovery, and a version taken on is not a new line. */
+export function checkReport(result: CheckResult, apiEnabled: boolean): string {
+  const sources = Array.isArray(result.sources) ? result.sources : []
+  const limited = sources.some(source => source?.state === 'limited')
+  const staleSource = sources.some(source => source?.state === 'stale')
+  const found = result.new_lines?.length ?? 0
+  const added = typeof result.added === 'number' && result.added > 0 ? result.added : 0
+  const sentences: string[] = []
+  if (found > 0) sentences.push(`${found} new ${found === 1 ? 'model' : 'models'} found`)
+  else if (added > 0) sentences.push(added === 1 ? 'A newer version already in use was taken on' : `${added} newer versions already in use were taken on`)
+  else sentences.push(apiEnabled ? 'Up to date · nothing new' : 'Checked · vendor model lists are off, so nothing new could be found')
+  if (limited || staleSource) {
+    const discovery = limited && staleSource
+      ? 'Discovery was partial: some lists were incomplete and some could not be checked'
+      : limited
+        ? 'Discovery was partial: not every model could be read'
+        : 'Discovery was incomplete: some model lists could not be checked'
+    if (sentences.length === 1 && (sentences[0]!.startsWith('Up to date') || sentences[0]!.startsWith('Checked · vendor'))) sentences[0] = discovery
+    else sentences.push(discovery)
+  }
+  return sentences.join('. ')
+}
+
+function fallbackText(pick: LinePick | undefined, nameOf: (pick: LinePick) => string): string {
+  const named = pick?.model ? nameOf(pick) : pick?.line ?? ''
+  if (!named) return 'no qualified fallback'
+  return pick?.effort ? `${named} at ${pick.effort} takes over` : `${named} takes over, with no effort named`
+}
+
+/** One sentence per visible use. Each use keeps its own replacement; a null replacement is said plainly. */
+export function removalText(name: string, source: 'auto' | 'manual', usage: LineUsage, kinds: Record<string, string>, me: string, nameOf: (pick: LinePick) => string): string {
+  const auto = source === 'auto' ? ' Auto-update won’t add it back.' : ''
+  const hidden = usage.incomplete ? ' Other people’s choices are not shown.' : ''
+  if (!usage.used_by.length) return `Remove ${name}? ${usage.incomplete ? 'Nothing you can see uses it.' : 'Nothing uses it.'}${usage.incomplete ? hidden : ''}${auto}`
+  const parts = usage.used_by.map(use => `${useText(use, kinds, me)} — ${fallbackText(use.replacement, nameOf)}`)
+  return `${name} is in use: ${parts.join('; ')}.${hidden}${auto}`
 }
 
 // ---------- the remove preview ----------

@@ -524,7 +524,7 @@
         ,
         {"file":"tests/models-expert.spec.ts","listedTests":8,"weightSeconds":17,"weightSource":"AEON-881 focused Expert behavior and viewport evidence estimate"}
         ,
-        {"file":"tests/models-registry.spec.ts","listedTests":20,"weightSeconds":12,"weightSource":"AEON-1012 local single-worker run, 9.9s plus margin"}
+        {"file":"tests/models-registry.spec.ts","listedTests":25,"weightSeconds":20,"weightSource":"AEON-1012 fix2 local single-worker run, 16.0s plus margin"}
         ,
         {"file":"tests/models-setup.spec.ts","listedTests":1,"weightSeconds":25,"weightSource":"AEON-882 focused atomic setup, identity and stability evidence estimate"}
         ,

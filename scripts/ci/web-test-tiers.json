@@ -8452,6 +8452,8 @@
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Check now asks the server, shows the five-minute cooldown on the same button and returns when it ends","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Check now reports a partial or stale discovery, and a taken-on version is not called a new model","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Check now says when vendor lists are off, so \"nothing new\" is not mistaken for \"nothing exists\"","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Check now shows the wait the server names after a 429, and a failed check says so without a cooldown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8460,9 +8462,13 @@
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit of a hand-added entry can change its slug and route, and a server refusal is shown in the form","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit sends the revision captured with the form, Undo sends the revision the edit returned, and a conflict reloads","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Esc leaves a field, then closes the remove question, then the editor and returns focus to its Edit","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove cannot go ahead without its preview, and a partly failed removal says how far it got","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove names each use’s own replacement and effort, and says when there is no qualified fallback","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove of an unused hand-added entry says nothing uses it; other people’s uses are reported as not shown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -8485,6 +8491,8 @@
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"screenshots of the card at 1440 and 400 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"the registry lists every model with its note, source, levels and state, newest versions first","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"thinking levels growing or shrinking do not move the input, note or actions at desktop or phone width","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-setup.spec.ts","name":"guided setup preserves controls and own columns, saves once with exact Undo and discards stale writes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -15244,7 +15252,11 @@
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"answers that are not what the page expects > is an error, not a crash, when the list or the refresh status has the wrong shape","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"copy > names each visible use by its own replacement and effort, and a null one is no qualified fallback","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"copy > names where a model is used, and who for","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"copy > separates a partial or stale discovery from a new model and from a version taken on","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"copy > writes dates, times, intervals and waits the way the page shows them","tier":"GATED-FULL"}
     ,
@@ -15287,6 +15299,8 @@
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > removes every level one by one and stops at the first refusal, saying how far it got","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > restores levels and reports how many could not come back","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > stops the next request when the captured person or workspace is gone","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"a canonical-person change with equal revision invalidates old template approval and Undo","tier":"ESSENTIAL"}
     ,

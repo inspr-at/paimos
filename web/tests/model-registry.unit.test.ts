@@ -2,22 +2,24 @@
 // Risks: a hand-added model is stored under a route the server refuses; the registry shows a
 // level order, state or "taken on" the data does not support; a partial write is reported as saved.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-const http = vi.hoisted(() => ({ calls: [] as { method: string; path: string; body: unknown }[], handle: (_method: string, _path: string, _body: unknown): Response => new Response('{}') }))
+const http = vi.hoisted(() => ({ calls: [] as { method: string; path: string; body: unknown }[], signals: [] as (AbortSignal | undefined)[], handle: (_method: string, _path: string, _body: unknown): Response => new Response('{}') }))
 vi.mock('../src/lib/api.ts', () => ({
   api: async (path: string, init: RequestInit = {}) => {
     const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
     http.calls.push({ method: init.method ?? 'GET', path, body })
+    http.signals.push(init.signal ?? undefined)
     return http.handle(init.method ?? 'GET', path, body)
   },
 }))
-import { RegistryError, addLine, getRefreshStatus, listProfiles, buildLines, changeOf, cooldownLabel, draftOf, emptyDraft, familyOf, intervalLabel, lastChecked, lineWriteOf, metaParts, modelSlug, removeLine, restoreLine, routeOf, routesFor, shortDate, splitLevels, takenText, useText, validateDraft, checkNow, type LineDraft, type RegistryProfile } from '../src/lib/modelRegistry'
+import { StaleScopeError } from '../src/lib/identityScope'
+import { RegistryError, addLine, getRefreshStatus, listProfiles, buildLines, changeOf, checkReport, cooldownLabel, draftOf, emptyDraft, familyOf, intervalLabel, lastChecked, lineWriteOf, metaParts, modelSlug, removalText, removeLine, restoreLine, routeOf, routesFor, shortDate, splitLevels, takenText, useText, validateDraft, checkNow, type LineDraft, type LineUsage, type RegistryProfile, type WriteScope } from '../src/lib/modelRegistry'
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } })
 let counter = 0
 const profile = (over: Partial<RegistryProfile> & Pick<RegistryProfile, 'harness' | 'model' | 'effort'>): RegistryProfile => ({
   id: `id-${++counter}`, slug: `s${counter}`, version: '1', family: 'openai', tier: 'strong', enabled: true, created_at: '2026-09-20T12:00:00Z', source: 'auto', retire_at: null, retired: false, effort_level: null, ...over,
 })
-beforeEach(() => { http.calls.length = 0; http.handle = () => json({}) })
+beforeEach(() => { http.calls.length = 0; http.signals.length = 0; http.handle = () => json({}) })
 
 describe('registry lines', () => {
   const sol = (effort: string, level: number, extra: Partial<RegistryProfile> = {}) => profile({ harness: 'codex', model: 'gpt-6.1-sol', effort, effort_level: level, display_name: 'GPT Sol', model_version: '6.1', ...extra })
@@ -154,6 +156,43 @@ describe('writes', () => {
     expect(await restoreLine(['a1', 'b2', 'c3'])).toBe('1 of 3 levels could not be restored')
     expect(await restoreLine(['a1'])).toBeNull()
   })
+  it('stops the next request when the captured person or workspace is gone', async () => {
+    const ended = () => {
+      const controller = new AbortController()
+      let live = true
+      const scope: WriteScope = { signal: controller.signal, live: () => live }
+      return { scope, kill() { live = false; controller.abort() } }
+    }
+    const several: LineDraft = { ...emptyDraft(), name: 'Qwen3 Coder', slug: 'qwen3', harness: 'opencode', route: 'ollama', efforts: [], level: 'low, high', note: 'trial' }
+    const adding = ended()
+    http.handle = () => { adding.kill(); return json({ id: 'first', enabled: true, created_at: '2026-10-09T08:00:00Z', source: 'manual', harness: 'opencode', model: 'ollama/qwen3', effort: 'low' }, 201) }
+    await expect(addLine(several, new Date('2026-10-09T08:00:00Z'), adding.scope)).rejects.toBeInstanceOf(StaleScopeError)
+    expect(http.calls).toHaveLength(1)
+    expect(http.signals[0]).toBe(adding.scope.signal)
+    http.calls.length = 0; http.signals.length = 0
+    await expect(addLine(several, new Date('2026-10-09T08:00:00Z'), { live: () => false })).rejects.toBeInstanceOf(StaleScopeError)
+    expect(http.calls).toHaveLength(0)
+
+    const retire = ended()
+    http.handle = () => { retire.kill(); return json({ retired: true }) }
+    await expect(removeLine(['a1', 'b2'], 'Removed in Settings › Models', retire.scope)).rejects.toBeInstanceOf(StaleScopeError)
+    expect(http.calls.map(call => call.path)).toEqual(['/models/a1/retire'])
+    expect(http.signals[0]).toBe(retire.scope.signal)
+    expect(http.calls[0]!.body).toEqual({ reason: 'Removed in Settings › Models' })
+    http.calls.length = 0
+    await expect(removeLine(['a1'], 'Removed in Settings › Models', { signal: AbortSignal.abort() })).rejects.toBeInstanceOf(StaleScopeError)
+    expect(http.calls).toHaveLength(0)
+
+    const restore = ended()
+    http.calls.length = 0; http.signals.length = 0
+    http.handle = () => { restore.kill(); return json({ retired: false }) }
+    await expect(restoreLine(['a1', 'b2'], restore.scope)).rejects.toBeInstanceOf(StaleScopeError)
+    expect(http.calls).toHaveLength(1)
+    expect(http.signals[0]).toBe(restore.scope.signal)
+    http.calls.length = 0
+    await expect(restoreLine(['a1'], { live: () => false })).rejects.toBeInstanceOf(StaleScopeError)
+    expect(http.calls).toHaveLength(0)
+  })
   it('carries the server\'s remaining wait from a 429, from the body or the Retry-After header', async () => {
     http.handle = () => json({ error: 'model refresh cooldown', retry_after: 120 }, 429, { 'Retry-After': '120' })
     await expect(checkNow()).rejects.toMatchObject({ status: 429, retryAfter: 120 })
@@ -188,6 +227,37 @@ describe('copy', () => {
     expect(lastChecked(null, now)).toBe('')
     expect([intervalLabel(360), intervalLabel(1440), intervalLabel(90)]).toEqual(['6 h', '24 h', '90 min'])
     expect([cooldownLabel(300), cooldownLabel(61), cooldownLabel(59), cooldownLabel(0)]).toEqual(['again in 5 min', 'again in 2 min', 'again in 1 min', 'again in 1 min'])
+  })
+  it('names each visible use by its own replacement and effort, and a null one is no qualified fallback', () => {
+    const usage: LineUsage = {
+      revision: 'shown', incomplete: false,
+      replacement: { line: 'decoy', effort: 'max', harness: 'codex', model: 'gpt-decoy' },
+      used_by: [
+        { column: 'other', layer: 'default', replacement: { line: 'openai:astra', effort: 'xhigh', harness: 'codex', model: 'gpt-6-astra' } },
+        { column: 'backend', layer: 'workspace', replacement: { line: null, effort: null } },
+        { column: 'concept', layer: 'workspace', replacement: { line: 'anthropic:opus', effort: null, harness: 'claude', model: 'claude-opus-5-5' } },
+      ],
+    }
+    const text = removalText('GPT Sol 6.1', 'auto', usage, { backend: 'Backend build' }, 'me', pick => pick.model === 'gpt-6-astra' ? 'GPT Astra 6' : pick.model === 'claude-opus-5-5' ? 'Claude Opus 5.5' : pick.model ?? pick.line ?? '')
+    expect(text).toBe('GPT Sol 6.1 is in use: Default · all work (for everyone) — GPT Astra 6 at xhigh takes over; Backend build (for everyone) — no qualified fallback; Concepts (for everyone) — Claude Opus 5.5 takes over, with no effort named. Auto-update won’t add it back.')
+    expect(text).not.toContain('The next model in line')
+    expect(text).not.toContain('gpt-decoy')
+    expect(text).not.toContain('takes over there')
+  })
+  it('separates a partial or stale discovery from a new model and from a version taken on', () => {
+    expect(checkReport({ sources: [{ state: 'stale' }] }, true)).toBe('Discovery was incomplete: some model lists could not be checked')
+    expect(checkReport({ sources: [{ state: 'limited' }] }, true)).toBe('Discovery was partial: not every model could be read')
+    expect(checkReport({ sources: [{ state: 'limited' }, { state: 'stale' }] }, true)).toBe('Discovery was partial: some lists were incomplete and some could not be checked')
+    expect(checkReport({ added: 2 }, true)).toBe('2 newer versions already in use were taken on')
+    expect(checkReport({ added: 1 }, true)).toBe('A newer version already in use was taken on')
+    expect(checkReport({ new_lines: ['openai:gpt-7'], added: 1 }, true)).toBe('1 new model found')
+    expect(checkReport({ new_lines: ['openai:gpt-7'], added: 1, sources: [{ state: 'limited' }] }, true)).toBe('1 new model found. Discovery was partial: not every model could be read')
+    expect(checkReport({ new_lines: ['a', 'b'], sources: [{ state: 'stale' }] }, true)).toBe('2 new models found. Discovery was incomplete: some model lists could not be checked')
+    expect(checkReport({}, false)).toBe('Checked · vendor model lists are off, so nothing new could be found')
+    expect(checkReport({ sources: [{ state: 'fresh' }] }, true)).toBe('Up to date · nothing new')
+    expect(checkReport({ new_lines: ['openai:gpt-7'], added: 1 }, true)).not.toContain('taken on')
+    expect(checkReport({ added: 2, sources: [{ state: 'stale' }] }, true)).not.toContain('Up to date')
+    expect(checkReport({ added: 2, sources: [{ state: 'stale' }] }, true)).toBe('2 newer versions already in use were taken on. Discovery was incomplete: some model lists could not be checked')
   })
   it('names where a model is used, and who for', () => {
     const kinds = { backend: 'Backend build' }

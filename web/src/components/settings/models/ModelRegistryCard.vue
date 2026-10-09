@@ -10,9 +10,9 @@ import { toast } from '../../../lib/toast'
 import { listWorkKinds } from '../../../lib/workKinds'
 import { useSession } from '../../../stores/session'
 import {
-  RegistryError, UNDONE_REASON, addLine, buildLines, changeOf, checkNow, cooldownLabel, draftOf, editLine, emptyDraft, getRefreshStatus, hasErrors, intervalLabel, lastChecked, lineWriteOf,
-  listProfiles, metaParts, modelSlug, previewRemoval, putRefreshSettings, removeLine, restoreLine, shortDate, splitLevels, useText, validateDraft,
-  type DraftErrors, type LineDraft, type LineUsage, type RefreshStatus, type RegistryLine, type RegistryProfile,
+  RegistryError, REMOVED_REASON, UNDONE_REASON, addLine, buildLines, changeOf, checkNow, checkReport, cooldownLabel, draftOf, editLine, emptyDraft, getRefreshStatus, hasErrors, intervalLabel, lastChecked, lineWriteOf,
+  listProfiles, metaParts, modelSlug, previewRemoval, putRefreshSettings, removalText, removeLine, restoreLine, shortDate, splitLevels, validateDraft,
+  type DraftErrors, type LineDraft, type LinePick, type LineUsage, type RefreshStatus, type RegistryLine, type RegistryProfile, type WriteScope,
 } from '../../../lib/modelRegistry'
 
 // Settings › Models › Model registry (AEON-1012). Admins edit, everyone else reads.
@@ -40,6 +40,7 @@ const now = ref(Date.now()), cooldownUntil = ref(0), checking = ref(false)
 const editing = ref<'new' | string | null>(null)   // 'new' or a line key
 const draft = ref<LineDraft>(emptyDraft()), errors = ref<DraftErrors>({}), saving = ref(false), formError = ref('')
 const question = ref<RemoveQuestion | null>(null)
+let revisionWait: Promise<string> | null = null
 type EditorHandle = { focusName(): void; focusFor(found: DraftErrors): void }
 let editor: EditorHandle | null = null, opener: HTMLElement | null = null, ticker: ReturnType<typeof setInterval> | undefined, questionTurn = 0
 const bindEditor = (el: unknown) => { editor = el as EditorHandle | null }
@@ -93,10 +94,9 @@ function toggleAuto() {
 function check() {
   if (checking.value || cooling.value || !refreshable.value) return
   checking.value = true; stripError.value = ''
-  void scope.run(({ after }) => after(checkNow(), found => after(reload(), () => {
+  void scope.run(({ after, signal }) => after(checkNow(signal), found => after(reload(), () => {
     startCooldown(COOLDOWN_MS)
-    const fresh = found.new_lines?.length ?? 0
-    toast(fresh ? `${fresh} new ${fresh === 1 ? 'model' : 'models'} found` : status.value?.settings.api_enabled === false ? 'Checked · vendor model lists are off, so nothing new could be found' : 'Up to date · nothing new')
+    toast(checkReport(found, status.value?.settings.api_enabled !== false))
   })), {
     failed: error => {
       if (error instanceof RegistryError && error.status === 429) startCooldown((error.retryAfter ?? 300) * 1000)
@@ -115,13 +115,43 @@ function openEditor(key: 'new' | string, trigger: HTMLElement | null) {
   if (editing.value === key) { closeEditor(true); return }
   const line = key === 'new' ? null : lineOf(key)
   if (key !== 'new' && !line) return
-  closeQuestion(); opener = trigger; editing.value = key; draft.value = line ? draftOf(line) : emptyDraft(); errors.value = {}; formError.value = ''
+  closeQuestion(); opener = trigger; editing.value = key; draft.value = line ? draftOf(line) : emptyDraft(); errors.value = {}; formError.value = ''; revisionWait = null
+  if (line) captureRevision(line)
   void nextTick(() => editor?.focusName())
 }
 function closeEditor(restoreFocus: boolean) {
   const back = opener
-  editing.value = null; errors.value = {}; formError.value = ''; closeQuestion(); opener = null
+  editing.value = null; errors.value = {}; formError.value = ''; closeQuestion(); opener = null; revisionWait = null
   if (restoreFocus && back) void nextTick(() => { if (back.isConnected) back.focus() })
+}
+// The revision belongs to the line on screen when Edit opened, not to a later read taken at Save.
+function captureRevision(line: RegistryLine) {
+  const key = line.key
+  let settled = false
+  const pending = new Promise<string>((resolve, reject) => {
+    const finish = (error?: unknown, value?: string) => {
+      if (settled) return
+      settled = true
+      if (error) reject(error)
+      else resolve(value ?? '')
+    }
+    void scope.run(({ after, signal }) => {
+      if (signal.aborted) { finish(new Error('The person or workspace changed.')); return Promise.resolve(undefined) }
+      const abort = () => finish(new Error('The person or workspace changed.'))
+      signal.addEventListener('abort', abort, { once: true })
+      return after(previewRemoval(line.harness, line.model, signal), usage => {
+        signal.removeEventListener('abort', abort)
+        if (editing.value !== key) { finish(new Error('The editor moved on.')); return }
+        finish(undefined, usage.revision)
+      })
+    }, { failed: error => finish(error) })
+  })
+  void pending.catch(() => {})
+  revisionWait = pending
+}
+function writeScope(signal: AbortSignal): WriteScope {
+  const owner = scopeKey.value
+  return { signal, live: () => scopeKey.value === owner }
 }
 // An answer belongs to the entry it was asked for: if the person has moved to another form since, that form is left alone.
 const stillOn = (key: string | null) => editing.value === key
@@ -130,8 +160,8 @@ function failure(error: unknown) {
   if (error instanceof RegistryError && error.status === 403) return 'You can’t change models. Ask a workspace admin.'
   return error instanceof Error && error.message ? `It could not be saved: ${error.message}.` : 'It could not be saved. Try again.'
 }
-function undo(work: () => Promise<unknown>) {
-  void scope.run(({ after }) => after(work(), () => after(reload(), () => { toast('Undone') })), { failed: () => { toast('It could not be undone. Reload and check the list.', { tone: 'error' }); void reload() } })
+function undo(work: (scope: WriteScope) => Promise<unknown>) {
+  void scope.run(({ after, signal }) => after(work(writeScope(signal)), () => after(reload(), () => { toast('Undone') })), { failed: () => { toast('It could not be undone. Reload and check the list.', { tone: 'error' }); void reload() } })
 }
 
 function save() {
@@ -149,23 +179,44 @@ function save() {
     if (!changeOf(line, write)) { saving.value = false; closeEditor(true); return }
     const back = lineWriteOf(draftOf(line), line)
     const key = line.key
-    void scope.run(({ after }) => after(editLine(line.harness, line.model, write), () => after(reload(), () => {
-      if (stillOn(key)) closeEditor(true)
-      // Undo writes the earlier values back as another version; it never rewrites history.
-      toast('Saved', { action: { label: 'Undo', run: () => undo(() => editLine(line.harness, write.model ?? line.model, { ...back, ...(write.model ? { model: line.model } : {}) })) } })
-    })), { failed: error => { if (stillOn(key)) formError.value = failure(error) }, settled: () => { saving.value = false } })
+    const pending = revisionWait
+    void scope.run(({ after, signal }) => after(pending ?? Promise.reject(new RegistryError(502, 'The registry revision is not available.')), revision => {
+      if (!revision) throw new RegistryError(502, 'The registry revision is not available.')
+      const body = { ...write, revision }
+      return after(editLine(line.harness, line.model, body, signal), saved => after(reload(), () => {
+        if (stillOn(key)) closeEditor(true)
+        // Undo writes the earlier values back as another version, at the revision this edit produced.
+        if (!saved.revision) { toast('Saved. Undo is unavailable because the registry did not confirm its revision.', { tone: 'error' }); return }
+        const undoRevision = saved.revision
+        toast('Saved', { action: { label: 'Undo', run: () => undo(scope => editLine(line.harness, body.model ?? line.model, { ...back, ...(body.model ? { model: line.model } : {}), revision: undoRevision }, scope.signal)) } })
+      }))
+    }), {
+      failed: error => {
+        if (error instanceof RegistryError && error.status === 409) {
+          toast('This model changed somewhere else. The list was reloaded; review it before saving again.', { tone: 'error' })
+          if (stillOn(key)) closeEditor(false)
+          void reload()
+          return
+        }
+        if (stillOn(key)) formError.value = failure(error)
+      },
+      settled: () => { saving.value = false },
+    })
     return
   }
-  void scope.run(({ after }) => after(addLine(written), added => after(reload(), () => {
+  void scope.run(({ after, signal }) => after(addLine(written, new Date(), writeScope(signal)), added => after(reload(), () => {
     if (added.failed) {
       // The first level exists; the person finishes the rest from its own Edit.
       if (!stillOn('new')) { toast(`${written.name.trim()} was added with its first level only. Open its Edit to add the rest.`, { tone: 'error' }); return }
       editing.value = `${written.harness}\u0000${modelSlug(written)}`
+      // The form is now an edit of the line that exists. Save must send the revision captured with that line.
+      const created = lineOf(editing.value)
+      if (created) captureRevision(created)
       formError.value = `Added with its first level only. The rest could not be saved: ${added.failed}. Save again to add the rest.`
       return
     }
     if (stillOn('new')) closeEditor(true)
-    toast('Saved', { action: { label: 'Undo', run: () => undo(async () => { const result = await removeLine(added.profiles.map(profile => profile.id), UNDONE_REASON); if (result.error) throw new Error(result.error) }) } })
+    toast('Saved', { action: { label: 'Undo', run: () => undo(async scope => { const result = await removeLine(added.profiles.map(profile => profile.id), UNDONE_REASON, scope); if (result.error) throw new Error(result.error) }) } })
   })), { failed: error => { if (stillOn('new')) formError.value = failure(error) }, settled: () => { saving.value = false } })
 }
 
@@ -186,28 +237,26 @@ function retryRemove() { closeQuestion(); askRemove() }
 async function kindLabels(signal: AbortSignal): Promise<Record<string, string>> {
   try { return Object.fromEntries((await listWorkKinds(signal)).items.map(kind => [kind.slug, kind.label])) } catch { return {} }
 }
+function replacementName(pick: LinePick): string {
+  if (!pick.model) return pick.line ?? ''
+  return lines.value.find(other => other.harness === pick.harness && other.model === pick.model)?.name ?? pick.model
+}
 function previewText(line: RegistryLine, usage: LineUsage, kinds: Record<string, string>): string {
-  const me = session.identity?.principal.id ?? ''
-  const auto = line.source === 'auto' ? ' Auto-update won’t add it back.' : ''
-  const hidden = usage.incomplete ? ' Other people’s choices are not shown.' : ''
-  if (!usage.used_by.length) return `Remove ${line.name}? ${usage.incomplete ? 'Nothing you can see uses it.' : 'Nothing uses it.'}${hidden && usage.incomplete ? hidden : ''}${auto}`
-  const successor = usage.replacement.model ? lines.value.find(other => other.harness === usage.replacement.harness && other.model === usage.replacement.model)?.name ?? usage.replacement.model : ''
-  const uses = [...new Set(usage.used_by.map(use => useText(use, kinds, me)))].join(', ')
-  return `${line.name} is in use: ${uses}. ${successor ? `${successor} takes over there.` : 'The next model in line takes over there.'}${hidden}${auto}`
+  return removalText(line.name, line.source, usage, kinds, session.identity?.principal.id ?? '', replacementName)
 }
 function remove() {
   const line = editedLine.value, current = question.value
   if (!line || current?.state !== 'ready' || current.removing || !manageable.value) return
   const turn = questionTurn, key = line.key
   question.value = { ...current, removing: true }
-  void scope.run(({ after }) => after(removeLine(line.profileIds), result => after(reload(), () => {
+  void scope.run(({ after, signal }) => after(removeLine(line.profileIds, REMOVED_REASON, writeScope(signal)), result => after(reload(), () => {
     if (result.error) {
       if (turn === questionTurn) closeQuestion()
       if (stillOn(key)) formError.value = `Only ${result.done.length} of ${line.profileIds.length} levels were removed: ${result.error}. Remove it again to finish.`
       return
     }
     if (stillOn(key)) closeEditor(true)
-    toast(`Removed ${line.name}`, { action: { label: 'Undo', run: () => undo(async () => { const failed = await restoreLine(result.done); if (failed) throw new Error(failed) }) } })
+    toast(`Removed ${line.name}`, { action: { label: 'Undo', run: () => undo(async scope => { const failed = await restoreLine(result.done, scope); if (failed) throw new Error(failed) }) } })
   })), { failed: error => { if (turn === questionTurn) closeQuestion(); if (stillOn(key)) formError.value = failure(error) } })
 }
 

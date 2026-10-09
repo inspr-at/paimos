@@ -14,12 +14,12 @@ export interface RegistryWorld {
   profiles: MockProfile[]; permissions: string[]
   settings: { agent_reports_enabled: boolean; auto_add_profiles: boolean; api_enabled: boolean; interval_minutes: number }
   lastRun: string | null; writes: Write[]; reads: string[]
-  /** What the next POST /models/refresh answers: success with new lines, a 429 or a 500. */
-  check: { status: 200 | 429 | 500; retryAfter?: number; newLines?: string[] }
-  failPut: boolean; failSettings: boolean; failUsage: boolean; failRetireAfter: number | null; failList: boolean
+  /** What the next POST /models/refresh answers: success with new lines, a 429 or a 500. `added` counts profiles taken on, including successors that are not new lines. */
+  check: { status: 200 | 429 | 500; retryAfter?: number; newLines?: string[]; added?: number; sources?: { state: string; vendor?: string; account_id?: string; seen?: number }[] }
+  failPut: boolean; conflictPut: boolean; failSettings: boolean; failUsage: boolean; failRetireAfter: number | null; failList: boolean
   /** While set, retire answers wait for it: a barrier that holds a removal in flight. */
   gateRetire: Promise<void> | null
-  usage: { used_by: { column: string; layer: string; person?: string; replacement: { line: string; effort: string; harness: string; model: string } }[]; incomplete: boolean }
+  usage: { used_by: { column: string; layer: string; person?: string; replacement: { line: string | null; effort: string | null; harness?: string; model?: string } }[]; incomplete: boolean }
 }
 const LEVELS: Record<string, number | null> = { off: 0, low: 1, medium: 2, high: 3, xhigh: 4, max: 5, default: null }
 let counter = 0
@@ -50,7 +50,7 @@ export function registryWorld(over: Partial<RegistryWorld> = {}): RegistryWorld 
   return {
     profiles: registryProfiles(), permissions: ['models.read', 'models.manage', 'models.refresh'],
     settings: { agent_reports_enabled: true, auto_add_profiles: true, api_enabled: true, interval_minutes: 360 }, lastRun: '2026-10-09T04:12:00Z', writes: [], reads: [],
-    check: { status: 200 }, failPut: false, failSettings: false, failUsage: false, failRetireAfter: null, failList: false, gateRetire: null,
+    check: { status: 200 }, failPut: false, conflictPut: false, failSettings: false, failUsage: false, failRetireAfter: null, failList: false, gateRetire: null,
     usage: { used_by: [], incomplete: false }, ...over,
   }
 }
@@ -78,7 +78,7 @@ export async function mockRegistry(page: Page, world: RegistryWorld, options: { 
       if (world.check.status === 429) return route.fulfill({ status: 429, headers: { 'Retry-After': String(world.check.retryAfter ?? 300) }, json: { error: 'model refresh cooldown', retry_after: world.check.retryAfter ?? 300 } })
       if (world.check.status === 500) return route.fulfill({ status: 500, json: { error: 'refresh failed' } })
       world.lastRun = new Date().toISOString()
-      return route.fulfill({ json: { new_lines: world.check.newLines ?? [] } })
+      return route.fulfill({ json: { new_lines: world.check.newLines ?? [], ...(world.check.added === undefined ? {} : { added: world.check.added }), ...(world.check.sources ? { sources: world.check.sources } : {}) } })
     }
     if (path === '/models/refresh/settings' && method === 'PUT') {
       if (world.failSettings) return route.fulfill({ status: 500, json: { error: 'settings failed' } })
@@ -90,6 +90,7 @@ export async function mockRegistry(page: Page, world: RegistryWorld, options: { 
       const harness = decode(line[1]!), model = decode(line[2]!)
       if (line[3]) return world.failUsage ? route.fulfill({ status: 500, json: { error: 'usage failed' } }) : route.fulfill({ json: { ...world.usage, replacement: world.usage.used_by[0]?.replacement ?? { line: null, effort: null }, revision: 'r1' } })
       if (world.failPut) return route.fulfill({ status: 422, json: { error: 'provider route does not match model namespace' } })
+      if (world.conflictPut) return route.fulfill({ status: 409, json: { error: 'stale registry revision' } })
       const before = world.profiles.filter(profile => sameLine(profile, harness, model))
       if (!before.length) return route.fulfill({ status: 404, json: { error: 'model line not found' } })
       before.forEach(profile => { profile.retired = true })

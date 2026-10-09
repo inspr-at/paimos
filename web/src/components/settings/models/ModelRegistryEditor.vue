@@ -83,9 +83,11 @@ defineExpose({ focusName: () => root.value?.querySelector<HTMLElement>('[data-re
 
     <span :id="`${uid}-lv`" class="fl">Thinking levels</span>
     <div class="fv">
-      <div class="chips" role="group" :aria-labelledby="`${uid}-lv`">
-        <span v-for="(level, index) in draft.efforts" :key="level" class="chip">{{ level }}<button type="button" class="chip-x" :aria-label="`Remove level ${level}`" @click="removeLevel(index)"><AppIcon name="close" :size="11" /></button></span>
-        <input class="chip-in" data-reg-level placeholder="Add a level, Enter" aria-label="Add a thinking level (its own name)" spellcheck="false" autocomplete="off" :value="draft.level" :aria-invalid="!!errors.efforts" :aria-describedby="`${uid}-lv-h`" @input="patch({ level: typed($event) })" @keydown="levelKey" @blur="commitLevels">
+      <div class="levels" role="group" :aria-labelledby="`${uid}-lv`">
+        <div class="chip-scroll">
+          <span v-for="(level, index) in draft.efforts" :key="level" class="chip">{{ level }}<button type="button" class="chip-x" :aria-label="`Remove level ${level}`" @click="removeLevel(index)"><AppIcon name="close" :size="11" /></button></span>
+        </div>
+        <input class="chip-in" data-reg-level placeholder="Add a level" aria-label="Add a thinking level (its own name)" spellcheck="false" autocomplete="off" :value="draft.level" :aria-invalid="!!errors.efforts" :aria-describedby="`${uid}-lv-h`" @input="patch({ level: typed($event) })" @keydown="levelKey" @blur="commitLevels">
       </div>
       <p :id="`${uid}-lv-h`" class="slot" :class="{ err: errors.efforts }">{{ errors.efforts || 'The model’s own names, lowest first, e.g. low · medium · high · xhigh.' }}</p>
     </div>
@@ -128,12 +130,15 @@ defineExpose({ focusName: () => root.value?.querySelector<HTMLElement>('[data-re
 .via { font-size: 13px; color: var(--ink-3); }
 .slot { min-height: 20px; margin-top: 4px; font-size: 12px; line-height: 1.45; color: var(--ink-3); }
 .slot.err { color: var(--danger); }
-.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 38px; padding: 4px 6px; border-radius: var(--radius-s); background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); }
-.chips:focus-within { box-shadow: var(--field-inset), 0 0 0 1px var(--teal); }
-.chip { display: inline-flex; align-items: center; gap: 2px; height: 28px; padding: 0 2px 0 10px; border-radius: 999px; background: var(--surface-sunken); font: 500 12px/1 var(--mono); color: var(--ink); }
+/* One field-height row. Chips scroll sideways; the input keeps its own column, so adding or removing a level cannot move it, the note, or the actions. */
+.levels { display: grid; grid-template-columns: minmax(0, 1fr) 190px; align-items: center; height: 38px; padding: 0 6px; border-radius: var(--radius-s); background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); overflow: hidden; }
+.levels:focus-within { box-shadow: var(--field-inset), 0 0 0 1px var(--teal); }
+.chip-scroll { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; height: 38px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.chip-scroll::-webkit-scrollbar { display: none; }
+.chip { display: inline-flex; flex: none; align-items: center; gap: 2px; height: 28px; padding: 0 2px 0 10px; border-radius: 999px; background: var(--surface-sunken); font: 500 12px/1 var(--mono); color: var(--ink); white-space: nowrap; }
 .chip-x { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--ink-3); }
 .chip-x:hover { background: var(--row-hover); color: var(--ink); }
-.chip-in { flex: 1; min-width: 140px; height: 28px; padding: 0 6px; border: 0; background: transparent; color: var(--ink); font: 500 12.5px/1 var(--mono); }
+.chip-in { box-sizing: border-box; width: 100%; min-width: 0; height: 28px; padding: 0 6px; border: 0; background: transparent; color: var(--ink); font: 500 12.5px/1 var(--mono); }
 .chip-in:focus-visible { outline: none; }
 .ed-foot, .ed-confirm, .ed-msg { grid-column: 1 / -1; }
 .ed-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--line); }
