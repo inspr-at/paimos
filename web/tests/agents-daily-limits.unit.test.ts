@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, ref, type EffectScope } from 'vue'
 import type { PlanSnapshot } from '../src/lib/agentsWorking'
 import {
-  atLimitWords, boostNumber, chipTip, dailyBar, dailyOf, dailyView, makeBoost, needsAttention, paceSummary, resetsLine, sameDaily, stateWords, todayLine, typedPercent, typedPoints, usageLine, weekParts,
+  atLimitWords, boostNumber, chipTip, dailyBar, dailyOf, dailyView, detailHeadline, makeBoost, needsAttention, paceSummary, resetsLine, sameDaily, stateWords, todayLine, typedPercent, typedPoints, usageLine, weekParts,
   type DailyAccount, type DailySettings, type DailyState,
 } from '../src/lib/dailyLimits'
 import { DEFAULT_DIAL, readDialPrefs, selectedHarness, withDialDefaults } from '../src/lib/dialPrefs'
@@ -48,6 +48,15 @@ describe('what the dial may say about a daily reading', () => {
     expect(view(state({ state: 'at_limit' }, [account({ used_pct: 51 }), account({ account_id: 'a2', used_pct: null, limit_used_pct: null })])).kind).toBe('unknown')
     expect(view(state({ state: 'at_limit' }, [account({ used_pct: 51 }), account({ account_id: 'a2', used_pct: 52 })])).kind).toBe('at_limit')
   })
+  it('does not turn a stale, expired or unknown reading above the ceiling into the red limit', () => {
+    for (const freshness of ['stale', 'expired', 'unknown'] as const) {
+      const old = view(state({ state: 'at_limit' }, [account({ used_pct: 51, limit_used_pct: 50, freshness })]))
+      expect(old.kind, freshness).toBe('unknown'); expect(needsAttention(old), freshness).toBe(false); expect(stateWords(old), freshness).toBe('Usage not measured right now')
+      expect(chipTip(old, 'at most 2'), freshness).toBe('Claude · at most 2 · usage not measured right now')
+    }
+    // One fresh account at its limit does not make up for another account whose reading is old.
+    expect(view(state({ state: 'at_limit' }, [account({ used_pct: 51 }), account({ account_id: 'a2', used_pct: 52, freshness: 'stale' })])).kind).toBe('unknown')
+  })
   it('keeps the usage line to the limit, and says no daily limit for a billed-by-use harness and for everything', () => {
     expect(usageLine(view(state()))).toBe('≤ 50 % used today')
     expect(usageLine(view(state({ state: 'no_limit' }, [account({ no_daily_limit: true, used_pct: null })])))).toBe('no daily limit')
@@ -55,6 +64,20 @@ describe('what the dial may say about a daily reading', () => {
     const all = view(state({ limit_used_pct: 100 }), settings({ pace: { mode: 'everything', points_per_day: null } }))
     expect(all.kind).toBe('everything'); expect(usageLine(all)).toBe('no daily limit'); expect(stateWords(all)).toBe('Uses everything before the reset')
     expect(all.share).toBeNull()
+  })
+  it('keeps the ceiling of an active Boost under use everything, since the server enforces it', () => {
+    const everything = { mode: 'everything', points_per_day: null } as const
+    const boosted = view(state({ limit_used_pct: 60, today_points_used: 7, today_points_allowed: 20 }, [account({ limit_used_pct: 60 })]), settings({ pace: everything, boost_today: makeBoost(60, 'used', '2026-10-09T22:00:00Z') }))
+    expect(boosted.limit).toBe(60); expect(boosted.kind).toBe('on_pace')
+    expect(usageLine(boosted)).toBe('≤ 60 % used today'); expect(detailHeadline(boosted)).toBe('Claude · daily limit: up to 60 % used')
+    expect(stateWords(boosted)).toBe('Within today’s limit'); expect(chipTip(boosted, 'at most 2')).toBe('Claude · at most 2 · ≤ 60 % used today · within today’s limit')
+    expect(needsAttention(boosted)).toBe(false)
+    // Reaching the Boost's ceiling is the limit, as for any other day.
+    const reached = view(state({ state: 'at_limit', limit_used_pct: 60, today_points_used: 21, today_points_allowed: 20 }, [account({ used_pct: 61, limit_used_pct: 60 })]), settings({ pace: everything, boost_today: makeBoost(60, 'used', '2026-10-09T22:00:00Z') }))
+    expect(reached.kind).toBe('at_limit')
+    // Without a Boost nothing limits it, and without a daily limit the words say so.
+    const free = view(state({ limit_used_pct: 100 }), settings({ pace: everything }))
+    expect(free.kind).toBe('everything'); expect(usageLine(free)).toBe('no daily limit'); expect(detailHeadline(free)).toBe('Claude · no daily limit')
   })
   it('words what happens at the limit without inventing a ladder', () => {
     const base = state({ state: 'at_limit' }, [account({ used_pct: 51 })])

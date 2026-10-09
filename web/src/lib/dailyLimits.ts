@@ -72,7 +72,8 @@ export function dailyView(harness: string, settings: DailySettings, state: Daily
   const account = accounts.find(a => a.account_id === state.active_account_id) ?? accounts[0]!
   const view: DailyView = { ...base, kind: 'unknown', account, next: state.next_on_ladder, editable: accounts.every(a => a.can_edit === true && !a.details_redacted) }
   if (state.state === 'no_limit') return { ...view, kind: 'no_limit' }
-  const measured = (a: DailyAccount) => finite(a.used_pct) && finite(a.limit_used_pct) && !a.details_redacted
+  // Only a fresh reading proves a limit: the server counts a stale one as at_limit too, and its numbers may be old.
+  const measured = (a: DailyAccount) => finite(a.used_pct) && finite(a.limit_used_pct) && !a.details_redacted && a.freshness === 'fresh'
   const read = account.details_redacted ? null : account
   const known = read && finite(read.used_pct)
   const out: DailyView = {
@@ -87,7 +88,8 @@ export function dailyView(harness: string, settings: DailySettings, state: Daily
   }
   if (state.state === 'at_limit') return { ...out, kind: accounts.every(measured) && accounts.every(a => a.used_pct! >= a.limit_used_pct!) ? 'at_limit' : 'unknown' }
   if (out.limit === null || out.used === null) return { ...out, kind: 'unknown' }
-  if (settings.pace.mode === 'everything') return { ...out, kind: 'everything' }
+  // An active Boost still caps "use everything": the server enforces its ceiling, so the dial keeps that number.
+  if (settings.pace.mode === 'everything' && !settings.boost_today) return { ...out, kind: 'everything' }
   return { ...out, kind: state.state === 'over_pace' && out.over > 0 ? 'over_pace' : 'on_pace' }
 }
 
@@ -100,12 +102,14 @@ export function atLimitWords(v: DailyView, short = false): string {
   if (v.next) return short ? `${name(v.next)} next` : `${name(v.next)} next on the model ladder`
   return short ? 'follows the model ladder' : 'new work follows the model ladder'
 }
+/** On pace; under "use everything" with a Boost there is no pace, only today's limit. */
+const withinWords = (v: DailyView, capital = false) => v.share === null ? (capital ? 'Within today’s limit' : 'within today’s limit') : capital ? 'On pace' : 'on pace'
 /** The pace line of a harness row and of the detail; empty only where there is nothing to say. */
 export function stateWords(v: DailyView, short = false): string {
   switch (v.kind) {
     case 'at_limit': return `At today’s limit · ${atLimitWords(v, short)}`
     case 'over_pace': return `${points(v.over)} over pace`
-    case 'on_pace': return 'On pace'
+    case 'on_pace': return withinWords(v, true)
     case 'everything': return 'Uses everything before the reset'
     case 'no_limit': return 'Nothing to pace'
     case 'unknown': return 'Usage not measured right now'
@@ -121,7 +125,7 @@ export function usageLine(v: DailyView): string {
 export function chipTip(v: DailyView, limitWords: string): string {
   const head = `${name(v.harness)} · ${limitWords}`
   if (v.kind === 'at_limit') return `${head} · at today’s limit · ${atLimitWords(v, true)}`
-  if (v.kind === 'on_pace' || v.kind === 'over_pace') return `${head} · ≤ ${pct(v.limit!)} % used today · ${v.kind === 'on_pace' ? 'on pace' : `${points(v.over)} over pace`}`
+  if (v.kind === 'on_pace' || v.kind === 'over_pace') return `${head} · ≤ ${pct(v.limit!)} % used today · ${v.kind === 'on_pace' ? withinWords(v) : `${points(v.over)} over pace`}`
   if (v.kind === 'unknown') return `${head} · usage not measured right now`
   return `${head} · ${v.kind === 'none' ? 'no account to read' : 'no daily limit'}`
 }
