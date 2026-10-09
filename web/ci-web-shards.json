@@ -524,6 +524,8 @@
         ,
         {"file":"tests/models-expert.spec.ts","listedTests":8,"weightSeconds":17,"weightSource":"AEON-881 focused Expert behavior and viewport evidence estimate"}
         ,
+        {"file":"tests/models-registry.spec.ts","listedTests":26,"weightSeconds":22,"weightSource":"AEON-1012 fix3 adds the revision-snapshot spec to the fix2 16.0s run"}
+        ,
         {"file":"tests/models-setup.spec.ts","listedTests":1,"weightSeconds":25,"weightSource":"AEON-882 focused atomic setup, identity and stability evidence estimate"}
         ,
         {"file":"tests/policy-editors.spec.ts","listedTests":32,"weightSeconds":73,"weightSource":"local-single-worker-AEON-879-60.8s-plus-margin"}

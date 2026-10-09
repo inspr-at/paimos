@@ -1,10 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
 import AppIcon from '../../AppIcon.vue'
 import HoverText from './HoverText.vue'
-import ModelRefreshSettings from '../ModelRefreshSettings.vue'
 import { can, onAccessChange } from '../../../lib/authz'
 import { createScope, scopeOwner } from '../../../lib/identityScope'
 import { useSession } from '../../../stores/session'
@@ -13,7 +11,6 @@ import { localizeColumn, type BoardColumn } from '../../../lib/modelsBoard'
 import type { BoardEvidence } from '../../../lib/modelsSettings'
 import type { PrefProfile } from '../../../lib/modelPrefs'
 const props = defineProps<{ columns: BoardColumn[]; person?: string | null; project?: string; german: boolean }>()
-const route = useRoute()
 const session = useSession(), owner = computed(() => scopeOwner(session.identity) ? `${session.identity!.tenant.id}/${props.person || session.identity!.principal.id}` : '')
 const text = (en: string, de: string) => props.german ? de : en
 const folds = ref<string[]>([]), kind = ref(''), evidence = ref<BoardEvidence | null>(null), error = ref(''), loading = ref(false)
@@ -22,7 +19,6 @@ const scope = createScope(() => session.authenticationCurrent() && can('models.r
 const storageKey = computed(() => `models-page/${owner.value}/proof`)
 function persist() { if (!owner.value) return; try { localStorage.setItem(storageKey.value, JSON.stringify({ folds: folds.value, kind: kind.value })) } catch { /* Storage is optional. */ } }
 function toggle(id: string) { folds.value = folds.value.includes(id) ? folds.value.filter(value => value !== id) : [...folds.value, id]; persist() }
-function revealRefresh() { if (route.hash === '#model-refresh') folds.value = [...new Set([...folds.value, 'more', 'fresh'])] }
 function load(cursor?: string) {
   loading.value = true; error.value = ''
   const selected = kind.value, project = props.project
@@ -35,10 +31,8 @@ function load(cursor?: string) {
 }
 watch(owner, () => {
   scope.reset(); folds.value = []; kind.value = ''; evidence.value = null; profiles.value = []; catalogNote.value = ''; error.value = ''; loading.value = false
-  try { const saved = JSON.parse(localStorage.getItem(storageKey.value) || '{}'); if (Array.isArray(saved.folds)) folds.value = saved.folds.filter((id: unknown) => ['more', 'proof', 'fresh', 'watch'].includes(String(id))); if (typeof saved.kind === 'string' && saved.kind.length <= 48) kind.value = saved.kind } catch { /* Start closed. */ }
-  revealRefresh()
+  try { const saved = JSON.parse(localStorage.getItem(storageKey.value) || '{}'); if (Array.isArray(saved.folds)) folds.value = saved.folds.filter((id: unknown) => ['more', 'proof', 'watch'].includes(String(id))); if (typeof saved.kind === 'string' && saved.kind.length <= 48) kind.value = saved.kind } catch { /* Start closed. */ }
 }, { immediate: true, flush: 'sync' })
-watch(() => route.hash, revealRefresh)
 watch([kind, () => props.project, () => folds.value.includes('more') && folds.value.includes('proof')], ([,,open]) => { lane.cancel(); evidence.value = null; loading.value = false; if (open) load() }, { immediate: true })
 const stop = onAccessChange(() => { scope.reset(); evidence.value = null; loading.value = false; if (folds.value.includes('proof') && can('models.read', props.project)) load() })
 onBeforeUnmount(() => { scope.dispose(); stop() })
@@ -61,8 +55,6 @@ function chosenBy(item: BoardEvidence['items'][number]) { return item.preference
         <p v-if="error" role="alert">{{ error }}</p><p v-else-if="loading" role="status">{{ text('Loading run records…', 'Laufdaten werden geladen…') }}</p>
         <template v-else><p v-if="catalogNote" class="small" role="status">{{ catalogNote }}</p><section v-for="group in groups" :key="group.source" class="run-group"><h3>{{ group.label }}</h3><p class="small">{{ group.source === 'run' ? text('PAIMOS run records · for whom, and whose board or which rule chose', 'PAIMOS-Laufdaten · für wen, und wessen Board oder welche Regel wählte') : text('Harness sessions · reported by the launcher · not driven by this page until Engine Wave 2', 'Harness-Sitzungen · vom Starter gemeldet · bis Engine Wave 2 nicht von dieser Seite gesteuert') }}</p><p v-if="!group.items.length" class="empty">{{ group.source === 'run' ? text('No PAIMOS-dispatched runs recorded yet', 'Noch keine von PAIMOS gestarteten Läufe') : text('No harness sessions recorded yet', 'Noch keine Harness-Sitzungen erfasst') }}</p><ol v-else class="runs"><li v-for="item in group.items" :key="item.id"><time>{{ new Date(item.at).toLocaleString(german ? 'de' : 'en') }}</time><span>{{ columns.find(column => column.column === item.kind) ? localizeColumn(columns.find(column => column.column === item.kind)!, german).label : item.kind }} · {{ text('for', 'für') }} {{ personLabel(item.for_person) }}</span><span>{{ modelLabel(item) }}</span><span>{{ chosenBy(item) }}</span><span>{{ item.agreement === 'matches' ? text('Agrees with the recorded choice', 'Stimmt mit der erfassten Auswahl überein') : item.agreement === 'differs' ? text('Differs', 'Weicht ab') : text('Agreement not verified', 'Übereinstimmung nicht geprüft') }}</span></li></ol></section><p v-if="evidence?.next_cursor" class="small">{{ text('More records are available. This page shows up to 50.', 'Weitere Einträge sind verfügbar. Diese Seite zeigt bis zu 50.') }}</p></template>
       </div>
-      <button type="button" class="fold" :aria-expanded="folds.includes('fresh')" aria-controls="models-freshness" @click="toggle('fresh')"><AppIcon name="chevron-right" :size="14" :class="{ open: folds.includes('fresh') }" /><b>{{ text('Catalog freshness', 'Aktualität des Katalogs') }}</b></button>
-      <div v-if="folds.includes('fresh')" id="models-freshness" class="fold-body"><p class="small">{{ text('Cards are model lines: a new version of a line takes its place by itself.', 'Karten sind Modelllinien: Eine neue Version einer Linie nimmt ihren Platz von selbst ein.') }}</p><ModelRefreshSettings :key="owner" :german="german" /></div>
       <button type="button" class="fold" :aria-expanded="folds.includes('watch')" aria-controls="models-watch" @click="toggle('watch')"><AppIcon name="chevron-right" :size="14" :class="{ open: folds.includes('watch') }" /><b>{{ text('Model watch', 'Modellbeobachtung') }}</b></button>
       <div v-if="folds.includes('watch')" id="models-watch" class="fold-body"><p>{{ text('Model watch proposals for ranked boards are not available in this release.', 'Vorschläge der Modellbeobachtung für geordnete Boards sind in diesem Release noch nicht verfügbar.') }}</p><p class="small">{{ text('Later: tweaks learned from 4 weeks of runs.', 'Später: Feinschliff aus 4 Wochen Läufen.') }}</p></div>
       <p class="links small"><RouterLink to="/settings/accounts">{{ text('Accounts and computers', 'Konten und Computer') }}</RouterLink> · <RouterLink to="/settings/policies">{{ text('Policies', 'Richtlinien') }}</RouterLink> · <RouterLink to="/agents">{{ text('Agents header', 'Agenten-Kopf') }}</RouterLink></p>

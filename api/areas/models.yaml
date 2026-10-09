@@ -79,7 +79,7 @@ paths:
       description: 'Requires models.refresh. Runs the deterministic refresh with tenant settings and vault credentials. Person-triggered checks bypass interval_minutes and share a five-minute per-tenant manual cooldown; 429 includes retry_after seconds and Retry-After. Agents and the scheduler retain interval_minutes. Vendor requests run after the reservation transaction commits, with a shared 30-second deadline, at most 5 pages and 500 identifiers per vendor, and 200 observations/profile additions per run. Accepts no profile, route, URL or credential writes. Optional API calls stay disabled until a person enables them. Every completed run writes one audit event; outages keep the last good catalog and mark that source stale.'
       security: *auth
       responses:
-        '200': {description: Refresh result, content: {application/json: {schema: {type: object, additionalProperties: true, properties: {new_lines: {type: array, maxItems: 200, items: {type: string}}}}}}}
+        '200': {description: Refresh result, content: {application/json: {schema: {type: object, additionalProperties: true, properties: {new_lines: {type: array, maxItems: 200, items: {type: string}}, added: {type: integer, minimum: 0, description: 'Profiles inserted by this run, including disabled discoveries and one profile per effort.'}, accepted_models: {type: array, maxItems: 200, items: {type: string}, description: 'Distinct board line ids whose newer version was accepted because the line is already in use. Absent when acceptance was not established.'}}}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         '429': {description: 'Manual cooldown or agent interval; retry_after is seconds.', headers: {Retry-After: {schema: {type: integer}}}, content: {application/json: {schema: {type: object, properties: {error: {type: string}, retry_after: {type: integer, minimum: 1, maximum: 300}}}}}}
@@ -304,7 +304,7 @@ components:
         revision: {type: string, maxLength: 64}
     ModelLineUsage:
       type: object
-      required: [used_by, replacement, revision, incomplete]
+      required: [used_by, replacement, revision, incomplete, line_profiles]
       properties:
         used_by:
           type: array
@@ -320,6 +320,7 @@ components:
         replacement: {$ref: '#/components/schemas/ModelSimplePick'}
         revision: {type: string}
         incomplete: {type: boolean}
+        line_profiles: {type: array, maxItems: 64, items: {$ref: '#/components/schemas/ModelProfile'}, description: 'Active profiles of this line, read in the same transaction as revision.'}
     ModelRoute:
       type: object
       required: [role, priority, profile_id, state]

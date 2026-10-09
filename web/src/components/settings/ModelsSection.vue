@@ -15,6 +15,7 @@ import KeyCap from '../KeyCap.vue'
 import { settingsSubmitKey } from '../../lib/settingsOverlays'
 import { setupAnswers, setupPatch, type SetupAnswers, type SetupPreview } from '../../lib/modelsSetup'
 import ProofFreshness from './models/ProofFreshness.vue'
+import ModelRegistryCard from './models/ModelRegistryCard.vue'
 import { useSession } from '../../stores/session'
 import { useProjects } from '../../stores/projects'
 import { can } from '../../lib/authz'
@@ -191,6 +192,7 @@ onBeforeUnmount(() => scope.dispose())
       </section>
       <section class="where" :aria-label="text('Where this applies', 'Wo das gilt')"><p v-if="coverageError" role="status">{{ coverageError }}</p><template v-else-if="coverage"><p class="coverage-row"><AppIcon :name="managedCoverage.length ? 'check' : 'info'" :size="14" /><b>{{ managedCoverage.length ? text('Runs PAIMOS starts follow this page', 'Läufe, die PAIMOS startet, folgen dieser Seite') : text('No managed runs report reading this page yet', 'Noch keine verwalteten Läufe melden, diese Seite zu lesen') }}</b><span>{{ coverageLabels }}</span></p><p class="coverage-row"><AppIcon :name="coverage.consumers.find(consumer => consumer.consumer === 'lead_harness')?.reads_board ? 'check' : 'info'" :size="14" /><b>{{ coverage.consumers.find(consumer => consumer.consumer === 'lead_harness')?.reads_board ? text('The Lead’s dispatcher too, since Engine Wave 2', 'Auch der Lead-Dispatcher, seit Engine Wave 2') : text('The Lead’s dispatcher does not, until Engine Wave 2', 'Der Lead-Dispatcher nicht, bis Engine Wave 2') }}</b></p></template><p v-else>{{ text('Checking where this applies…', 'Die Geltung wird geprüft…') }}</p></section>
       <p class="usage-link">{{ text('Usage per account, owners and floors:', 'Nutzung je Konto, Besitzer und Untergrenzen:') }} <RouterLink to="/settings/accounts">{{ text('Accounts and computers', 'Konten und Computer') }}</RouterLink></p>
+      <ModelRegistryCard />
       <ProofFreshness :columns="board?.columns || []" :person="canonicalPerson" :project="context.project" :german="german" />
     </section>
     <template #panel><div v-if="setupOpen" class="setup-content"><SetupAssistant v-if="setupSource && setupWorkspace && setupDraft" v-model="setupDraft" :source="setupSource" :workspace="setupWorkspace" :step="setupStep" :preview="setupPreview" :german="german" :busy="busy" /><p v-else role="status">{{ setupLoading ? text('Loading setup…', 'Einrichtung wird geladen…') : setupError }}</p><p v-if="error || setupError" class="setup-error" role="alert">{{ error || setupError }}</p></div><WhyPanel v-else :resolution="resolution" :reviewer="reviewer" :person="person" :error="resolutionError" :loading="resolving" :german="german" /></template>
