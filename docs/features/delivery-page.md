@@ -57,8 +57,11 @@ its coverage. Merge rounds count the scripted share (target 80 %, the server's "
 by a model" turned around). **Learn** keeps the proper terms (p50, p90, wall time,
 flake) and the Expert name: hover or keyboard focus shows it, a click or Enter pins it,
 Esc closes it and leaves focus on the button. Below the sections the technical words
-are explained simply. A failed preference save and a failed numbers read can stand
-together: each alert owns one half of the status row, and Retry stays put.
+are explained simply. A failed preference save shows as one plain sentence with an
+inline **Save again** inside the fixed "Updated …" line under the page head (the same
+line in Numbers and Flow, same height and place); the chosen window or level stays
+applied for the session, and on recovery the line says "Updated …" again. A failed
+numbers read keeps its own alert and Retry on the status row; both can stand together.
 
 **Flow** (A Lanes) shows who worked and who waited, one lane per actor (you, LEAD,
 OPS, Reviewer, Builder, Checks). A wait sits in the lane of whoever is awaited, repeats
@@ -89,8 +92,8 @@ person's window, time and selected step; a failed read shows an error with **Ret
 never an old answer. Steps carry facts only, so their labels are built from the step
 key, kind, round, outcome and wait reason. Without any recorded run, Flow says so and
 shows release 126 of 8 Oct 2026 as a labelled example in all three modes. A failed
-preference save hides that example line in place, the same way Numbers hides its
-status row.
+preference save shows in the fixed line under the page head, so neither that example
+line nor the mode buttons move or are covered.
 
 - **Live** shows the runs active in the last hours (and those that ended in the last
   45 minutes): releases first, then the soonest estimate. An open step runs on to its

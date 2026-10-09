@@ -4,7 +4,7 @@
 // the person is viewing; Replay auto-plays more than once, or under reduced motion; the
 // play controls, picker or panel move while playing or moving the time; Compare loses a
 // set or never says when the target was live.
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Route } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
@@ -13,14 +13,14 @@ import { mockFlow, RUN, ZONE } from './delivery-flow-fixtures'
 
 test.use({ timezoneId: ZONE })
 
-async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en' | 'de'; level?: 'simple' | 'expert' } = {}) {
+async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en' | 'de'; level?: 'simple' | 'expert'; empty?: boolean } = {}) {
   const work = fixtures()
   work.preferences.theme = { choice: options.theme ?? 'light' }
   work.preferences['delivery:numbers'] = { level: options.level ?? 'simple', window: 7 }
   await mockWork(page, work)
   if (options.lang === 'de') { const data = settingsData(); data.profile.locale = 'de-AT'; await mockSettings(page, data) }
   await mockDelivery(page, async () => ({ status: 200, body: deliveryMetrics() }), ['delivery.read'])
-  return mockFlow(page)
+  return mockFlow(page, { empty: options.empty })
 }
 const lanes = (page: Page) => page.getByTestId('flow-lanes')
 const chip = (page: Page) => page.getByTestId('flow-chip').locator('.shown')
@@ -159,6 +159,64 @@ for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'],
       await page.mouse.move(0, 0)
       await page.locator('.fl').evaluate(el => el.scrollIntoView({ block: 'start' }))
       await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-994-p6-modes/flow-${mode}-${width}-${theme}-${lang}.png`) })
+    }
+  })
+}
+
+// Risk (AEON-1003 round 7): a refused preference save covers or moves the Flow mode buttons. The failure is text with an
+// inline Retry inside the fixed "Now …" line: with recorded runs, the labelled example and while loading, the page head,
+// the line and the Flow mode controls keep their boxes (±0.5 px), stay clickable, and the line returns after the retry.
+for (const lang of ['en', 'de'] as const) {
+  test(`a refused preference save stays inside the fixed line and leaves the Flow controls in place and clickable (${lang})`, async ({ page }) => {
+    test.setTimeout(120_000)
+    const de = lang === 'de'
+    const copy = de
+      ? { level: 'Detailgrad', expert: 'Experte', warning: 'Nicht gespeichert. Gilt nur hier.', retry: 'Erneut speichern', now: 'Jetzt 20:25 · live' }
+      : { level: 'Level of detail', expert: 'Expert', warning: 'Not saved. The choice stays on this page.', retry: 'Save again', now: 'Now 20:25 · live' }
+    let reject = true
+    for (const width of [1440, 400]) for (const scenario of ['recorded', 'example', 'loading'] as const) {
+      await page.setViewportSize({ width, height: width === 400 ? 2000 : 1300 })
+      await setup(page, { lang, empty: scenario === 'example' })
+      let open: () => void = () => {}
+      const gate = scenario === 'loading' ? new Promise<void>(resolve => { open = resolve }) : null
+      const hold = async (route: Route) => { await gate; await route.fallback() }
+      if (gate) await page.route(/\/api\/projects\/[^/]+\/delivery\/flow(\?|$)/, hold)
+      const refuse = async (route: Route) => route.request().method() === 'PUT' && reject ? route.fulfill({ status: 500, json: { error: 'not saved' } }) : route.fallback()
+      await page.route('**/api/preferences/delivery*', refuse)
+      reject = true
+      await page.goto('/p/AEON/delivery?view=flow')
+      const where = `${scenario} ${width} ${lang}`
+      const line = page.getByTestId('delivery-updated')
+      const failure = line.getByTestId('delivery-pref-error')
+      const levels = page.locator('.dl-head').getByRole('radiogroup', { name: copy.level })
+      const expert = levels.getByRole('radio', { name: copy.expert, exact: true })
+      if (scenario === 'recorded') await expect(line, where).toHaveText(copy.now)
+      else if (scenario === 'example') await expect(page.locator('.flow-empty'), where).toBeVisible()
+      else await expect(page.getByTestId('flow-loading').first(), where).toBeVisible()
+      const baseline = (await line.textContent())!.trim()
+      const guard = await controlStability(page, {
+        head: page.locator('.dl-head'), line, levels, views: page.locator('.dl-views'), modes: modes(page), top: page.locator('.fl-top'),
+      })
+      // The save is refused. Wherever it shows, the mode buttons still take a real click (a cover would intercept it).
+      const anywhere = page.getByTestId('delivery-pref-error')
+      await guard.check(async () => { await expert.click(); await expect(anywhere, where).toBeVisible() })
+      await guard.check(async () => { await modes(page).locator('[data-mode="replay"]').click({ timeout: 5000 }); await expect(page, where).toHaveURL(/mode=replay/) })
+      await guard.check(async () => { await modes(page).locator('[data-mode="live"]').click({ timeout: 5000 }); await expect(page, where).not.toHaveURL(/mode=/) })
+      // The failure is text with the retry inside the fixed line, and nowhere else.
+      await expect(failure, where).toBeVisible()
+      await expect(failure, where).toContainText(copy.warning)
+      await expect(anywhere, `${where}: the failure is only in the line`).toHaveCount(1)
+      await expect(expert, where).toHaveAttribute('aria-checked', 'true')
+      // The retry works and the line returns.
+      reject = false
+      await guard.check(async () => { await failure.getByRole('button', { name: copy.retry, exact: true }).click(); await expect(failure, where).toHaveCount(0) })
+      guard.done()
+      await expect(expert, where).toHaveAttribute('aria-checked', 'true')
+      if (scenario === 'recorded') await expect(line, where).toHaveText(copy.now)
+      else await expect(line, where).toHaveText(baseline)
+      open()
+      await page.unroute('**/api/preferences/delivery*', refuse)
+      if (gate) await page.unroute(/\/api\/projects\/[^/]+\/delivery\/flow(\?|$)/, hold)
     }
   })
 }

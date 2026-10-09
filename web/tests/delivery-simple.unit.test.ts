@@ -200,14 +200,14 @@ it('Learn opens on focus, pins with Enter or a click, and Esc closes it and keep
   scope.stop()
 })
 
-// Risk: a refused save and a failed read stand together, and the save warning's veil hides the
-// read error and its Retry. Both alerts and both retries must stay reachable, in either order, and
-// neither alert nor its retry may take another place or size when the other failure comes or goes.
+// Risk: a refused save shows as a second element (an overlay with a veil) that takes room or covers a control.
+// It is one plain sentence with an inline Retry INSIDE the fixed "Updated …" line, in Numbers and in Flow. A failed
+// read keeps its own alert and Retry beside it; each Retry works alone, in either order, and nothing is hidden.
 for (const lang of ['en', 'de'] as const) {
-  it(`with a refused save and a failed read together, both alerts and both retries stay reachable (${lang})`, async () => {
+  it(`a refused save sits with its retry inside the Updated line, in Numbers and in Flow, beside a failed read (${lang})`, async () => {
     const labels = lang === 'de'
-      ? { load: 'Erneut versuchen', save: 'Erneut speichern', failed: 'Die Lieferzahlen konnten nicht geladen werden.' }
-      : { load: 'Retry', save: 'Save again', failed: 'Delivery numbers could not be loaded.' }
+      ? { load: 'Erneut versuchen', save: 'Erneut speichern', warning: 'Nicht gespeichert. Gilt nur hier.', failed: 'Die Lieferzahlen konnten nicht geladen werden.', updated: /^Aktualisiert \S/ }
+      : { load: 'Retry', save: 'Save again', warning: 'Not saved. The choice stays on this page.', failed: 'Delivery numbers could not be loaded.', updated: /^Updated \S/ }
     vi.stubGlobal('document', { addEventListener() {}, removeEventListener() {} })
     vi.stubGlobal('window', { addEventListener() {}, removeEventListener() {}, innerWidth: 1440, innerHeight: 900 })
     let read: () => Promise<unknown> = async () => deliveryMetrics()
@@ -215,18 +215,20 @@ for (const lang of ['en', 'de'] as const) {
     const failures = new Set<(key: string) => void>()
     const preferenceSaves = Vue.reactive({ saving: new Set<string>(), failed: new Set<string>() })
     const pref = { value: Vue.ref({}), ready: Promise.resolve(), save: () => {} }
+    const route = Vue.reactive<{ query: Record<string, string>; path: string; hash: string }>({ query: {}, path: '/p/AEON/delivery', hash: '' })
+    const example = Vue.ref(false)
     // A .vue module is imported through __importDefault, so it needs the ES module flag to be seen as a default export.
     const sfc = (component: Vue.Component) => ({ __esModule: true, default: component })
     const stub = sfc({ render: () => null })
     const DeliveryView = component('DeliveryView.vue', {
       vue: Vue,
-      'vue-router': { useRoute: () => Vue.reactive({ query: {}, path: '/p/AEON/delivery', hash: '' }), useRouter: () => ({ replace: () => {} }) },
+      'vue-router': { useRoute: () => route, useRouter: () => ({ replace: () => {} }) },
       '../AppIcon.vue': sfc({ props: ['name', 'size'], render: () => Vue.h('svg') }),
       '../work/ProjectTabs.vue': stub, './ExpertTile.vue': stub, './FlowView.vue': stub, './LevelSwitch.vue': stub,
       './SimpleNumbers.vue': stub, './TrendChart.vue': stub, './WindowSwitch.vue': stub,
       '../../lib/delivery': delivery, '../../lib/deliveryFlow': flow, '../../lib/deliveryFlowModes': flowModes, '../../lib/deliveryFlowText': flowWords, '../../lib/deliveryNumbersText': numbersText,
-      // Flow is not under test here: it reads nothing, shows no banner and offers nothing to choose.
-      '../../lib/useDeliveryFlow': { useDeliveryFlow: () => ({ status: Vue.ref('ready'), data: Vue.ref(null), example: Vue.ref(false), empty: Vue.ref(null), choices: Vue.ref([]), runId: Vue.ref(null), key: Vue.ref(''), truncated: Vue.ref(false), retry() {} }) },
+      // Flow is not under test here: it reads nothing and offers nothing to choose; it may show the labelled example.
+      '../../lib/useDeliveryFlow': { useDeliveryFlow: () => ({ status: Vue.ref('ready'), data: Vue.ref(null), example, empty: Vue.ref(null), choices: Vue.ref([]), runId: Vue.ref(null), key: Vue.ref(''), truncated: Vue.ref(false), retry() {} }) },
       '../../lib/deliveryNumbers': { ...numbers, readDeliveryMetrics: () => read() },
       '../../lib/preferences': { onPreferenceFailure: (listener: (key: string) => void) => { failures.add(listener); return () => { failures.delete(listener) } }, preferenceSaves, usePreference: () => pref },
       '../../lib/usePolledData': { usePoller: (load: () => Promise<void>) => { reload = load; return { start: () => { void load() }, stop() {}, restart() {} } } },
@@ -237,61 +239,95 @@ for (const lang of ['en', 'de'] as const) {
     const root = el('root'); apps.push(app); app.mount(root)
     const settle = async () => { for (let turn = 0; turn < 6; turn++) { await Promise.resolve(); await Vue.nextTick() } }
     await settle()
-    const alert = (id: string) => all(root).find(node => node.props['data-testid'] === id)
-    const veiled = (node: El | null): boolean => node ? /\bveiled\b/.test(String(node.props.class ?? '')) || veiled(node.parent) : false
-    const retryOf = (id: string) => all(alert(id)!).find(node => node.tag === 'button')!
-    // What decides an alert's place and size: its own classes and every container's (a veil only hides),
-    // its retry's classes and tip. The browser spec measures the boxes; this keeps their inputs from depending on the other failure.
-    const layoutOf = (id: string) => {
-      const classes = (node: El | null): string[] => node ? [String(node.props.class ?? '').replace(/\bveiled\b/g, '').trim(), ...classes(node.parent)] : []
-      return JSON.stringify({ alert: classes(alert(id)!), retry: [classes(retryOf(id))[0], retryOf(id).props['data-tip'] ?? null] })
-    }
-    const hiddenStatus = () => all(root).find(node => /\bdl-status\b/.test(String(node.props.class ?? '')))!
-    hiddenStatus().getBoundingClientRect = () => ({ height: 40 })
+    const byId = (id: string) => all(root).filter(node => node.props['data-testid'] === id)
+    const line = () => byId('delivery-updated')[0]!
+    const within = (node: El | null, outer: El): boolean => node ? node === outer || within(node.parent, outer) : false
+    const retryOf = (node: El) => all(node).find(item => item.tag === 'button')!
+    const click = async (button: El) => { (button.props.onClick as () => void)(); await settle() }
     const refuseSave = async () => { for (const listener of failures) listener(numbers.DELIVERY_PREFS_KEY); await settle() }
     const failRead = async () => { read = async () => { throw new Error('boom') }; await reload(); await settle() }
-    const bothReachable = () => {
-      for (const [id, label] of [['delivery-pref-error', labels.save], ['delivery-load-error', labels.load]] as const) {
-        expect(alert(id), id).toBeDefined()
-        expect(veiled(alert(id)!), `${id} is not hidden by a veil`).toBe(false)
-        expect(textOf(retryOf(id)), `${id} retry`).toBe(label)
-      }
-      expect(textOf(alert('delivery-load-error')!)).toContain(labels.failed)
+    const recoverRead = async () => { read = async () => deliveryMetrics(); await reload(); await settle() }
+    const classes = (node: El) => all(root).map(item => String(item.props.class ?? '')).join(' ')
+    // The sentence is plain text in exactly one place, and that place is the line.
+    const sentences = () => all(root).filter(node => node.children.some(child => child.text?.includes(labels.warning)))
+    const savedInLine = () => {
+      const alert = byId('delivery-pref-error')
+      expect(alert, 'one failure element').toHaveLength(1)
+      expect(within(alert[0]!, line()), 'inside the Updated line').toBe(true)
+      expect(sentences().map(node => within(node, line()))).toEqual([true])
+      expect(textOf(line())).toBe(`${labels.warning}${labels.save}`)
+      expect(textOf(retryOf(alert[0]!))).toBe(labels.save)
+      expect(alert[0]!.props.role).toBe('alert')
+      expect(classes(root), 'no separate warning and no veil').not.toMatch(/pref-warn|veiled/)
     }
+    // A failed read keeps the status row's measured height; the stub renderer has no layout, so it answers 40.
+    all(root).find(node => /\bdl-status\b/.test(String(node.props.class ?? '')))!.getBoundingClientRect = () => ({ height: 40 })
+    const lineClass = line().props.class
 
-    // The save is refused first, then the read fails.
-    expect(alert('delivery-load-error')).toBeUndefined()
+    // Numbers, healthy: the line says "Updated …", there is no failure and no alert.
+    expect(textOf(line())).toMatch(labels.updated)
+    expect(byId('delivery-pref-error')).toHaveLength(0)
+    expect(byId('delivery-load-error')).toHaveLength(0)
+
+    // The save is refused: the line holds the sentence and the retry; the retry gives the line back.
     await refuseSave()
-    expect(alert('delivery-pref-error')).toBeDefined()
-    const saveAlone = layoutOf('delivery-pref-error')
-    await failRead()
-    bothReachable()
-    expect(layoutOf('delivery-pref-error'), 'the save alert and retry keep their place when the read fails').toBe(saveAlone)
-    const readWithSave = layoutOf('delivery-load-error')
-    // The read retry works alone: the save warning stays, reachable and in place.
-    read = async () => deliveryMetrics()
-    ;(retryOf('delivery-load-error').props.onClick as () => void)(); await settle()
-    expect(alert('delivery-load-error')).toBeUndefined()
-    expect(veiled(alert('delivery-pref-error')!)).toBe(false)
-    expect(layoutOf('delivery-pref-error'), 'the save alert and retry keep their place when the read recovers').toBe(saveAlone)
-    // The save retry works alone: the read error stays, reachable and in place.
-    await failRead()
-    ;(retryOf('delivery-pref-error').props.onClick as () => void)(); await settle()
-    expect(alert('delivery-pref-error')).toBeUndefined()
-    expect(veiled(alert('delivery-load-error')!)).toBe(false)
-    expect(layoutOf('delivery-load-error'), 'the read alert and retry keep their place when the save recovers').toBe(readWithSave)
+    savedInLine()
+    expect(line().props.class, 'the line keeps its class, so its box does not change').toBe(lineClass)
+    await click(retryOf(line()))
+    expect(byId('delivery-pref-error')).toHaveLength(0)
+    expect(textOf(line())).toMatch(labels.updated)
 
-    // The read fails first, then the save is refused; the save retry works alone.
-    expect(veiled(alert('delivery-load-error')!)).toBe(false)
+    // The save is refused, then the read fails: the read alert stands outside the line with its own retry.
+    await refuseSave()
+    await failRead()
+    savedInLine()
+    expect(within(byId('delivery-load-error')[0]!, line()), 'the read alert is not in the line').toBe(false)
+    expect(textOf(retryOf(byId('delivery-load-error')[0]!))).toBe(labels.load)
+    expect(textOf(byId('delivery-load-error')[0]!)).toContain(labels.failed)
+    expect(line().props.class).toBe(lineClass)
+    // The read retry works alone: the save failure stays in the line.
+    read = async () => deliveryMetrics()
+    await click(retryOf(byId('delivery-load-error')[0]!))
+    expect(byId('delivery-load-error')).toHaveLength(0)
+    savedInLine()
+    // The save retry works alone while the read is failing: the read alert stays and keeps its retry.
+    await failRead()
+    await click(retryOf(byId('delivery-pref-error')[0]!))
+    expect(byId('delivery-pref-error')).toHaveLength(0)
+    expect(textOf(retryOf(byId('delivery-load-error')[0]!))).toBe(labels.load)
+    await recoverRead()
+    expect(textOf(line())).toMatch(labels.updated)
+
+    // The read fails first, then the save is refused.
+    await failRead()
     preferenceSaves.failed.add('me/delivery:numbers')
     await refuseSave()
-    bothReachable()
-    expect(layoutOf('delivery-load-error'), 'the read alert and retry keep their place when the save is refused').toBe(readWithSave)
-    expect(layoutOf('delivery-pref-error'), 'the save alert and retry take the same place whichever failure came first').toBe(saveAlone)
+    savedInLine()
+    expect(textOf(retryOf(byId('delivery-load-error')[0]!))).toBe(labels.load)
     preferenceSaves.failed.clear()
-    ;(retryOf('delivery-pref-error').props.onClick as () => void)(); await settle()
-    expect(alert('delivery-pref-error')).toBeUndefined()
-    expect(veiled(alert('delivery-load-error')!)).toBe(false)
-    expect(textOf(retryOf('delivery-load-error'))).toBe(labels.load)
+    await click(retryOf(byId('delivery-pref-error')[0]!))
+    expect(byId('delivery-pref-error')).toHaveLength(0)
+    await recoverRead()
+    expect(textOf(line())).toMatch(labels.updated)
+
+    // Flow with the labelled example: the banner is never hidden and the failure is in the same line.
+    route.query = { view: 'flow' }; example.value = true
+    await settle()
+    const banner = () => all(root).find(node => /\bflow-empty\b/.test(String(node.props.class ?? '')))!
+    expect(banner(), 'the example banner is shown').toBeDefined()
+    await refuseSave()
+    savedInLine()
+    expect(String(banner().props.class), 'the example banner is not hidden by a veil').not.toMatch(/veiled/)
+    await click(retryOf(line()))
+    expect(byId('delivery-pref-error')).toHaveLength(0)
+    expect(textOf(line()).trim()).toBe('')
+    // Flow with recorded runs: nothing but the line changes either.
+    example.value = false
+    await settle()
+    expect(banner()).toBeUndefined()
+    await refuseSave()
+    savedInLine()
+    await click(retryOf(line()))
+    expect(byId('delivery-pref-error')).toHaveLength(0)
   })
 }

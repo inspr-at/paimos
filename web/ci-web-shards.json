@@ -788,7 +788,7 @@
         ,
         {"file":"tests/delivery-flow-lanes.spec.ts","listedTests":9,"weightSeconds":12,"weightSource":"aeon-1005-estimate"}
         ,
-        {"file":"tests/delivery-flow-modes.spec.ts","listedTests":9,"weightSeconds":20,"weightSource":"aeon-1006-estimate"}
+        {"file":"tests/delivery-flow-modes.spec.ts","listedTests":11,"weightSeconds":20,"weightSource":"aeon-1006-estimate"}
         ,
         {"file":"tests/delivery-guarantee.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,

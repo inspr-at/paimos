@@ -55,8 +55,9 @@ const prefsReady = ref(false)
 void pref.ready.then(() => { prefsReady.value = true })
 const chosen = ref<DeliveryPrefs | null>(null)
 const prefs = computed<DeliveryPrefs>(() => chosen.value ?? (prefsReady.value ? readPrefs(pref.value.value) : DEFAULT_PREFS))
+// A refused save shows inside the "Updated …" line under the head, never as a second element.
 // The listener fires inside the failed write, before the set records it. The watch only
-// clears the warning, so a retry does not flash the failure that is still in the set.
+// clears the failure, so a retry does not flash the failure that is still in the set.
 const prefFailed = ref(false)
 onBeforeUnmount(onPreferenceFailure(key => { if (key === DELIVERY_PREFS_KEY) prefFailed.value = true }))
 watch(() => [...preferenceSaves.failed], ids => {
@@ -220,20 +221,20 @@ watch(state, (next, prev) => {
           <WindowSwitch :class="{ 'slot-hidden': view === 'flow' }" :model-value="prefs.window" :label="text.windowLabel" :unit="text.days" @update:model-value="setWindow" />
           <LevelSwitch :model-value="prefs.level" :label="text.levelLabel" :names="text.level" @update:model-value="setLevel" />
         </div>
-        <span class="dl-updated" data-testid="delivery-updated">{{ updated || ' ' }}</span>
+        <!-- One fixed line for both views: "Updated …" (or Flow's "Now …"), or a refused save with its Retry in the same
+             box. It never changes size or place, so no control or tile moves (AEON-541). -->
+        <div class="dl-updated" data-testid="delivery-updated">
+          <span v-if="prefFailed" class="dl-fail" role="alert" data-testid="delivery-pref-error">
+            <span v-clip-tip class="dl-fail-text">{{ text.prefErr }}</span>
+            <button type="button" class="link-btn" @click="retryPrefs">{{ text.prefRetry }}</button>
+          </span>
+          <template v-else>{{ updated || ' ' }}</template>
+        </div>
       </div>
-      <!-- Save feedback sits on the status row. It is out of flow, so Learn does not move when it appears or clears.
-           A refused save and a failed read can stand together: each owns one half of the row for good (save left,
-           read right), so neither alert nor its retry changes place or size when the other comes or goes (AEON-541). -->
-      <p v-if="prefFailed" class="banner err half pref-warn" role="alert" data-testid="delivery-pref-error">
-        <AppIcon name="alert" :size="16" />
-        <span v-clip-tip class="grow">{{ text.prefErr }}</span>
-        <button type="button" class="btn sm" :data-tip="text.prefRetry" @click="retryPrefs"><AppIcon name="refresh" :size="14" /><span class="lbl">{{ text.prefRetry }}</span></button>
-      </p>
     </div>
 
     <template v-if="view === 'numbers'">
-      <div ref="statusEl" class="dl-status" :class="{ veiled: prefFailed && state !== 'error' }" :style="statusHold > 0 ? { minHeight: `${statusHold}px` } : undefined">
+      <div ref="statusEl" class="dl-status" :style="statusHold > 0 ? { minHeight: `${statusHold}px` } : undefined">
         <div v-if="state === 'loading'" class="sources" aria-hidden="true">
           <span class="sk chip-sk" style="width: 210px" /><span class="sk chip-sk" style="width: 250px" /><span class="sk chip-sk" style="width: 230px" />
         </div>
@@ -283,9 +284,8 @@ watch(state, (next, prev) => {
       </div>
     </template>
     <template v-else>
-      <!-- Without any recorded run, Flow shows the approved example, and says so.
-           A failed preference save hides this banner in place, the same way Numbers hides its status row. -->
-      <div v-if="flow.example.value" class="flow-empty banner" :class="{ veiled: prefFailed }" role="status">
+      <!-- Without any recorded run, Flow shows the approved example, and says so. -->
+      <div v-if="flow.example.value" class="flow-empty banner" role="status">
         <AppIcon name="flow" :size="16" />
         <span class="grow"><b>{{ text.flowNone }}</b> {{ flowText(lang).example }}</span>
       </div>
@@ -312,7 +312,7 @@ watch(state, (next, prev) => {
 .fade-1 { stop-color: var(--teal); stop-opacity: .13; }
 .hatch-line { stroke: var(--line-2); stroke-width: 1; }
 /* Top-anchored head: the controls keep their place whatever the text beside them says. */
-.dl-head { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; }
+.dl-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; }
 .dl-left { flex: 1 1 360px; min-width: 0; }
 .dl-titleline { display: flex; align-items: center; gap: 12px; }
 .dl-titleline h2 { margin: 0; font: 650 19px/1.25 var(--font); letter-spacing: -.01em; color: var(--ink); }
@@ -320,13 +320,14 @@ watch(state, (next, prev) => {
 .dl-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .dl-ctrls { display: flex; align-items: center; gap: 10px; }
 .slot-hidden { visibility: hidden; }
-.dl-updated { font: 500 11.5px/1.4 var(--mono); color: var(--ink-3); white-space: nowrap; }
+/* The line takes the width of the controls above it and never widens them: a long failure clips, with its full text as a tip. */
+.dl-updated { display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: 0; min-width: 100%; min-height: 1.4em; font: 500 11.5px/1.4 var(--mono); color: var(--ink-3); white-space: nowrap; }
+.dl-fail { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--danger); }
+.dl-fail-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dl-updated .link-btn { flex: none; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--teal-ink); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.dl-updated .link-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .dl-status { min-height: 40px; }
-.dl-status.veiled, .flow-empty.veiled { visibility: hidden; }
-/* The warning replaces the status row in place: same anchor, no extra flow, so tiles stay put. */
-.banner.pref-warn { position: absolute; z-index: 2; top: calc(100% + 12px); right: calc(50% + 6px); left: 0; margin: 0; min-height: 28px; padding-block: 0; flex-wrap: nowrap; }
-.banner.pref-warn .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The read alert owns the right half, the save alert the left half: always, so a retry never moves or resizes (AEON-541). */
+/* The read alert keeps the right half of the row; the half beside it stays free, so its place never depends on anything else (AEON-541). */
 .dl-status .banner.half { margin-left: calc(50% + 6px); }
 .sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 28px; margin-top: 12px; }
 .src { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 12px; }
@@ -378,9 +379,15 @@ watch(state, (next, prev) => {
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+@media (max-width: 720px), (pointer: coarse) {
+  /* The line is one 44 px slot, so the retry's touch area (base.css) stays inside it and never overlaps the controls above. */
+  .dl-updated { min-height: 44px; }
+}
 @container delivery (max-width: 640px) {
   .dl-titleline { flex-wrap: wrap; gap: 8px; }
   .dl-right { width: 100%; align-items: stretch; }
+  .dl-updated { justify-content: flex-start; }
+  .dl-fail-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
   .dl-ctrls { flex-wrap: wrap; gap: 8px; }
   .dl-views :deep(button) { min-height: 44px; padding: 0 14px; }
   .src { height: auto; padding: 4px 10px; }
@@ -389,13 +396,12 @@ watch(state, (next, prev) => {
   .tr-cap { flex-basis: 100%; margin-left: 0; }
   .defs { grid-template-columns: minmax(0, 1fr); }
   .banner { flex-wrap: wrap; }
-  .banner.pref-warn { flex-wrap: nowrap; min-height: 44px; }
   .banner .btn { min-height: 44px; }
   .dl-status .sources, .dl-status .banner { min-height: 44px; }
   .dl-status .banner { flex-wrap: nowrap; }
-  /* Each alert fills its half of one 44 px row: the sentence takes up to three lines, the retry is a 44 px icon. */
-  .banner.pref-warn, .dl-status .banner.half { gap: 6px; padding: 0 4px 0 10px; }
-  .banner.pref-warn .grow, .dl-status .banner.half .grow { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; white-space: normal; font-size: 12px; line-height: 1.2; }
+  /* The read alert fills its half of one 44 px row: the sentence takes up to three lines, the retry is a 44 px icon. */
+  .dl-status .banner.half { gap: 6px; padding: 0 4px 0 10px; }
+  .dl-status .banner.half .grow { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; white-space: normal; font-size: 12px; line-height: 1.2; }
   .half .btn { width: 44px; }
 }
 @container delivery (max-width: 460px) { .tiles { grid-template-columns: minmax(0, 1fr); } }
