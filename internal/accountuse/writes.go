@@ -3,6 +3,7 @@ package accountuse
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -191,12 +192,12 @@ func (m *Module) context(r *http.Request, tx pgx.Tx, p tenant.Principal, create 
 		return nil, fail(400, "invalid work context")
 	}
 	ctx := r.Context()
-	if _, err := FenceWrite(ctx, tx, p, in.ExpectedRevision); err != nil {
+	rules, err := FenceWrite(ctx, tx, p, in.ExpectedRevision)
+	if err != nil {
 		return nil, err
 	}
 	var before *WorkContext
 	var out WorkContext
-	var err error
 	if create {
 		out, err = scanContext(tx.QueryRow(ctx, `INSERT INTO work_contexts(tenant_id,name,new_accounts_override) VALUES($1,$2,$3) RETURNING `+contextColumns, p.TenantID, strings.TrimSpace(in.Name), in.NewAccountsOverride))
 	} else {
@@ -218,7 +219,14 @@ func (m *Module) context(r *http.Request, tx pgx.Tx, p tenant.Principal, create 
 		return nil, err
 	}
 	result := contextResult{out, after.Revision}
-	_, err = events.Append(ctx, tx, p, events.Change{Type: "work_context.changed", Before: before, After: result})
+	var metadata json.RawMessage
+	if create {
+		metadata, err = json.Marshal(map[string]any{"rule": rules.NewContexts, "rule_revision": rules.Revision})
+		if err != nil {
+			return nil, err
+		}
+	}
+	_, err = events.Append(ctx, tx, p, events.Change{Type: "work_context.changed", Before: before, After: result, Metadata: metadata})
 	return result, err
 }
 

@@ -2,7 +2,6 @@
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "permissions": [
     "account.overview.read",
-    "account.use.manage",
     "delivery.manage",
     "delivery.route",
     "delivery_queue.claim",

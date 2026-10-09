@@ -81,7 +81,7 @@ INSERT INTO aeon_required_capabilities(capability) VALUES ('account_use_v1');
 CREATE FUNCTION aeon_account_use_gate() RETURNS boolean LANGUAGE plpgsql STABLE AS $$
 BEGIN
     IF current_setting('aeon.account_use_capable',true) IS DISTINCT FROM 'on'
-       AND EXISTS (SELECT 1 FROM account_use_rules WHERE enforced_at IS NOT NULL) THEN
+       AND EXISTS (SELECT 1 FROM account_use_rules WHERE tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid AND enforced_at IS NOT NULL) THEN
         RAISE EXCEPTION USING ERRCODE='0A000', MESSAGE='account-use capability required: this binary is below the rollback floor';
     END IF;
     RETURN true;
@@ -91,19 +91,19 @@ CREATE FUNCTION aeon_account_use_allowed_for_project(p_account uuid,p_project uu
 LANGUAGE plpgsql STABLE AS $$
 DECLARE target uuid; active boolean; prior text := current_setting('aeon.visible_projects',true);
 BEGIN
-    SELECT enforced_at IS NOT NULL INTO active FROM account_use_rules;
+    SELECT enforced_at IS NOT NULL INTO active FROM account_use_rules WHERE tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid;
     IF active IS false THEN RETURN true; END IF;
     IF active IS NULL THEN RETURN false; END IF;
     IF p_project IS NULL THEN
-        SELECT id INTO target FROM work_contexts WHERE kind='default' AND archived_at IS NULL;
+        SELECT id INTO target FROM work_contexts WHERE tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid AND kind='default' AND archived_at IS NULL;
     ELSE
         PERFORM set_config('aeon.visible_projects','*',true);
         SELECT m.context_id INTO target FROM project_work_contexts m
             JOIN work_contexts c ON c.tenant_id=m.tenant_id AND c.id=m.context_id
-            WHERE m.project_id=p_project AND c.kind<>'holding' AND c.archived_at IS NULL;
+            WHERE m.tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid AND m.project_id=p_project AND c.kind<>'holding' AND c.archived_at IS NULL;
         PERFORM set_config('aeon.visible_projects',coalesce(prior,''),true);
     END IF;
-    RETURN target IS NOT NULL AND EXISTS (SELECT 1 FROM account_use_cells WHERE account_id=p_account AND context_id=target);
+    RETURN target IS NOT NULL AND EXISTS (SELECT 1 FROM account_use_cells WHERE tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid AND account_id=p_account AND context_id=target);
 EXCEPTION WHEN OTHERS THEN
     PERFORM set_config('aeon.visible_projects',coalesce(prior,''),true);
     RAISE;
@@ -114,19 +114,19 @@ LANGUAGE plpgsql STABLE AS $$
 DECLARE project uuid; node uuid; purpose text; prior text := current_setting('aeon.visible_projects',true);
 BEGIN
     PERFORM set_config('aeon.visible_projects','*',true);
-    SELECT coalesce(r.queue_node_id,r.work_order_id),r.purpose INTO node,purpose FROM agent_runs r WHERE r.id=p_run;
+    SELECT coalesce(r.queue_node_id,r.work_order_id),r.purpose INTO node,purpose FROM agent_runs r WHERE r.tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid AND r.id=p_run;
     IF NOT FOUND THEN
         PERFORM set_config('aeon.visible_projects',coalesce(prior,''),true);
         RETURN false;
     END IF;
     IF purpose='pairing_verification' AND EXISTS (
-        SELECT 1 FROM agent_pairing_enrollments WHERE account_id=p_account AND verification_run_id=p_run
+        SELECT 1 FROM agent_pairing_enrollments WHERE tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid AND account_id=p_account AND verification_run_id=p_run
     ) THEN
         PERFORM set_config('aeon.visible_projects',coalesce(prior,''),true);
         RETURN true;
     END IF;
     IF node IS NOT NULL THEN
-        SELECT n.project_id INTO project FROM nodes n WHERE n.id=node;
+        SELECT n.project_id INTO project FROM nodes n WHERE n.tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid AND n.id=node;
         IF NOT FOUND THEN
             PERFORM set_config('aeon.visible_projects',coalesce(prior,''),true);
             RETURN false;
@@ -140,30 +140,43 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 
 CREATE FUNCTION aeon_account_use_reservation_guard() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE account uuid;
+DECLARE account uuid; allowed boolean; prior text := current_setting('aeon.tenant_id',true);
 BEGIN
-    SELECT account_id INTO account FROM account_allowance_windows WHERE id=NEW.window_id;
-    IF NOT aeon_account_use_allowed(account,NEW.run_id) THEN
+    SELECT account_id INTO account FROM account_allowance_windows WHERE tenant_id=NEW.tenant_id AND id=NEW.window_id;
+    PERFORM set_config('aeon.tenant_id',NEW.tenant_id::text,true);
+    allowed := aeon_account_use_allowed(account,NEW.run_id);
+    PERFORM set_config('aeon.tenant_id',coalesce(prior,''),true);
+    IF NOT allowed THEN
         RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='account not allowed for work context';
     END IF;
     RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('aeon.tenant_id',coalesce(prior,''),true);
+    RAISE;
 END $$;
 CREATE TRIGGER account_reservations_use_guard BEFORE INSERT ON account_reservations
     FOR EACH ROW EXECUTE FUNCTION aeon_account_use_reservation_guard();
 
 CREATE FUNCTION aeon_account_use_start_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE allowed boolean; prior text := current_setting('aeon.tenant_id',true);
 BEGIN
-    IF NOT aeon_account_use_allowed(NEW.account_id,NEW.id) THEN
+    PERFORM set_config('aeon.tenant_id',NEW.tenant_id::text,true);
+    allowed := aeon_account_use_allowed(NEW.account_id,NEW.id);
+    PERFORM set_config('aeon.tenant_id',coalesce(prior,''),true);
+    IF NOT allowed THEN
         RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='account not allowed for work context';
     END IF;
     RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('aeon.tenant_id',coalesce(prior,''),true);
+    RAISE;
 END $$;
 CREATE TRIGGER agent_runs_use_guard BEFORE UPDATE OF status ON agent_runs
     FOR EACH ROW WHEN (NEW.status='starting') EXECUTE FUNCTION aeon_account_use_start_guard();
 
 CREATE FUNCTION aeon_account_use_cell_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM work_contexts WHERE id=NEW.context_id AND kind<>'holding' AND archived_at IS NULL) THEN
+    IF NOT EXISTS (SELECT 1 FROM work_contexts WHERE tenant_id=NEW.tenant_id AND id=NEW.context_id AND kind<>'holding' AND archived_at IS NULL) THEN
         RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='holding or archived context cannot be allowed';
     END IF;
     RETURN NEW;
@@ -178,16 +191,16 @@ BEGIN
     IF current_setting('aeon.account_use_seeding',true)='on' THEN RETURN NULL; END IF;
     PERFORM set_config('aeon.visible_projects','*',true);
     UPDATE account_use_rules r SET enforced_at=clock_timestamp()
-    WHERE r.enforced_at IS NULL AND (
+    WHERE r.tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid AND r.enforced_at IS NULL AND (
         r.new_models='deny' OR r.new_projects='holding'
         OR EXISTS (SELECT 1 FROM project_work_contexts m JOIN work_contexts c
-                   ON c.tenant_id=m.tenant_id AND c.id=m.context_id WHERE c.kind='holding' OR c.archived_at IS NOT NULL)
+                   ON c.tenant_id=m.tenant_id AND c.id=m.context_id WHERE m.tenant_id=r.tenant_id AND (c.kind='holding' OR c.archived_at IS NOT NULL))
         OR EXISTS (SELECT 1 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-                   WHERE k.slug='project' AND n.deleted_at IS NULL
-                   AND NOT EXISTS (SELECT 1 FROM project_work_contexts m WHERE m.project_id=n.id))
+                   WHERE n.tenant_id=r.tenant_id AND k.slug='project' AND n.deleted_at IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM project_work_contexts m WHERE m.tenant_id=n.tenant_id AND m.project_id=n.id))
         OR EXISTS (SELECT 1 FROM agent_accounts a CROSS JOIN work_contexts c
-                   WHERE a.archived_at IS NULL AND c.archived_at IS NULL AND c.kind<>'holding'
-                   AND NOT EXISTS (SELECT 1 FROM account_use_cells x WHERE x.account_id=a.id AND x.context_id=c.id))
+                   WHERE a.tenant_id=r.tenant_id AND c.tenant_id=r.tenant_id AND a.archived_at IS NULL AND c.archived_at IS NULL AND c.kind<>'holding'
+                   AND NOT EXISTS (SELECT 1 FROM account_use_cells x WHERE x.tenant_id=r.tenant_id AND x.account_id=a.id AND x.context_id=c.id))
     );
     PERFORM set_config('aeon.visible_projects',coalesce(prior,''),true);
     RETURN NULL;
@@ -232,10 +245,10 @@ BEGIN
         INSERT INTO account_use_cells(tenant_id,account_id,context_id,source,set_by)
             SELECT NEW.tenant_id,a.id,NEW.id,'rule',p.id FROM agent_accounts a CROSS JOIN account_use_rules r
             JOIN principals p ON p.tenant_id=r.tenant_id AND p.kind='agent' AND p.name='System' AND p.roles @> ARRAY['system']::text[]
-            WHERE r.new_contexts='allow' AND a.archived_at IS NULL;
+            WHERE r.tenant_id=NEW.tenant_id AND a.tenant_id=NEW.tenant_id AND r.new_contexts='allow' AND a.archived_at IS NULL;
         -- An ask-first context is a saved denial even with an empty pool.
         UPDATE account_use_rules SET enforced_at=clock_timestamp()
-            WHERE enforced_at IS NULL AND new_contexts='ask';
+            WHERE tenant_id=NEW.tenant_id AND enforced_at IS NULL AND new_contexts='ask';
     END IF;
     RETURN NEW;
 END $$;
@@ -247,9 +260,9 @@ BEGIN
     INSERT INTO account_use_cells(tenant_id,account_id,context_id,source,set_by)
         SELECT NEW.tenant_id,NEW.id,c.id,'rule',NEW.registered_by_principal_id
         FROM work_contexts c CROSS JOIN account_use_rules r
-        WHERE c.kind<>'holding' AND c.archived_at IS NULL AND c.new_accounts_override IS NULL AND r.new_accounts='allow';
+        WHERE c.tenant_id=NEW.tenant_id AND r.tenant_id=NEW.tenant_id AND c.kind<>'holding' AND c.archived_at IS NULL AND c.new_accounts_override IS NULL AND r.new_accounts='allow';
     PERFORM set_config('aeon.account_use_account_'||replace(NEW.id::text,'-',''),
-        (SELECT jsonb_build_object('account_id',NEW.id,'rule',new_accounts,'rule_revision',revision)::text FROM account_use_rules),true);
+        (SELECT jsonb_build_object('account_id',NEW.id,'rule',new_accounts,'rule_revision',revision)::text FROM account_use_rules WHERE tenant_id=NEW.tenant_id),true);
     RETURN NEW;
 END $$;
 CREATE TRIGGER agent_accounts_use_stamp AFTER INSERT ON agent_accounts
@@ -268,13 +281,13 @@ CREATE CONSTRAINT TRIGGER agent_accounts_use_audit AFTER INSERT ON agent_account
 
 CREATE FUNCTION aeon_account_use_stamp_project() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM node_kinds WHERE id=NEW.kind_id AND slug='project') THEN
+    IF EXISTS (SELECT 1 FROM node_kinds WHERE tenant_id=NEW.tenant_id AND id=NEW.kind_id AND slug='project') THEN
         INSERT INTO project_work_contexts(tenant_id,project_id,context_id)
             SELECT NEW.tenant_id,NEW.id,c.id FROM work_contexts c CROSS JOIN account_use_rules r
-            WHERE c.kind=r.new_projects;
+            WHERE c.tenant_id=NEW.tenant_id AND r.tenant_id=NEW.tenant_id AND c.kind=r.new_projects;
         PERFORM set_config('aeon.account_use_project_'||replace(NEW.id::text,'-',''),
             (SELECT jsonb_build_object('project_id',NEW.id,'context_id',m.context_id,'rule',r.new_projects,'rule_revision',r.revision)::text
-             FROM project_work_contexts m CROSS JOIN account_use_rules r WHERE m.project_id=NEW.id),true);
+             FROM project_work_contexts m CROSS JOIN account_use_rules r WHERE m.tenant_id=NEW.tenant_id AND r.tenant_id=NEW.tenant_id AND m.project_id=NEW.id),true);
     END IF;
     RETURN NEW;
 END $$;
@@ -284,7 +297,7 @@ CREATE TRIGGER nodes_use_stamp AFTER INSERT ON nodes
 CREATE FUNCTION aeon_account_use_project_audit() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE actor uuid;
 BEGIN
-    IF EXISTS (SELECT 1 FROM node_kinds WHERE id=NEW.kind_id AND slug='project') THEN
+    IF EXISTS (SELECT 1 FROM node_kinds WHERE tenant_id=NEW.tenant_id AND id=NEW.kind_id AND slug='project') THEN
         SELECT id INTO STRICT actor FROM principals WHERE tenant_id=NEW.tenant_id AND kind='agent' AND name='System' AND roles @> ARRAY['system']::text[];
         INSERT INTO events(tenant_id,actor_principal_id,type,node_id,after)
             VALUES(NEW.tenant_id,actor,'work_context.project_set',NEW.id,
@@ -298,7 +311,7 @@ CREATE CONSTRAINT TRIGGER nodes_use_audit AFTER INSERT ON nodes
 CREATE FUNCTION aeon_account_use_refresh_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE mirror boolean;
 BEGIN
-    SELECT new_models='allow' INTO mirror FROM account_use_rules;
+    SELECT new_models='allow' INTO mirror FROM account_use_rules WHERE tenant_id=NEW.tenant_id;
     IF mirror IS NULL THEN
         RAISE EXCEPTION USING ERRCODE='42501', MESSAGE='account-use rules required';
     END IF;
@@ -332,7 +345,7 @@ BEGIN
     INSERT INTO account_use_rules(tenant_id,new_accounts,new_contexts,new_models,confirmation_required)
         VALUES(p_tenant,CASE WHEN p_migrated THEN 'allow' ELSE 'ask' END,
                CASE WHEN p_migrated THEN 'allow' ELSE 'ask' END,
-               CASE WHEN p_migrated AND EXISTS(SELECT 1 FROM model_refresh_settings WHERE NOT auto_add_profiles) THEN 'shipped_only' ELSE 'allow' END,
+               CASE WHEN p_migrated AND EXISTS(SELECT 1 FROM model_refresh_settings WHERE tenant_id=p_tenant AND NOT auto_add_profiles) THEN 'shipped_only' ELSE 'allow' END,
                p_migrated);
     GET DIAGNOSTICS inserted = ROW_COUNT;
     IF inserted=0 THEN
@@ -348,9 +361,9 @@ BEGIN
     INSERT INTO work_contexts(tenant_id,name,kind) VALUES(p_tenant,'Unassigned','holding');
     IF p_migrated THEN
         INSERT INTO account_use_cells(tenant_id,account_id,context_id,source,set_by)
-            SELECT p_tenant,a.id,default_context,'migration',a.registered_by_principal_id FROM agent_accounts a WHERE a.archived_at IS NULL;
+            SELECT p_tenant,a.id,default_context,'migration',a.registered_by_principal_id FROM agent_accounts a WHERE a.tenant_id=p_tenant AND a.archived_at IS NULL;
         INSERT INTO project_work_contexts(tenant_id,project_id,context_id)
-            SELECT p_tenant,n.id,default_context FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='project';
+            SELECT p_tenant,n.id,default_context FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.tenant_id=p_tenant AND k.slug='project';
         INSERT INTO events(tenant_id,actor_principal_id,type,after,metadata)
             VALUES(p_tenant,actor,'account_use.migrated',jsonb_build_object('confirmation_required',true),
                    jsonb_build_object('migration','1309','policy','preserve_pre_matrix_behaviour'));
