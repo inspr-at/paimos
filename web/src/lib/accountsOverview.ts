@@ -30,3 +30,9 @@ export function overviewAccounts(records: AgentAccount[], rows: AccountRow[], co
   }
   return [...result.values()]
 }
+/** "Shared by 1 computer", "Shared by 3 computers": distinct computers signed in with the account (AEON-1062). */
+export function sharedByComputers(account: Pick<OverviewAccount, 'signins'>, language: 'en' | 'de' = 'en'): string {
+  const count = new Set(account.signins.map(s => s.computer.computer_id)).size
+  if (language === 'de') return count === 0 ? 'Auf keinem Computer angemeldet' : count === 1 ? 'Von 1 Computer geteilt' : `Von ${count} Computern geteilt`
+  return count === 0 ? 'Not signed in on any computer' : count === 1 ? 'Shared by 1 computer' : `Shared by ${count} computers`
+}
