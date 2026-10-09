@@ -4,6 +4,7 @@
 // which way is better, the verdict against the Arion target (shape + word), the
 // small chart, the change against the window before, one plain sentence with
 // Arion's wish, and the source or "Partial". Lines keep their height in every state.
+import { ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import LearnPopover from './LearnPopover.vue'
 import TileSpark from './TileSpark.vue'
@@ -11,12 +12,19 @@ import { vClipTip } from '../../directives/clipTip'
 import type { SimpleTileModel } from '../../lib/deliverySimple'
 import type { SimpleText } from '../../lib/deliverySimpleText'
 
-defineProps<{ tile: SimpleTileModel; state: 'loading' | 'error' | 'ready'; text: SimpleText }>()
+const props = defineProps<{ tile: SimpleTileModel; state: 'loading' | 'error' | 'ready'; text: SimpleText }>()
 const ICON = { on: 'v-on', close: 'v-close', far: 'v-far', none: 'v-none' } as const
+// A shorter error sentence must not shrink the tile, or the next row's Learn button jumps.
+const root = ref<HTMLElement>()
+const hold = ref(0)
+watch(() => props.state, (next, prev) => {
+  if (prev === 'ready' && next !== 'ready') hold.value = root.value?.getBoundingClientRect().height ?? 0
+  else if (next === 'ready') hold.value = 0
+}, { flush: 'pre' })
 </script>
 
 <template>
-  <article class="s-tile" role="listitem" :aria-labelledby="`sn-${tile.key}`" :aria-busy="state === 'loading' || undefined" :data-key="tile.key">
+  <article ref="root" class="s-tile" role="listitem" :aria-labelledby="`sn-${tile.key}`" :aria-busy="state === 'loading' || undefined" :data-key="tile.key" :style="hold > 0 ? { minHeight: `${hold}px` } : undefined">
     <div class="s-top">
       <h4 :id="`sn-${tile.key}`" class="s-name">{{ tile.name }}</h4>
       <LearnPopover :id="tile.key" :name="tile.name" :body="tile.learn.body" :expert="tile.learn.expert" :target="tile.learn.target"

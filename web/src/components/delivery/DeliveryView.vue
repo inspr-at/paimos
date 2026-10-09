@@ -164,6 +164,15 @@ onBeforeUnmount(() => {
 })
 // The tile behind an open popover belongs to this window and this answer.
 watch([() => prefs.value.window, () => prefs.value.level, view, lang], closeTip)
+
+// Source chips wrap onto several rows on a phone. A failed read must keep that box,
+// or the shorter banner collapses it and every Learn button below jumps (AEON-541).
+const statusEl = ref<HTMLElement>()
+const statusHold = ref(0)
+watch(state, (next, prev) => {
+  if (prev === 'ready' && next !== 'ready') statusHold.value = statusEl.value?.getBoundingClientRect().height ?? 0
+  else if (next === 'ready') statusHold.value = 0
+}, { flush: 'pre' })
 </script>
 
 <template>
@@ -189,15 +198,16 @@ watch([() => prefs.value.window, () => prefs.value.level, view, lang], closeTip)
         </div>
         <span class="dl-updated" data-testid="delivery-updated">{{ updated || ' ' }}</span>
       </div>
+      <!-- Save feedback sits on the status row. It is out of flow, so Learn does not move when it appears or clears. -->
+      <p v-if="prefFailed" class="banner err pref-warn" role="alert" data-testid="delivery-pref-error">
+        <AppIcon name="alert" :size="16" />
+        <span v-clip-tip class="grow">{{ text.prefErr }}</span>
+        <button type="button" class="btn sm" @click="retryPrefs">{{ text.prefRetry }}</button>
+      </p>
     </div>
-    <p v-if="prefFailed" class="banner err pref-warn" role="alert" data-testid="delivery-pref-error">
-      <AppIcon name="alert" :size="16" />
-      <span v-clip-tip class="grow">{{ text.prefErr }}</span>
-      <button type="button" class="btn sm" @click="retryPrefs">{{ text.prefRetry }}</button>
-    </p>
 
     <template v-if="view === 'numbers'">
-      <div class="dl-status">
+      <div ref="statusEl" class="dl-status" :class="{ veiled: prefFailed }" :style="statusHold > 0 ? { minHeight: `${statusHold}px` } : undefined">
         <div v-if="state === 'loading'" class="sources" aria-hidden="true">
           <span class="sk chip-sk" style="width: 210px" /><span class="sk chip-sk" style="width: 250px" /><span class="sk chip-sk" style="width: 230px" />
         </div>
@@ -246,7 +256,7 @@ watch([() => prefs.value.window, () => prefs.value.level, view, lang], closeTip)
         </div>
       </div>
     </template>
-    <div v-else class="flow-empty banner" role="status">
+    <div v-else class="flow-empty banner" :class="{ veiled: prefFailed }" role="status">
       <AppIcon name="flow" :size="16" />
       <span class="grow"><b>{{ text.flowNone }}</b> {{ text.flowNoneB }}</span>
     </div>
@@ -269,7 +279,7 @@ watch([() => prefs.value.window, () => prefs.value.level, view, lang], closeTip)
 .fade-1 { stop-color: var(--teal); stop-opacity: .13; }
 .hatch-line { stroke: var(--line-2); stroke-width: 1; }
 /* Top-anchored head: the controls keep their place whatever the text beside them says. */
-.dl-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; }
+.dl-head { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; }
 .dl-left { flex: 1 1 360px; min-width: 0; }
 .dl-titleline { display: flex; align-items: center; gap: 12px; }
 .dl-titleline h2 { margin: 0; font: 650 19px/1.25 var(--font); letter-spacing: -.01em; color: var(--ink); }
@@ -279,6 +289,10 @@ watch([() => prefs.value.window, () => prefs.value.level, view, lang], closeTip)
 .slot-hidden { visibility: hidden; }
 .dl-updated { font: 500 11.5px/1.4 var(--mono); color: var(--ink-3); white-space: nowrap; }
 .dl-status { min-height: 40px; }
+.dl-status.veiled, .flow-empty.veiled { visibility: hidden; }
+/* The warning replaces the status row in place: same anchor, no extra flow, so tiles stay put. */
+.banner.pref-warn { position: absolute; z-index: 2; top: calc(100% + 12px); right: 0; left: 0; margin: 0; min-height: 28px; padding-block: 0; flex-wrap: nowrap; }
+.banner.pref-warn .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 28px; margin-top: 12px; }
 .src { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 12px; }
 .src svg { flex: none; color: var(--teal-ink); }
@@ -291,7 +305,7 @@ watch([() => prefs.value.window, () => prefs.value.level, view, lang], closeTip)
 .banner.err { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .banner.err svg { color: var(--danger); }
 .banner .btn { flex: none; gap: 6px; }
-/* The status row keeps the sources' height in every state, so the tiles' Learn buttons do not jump (AEON-541). */
+/* While a read is in flight or has failed, the row keeps the height measured from the chips (AEON-541). */
 .dl-status .banner { min-height: 28px; padding-block: 0; flex-wrap: nowrap; }
 .dl-status .banner .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flow-empty { margin-top: 16px; }
@@ -335,6 +349,7 @@ watch([() => prefs.value.window, () => prefs.value.level, view, lang], closeTip)
   .tr-cap { flex-basis: 100%; margin-left: 0; }
   .defs { grid-template-columns: minmax(0, 1fr); }
   .banner { flex-wrap: wrap; }
+  .banner.pref-warn { flex-wrap: nowrap; min-height: 44px; }
   .banner .btn { min-height: 44px; }
   .dl-status .sources, .dl-status .banner { min-height: 44px; }
   .dl-status .banner { flex-wrap: nowrap; }

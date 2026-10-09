@@ -23,8 +23,24 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en
 const head = (page: Page) => page.locator('.dl-head')
 const simpleTile = (page: Page, name: string) => page.getByTestId('delivery-simple').getByRole('listitem').filter({ has: page.getByRole('heading', { name, level: 4 }) })
 
+const copy = (lang: 'en' | 'de') => lang === 'de'
+  ? {
+      window: 'Zeitraum der Diagramme', level: 'Detailgrad', days: (n: number) => `${n} Tage`,
+      warning: 'Zeitraum und Detailgrad konnten nicht gespeichert werden. Die Auswahl bleibt auf dieser Seite.', retrySave: 'Erneut speichern',
+      learn: 'Lernen: Wie lange die PR-Checks dauern', last: 'Lernen: Voller Testlauf jede Nacht', tile: 'Wie lange die PR-Checks dauern',
+      summary: 'Letzte 7 Tage gegen die 7 davor', failed: 'Die Lieferzahlen konnten nicht geladen werden.', notLoaded: 'Nicht geladen', retry: 'Erneut versuchen',
+    }
+  : {
+      window: 'Chart window', level: 'Level of detail', days: (n: number) => `${n} days`,
+      warning: 'The window and level could not be saved. This choice stays on this page.', retrySave: 'Save again',
+      learn: 'Learn: How long the PR checks take', last: 'Learn: Full test run each night', tile: 'How long the PR checks take',
+      summary: 'Last 7 days vs. the 7 before', failed: 'Delivery numbers could not be loaded.', notLoaded: 'Not loaded', retry: 'Retry',
+    }
+
 for (const lang of ['en', 'de'] as const) {
   test(`a failed preference save keeps the choice and shows a ${lang === 'de' ? 'German' : 'English'} warning with retry`, async ({ page }) => {
+    test.setTimeout(90_000)
+    const text = copy(lang)
     await page.setViewportSize({ width: 1440, height: 1000 })
     await setup(page, { lang })
     let reject = true
@@ -34,57 +50,94 @@ for (const lang of ['en', 'de'] as const) {
       return route.fallback()
     })
     await page.goto('/p/AEON/delivery')
-    const windows = head(page).getByRole('radiogroup', { name: lang === 'de' ? 'Zeitraum der Diagramme' : 'Chart window' })
-    const levels = head(page).getByRole('radiogroup', { name: lang === 'de' ? 'Detailgrad' : 'Level of detail' })
-    const chosen = windows.getByRole('radio', { name: lang === 'de' ? '30 Tage' : '30 days' })
+    const windows = head(page).getByRole('radiogroup', { name: text.window })
+    const levels = head(page).getByRole('radiogroup', { name: text.level })
+    const chosen = windows.getByRole('radio', { name: text.days(30) })
     const warning = page.getByTestId('delivery-pref-error')
-    await expect(windows.getByRole('radio', { name: lang === 'de' ? '7 Tage' : '7 days' })).toHaveAttribute('aria-checked', 'true')
-    const guard = await controlStability(page, { windows, levels })
+    const simple = page.getByTestId('delivery-simple')
+    await expect(windows.getByRole('radio', { name: text.days(7) })).toHaveAttribute('aria-checked', 'true')
+    const learn = simple.getByRole('button', { name: text.learn })
+    const last = simple.getByRole('button', { name: text.last })
+    // The warning must not push the tiles: Learn is measured through the failure and the retry.
+    const guard = await controlStability(page, { windows, levels, learn, last })
     await guard.check(async () => {
       await chosen.click()
       await expect(warning).toBeVisible()
     })
+    await expect(chosen).toHaveAttribute('aria-checked', 'true')
+    await expect(warning).toContainText(text.warning)
+    reject = false
+    await guard.check(async () => {
+      await warning.getByRole('button', { name: text.retrySave, exact: true }).click()
+      await expect(warning).toHaveCount(0)
+    })
     guard.done()
     await expect(chosen).toHaveAttribute('aria-checked', 'true')
-    await expect(warning).toContainText(lang === 'de'
-      ? 'Zeitraum und Detailgrad konnten nicht gespeichert werden. Die Auswahl bleibt auf dieser Seite.'
-      : 'The window and level could not be saved. This choice stays on this page.')
+
+    // Phone: the same warning wraps, and Learn still stays put through failure and retry.
+    await page.setViewportSize({ width: 400, height: 860 })
+    reject = true
+    await page.reload()
+    const phoneWindows = head(page).getByRole('radiogroup', { name: text.window })
+    const phoneLevels = head(page).getByRole('radiogroup', { name: text.level })
+    const phoneChosen = phoneWindows.getByRole('radio', { name: text.days(90) })
+    await expect(phoneWindows.getByRole('radio', { name: text.days(30) })).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByTestId('delivery-summary')).toContainText(lang === 'de' ? 'Letzte 30 Tage gegen die 30 davor' : 'Last 30 days vs. the 30 before')
+    const phoneLearn = page.getByTestId('delivery-simple').getByRole('button', { name: text.learn })
+    const phoneLast = page.getByTestId('delivery-simple').getByRole('button', { name: text.last })
+    const phone = await controlStability(page, { windows: phoneWindows, levels: phoneLevels, learn: phoneLearn, last: phoneLast })
+    await phone.check(async () => {
+      await phoneChosen.click()
+      await expect(warning).toBeVisible()
+    })
+    await expect(warning).toContainText(text.warning)
+    const warnBox = await warning.boundingBox()
+    const learnBox = await phoneLearn.boundingBox()
+    expect(warnBox!.y + warnBox!.height).toBeLessThanOrEqual(learnBox!.y + 0.5)
     reject = false
-    await warning.getByRole('button', { name: lang === 'de' ? 'Erneut speichern' : 'Save again', exact: true }).click()
-    await expect(warning).toHaveCount(0)
-    await expect(chosen).toHaveAttribute('aria-checked', 'true')
+    await phone.check(async () => {
+      await warning.getByRole('button', { name: text.retrySave, exact: true }).click()
+      await expect(warning).toHaveCount(0)
+    })
+    phone.done()
+    await expect(phoneChosen).toHaveAttribute('aria-checked', 'true')
   })
 }
 
 test('a failed refresh keeps Learn still through the error and the retry', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1000 })
-  const world = await setup(page)
-  await page.goto('/p/AEON/delivery')
-  const simple = page.getByTestId('delivery-simple')
-  const learn = simple.getByRole('button', { name: 'Learn: How long the PR checks take' })
-  const last = simple.getByRole('button', { name: 'Learn: Full test run each night' })
-  const summary = page.getByTestId('delivery-summary')
-  await expect(summary).toContainText('Last 7 days vs. the 7 before')
-  const guard = await controlStability(page, {
-    learn, last, summary,
-    windows: head(page).getByRole('radiogroup', { name: 'Chart window' }),
-    levels: head(page).getByRole('radiogroup', { name: 'Level of detail' }),
-  })
-  world.answer(500, { error: 'boom' })
-  await guard.check(async () => {
-    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
-    await expect(page.getByRole('alert')).toContainText('Delivery numbers could not be loaded.')
-    await expect(simple.locator('.s-val.empty').first()).toHaveText('Not loaded')
-    await expect(summary).toContainText('Delivery numbers could not be loaded.')
-  })
-  world.metrics({})
-  await guard.check(async () => {
-    await page.getByRole('button', { name: 'Retry', exact: true }).click()
-    await expect(page.getByRole('alert')).toHaveCount(0)
-    await expect(summary).toContainText('Last 7 days vs. the 7 before')
-    await expect(simple.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'How long the PR checks take', level: 4 }) }).locator('.s-val')).toHaveText('16min')
-  })
-  guard.done()
+  test.setTimeout(120_000)
+  for (const width of [1440, 400]) for (const lang of ['en', 'de'] as const) {
+    const text = copy(lang)
+    await page.setViewportSize({ width, height: width === 400 ? 860 : 1000 })
+    const world = await setup(page, { lang })
+    await page.goto('/p/AEON/delivery')
+    const simple = page.getByTestId('delivery-simple')
+    const learn = simple.getByRole('button', { name: text.learn })
+    const last = simple.getByRole('button', { name: text.last })
+    const summary = page.getByTestId('delivery-summary')
+    await expect(summary).toContainText(text.summary)
+    // Phone source chips wrap to several rows. The status region and Learn must keep that geometry through the error and the retry.
+    const guard = await controlStability(page, {
+      learn, last, summary, status: page.locator('.dl-status'),
+      windows: head(page).getByRole('radiogroup', { name: text.window }),
+      levels: head(page).getByRole('radiogroup', { name: text.level }),
+    })
+    world.answer(500, { error: 'boom' })
+    await guard.check(async () => {
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await expect(page.getByRole('alert')).toContainText(text.failed)
+      await expect(simple.locator('.s-val.empty').first()).toHaveText(text.notLoaded)
+      await expect(summary).toContainText(text.failed)
+    })
+    world.metrics({})
+    await guard.check(async () => {
+      await page.getByRole('button', { name: text.retry, exact: true }).click()
+      await expect(page.getByRole('alert')).toHaveCount(0)
+      await expect(summary).toContainText(text.summary)
+      await expect(simple.getByRole('listitem').filter({ has: page.getByRole('heading', { name: text.tile, level: 4 }) }).locator('.s-val')).toHaveText('16min')
+    })
+    guard.done()
+  }
 })
 
 test('Simple explains each number in plain words, and its controls stay still through every window', async ({ page }) => {
