@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelactivation"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -210,7 +211,7 @@ func (m *Module) editLine(w http.ResponseWriter, r *http.Request) {
 			if err := validateProfile(pin); err != nil {
 				return err
 			}
-			prof, err := insertProfileWithState(ctx, tx, p.TenantID, pin, before[0].Enabled)
+			prof, err := insertActivatedProfile(ctx, tx, p, pin, before[0].Enabled, modelactivation.Person)
 			if err != nil {
 				return err
 			}

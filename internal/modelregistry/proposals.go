@@ -2,9 +2,11 @@
 package modelregistry
 
 import (
+	"github.com/inspr-at/paimos/internal/modelactivation"
 	"net/http"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/jackc/pgx/v5"
 )
@@ -43,6 +45,9 @@ func (m *Module) acceptProposal(w http.ResponseWriter, r *http.Request) {
 	}
 	var out Profile
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(r.Context(), tx, p.TenantID); err != nil {
+			return err
+		}
 		if err := catalogLock(r.Context(), tx); err != nil {
 			return err
 		}
@@ -71,7 +76,7 @@ func (m *Module) acceptProposal(w http.ResponseWriter, r *http.Request) {
 				pin.Version = profile.Version + "-accepted"
 			}
 		}
-		out, err = insertProfile(r.Context(), tx, p.TenantID, pin)
+		out, err = insertActivatedProfile(r.Context(), tx, p, pin, true, modelactivation.Person)
 		if err != nil {
 			return err
 		}

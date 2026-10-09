@@ -2,6 +2,7 @@
 package agentaccounts
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -12,6 +13,60 @@ import (
 	"net/http/httptest"
 	"testing"
 )
+
+// Risk: account.manage alone bypasses deny, or accepting a withheld pi model
+// mutates its historical pin instead of creating an enabled immutable version.
+func TestPiModelUnderDenyRequiresAccountUseManage(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "pi-deny", "person", "Admin", []string{"admin"})
+	runner := addPrincipal(t, admin.TenantID, "agent", "runner", []string{"admin"})
+	token := issueKey(t, runner, []string{"account.manage", "account.read"})
+	mod := &Module{pool: appPool}
+	var a Account
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"pi-deny","harness":"pi","daemon_id":"daemon-pi","label":"Pi"}`, 201, &a)
+	ownFixtureAccount(t, admin, &a)
+	full := "anthropic/claude-opus-5"
+	slug := fmt.Sprintf("pi-account-%x", sha256.Sum256([]byte(full)))
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET provider='anthropic' WHERE id=$1`, a.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE account_use_rules SET new_models='deny'`); err != nil {
+			return err
+		}
+		// The legacy pi writer is uncaused and must now be withheld by T5.
+		var enabled bool
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'1','pi','anthropic',$3,'off','standard') RETURNING enabled`, admin.TenantID, slug, full).Scan(&enabled); err != nil {
+			return err
+		}
+		if enabled {
+			return fmt.Errorf("legacy pi model bypassed deny")
+		}
+		if _, err := tx.Exec(t.Context(), `WITH r AS (INSERT INTO roles(tenant_id,key,name) VALUES($1,'account-only','Accounts only') RETURNING id) INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,id,unnest(ARRAY['account.manage','account.read']) FROM r`, admin.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='account-only') WHERE principal_id=$1 AND scope_type='workspace'`, admin.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/agent-accounts/" + a.ID + "/model"
+	beforeEvents := scalar(t, admin, `SELECT count(*) FROM events WHERE type='account.updated'`)
+	callStatus(t, mod, &admin, "", "PUT", path, `{"model":"claude-opus-5"}`, 403, nil)
+	if scalar(t, admin, `SELECT count(*) FROM model_profiles WHERE enabled`) != 0 || scalar(t, admin, `SELECT count(*) FROM model_profiles`) != 1 || scalar(t, admin, `SELECT count(*) FROM events WHERE type='account.updated'`) != beforeEvents {
+		t.Fatal("denied activation changed pins or audit")
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='admin') WHERE principal_id=$1 AND scope_type='workspace'`, admin.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	callStatus(t, mod, &admin, "", "PUT", path, `{"model":"claude-opus-5"}`, 200, &a)
+	if len(a.AllowedProfileIDs) != 1 || scalar(t, admin, `SELECT count(*) FROM model_profiles WHERE id=$1 AND enabled AND version='2'`, a.AllowedProfileIDs[0]) != 1 || scalar(t, admin, `SELECT count(*) FROM model_profiles WHERE version='1' AND NOT enabled`) != 1 {
+		t.Fatal("person acceptance did not preserve withheld immutable pin")
+	}
+}
 
 func TestPiAccountModelPermissionCatalogAndImmutablePins(t *testing.T) {
 	reset(t)

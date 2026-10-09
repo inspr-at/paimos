@@ -26,7 +26,16 @@ unconditional principal-entry guard explicitly refuses older binaries, even
 when the account pool is empty. The bound pairing verification run alone is
 exempt. Boot checks enforce the database capability floor for future binaries.
 
-Matrix UI, all Go selection filters, model activation and daemon enrolment are
+The model activation fence consumes a cause on every profile insert, including
+disabled pins. Shipped catalogs remain automatic under shipped-only; vendor
+successors and older writers are withheld. Deny withholds every automatic pin,
+even the first catalog. Withheld pins stay disabled, appear as observations,
+and audit the persisted rule and cause at transaction end. Catalog ladders
+skip them. Person acceptance, manual additions, line edits and pi model writes
+re-check their existing permission; enabling a pin under deny additionally
+requires workspace `account.use.manage`.
+
+Matrix UI, all Go selection filters and daemon enrolment are
 separate slices of the same release. This core alone is not a complete release
 of the account matrix. Exact-byte migration-policy records are review artifacts
 and require the coordinator's review and previous-image compatibility gate.

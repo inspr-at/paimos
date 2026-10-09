@@ -4,7 +4,6 @@ package modelregistry
 
 import (
 	"context"
-	"encoding/json"
 	"math"
 	"net/http"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/modelactivation"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -97,7 +97,7 @@ func prepareCatalogDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal) 
 		upgraded, err := prepareCatalogUpgrade(ctx, tx, p)
 		return append(changes, upgraded...), err
 	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id', true), 0))`); err != nil {
+	if err := catalogLock(ctx, tx); err != nil {
 		return nil, err
 	}
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles`).Scan(&n); err != nil {
@@ -115,21 +115,23 @@ func prepareCatalogDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal) 
 	ids := make(map[string]string, len(profiles))
 	seeded := make([]Profile, 0, len(profiles))
 	for _, profile := range profiles {
-		row, err := insertProfile(ctx, tx, p.TenantID, profileWrite{
+		row, err := insertActivatedProfile(ctx, tx, p, profileWrite{
 			Slug: profile.Slug, Version: profile.Version, Harness: profile.Harness,
 			Family: profile.Family, Model: profile.Model, Effort: profile.Effort, Tier: profile.Tier,
-		})
+		}, true, modelactivation.ShippedCatalog)
 		if err != nil {
 			return nil, err
 		}
-		ids[profile.Slug] = row.ID
+		if row.Enabled {
+			ids[profile.Slug] = row.ID
+		}
 		seeded = append(seeded, row)
 	}
 	routes := make([]Route, 0)
 	for _, route := range defaultRoutes(profiles) {
 		id := ids[route.Slug]
 		if id == "" {
-			return nil, fail(http.StatusInternalServerError, "catalog route is missing its profile")
+			continue
 		}
 		stored := Route{Role: route.Role, Priority: route.Priority, ProfileID: id, State: "available"}
 		if err := insertRoute(ctx, tx, p.TenantID, stored); err != nil {
@@ -156,6 +158,10 @@ func insertObservedProfile(ctx context.Context, tx pgx.Tx, tenantID string, in p
 }
 
 func insertProfileWithState(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite, enabled bool) (Profile, error) {
+	return insertActivatedProfile(ctx, tx, tenant.Principal{TenantID: tenantID}, in, enabled, "")
+}
+
+func insertActivatedProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite, enabled bool, cause modelactivation.Cause) (Profile, error) {
 	var out Profile
 	overrides := map[string]string{}
 	if in.DisplayName != "" {
@@ -167,20 +173,18 @@ func insertProfileWithState(ctx context.Context, tx pgx.Tx, tenantID string, in 
 	if in.ModelVersion != "" {
 		overrides["model_version"] = in.ModelVersion
 	}
-	raw, err := json.Marshal(overrides)
-	if err != nil {
-		return out, err
-	}
-	err = tx.QueryRow(ctx, `
-		INSERT INTO model_profiles
-			(tenant_id, slug, version, harness, family, model, effort, tier, enabled, display_overrides,source,note,registered_effort_level)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb,$11,$12,$13)
-		RETURNING id::text, slug, version, harness, family, model, effort, tier, enabled, created_at`,
-		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier, enabled, string(raw), profileSource(in.Source), in.Note, in.RegisteredEffortLevel).
-		Scan(&out.ID, &out.Slug, &out.Version, &out.Harness, &out.Family, &out.Model, &out.Effort, &out.Tier, &out.Enabled, &out.CreatedAt)
+	stored, err := modelactivation.Activate(ctx, tx, p, modelactivation.Pin{
+		Slug: in.Slug, Version: in.Version, Harness: in.Harness, Family: in.Family,
+		Model: in.Model, Effort: in.Effort, Tier: in.Tier, Enabled: enabled,
+		DisplayOverrides: overrides, Source: profileSource(in.Source), Note: in.Note,
+		RegisteredEffortLevel: in.RegisteredEffortLevel, Permission: "models.manage",
+	}, cause)
+	out = Profile{ID: stored.ID, Slug: stored.Slug, Version: stored.Version, Harness: stored.Harness,
+		Family: stored.Family, Model: stored.Model, Effort: stored.Effort, Tier: stored.Tier,
+		Enabled: stored.Enabled, CreatedAt: stored.CreatedAt}
 	if err == nil {
 		err = tx.QueryRow(ctx, `SELECT model_display->>'display_name',model_display->>'short_name',model_display->>'model_version',effort_level,provider
-			FROM model_profile_display WHERE tenant_id=$1::uuid AND profile_id=$2::uuid`, tenantID, out.ID).
+			FROM model_profile_display WHERE tenant_id=$1::uuid AND profile_id=$2::uuid`, p.TenantID, out.ID).
 			Scan(&out.DisplayName, &out.ShortName, &out.ModelVersion, &out.EffortLevel, &out.Provider)
 	}
 	if out.Harness == "gemini" {
@@ -350,7 +354,7 @@ func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profil
 	if err := requireCatalog(ctx, tx); err != nil {
 		return Profile{}, err
 	}
-	out, err := insertProfile(ctx, tx, p.TenantID, in)
+	out, err := insertActivatedProfile(ctx, tx, p, in, true, modelactivation.Person)
 	if err != nil {
 		return Profile{}, err
 	}
