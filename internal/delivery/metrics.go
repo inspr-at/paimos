@@ -47,13 +47,16 @@ type metricRun struct {
 	// HeadTree is the tree of the head commit; a retrigger commit shares it
 	// with its parent (AEON-1016). Empty when GitHub did not say.
 	HeadTree string
-	// Job facts (AEON-1016) of attempt 1 of a pull-request or merge-queue run:
-	// JobsRead says they were read; Required holds the conclusion of each
-	// required check ("missing" when no job had that name); WorstWaitMS is the
+	// Job facts (AEON-1016) of attempt 1 of a pull-request or merge-queue run.
+	// JobsRead says they were read. JobsComplete says Required is every job
+	// conclusion of that attempt, not only the checks one project asked for;
+	// a name absent from a complete map did not run. A legacy row is a flat
+	// map of whatever was asked then, and is not complete. WorstWaitMS is the
 	// longest wait for a runner of any job that ran, nil when none did.
-	JobsRead    bool
-	Required    map[string]string
-	WorstWaitMS *int
+	JobsRead     bool
+	JobsComplete bool
+	Required     map[string]string
+	WorstWaitMS  *int
 }
 
 type metricPull struct {
@@ -125,9 +128,13 @@ type metricInput struct {
 	// IncidentCovered is when rollout records began for this project.
 	IncidentCovered *time.Time
 	Covered         *time.Time
-	CoveredUntil    *time.Time
-	ReadFrom        *time.Time
-	Truncated       bool
+	// PreflightCovered is the earliest time preflight runs are complete. It
+	// follows a backfill that listed the preflight workflow, not CI coverage.
+	// Nil, or the first webhook preflight fact, until that backfill has run.
+	PreflightCovered *time.Time
+	CoveredUntil     *time.Time
+	ReadFrom         *time.Time
+	Truncated        bool
 }
 
 type MetricSample struct {
@@ -248,6 +255,10 @@ type metricSpec struct {
 	alwaysPartial                 bool
 	// tagNames name the bits of metricPoint.tags; each becomes a count.
 	tagNames []string
+	// withhold, when set, means the share cannot be measured yet. Samples and
+	// their counts stay; the value is nil and the status is no_data. A zero
+	// would claim a measurement that was not made.
+	withhold string
 	// gaps are the instants of samples that could not be taken because a fact
 	// is missing (jobs not read yet). A span holding one is partial.
 	gaps      []time.Time
@@ -545,6 +556,11 @@ func (s metricSpec) measure(samples []metricPoint, span metricSpan, now time.Tim
 	switch {
 	case len(points) == 0:
 		m.status = "no_data"
+	case s.withhold != "":
+		// The samples are real. The share they would make is not, until the
+		// missing evidence exists. Counts still name what was observed.
+		m.status = "no_data"
+		m.value, m.p50, m.p90 = nil, nil, nil
 	case s.incomplete(span.first, end, truncated):
 		m.status = "partial"
 	default:
@@ -567,7 +583,7 @@ func (s metricSpec) buildFor(now time.Time, samples []metricPoint, truncated boo
 	out := Metric{Number: s.number, Key: s.key, Label: s.label, Unit: s.unit, Source: s.source, Definition: s.def, Target: s.target, Windows: []MetricWindow{}, Daily: []MetricPoint{}, Series: []MetricBucket{}}
 	sort.SliceStable(samples, func(i, j int) bool { return samples[i].at.Before(samples[j].at) })
 	for _, sample := range samples {
-		if sample.none || s.aggregate == "per100" || s.aggregate == "count" {
+		if sample.none || s.aggregate == "per100" || s.aggregate == "count" || s.withhold != "" {
 			continue
 		}
 		if !sample.at.After(now) && !sample.at.Before(now.Add(-metricDays*24*time.Hour)) {
@@ -616,6 +632,9 @@ func (s metricSpec) buildFor(now time.Time, samples []metricPoint, truncated boo
 	}
 	covered := s.covered()
 	switch {
+	case s.withhold != "" && long.N > 0:
+		out.Status = "no_data"
+		reasons = append(reasons, s.withhold)
 	case long.N == 0:
 		out.Status = "no_data"
 		if missing := s.gapsIn(windowStart, now); missing > 0 {

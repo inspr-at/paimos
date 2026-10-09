@@ -172,6 +172,20 @@ export function nightStreak(nights: ('ok' | 'bad' | 'none' | 'nodata')[]): { ver
   return { verdict, count }
 }
 
+/** Required checks beside workflow green: their own sample size, and coverage plus the missing-facts reason when that window is not whole. */
+function requiredParts(also: MetricWindow | null, alsoMetric: Metric | undefined, primaryN: number, text: DeliveryText, lang: DeliveryLanguage): Part[] {
+  if (!also || also.value == null) return [{ text: `${text.requiredChecks} –` }]
+  const parts: Part[] = [{ text: `${text.requiredChecks} ` }, { text: pct(also.value, lang), strong: true }, { text: ` · ${num(also.n, lang)} ${text.of} ${num(primaryN, lang)}` }]
+  if (also.status === 'partial' || !also.coverage.full) {
+    const cover = coverText(also.coverage, text)
+    if (cover) parts.push({ text: ` · ${cover}` })
+    const reason = alsoMetric?.reason?.trim()
+    if (reason) parts.push({ text: ` · ${reason}` })
+    else if (also.status === 'partial') parts.push({ text: ` · ${text.partial}` })
+  }
+  return parts
+}
+
 export function tileModel(def: TileDef, metrics: Map<MetricKey, Metric>, days: WindowDays, source: MetricSource | null, lang: DeliveryLanguage): TileModel {
   const text = deliveryText(lang), words = text.metrics[def.key], metric = metrics.get(def.key)
   const window = windowOf(metric, days), also = def.also ? windowOf(metrics.get(def.also), days) : null
@@ -189,6 +203,11 @@ export function tileModel(def: TileDef, metrics: Map<MetricKey, Metric>, days: W
     return { ...base, value: { main: '0', unit: text.unitRecorded }, lineA: { parts: [{ text: text.counts.nothingRecorded }], mono: false }, lineB: details(def, window, text, lang).b }
   }
   const empty = { ...base, value: null, lineA: { parts: [{ text: 'p50 · p90 –' }], mono: true }, lineB: details(def, window, text, lang).b }
+  // A withheld flake share is unavailable, not zero. The rescue and suspect counts still have a place to stand.
+  if (def.key === 'flaked_failures' && window && window.n > 0 && window.value == null) {
+    const more = details(def, window, text, lang)
+    return { ...base, value: null, lineA: { parts: [{ text: more.a }], mono: false }, lineB: more.b }
+  }
   if (!window || window.n === 0 || window.value == null) return def.kind === 'nightly' ? nightlyTile(base, metric, window, days, text, lang, true) : empty
   const n = window.n, count = `${num(n, lang)} ${words.count}`
   const more = details(def, window, text, lang)
@@ -208,7 +227,7 @@ export function tileModel(def: TileDef, metrics: Map<MetricKey, Metric>, days: W
         lineA: { parts: [{ text: `${text.mean} ` }, { text: num(window.value, lang, 1), strong: true }, { text: ' · p90 ' }, { text: window.p90 == null ? '–' : num(window.p90, lang, window.p90 % 1 ? 1 : 0), strong: true }], mono: true }, lineB: count }
     case 'share':
       return { ...base, value: { main: num(window.value, lang), unit: '%' },
-        lineA: { parts: also?.value != null ? [{ text: `${text.requiredChecks} ` }, { text: pct(also.value, lang), strong: true }] : [{ text: `${text.requiredChecks} –` }], mono: false }, lineB: count }
+        lineA: { parts: requiredParts(also, def.also ? metrics.get(def.also) : undefined, n, text, lang), mono: false }, lineB: count }
     case 'rate':
       return { ...base, value: { main: num(window.value, lang, window.value < 10 && window.value % 1 ? 1 : 0), unit: '%' }, lineA: { parts: [{ text: more.a }], mono: false }, lineB: more.b || count }
     case 'per100':
@@ -238,7 +257,7 @@ export function details(def: TileDef, window: MetricWindow | null, text: Deliver
   switch (def.key) {
     case 'time_to_first_green': return { a: '', b: window && (n > 0 || (c.never_green ?? 0) > 0) ? fill(k.branches, { n: num(n, lang), never: of('never_green') }) : '' }
     case 'time_to_first_green_commit': return { a: '', b: window && (n > 0 || (c.never_green ?? 0) > 0) ? fill(k.commits, { n: num(n, lang), never: of('never_green'), sup: of('superseded') }) : '' }
-    case 'flaked_failures': return { a: fill(k.flakes, { c: of('confirmed'), s: of('suspect') }), b: fill(k.firstAttempts, { n: num(n, lang) }) }
+    case 'flaked_failures': return { a: fill(k.flakes, { c: of('confirmed'), s: of('suspect'), r: of('workflow_rescue') }), b: fill(k.firstAttempts, { n: num(n, lang) }) }
     case 'preflight_red_rate': return { a: fill(k.preflights, { n: num(n, lang) }), b: k.preflightNote }
     case 'queue_ejections': return { a: fill(k.ejections, { e: of('events'), b: of('base') }), b: k.inferred }
     case 'queue_unclassified': return { a: fill(k.unclassified, { e: of('events'), b: of('base') }), b: k.unclassifiedNote }
@@ -380,7 +399,8 @@ export function chartModel(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
     if (sample.n > 0 && sample.value != null) return sample.value >= 100 ? 'ok' : 'bad'
     return observed(covered, buckets[index].from, buckets[index].to) ? 'none' : 'nodata'
   }) as ChartModel['nights'] : []
-  const readouts = buckets.map((bucket, index) => readout(def, bucket, samples[index], alsoSamples[index], nights[index], text, lang))
+  const alsoMetric = def.also ? metrics.get(def.also) : undefined
+  const readouts = buckets.map((bucket, index) => readout(def, bucket, samples[index], alsoSamples[index], nights[index], text, lang, alsoSamples[index]?.status === 'partial' ? alsoMetric?.reason?.trim() || null : null))
   const notes = [sourceLabel(def, source, text)]
   if (clippedTo != null) notes.push(`${text.clip}, ${text.upTo} ${duration(clippedTo, lang)}`)
   const cover = coverText(windowOf(metric, days)?.coverage, text)
@@ -389,7 +409,7 @@ export function chartModel(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
     legend: def.kind === 'share' ? 'two' : def.kind === 'nightly' ? 'nightly' : null, nights }
 }
 
-export function readout(def: TileDef, bucket: ChartBucket, sample: Measured | undefined, also: Measured | undefined, night: ChartModel['nights'][number] | undefined, text: DeliveryText, lang: DeliveryLanguage): string {
+export function readout(def: TileDef, bucket: ChartBucket, sample: Measured | undefined, also: Measured | undefined, night: ChartModel['nights'][number] | undefined, text: DeliveryText, lang: DeliveryLanguage, companionReason: string | null = null): string {
   const head = bucket.long
   if (def.kind === 'nightly' && bucket.unit === 'day') {
     return `${head} · ${night === 'ok' ? text.green : night === 'bad' ? `${text.red} (${text.failed})` : night === 'none' ? text.noRun : text.noData}`
@@ -404,7 +424,13 @@ export function readout(def: TileDef, bucket: ChartBucket, sample: Measured | un
     case 'duration': return `${head}${partial} · ${pair(sample.p50 ?? sample.value, sample.p90)} · ${count}`
     case 'review': return `${head}${partial} · ${pair(sample.p50 ?? sample.value, sample.p90)}${also?.value != null && also.n > 0 ? ` · ${text.changes} ${pct(also.value, lang)}` : ''} · ${count}`
     case 'runs': return `${head}${partial} · ${text.mean} ${sample.value == null ? '–' : num(sample.value, lang, 1)} · p90 ${sample.p90 == null ? '–' : num(sample.p90, lang, sample.p90 % 1 ? 1 : 0)} · ${count}`
-    case 'share': return `${head}${partial} · ${sample.value == null ? '–' : pct(sample.value, lang)} ${text.greenWord} · ${also?.value == null ? '–' : pct(also.value, lang)} ${text.required} · ${count}`
+    case 'share': {
+      const green = `${sample.value == null ? '–' : pct(sample.value, lang)} ${text.greenWord}`
+      const required = `${also?.value == null ? '–' : pct(also.value, lang)} ${text.required}`
+      const denom = also ? `${num(also.n, lang)} ${text.of} ${count}` : count
+      const why = also?.status === 'partial' ? ` · ${text.partial}${companionReason ? ` · ${companionReason}` : ''}` : ''
+      return `${head}${partial} · ${green} · ${required} · ${denom}${why}`
+    }
     case 'rate': return `${head}${partial} · ${sample.value == null ? '–' : pct(sample.value, lang)} · ${count}`
     case 'per100': return `${head}${partial} · ${sample.value == null ? '–' : num(sample.value, lang)} ${text.unitPerHundred} · ${count}`
     case 'count': return `${head}${partial} · ${sample.value == null ? '–' : num(sample.value, lang)} ${sample.value === 1 ? words.one : words.many}`

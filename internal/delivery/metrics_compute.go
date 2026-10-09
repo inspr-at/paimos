@@ -18,11 +18,17 @@ import (
 
 const defaultPreflightWorkflow = ".github/workflows/ci-preflight.yml"
 
-// The first and second count a metric reports (metricSpec.tagNames, in bit order).
+// The counts a metric reports (metricSpec.tagNames, in bit order).
 const (
 	bitFirst  uint8 = 1 << 0
 	bitSecond uint8 = 1 << 1
+	bitThird  uint8 = 1 << 2
 )
+
+// confirmedFlakeWithheld is why the flake share has no value. The same case,
+// the workflow revision and the runner class are not stored, so a same-run
+// rescue cannot be called a confirmed execution (Project Arion v5 §3a).
+const confirmedFlakeWithheld = "Confirmed executions are unavailable until the same case, the workflow revision and the runner class are recorded. A later green attempt of the same run is a workflow rescue, counted apart, and is not a confirmed execution."
 
 // defaultRequiredChecks are the required checks of Project Arion's ruleset,
 // used when a project names none.
@@ -54,7 +60,9 @@ func notCounted(conclusion string) bool {
 // requiredStatus is the verdict of the required checks of one attempt-1 run:
 // "red" when any required job did not succeed or was missing, "green" otherwise
 // (skipped counts as passing, as GitHub treats it), "unknown" when the jobs were
-// not read or were read for other check names. Unknown is never guessed.
+// not read or the stored map is a legacy list that does not name this check.
+// A complete map names every job of the attempt, so a check that is absent
+// did not run and is "missing". Unknown is never guessed.
 func requiredStatus(run metricRun, required []string) string {
 	if !run.JobsRead || len(required) == 0 {
 		return "unknown"
@@ -63,7 +71,10 @@ func requiredStatus(run metricRun, required []string) string {
 	for _, name := range required {
 		conclusion, ok := run.Required[name]
 		if !ok {
-			return "unknown"
+			if !run.JobsComplete {
+				return "unknown"
+			}
+			conclusion = "missing"
 		}
 		switch conclusion {
 		case "failure", "timed_out", "cancelled", "missing", "action_required", "startup_failure":
@@ -333,13 +344,16 @@ func computeMetricsFor(in metricInput, now time.Time, windows []int) []Metric {
 		case "red":
 			requiredGreen = append(requiredGreen, metricPoint{at: run.Created, value: 0})
 		}
-		// A confirmed flaky run: red on its first attempt, green on a later
-		// attempt of the same run (same commit, same workflow).
+		// A later green attempt of the same run is a workflow rescue. It is not
+		// a confirmed flake: confirmation needs the same case, the workflow
+		// revision and the runner class, and none of those is stored. The
+		// share stays withheld. Suspects (same tree, next commit) stay a
+		// separate count and never enter the share.
 		point := metricPoint{at: run.Created}
 		if run.Conclusion == "failure" || run.Conclusion == "timed_out" {
 			for _, later := range x.attempts[run.ID] {
 				if later.Attempt > 1 && later.Conclusion == "success" {
-					point.value, point.tags = 1, bitFirst
+					point.tags |= bitThird
 					break
 				}
 			}
@@ -405,8 +419,8 @@ func computeMetricsFor(in metricInput, now time.Time, windows []int) []Metric {
 
 	// 12: confirmed flaky runs, and the suspects beside them.
 	out = append(out, build(spec(metricSpec{number: 12, key: "flaked_failures", label: "Runs with a confirmed flaky execution", unit: "percent", source: runSource("pull_request"),
-		def:       "Share of first attempts of pull_request runs that failed and then passed on a later attempt of the same run, so same commit and same workflow: a confirmed flaky execution. Beside it, suspects: a run that failed on a commit whose next commit passed on the very same tree. A suspect is not confirmed; the wider form (no change in the failing owner package) needs the complete impact map of WP1.4 and is not counted.",
-		aggregate: "share", target: arion(2, "max", "Measured first; then ≤ 2 % of runs"), tagNames: []string{"confirmed", "suspect"}, noDataReason: noRuns}), flaky))
+		def:       "Share of confirmed flaky case executions among first attempts of pull_request runs: the same case, the same commit, the same workflow revision and the same runner class, red then green. Those three facts are not recorded, so the share is withheld rather than reported as zero. A later green attempt of the same run is a workflow rescue, counted apart, and is not a confirmed execution. Beside it, suspects: a run that failed on a commit whose next commit passed on the very same tree. A suspect is not confirmed and never enters the share; the wider form (no change in the failing owner package) needs the complete impact map of WP1.4 and is not counted.",
+		aggregate: "share", target: arion(2, "max", "Measured first; then ≤ 2 % of runs"), tagNames: []string{"confirmed", "suspect", "workflow_rescue"}, withhold: confirmedFlakeWithheld, noDataReason: noRuns}), flaky))
 
 	// 5: pull request opened → merged, counted on the merge day.
 	merged := []metricPoint{}
@@ -620,9 +634,9 @@ func computeMetricsFor(in metricInput, now time.Time, windows []int) []Metric {
 			pre = append(pre, metricPoint{at: run.Created, value: boolValue(run.Conclusion != "success")})
 		}
 	}
-	out = append(out, build(spec(metricSpec{number: 16, key: "preflight_red_rate", label: "Preflight red rate", unit: "percent", source: fmt.Sprintf("GitHub Actions workflow %s (GitHub App check suites and backfill)", path.Base(preflight)),
-		def:       "Share of exact-commit preflight runs (first attempt) that ended red, counted on the day the run was created. Preflight runs before a pull request opens; they are their own line and never count as CI greens.",
-		aggregate: "share", target: nil, noDataReason: "No completed " + path.Base(preflight) + " run in the last 30 days."}), pre))
+	out = append(out, build(metricSpec{number: 16, key: "preflight_red_rate", label: "Preflight red rate", unit: "percent", source: fmt.Sprintf("GitHub Actions workflow %s (GitHub App check suites and backfill)", path.Base(preflight)),
+		def:       "Share of exact-commit preflight runs (first attempt) that ended red, counted on the day the run was created. Preflight runs before a pull request opens; they are their own line and never count as CI greens. Coverage starts when a backfill has listed this workflow, not when CI history is complete.",
+		aggregate: "share", target: nil, coverage: in.PreflightCovered, readFrom: in.ReadFrom, noDataReason: "No completed " + path.Base(preflight) + " run in the last 30 days."}, pre))
 
 	// 17, 18: reported audits and defects, and rollout incidents.
 	audits, defects := []metricPoint{}, []metricPoint{}

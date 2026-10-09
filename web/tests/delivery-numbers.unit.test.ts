@@ -89,7 +89,15 @@ it('the paired numbers count what they say: required checks, “changes”, scri
     window('merge_rounds_model_share', 10, 80),
   ])
   expect(tileModel(def('first_attempt_green'), metrics, 7, null, 'en')).toMatchObject({ value: { main: '35', unit: '%' }, lineB: '168 first attempts' })
-  expect(tileModel(def('first_attempt_green'), metrics, 7, null, 'en').lineA.parts.map(part => part.text).join('')).toBe('Required checks 24%')
+  expect(tileModel(def('first_attempt_green'), metrics, 7, null, 'en').lineA.parts.map(part => part.text).join('')).toBe('Required checks 24% · 40 of 168')
+  const partialRequired = metric('required_checks_green', { unit: 'percent', reason: '4 runs without job facts yet, so their required checks and runner waits are not counted.' }, { n: 40, value: 24, status: 'partial', coverage: coverage(7, day(3), { full: false, covered_days: 4, buckets_covered: 4 }) })
+  const withGap = new Map(metrics)
+  withGap.set('required_checks_green', partialRequired)
+  const gapLine = tileModel(def('first_attempt_green'), withGap, 7, null, 'en').lineA.parts.map(part => part.text).join('')
+  expect(gapLine).toContain('Required checks 24%')
+  expect(gapLine).toContain('40 of 168')
+  expect(gapLine).toContain('covers 4 of 7 days')
+  expect(gapLine).toContain('4 runs without job facts yet')
   expect(tileModel(def('review_time'), metrics, 7, null, 'en').lineB).toBe('“changes” verdicts 7 of 12 (58%)')
   const merge = tileModel(def('merge_rounds_model_share'), metrics, 7, null, 'en')
   expect(merge).toMatchObject({ value: { main: '2 of 10', unit: 'scripted' }, lineB: '10 merge rounds reported' })
@@ -187,8 +195,14 @@ it('time to first green names how many never went green, per branch and per comm
 it('confirmed flaky runs and suspects are two numbers; the suspects never enter the share', () => {
   const tile = tileModel(def('flaked_failures'), counted('flaked_failures', 427, 0.2, { confirmed: 1, suspect: 3 }, 'percent'), 7, null, 'en')
   expect(tile.value).toEqual({ main: '0.2', unit: '%' })
-  expect(tile.lineA.parts.map(part => part.text).join('')).toBe('1 confirmed · 3 suspect')
+  expect(tile.lineA.parts.map(part => part.text).join('')).toBe('1 confirmed · 3 suspect · 0 workflow rescues')
   expect(tile.lineB).toBe('427 first attempts')
+  // Same-run red-then-green is a workflow rescue. Without case, revision and runner class the share is withheld, not 0%.
+  const withheld = tileModel(def('flaked_failures'), counted('flaked_failures', 10, null, { confirmed: 0, suspect: 1, workflow_rescue: 2 }, 'percent', { status: 'no_data' }), 7, null, 'en')
+  expect(withheld.value).toBeNull()
+  expect(withheld.status).toBe('no_data')
+  expect(withheld.lineA.parts.map(part => part.text).join('')).toBe('0 confirmed · 1 suspect · 2 workflow rescues')
+  expect(withheld.lineB).toBe('10 first attempts')
   // A rate moves in points, and 1 point is within the "about the same" band for a share of the runs.
   const before = counted('flaked_failures', 400, 5.5, { confirmed: 22, suspect: 0 }, 'percent', { previous: { status: 'ok', n: 400, value: 1.5, p50: null, p90: null, coverage: coverage(7, day(13)) } })
   expect(tileModel(def('flaked_failures'), before, 7, null, 'en').delta).toMatchObject({ cls: 'worse', text: '+4\u00a0pts' })
@@ -243,7 +257,13 @@ it('every reading draws a chart with its own target, and its readout names count
   const both = chartModel(def('first_attempt_green'), new Map([['first_attempt_green', metric('first_attempt_green', { unit: 'percent' })], ['required_checks_green', metric('required_checks_green', { unit: 'percent' })]]), 7, null, 'en')
   expect(both.panels[0].lines).toHaveLength(2)
   expect(both.panels[0].targets).toHaveLength(1)
-  expect(both.readouts.at(-1)).toContain('required checks')
+  expect(both.readouts.at(-1)).toMatch(/required checks · 2 of 2 runs$/)
+  const required = metric('required_checks_green', { unit: 'percent', reason: '4 runs without job facts yet, so their required checks and runner waits are not counted.' })
+  required.daily[required.daily.length - 1] = { ...required.daily.at(-1)!, status: 'partial', n: 1, value: 50, p50: 50, p90: 50 }
+  const partialChart = chartModel(def('first_attempt_green'), new Map([['first_attempt_green', metric('first_attempt_green', { unit: 'percent' })], ['required_checks_green', required]]), 7, null, 'en')
+  expect(partialChart.readouts.at(-1)).toContain('1 of 2 runs')
+  expect(partialChart.readouts.at(-1)).toContain('Partial')
+  expect(partialChart.readouts.at(-1)).toContain('without job facts')
 })
 
 it('the v5 readings read German, impersonal', () => {

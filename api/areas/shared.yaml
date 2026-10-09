@@ -503,10 +503,10 @@ components:
         days: {type: integer, enum: [7, 30, 90, 180, 365], description: 'Whole UTC days ending today.'}
         status: {type: string, enum: [ok, partial, no_data]}
         n: {type: integer, minimum: 0, description: 'Samples in the window.'}
-        value: {type: [number, 'null'], description: 'p50 for durations, the mean for runs per PR, the share in percent for rates, p90 for runner wait, the events per 100 merged pull requests for queue readings, the count for audits and defects.'}
+        value: {type: [number, 'null'], description: 'p50 for durations, the mean for runs per PR, the share in percent for rates, p90 for runner wait, the events per 100 merged pull requests for queue readings, the count for audits and defects. Null, never 0, when the confirmed flake share is withheld because case, workflow revision and runner class are not stored; counts then still name workflow_rescue and suspect.'}
         p50: {type: [number, 'null']}
         p90: {type: [number, 'null']}
-        counts: {type: object, additionalProperties: {type: integer, minimum: 0}, description: 'Exact numbers behind the value, named by the metric: never_green, superseded and first_run_green for time to first green; confirmed and suspect for flakes; events and base for readings per 100 merged pull requests; high, medium, low and clean for audits and defects. Omitted when a metric names none.'}
+        counts: {type: object, additionalProperties: {type: integer, minimum: 0}, description: 'Exact numbers behind the value, named by the metric: never_green, superseded and first_run_green for time to first green; confirmed, suspect and workflow_rescue for flakes (workflow_rescue is a same-run pass, not a confirmed flake); events and base for readings per 100 merged pull requests; high, medium, low and clean for audits and defects. Omitted when a metric names none.'}
         coverage: {$ref: '#/components/schemas/DeliveryMetricCoverage'}
         previous: {oneOf: [{$ref: '#/components/schemas/DeliveryMetricPrevious'}, {type: 'null'}], description: 'The same number of days just before the window, for the change; null when no comparison is computed.'}
     DeliveryMetrics:
@@ -525,12 +525,13 @@ components:
       properties:
         state: {type: string, enum: [running, done]}
         since: {type: string, format: date-time}
-        phase: {type: string, enum: [runs, pulls, jobs, done], description: 'jobs is the pass that reads the jobs of first attempts after the runs and pulls are in.'}
+        phase: {type: string, enum: [runs, pulls, jobs, done], description: 'jobs is the pass that reads job conclusions after the runs and pulls are in. A deferred jobs failure keeps phase jobs until retry_at.'}
         day: {type: [string, 'null'], format: date, description: 'Next UTC day of runs to read.'}
         calls: {type: integer, minimum: 0, description: 'GitHub reads in this step.'}
         runs: {type: integer, minimum: 0}
         pulls: {type: integer, minimum: 0}
         jobs: {type: integer, minimum: 0, description: 'Runs whose jobs this step read (the jobs pass).'}
+        retry_at: {type: [string, 'null'], format: date-time, description: 'When a jobs read failed and no other job work is eligible, the earliest time to call again. Absent when this step has no deferred retry.'}
         truncated: {type: boolean, description: 'A day had more runs than GitHub lists; metrics stay partial.'}
     DeliveryMetricsBackfillInput:
       type: object

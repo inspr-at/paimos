@@ -15,8 +15,8 @@ vi.mock('../src/lib/api.ts', () => ({
   APIError: class APIError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; this.name = 'APIError' } },
 }))
 import * as flow from '../src/lib/deliveryFlow'
-import { createTimeline, criticalPath, laneModel, refreshTimeline, resetTimeline, runEnd, timeLabel, type FlowData } from '../src/lib/deliveryFlow'
-import { arionTarget, ARION_MINUTES, compareData, liveData, recordedRuns, replayData, type ApiFlow, type ApiItem, type ApiRun, type ApiStep } from '../src/lib/deliveryFlowData'
+import { createTimeline, criticalPath, fitAll, laneModel, refreshTimeline, resetTimeline, runEnd, timeLabel, type FlowData } from '../src/lib/deliveryFlow'
+import { arionTarget, ARION_LATER_MINUTES, ARION_MINUTES, compareData, liveData, recordedRuns, replayData, type ApiFlow, type ApiItem, type ApiRun, type ApiStep } from '../src/lib/deliveryFlowData'
 import { EXAMPLE_NOW, exampleCompare, exampleLive, exampleReplay } from '../src/lib/deliveryFlowExample'
 import * as modes from '../src/lib/deliveryFlowModes'
 import { autoplayOnce, createPlayer, flightRows, headOf, momentOf, PLAY_MS, wentOf, type Frames } from '../src/lib/deliveryFlowModes'
@@ -91,8 +91,20 @@ it('Compare races a release from its step a against the Arion target on one rela
   expect(data.sets[0]!.lanes.slice(0, 3)).toEqual(['review', 'ops', 'ci'])
   expect(criticalPath(data.sets[0]!.main)[0]!.start).toBe(0)
   expect(runEnd(data.sets[1]!.main)).toBeCloseTo(ARION_MINUTES)
-  expect(ARION_MINUTES).toBe(24)
-  expect(arionTarget('de', 12).steps.at(-1)!.end).toBeCloseTo(12)
+  expect(ARION_MINUTES).toBeCloseTo(60.6)
+  expect(ARION_LATER_MINUTES).toBeCloseTo(53.9)
+  const scaled = arionTarget('de', 12)
+  expect(runEnd(scaled)).toBeCloseTo(12)
+  expect(criticalPath(scaled).at(-1)!.end).toBeCloseTo(12)
+  const sides = arionTarget('en').steps.filter(step => step.side)
+  expect(sides.map(step => step.stepKey)).toEqual(['catalogue', 'w'])
+  expect(sides[0]).toMatchObject({ lane: 'ci', kind: 'work', start: 0 })
+  expect(sides[0]!.simple.en).toContain('4.6')
+  expect(sides[0]!.simple.en).toContain('not in the total')
+  expect(sides[1]).toMatchObject({ lane: 'you', kind: 'wait' })
+  expect(sides[1]!.facts?.waitReason).toBe('human_gate')
+  expect(sides[1]!.end).toBe(sides[1]!.start)
+  expect(sides[1]!.simple.de).not.toMatch(/\b(du|wir)\b/i)
   // A run without a step a cannot race.
   expect(compareData(recordedRuns(answer(), { extendOpen: false }).runs[1]!, arionTarget('en'))).toBeNull()
 })
@@ -278,10 +290,10 @@ it('Compare calls an unfinished release elapsed so far, not live', () => {
   const sets = laneModel(open)
   const ctx = { data: open, sets, level: 'simple' as const, lang: 'en' as const, text: en, reduced: true }
   const big = headOf('compare', ctx).big.map(part => part.text).join('')
-  expect(big).toBe('Release 126 vs. the Arion target, 10 min so far instead of 24 min')
+  expect(big).toBe('Release 126 vs. the Arion target, 10 min so far instead of 1 h 01')
   expect(big).not.toContain('queue to live')
   const de = headOf('compare', { ...ctx, lang: 'de', text: flowText('de') }).big.map(part => part.text).join('')
-  expect(de).toBe('Release 126 gegen das Arion-Ziel, 10 min bisher statt 24 min')
+  expect(de).toBe('Release 126 gegen das Arion-Ziel, 10 min bisher statt 1 h 01')
   expect(headOf('compare', { ...ctx, level: 'expert' }).small).toBe('a → l so far: 10 min.')
   const end = runEnd(open.sets[0]!.main)
   expect(end).toBe(10)
@@ -292,7 +304,7 @@ it('Compare calls an unfinished release elapsed so far, not live', () => {
   // A recorded end still says the release went live. Ten minutes is the same length either way.
   const done = compareData(recordedRuns(release(10), { extendOpen: false }).runs[0]!, arionTarget('en'))!
   const doneBig = headOf('compare', { data: done, level: 'simple', lang: 'en', text: en, reduced: true }).big.map(part => part.text).join('')
-  expect(doneBig).toContain('queue to live: 10 min instead of 24 min')
+  expect(doneBig).toContain('queue to live: 10 min instead of 1 h 01')
   const donePanel = momentOf({ data: done, sets: laneModel(done), T: 10, selected: null, level: 'simple', lang: 'en', text: en })
   expect(donePanel.lines.filter(line => line.kind === 'done').map(line => line.label)).toEqual(['live after +10 min'])
 })
@@ -419,16 +431,16 @@ it('Compare shows two lane sets on one relative axis and says when the target wa
   await Vue.nextTick()
   const sets = view.stubNode('lanes').props.sets as flow.LaneSet[]
   expect(sets.map(s => s.title?.en)).toEqual(['Release 126 (a → l)', 'Arion target'])
-  expect(textOf(view.byTest('flow-head')!)).toMatch(/^Release 126 vs\. the Arion target, queue to live: 1 h 10 instead of 24 min/)
+  expect(textOf(view.byTest('flow-head')!)).toMatch(/^Release 126 vs\. the Arion target, queue to live: 1 h 10 instead of 1 h 01/)
   const t = view.timeline()
   expect([t.v0, t.v1]).toEqual([t.r0, t.r1])
   expect(textOf(view.byTest('flow-clock')!)).toBe('+0 min')
-  t.follow = false; t.T = 30
+  t.follow = false; t.T = 61
   await Vue.nextTick()
   const moment = view.stubNode('moment').props.moment as modes.Moment
-  expect(moment.sentence).toMatch(/the Arion target was live after 24 min\.$/)
-  expect(moment.lines.find(l => l.kind === 'done')!.label).toBe('live after +24 min')
-  expect(textOf(view.byTest('flow-clock')!)).toBe('+30 min · target reached')
+  expect(moment.sentence).toMatch(/the Arion target was live after 1 h 01\.$/)
+  expect(moment.lines.find(l => l.kind === 'done')!.label).toBe('live after +1 h 01')
+  expect(textOf(view.byTest('flow-clock')!)).toBe('+1 h 01 · target reached')
   expect((view.stubNode('went').props.runs as modes.Went[]).map(w => w.title)).toEqual(['Release 126 (a → l)', 'Arion target'])
 })
 
@@ -520,6 +532,8 @@ it('Compare lanes leave an open release without a finish line or a completed ava
   expect(classText(avatarNode(nodes, '126').props.class)).not.toContain('done')
   expect(classText(avatarNode(nodes, 'Target').props.class)).not.toContain('done')
   // Past the recorded minutes the open figure stays with the playhead. Only the target has arrived.
+  // The target is 60.6 min, wider than the opening 40 min window, so fit the whole axis first.
+  fitAll(open.view.timeline)
   open.view.timeline.T = open.data.play[1]
   await Vue.nextTick()
   nodes = open.view.nodes()

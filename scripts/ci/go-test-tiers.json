@@ -5176,6 +5176,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryAlertsEpisodesIsolationAndSettings","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryCompleteJobMapServesEveryProject","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryConfirmedFlakesAndSuspectsStayApart","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowCompletionKeepsFlake","tier":"ESSENTIAL"}
@@ -5219,6 +5221,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowStreamSendsValueFreeLiveHints","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowWorkflowRunShowsRunningChecks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryLegacyJobMapIsRefreshedOnce","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryManageExplicitAgentGrant","tier":"ESSENTIAL"}
     ,
@@ -5273,6 +5277,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsWindowsCoverPreviousAndBuckets","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryNumbersEqualMeasureV2","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryPreflightCatchupListsOnlyPreflight","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryPreflightRedRateIsItsOwnLine","tier":"ESSENTIAL"}
     ,
@@ -5359,6 +5365,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestQueueQuarantineBindsHeadClassifiesFailuresAndIsolates","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestQueueWorkflowReadRejectsWrongSubjectAndPartialSuite","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestReadJobFactsKeepsEveryConclusionAndTheWorstName","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestReconcileContinuesAfterConfirmedMissingPull","tier":"ESSENTIAL"}
     ,

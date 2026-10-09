@@ -124,7 +124,12 @@ func TestDeliveryMetricsFromFixedFacts(t *testing.T) {
 	green := metricByKey(t, metrics, "first_attempt_green")
 	wantWindow(t, green, 7, "ok", 2, f64(50), nil, nil)
 	wantWindow(t, green, 30, "ok", 3, f64(33.3), nil, nil)
-	wantWindow(t, metricByKey(t, metrics, "flaked_failures"), 30, "ok", 3, f64(33.3), nil, nil)
+	flaky := metricByKey(t, metrics, "flaked_failures")
+	wantWindow(t, flaky, 30, "no_data", 3, nil, nil, nil)
+	wantCounts(t, flaky, 30, map[string]int{"confirmed": 0, "workflow_rescue": 1, "suspect": 0})
+	if flaky.Status != "no_data" || flaky.Latest != nil || flaky.Reason == nil || !strings.Contains(*flaky.Reason, "unavailable") {
+		t.Fatalf("a same-run rescue is not a confirmed share: %+v", flaky.Reason)
+	}
 	wantWindow(t, metricByKey(t, metrics, "time_to_first_green"), 7, "ok", 2, f64(33), f64(33), f64(41.8))
 	wantWindow(t, metricByKey(t, metrics, "pr_open_to_merged"), 30, "ok", 2, f64(45), f64(45), f64(57))
 	wantWindow(t, metricByKey(t, metrics, "queue_runs_per_pr"), 30, "ok", 2, f64(1.5), f64(1.5), f64(1.9))

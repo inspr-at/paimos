@@ -8,7 +8,7 @@ import type { MetricTextKey } from './deliveryNumbersText'
 const TO = '→'
 
 export interface SimpleMetricText {
-  name: string; say: string; sayAlt?: string; wants: string; learn: string; learnPart?: string; src: string; part?: string
+  name: string; say: string; sayAlt?: string; sayNone?: string; wants: string; learn: string; learnPart?: string; src: string; part?: string
 }
 
 const EN = {
@@ -41,7 +41,7 @@ const EN = {
     ['Slow tail (p90)', 'Nine in ten were faster. It shows how bad the bad cases are.'],
     ['First try vs. until green', '“PR checks” measures one run. “Until checks are green” counts every re-run and fix as well.'],
     ['Run time vs. waiting', `Run time (wall) is start ${TO} end of one run. Waiting for a runner or in the queue is not in it; “From PR opened to merged” includes all waiting.`],
-    ['Flaky test', 'A test that sometimes fails without a real bug. A re-run without any code change turns green. “Confirmed” means a re-run of the same commit passed; “suspect” only that the next commit passed on the very same files.'],
+    ['Flaky test', 'A test that sometimes fails without a real bug. “Confirmed” needs the same case, the same commit, the same workflow revision and the same runner class. A re-run of the same commit that passes is a workflow rescue, not yet confirmed. “Suspect” means only that the next commit passed on the very same files. Neither enters the share, and the share stays unavailable rather than 0% until the evidence exists.'],
     ['Thrown out of the queue', 'The merge queue builds a change with the newest main. When a required check fails there, the change is taken out and must go in again.'],
     ['Partial and no data yet', 'Partial: the source sees only part of the picture (e.g. reported only recently). No data yet: nothing recorded, never shown as 0.'],
   ] as [string, string][],
@@ -50,9 +50,9 @@ const EN = {
       learn: 'p50 (median) {p50}: half of the runs were faster than this. p90 {p90}: nine in ten were faster; it shows the slow tail. Wall time: start to end of one run; waiting for a free runner before the start is not counted.', src: 'Measured from GitHub' },
     queue_run_wall: { name: 'One merge-queue run', say: 'One pass through the merge queue takes about {v}.', wants: 'Arion wants 10 min, later 7.',
       learn: 'Merge-queue run duration (wall), p50 {p50} · p90 {p90}. One run of the full checks in the merge queue; the wait in the queue before it starts is not counted.', src: 'Measured from GitHub' },
-    first_attempt_green: { name: 'Checks green on the first try', say: '{v} of changes pass every check on the first try; counted the way the merge rule counts, {v2} do.', sayAlt: '{v} of changes pass every check on the first try.',
+    first_attempt_green: { name: 'Checks green on the first try', say: '{v} of changes pass every check on the first try; counted the way the merge rule counts, {v2} of {n2} do.', sayAlt: '{v} of changes pass every check on the first try.',
       wants: 'Arion wants at least 70 %, later 80 %.',
-      learn: 'First-attempt green rate: {v} of {n} first attempts ended green. Counted by the merge rule, only the required checks decide, so a run that is red only outside them is green ({v2}). Arion target: green on the first try ≥ {t} (D4″).', src: 'Measured from GitHub' },
+      learn: 'First-attempt green rate: {v} of {n} first attempts ended green. Counted by the merge rule, only the required checks decide, so a run that is red only outside them is green ({v2} of {n2}). Arion target: green on the first try ≥ {t} (D4″).', src: 'Measured from GitHub' },
     time_to_first_green: { name: 'Time until checks are green', say: 'Until its checks are green, a branch needs about {v}, re-runs and fixes included.', wants: 'Arion wants 30 min, later 20.',
       learn: 'Time to first green per branch, p50 {p50} · p90 {p90}. Counted from the first CI run of a PR branch to the first green one, with every re-run and fix in between. {never} of {total} branches never went green and are not in this time; {first} were green on their very first run.', src: 'Measured from GitHub' },
     pr_open_to_merged: { name: 'From PR opened to merged', say: 'From opening a PR to merging it takes about {v}.', wants: 'Arion wants 80 min, later 60.',
@@ -72,8 +72,8 @@ const EN = {
       learn: 'Nightly full run, {k} of {n} nights green. One verdict per night from the scheduled full run; a night without a run is shown as “no run”, never as red.', src: 'Measured from GitHub' },
     time_to_first_green_commit: { name: 'Time until a commit is green', say: 'A commit needs about {v} until one of its runs is green.', wants: 'Arion has no target for this yet.',
       learn: 'Time to first green per commit, p50 {p50} · p90 {p90}. {never} of {total} commits never went green, {sup} of them because a newer commit on the branch replaced them.', src: 'Measured from GitHub' },
-    flaked_failures: { name: 'Runs that failed, then passed', say: '{v} of first attempts failed and then passed on a re-run of the same commit; {suspect} more look suspicious.', wants: 'Arion wants 2 % or less.',
-      learn: 'Confirmed flaky runs: a run failed, then passed on a later attempt of the same run, so same commit and same workflow ({confirmed} of {n} first attempts, {v}). Suspects ({suspect}): a run failed on a commit and the next commit passed on the very same tree. They are not confirmed and not in the share.', src: 'Measured from GitHub' },
+    flaked_failures: { name: 'Runs that failed, then passed', say: '{v} of first attempts are confirmed flaky; {rescue} workflow rescues and {suspect} suspects stay outside that share.', sayNone: 'The confirmed share is unavailable until the same case, workflow revision and runner class are recorded. Workflow rescues: {rescue}. Suspects: {suspect}. Both sit beside the share ({n} first attempts).', wants: 'Arion wants 2 % or less.',
+      learn: 'Confirmed flaky runs need the same case, the same commit, the same workflow revision and the same runner class. Until that evidence is stored the share is unavailable, never 0% ({v} of {n} first attempts, {confirmed} confirmed). Workflow rescues ({rescue}): a later attempt of the same run passed; they are not confirmed. Suspects ({suspect}): a run failed on a commit and the next commit passed on the very same tree. Neither enters the share.', src: 'Measured from GitHub' },
     queue_ejections: { name: 'Changes thrown out of the queue', say: 'About {v} of every 100 merged changes were thrown out of the merge queue first because a required check failed ({e} runs for {b} merged changes).', wants: 'Arion wants 25 or fewer, later 10.',
       learn: 'Inferred ejections per 100 merged PRs: {e} merge-queue runs with a red required check for {b} merged PRs. Inferred, because the queue’s own events are not joined to the runs yet.', src: 'Measured from GitHub' },
     queue_unclassified: { name: 'Extra queue runs, cause unknown', say: 'For every 100 merged changes, {v} extra queue runs were not caused by a failed required check ({e} runs for {b} merged changes).', wants: 'Arion sets a target once the causes are sorted out.',
@@ -120,7 +120,7 @@ const DE: SimpleText = {
     ['Langsame Ausreißer (p90)', 'Neun von zehn waren schneller. Zeigt, wie schlimm die schlechten Fälle sind.'],
     ['Erster Versuch vs. bis grün', '„PR-Checks“ misst einen Lauf. „Bis die Checks grün sind“ zählt alle Wiederholungen und Fixes mit.'],
     ['Laufzeit vs. Wartezeit', `Laufzeit (Wall) ist Start ${TO} Ende eines Laufs. Warten auf einen Runner oder in der Queue zählt dort nicht; „Vom PR bis zum Merge“ enthält alles Warten.`],
-    ['Wackeliger Test (Flake)', 'Ein Test, der manchmal ohne echten Fehler scheitert. Eine Wiederholung ohne Codeänderung wird grün. „Bestätigt“ heißt: Eine Wiederholung desselben Commits lief durch; „verdächtig“ nur: Der nächste Commit lief auf genau denselben Dateien durch.'],
+    ['Wackeliger Test (Flake)', 'Ein Test, der manchmal ohne echten Fehler scheitert. „Bestätigt“ verlangt denselben Fall, denselben Commit, dieselbe Workflow-Revision und dieselbe Runner-Klasse. Eine Wiederholung desselben Commits, die durchläuft, ist eine Workflow-Rettung, noch nicht bestätigt. „Verdächtig“ heißt nur: Der nächste Commit lief auf genau denselben Dateien durch. Beides zählt nicht im Anteil, und der Anteil bleibt aus, statt als 0 % zu erscheinen, bis die Belege da sind.'],
     ['Aus der Queue geworfen', 'Die Merge-Queue baut eine Änderung mit dem neuesten main. Scheitert dort eine Pflichtprüfung, wird die Änderung herausgenommen und muss erneut hinein.'],
     ['Teilweise und noch keine Daten', 'Teilweise: Die Quelle sieht nur einen Teil (z. B. erst seit Kurzem gemeldet). Noch keine Daten: nichts erfasst, nie als 0 gezeigt.'],
   ],
@@ -129,9 +129,9 @@ const DE: SimpleText = {
       learn: 'p50 (Median) {p50}: Die Hälfte der Läufe war schneller. p90 {p90}: Neun von zehn waren schneller; das zeigt die langsamen Ausreißer. Wall-Zeit: Start bis Ende eines Laufs; das Warten auf einen freien Runner davor zählt nicht.', src: 'Gemessen über GitHub' },
     queue_run_wall: { name: 'Ein Merge-Queue-Durchlauf', say: 'Ein Durchlauf der Merge-Queue dauert etwa {v}.', wants: 'Arion will 10 min, später 7.',
       learn: 'Merge-Queue-Laufdauer (Wall), p50 {p50} · p90 {p90}. Ein Lauf der vollen Checks in der Merge-Queue; die Wartezeit davor zählt nicht.', src: 'Gemessen über GitHub' },
-    first_attempt_green: { name: 'Checks beim ersten Versuch grün', say: '{v} der Änderungen bestehen alle Checks beim ersten Versuch; so gezählt, wie die Merge-Regel zählt, sind es {v2}.', sayAlt: '{v} der Änderungen bestehen alle Checks beim ersten Versuch.',
+    first_attempt_green: { name: 'Checks beim ersten Versuch grün', say: '{v} der Änderungen bestehen alle Checks beim ersten Versuch; so gezählt, wie die Merge-Regel zählt, sind es {v2} von {n2}.', sayAlt: '{v} der Änderungen bestehen alle Checks beim ersten Versuch.',
       wants: 'Arion will mindestens 70 %, später 80 %.',
-      learn: 'Grün-Quote beim ersten Versuch: {v} von {n} ersten Versuchen endeten grün. Nach der Merge-Regel entscheiden nur die Pflichtprüfungen; ein Lauf, der nur außerhalb davon rot ist, gilt als grün ({v2}). Arion-Ziel: grün beim ersten Versuch ≥ {t} (D4″).', src: 'Gemessen über GitHub' },
+      learn: 'Grün-Quote beim ersten Versuch: {v} von {n} ersten Versuchen endeten grün. Nach der Merge-Regel entscheiden nur die Pflichtprüfungen; ein Lauf, der nur außerhalb davon rot ist, gilt als grün ({v2} von {n2}). Arion-Ziel: grün beim ersten Versuch ≥ {t} (D4″).', src: 'Gemessen über GitHub' },
     time_to_first_green: { name: 'Zeit, bis die Checks grün sind', say: 'Bis ihre Checks grün sind, braucht ein Branch etwa {v}, Wiederholungen und Fixes inklusive.', wants: 'Arion will 30 min, später 20.',
       learn: 'Zeit bis zum ersten Grün pro Branch, p50 {p50} · p90 {p90}. Gezählt vom ersten CI-Lauf eines PR-Branches bis zum ersten grünen, mit allen Wiederholungen und Fixes dazwischen. {never} von {total} Branches wurden nie grün und stehen nicht in dieser Zeit; {first} waren schon beim ersten Lauf grün.', src: 'Gemessen über GitHub' },
     pr_open_to_merged: { name: 'Vom PR bis zum Merge', say: 'Vom Öffnen eines PR bis zum Merge vergehen etwa {v}.', wants: 'Arion will 80 min, später 60.',
@@ -151,8 +151,8 @@ const DE: SimpleText = {
       learn: 'Nightly-Volllauf, {k} von {n} Nächten grün. Ein Urteil pro Nacht aus dem geplanten Volllauf; eine Nacht ohne Lauf heißt „kein Lauf“, nie rot.', src: 'Gemessen über GitHub' },
     time_to_first_green_commit: { name: 'Zeit, bis ein Commit grün ist', say: 'Ein Commit braucht etwa {v}, bis einer seiner Läufe grün ist.', wants: 'Arion hat dafür noch kein Ziel.',
       learn: 'Zeit bis zum ersten Grün pro Commit, p50 {p50} · p90 {p90}. {never} von {total} Commits wurden nie grün, {sup} davon, weil ein neuerer Commit des Branches sie ersetzt hat.', src: 'Gemessen über GitHub' },
-    flaked_failures: { name: 'Läufe, die scheiterten und dann durchliefen', say: '{v} der ersten Versuche scheiterten und liefen bei einer Wiederholung desselben Commits durch; {suspect} weitere sind verdächtig.', wants: 'Arion will 2 % oder weniger.',
-      learn: 'Bestätigt flackernde Läufe: Ein Lauf scheiterte und lief bei einem späteren Versuch desselben Laufs durch, also derselbe Commit und derselbe Workflow ({confirmed} von {n} ersten Versuchen, {v}). Verdächtige ({suspect}): Ein Lauf scheiterte auf einem Commit und der nächste Commit lief auf demselben Tree durch. Sie sind nicht bestätigt und nicht im Anteil.', src: 'Gemessen über GitHub' },
+    flaked_failures: { name: 'Läufe, die scheiterten und dann durchliefen', say: '{v} der ersten Versuche sind bestätigt flackernd; {rescue} Workflow-Rettungen und {suspect} Verdächtige bleiben außerhalb dieses Anteils.', sayNone: 'Der bestätigte Anteil bleibt aus, bis derselbe Fall, dieselbe Workflow-Revision und dieselbe Runner-Klasse erfasst sind. Workflow-Rettungen: {rescue}. Verdächtige: {suspect}. Beides steht neben dem Anteil ({n} erste Versuche).', wants: 'Arion will 2 % oder weniger.',
+      learn: 'Bestätigt flackernde Läufe verlangen denselben Fall, denselben Commit, dieselbe Workflow-Revision und dieselbe Runner-Klasse. Bis diese Belege gespeichert sind, bleibt der Anteil aus, nie als 0 % ({v} von {n} ersten Versuchen, {confirmed} bestätigt). Workflow-Rettungen ({rescue}): Ein späterer Versuch desselben Laufs lief durch; das ist nicht bestätigt. Verdächtige ({suspect}): Ein Lauf scheiterte auf einem Commit und der nächste Commit lief auf demselben Tree durch. Beides zählt nicht im Anteil.', src: 'Gemessen über GitHub' },
     queue_ejections: { name: 'Aus der Queue geworfene Änderungen', say: 'Etwa {v} von je 100 gemergten Änderungen flogen vorher aus der Merge-Queue, weil eine Pflichtprüfung scheiterte ({e} Läufe für {b} gemergte Änderungen).', wants: 'Arion will 25 oder weniger, später 10.',
       learn: 'Abgeleitete Auswürfe pro 100 gemergte PRs: {e} Merge-Queue-Läufe mit roter Pflichtprüfung für {b} gemergte PRs. Abgeleitet, weil die Queue-Ereignisse selbst den Läufen noch nicht zugeordnet sind.', src: 'Gemessen über GitHub' },
     queue_unclassified: { name: 'Zusätzliche Queue-Läufe, Ursache offen', say: 'Auf je 100 gemergte Änderungen kamen {v} zusätzliche Queue-Läufe, die nicht an einer gescheiterten Pflichtprüfung lagen ({e} Läufe für {b} gemergte Änderungen).', wants: 'Arion setzt ein Ziel, sobald die Ursachen geklärt sind.',

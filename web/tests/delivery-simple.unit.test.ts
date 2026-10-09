@@ -303,7 +303,31 @@ it('the v5 readings get a verdict, a sentence and a direction from this windowâ€
   const tile = (key: string) => page.sections.flatMap(section => section.tiles).find(item => item.key === key)!
   // Flakes: lower is better, a rare rate scales on its own (a 100 % axis would flatten it), and it is on target at 2 %.
   expect(tile('flaked_failures')).toMatchObject({ up: false, hasTarget: true, verdict: { level: 'on' }, value: [{ text: '2', unit: '%' }] })
+  expect(tile('flaked_failures').say).toContain('workflow rescues')
+  expect(tile('flaked_failures').say).not.toMatch(/re-run of the same commit/)
   expect(tile('flaked_failures').spark.percent).toBe(false)
+  const data = deliveryMetrics() as { metrics: { key: string; reason: string | null; windows: { days: number; status: string; n: number; value: number | null; coverage: { full: boolean; buckets_covered: number; buckets_total: number } }[] }[] }
+  const required = data.metrics.find(item => item.key === 'required_checks_green')!
+  required.reason = '4 runs without job facts yet, so their required checks and runner waits are not counted.'
+  const window = required.windows.find(item => item.days === 7)!
+  window.status = 'partial'
+  window.coverage.full = false
+  window.coverage.buckets_covered = 4
+  const green = simpleNumbersOf(data as never, 7, 'ready', false, 'en').sections.flatMap(section => section.tiles).find(item => item.key === 'first_attempt_green')!
+  expect(green.say).toMatch(/of \d+ do/)
+  expect(green.foot).toContain('without job facts')
+  expect(green.foot).toContain('covers 4 of')
+  const flakes = deliveryMetrics() as { metrics: { key: string; windows: { days: number; status: string; n: number; value: number | null; counts?: Record<string, number> }[] }[] }
+  const flake = flakes.metrics.find(item => item.key === 'flaked_failures')!
+  const flakeWindow = flake.windows.find(item => item.days === 7)!
+  flakeWindow.status = 'no_data'
+  flakeWindow.value = null
+  flakeWindow.counts = { confirmed: 0, suspect: 1, workflow_rescue: 2 }
+  const withheld = simpleNumbersOf(flakes as never, 7, 'ready', false, 'en').sections.flatMap(section => section.tiles).find(item => item.key === 'flaked_failures')!
+  expect(withheld.value).toBeNull()
+  expect(withheld.say).toContain('unavailable')
+  expect(withheld.say).toContain('Workflow rescues: 2')
+  expect(withheld.say).toContain('Suspects: 1')
   expect(tile('first_attempt_green').spark.percent).toBe(true)
   // No target: no verdict, and the arrow still says lower is better for trouble counts.
   for (const key of ['time_to_first_green_commit', 'queue_unclassified', 'preflight_red_rate', 'review_audits', 'escaped_defects']) {

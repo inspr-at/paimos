@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -35,7 +36,11 @@ func upsertRunsTx(ctx context.Context, tx pgx.Tx, tid, repository, source string
 		if r.JobsRead {
 			jobsAt = &at
 			var err error
-			if required, err = json.Marshal(r.Required); err != nil {
+			if r.JobsComplete {
+				if required, err = encodeStoredJobs(jobFacts{Conclusions: r.Required, Complete: true}); err != nil {
+					return err
+				}
+			} else if required, err = json.Marshal(r.Required); err != nil {
 				return err
 			}
 		}
@@ -159,7 +164,7 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) erro
 			}
 			// Job facts are best effort: a run stored without them is a visible
 			// gap that the backfill's jobs pass fills, never a lost run.
-			attachJobFacts(get, runs, scope.ci, scope.Required)
+			attachJobFacts(get, runs, scope.ci)
 			return nil
 		})
 		if err != nil {
@@ -260,10 +265,12 @@ func loadMetricInputTx(ctx context.Context, tx pgx.Tx, s metricSourceRow, now ti
 			return in, err
 		}
 		if required != nil {
-			if err = json.Unmarshal(required, &r.Required); err != nil {
+			conclusions, complete, err := decodeJobFacts(required)
+			if err != nil {
 				rows.Close()
 				return in, err
 			}
+			r.Required, r.JobsComplete = conclusions, complete
 		}
 		in.Runs = append(in.Runs, r)
 	}
@@ -351,6 +358,24 @@ func loadMetricInputTx(ctx context.Context, tx pgx.Tx, s metricSourceRow, now ti
 	if webhook != nil && (in.Covered == nil || webhook.Before(*in.Covered)) {
 		v := webhook.UTC()
 		in.Covered = &v
+	}
+	// Preflight coverage is its own fact. CI being complete does not cover
+	// ci-preflight.yml until a backfill has listed that workflow and finished
+	// the runs pass. Until then the first webhook preflight fact is the start,
+	// and a window that reaches earlier stays partial.
+	if s.DoneAt != nil && s.Since != nil && s.Cursor != nil && s.Cursor.ResumePhase == "" &&
+		(s.Cursor.Phase == "done" || s.Cursor.Phase == "jobs") && workflowListed(s.Cursor.Workflows, defaultPreflightWorkflow) {
+		v := s.Since.UTC()
+		in.PreflightCovered = &v
+	} else {
+		var first *time.Time
+		if err = tx.QueryRow(ctx, `SELECT min(created_at) FROM delivery_metric_runs WHERE repository=$1 AND source='webhook' AND regexp_replace(workflow_path,'^.*/','')=$2`, s.Repository, path.Base(defaultPreflightWorkflow)).Scan(&first); err != nil {
+			return in, err
+		}
+		if first != nil {
+			v := first.UTC()
+			in.PreflightCovered = &v
+		}
 	}
 	if s.Cursor != nil && s.Cursor.Truncated {
 		in.Truncated = true

@@ -122,7 +122,10 @@ func TestDeliveryNumbersEqualMeasureV2(t *testing.T) {
 	check("queue_runs_per_pr", "ok", 151, f64(1.45), f64(1), f64(2), nil)
 	check("queue_ejections", "ok", 151, f64(59.6), nil, nil, map[string]int{"events": 90, "base": 151})
 	check("queue_unclassified", "ok", 151, f64(15.9), nil, nil, map[string]int{"events": 24, "base": 151})
-	check("flaked_failures", "ok", 427, f64(0.2), nil, nil, map[string]int{"confirmed": 1, "suspect": 0})
+	// measure-v2.py labels a same-run rescue as a confirmed flake. Project Arion
+	// v5 §3a does not: the case, the workflow revision and the runner class are
+	// not in this record, so the share is withheld and the rescue is counted apart.
+	check("flaked_failures", "no_data", 427, nil, nil, nil, map[string]int{"confirmed": 0, "suspect": 0, "workflow_rescue": 1})
 	// The number behind "62.3 %": 266 of 427 first attempts were green.
 	if g := window("time_to_first_green"); g.Counts["never_green"]+g.N != 149 {
 		t.Fatalf("branches in the window: %d, want 149", g.Counts["never_green"]+g.N)
@@ -259,22 +262,25 @@ func TestDeliveryConfirmedFlakesAndSuspectsStayApart(t *testing.T) {
 		// work/h: no tree known on either commit: never a suspect.
 		mk(5, 1, arionCI, "pull_request", "work/h", arionSha("5"), arionDays(2), 0, 10, "failure"),
 		mk(6, 1, arionCI, "pull_request", "work/h", arionSha("6"), arionDays(2).Add(hour), 0, 10, "success"),
-		// work/i: red, green, red again on the same run: confirmed, though the latest attempt is red.
+		// work/i: red, green, red again on the same run: a workflow rescue, not a confirmed execution.
 		mk(7, 1, arionCI, "pull_request", "work/i", arionSha("7"), arionDays(1), 0, 10, "failure"),
 		mk(7, 2, arionCI, "pull_request", "work/i", arionSha("7"), arionDays(1), 20, 10, "success"),
 		mk(7, 3, arionCI, "pull_request", "work/i", arionSha("7"), arionDays(1), 40, 10, "failure"),
-		// work/j: red twice: not flaky.
+		// work/j: red twice: not a rescue.
 		mk(8, 1, arionCI, "pull_request", "work/j", arionSha("8"), arionDays(1), 0, 10, "failure"),
 		mk(8, 2, arionCI, "pull_request", "work/j", arionSha("8"), arionDays(1), 20, 10, "failure"),
-		// work/k: confirmed on its own commit, and the next commit is green on the same tree:
-		// green on the commit itself rules out a suspect.
+		// work/k: a same-run rescue, and the next commit is green on the same tree.
+		// Green on the commit itself rules out a suspect. The rescue is still not confirmed.
 		tree(mk(9, 1, arionCI, "pull_request", "work/k", arionSha("9"), arionDays(1), 0, 10, "failure"), "d"),
 		tree(mk(9, 2, arionCI, "pull_request", "work/k", arionSha("9"), arionDays(1), 20, 10, "success"), "d"),
 		tree(mk(10, 1, arionCI, "pull_request", "work/k", arionSha("0"), arionDays(1).Add(hour), 0, 10, "success"), "d"),
 	}
 	flaky := metricByKey(t, computeMetrics(arionBase(runs), metricNow), "flaked_failures")
-	wantWindow(t, flaky, 7, "ok", 10, f64(20), nil, nil)
-	wantCounts(t, flaky, 7, map[string]int{"confirmed": 2, "suspect": 1})
+	wantWindow(t, flaky, 7, "no_data", 10, nil, nil, nil)
+	wantCounts(t, flaky, 7, map[string]int{"confirmed": 0, "suspect": 1, "workflow_rescue": 2})
+	if flaky.Status != "no_data" || flaky.Latest != nil || flaky.Reason == nil || !strings.Contains(*flaky.Reason, "workflow rescue") {
+		t.Fatalf("confirmed executions stay unavailable: status %s latest %v reason %v", flaky.Status, flaky.Latest, flaky.Reason)
+	}
 }
 
 func TestDeliveryQueueEjectionsAndUnclassifiedRunsPerHundredMergedPRs(t *testing.T) {
@@ -359,7 +365,15 @@ func TestDeliveryPreflightRedRateIsItsOwnLine(t *testing.T) {
 		mk(3, 1, pre, "workflow_dispatch", "main", arionSha("3"), arionDays(1), 0, 1, "cancelled"),
 		mk(4, 1, arionCI, "pull_request", "work/a", arionSha("4"), arionDays(1), 0, 10, "success"),
 	}
-	metrics := computeMetrics(arionBase(runs), metricNow)
+	// CI coverage alone must not make preflight look fully covered.
+	partial := metricByKey(t, computeMetrics(arionBase(runs), metricNow), "preflight_red_rate")
+	wantWindow(t, partial, 7, "partial", 2, f64(50), nil, nil)
+	if partial.Reason == nil || !strings.Contains(*partial.Reason, "no backfill has finished") {
+		t.Fatalf("preflight without its own backfill: %+v", partial.Reason)
+	}
+	covered := arionBase(runs)
+	covered.PreflightCovered = covered.Covered
+	metrics := computeMetrics(covered, metricNow)
 	wantWindow(t, metricByKey(t, metrics, "preflight_red_rate"), 7, "ok", 2, f64(50), nil, nil)
 	wantWindow(t, metricByKey(t, metrics, "first_attempt_green"), 7, "ok", 1, f64(100), nil, nil)
 	if m := metricByKey(t, computeMetrics(arionBase(nil), metricNow), "preflight_red_rate"); m.Status != "no_data" || m.Reason == nil || m.Windows[0].Value != nil {

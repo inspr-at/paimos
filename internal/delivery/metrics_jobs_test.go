@@ -2,6 +2,7 @@
 package delivery
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func readStoredRun(t *testing.T, f *fixture, id int64, attempt int) storedRun {
 	t.Helper()
 	var s storedRun
 	f.tx(t, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT head_tree,jobs_read_at IS NOT NULL,jobs_failed_at IS NOT NULL,worst_job_wait_ms,required_jobs->>'web' FROM delivery_metric_runs WHERE run_id=$1 AND attempt=$2`, id, attempt).
+		return tx.QueryRow(t.Context(), `SELECT head_tree,jobs_read_at IS NOT NULL,jobs_failed_at IS NOT NULL,worst_job_wait_ms,required_jobs->'conclusions'->>'web' FROM delivery_metric_runs WHERE run_id=$1 AND attempt=$2`, id, attempt).
 			Scan(&s.tree, &s.jobsRead, &s.failed, &s.waitMS, &s.requiredWe)
 	})
 	return s
@@ -70,13 +71,18 @@ func TestDeliveryMetricsWebhookStoresJobFactsAndHeadTree(t *testing.T) {
 	if two.jobsRead {
 		t.Fatalf("a later attempt has no job facts of its own: %+v", two)
 	}
-	var required map[string]string
+	var raw []byte
 	f.tx(t, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT required_jobs FROM delivery_metric_runs WHERE run_id=501 AND attempt=1`).Scan(&required)
+		return tx.QueryRow(t.Context(), `SELECT required_jobs FROM delivery_metric_runs WHERE run_id=501 AND attempt=1`).Scan(&raw)
 	})
-	// A required job that never ran is "missing"; the skipped job's start is not a wait.
-	if required["e2e"] != "missing" || required["go"] != "success" || len(required) != 5 {
-		t.Fatalf("required jobs: %v", required)
+	var stored storedJobFacts
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatal(err)
+	}
+	// Every job is kept, not only the requesting project's checks. A required
+	// name with no job is absent here and counts as missing when the map is complete.
+	if !stored.Complete || stored.Conclusions["go"] != "success" || stored.Conclusions["web"] != "failure" || stored.Conclusions["e2e"] != "" || stored.Conclusions["go-test (1)"] != "skipped" {
+		t.Fatalf("job conclusions: %s", raw)
 	}
 	// A redelivery converges; the first attempt keeps its facts.
 	auditSend(t, f, "check_suite", "jobs-suite", suite, 204)
@@ -126,8 +132,13 @@ func seedBareRuns(t *testing.T, f *fixture, n int) {
 		if err := upsertRunsTx(t.Context(), tx, f.person.TenantID, f.m.config.Repository, "backfill", runs, f.at); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_since=$3,backfill_done_at=$4 WHERE project_id=$1`,
-			f.project, fmt.Sprintf(`{"since":%q,"phase":"done"}`, f.at.AddDate(0, 0, -30).Format(time.RFC3339)), f.at.AddDate(0, 0, -30), f.at)
+		since := f.at.AddDate(0, 0, -30)
+		cursor, err := json.Marshal(backfillCursor{Since: since, Phase: "done", Workflows: fullBackfillWorkflows(&metricSourceRow{CIWorkflow: defaultCIWorkflow, NightlyWorkflow: defaultNightlyWorkflow})})
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_since=$3,backfill_done_at=$4 WHERE project_id=$1`,
+			f.project, cursor, since, f.at)
 		return err
 	})
 }
@@ -159,7 +170,7 @@ func TestDeliveryMetricsJobsPassFillsRunsWithoutJobFacts(t *testing.T) {
 		t.Fatalf("second jobs step: %+v", step)
 	}
 	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
-	if step.State != "done" || step.Phase != "done" || step.Jobs != 0 {
+	if step.State != "running" || step.Phase != "jobs" || step.Jobs != 0 || step.RetryAt == nil || !step.RetryAt.Equal(f.at.Add(jobFillRetry)) {
 		t.Fatalf("with only the broken run left, within its hour: %+v", step)
 	}
 	if s := readStoredRun(t, f, newest, 1); s.jobsRead || !s.failed {
@@ -274,4 +285,192 @@ func TestDeliveryMetricsReportsReviewAuditsAndEscapedDefects(t *testing.T) {
 	defects := metricByKey(t, out.Metrics, "escaped_defects")
 	wantWindow(t, defects, 7, "partial", 2, f64(2), nil, nil)
 	wantCounts(t, defects, 7, map[string]int{"high": 1, "medium": 1, "low": 0})
+}
+
+func TestReadJobFactsKeepsEveryConclusionAndTheWorstName(t *testing.T) {
+	// Risk: a job that is not in the requesting project's required checks is
+	// dropped, or a failed matrix leg is hidden by an earlier success of the
+	// same name.
+	created := time.Date(2026, 10, 7, 1, 0, 0, 0, time.UTC)
+	jobs := []any{
+		map[string]any{"name": "go", "conclusion": "success", "created_at": created, "started_at": created.Add(time.Second)},
+		map[string]any{"name": "go", "conclusion": "failure", "created_at": created, "started_at": created.Add(2 * time.Second)},
+		map[string]any{"name": "lint", "conclusion": "success", "created_at": created, "started_at": created.Add(time.Second)},
+	}
+	body := map[string]any{"total_count": len(jobs), "jobs": jobs}
+	get := func(string, any) error { return nil }
+	get = func(_ string, out any) error {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(raw, out)
+	}
+	facts, err := readJobFacts(get, 1, 1)
+	if err != nil || !facts.Complete || facts.Conclusions["go"] != "failure" || facts.Conclusions["lint"] != "success" || len(facts.Conclusions) != 2 {
+		t.Fatalf("%+v %v", facts, err)
+	}
+	jobs[0].(map[string]any)["conclusion"] = strings.Repeat("x", 33)
+	if _, err = readJobFacts(get, 1, 1); err == nil {
+		t.Fatal("a conclusion past the bound was accepted")
+	}
+	jobs[0].(map[string]any)["conclusion"] = "failure"
+	jobs[0].(map[string]any)["name"] = strings.Repeat("n", jobNameLimit+1)
+	if _, err = readJobFacts(get, 1, 1); err == nil {
+		t.Fatal("a job name past the bound was accepted")
+	}
+}
+
+func TestDeliveryCompleteJobMapServesEveryProject(t *testing.T) {
+	// Risk: the jobs pass stores only the requesting project's required checks,
+	// so another project, or a check added later, can never see a job that was
+	// already read.
+	f, g := newMetricsFixture(t)
+	head := strings.Repeat("d", 40)
+	created := f.at.Add(-2 * time.Hour)
+	suite := map[string]any{"action": "completed", "check_suite": map[string]any{"id": 900, "head_sha": head, "head_branch": "work/shared", "status": "completed", "conclusion": "success", "app": map[string]any{"slug": "github-actions"}, "pull_requests": []any{}}}
+	run := githubRunBody(501, 1, defaultCIWorkflow, "pull_request", "work/shared", head, created, 10*time.Minute, "success", 900)
+	jobs := githubJobsBody(created, 30, nil)
+	list := jobs["jobs"].([]any)
+	list = append(list, map[string]any{"name": "lint", "conclusion": "failure", "created_at": created, "started_at": created.Add(time.Second)})
+	jobs["jobs"], jobs["total_count"] = list, len(list)
+	g.respond = func(path string) (any, error) {
+		switch path {
+		case "/actions/runs?check_suite_id=900&head_sha=" + head + "&per_page=2":
+			return map[string]any{"total_count": 1, "workflow_runs": []any{run}}, nil
+		case "/actions/runs/501/attempts/1/jobs?per_page=100&page=1":
+			return jobs, nil
+		}
+		return nil, errRead
+	}
+	auditSend(t, f, "check_suite", "shared-jobs", suite, 204)
+	var raw []byte
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT required_jobs FROM delivery_metric_runs WHERE run_id=501 AND attempt=1`).Scan(&raw)
+	})
+	var stored storedJobFacts
+	if err := json.Unmarshal(raw, &stored); err != nil || !stored.Complete || stored.Conclusions["lint"] != "failure" || stored.Conclusions["go"] != "success" {
+		t.Fatalf("stored map: %s %v", raw, err)
+	}
+	var other string
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'AEON-1016B',id,'Second delivery project' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.person.TenantID).Scan(&other)
+	})
+	f.call(t, f.person, "PUT", "/api/projects/"+other+"/delivery/metrics/source", map[string]any{"repository": f.m.config.Repository}, 200, nil)
+	f.call(t, f.person, "PUT", "/api/projects/"+other+"/delivery-settings", map[string]any{"required_checks": []string{"lint"}}, 200, nil)
+	calls := len(g.calls)
+	var out DeliveryMetrics
+	f.call(t, f.person, "GET", "/api/projects/"+other+"/delivery/metrics", nil, 200, &out)
+	wantWindow(t, metricByKey(t, out.Metrics, "required_checks_green"), 30, "partial", 1, f64(0), nil, nil)
+	if len(g.calls) != calls {
+		t.Fatal("the second project re-read jobs that were already stored")
+	}
+	// A check added later is missing when no job had that name, never unknown.
+	f.call(t, f.person, "PUT", "/api/projects/"+f.project+"/delivery-settings", map[string]any{"required_checks": []string{"not-a-job"}}, 200, nil)
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/metrics", nil, 200, &out)
+	added := metricByKey(t, out.Metrics, "required_checks_green")
+	wantWindow(t, added, 30, "partial", 1, f64(0), nil, nil)
+	if added.Reason != nil && strings.Contains(*added.Reason, "without job facts") {
+		t.Fatalf("an absent name on a complete map is missing, not unread: %s", *added.Reason)
+	}
+}
+
+func TestDeliveryLegacyJobMapIsRefreshedOnce(t *testing.T) {
+	// Risk: a row written as a flat list of one project's checks is treated as
+	// finished, so a check it does not name stays unknown forever.
+	f, g := newMetricsFixture(t)
+	seedBareRuns(t, f, 1)
+	const id = int64(1001)
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE delivery_metric_runs SET jobs_read_at=$2,required_jobs='{"go":"success"}'::jsonb WHERE run_id=$1 AND attempt=1`, id, f.at)
+		return err
+	})
+	g.respond = func(p string) (any, error) {
+		if p != "/actions/runs/1001/attempts/1/jobs?per_page=100&page=1" {
+			return nil, errRead
+		}
+		body := githubJobsBody(f.at.Add(-time.Hour), 30, nil)
+		list := body["jobs"].([]any)
+		list = append(list, map[string]any{"name": "special", "conclusion": "failure", "created_at": f.at.Add(-time.Hour), "started_at": f.at.Add(-time.Hour).Add(time.Second)})
+		body["jobs"], body["total_count"] = list, len(list)
+		return body, nil
+	}
+	var step BackfillResult
+	path := "/api/projects/" + f.project + "/delivery/metrics/backfill"
+	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
+	if step.Jobs != 1 {
+		t.Fatalf("legacy map was not read again: %+v", step)
+	}
+	var raw []byte
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT required_jobs FROM delivery_metric_runs WHERE run_id=$1 AND attempt=1`, id).Scan(&raw)
+	})
+	var stored storedJobFacts
+	if err := json.Unmarshal(raw, &stored); err != nil || !stored.Complete || stored.Conclusions["special"] != "failure" || stored.Conclusions["go"] != "success" {
+		t.Fatalf("refreshed map: %s %v", raw, err)
+	}
+	calls := len(g.calls)
+	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
+	if step.State != "done" || len(g.calls) != calls {
+		t.Fatalf("a complete map was read again: %+v calls %d→%d", step, calls, len(g.calls))
+	}
+}
+
+func TestDeliveryPreflightCatchupListsOnlyPreflight(t *testing.T) {
+	// Risk: a finished CI backfill reports preflight as fully covered, or the
+	// catch-up reads CI and pulls a second time.
+	f, g := newMetricsFixture(t)
+	since := f.at.AddDate(0, 0, -30)
+	cursor, err := json.Marshal(backfillCursor{Since: since, Phase: "done", Workflows: []string{defaultCIWorkflow, defaultNightlyWorkflow}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := f.at.Add(-3 * time.Hour)
+	run := metricRun{ID: 700, Attempt: 1, Workflow: defaultPreflightWorkflow, Name: "preflight", Event: "workflow_dispatch", Branch: "main", Head: strings.Repeat("b", 40),
+		Created: created, Started: created.Add(time.Minute), Completed: created.Add(6 * time.Minute), Conclusion: "failure"}
+	f.tx(t, func(tx pgx.Tx) error {
+		if err := upsertRunsTx(t.Context(), tx, f.person.TenantID, f.m.config.Repository, "webhook", []metricRun{run}, f.at); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_since=$3,backfill_done_at=$4 WHERE project_id=$1`, f.project, cursor, since, f.at)
+		return err
+	})
+	var out DeliveryMetrics
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/metrics", nil, 200, &out)
+	before := metricByKey(t, out.Metrics, "preflight_red_rate")
+	wantWindow(t, before, 30, "partial", 1, f64(100), nil, nil)
+	if before.Windows[1].Coverage.Full {
+		t.Fatal("preflight coverage followed the CI backfill")
+	}
+	g.respond = func(p string) (any, error) {
+		if strings.Contains(p, "ci-preflight.yml") {
+			return map[string]any{"total_count": 0, "workflow_runs": []any{}}, nil
+		}
+		return nil, fmt.Errorf("unexpected GitHub read %s", p)
+	}
+	var step BackfillResult
+	backfill := "/api/projects/" + f.project + "/delivery/metrics/backfill"
+	for i := 0; i < 4 && step.Phase != "jobs" && step.Phase != "done"; i++ {
+		f.call(t, f.person, "POST", backfill, map[string]any{}, 200, &step)
+	}
+	sawPreflight, sawCI := false, false
+	for _, call := range g.calls {
+		if strings.Contains(call, "ci-preflight.yml") {
+			sawPreflight = true
+		}
+		if strings.Contains(call, "/actions/workflows/ci.yml") || strings.Contains(call, "/pulls?") {
+			sawCI = true
+		}
+	}
+	if !sawPreflight || sawCI {
+		t.Fatalf("catch-up calls: %v", g.calls)
+	}
+	for i := 0; step.State != "done" && i < 4; i++ {
+		f.call(t, f.person, "POST", backfill, map[string]any{}, 200, &step)
+	}
+	if step.State != "done" {
+		t.Fatalf("catch-up did not finish: %+v", step)
+	}
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/metrics", nil, 200, &out)
+	wantWindow(t, metricByKey(t, out.Metrics, "preflight_red_rate"), 30, "ok", 1, f64(100), nil, nil)
 }

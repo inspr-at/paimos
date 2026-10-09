@@ -39,10 +39,10 @@ test('the v5 readings sit in their tiles with exact counts and the plan’s targ
   await expect(tile(page, 'Release → live (csb1)').locator('.t-target')).toHaveText('Target ~61 min + W, then ~54 + W')
   await expect(tiles).not.toContainText('reuse')
   // Required checks stand beside the workflow's green; exact counts, not shares turned back into counts.
-  await expect(tile(page, 'Green on first try').locator('.t-line').nth(0)).toHaveText(/^Required checks \d+%$/)
+  await expect(tile(page, 'Green on first try').locator('.t-line').nth(0)).toHaveText(/^Required checks \d+% · \d+ of \d+$/)
   await expect(tile(page, 'Time to first green (branch)').locator('.t-line').nth(1)).toHaveText(/^\d+ went green · \d+ never green$/)
   await expect(tile(page, 'Time to first green (commit)').locator('.t-line').nth(1)).toHaveText(/^\d+ went green · \d+ never, \d+ superseded$/)
-  await expect(tile(page, 'Confirmed flaky runs').locator('.t-line').nth(0)).toHaveText(/^\d+ confirmed · \d+ suspect$/)
+  await expect(tile(page, 'Confirmed flaky runs').locator('.t-line').nth(0)).toHaveText(/^\d+ confirmed · \d+ suspect · \d+ workflow rescues$/)
   await expect(tile(page, 'Inferred ejections').locator('.t-line').nth(0)).toHaveText(/^\d+ ejections · \d+ merged PRs$/)
   await expect(tile(page, 'Inferred ejections').locator('.t-line').nth(1)).toHaveText('Inferred from required checks')
   await expect(tile(page, 'Extra queue runs, cause unclassified').locator('.t-line').nth(1)).toHaveText('Cause not classified yet')

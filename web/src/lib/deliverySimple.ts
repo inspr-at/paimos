@@ -65,7 +65,7 @@ function countValues(window: MetricWindow, lang: DeliveryLanguage): Record<strin
   const c = window.counts ?? {}, of = (name: string) => num(c[name] ?? 0, lang)
   return {
     never: of('never_green'), sup: of('superseded'), first: of('first_run_green'), total: num(window.n + (c.never_green ?? 0), lang),
-    confirmed: of('confirmed'), suspect: of('suspect'), e: of('events'), b: of('base'),
+    confirmed: of('confirmed'), suspect: of('suspect'), rescue: of('workflow_rescue'), e: of('events'), b: of('base'),
     high: of('high'), medium: of('medium'), low: of('low'), clean: of('clean'),
   }
 }
@@ -150,9 +150,16 @@ export function simpleTile(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
   const part = words.part && (!words.part.includes('{d}') || from) ? fill(words.part, { d: from }) : ''
   // Full calendar coverage still leaves a partial window when facts were truncated.
   // The coverage phrase is empty then; the server's reason is what is missing.
-  const reason = ready && window?.status === 'partial' && window.coverage.full && metric?.reason?.trim() ? metric.reason.trim() : ''
+  const ownReason = ready && window?.status === 'partial' && window.coverage.full && metric?.reason?.trim() ? metric.reason.trim() : ''
+  // The companion can be partial, or missing facts, while the workflow share is whole. Say that too.
+  const alsoMetric = def.also ? metrics.get(def.also) : undefined
+  const alsoOpen = ready && !!also && (also.status === 'partial' || !also.coverage.full)
+  const alsoReason = alsoOpen && alsoMetric?.reason?.trim() ? alsoMetric.reason.trim() : ''
+  const alsoCover = alsoOpen && also ? coverText(also.coverage, deliveryText(lang)) : ''
+  const reason = [ownReason, alsoReason].filter(Boolean).join(' · ')
   const footBase = partial && (cover || part) ? cover || part : words.src
-  const foot = reason ? `${footBase} · ${reason}` : footBase
+  const footBits = [footBase, reason, alsoCover && !footBase.includes(alsoCover) ? alsoCover : ''].filter(Boolean)
+  const foot = footBits.join(' · ')
 
   // The sentence, the Learn text and the nightly verdict's gap, all from this window's numbers.
   const n = window?.n ?? 0
@@ -168,6 +175,7 @@ export function simpleTile(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
       case 'share': {
         values.v = pct(value, lang)
         values.v2 = also?.value != null && also.n > 0 ? pct(also.value, lang) : '–'
+        values.n2 = also && also.n > 0 ? num(also.n, lang) : '–'
         values.t = target ? pct(target.value, lang) : '–'
         if (values.v2 === '–') sentence = words.sayAlt ?? sentence
         break
@@ -208,6 +216,10 @@ export function simpleTile(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
     say = `${fill(sentence, values)} ${words.wants}`
     learn = fill(words.learn, { ...values, n: def.kind === 'release' ? (n === 1 ? text.releaseOne : fill(text.releaseMany, { n: num(n, lang) })) : def.kind === 'review' ? values.n : num(n, lang) })
       + (partial && words.learnPart && from ? fill(words.learnPart, { d: from }) : '')
+  } else if (def.key === 'flaked_failures' && ready && window && n > 0 && window.value == null && words.sayNone) {
+    const values = { n: num(n, lang), v: text.noDataYet, ...countValues(window, lang) }
+    say = `${fill(words.sayNone, values)} ${words.wants}`
+    learn = fill(words.learn, values)
   }
   if (reason && !learn.includes(reason)) learn = `${learn} ${reason}`
 

@@ -105,9 +105,11 @@ shows release 126 of 8 Oct 2026 as a labelled example in all three modes.
   the playhead; a pan or zoom stops following, a playhead drag pauses. With reduced
   motion nothing plays: the run stands still, Play is off, and the handle and
   Shift+←/→ still move the time.
-- **Compare** races a release from its step a against the Arion target (the release
-  path a to l of arion.md § 4, 24 minutes) on one relative axis: two lane sets
-  (Reviewer, OPS, Checks), one overview, one playhead, finish lines.
+- **Compare** races a release from its step a against the Arion target (Project Arion
+  v5 §4b: 60.6 min now, 53.9 after Phases 2 and 4) on one relative axis. The wait for
+  a person (W) and a conditional catalogue overrun sit beside that path and are not
+  in the total. Two lane sets (Reviewer, OPS, Checks, and the person on the target),
+  one overview, one playhead, finish lines.
 - Replay and Compare list **where the time went**: working, waiting, doing it again and
   incident + recovery along the critical path, hand-overs, and the biggest waits and
   repeats.
@@ -162,7 +164,10 @@ verdict.
   went green inside.
 - *Required checks green* beside the workflow's green: only the project's required checks
   (delivery settings, default `go`, `web`, `release-check`, `e2e`, `migration-compat`) decide,
-  skipped counts as passing, a required job that never ran is red.
+  skipped counts as passing. On a complete job map a required name that is absent is red
+  (the job never ran). On a legacy map that is not complete, an absent name stays unknown
+  and is not guessed. The Numbers and Simple views show this companion's own sample size,
+  and its coverage and missing-facts reason whenever that window is not whole.
 - *Inferred ejections* and *extra queue runs, cause unclassified*, each per 100 merged pull
   requests that had a queue run: a queue run with a red required check is an inferred
   ejection; an earlier run of a merged pull request that was cancelled or required-green is
@@ -170,8 +175,13 @@ verdict.
   apart before the queue events are joined, WP1.6).
 - *Runner wait*: per first attempt the longest wait of any job that ran (skipped jobs have
   none); the big number is p90, with p50 beside it.
-- *Confirmed flaky runs* and *suspects*: confirmed is a first attempt that failed and passed on
-  a later attempt of the same run. A suspect is a run that failed on a commit whose next
+- *Confirmed flaky runs*, *workflow rescues* and *suspects*. A confirmed flake is the same
+  case, the same commit, the same workflow revision and the same runner class, red then
+  green (Project Arion v5 §3a). This release does not store case, revision or runner class,
+  so the confirmed share is withheld: no percentage, and not 0%. A first attempt that failed
+  and passed on a later attempt of the same run is a workflow rescue, counted beside the
+  share, never inside it. measure-v2 labels that same-run rescue as confirmed; v5 §3a does
+  not, and this page follows §3a. A suspect is a run that failed on a commit whose next
   commit passed on the very same tree (the commit's tree id is stored with the run). That is
   a subset of the plan's definition (no change in the failing owner package, spec or
   fixtures); the wider form needs the complete impact map of WP1.4 and is not counted. Suspects
@@ -186,15 +196,22 @@ verdict.
   first report; inside it, nothing recorded is shown as "0 recorded", before it as "no data yet".
 
 **Where the facts come from.** The check-suite webhook stores each run attempt with the tree of
-its head commit; for the first attempt of a pull-request or merge-queue run of the CI workflow
-it also reads the jobs and keeps only the required checks' conclusions and the worst wait for a
-runner. A jobs read that fails never loses the run: the run is stored without job facts and the
-windows that hold it are partial and name how many runs lack them. The backfill ends with a jobs
-pass (`phase: jobs`) that reads the jobs of first attempts still lacking them, at most 40 GitHub
-reads a step, newest first; a run whose jobs GitHub could not return is tried again after an
-hour, and nothing readable at all answers 502. The backfill is done when no run lacks its job facts.
-A deployment whose backfill finished before this release restarts it once for the history of
-head trees and `ci-preflight.yml` runs.
+its head commit. For the first attempt of a pull-request or merge-queue run it also reads the
+jobs and keeps every job conclusion that fits the page bound, as a complete map, plus the worst
+wait for a runner. A name or conclusion that does not fit is refused and the run stays without
+job facts. A legacy row that stored only some check names is read once more. A jobs read that
+fails never loses the run: the run stays without a complete map, and the windows that hold it
+are partial and name how many runs lack job facts. The backfill lists the CI workflow, the
+nightly workflow when it differs, and `ci-preflight.yml` on a fresh backfill. It ends with a
+jobs pass (`phase: jobs`) that reads the jobs of first attempts whose map is not complete, at
+most 40 GitHub reads a step, newest first. A run whose jobs GitHub could not return is not
+eligible again until an hour after the failure. While any such retry is still outstanding the
+step stays `state: running`, `phase: jobs`, and names `retry_at`. A caller stops only when
+`state` is `done`. When nothing is unfinished the pass is done and does not read GitHub again.
+Nothing readable at all answers 502. A deployment whose backfill finished before preflight was
+collected runs one catch-up of `ci-preflight.yml` and returns to the jobs pass. That catch-up
+does not read pull requests again. Preflight coverage is its own span: full only after that
+workflow was backfilled, otherwise only the webhook samples.
 
 Not part of this release: the machine-readable job-summary marker for strata lane, runner class
 and reuse result (it needs a producer in `ci.yml`, which OPS owns), and a native "caused by"

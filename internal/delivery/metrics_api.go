@@ -62,6 +62,10 @@ type BackfillResult struct {
 	// the runs and pulls phases).
 	Jobs      int  `json:"jobs"`
 	Truncated bool `json:"truncated"`
+	// RetryAt is the earliest time a deferred jobs read should be tried again.
+	// Set only when nothing is eligible now but a failed read is still inside
+	// its retry hour. Callers stop only when state is done.
+	RetryAt *time.Time `json:"retry_at,omitempty"`
 }
 
 type metricFactInput struct {
@@ -378,12 +382,20 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 	cursor := source.Cursor
 	if cursor == nil || in.Restart {
 		since := dayStart(now.AddDate(0, 0, -days))
-		cursor = &backfillCursor{Since: since, Phase: "runs", Day: since.Format("2006-01-02"), Page: 1}
+		cursor = &backfillCursor{Since: since, Phase: "runs", Day: since.Format("2006-01-02"), Page: 1, Workflows: fullBackfillWorkflows(source)}
+	}
+	// A finished backfill that never listed preflight catches that workflow up
+	// once, then returns to the jobs pass. It does not read CI again and it
+	// does not walk pulls again.
+	if !in.Restart && source.DoneAt != nil && needsPreflightCatchup(cursor) {
+		caught := startPreflightCatchup(cursor, source)
+		cursor = &caught
 	}
 	result := BackfillResult{Since: cursor.Since, Phase: cursor.Phase, Truncated: cursor.Truncated}
-	if cursor.Phase == "done" && source.DoneAt != nil {
-		// The runs and pulls are in; the jobs pass reads what the check suites
-		// did not bring (AEON-1016) until no eligible run lacks job facts.
+	if source.DoneAt != nil && cursor.ResumePhase == "" && (cursor.Phase == "done" || cursor.Phase == "jobs") {
+		// The runs and pulls are in. The jobs pass reads what the check suites
+		// did not bring, including a legacy map that is not complete, until
+		// nothing unfinished remains. A deferred failure stays phase jobs.
 		result, err = m.fillJobs(r.Context(), p, project, source, reader, cursor, now)
 		if err != nil {
 			respondError(w, err)
@@ -392,10 +404,7 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteJSON(w, 200, result)
 		return
 	}
-	workflows := []string{source.CIWorkflow}
-	if source.NightlyWorkflow != source.CIWorkflow {
-		workflows = append(workflows, source.NightlyWorkflow)
-	}
+	workflows := backfillWorkflowList(source, cursor)
 	next := *cursor
 	var batch backfillBatch
 	err = reader.MetricsRead(r.Context(), p.TenantID, func(get func(string, any) error) error {
@@ -409,6 +418,7 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 		respondError(w, fail(502, "GitHub could not be read; the backfill resumes from its last stored position"))
 		return
 	}
+	var retryAt *time.Time
 	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := db.LockTenant(r.Context(), tx, p.TenantID); err != nil {
 			return err
@@ -433,13 +443,42 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 		if err = upsertPullsTx(r.Context(), tx, p.TenantID, source.Repository, "backfill", batch.Pulls, at); err != nil {
 			return err
 		}
+		// Runs and pulls are in. Stay on the jobs phase while any first
+		// attempt still lacks a complete job map, including one whose read
+		// failed and is waiting out its hour. The cursor records that, so a
+		// caller that stops at done cannot stop early.
+		if next.Phase == "done" {
+			pending, err := jobWorklistTx(r.Context(), tx, current, now, 1)
+			if err != nil {
+				return err
+			}
+			unfinished, err := jobDeferredSinceTx(r.Context(), tx, current, now)
+			if err != nil {
+				return err
+			}
+			if len(pending) > 0 || unfinished != nil {
+				next.Phase = "jobs"
+				if len(pending) == 0 && unfinished != nil {
+					t := unfinished.Add(jobFillRetry)
+					retryAt = &t
+				}
+			}
+		}
 		raw, err := json.Marshal(next)
 		if err != nil {
 			return err
 		}
-		var done *time.Time
-		if next.Phase == "done" {
-			done = &at
+		done := (*time.Time)(nil)
+		switch {
+		case next.Phase == "done" || next.Phase == "jobs":
+			if current.DoneAt != nil {
+				done = current.DoneAt
+			} else {
+				done = &at
+			}
+		case cursor.ResumePhase != "" && current.DoneAt != nil:
+			// A preflight catch-up still walking days keeps the finished time.
+			done = current.DoneAt
 		}
 		_, err = tx.Exec(r.Context(), `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_revision=backfill_revision+1,backfill_since=$3,backfill_done_at=$4 WHERE project_id=$1`, project, raw, next.Since, done)
 		return err
@@ -448,28 +487,13 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	result = BackfillResult{State: "running", Since: next.Since, Phase: next.Phase, Calls: batch.Calls, Runs: len(batch.Runs), Pulls: len(batch.Pulls), Truncated: next.Truncated}
+	result = BackfillResult{State: "running", Since: next.Since, Phase: next.Phase, Calls: batch.Calls, Runs: len(batch.Runs), Pulls: len(batch.Pulls), Truncated: next.Truncated, RetryAt: retryAt}
 	if next.Phase == "runs" {
 		day := next.Day
 		result.Day = &day
 	}
 	if next.Phase == "done" {
-		// The runs and pulls are in. The backfill is done when no run lacks its
-		// job facts either; until then the next steps are the jobs pass.
 		result.State = "done"
-		var pending []int64
-		err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-			var err error
-			pending, err = jobWorklistTx(r.Context(), tx, source, now, 1)
-			return err
-		})
-		if err != nil {
-			respondError(w, err)
-			return
-		}
-		if len(pending) > 0 {
-			result.State, result.Phase = "running", "jobs"
-		}
 	}
 	httpapi.WriteJSON(w, 200, result)
 }
@@ -619,18 +643,85 @@ const (
 	jobFillRetry  = time.Hour
 )
 
+// jobFactsMissing matches a run whose job map is absent or not complete.
+// A legacy flat map (no "complete": true) is missing and is read once more.
+const jobFactsMissing = `(jobs_read_at IS NULL OR coalesce(required_jobs->>'complete','') <> 'true')`
+
+func ciNightlyWorkflows(source *metricSourceRow) []string {
+	out := []string{source.CIWorkflow}
+	if source.NightlyWorkflow != source.CIWorkflow {
+		out = append(out, source.NightlyWorkflow)
+	}
+	return out
+}
+
+func fullBackfillWorkflows(source *metricSourceRow) []string {
+	out := ciNightlyWorkflows(source)
+	if !workflowListed(out, defaultPreflightWorkflow) {
+		out = append(out, defaultPreflightWorkflow)
+	}
+	return out
+}
+
+func workflowListed(list []string, workflow string) bool {
+	base := path.Base(workflow)
+	for _, name := range list {
+		if name == workflow || path.Base(name) == base {
+			return true
+		}
+	}
+	return false
+}
+
+// backfillWorkflowList is the workflow files this step may read. A catch-up
+// reads only its own list. An in-progress cursor that recorded its list keeps
+// that list, so day indexes stay valid. A legacy in-progress cursor has no
+// list and stays on CI and nightly. A fresh backfill reads all three.
+func backfillWorkflowList(source *metricSourceRow, cursor *backfillCursor) []string {
+	if cursor != nil && cursor.ResumePhase != "" && len(cursor.Workflows) > 0 {
+		return append([]string(nil), cursor.Workflows...)
+	}
+	if cursor != nil && (cursor.Phase == "runs" || cursor.Phase == "pulls") && len(cursor.Workflows) > 0 {
+		return append([]string(nil), cursor.Workflows...)
+	}
+	if cursor != nil && (cursor.Phase == "runs" || cursor.Phase == "pulls") {
+		return ciNightlyWorkflows(source)
+	}
+	return fullBackfillWorkflows(source)
+}
+
+func needsPreflightCatchup(cursor *backfillCursor) bool {
+	if cursor == nil || cursor.ResumePhase != "" {
+		return false
+	}
+	if cursor.Phase != "done" && cursor.Phase != "jobs" {
+		return false
+	}
+	return !workflowListed(cursor.Workflows, defaultPreflightWorkflow)
+}
+
+func startPreflightCatchup(cursor *backfillCursor, source *metricSourceRow) backfillCursor {
+	return backfillCursor{
+		Since: cursor.Since, Phase: "runs", Day: dayStart(cursor.Since).Format("2006-01-02"), Page: 1,
+		Truncated: cursor.Truncated, Workflows: []string{defaultPreflightWorkflow},
+		ResumePhase: "jobs", ThenWorkflows: fullBackfillWorkflows(source),
+	}
+}
+
 // fillJobs reads the jobs of attempt 1 of pull-request and merge-queue runs of
-// the CI workflow that have none yet, newest first, within one step's budget.
-// A run whose jobs GitHub could not return is tried again after an hour, so a
-// few persistent failures never block the rest; its window stays partial and
-// says so. Authority is checked again in the write transaction.
-// jobWorklistTx lists the attempt-1 runs of the CI workflow that still lack job
-// facts, newest first. A run whose read failed waits an hour before its next try.
+// the CI workflow that still lack a complete map, newest first, within one
+// step's budget. The map holds every job conclusion, so a later project's
+// checks are present or truly missing. A run whose jobs GitHub could not
+// return is tried again after an hour. While any such retry is outstanding
+// the phase stays jobs and retry_at names when to call; state done means
+// nothing is left. Authority is checked again in the write transaction.
+
 func jobWorklistTx(ctx context.Context, tx pgx.Tx, source *metricSourceRow, now time.Time, limit int) ([]int64, error) {
 	from := windowSpan(now, metricLongDays, true).first.Add(-metricSlack)
 	rows, err := tx.Query(ctx, `SELECT run_id FROM delivery_metric_runs
-		WHERE repository=$1 AND attempt=1 AND jobs_read_at IS NULL AND event IN ('pull_request','merge_group') AND completed_at>=$2
-		AND regexp_replace(workflow_path,'^.*/','')=$3 AND (jobs_failed_at IS NULL OR jobs_failed_at<$4)
+		WHERE repository=$1 AND attempt=1 AND event IN ('pull_request','merge_group') AND completed_at>=$2
+		AND regexp_replace(workflow_path,'^.*/','')=$3 AND `+jobFactsMissing+`
+		AND (jobs_failed_at IS NULL OR jobs_failed_at<$4)
 		ORDER BY completed_at DESC LIMIT $5`, source.Repository, from, path.Base(source.CIWorkflow), now.Add(-jobFillRetry), limit)
 	if err != nil {
 		return nil, err
@@ -647,52 +738,59 @@ func jobWorklistTx(ctx context.Context, tx pgx.Tx, source *metricSourceRow, now 
 	return out, rows.Err()
 }
 
+// jobDeferredSinceTx is the earliest jobs_failed_at of a run that still lacks
+// a complete map and is inside its retry hour. Nil when nothing is waiting.
+func jobDeferredSinceTx(ctx context.Context, tx pgx.Tx, source *metricSourceRow, now time.Time) (*time.Time, error) {
+	from := windowSpan(now, metricLongDays, true).first.Add(-metricSlack)
+	var at *time.Time
+	err := tx.QueryRow(ctx, `SELECT min(jobs_failed_at) FROM delivery_metric_runs
+		WHERE repository=$1 AND attempt=1 AND event IN ('pull_request','merge_group') AND completed_at>=$2
+		AND regexp_replace(workflow_path,'^.*/','')=$3 AND `+jobFactsMissing+`
+		AND jobs_failed_at IS NOT NULL AND jobs_failed_at>=$4`,
+		source.Repository, from, path.Base(source.CIWorkflow), now.Add(-jobFillRetry)).Scan(&at)
+	return at, err
+}
+
 func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project string, source *metricSourceRow, reader metricsReader, cursor *backfillCursor, now time.Time) (BackfillResult, error) {
 	result := BackfillResult{State: "running", Since: cursor.Since, Phase: "jobs", Truncated: cursor.Truncated}
 	var runs []int64
-	var required []string
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := requireMetrics(ctx, tx, p, "delivery.manage", project); err != nil {
 			return err
 		}
 		var err error
-		if required, err = requiredChecksTx(ctx, tx, []string{project}); err != nil {
-			return err
-		}
 		runs, err = jobWorklistTx(ctx, tx, source, now, jobFillBudget)
 		return err
 	})
 	if err != nil {
 		return result, err
 	}
-	if len(runs) == 0 {
-		result.State, result.Phase = "done", "done"
-		return result, nil
-	}
 	facts := map[int64]jobFacts{}
 	var failedRuns []int64
 	calls := 0
-	err = reader.MetricsRead(ctx, p.TenantID, func(get func(string, any) error) error {
-		counted := func(path string, out any) error { calls++; return get(path, out) }
-		for _, id := range runs {
-			if calls >= jobFillBudget {
-				break
+	if len(runs) > 0 {
+		err = reader.MetricsRead(ctx, p.TenantID, func(get func(string, any) error) error {
+			counted := func(path string, out any) error { calls++; return get(path, out) }
+			for _, id := range runs {
+				if calls >= jobFillBudget {
+					break
+				}
+				f, err := readJobFacts(counted, id, 1)
+				if err != nil {
+					failedRuns = append(failedRuns, id)
+					continue
+				}
+				facts[id] = f
 			}
-			f, err := readJobFacts(counted, id, 1, required)
-			if err != nil {
-				failedRuns = append(failedRuns, id)
-				continue
-			}
-			facts[id] = f
+			return nil
+		})
+		// Nothing read at all is GitHub's fault, not the runs': report it and keep
+		// every run eligible. Failures among successes mark only those runs.
+		if err != nil || len(facts) == 0 {
+			return result, fail(502, "GitHub could not be read; the jobs pass resumes from the runs that still lack job facts")
 		}
-		return nil
-	})
-	// Nothing read at all is GitHub's fault, not the runs': report it and keep
-	// every run eligible. Failures among successes mark only those runs.
-	if err != nil || len(facts) == 0 {
-		return result, fail(502, "GitHub could not be read; the jobs pass resumes from the runs that still lack job facts")
+		result.Calls = calls
 	}
-	result.Calls = calls
 	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
 			return err
@@ -712,7 +810,7 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 		}
 		at := m.now()
 		for id, f := range facts {
-			raw, err := json.Marshal(f.Required)
+			raw, err := encodeStoredJobs(f)
 			if err != nil {
 				return err
 			}
@@ -725,6 +823,35 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 			if _, err = tx.Exec(ctx, `UPDATE delivery_metric_runs SET jobs_failed_at=$3 WHERE repository=$1 AND run_id=$2 AND attempt=1`, source.Repository, id, at); err != nil {
 				return err
 			}
+		}
+		pending, err := jobWorklistTx(ctx, tx, current, now, 1)
+		if err != nil {
+			return err
+		}
+		unfinished, err := jobDeferredSinceTx(ctx, tx, current, now)
+		if err != nil {
+			return err
+		}
+		stored := *cursor
+		stored.ResumePhase = ""
+		stored.ThenWorkflows = nil
+		stored.Phase = "done"
+		result.State, result.Phase = "done", "done"
+		result.RetryAt = nil
+		if len(pending) > 0 || unfinished != nil {
+			stored.Phase = "jobs"
+			result.State, result.Phase = "running", "jobs"
+			if len(pending) == 0 && unfinished != nil {
+				t := unfinished.Add(jobFillRetry)
+				result.RetryAt = &t
+			}
+		}
+		raw, err := json.Marshal(stored)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_revision=backfill_revision+1 WHERE project_id=$1`, project, raw); err != nil {
+			return err
 		}
 		result.Jobs = len(facts)
 		return nil

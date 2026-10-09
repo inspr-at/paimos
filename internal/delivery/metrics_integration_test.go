@@ -150,7 +150,9 @@ func TestDeliveryMetricsWebhookRecordsEachEventKind(t *testing.T) {
 	}
 	wall := metricByKey(t, out.Metrics, "pr_ci_wall")
 	wantWindow(t, wall, 30, "partial", 1, f64(10), f64(10), f64(10))
-	wantWindow(t, metricByKey(t, out.Metrics, "flaked_failures"), 30, "partial", 1, f64(100), nil, nil)
+	flaky := metricByKey(t, out.Metrics, "flaked_failures")
+	wantWindow(t, flaky, 30, "no_data", 1, nil, nil, nil)
+	wantCounts(t, flaky, 30, map[string]int{"confirmed": 0, "workflow_rescue": 1})
 	wantWindow(t, metricByKey(t, out.Metrics, "pr_open_to_merged"), 30, "partial", 1, f64(120), f64(120), f64(120))
 	wantWindow(t, metricByKey(t, out.Metrics, "review_time"), 30, "partial", 1, f64(11), f64(11), f64(11))
 }
@@ -194,24 +196,30 @@ func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
 		}
 		return nil, fmt.Errorf("unexpected GitHub read %s", path)
 	}
-	// 31 days × 2 workflows need two bounded steps.
+	// 31 days × 3 workflows (CI, nightly, preflight). The first two bounded
+	// steps stay in runs; the third is the one that reaches pulls.
 	var step BackfillResult
-	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{"days": 30}, 200, &step)
+	backfillPath := "/api/projects/" + f.project + "/delivery/metrics/backfill"
+	f.call(t, f.person, "POST", backfillPath, map[string]any{"days": 30}, 200, &step)
 	if step.State != "running" || step.Calls > backfillCallBudget || step.Phase != "runs" || step.Day == nil {
 		t.Fatalf("first step: %+v", step)
 	}
-	firstStep := step
+	f.call(t, f.person, "POST", backfillPath, map[string]any{}, 200, &step)
+	if step.Phase != "runs" || step.Day == nil || step.Calls > backfillCallBudget {
+		t.Fatalf("second step still in runs: %+v", step)
+	}
+	anchor := step
 	// The next step fails on the pulls page: nothing is written and the
-	// stored position stays where the first step left it.
+	// stored position stays where the previous step left it.
 	failOn = "/pulls?state=all&sort=updated&direction=desc&per_page=100&page=1"
-	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 502, nil)
+	f.call(t, f.person, "POST", backfillPath, map[string]any{}, 502, nil)
 	runsBefore, pullsBefore, _ := metricCounts(t, f)
 	var cursor []byte
 	f.tx(t, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT backfill_cursor FROM delivery_metric_sources WHERE project_id=$1`, f.project).Scan(&cursor)
 	})
 	var stored backfillCursor
-	if err := json.Unmarshal(cursor, &stored); err != nil || stored.Phase != "runs" || stored.Day != *firstStep.Day {
+	if err := json.Unmarshal(cursor, &stored); err != nil || stored.Phase != "runs" || stored.Day != *anchor.Day {
 		t.Fatalf("failed step moved the cursor: %s (%v)", cursor, err)
 	}
 	if pullsBefore != 0 {
@@ -244,7 +252,7 @@ func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
 	}
 	// A restart reads the same history and converges on the same rows.
 	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{"days": 30, "restart": true}, 200, &step)
-	for step.State != "done" {
+	for i := 0; step.State != "done" && i < 12; i++ {
 		f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
 	}
 	if r, p, _ := metricCounts(t, f); r != runs || p != pulls {

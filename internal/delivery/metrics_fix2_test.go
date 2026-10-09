@@ -109,7 +109,9 @@ func TestDeliveryMetricsFix2KeepsIntermediateAttempts(t *testing.T) {
 	merged := day.Add(4 * time.Hour)
 	metrics := computeMetrics(metricInput{CIWorkflow: defaultCIWorkflow, NightlyWorkflow: defaultNightlyWorkflow, Covered: &covered, Runs: runs,
 		Pulls: []metricPull{{Number: 9, Opened: day, Merged: &merged}}}, now)
-	wantWindow(t, metricByKey(t, metrics, "flaked_failures"), 30, "ok", 1, f64(100), nil, nil)
+	flaky := metricByKey(t, metrics, "flaked_failures")
+	wantWindow(t, flaky, 30, "no_data", 1, nil, nil, nil)
+	wantCounts(t, flaky, 30, map[string]int{"confirmed": 0, "workflow_rescue": 1})
 	wantWindow(t, metricByKey(t, metrics, "time_to_first_green"), 30, "ok", 1, f64(40), f64(40), f64(40))
 	wantWindow(t, metricByKey(t, metrics, "queue_runs_per_pr"), 30, "ok", 1, f64(3), f64(3), f64(3))
 }
