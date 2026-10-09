@@ -86,6 +86,46 @@
     ,
     "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 400 light"
     ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:Models dark 1024: a pick without a registry profile shows a name and its family mark, never the raw id"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:Models dark 390: a pick without a registry profile shows a name and its family mark, never the raw id"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:Models dark 620: a pick without a registry profile shows a name and its family mark, never the raw id"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:Models light 1024: a pick without a registry profile shows a name and its family mark, never the raw id"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:Models light 390: a pick without a registry profile shows a name and its family mark, never the raw id"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:Models light 620: a pick without a registry profile shows a name and its family mark, never the raw id"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:account drawer dark 1024: shared quota counts computers in the right number"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:account drawer dark 390: shared quota counts computers in the right number"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:account drawer dark 620: shared quota counts computers in the right number"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:account drawer light 1024: shared quota counts computers in the right number"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:account drawer light 390: shared quota counts computers in the right number"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:account drawer light 620: shared quota counts computers in the right number"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:chat header dark 1024: actions wrap without overlap, stay put, and Stop reads in the theme"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:chat header dark 1600 panel 620: actions wrap without overlap, stay put, and Stop reads in the theme"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:chat header dark 390: actions wrap without overlap, stay put, and Stop reads in the theme"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:chat header dark 620: actions wrap without overlap, stay put, and Stop reads in the theme"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:chat header light 1024: actions wrap without overlap, stay put, and Stop reads in the theme"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:chat header light 1600 panel 620: actions wrap without overlap, stay put, and Stop reads in the theme"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:chat header light 390: actions wrap without overlap, stay put, and Stop reads in the theme"
+    ,
+    "browser:tests/aeon-1062-qapolish.spec.ts:chat header light 620: actions wrap without overlap, stay put, and Stop reads in the theme"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -4793,6 +4833,46 @@
     {"kind":"browser","file":"tests/aeon-1042-headergraph.spec.ts","name":"header graph off by default, developer switch keeps the header still 400 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1042-headergraph.spec.ts","name":"header graph off by default, developer switch keeps the header still 400 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"Models dark 1024: a pick without a registry profile shows a name and its family mark, never the raw id","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"Models dark 390: a pick without a registry profile shows a name and its family mark, never the raw id","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"Models dark 620: a pick without a registry profile shows a name and its family mark, never the raw id","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"Models light 1024: a pick without a registry profile shows a name and its family mark, never the raw id","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"Models light 390: a pick without a registry profile shows a name and its family mark, never the raw id","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"Models light 620: a pick without a registry profile shows a name and its family mark, never the raw id","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"account drawer dark 1024: shared quota counts computers in the right number","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"account drawer dark 390: shared quota counts computers in the right number","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"account drawer dark 620: shared quota counts computers in the right number","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"account drawer light 1024: shared quota counts computers in the right number","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"account drawer light 390: shared quota counts computers in the right number","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"account drawer light 620: shared quota counts computers in the right number","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header dark 1024: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header dark 1600 panel 620: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header dark 390: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header dark 620: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header light 1024: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header light 1600 panel 620: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header light 390: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header light 620: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -12665,6 +12745,8 @@
     {"kind":"node","file":"tests/accounts-overview.test.ts","name":"accounts overview merges only a canonical shared quota identity within one harness","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/accounts-overview.test.ts","name":"host capacity parsing retains off defaults and rejects oversized history","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/accounts-overview.test.ts","name":"shared quota names its computers in the singular and plural, in English and German","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/activity.test.ts","name":"an automatic change keeps the job that wrote it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
