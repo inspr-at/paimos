@@ -85,7 +85,12 @@ export function validateRegistry(data, file) {
       fields(row, ['table', 'classification', 'locator', 'columns'])
       require(identifier(row.table) && classes.has(row.classification), 'Invalid classified table')
       fields(row.locator, ['tenant_column'], ['person_column'])
-      require(Object.values(row.locator).every(identifier), 'Invalid tenant/person locator')
+      // The capability floor is deployment metadata, not tenant data. Keep
+      // this exception exact: every other DSAR table still needs its locator.
+      const globalCapability = row.table === 'aeon_required_capabilities' && row.classification === 'metadata' &&
+        Object.keys(row.locator).length === 1 && row.locator.tenant_column === '' && object(row.columns) &&
+        Object.keys(row.columns).length === 2 && row.columns.capability === 'metadata' && row.columns.since === 'metadata'
+      require(globalCapability || Object.values(row.locator).every(identifier), 'Invalid tenant/person locator')
       require(object(row.columns), 'Invalid columns')
       for (const [column, classification] of Object.entries(row.columns)) require(identifier(column) && classes.has(classification), `Invalid classification: ${row.table}.${column}`)
       return row.table

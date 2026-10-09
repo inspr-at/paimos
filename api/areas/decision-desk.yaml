@@ -48,7 +48,7 @@ components:
       required: [id, kind, revision, title, created_at, held, href, source]
       properties:
         id: {type: string, format: uuid}
-        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim, stepup]}
+        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim, stepup, account_matrix]}
         project_id: {type: string, format: uuid}
         revision: {type: integer, minimum: 1}
         title: {type: string}

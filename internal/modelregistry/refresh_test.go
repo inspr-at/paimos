@@ -639,7 +639,11 @@ func TestAutoAcceptOffRequiresPersonAndDoesNotWriteRoutes(t *testing.T) {
 	worker.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
 	decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
 	before := registryRoutes(t, p)
-	cfg := `{"agent_reports_enabled":true,"auto_add_profiles":false,"api_enabled":false,"interval_minutes":1440}`
+	var ruleRevision int64
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT revision FROM account_use_rules`).Scan(&ruleRevision)
+	})
+	cfg := fmt.Sprintf(`{"agent_reports_enabled":true,"auto_add_profiles":false,"api_enabled":false,"interval_minutes":1440,"account_use_revision":%d}`, ruleRevision)
 	decode[RefreshSettings](t, &p, "PUT", "/api/models/refresh/settings", cfg, 200)
 	decode[RefreshResult](t, &worker, "POST", "/api/models/refresh", "{}", 200)
 	enrollEvidenceHarness(t, p, worker, "grok")

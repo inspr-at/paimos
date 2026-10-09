@@ -45,6 +45,10 @@ func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 		pool.Close()
 		return nil, err
 	}
+	if err := CheckRequiredCapabilities(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
 	return pool, nil
 }
 

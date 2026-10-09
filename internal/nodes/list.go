@@ -1786,6 +1786,7 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
                 SELECT s.project_id,coalesce(a.linked_to,a.id) AS person,max(r.at) AS at
                 FROM recent r JOIN subtree s ON s.node_id=r.node_id
                 JOIN principals a ON a.tenant_id=current_setting('aeon.tenant_id')::uuid AND a.id=r.actor_principal_id
+                WHERE NOT (a.kind='agent' AND a.roles && `+servicePrincipalRoles+`)
                 GROUP BY s.project_id,coalesce(a.linked_to,a.id)
             ), ranked AS (
                 SELECT project_id,person,at,row_number() OVER (PARTITION BY project_id ORDER BY at DESC,person) AS n FROM actors

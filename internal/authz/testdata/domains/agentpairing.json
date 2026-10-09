@@ -37,6 +37,7 @@
     "POST /api/agent-pairing/requests/{requestId}/deny": "account.manage",
     "POST /api/agent-pairing/self/capacity": "run.claim",
     "POST /api/agent-pairing/self/disconnect": "run.claim",
+    "POST /api/agent-pairing/self/ledger": "run.claim",
     "PUT /api/agent-pairing/computers/{computerId}/capacity": "account.manage",
     "PUT /api/agent-pairing/computers/{computerId}/name": "account.manage",
     "PUT /api/me/security/session-watching": "profile.write"

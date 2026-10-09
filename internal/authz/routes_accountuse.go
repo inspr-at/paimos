@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package authz
+
+func init() {
+	registerRoutes("accountuse", map[string]string{
+		"GET /api/account-use":                       "account.use.manage",
+		"PUT /api/account-use/rules":                 "account.use.manage",
+		"PATCH /api/account-use/cells":               "account.use.manage",
+		"POST /api/account-use/confirm":              "account.use.manage",
+		"POST /api/work-contexts":                    "account.use.manage",
+		"PATCH /api/work-contexts/{contextId}":       "account.use.manage",
+		"GET /api/projects/{projectId}/work-context": "account.use.manage",
+		"PUT /api/projects/{projectId}/work-context": "account.use.manage",
+	})
+}
