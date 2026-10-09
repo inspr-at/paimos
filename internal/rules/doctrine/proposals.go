@@ -272,8 +272,8 @@ func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, i
 		if err != nil {
 			return err
 		}
-		if !writableSource(source) {
-			return fail(422, "unsupported_repository", "Only the public and private INSPR doctrine repositories accept proposals; their visibility must match.")
+		if !m.writableSource(source) {
+			return fail(422, "unsupported_repository", "Only the deployment-configured doctrine repositories accept proposals; their visibility must match.")
 		}
 		if source.CredentialRef != "" {
 			if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
@@ -281,7 +281,7 @@ func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, i
 			}
 		}
 		files, err = cachedFiles(ctx, tx, source)
-		if err == nil && source.Repository == publicRepository {
+		if err == nil && m.repositories.IsPublic(source.Repository) {
 			guard, err = m.privateGuard(ctx, tx, actor)
 		}
 		return err
@@ -343,7 +343,7 @@ func (m *Module) preparePublication(ctx context.Context, actor tenant.Principal,
 	if !humanActor(actor) {
 		return nil, "", nil, errPersonPublishes
 	}
-	changed, _, _, err := editRuleViews(source, files, in)
+	changed, _, _, err := m.editRuleViews(source, files, in)
 	if err != nil {
 		return nil, "", nil, err
 	}

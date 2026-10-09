@@ -4840,6 +4840,8 @@
     ,
     {"kind":"go","package":"internal/config","name":"TestDoctrineGuardKey","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/config","name":"TestDoctrineRepositoriesFromEnv","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/config","name":"TestFromEnvDefaults","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/config","name":"TestFromEnvOverrides","tier":"GATED-FULL"}
@@ -8359,6 +8361,8 @@
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDefaultDoctrineGuardIgnoresUnrelatedCheckouts","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDefaultIgnorablesRemovedBeforeNormalization","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/rules/doctrine","name":"TestDeploymentDoctrineRepositoryBoundary","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineInboxDismissalBeatsARacingSubmission","tier":"GATED-FULL"}
     ,

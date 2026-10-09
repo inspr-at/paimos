@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1308_doctrine_repository_boundary.sql",
+      "sha256": "7381010937bec162022140db5cc98b3968c744fa70615d2fe45448d99589b6ca",
+      "ticket": "AEON-1043",
+      "reason": "Widen the released 1024 repository CHECKs on doctrine_proposals and doctrine_machine_pins to valid bounded GitHub owner/repository names, retaining every formerly accepted name. Each drop and replacement runs in one transaction; no rows, columns, RLS policies or data change. The validated deployment-owned public/private pair, sole App tenant, tenant/repository credential grants, exact token scope/visibility, leak and quotation guards, person publication and independent review/release gates remain the authority. DROP CONSTRAINT is outside the expand-safe allowlist. This is a draft exact-byte review artifact, following 1305; coordinator approval of the reservation/exception and the previous-binary compatibility gate are required before merge or release. It grants no acceptance, push or deployment authority."
+    }
+  ]
+}
