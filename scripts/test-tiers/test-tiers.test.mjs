@@ -41,11 +41,11 @@ test('AEON-1025 compiled Go owners retain exact execution, blocking failures and
   const all=[...rows,g('internal/nodes','TestUnselected'),{...g('internal/nodes','TestOtherPlatform'),active:false}]
   const selection={tests:rows,all,full:true,scope:'gated-full',reason:'fixture'}
   const simulate=async({event='merge_group',failed=[rows[0]],again=[],compileFailure=false,listMismatch=false,
-    missing=false,unexpected=false,packageFailure=false,signal=false,saveFailure=false}={})=>{
+    missing=false,unexpected=false,packageFailure=false,signal=false,saveFailure=false,goFlags}={})=>{
     const calls=[],lists=[],attempts=new Map(),binaries=[]
     let report,clock=0,error,code
     try {
-      code=await run('go',selection,{env:{GITHUB_EVENT_NAME:event,FIXTURE:'retained'},job:'aeon1025-fixture'}, {
+      code=await run('go',selection,{env:{GITHUB_EVENT_NAME:event,FIXTURE:'retained',GOFLAGS:goFlags},job:'aeon1025-fixture'}, {
         knownFlaky:noFlaky,now:()=>{clock+=100;return clock},log:()=>{},
         saveJSON:(_path,value)=>{if(saveFailure) throw new Error('fixture save failure');report=value},
         command:(bin,args,options)=>{
@@ -53,8 +53,9 @@ test('AEON-1025 compiled Go owners retain exact execution, blocking failures and
           lists.push({bin,args,options})
           if(compiled) {
             assert.equal(bin,binaries[0])
-            assert.deepEqual(args,['-test.list=^(Test|Fuzz)'])
+            assert.deepEqual(args,['-test.paniconexit0','-test.list=^(Test|Fuzz)'])
             assert.equal(options.cwd,resolve(new URL('../../internal/nodes',import.meta.url).pathname))
+            assert.equal(options.env.PWD,options.cwd)
           }
           return all.filter(row=>row.package===owner&&row.active&&(!listMismatch||row!==rows[0])).map(row=>row.name).join('\n')
         },
@@ -73,9 +74,11 @@ test('AEON-1025 compiled Go owners retain exact execution, blocking failures and
             assert.deepEqual(args.slice(0,5),['tool','test2json','-t','-p','github.com/inspr-at/paimos/internal/nodes'])
             assert.equal(args[5],binaries[0])
             assert.ok(args.includes('-test.v=test2json'))
+            assert.ok(args.includes('-test.paniconexit0'))
             assert.ok(args.includes('-test.count=1'))
             assert.ok(args.includes('-test.timeout=25m'))
             assert.equal(options.cwd,lists[0].options.cwd)
+            assert.equal(options.env.PWD,options.cwd)
           } else {
             assert.ok(args.includes('-count=1'))
             assert.ok(args.includes('-timeout=25m'))
@@ -125,6 +128,17 @@ test('AEON-1025 compiled Go owners retain exact execution, blocking failures and
       assert.match(error.message,options.compileFailure?/Go test compilation failed:[\s\S]*fixture compile failure/:/Native Go inventory mismatch/)
       assert.equal(report,undefined)
       assert.equal(calls.filter(call=>!call.compile).length,0)
+    }
+  })
+  await t.test('CI count flag retains compile reuse; other GOFLAGS retain the original go test runtime semantics',async()=>{
+    assert.equal((await simulate({failed:[],goFlags:'-count=1'})).binaries.length,1)
+    for(const goFlags of ['-short','-race','-shuffle=on -failfast']) {
+      const {code,error,calls,report,binaries}=await simulate({failed:[],goFlags})
+      assert.equal(error,undefined)
+      assert.equal(code,0)
+      assert.deepEqual(binaries,[])
+      assert.ok(calls.every(call=>!call.compile&&!call.compiled&&call.options.env.GOFLAGS===goFlags))
+      assert.ok(report.goPhases.every(row=>!row.compiled))
     }
   })
   await t.test('native comparison retains subtest identity and outcomes when fixture UUID values change',async()=>{

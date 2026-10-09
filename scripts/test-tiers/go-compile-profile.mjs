@@ -42,7 +42,7 @@ export function profile(output, { part: onlyPart } = {}) {
   const env = { ...process.env, GOMAXPROCS: '2' }
   const native = (bin, args, name, cwd = root) => {
     const begin = performance.now()
-    const result = spawnSync(bin, args, { cwd, env, encoding: 'utf8', timeout: 30 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 })
+    const result = spawnSync(bin, args, { cwd, env: { ...env, PWD: cwd }, encoding: 'utf8', timeout: 30 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 })
     const seconds = (performance.now() - begin) / 1000
     writeFileSync(resolve(scratch, `${name}.stdout`), result.stdout ?? '')
     writeFileSync(resolve(scratch, `${name}.stderr`), result.stderr ?? '')
@@ -72,9 +72,9 @@ export function profile(output, { part: onlyPart } = {}) {
       const before = native('go', ['test', '-p', '2', '-count=1', '-timeout=25m', '-json', '-run', pattern, `./${owner}`], `before-run-${index}`)
       const binary = resolve(scratch, `nodes-${index}.test`)
       const compile = native('go', ['test', '-p', '2', '-c', '-o', binary, `./${owner}`], `compile-${index}`)
-      const afterList = native(binary, ['-test.list=^(Test|Fuzz)'], `after-list-${index}`, resolve(root, owner))
+      const afterList = native(binary, ['-test.paniconexit0', '-test.list=^(Test|Fuzz)'], `after-list-${index}`, resolve(root, owner))
       assert.deepEqual(listNames(afterList.output), names)
-      const after = native('go', ['tool', 'test2json', '-t', '-p', pkg, binary, '-test.v=test2json', '-test.count=1', '-test.timeout=25m', `-test.run=${pattern}`], `after-run-${index}`, resolve(root, owner))
+      const after = native('go', ['tool', 'test2json', '-t', '-p', pkg, binary, '-test.paniconexit0', '-test.v=test2json', '-test.count=1', '-test.timeout=25m', `-test.run=${pattern}`], `after-run-${index}`, resolve(root, owner))
       const outcomes = text => goOutcomes(text).sort((a, b) => a.key.localeCompare(b.key))
       assert.deepEqual(outcomes(after.output), outcomes(before.output), 'Every selected top-level outcome is preserved')
       assert.deepEqual(outcomes(after.output).map(row => row.key).sort(), part.rows.map(key).sort())
