@@ -69,7 +69,7 @@ test('auto-update writes the whole settings object and a failed save puts the sw
   await expect(card(page).locator('[data-reg-when]')).toHaveText(/^Off · last checked /)
   // The settings the page does not show (agent reports, discovery, interval) keep their values.
   // AEON-1054: Auto-update is the New model versions rule; it carries the matrix revision.
-  expect(world.writes.at(-1)).toEqual({ method: 'PUT', path: '/models/refresh/settings', body: { agent_reports_enabled: true, auto_add_profiles: false, api_enabled: true, interval_minutes: 360, account_use_revision: 7 } })
+  await expect.poll(() => world.writes.at(-1)).toEqual({ method: 'PUT', path: '/models/refresh/settings', body: { agent_reports_enabled: true, auto_add_profiles: false, api_enabled: true, interval_minutes: 360, account_use_revision: 7 } })
   world.failSettings = true
   await auto.click()
   await expect(card(page).getByRole('alert')).toHaveText('Auto-update could not be changed. Try again.')
@@ -78,7 +78,7 @@ test('auto-update writes the whole settings object and a failed save puts the sw
   await auto.click()
   await expect(auto).toBeChecked()
   await expect(card(page).getByRole('alert')).toHaveCount(0)
-  expect(world.settings.auto_add_profiles).toBe(true)
+  await expect.poll(() => world.settings.auto_add_profiles).toBe(true)
 })
 
 test('auto-update without account.use.manage is shown but cannot change; a competing rule change says nothing was saved', async ({ page }) => {

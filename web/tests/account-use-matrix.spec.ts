@@ -160,39 +160,39 @@ test('bulk, tri-state rows and columns, single cells and Undo all save with the 
 
   // A part-ticked row resolves to allowed everywhere for that account.
   await rowBox(page, ACCOUNTS.spare).click()
-  expect(lastWrite(w)).toEqual({ method: 'PATCH', path: '/api/account-use/cells', body: { expected_revision: 5, bulk: { scope: 'account', account_id: ACCOUNTS.spare, allowed: true } } })
+  await expect.poll(() => lastWrite(w)).toEqual({ method: 'PATCH', path: '/api/account-use/cells', body: { expected_revision: 5, bulk: { scope: 'account', account_id: ACCOUNTS.spare, allowed: true } } })
   await expect(rowBox(page, ACCOUNTS.spare)).toBeChecked()
   expect(await indeterminate(page, ACCOUNTS.spare)).toBe(false)
 
   // One cell; the column becomes fully allowed.
   await cell(page, ACCOUNTS.claude, C.acme).click()
-  expect(lastWrite(w)!.body).toEqual({ expected_revision: 6, changes: [{ account_id: ACCOUNTS.claude, context_id: C.acme, allowed: true }] })
+  await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 6, changes: [{ account_id: ACCOUNTS.claude, context_id: C.acme, allowed: true }] })
   await expect(colBox(page, C.acme)).toBeChecked()
 
   // Undo sends the inverse with the revision its own save returned.
   const undo = zone(page).getByRole('button', { name: /^Undo/ })
   await expect(undo).toBeEnabled()
   await undo.click()
-  expect(lastWrite(w)!.body).toEqual({ expected_revision: 7, changes: [{ account_id: ACCOUNTS.claude, context_id: C.acme, allowed: false }] })
+  await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 7, changes: [{ account_id: ACCOUNTS.claude, context_id: C.acme, allowed: false }] })
   await expect(cell(page, ACCOUNTS.claude, C.acme)).not.toBeChecked()
   await expect(undo).toBeDisabled()
 
   // A fully ticked column resolves to "no account" for that context.
   await colBox(page, C.def).click()
-  expect(lastWrite(w)!.body).toEqual({ expected_revision: 8, bulk: { scope: 'context', context_id: C.def, allowed: true } })
+  await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 8, bulk: { scope: 'context', context_id: C.def, allowed: true } })
   await expect(colBox(page, C.def)).toBeChecked()
   await colBox(page, C.def).click()
-  expect(lastWrite(w)!.body).toEqual({ expected_revision: 9, bulk: { scope: 'context', context_id: C.def, allowed: false } })
+  await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 9, bulk: { scope: 'context', context_id: C.def, allowed: false } })
   await expect(colBox(page, C.def)).not.toBeChecked()
 
   // Allow none, then Undo from the toast: every cell comes back as stored before.
   const before = [...w.cells].sort()
   await zone(page).getByRole('button', { name: 'Allow none' }).click()
-  expect(lastWrite(w)!.body).toEqual({ expected_revision: 10, bulk: { scope: 'all', allowed: false } })
+  await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 10, bulk: { scope: 'all', allowed: false } })
   await expect(zone(page).locator('[data-use-cell]:checked')).toHaveCount(0)
   await page.locator('.toast').filter({ hasText: 'Allow none' }).getByRole('button', { name: 'Undo' }).click()
   await expect.poll(() => [...w.cells].sort()).toEqual(before)
-  expect(lastWrite(w)!.body.expected_revision).toBe(11)
+  await expect.poll(() => lastWrite(w)?.body.expected_revision).toBe(11)
   await expect(zone(page).locator('[data-use-cell]:checked')).toHaveCount(before.length)
 
   // Allow all, then U (outside a text field) undoes it.
@@ -217,7 +217,7 @@ test('a competing change answers 409: nothing is claimed as saved and the server
   expect(w.cells.has(key(ACCOUNTS.claude, C.beta))).toBe(false)
   // The next save uses the revision the server now has.
   await cell(page, ACCOUNTS.claude, C.beta).click()
-  expect(lastWrite(w)!.body.expected_revision).toBe(6)
+  await expect.poll(() => lastWrite(w)?.body.expected_revision).toBe(6)
   await expect(cell(page, ACCOUNTS.claude, C.beta)).toBeChecked()
 })
 
@@ -231,14 +231,14 @@ test('switch changes save all four persisted rules with the revision; keyboard m
   await expect(sw(page, 'New accounts').getByRole('radio')).toHaveCount(2)
 
   await sw(page, 'New accounts').getByRole('radio', { name: 'Allow automatically' }).click()
-  expect(lastWrite(w)).toEqual({ method: 'PUT', path: '/api/account-use/rules', body: { expected_revision: 5, new_accounts: 'allow', new_contexts: 'ask', new_projects: 'default', new_models: 'shipped_only' } })
+  await expect.poll(() => lastWrite(w)).toEqual({ method: 'PUT', path: '/api/account-use/rules', body: { expected_revision: 5, new_accounts: 'allow', new_contexts: 'ask', new_projects: 'default', new_models: 'shipped_only' } })
   await expect(sw(page, 'New accounts').getByRole('radio', { name: 'Allow automatically' })).toHaveAttribute('aria-checked', 'true')
   await expect(page.locator('.toast').filter({ hasText: 'New accounts: Allow automatically. Saved and recorded in the audit log.' })).toBeVisible()
 
   // Keyboard: arrows move the choice inside the focused switch.
   await sw(page, 'New projects').getByRole('radio', { name: 'Follow automatically' }).focus()
   await page.keyboard.press('ArrowRight')
-  expect(lastWrite(w)!.body).toEqual({ expected_revision: 6, new_accounts: 'allow', new_contexts: 'ask', new_projects: 'holding', new_models: 'shipped_only' })
+  await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 6, new_accounts: 'allow', new_contexts: 'ask', new_projects: 'holding', new_models: 'shipped_only' })
   await expect(sw(page, 'New projects').getByRole('radio', { name: 'Ask first' })).toHaveAttribute('aria-checked', 'true')
   await expect(sw(page, 'New projects').getByRole('radio', { name: 'Ask first' })).toBeFocused()
 
@@ -262,7 +262,7 @@ test('grid keyboard: arrows move between boxes and Space toggles; U never fires 
   await expect(rowBox(page, ACCOUNTS.spare)).toBeFocused()
   await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight')
   await page.keyboard.press('Space')
-  expect(lastWrite(w)!.body).toEqual({ expected_revision: 5, changes: [{ account_id: ACCOUNTS.spare, context_id: C.acme, allowed: true }] })
+  await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 5, changes: [{ account_id: ACCOUNTS.spare, context_id: C.acme, allowed: true }] })
   await expect(cell(page, ACCOUNTS.spare, C.acme)).toBeChecked()
 
   // Add a context from the keyboard: typing "u" in the name is text, ⌘/Ctrl+Enter saves.
@@ -272,9 +272,9 @@ test('grid keyboard: arrows move between boxes and Space toggles; U never fires 
   await expect(name).toBeFocused()
   await name.fill('Studio u')
   await name.press('u')
-  expect(w.writes.length).toBe(writes)
   await name.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter')
-  expect(lastWrite(w)).toEqual({ method: 'POST', path: '/api/work-contexts', body: { expected_revision: 6, name: 'Studio uu' } })
+  await expect.poll(() => lastWrite(w)).toEqual({ method: 'POST', path: '/api/work-contexts', body: { expected_revision: 6, name: 'Studio uu' } })
+  expect(w.writes.length, 'typing u in the name field must not undo').toBe(writes + 1)
   await expect(zone(page).locator('thead th[data-use-col] b')).toHaveText(['Default', 'Acme client work', 'Beta', 'Studio uu'])
 })
 
@@ -289,7 +289,7 @@ test('context menu sets "never" for new accounts; confirmation and running work 
   const guard = await controlStability(page, { newAccounts: sw(page, 'New accounts'), allowAll: zone(page).getByRole('button', { name: 'Allow all' }), firstCell: cell(page, ACCOUNTS.main, C.def) })
   await guard.check(() => confirm.getByRole('button', { name: 'Looks right' }).click())
   await expect(confirm).toContainText('Confirmed')
-  expect(lastWrite(w)).toEqual({ method: 'POST', path: '/api/account-use/confirm', body: { expected_revision: 5 } })
+  await expect.poll(() => lastWrite(w)).toEqual({ method: 'POST', path: '/api/account-use/confirm', body: { expected_revision: 5 } })
   guard.done()
 
   const outside = zone(page).getByRole('region', { name: 'Running outside the matrix' })
@@ -300,7 +300,7 @@ test('context menu sets "never" for new accounts; confirmation and running work 
 
   await zone(page).getByRole('button', { name: 'More for Acme client work' }).click()
   await page.getByRole('menuitemcheckbox', { name: 'New accounts: never' }).click()
-  expect(lastWrite(w)).toEqual({ method: 'PATCH', path: `/api/work-contexts/${C.acme}`, body: { expected_revision: 6, name: 'Acme client work', new_accounts_override: 'deny', archived: false } })
+  await expect.poll(() => lastWrite(w)).toEqual({ method: 'PATCH', path: `/api/work-contexts/${C.acme}`, body: { expected_revision: 6, name: 'Acme client work', new_accounts_override: 'deny', archived: false } })
   await expect(zone(page).locator(`[data-use-col="${C.acme}"] small`)).toHaveText('New accounts: never')
   await zone(page).getByRole('button', { name: 'More for Default' }).click()
   await expect(page.getByRole('menuitem', { name: 'Archive…' })).toHaveCount(0)
@@ -343,7 +343,7 @@ test('project settings choose the context; an unmapped project says no account w
   const guard = await controlStability(page, { select })
   await guard.check(() => select.selectOption(C.acme))
   guard.done()
-  expect(lastWrite(w)).toEqual({ method: 'PUT', path: '/api/projects/p-pharos/work-context', body: { expected_revision: 5, context_id: C.acme } })
+  await expect.poll(() => lastWrite(w)).toEqual({ method: 'PUT', path: '/api/projects/p-pharos/work-context', body: { expected_revision: 5, context_id: C.acme } })
   await expect(card.getByText('1 account may work here: Main.')).toBeVisible()
   // A competing change: the select returns to the stored context.
   w.conflict = true
