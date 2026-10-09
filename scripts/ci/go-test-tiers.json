@@ -2212,6 +2212,18 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestLaterConnectOnlyApprovalCancelsQueuedVerification","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestLedgerBoundaryApprovalCrashBeforeEnrollment","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestLedgerBoundaryApprovalRequiresCapability","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestLedgerBoundaryDowngradeReplayRebuildAndVerification","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestLedgerBoundaryLifecycleAdvertisement","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestLedgerBoundaryNeverEnrolledAndClassicDaemon","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestLedgerEnrollmentBoundedInputAndLiveAuthority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestLegacyAttachRegistrationKeepsDaemonIdentityButGrantsNoAttach","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestLegacyPairingUsesAeonApprovalDespiteCapabilityReport","tier":"GATED-FULL"}
@@ -2742,6 +2754,8 @@
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestLaunchdPrivateDiagnosticPaths","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestLedgerServerNegotiationAndEnrollmentClient","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentsetup","name":"TestLinuxGroupWritableAncestorRefused","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestManagedPairingWaitsForPersonAndNeverControlsService","tier":"GATED-FULL"}
@@ -3154,6 +3168,8 @@
     ,
     {"kind":"go","package":"internal/attachments","name":"TestGCWaitsForReusedBlobReferenceCommit","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/attachments","name":"TestGzipAttachmentUploadAndIsolatedDownload","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/attachments","name":"TestHTMLPreviewCapabilities","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestHTMLPreviewDisabledAndSessionRevoked","tier":"GATED-FULL"}
@@ -3171,6 +3187,8 @@
     {"kind":"go","package":"internal/attachments","name":"TestSandboxHostBoundary","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestSandboxOrigin","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/attachments","name":"TestStorageGzipPreservesBytesAndLimit","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestUploadDedupeVariantsETagIsolationUndoAndOps","tier":"ESSENTIAL"}
     ,
@@ -7825,6 +7843,8 @@
     {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceCreatesWorkLeafAndReopensDoneParent","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceFenceAllowsTenantKeyShare","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceReleaseCopySurvivesEditsAndDoneGate","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceTenantBeforeTree","tier":"NIGHTLY"}
     ,

@@ -16366,6 +16366,8 @@
     ,
     {"kind":"vitest","file":"tests/recurrences.unit.test.ts","name":"new recurrence templates use canonical work for migrated leaves and parents","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/recurrences.unit.test.ts","name":"preserves bilingual release copy and explicit visibility through source copying and edits","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/recurrences.unit.test.ts","name":"recurrence templates > copies nested values and describes quarterly last-day schedules","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/recurrences.unit.test.ts","name":"recurrence templates > rejects invalid tokens and incomplete queued work","tier":"NIGHTLY"}

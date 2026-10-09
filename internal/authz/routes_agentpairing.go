@@ -35,6 +35,7 @@ func init() {
 		"POST /api/agent-pairing/redeem":                                                    "public",
 		"POST /api/agent-pairing/requests/{requestId}/approve":                              "account.manage",
 		"POST /api/agent-pairing/requests/{requestId}/deny":                                 "account.manage",
+		"POST /api/agent-pairing/self/ledger":                                               "run.claim",
 		"POST /api/agent-pairing/self/capacity":                                             "run.claim",
 		"POST /api/agent-pairing/self/disconnect":                                           "run.claim",
 		"PUT /api/agent-pairing/computers/{computerId}/capacity":                            "account.manage",
