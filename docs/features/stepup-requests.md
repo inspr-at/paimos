@@ -144,3 +144,27 @@ The final locked remote static gate passed all 41 checks with no skips (exit 0)
 after restoring its missing Apple SDK dependency. The tier manifest change is
 one additive regression entry. Non-blocking review findings remain follow-up
 work; no origin push, deployment or worker-run model review was performed.
+
+AEON-1049 fix round 3 cancels the phone review's outstanding proof when route
+leave starts, before navigation waits for session refresh or the next page's
+bundle. A late options response cannot start a passkey ceremony, and a late
+passkey cannot submit approval after Back has started navigation.
+
+The existing cancellation regression now holds navigation open with a session
+read barrier and checks both proof stages, including a passkey stub that returns
+despite cancellation. It fails against unchanged `e1264d5b` production code
+because the options signal is still live during navigation. With `cf06b2d7b`,
+both stages pass and record no approval. The three targeted phone cases passed
+locally with one worker, and 24 targeted push/identity-scope unit tests passed
+both locally and remotely. Existing control stability
+and screenshots cover 390, 1024 and 1440 pixels in both themes; artifact names
+remain as documented above. The locked remote static gate passed all 41 checks
+without skips. The remote browser launcher still refuses pending OPS-247, so
+CI-equivalent Linux Chromium validation remains for coordinator CI.
+
+The affected remote phone-approval, native step-up, inbox, authentication,
+Decision Desk, command and reporter-contract suites passed on `cf06b2d7b`.
+The command and contract rerun generated OpenAPI in this task's temporary test
+checkout first. The existing test name and registrations are retained; no
+assertion was weakened. Non-blocking follow-ups remain untouched. Only local
+branch commits were made; no origin push, deployment or worker review gate ran.
