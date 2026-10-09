@@ -197,7 +197,7 @@ function fitMoon() {
   const el = header.value
   if (!el || !narrow.matches) { moonAway.value = false; return }
   const crumb = el.querySelector<HTMLElement>('.crumbs > .crumb.current')
-  const overflow = crumb ? crumb.scrollWidth - crumb.clientWidth : 0
+  const overflow = Math.max(el.scrollWidth - el.clientWidth, crumb ? crumb.scrollWidth - crumb.clientWidth : 0)
   const width = el.clientWidth
   if (!moonAway.value) {
     if (overflow > 0.5) { moonAway.value = true; if (returnedAt === width) heldAt = width }
@@ -403,7 +403,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .pill-keys { display: inline-flex; gap: 3px; }
 /* Narrower desktops: the wordmark steps back on inner pages, then the place labels. */
 @media (max-width: 1180px) { .lockup.compact .wordmark, .lockup.compact.has-logo .tenant-name { display: none; } }
-@media (max-width: 980px) {
+@media (max-width: 1180px) {
   .place { width: 36px; padding: 0; justify-content: center; }
   .place-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .place .needs-badge { position: absolute; top: -4px; right: -6px; margin: 0; }
@@ -442,7 +442,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   /* The breadcrumb keeps only where you are. */
   .crumbs { gap: 6px; }
   /* The fold button's full touch target and focus ring must clear its trail. */
-  .crumbs:has(> .phone-header-fold) { height: 44px; overflow: visible; }
+  .crumbs:has(> .phone-header-fold) { height: 44px; flex-shrink: 0; overflow: visible; }
   .crumbs > :not(:last-child) { display: none; }
   .crumbs.lead { padding-left: 2px; }
   .crumb { height: 44px; margin: 0; padding: 0 4px; }
@@ -451,7 +451,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .crumb-name { display: none; }
   .crumb-long { display: none; }
   .crumb-short { display: inline; }
-  .search-pill { width: 44px; height: 44px; padding: 0; justify-content: center; }
+  .search-pill { flex-shrink: 0; min-width: 44px; width: 44px; height: 44px; padding: 0; justify-content: center; }
   .pill-text, .pill-keys { display: none; }
   .app-header :deep(.header-btn) { width: 44px; height: 44px; }
 }

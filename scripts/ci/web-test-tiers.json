@@ -5794,8 +5794,6 @@
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"approved, expired and cancelled requests say so, and ended ones can be dismissed","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"attach approvals share the queue count and expiry ordering, never a code or inline Allow","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"attach controls never move from code to memo or settled state dark 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"attach controls never move from code to memo or settled state dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -5807,6 +5805,8 @@
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"attach keyboard keeps browser shortcuts native and requires explicit lookup on MacIntel","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"attach keyboard keeps browser shortcuts native and requires explicit lookup on Win32","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"connections retain expiry ordering and stay separate from canonical permission decisions, never a code or inline Allow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"names still loading for the previous person never enable approval for the next one","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -6568,6 +6568,14 @@
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"approval project names and doctrine PR context stay visible","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"connection facts and review stay bound to the original request 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"connection facts and review stay bound to the original request 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"connection facts and review stay bound to the original request 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"connection facts and review stay bound to the original request 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover header preserves ticket and Business access 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover header preserves ticket and Business access 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -6591,6 +6599,14 @@
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover overview and agents 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover overview and agents 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover shell fits root and ticket controls 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover shell fits root and ticket controls 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover shell fits root and ticket controls 320 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover shell fits root and ticket controls 320 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"denied reads keep the memo blocked and inaccessible context explicit","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -14911,6 +14927,8 @@
     {"kind":"vitest","file":"tests/crm-undo-receipt.unit.test.ts","name":"S9-002: a save receipt keeps event 10 when event 11 arrives before Undo","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/crm-undo-receipt.unit.test.ts","name":"S9-002: missing receipts and receipts from a previous sign-in refuse Undo","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"connection chores preserve consent scope, exact expiry and readable history","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"drops a previous person read even if transport ignores abort, and resets the count synchronously","tier":"ESSENTIAL"}
     ,

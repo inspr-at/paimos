@@ -16,7 +16,7 @@ export function sampleQuestion(id = 'question-1', input: Partial<Question['input
     askers: [{ id: 'asker-1', principal_id: 'agent-1', reply_root_id: 'root-1', comment_node_id: 'n-a1', input: { request_id: id, question: 'Which index?', options: [], meanwhile: 'parked' } }], pending: [],
   }
 }
-export async function mockDecisionDesk(page: Page, options: { denied?: boolean; long?: boolean; short?: boolean; theme?: 'light' | 'dark'; tier?: boolean; phone?: boolean; html?: boolean } = {}) {
+export async function mockDecisionDesk(page: Page, options: { denied?: boolean; long?: boolean; short?: boolean; theme?: 'light' | 'dark'; tier?: boolean; phone?: boolean; html?: boolean; projectedSources?: () => DeskProjectionItem[] } = {}) {
   const data = fixtures()
   data.projects.find(project => project.id === 'p-aeon')!.title = 'Paimos Aeon'
   if (options.theme) data.preferences.theme = { choice: options.theme }
@@ -48,6 +48,7 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
       if (!questions.some(q => q.input.source_request_id === action.id || q.askers.some(a => a.input.source_request_id === action.id))) rows.push({ id: action.id, kind: 'action_request', project_id: 'p-aeon', revision: 1, title: 'Human request', created_at: action.created_at, held: true, href: `/decision-desk?item=m:${action.id}`, source: `/agents?needs=m:${action.id}` })
       if (rule.state === 'pending') rows.push({ id: rule.id, kind: 'doctrine', revision: 1, title: 'Doctrine change', created_at: rule.created_at, held: false, href: `/decision-desk?item=r:${rule.id}`, source: '/settings/agent-rules#doctrine-inbox' })
       if (options.tier && tierRequest.state === 'pending') rows.push({ id: tierRequest.id, kind: 'tier_request', project_id: 'p-aeon', revision: tier.revision, title: 'Tier request', created_at: tierRequest.created_at, held: false, href: `/decision-desk?item=t:${tierRequest.id}`, source: '/api/projects/p-aeon/harness-sessions/tier-session/tier' })
+      rows.push(...(options.projectedSources?.() ?? []))
       const query = new URL(request.url()).searchParams, offset = Number(query.get('cursor') || 0), limit = Number(query.get('limit') || 100)
       return route.fulfill({ json: { items: rows.slice(offset, offset + limit), counts: { open: rows.length, held: rows.filter(row => row.held).length, chores: 0 }, has_more: rows.length > offset + limit, next_cursor: rows.length > offset + limit ? String(offset + limit) : undefined, as_of: new Date(control.projectionTime ?? Date.now()).toISOString() } })
     }

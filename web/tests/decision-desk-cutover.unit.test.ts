@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { reactive } from 'vue'
+import { createSSRApp, reactive } from 'vue'
+import { renderToString } from '@vue/server-renderer'
+import AgentChores from '../src/components/agents/AgentChores.vue'
+import type { AttachQueueRow } from '../src/lib/attachWatch'
 import { useDecisionDesk } from '../src/stores/decisionDesk'
 import { useSession } from '../src/stores/session'
 import { loadDeskProjection, type DeskProjection } from '../src/lib/decisionDesk'
@@ -41,4 +44,24 @@ it('reports an unknown count on failed refresh and retries without claiming an e
   await desk.refresh(); expect(desk.count).toBe(8)
   await desk.refresh(); expect(desk.count).toBeNull(); expect(desk.error).toBe('Access changed')
   await desk.refresh(); expect(desk.count).toBe(2); expect(desk.error).toBe('')
+})
+
+// Risk: the connection adapter must retain consent scope, expiry and receipts.
+it('connection chores preserve consent scope, exact expiry and readable history', async () => {
+  vi.mocked(useSession).mockReturnValue({ identity: null } as never)
+  const row: AttachQueueRow = { outcome: 'waiting', what: 'Codex on the review Mac', detail: 'Wants to watch the conversation', left: 'Expires in 2m', soon: false, ticket: { key: 'AEON-569', title: 'Decision Desk cutover' },
+    review: { request_id: 'connection-source', request_digest: 'a'.repeat(64), state: 'pending', expires_at: '2026-10-09T12:02:00Z', snapshot: { computer_id: 'computer', project_id: 'project', ticket_id: 'ticket', host: 'the review Mac', harness: 'codex', transcript: '/fixture/session.jsonl', file_id: 'fixture', process: { pid: 1234, uid: 501, started: '2026-10-09T12:00:00Z', executable: '/fixture/codex', cwd: '/fixture' } } } }
+  const render = (connection: AttachQueueRow) => renderToString(createSSRApp(AgentChores, { signins: [], attaches: [connection], history: [{ ...row, outcome: 'declined' }] }))
+  const conversation = await render(row)
+  expect(conversation).toContain('and share its conversation')
+  expect(conversation).toContain('AEON-569')
+  expect(conversation).toContain('Decision Desk cutover')
+  expect(conversation).toContain('Your terminal on the review Mac waits')
+  expect(conversation).toContain('datetime="2026-10-09T12:02:00Z"')
+  expect(conversation).toContain('Expires in 2m')
+  expect(conversation).toContain('Connection history')
+  expect(conversation).toContain('Declined')
+  const statusOnly = await render({ ...row, review: { ...row.review, snapshot: { ...row.review.snapshot, mode: 'lease' } } })
+  expect(statusOnly).toContain('Status only')
+  expect(statusOnly).not.toContain('share its conversation')
 })
