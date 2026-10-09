@@ -33,7 +33,7 @@ export interface ModelRule { scope: 'workspace' | 'project'; project_id: string 
 export interface RulesDocument { revision: number; rules: ModelRule[] }
 export interface RulesBody { top: { line: string; why: string }[]; bottom: { line: string; why: string }[]; not: Record<string, string> }
 export interface WriteResult { revision: number; person_id?: string | null }
-export type RegistryProfile = PrefProfile & { effort_level?: number | null; note?: string; source?: 'auto' | 'manual'; retire_at?: string | null; retired?: boolean; short_name?: string }
+export type RegistryProfile = PrefProfile & { effort_level?: number | null; note?: string; source?: 'auto' | 'manual'; retire_at?: string | null; retired?: boolean; short_name?: string; created_at?: string; version?: string; slug?: string }
 
 export const ALL_COLUMN = 'other'
 /** The shared effort scale, used only when the server reports no level for a name. */

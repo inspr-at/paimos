@@ -26,7 +26,7 @@ const REVIEWS = ['review:openai', 'review:anthropic', 'review:xai']
 
 export function registry(extra: Line[] = []): RegistryProfile[] {
   return [...LINES, ...extra].flatMap(line => line.efforts.map((effort, index): RegistryProfile => ({
-    id: `${line.model}/${effort}`, harness: line.harness, family: line.family, model: line.model, effort, tier: 'strong', enabled: true,
+    id: `${line.model}/${effort}`, slug: line.id, version: '', created_at: '2026-01-01T00:00:00Z', harness: line.harness, family: line.family, model: line.model, effort, tier: 'strong', enabled: true,
     display_name: line.display, short_name: line.short, model_version: line.version, provider: line.family, effort_level: LEVEL[effort] ?? index, note: line.note ?? '',
     source: line.source ?? 'auto', retire_at: line.retireAt ?? null, retired: false,
   })))

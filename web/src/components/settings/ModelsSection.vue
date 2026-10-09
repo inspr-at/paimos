@@ -8,6 +8,7 @@ import ModelPicker from './models/ModelPicker.vue'
 import KindMenu from './models/KindMenu.vue'
 import ModelsPopover from './models/ModelsPopover.vue'
 import ModelRefreshSettings from './ModelRefreshSettings.vue'
+import ModelRegistryCard from './models/ModelRegistryCard.vue'
 import { useModelsSimple } from '../../lib/useModelsSimple'
 import { lineFallback, lockTip, pickText, reasonText, type ModelEntry, type RowView } from '../../lib/modelsSimple'
 
@@ -102,7 +103,7 @@ watch(() => [route.query.why, shown.value, !!next.value.why], async () => {
   if (route.query.why !== '1' || !shown.value || !next.value.why || whyOpened) return
   whyOpened = true; await nextTick(); why.value = document.getElementById('why')
 }, { immediate: true })
-// #model-refresh keeps scrolling to the catalog card until the registry card replaces it.
+// #model-refresh opens the catalog fold and scrolls to the model registry card under the models card.
 watch(() => [route.hash, shown.value], async () => {
   if (route.hash !== '#model-refresh' || !shown.value) return
   catalog.value = true
@@ -111,8 +112,9 @@ watch(() => [route.hash, shown.value], async () => {
 </script>
 <template>
   <div v-if="readable" class="models-section" data-models-section :data-models-ready="shown ? 'true' : 'false'">
-    <!-- Until the model registry card (AEON-1012) replaces it, the catalog settings stay one fold away. The toggle sits above the
-         card, where nothing grows above it: a refusal, a new row or a skeleton below never moves it (AEON-541). -->
+    <!-- The catalog toggle stays above the models card, so a refusal, a new row or a skeleton below never moves it (AEON-541).
+         The model registry card (AEON-1012) sits under that card and is the #model-refresh target. Catalog refresh settings
+         stay one fold away and do not take that anchor. -->
     <div class="m-fold">
       <button type="button" class="fold" data-catalog-fold :aria-expanded="catalog" aria-controls="catalog-body" @click="catalog = !catalog"><AppIcon name="chevron-right" :size="14" :class="{ open: catalog }" /><b>Model catalog</b><span>How new models are found</span></button>
       <div v-if="catalog" id="catalog-body"><ModelRefreshSettings :key="owner" /></div>
@@ -148,6 +150,7 @@ watch(() => [route.hash, shown.value], async () => {
         <div v-if="error" class="m-note" role="alert" data-models-error><AppIcon name="alert" :size="14" /><span>{{ error }}</span></div>
       </template>
     </section>
+    <ModelRegistryCard />
     <p class="sr-only" role="status" aria-live="polite">{{ announcement }}</p>
     <ModelsPopover v-if="pickRow && picker" :open="true" :anchor="picker.anchor" :label="`Model for ${pickRow.isDefault ? 'the default' : pickRow.label}`" role="presentation" :width="Math.max(picker.anchor.offsetWidth, 520)" @close="pickerClosed">
       <ModelPicker :entries="entries" :row="pickRow" :name="pickRow.isDefault ? 'the default' : pickRow.label" :cant="line => model.cantReason(pickRow!.column, line)" :fresh="fresh" :lock="scope === 'default' && admin && !pickRow.draft" :locked="!!pickRow.lock" @choose="choose" @lock="lockRow" />

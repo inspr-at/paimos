@@ -25,7 +25,7 @@ Stored ranked orders beyond the first pick, situations, templates, usage, provid
 
 The AEON-878/879 board UI (view switch, templates, Thinking and Usage switches, setup assistant and welcome banner, next-run menus, side panel, Show/Project/Providers menus, situations, drag and move, other rule kinds, hide column, new tray, coverage, proof and run evidence, the full-screen board route). `/settings/models/board` redirects to the page; the query layer, situation, project, mode, kind and ticket are ignored. Endpoints and stored data are unchanged.
 
-The catalog freshness settings stay one fold away (**Model catalog**, opened by `#model-refresh`) until the model registry card (package 3) replaces them. The toggle sits above the card, so a refusal, a new row or a loading card below it never moves it; its settings open under it.
+The catalog refresh settings stay one fold away (**Model catalog**). The toggle sits above the models card, so a refusal, a new row or a loading card below it never moves it; its settings open under it. The model registry card sits under the models card and is the `#model-refresh` target; that link also opens the catalog fold.
 
 ## Verification
 

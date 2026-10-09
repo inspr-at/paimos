@@ -74,7 +74,7 @@ onBeforeUnmount(() => { alive = false; generation++; apiKey.value = ''; stopAcce
 </script>
 
 <template>
-  <SettingsCard :title="text('Models', 'Modelle')" icon="gear" anchor="model-refresh">
+  <SettingsCard :title="text('Models', 'Modelle')" icon="gear" anchor="catalog-settings">
     <template #lead>{{ text('Agents keep model availability current as they work. Your role order stays under your control.', 'Agenten halten die Modellverfügbarkeit bei der Arbeit aktuell. Die Reihenfolge bleibt selbst bestimmt.') }}<span class="accounts-link">{{ text('Vendor logins and their quota (Claude, Codex, Cursor) are in', 'Anbieter-Zugänge und ihr Kontingent (Claude, Codex, Cursor) stehen unter') }} <RouterLink to="/settings/accounts">{{ text('Accounts and computers', 'Konten und Computer') }}</RouterLink>.</span></template>
     <div class="feedback"><p v-if="error" role="alert" class="error-line">{{ error }}</p><p v-else-if="message" role="status" class="hint">{{ message }}</p></div>
     <template v-if="status">

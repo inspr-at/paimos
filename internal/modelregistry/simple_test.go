@@ -187,8 +187,13 @@ func TestMinimalRemovePreviewQualificationAndPrivacy(t *testing.T) {
 	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/first?for=default", order, ""), 200)
 	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/orders/docs/first", order, member.ID), 200)
 	preview := boardDecode[lineUsageDocument](t, boardCall(t, admin, "GET", "/api/models/lines/claude/"+opus.Model+"/usage", nil, ""), 200)
-	if len(preview.UsedBy) != 2 || preview.Incomplete || preview.Replacement.Line == nil || *preview.Replacement.Line != "openai:sol" {
+	if len(preview.UsedBy) != 2 || preview.Incomplete || preview.Replacement.Line == nil || *preview.Replacement.Line != "openai:sol" || preview.Revision == "" || len(preview.LineProfiles) == 0 {
 		t.Fatal(preview)
+	}
+	for _, profile := range preview.LineProfiles {
+		if profile.Harness != "claude" || profile.Model != opus.Model || profile.Retired {
+			t.Fatal("usage snapshot is not the line it revised", profile)
+		}
 	}
 	memberView := boardDecode[lineUsageDocument](t, boardCall(t, member, "GET", "/api/models/lines/claude/"+opus.Model+"/usage", nil, ""), 200)
 	if len(memberView.UsedBy) != 2 {
@@ -435,6 +440,14 @@ func TestMinimalAutoAcceptOnlyUsedSuccessors(t *testing.T) {
 	}
 	if result.Added < 1 {
 		t.Fatal("refresh did not accept a used successor", result)
+	}
+	if len(result.AcceptedModels) != 1 || result.AcceptedModels[0] != "openai:sol" {
+		t.Fatalf("one accepted successor counted as %d profiles, models %v", result.Added, result.AcceptedModels)
+	}
+	for _, id := range result.NewLines {
+		if slices.Contains(result.AcceptedModels, id) {
+			t.Fatal("a new line was reported as accepted", id)
+		}
 	}
 	inRegistry(t, admin, func(tx pgx.Tx) error {
 		var accepted, bad int

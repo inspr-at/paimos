@@ -448,6 +448,8 @@
     ,
     "browser:tests/knowledge.spec.ts:Decision entries expose active and superseded history without generic mutation controls"
     ,
+    "browser:tests/models-registry.spec.ts:screenshots of the card at 1440 and 400 px, light and dark"
+    ,
     "browser:tests/no-shift.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
     ,
     "browser:tests/no-shift.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1440"
@@ -6586,6 +6588,24 @@
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"the overview brush pans and resizes the window, and its playhead moves the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Compare races release 126 from step a against the Arion target on one axis","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Flow modes at 1440 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Flow modes at 1440 light de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Flow modes at 1440 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Flow modes at 400 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Flow modes at 400 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Live reads the recorded runs, follows a server hint, and keeps the time the person is viewing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Replay under reduced motion shows the run still; the handle and Shift+arrows move the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"with motion › Replay opens at the start of the latest release and auto-plays once per session","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-guarantee.spec.ts","name":"dark 1600: listening status in the list and the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/delivery-guarantee.spec.ts","name":"dark 1600: own posts read Sent, Delivered, Read or Not delivered, live","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -8402,7 +8422,59 @@
     ,
     {"kind":"browser","file":"tests/model-provider.spec.ts","name":"workspace AI starts off, saves explicit feature choices and tests only saved configuration","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/model-refresh.spec.ts","name":"model refresh starts private, saves its interval and accepts profiles without route writes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/model-refresh.spec.ts","name":"the Models page carries the registry card: the old freshness links land on it and Check now shows its cooldown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Add model with several levels registers them in order, and a failure after the first level is never reported as saved","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Add model: Undo removes what was added","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Add model: a pi OpenRouter slug is stored with its route, in place errors guide, and ⌘↵ saves with Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Check now asks the server, shows the five-minute cooldown on the same button and returns when it ends","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Check now reports a partial or stale discovery, and a taken-on version is not called a new model","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Check now says when vendor lists are off, so \"nothing new\" is not mistaken for \"nothing exists\"","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Check now shows the wait the server names after a 429, and a failed check says so without a cooldown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit binds the revision to the line read with it when that line changed before the revision was captured","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit creates a new version with only the changed fields; an auto-discovered entry keeps harness, route and slug","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit of a hand-added entry can change its slug and route, and a server refusal is shown in the form","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit sends the revision captured with the form, Undo sends the revision the edit returned, and a conflict reloads","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Esc leaves a field, then closes the remove question, then the editor and returns focus to its Edit","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove cannot go ahead without its preview, and a partly failed removal says how far it got","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove names each use’s own replacement and effort, and says when there is no qualified fallback","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove of an unused hand-added entry says nothing uses it; other people’s uses are reported as not shown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove shows where the model is used and what takes over before anything is removed, and Undo restores every level","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"a person who cannot read models sees who to ask instead of an empty list","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"a removal that finishes after the person moved on leaves the form they are in now alone","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"an agent key never gets registry controls, even with the permissions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"auto-update writes the whole settings object and a failed save puts the switch back","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"controls stay put: the strip, the entry that was used and its form buttons do not move (±0.5 px)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"models that cannot load say so in place and Try again recovers","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"people without models.manage read the registry and get no controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"screenshots of the card at 1440 and 400 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"the registry lists every model with its note, source, levels and state, newest versions first","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"thinking levels growing or shrinking do not move the input, note or actions at desktop or phone width","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"card at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -14552,6 +14624,42 @@
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"the wheel pans or zooms the window and never moves the time; a plain vertical wheel is left to the page","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Compare calls an unfinished release elapsed so far, not live","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Compare lanes leave an open release without a finish line or a completed avatar","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Compare races a release from its step a against the Arion target on one relative axis","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Compare shows two lane sets on one relative axis and says when the target was live","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Live follows now; a playhead drag shows \"Viewing\" and \"Back to now\"; a live update keeps the view","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Replay auto-plays once per session and never with reduced motion","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a failed run read settles until Retry and does not reload from a cleared list","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a live refresh keeps 02:00 when removing an older run moves the axis origin","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a live update keeps the person viewing the past, and moves the playhead with now while following","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"auto-play is granted once per session","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"recorded steps become lanes and words from their facts; open steps run on to their expected end in Live","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"selecting another run shows loading and keeps the run choices","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the example replays release 126 final and the changes so far","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the in-flight table gives each run its step, wait, estimate and a verdict with shape and word","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the moment panel names the active lanes, one idle line, the incident and the selected step","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the player walks the whole run in 60 s at 1x and 30 s at 2x, and stops at the end","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the run picker stays mounted through loading and errors","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"where the time went splits the critical path and lists the incident and the biggest waits","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"German numbers use the German decimal comma and impersonal words","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"a change is steady within 10 %, 3 points for shares, and better or worse by the target’s direction","tier":"ESSENTIAL"}
@@ -15255,6 +15363,66 @@
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > uses plain provenance, reset and summary copy","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > uses server review evidence, including newly qualified harnesses and per-model residency","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a save that waited for a read and lost its editor writes nothing and does not call it a conflict","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"an answer from a closed editor never reaches the reopened one: Undo restores the values that editor was read with","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"an earlier answer that arrives first does not stand in for the reopened editor's own read","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"answers that are not what the page expects > is an error, not a crash, when the list or the refresh status has the wrong shape","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"copy > does not call a profile addition accepted, and counts one accepted model once however many efforts it has","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"copy > names each visible use by its own replacement and effort, and a null one is no qualified fallback","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"copy > names where a model is used, and who for","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"copy > separates a partial or stale discovery from a new model and from a version taken on","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"copy > writes dates, times, intervals and waits the way the page shows them","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > describes a line as harness, route (when it adds something), id, source and what was taken on","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > groups profiles into one line per model, levels in the model's own order, retired profiles left out","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > marks a discovered, disabled line New and shows a scheduled retirement, never both","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > names a level whose effort level is unknown after those that have one, and a missing display name falls back to the model id","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > orders harnesses as the page does, newest version first and then by name","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > says which version a taken-on line replaced only when the data shows one","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"routes and families > derives the provider the server compares with the model's own namespace","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"routes and families > mirrors the server's family rule, so an unknown OpenRouter family is allowed for pi only through \"unknown\"","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the inline form > accepts an OpenRouter slug with or without its prefix and a variant, and refuses what the server would","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the inline form > does not check the slug of an auto-discovered entry, which cannot change","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the inline form > needs a name and at least one level of valid, distinct, bounded names; a level still being typed counts","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the inline form > puts the route in front of a pi or OpenCode slug once, in lower case","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the inline form > refuses a slug that belongs to another route instead of storing it under the wrong provider","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the inline form > writes only what the person changed, keeping an auto entry's model and route","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > adds a pi OpenRouter model as one profile with the slug in model, the family unknown and the tier standard","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > carries the server's remaining wait from a 429, from the body or the Retry-After header","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > never swallows a refused first write","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > registers several levels in the person's order with one more write, and says so when that write fails","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > removes every level one by one and stops at the first refusal, saying how far it got","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > restores levels and reports how many could not come back","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > stops the next request when the captured person or workspace is gone","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"binds every legacy person write to the captured canonical person","tier":"ESSENTIAL"}
     ,

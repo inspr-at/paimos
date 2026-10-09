@@ -7,6 +7,7 @@ import { fixtures, mockWork } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
 import { deliveryMetrics, mockDelivery } from './delivery-numbers-fixtures'
+import { mockFlow } from './delivery-flow-fixtures'
 
 async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en' | 'de' } = {}) {
   const work = fixtures()
@@ -15,6 +16,8 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en
   await mockWork(page, work)
   if (options.lang === 'de') { const data = settingsData(); data.profile.locale = 'de-AT'; await mockSettings(page, data) }
   await mockDelivery(page, async () => ({ status: 200, body: deliveryMetrics() }), ['delivery.read'])
+  // No recorded run yet: Flow shows the labelled example (AEON-1006 reads the recorded runs).
+  await mockFlow(page, { empty: true })
 }
 const lanes = (page: Page) => page.getByTestId('flow-lanes')
 const overview = (page: Page) => page.getByTestId('flow-overview')
