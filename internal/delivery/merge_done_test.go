@@ -329,7 +329,16 @@ func TestMergeBackfillPreviewApplyAndSafety(t *testing.T) {
 			case "revoked access":
 				g.beforeRead = func() {
 					f.tx(t, func(tx pgx.Tx) error {
-						_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.person.ID)
+						var role string
+						if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'merge_readonly','Merge read only') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
+							return err
+						}
+						if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest(ARRAY['nodes.read','projects.read','delivery.manage'])`, f.person.TenantID, role); err != nil {
+							return err
+						}
+						// Retain project visibility and delivery.manage; revoke only
+						// node mutation, which must be checked after this network read.
+						_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, f.person.ID, role)
 						return err
 					})
 				}

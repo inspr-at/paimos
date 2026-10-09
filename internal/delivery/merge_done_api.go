@@ -69,7 +69,7 @@ func (m *Module) mergeBackfill(w http.ResponseWriter, r *http.Request) {
 	_ = controller.SetReadDeadline(time.Now().Add(5 * time.Second))
 	defer controller.SetReadDeadline(time.Time{})
 	var in mergeBackfillInput
-	if err := decodeBounded(w, r, 16<<10, &in); err != nil {
+	if err := decode(w, r, &in); err != nil {
 		respondError(w, err)
 		return
 	}

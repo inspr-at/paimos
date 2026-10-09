@@ -50,6 +50,9 @@ func (m *Module) mergeWebhook(w http.ResponseWriter, r *http.Request) {
 		m.auditWebhook(w, r)
 		return
 	}
+	controller := http.NewResponseController(w)
+	_ = controller.SetReadDeadline(time.Now().Add(5 * time.Second))
+	defer controller.SetReadDeadline(time.Time{})
 	raw, err := io.ReadAll(io.LimitReader(r.Body, (2<<20)+1))
 	if err != nil || len(raw) > 2<<20 {
 		w.WriteHeader(413)
