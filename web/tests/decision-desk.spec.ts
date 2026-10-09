@@ -659,7 +659,6 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
   test(`connection facts and review stay bound to the original request ${width} ${theme}`, async ({ page }, testInfo) => {
     const now = Date.parse('2026-10-09T12:00:00Z')
     await page.clock.install({ time: now })
-    await page.clock.pauseAt(now)
     await page.setViewportSize({ width, height: 1000 })
     // The connection read succeeds while unrelated session/account APIs fail.
     await mockDecisionDesk(page, { theme })
