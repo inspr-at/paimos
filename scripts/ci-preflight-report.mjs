@@ -28,7 +28,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     const file = resolve(process.argv[2]);
     if (statSync(file).size > 4 * 1024 * 1024) throw new Error('preflight_inventory_oversized');
-    console.log(JSON.stringify(preflightMetrics(JSON.parse(readFileSync(file, 'utf8')).workflow_runs)));
+    const inventory = JSON.parse(readFileSync(file, 'utf8'));
+    if (!Array.isArray(inventory.workflow_runs) || inventory.total_count !== inventory.workflow_runs.length) throw new Error('preflight_inventory_incomplete');
+    console.log(JSON.stringify(preflightMetrics(inventory.workflow_runs)));
   }
   catch { console.error('preflight_metrics_unavailable'); process.exitCode = 1; }
 }

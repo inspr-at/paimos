@@ -9116,6 +9116,8 @@
     ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestNightlyFullRequiresAllThreeTiers","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/ci-runner-guard","name":"TestPreflightPolicyRejectsPoolStaleAttemptWriteAndLayoutChanges","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestProtectedJobsAndSecrets","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestRepositoryWorkflows","tier":"GATED-FULL"}

@@ -20,6 +20,14 @@ function boundBase(root, base) {
   if (git(root, ['rev-parse', 'refs/remotes/origin/main']) !== base) throw new Error('preflight_base_changed');
   git(root, ['merge-base', '--is-ancestor', base, 'HEAD']);
 }
+export function testEnvironment(source = process.env) {
+  const database = source.AEON_TEST_DATABASE_URL;
+  let url;
+  try { url = new URL(database); } catch { throw new Error('preflight_test_database_required'); }
+  if (!['postgres:', 'postgresql:'].includes(url.protocol) || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
+      !/^\/aeon_(?:run|preflight)_[a-f0-9]{10,40}$/.test(url.pathname)) throw new Error('preflight_isolated_test_database_required');
+  return { ...fixedEnvironment(source), GOMAXPROCS: '4', AEON_TEST_DATABASE_URL: database };
+}
 // Deleted packages, global inputs, root Go or uncertain paths widen to all
 // packages. Other changes run every test in each touched Go package.
 export function goPackages(paths) {
@@ -32,7 +40,10 @@ export async function preflight({ root = process.cwd(), sha, base, runner = host
   bind = boundCheckout, verifyBase = boundBase,
   diff = () => git(root, ['diff', '--name-only', '--no-renames', `${base}...${sha}`]).split('\n').filter(Boolean),
   execute = (bin, args, cwd) => {
-    const result = spawnSync(bin, args, { cwd, env: { ...fixedEnvironment(), GOMAXPROCS: '4' },
+    // Without an explicit isolated test DB, dbtest would skip integration
+    // behavior and an affected package could misleadingly appear green.
+    const env = bin === 'go' && args[0] === 'test' ? testEnvironment() : { ...fixedEnvironment(), GOMAXPROCS: '4' };
+    const result = spawnSync(bin, args, { cwd, env,
       timeout: 30 * 60 * 1000, maxBuffer: 1024 * 1024, stdio: 'ignore' });
     return !result.error && !result.signal && result.status === 0;
   },

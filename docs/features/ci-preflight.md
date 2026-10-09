@@ -20,6 +20,12 @@ full web units and strict web classification. Global Go inputs and over-cap
 package changes widen to all packages. Failed, interrupted and unexecuted
 checks produce a red receipt. No command output, environment, credential,
 private payload or machine address enters the receipt.
+Affected Go package execution requires the approved lane's explicit loopback
+test database (`AEON_TEST_DATABASE_URL`, database name `aeon_preflight_<sha>` or
+`aeon_run_<sha>`, with a 10–40 character lowercase hexadecimal suffix). It
+refuses to call package tests without it, so integration tests cannot silently
+skip because the database variable was dropped. Database creation/cleanup
+remains with the approved test-lane controller.
 
 The authorized builder dispatcher supplies that receipt as `local-result` to
 `ci-preflight.yml`, dispatched from reviewed **main**, with `sha` naming the
@@ -42,6 +48,12 @@ router/pool policy and must confirm hosted capacity before rollout. Each of
 SHA/run/attempt receipt. WP1.4 may replace full selection only after its
 complete, base-tree-bound impact planner is available; no current selector is
 assumed complete. Setup failures cannot create a green group result.
+Dependencies, web build and browser downloads run once in a routed setup job;
+groups share that attempt's runtime and install only their OS libraries.
+The draft adds a narrow repository runner-guard policy for this workflow's
+dispatch, distinct job IDs, read-only authority, per-head concurrency and
+main/hosted/current-attempt conditions. This policy addition also requires OPS
+review; existing CI and runner-side pool admission are unchanged.
 
 The result job assembles `preflight.json` in the artifact
 `aeon-preflight-<sha>-<attempt>`. Candidate code runs in a separate checkout

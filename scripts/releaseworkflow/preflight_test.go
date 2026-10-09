@@ -19,13 +19,13 @@ func TestPreflightRoutingPermissionsAndResultBehavior(t *testing.T) {
 		t.Fatal("preflight must remain an explicit dispatch")
 	}
 	jobs := treeMap(w["jobs"])
-	if treeMap(jobs["runner-route"])["uses"] != "./.github/workflows/test-runner-route.yml" {
+	if treeMap(jobs["preflight-route"])["uses"] != "./.github/workflows/test-runner-route.yml" {
 		t.Fatal("router bypassed")
 	}
-	for _, id := range []string{"browser", "result"} {
+	for _, id := range []string{"preflight-setup", "browser", "result"} {
 		j := treeMap(jobs[id])
 		condition, _ := j["if"].(string)
-		if j["runs-on"] != "${{ fromJSON(needs.runner-route.outputs.runs_on) }}" || !strings.Contains(condition, "outputs.runner_class == 'hosted'") ||
+		if j["runs-on"] != "${{ fromJSON(needs.preflight-route.outputs.runs_on) }}" || !strings.Contains(condition, "outputs.runner_class == 'hosted'") ||
 			!strings.Contains(condition, "outputs.run_attempt == github.run_attempt") || j["permissions"] != nil {
 			t.Fatal("unapproved runner or authority", id)
 		}

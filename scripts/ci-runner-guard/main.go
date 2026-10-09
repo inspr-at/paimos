@@ -26,6 +26,9 @@ const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event_name ==
 // These exact mappings are the sole authority for workflow concurrency. Jobs
 // never own concurrency, and reusable workflows cannot enter a caller's group.
 var workflowConcurrency = map[string]map[string]any{
+	"ci-preflight.yml": {
+		"group": `preflight-${{ github.repository }}-${{ inputs.sha }}`, "cancel-in-progress": true,
+	},
 	"ci.yml": {
 		"group": ciConcurrencyGroup, "cancel-in-progress": `${{ github.event_name == 'pull_request' || github.event_name == 'push' && github.ref == 'refs/heads/main' }}`,
 	},
@@ -189,6 +192,10 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 		if err := checkFullUIQA(workflow); err != nil {
 			reject(err.Error())
 		}
+	} else if name == "ci-preflight.yml" {
+		if err := checkPreflight(workflow); err != nil {
+			reject(err.Error())
+		}
 	} else if name == "nightly-full.yml" {
 		if err := checkNightlyFull(workflow); err != nil {
 			reject(err.Error())
@@ -325,12 +332,16 @@ func checkRunnerJobs(name string, workflow map[string]any) []string {
 	routeID := "runner-route"
 	if name == "test-runner-smoke.yml" {
 		routeID = "smoke-route"
+	} else if name == "ci-preflight.yml" {
+		routeID = "preflight-route"
 	}
 	// The manual smoke caller retains its main-only event/ref/attempt guards.
 	// CI also admits opted-in same-repo PRs and merge groups through the router.
 	runnerExpression := routedRunner
 	if name == "test-runner-smoke.yml" {
 		runnerExpression = strings.ReplaceAll(mainRoutedRunner, "needs.runner-route.", "needs."+routeID+".")
+	} else if name == "ci-preflight.yml" {
+		runnerExpression = preflightRunner
 	}
 	for id, value := range jobs {
 		job := mapping(value)
