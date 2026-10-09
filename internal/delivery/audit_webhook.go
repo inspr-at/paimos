@@ -122,6 +122,11 @@ func (m *Module) auditWebhook(w http.ResponseWriter, r *http.Request) {
 		// AEON-993 timing facts; a failed read or write stays retryable.
 		err = m.metricsEvent(ctx, name, raw)
 	}
+	if err == nil && name == "workflow_run" {
+		// Live checks stay out of the metric tables. Completed suites still
+		// write those facts, and the flow rows converge on redelivery.
+		err = m.flowFromWorkflowRun(ctx, raw)
+	}
 	if err != nil {
 		w.WriteHeader(502)
 		return

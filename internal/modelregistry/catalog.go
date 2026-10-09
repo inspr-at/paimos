@@ -37,7 +37,7 @@ type seedRoute struct {
 var seedModels = []seedModel{
 	{"codex", "gpt-6-luna", "openai", "fast", []string{"medium", "high", "xhigh"}},
 	{"codex", "gpt-6.1-sol", "openai", "strong", []string{"medium", "high", "xhigh"}},
-	{"grok", "grok-4.7", "xai", "frontier", []string{"high", "xhigh"}},
+	{"grok", "grok-4.7", "xai", "frontier", []string{"medium", "high", "xhigh"}},
 	{"grok", "grok-4.7-build-fast", "xai", "standard", []string{"high"}},
 	{"grok", "grok-4.6", "xai", "strong", []string{"high", "xhigh"}},
 	{"grok", "grok-4.5", "xai", "standard", []string{"high"}},

@@ -15,7 +15,7 @@ import (
 func prepareAdditionalCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]events.Change, error) {
 	slugs := []string{}
 	for _, profile := range catalogProfiles() {
-		if profile.Harness == "gemini" || profile.Harness == "opencode" {
+		if profile.Harness == "gemini" || profile.Harness == "opencode" || profile.Harness == "grok" && profile.Model == "grok-4.7" && profile.Effort == "medium" {
 			slugs = append(slugs, profile.Slug)
 		}
 	}
@@ -32,7 +32,7 @@ func prepareAdditionalCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	added := []Profile{}
 	ids := map[string]string{}
 	for _, profile := range catalogProfiles() {
-		if profile.Harness != "gemini" && profile.Harness != "opencode" {
+		if profile.Harness != "gemini" && profile.Harness != "opencode" && !(profile.Harness == "grok" && profile.Model == "grok-4.7" && profile.Effort == "medium") {
 			continue
 		}
 		var exists bool

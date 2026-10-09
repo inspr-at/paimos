@@ -53,13 +53,13 @@ func LoadBoard(ctx context.Context, tx pgx.Tx, person *string, project string) (
 	if len(ids) > 2 {
 		return s, ErrBoardBounds
 	}
-	rows, err = tx.Query(ctx, `SELECT profile_id::text,column_key,situation,rank,not_allowed,thinking FROM model_pref_orders WHERE profile_id=ANY($1::uuid[]) ORDER BY profile_id,column_key,situation LIMIT 1537`, ids)
+	rows, err = tx.Query(ctx, `SELECT profile_id::text,column_key,situation,rank,not_allowed,thinking,effort,effort_level FROM model_pref_orders WHERE profile_id=ANY($1::uuid[]) ORDER BY profile_id,column_key,situation LIMIT 1537`, ids)
 	if err != nil {
 		return s, err
 	}
 	for rows.Next() {
 		var o BoardOrder
-		if err := rows.Scan(&o.ProfileID, &o.Column, &o.Situation, &o.Rank, &o.Not, &o.Thinking); err != nil {
+		if err := rows.Scan(&o.ProfileID, &o.Column, &o.Situation, &o.Rank, &o.Not, &o.Thinking, &o.Effort, &o.EffortLevel); err != nil {
 			rows.Close()
 			return s, err
 		}
