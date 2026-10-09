@@ -46,10 +46,11 @@ Older readiness writers populate history through an additive trigger; no
 existing values are rewritten. Rollback runs the older binary and retains the
 expansion and history. All new storage is classified in the DSAR inventory.
 
-This is plan data groundwork. The start-gate package must call
-`agentaccounts.ReadPlanTx` (or populate the same snapshot within its final
-transaction) before implementing daily refusal and model fallback. Running work
-is unchanged. `next_on_ladder` is null until Models resolves the work-specific
+The start gate now shares this account projection in the final reservation and
+claim transaction. Shadow admission populates the same daily snapshot before
+its decision; Models uses the saved ranked order for qualified fallback. See
+[the start-gate contract](agents-start-gate.md) for refusal and guard behavior.
+Running work is unchanged. `next_on_ladder` is null until Models resolves the work-specific
 ladder; reset credits and reset plans are null until the resets package supplies
 vendor-backed values. `daily_reset_policy` is suggest when unset. This package
 adds no vendor reset action, settings controls, or dial UI.

@@ -35,6 +35,13 @@ func synthetic(w Window) bool { return w.capacityKind == "refresh" || w.capacity
 // provisional grant is materialized, under the account lock in selectAccount.
 // claiming excludes the run's own slot and preserves its exact one-shot grant.
 func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time.Time, slots int, run runRow, claiming bool) ([]Window, *CapacityWait, error) {
+	// Projections with no run ID retain their existing capacity advice. Every
+	// real managed reservation and claim re-reads daily policy under its fence.
+	if run.Purpose == "managed" && run.ID != "" {
+		if wait, err := dailyStartAccountTx(ctx, tx, a, now); err != nil || wait != nil {
+			return nil, wait, err
+		}
+	}
 	if a.State != "available" {
 		return nil, waitFor("state"), nil
 	}

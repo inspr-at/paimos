@@ -129,71 +129,13 @@ func PopulateDailyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, out *ag
 			groups[a.Harness] = append(groups[a.Harness], item)
 			continue
 		}
-		u, err := loadUsagePolicy(ctx, tx, a.ID)
+		item.Routable = advice[a.ID].AvailableSlots > 0
+		item, d, err = dailyAccountTx(ctx, tx, a, item, d, explicit, p.TenantID, out.PrincipalID, points, start, end, now)
 		if err != nil {
 			return err
 		}
-		if !explicit {
-			d = legacyDaily(u)
-		}
-		if _, exists := out.Daily[a.Harness]; !exists {
+		if len(groups[a.Harness]) == 0 {
 			out.Daily[a.Harness] = d
-		}
-		var policy *string
-		if err := tx.QueryRow(ctx, `SELECT daily_reset_policy FROM agent_accounts WHERE id=$1`, a.ID).Scan(&policy); err != nil {
-			return err
-		}
-		if policy != nil {
-			if *policy != "suggest" && *policy != "auto_before_expiry" {
-				return errors.New("invalid reset policy")
-			}
-			item.ResetPolicy = *policy
-		}
-		item.FloorPct = agentplan.Number(float64(u.Floor))
-		item.Routable = advice[a.ID].AvailableSlots > 0
-		item.NoDailyLimit = a.BillingMode == "api"
-		if !item.NoDailyLimit {
-			schedule, err := routingSchedule(ctx, tx, a)
-			if err != nil {
-				return err
-			}
-			windows, err := overviewWindows(ctx, tx, a, now, schedule)
-			if err != nil {
-				return err
-			}
-			if w := dailyWindow(windows); w != nil {
-				item.UsedPct = w.UsedPercent
-				item.ResetsAt = &w.ResetsAt
-				item.ReadAt = w.ReadAt
-				item.Freshness = "stale"
-				if !now.Before(w.ResetsAt) {
-					item.Freshness = "expired"
-				} else if w.ReadAt != nil && !w.ReadAt.After(now) && now.Sub(*w.ReadAt) <= ProbeFreshness {
-					item.Freshness = "fresh"
-				}
-				baseline, err := dailyBaselineTx(ctx, tx, a, *w, p.TenantID, out.PrincipalID, start, now)
-				if err != nil {
-					return err
-				}
-				item.StartOfDayUsedPct = baseline
-				if !explicit && u.Boost > 0 && u.BoostUntil != nil && now.Before(*u.BoostUntil) && baseline != nil {
-					pointsForAccount := points
-					if d.Pace.PointsPerDay != nil {
-						pointsForAccount = *d.Pace.PointsPerDay
-					}
-					limit := min(100, *baseline+float64(pointsForAccount+u.Boost))
-					if d.Pace.Mode == "everything" {
-						limit = 100
-					}
-					d.BoostToday = &agentplan.DailyBoost{LimitUsedPct: limit, EnteredAs: "used", Until: end}
-					if first := groups[a.Harness]; len(first) == 0 {
-						out.Daily[a.Harness] = d
-					}
-				}
-				if err := agentplan.ApplyDaily(&item, d, points, now); err != nil {
-					return err
-				}
-			}
 		}
 		groups[a.Harness] = append(groups[a.Harness], item)
 	}
@@ -204,6 +146,69 @@ func PopulateDailyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, out *ag
 		}
 	}
 	return nil
+}
+
+// dailyAccountTx projects one door without routing advice. Admission shares
+// this calculation without recursively calling PopulateDailyTx.
+func dailyAccountTx(ctx context.Context, tx pgx.Tx, a Account, item agentplan.DailyAccount, d agentplan.DailySettings, explicit bool, tenantID, owner string, points int, start, end, now time.Time) (agentplan.DailyAccount, agentplan.DailySettings, error) {
+	u, err := loadUsagePolicy(ctx, tx, a.ID)
+	if err != nil {
+		return item, d, err
+	}
+	if !explicit {
+		d = legacyDaily(u)
+	}
+	var policy *string
+	if err := tx.QueryRow(ctx, `SELECT daily_reset_policy FROM agent_accounts WHERE id=$1`, a.ID).Scan(&policy); err != nil {
+		return item, d, err
+	}
+	if policy != nil {
+		if *policy != "suggest" && *policy != "auto_before_expiry" {
+			return item, d, errors.New("invalid reset policy")
+		}
+		item.ResetPolicy = *policy
+	}
+	item.FloorPct = agentplan.Number(float64(u.Floor))
+	item.NoDailyLimit = a.BillingMode == "api"
+	if item.NoDailyLimit {
+		return item, d, nil
+	}
+	schedule, err := routingSchedule(ctx, tx, a)
+	if err != nil {
+		return item, d, err
+	}
+	windows, err := overviewWindows(ctx, tx, a, now, schedule)
+	if err != nil {
+		return item, d, err
+	}
+	w := dailyWindow(windows)
+	if w == nil {
+		return item, d, nil
+	}
+	item.UsedPct, item.ResetsAt, item.ReadAt = w.UsedPercent, &w.ResetsAt, w.ReadAt
+	item.Freshness = "stale"
+	if !now.Before(w.ResetsAt) {
+		item.Freshness = "expired"
+	} else if w.ReadAt != nil && !w.ReadAt.After(now) && now.Sub(*w.ReadAt) <= ProbeFreshness {
+		item.Freshness = "fresh"
+	}
+	item.StartOfDayUsedPct, err = dailyBaselineTx(ctx, tx, a, *w, tenantID, owner, start, now)
+	if err != nil {
+		return item, d, err
+	}
+	if !explicit && u.Boost > 0 && u.BoostUntil != nil && now.Before(*u.BoostUntil) && item.StartOfDayUsedPct != nil {
+		accountPoints := points
+		if d.Pace.PointsPerDay != nil {
+			accountPoints = *d.Pace.PointsPerDay
+		}
+		limit := min(100, *item.StartOfDayUsedPct+float64(accountPoints+u.Boost))
+		if d.Pace.Mode == "everything" {
+			limit = 100
+		}
+		d.BoostToday = &agentplan.DailyBoost{LimitUsedPct: limit, EnteredAs: "used", Until: end}
+	}
+	err = agentplan.ApplyDaily(&item, d, points, now)
+	return item, d, err
 }
 
 func legacyDaily(u usagePolicy) agentplan.DailySettings {

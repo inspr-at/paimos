@@ -1,0 +1,66 @@
+# Daily limits before agent starts
+
+AEON-1034 uses the AEON-1033 daily plan for new managed reservations and
+launch claims. The account's current canonical owner, linked plan, local day,
+floor, legacy posture/boost compatibility and precise vendor reading are read
+again inside the existing fenced transaction. A prior reservation, Run now or
+recovery permit does not bypass a daily ceiling. Already running work keeps
+its existing replay and settlement behavior. Pairing verification retains its
+separate, bounded verification path.
+
+Measured usage at or above the account's `limit_used_pct` refuses with
+`daily_limit`. A missing owner, unreadable/malformed plan, privacy-withheld
+measurement, absent baseline, expired reset, future reading or reading older
+than `ProbeFreshness` (two minutes) refuses with `daily_limit_unknown`.
+API-billed doors have no percentage-based daily ceiling. Daily waits use the
+canonical person's next local midnight, with calendar/DST arithmetic.
+
+`GET /api/models/resolve` retains Settings → Models order and shared successor
+qualification. With `at_limit: ladder`, an exhausted selected harness is
+excluded and the same work-specific resolver is rerun. The successor still
+needs an allowed profile, available account, project fence, residency and
+existing review qualifications. Only owned doors with daily room appear in
+the selected qualifying account IDs. `wait` and unknown daily evidence return
+no selected profile; `trace.blocked` is `daily_limit` or
+`daily_limit_unknown`. An explicit harness filter remains binding. Catalog
+previews before any accounts are enrolled remain advisory; they grant no start
+authority. No model or key scopes are changed.
+
+`POST /api/engine/admission` remains shadow-only and returns `enforced: false`.
+It reads the same daily state in the final audited decision transaction.
+Both ladder and wait refuse the exhausted requested harness. The caller
+resolves the successor separately, then evaluates that harness with a new
+request ID. Replay returns the original decision; it is not fresh authority.
+
+LEAD guard migration (AEON-865): `plan-gate.py` and `quota-guard.py` use
+`GET /api/agents/plan` with the existing `agents.plan.read` scope, from the
+selected personal PPM account. Request time and response size must be bounded;
+an HTTP/parse/shape failure means no new starts. Do not cache an allow across a
+start or substitute a local percentage constant. The required projection is
+`total`, `limits`, `running`, `daily`, `daily_state` and `daily_until`.
+
+For the requested harness, inspect every account door, not just the display
+state or active account. Use the server's absolute `limit_used_pct`; do not
+recompute Boost, floors or midnight locally. Require `freshness: fresh`,
+`read_at` no later than now and no older than two minutes, and `resets_at`
+after now. Require numeric `used_pct` and `limit_used_pct` in 0–100. Unknown
+or redacted doors do not prove either headroom or measured exhaustion. A fresh
+door below its limit provides daily room. A `no_limit` state denotes visible
+API-billed doors, which have no percentage numbers. Once the day ends, fetch a
+new plan. Used and left are display pairs, not two independent limits.
+
+When all eligible doors are measured exhausted, `daily[harness].at_limit`
+selects `ladder` or `wait`. Ladder calls
+`GET /api/models/resolve?ticket=<work-key>&role=<work-role>&situation=<round>`
+with the existing Models read authority and the work's author family for
+review. No caller-selected provider order or unqualified successor is allowed.
+A null profile refuses; a selected profile still passes the existing count,
+account and host gates and the server's final reservation/claim check. Wait
+refuses until `daily_until`; an unknown plan retries a fresh read and never
+switches models based on stale usage. First-build finishing reserve and PR WIP
+remain separate existing gates.
+
+`claude-guard.sh` is retired by LEAD only after this contract ships and the
+plan readers are switched. This repository change documents that handoff; it
+does not edit coordinator-owned scripts, deploy, or enable the shadow gate.
+No migration, version change, vendor reset action or dial UI is included.
