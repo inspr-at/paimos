@@ -33,7 +33,11 @@ func TestAccountSuccessorMigrationAuditIsolationAndRollback(t *testing.T) {
 	}
 	type fixture struct{ tenant, agent, pin, next, account string }
 	var fixtures []fixture
-	err = db.MigrateWithHook(ctx, d.App, func(name string) error {
+	// Production runs the migration chain with a plain context: no principal
+	// and no service visibility (only fixtures use the seeded context). A seeded
+	// runner context hid the release-127 RLS failure of this backfill.
+	plain := t.Context()
+	err = db.MigrateWithHook(plain, d.App, func(name string) error {
 		if name != "1296_account_model_successors.sql" {
 			return nil
 		}
@@ -161,7 +165,7 @@ func TestAccountSuccessorMigrationAuditIsolationAndRollback(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := db.MigrateWithHook(ctx, d.App, nil); err != nil {
+	if err := db.MigrateWithHook(plain, d.App, nil); err != nil {
 		t.Fatal(err)
 	}
 }
