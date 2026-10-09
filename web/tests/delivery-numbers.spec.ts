@@ -7,6 +7,7 @@ import { fixtures, mockWork } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
 import { deliveryMetrics, mockDelivery, type MetricsOptions } from './delivery-numbers-fixtures'
+import { mockFlow } from './delivery-flow-fixtures'
 
 async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en' | 'de'; grant?: boolean; prefs?: Record<string, unknown> } = {}) {
   const work = fixtures()
@@ -18,6 +19,8 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en
   let hold: Promise<void> | null = null
   const reads: number[] = []
   await mockDelivery(page, async () => { reads.push(Date.now()); if (hold) await hold; return answer }, options.grant === false ? [] : ['delivery.read'])
+  // No recorded run yet: Flow shows the labelled example (AEON-1006 reads the recorded runs).
+  await mockFlow(page, { empty: true })
   return {
     work, reads,
     answer: (status: number, body: unknown) => { answer = { status, body } },
