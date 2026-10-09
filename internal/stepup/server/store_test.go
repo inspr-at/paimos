@@ -44,7 +44,7 @@ func setup(t *testing.T) *fixture {
 	f.person = principal(tenant.Person, "Markus")
 	f.other = principal(tenant.Person, "Anna")
 	f.m = New(f.d.App, nil, "https://aeon.example")
-	f.m.RecordResultTx = inbox.RecordResult
+	f.m.RecordResultsTx = inbox.RecordResults
 	f.m.now = func() time.Time { return f.now }
 	return f
 }
@@ -299,7 +299,7 @@ func TestStepupFirstDecisionWinsWithTwoApprovers(t *testing.T) {
 	r := f.create(t)
 	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return sql == db.TenantFenceSQL })
 	first := New(pool, nil, "")
-	first.RecordResultTx = inbox.RecordResult
+	first.RecordResultsTx = inbox.RecordResults
 	first.now = f.m.now
 	type result struct {
 		r   ApprovalRequest

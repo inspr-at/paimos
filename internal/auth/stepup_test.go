@@ -31,7 +31,7 @@ func TestStepupOIDCFallbackUsesExistingIdentityAndFreshVerifiedAuthTime(t *testi
 			mod.Mount(mux)
 			decisiondesk.New(appPool).Mount(mux)
 			native := stepup.New(appPool, phoneapprovals.New(appPool, nil, "http://localhost", nil, nil), "")
-			native.RecordResultTx = inbox.RecordResult
+			native.RecordResultsTx = inbox.RecordResults
 			native.Reauthenticate = mod.BeginStepUp
 			mod.StepUp = native
 			native.Mount(mux)
@@ -83,7 +83,7 @@ func TestStepupOIDCFallbackUsesExistingIdentityAndFreshVerifiedAuthTime(t *testi
 			// Mount a native module at this test origin; no configuration credential
 			// changes or additional OIDC client are needed.
 			native = stepup.New(appPool, phoneapprovals.New(appPool, nil, app.URL, nil, nil), app.URL)
-			native.RecordResultTx = inbox.RecordResult
+			native.RecordResultsTx = inbox.RecordResults
 			native.Reauthenticate = mod.BeginStepUp
 			mod.StepUp = native
 			nativeMux := http.NewServeMux()

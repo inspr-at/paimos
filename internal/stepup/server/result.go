@@ -42,19 +42,35 @@ func resultLine(r ApprovalRequest) string {
 	return ""
 }
 
-// Called exactly once by the conditional pending -> terminal write, before
-// the audit counter. No arbitrary session successor or process is selected.
-func (m *Module) recordResult(ctx context.Context, tx pgx.Tx, p tenant.Principal, r ApprovalRequest) error {
-	if m.RecordResultTx == nil {
+// Called once for the conditional pending -> terminal writes. Resolve every
+// exact session before the batch writer acquires the audit counter; no
+// arbitrary session successor or process is selected.
+func (m *Module) recordResults(ctx context.Context, tx pgx.Tx, p tenant.Principal, requests []ApprovalRequest) error {
+	if len(requests) == 0 {
+		return nil
+	}
+	if m.RecordResultsTx == nil {
 		return fault(503, "step-up result delivery unavailable")
 	}
-	project := nullableValue(r.ProjectID)
-	if r.SessionID != nil {
-		// Workspace requests keep workspace authority, but their result belongs
-		// in the requesting session's project chat, never an unrelated project.
-		if err := tx.QueryRow(ctx, `SELECT project_id::text FROM harness_sessions WHERE tenant_id=$1 AND id=$2 AND agent_principal_id=$3`, p.TenantID, *r.SessionID, r.RequestedBy).Scan(&project); err != nil {
+	results := make([]stepupwire.OutcomeMessage, 0, len(requests))
+	for _, r := range requests {
+		project := nullableValue(r.ProjectID)
+		if r.SessionID != nil {
+			// Workspace requests keep workspace authority, but their result belongs
+			// in the requesting session's project chat, never an unrelated project.
+			if err := tx.QueryRow(ctx, `SELECT project_id::text FROM harness_sessions WHERE tenant_id=$1 AND id=$2 AND agent_principal_id=$3`, p.TenantID, *r.SessionID, r.RequestedBy).Scan(&project); err != nil {
+				return err
+			}
+		}
+		results = append(results, stepupwire.OutcomeMessage{ID: r.ID, ProjectID: project, RecipientID: r.RequestedBy, SessionID: nullableValue(r.SessionID), Body: resultLine(r)})
+	}
+	if err := m.RecordResultsTx(ctx, tx, p, results); err != nil {
+		return err
+	}
+	for _, r := range requests {
+		if err := audit(ctx, tx, p, r); err != nil {
 			return err
 		}
 	}
-	return m.RecordResultTx(ctx, tx, p, stepupwire.OutcomeMessage{ID: r.ID, ProjectID: project, RecipientID: r.RequestedBy, SessionID: nullableValue(r.SessionID), Body: resultLine(r)})
+	return nil
 }

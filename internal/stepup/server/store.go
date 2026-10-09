@@ -67,8 +67,8 @@ type Module struct {
 	now     func() time.Time
 	// Reauthenticate starts the existing OIDC flow, with its existing signing
 	// key and callback. No credential or proof is accepted from an agent.
-	Reauthenticate func(http.ResponseWriter, *http.Request, tenant.Principal, ReauthStart) (string, error)
-	RecordResultTx func(context.Context, pgx.Tx, tenant.Principal, stepupwire.OutcomeMessage) error
+	Reauthenticate  func(http.ResponseWriter, *http.Request, tenant.Principal, ReauthStart) (string, error)
+	RecordResultsTx func(context.Context, pgx.Tx, tenant.Principal, []stepupwire.OutcomeMessage) error
 }
 type ReauthStart struct {
 	RequestID, ChallengeID, Digest string
@@ -235,6 +235,14 @@ func actorFor(r ApprovalRequest, decision string) *string {
 	return nil
 }
 func (m *Module) settle(ctx context.Context, tx pgx.Tx, p tenant.Principal, r *ApprovalRequest, state, decision, method string, authTime *time.Time) error {
+	if err := m.settleRows(ctx, tx, p, r, state, decision, method, authTime); err != nil {
+		return err
+	}
+	return m.recordResults(ctx, tx, p, []ApprovalRequest{*r})
+}
+
+// Batch expiry finishes every request mutation before result and audit events.
+func (m *Module) settleRows(ctx context.Context, tx pgx.Tx, p tenant.Principal, r *ApprovalRequest, state, decision, method string, authTime *time.Time) error {
 	now := m.now().UTC()
 	if state == "expired" {
 		now = r.ExpiresAt
@@ -259,13 +267,7 @@ func (m *Module) settle(ctx context.Context, tx pgx.Tx, p tenant.Principal, r *A
 	if tag.RowsAffected() != 1 {
 		return fault(409, "request already decided")
 	}
-	if err := decorate(ctx, tx, r); err != nil {
-		return err
-	}
-	if err := m.recordResult(ctx, tx, p, *r); err != nil {
-		return err
-	}
-	return audit(ctx, tx, p, *r)
+	return decorate(ctx, tx, r)
 }
 func (m *Module) expire(ctx context.Context, tx pgx.Tx, p tenant.Principal, r *ApprovalRequest) error {
 	if r.State == "pending" && !r.ExpiresAt.After(m.now()) {

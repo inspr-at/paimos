@@ -16,7 +16,12 @@ import (
 // and recipient. Call after all existing-row mutations and before audit.
 type Result = stepupwire.OutcomeMessage
 
-func RecordResult(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Result) error {
+// RecordResults writes the complete bounded result batch before appending any
+// event. Later recipients' foreign-key locks must precede the event counter.
+func RecordResults(ctx context.Context, tx pgx.Tx, p tenant.Principal, results []Result) error {
+	if len(results) == 0 {
+		return nil
+	}
 	// Withdrawal and expiry can be settled by the requesting agent. A System
 	// result preserves the no-self-message rule and names the decider in its body.
 	actor, created, err := resultActor(ctx, tx, p.TenantID)
@@ -24,34 +29,54 @@ func RecordResult(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Result)
 		return err
 	}
 	p = actor
-	_, err = tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_label) VALUES($1,$2,$3,$4,NULL,$5,$6,$7,'Step-up approval')`, p.TenantID, in.ID, p.ID, in.RecipientID, in.Body, "stepup-result/"+in.ID, deskNullable(in.SessionID))
-	if err != nil {
-		return err
-	}
-	if in.ProjectID != "" {
-		_, err = tx.Exec(ctx, `INSERT INTO inbox_compat_messages(tenant_id,id,project_id,sender_principal_id,recipient_principal_id,sender_address,recipient_address,body,key_digest,request_digest,thread_id,hop,inbox_message_id,sent_event_id,is_action_request,expects_reply,delivery_level,recipient_session_id,sender_label) VALUES($1,$2,$3,$4,$5,'paimos:Step-up approval','paimos:requesting-agent',$6,$7,$7,$2::uuid::text,1,$2,NULL,false,false,'simple',$8,'Step-up approval')`, p.TenantID, in.ID, in.ProjectID, p.ID, in.RecipientID, in.Body, "stepup-result/"+in.ID, deskNullable(in.SessionID))
+	pending := make([][]events.Change, len(results))
+	for i, in := range results {
+		pending[i], err = recordResultRows(ctx, tx, p, in)
 		if err != nil {
 			return err
 		}
-	}
-	var pending []events.Change
-	if in.ProjectID != "" {
-		if _, err = tx.Exec(ctx, `INSERT INTO inbox_message_deliveries(tenant_id,message_id,state,reason) VALUES($1,$2,'pending','')`, p.TenantID, in.ID); err != nil {
-			return err
-		}
-		if err = recordAcceptanceReceiptWith(ctx, tx, p, in.ID, func(c events.Change) error { pending = append(pending, c); return nil }); err != nil {
-			return err
-		}
-	}
-	var project *string
-	typ := "inbox.sent"
-	if in.ProjectID != "" {
-		project, typ = &in.ProjectID, "inbox.compat_sent"
 	}
 	if created {
 		if _, err = events.Append(ctx, tx, p, events.Change{Type: "principal.created", After: map[string]any{"id": p.ID, "kind": "agent", "name": "System", "roles": []string{"system"}}}); err != nil {
 			return err
 		}
+	}
+	for i, in := range results {
+		if err := recordResultEvents(ctx, tx, p, in, pending[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func recordResultRows(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Result) ([]events.Change, error) {
+	_, err := tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_label) VALUES($1,$2,$3,$4,NULL,$5,$6,$7,'Step-up approval')`, p.TenantID, in.ID, p.ID, in.RecipientID, in.Body, "stepup-result/"+in.ID, deskNullable(in.SessionID))
+	if err != nil {
+		return nil, err
+	}
+	if in.ProjectID != "" {
+		_, err = tx.Exec(ctx, `INSERT INTO inbox_compat_messages(tenant_id,id,project_id,sender_principal_id,recipient_principal_id,sender_address,recipient_address,body,key_digest,request_digest,thread_id,hop,inbox_message_id,sent_event_id,is_action_request,expects_reply,delivery_level,recipient_session_id,sender_label) VALUES($1,$2,$3,$4,$5,'paimos:Step-up approval','paimos:requesting-agent',$6,$7,$7,$2::uuid::text,1,$2,NULL,false,false,'simple',$8,'Step-up approval')`, p.TenantID, in.ID, in.ProjectID, p.ID, in.RecipientID, in.Body, "stepup-result/"+in.ID, deskNullable(in.SessionID))
+		if err != nil {
+			return nil, err
+		}
+	}
+	var pending []events.Change
+	if in.ProjectID != "" {
+		if _, err = tx.Exec(ctx, `INSERT INTO inbox_message_deliveries(tenant_id,message_id,state,reason) VALUES($1,$2,'pending','')`, p.TenantID, in.ID); err != nil {
+			return nil, err
+		}
+		if err = recordAcceptanceReceiptWith(ctx, tx, p, in.ID, func(c events.Change) error { pending = append(pending, c); return nil }); err != nil {
+			return nil, err
+		}
+	}
+	return pending, nil
+}
+
+func recordResultEvents(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Result, pending []events.Change) error {
+	var project *string
+	typ := "inbox.sent"
+	if in.ProjectID != "" {
+		project, typ = &in.ProjectID, "inbox.compat_sent"
 	}
 	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: project, Type: typ, After: map[string]string{"id": in.ID, "sender_principal_id": p.ID, "recipient_principal_id": in.RecipientID, "stepup_request_id": in.ID, "outcome_line": in.Body}})
 	if err != nil {
@@ -73,7 +98,7 @@ func RecordResult(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Result)
 }
 
 // Match the existing System actor's advisory/unique-index protocol, but let
-// RecordResult append first-use audit after all message and receipt writes.
+// RecordResults append first-use audit after all message and receipt writes.
 // Calling aeon_authz_system_actor here would acquire the event counter early.
 func resultActor(ctx context.Context, tx pgx.Tx, tenantID string) (tenant.Principal, bool, error) {
 	p := tenant.Principal{TenantID: tenantID, Kind: tenant.Agent, Name: "System", Roles: []string{"system"}}
