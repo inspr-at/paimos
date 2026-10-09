@@ -632,7 +632,7 @@
         ,
         {"file":"tests/key-trim.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":3.607,"median":2.179,"min":1.115},"seconds":17.02266,"selectedTests":7},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/model-prefs.spec.ts","listedTests":3,"tierTiming":{"caseSeconds":{"max":2.069,"median":1.71,"min":1.443},"seconds":5.565677,"selectedTests":3},"weightSeconds":7,"weightSource":"hosted-CI-37948687065-with-20-percent-margin","weightEvidence":{"attempt":1,"collectionPlanningSeconds":0.231546,"launchOverheadSeconds":0.112131,"marginFactor":1.2,"nativeSeconds":5.222,"runId":"37948687065","sha":"63841419452e1bfb206e6505b8051b8083527654"}}
+        {"file":"tests/model-prefs.spec.ts","listedTests":3,"tierTiming":{"caseSeconds":{"max":2.069,"median":1.71,"min":1.443},"seconds":5.565677,"selectedTests":3},"weightEvidence":{"attempt":1,"collectionPlanningSeconds":0.231546,"launchOverheadSeconds":0.112131,"marginFactor":1.2,"nativeSeconds":5.222,"runId":"37948687065","sha":"63841419452e1bfb206e6505b8051b8083527654"},"weightSeconds":7,"weightSource":"hosted-CI-37948687065-with-20-percent-margin"}
       ]
     }
     ,
