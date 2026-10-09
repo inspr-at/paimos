@@ -88,7 +88,7 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 		}
 		settings := agentplan.DefaultDaily()
 		save := func() error {
-			raw, err := json.Marshal(agentplan.Plan{Total: 5, Daily: map[string]agentplan.DailySettings{"codex": settings, "claude": agentplan.DefaultDaily()}})
+			raw, err := json.Marshal(agentplan.Plan{Total: 5, Limits: map[string]agentplan.Limit{}, Daily: map[string]agentplan.DailySettings{"codex": settings, "claude": agentplan.DefaultDaily()}})
 			if err != nil {
 				return err
 			}

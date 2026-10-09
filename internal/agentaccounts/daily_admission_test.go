@@ -39,7 +39,7 @@ func TestDailyAdmissionRechecksCurrentPlanAtReservationAndClaim(t *testing.T) {
 	}
 	save := func(t *testing.T) {
 		t.Helper()
-		raw, err := json.Marshal(agentplan.Plan{Total: 5, Daily: map[string]agentplan.DailySettings{"codex": settings}})
+		raw, err := json.Marshal(agentplan.Plan{Total: 5, Limits: map[string]agentplan.Limit{}, Daily: map[string]agentplan.DailySettings{"codex": settings}})
 		if err != nil {
 			t.Fatal(err)
 		}

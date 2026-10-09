@@ -21,7 +21,7 @@ func TestAdmissionDailyLimitUnknownAndMidnightWait(t *testing.T) {
 	d := agentplan.DefaultDaily()
 	d.AtLimit = "wait"
 	d.BoostToday = &agentplan.DailyBoost{LimitUsedPct: 20, EnteredAs: "used", Until: end}
-	raw, err := json.Marshal(agentplan.Plan{Total: 5, Daily: map[string]agentplan.DailySettings{"codex": d}})
+	raw, err := json.Marshal(agentplan.Plan{Total: 5, Limits: map[string]agentplan.Limit{}, Daily: map[string]agentplan.DailySettings{"codex": d}})
 	must(t, err)
 	f.exec(t, `INSERT INTO user_preferences(tenant_id,principal_id,key,value) VALUES($1,$2,'agents.working',$3)`, f.person.TenantID, f.person.ID, raw)
 	out := f.decide(t, f.request("daily-wait", "first_build"), "daily_limit")
@@ -29,7 +29,7 @@ func TestAdmissionDailyLimitUnknownAndMidnightWait(t *testing.T) {
 		t.Fatalf("wrong midnight wait: %+v", out)
 	}
 	d.AtLimit = "ladder"
-	raw, err = json.Marshal(agentplan.Plan{Total: 5, Daily: map[string]agentplan.DailySettings{"codex": d}})
+	raw, err = json.Marshal(agentplan.Plan{Total: 5, Limits: map[string]agentplan.Limit{}, Daily: map[string]agentplan.DailySettings{"codex": d}})
 	must(t, err)
 	f.exec(t, `UPDATE user_preferences SET value=$2 WHERE principal_id=$1 AND key='agents.working'`, f.person.ID, raw)
 	f.decide(t, f.request("daily-ladder", "fix"), "daily_limit")
