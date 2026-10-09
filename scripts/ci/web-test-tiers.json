@@ -14766,10 +14766,6 @@
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"a partial window with full calendar coverage names the missing facts beside the source","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"with a refused save and a failed read together, both alerts and both retries stay reachable (de)","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"with a refused save and a failed read together, both alerts and both retries stay reachable (en)","tier":"ESSENTIAL"}
-    ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"a verdict is on target up to 1×, close up to 1.5×, far off beyond, with a word and its own shape for each","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"each tile shows its verdict as shape and word: the icon follows the level","tier":"ESSENTIAL"}
@@ -14777,6 +14773,10 @@
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"the small chart shades the good side of the target and hatches only what no source covers","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"the summary counts numbers on target and names the closest and the biggest gap from this window’s numbers","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"with a refused save and a failed read together, both alerts and both retries stay reachable (de)","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"with a refused save and a failed read together, both alerts and both retries stay reachable (en)","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a denied or failed review-policy read selects no saved mode","tier":"ESSENTIAL"}
     ,
