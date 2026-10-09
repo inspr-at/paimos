@@ -141,7 +141,7 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) erro
 	}
 	at := m.now()
 	service := db.AllProjects(ctx, "delivery metric webhook facts")
-	return db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
 		if err := upsertRunsTx(ctx, tx, m.config.TenantID, m.config.Repository, "webhook", runs, at); err != nil {
 			return err
 		}
@@ -150,6 +150,11 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) erro
 		}
 		return upsertMarksTx(ctx, tx, m.config.TenantID, m.config.Repository, "webhook", marks, at)
 	})
+	if err != nil {
+		return err
+	}
+	// AEON-1004: the same runs become checks and merge-queue steps in Flow.
+	return m.flowFromRuns(ctx, runs)
 }
 
 // metricSourceRow is a project's repository link and backfill position.

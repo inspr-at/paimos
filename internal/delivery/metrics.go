@@ -668,8 +668,19 @@ func computeMetrics(in metricInput, now time.Time) []Metric {
 			}
 		}
 	}
+	mergedNumber := map[int64]struct{}{}
+	for _, pull := range in.Pulls {
+		if pull.Merged != nil {
+			mergedNumber[pull.Number] = struct{}{}
+		}
+	}
 	perPR := []metricPoint{}
-	for _, runs := range queued {
+	for number, runs := range queued {
+		// The approved count is merged pull requests. A queued PR that failed
+		// or was abandoned has no merged pull fact and is not a sample.
+		if _, ok := mergedNumber[number]; !ok {
+			continue
+		}
 		last := runs[0].Completed
 		for _, run := range runs {
 			if run.Completed.After(last) {
@@ -679,8 +690,8 @@ func computeMetrics(in metricInput, now time.Time) []Metric {
 		perPR = append(perPR, metricPoint{last, float64(len(runs))})
 	}
 	out = append(out, metricSpec{number: 6, key: "queue_runs_per_pr", label: "Queue runs per PR", unit: "runs", source: runSource("merge_group"),
-		def:       "Per pull request named in the merge-queue branch (gh-readonly-queue/…/pr-N-…): every queue run attempt, counted on the day of its last run. The value is the mean; a group run counts for the PR its branch names.",
-		aggregate: "mean", target: arion(1.1, "max", "0.1 extra queue runs per PR"), coverage: in.Covered, coverageEnd: in.CoveredUntil, noDataReason: "No merge-queue runs in the last 30 days.", readFrom: in.ReadFrom}.build(now, perPR, in.Truncated))
+		def:       "Per merged pull request named in the merge-queue branch (gh-readonly-queue/…/pr-N-…): every queue run attempt until it merged, counted on the day of its last run. A pull request that was queued and did not merge is not counted. The value is the mean; 1.0 means every counted pull request merged on its first queue run. A group run counts for the pull request its branch names.",
+		aggregate: "mean", target: arion(1.1, "max", "0.1 extra queue runs per PR"), coverage: in.Covered, coverageEnd: in.CoveredUntil, noDataReason: "No merged pull request had a merge-queue run in the last 30 days.", readFrom: in.ReadFrom}.build(now, perPR, in.Truncated))
 
 	// 7: review time and the share of "changes" verdicts.
 	reviewTime, changes := []metricPoint{}, []metricPoint{}

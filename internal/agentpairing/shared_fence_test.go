@@ -18,7 +18,7 @@ import (
 // Actual contention and FK compatibility are exercised by boundary/recurrence tests.
 var sharedFenceCallers = map[string][]string{
 	"db.LockTree":               {"authz/project_members.go", "crossreview/policy.go", "db/fences.go", "delivery/alerts.go", "delivery/audit.go", "delivery/audit_store.go", "delivery/reviews_api.go", "delivery/routing.go", "modelregistry/module.go", "modelregistry/preparation.go", "operatoractor/actor.go", "workorders/common.go"},
-	"db.LockTenant":             {"auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/alerts.go", "delivery/api.go", "delivery/audit_store.go", "delivery/audit_webhook.go", "delivery/metrics_api.go", "delivery/module.go", "delivery/quarantine.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "delivery/workqueue.go", "delivery/workqueue_api.go", "engineadmission/module.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "statusautopilot/attention_bulk.go", "workorders/common.go"},
+	"db.LockTenant":             {"auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/alerts.go", "delivery/api.go", "delivery/audit_store.go", "delivery/audit_webhook.go", "delivery/flow_store.go", "delivery/metrics_api.go", "delivery/module.go", "delivery/quarantine.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "delivery/workqueue.go", "delivery/workqueue_api.go", "engineadmission/module.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "statusautopilot/attention_bulk.go", "workorders/common.go"},
 	"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
 	"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
 	"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go"},
@@ -151,6 +151,10 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"../delivery/audit.go", "retryAuditAlerts", "UPDATE delivery_merge_audit", "auditAlert("},
 		// Merge-queue quarantine (AEON-850) takes the shared tenant fence before
 		// failure rows and the ledger. recordTx appends the event counter after.
+		// Delivery Flow (AEON-1004): tenant fence, then authorization and the
+		// item/step/incident rows; the value-free hints are appended last.
+		{"../delivery/flow_store.go", "flowWrite", "db.LockTenant(", "build(ctx, tx, apply)"},
+		{"../delivery/flow_store.go", "flowWrite", "build(ctx, tx, apply)", "events.Append("},
 		{"../delivery/quarantine.go", "quarantineEvent", "db.LockTenant(", "INSERT INTO delivery_queue_failures"},
 		{"../delivery/quarantine.go", "quarantineEvent", "INSERT INTO delivery_queue_failures", "recordTx("},
 		// Shadow admission (AEON-887) re-checks authority under the tenant fence
