@@ -406,7 +406,7 @@ func TestVerificationTelemetryPrestartBatchAndRetry(t *testing.T) {
 			if err := f.db.Admin.QueryRow(t.Context(), `SELECT r.status,
     (SELECT count(*) FROM run_telemetry WHERE run_id=r.id),
     (SELECT coalesce(sum(turn_count_delta),0) FROM run_telemetry WHERE run_id=r.id),
-    (SELECT error_code FROM run_telemetry WHERE run_id=r.id ORDER BY sequence DESC LIMIT 1),
+    (SELECT coalesce(error_code,'') FROM run_telemetry WHERE run_id=r.id ORDER BY sequence DESC LIMIT 1),
     (SELECT count(*) FROM account_reservations WHERE run_id=r.id AND state='active')
     FROM agent_runs r WHERE r.id=$1`, *e.VerificationRunID).Scan(&status, &n, &gotTurns, &code, &held); err != nil {
 				t.Fatal(err)
