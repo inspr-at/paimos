@@ -183,22 +183,20 @@ func dailyAccountTx(ctx context.Context, tx pgx.Tx, a Account, item agentplan.Da
 	if err != nil {
 		return item, d, err
 	}
-	w := dailyWindow(windows)
+	w := dailyWindow(windows, a.LinkedAt)
 	if w == nil {
-		// A long window without its precise percent is not "no reading".
-		if unreadableDailyWindow(windows) {
+		// The overview omits incomplete facts. Preserve their evidence here:
+		// a reported long window with missing fields is not "no reading".
+		facts, err := loadReadinessFacts(ctx, tx, a, now)
+		if err != nil {
+			return item, d, err
+		}
+		if unreadableDailyWindow(windows, a.LinkedAt) || unreadableDailyFacts(facts, a.LinkedAt) {
 			item.Freshness = "stale"
 		}
 		return item, d, nil
 	}
 	item.UsedPct, item.ResetsAt, item.ReadAt = w.UsedPercent, &w.ResetsAt, w.ReadAt
-	// A sample from before this link belongs to the previous binding. It is
-	// not today's percentage and must not become a missing-limit refusal.
-	if a.LinkedAt != nil && w.ReadAt != nil && w.ReadAt.Before(*a.LinkedAt) {
-		item.UsedPct, item.ReadAt, item.ResetsAt = nil, nil, nil
-		item.Freshness = "unknown"
-		return item, d, nil
-	}
 	item.Freshness = "stale"
 	if !now.Before(w.ResetsAt) {
 		item.Freshness = "expired"
@@ -243,11 +241,16 @@ func longDailyWindow(w *overviewWindow) bool {
 
 // dailyWindow is the subscription percentage. A 5h session window is a quota
 // hold, not the daily ceiling, even when it is the only vendor sample.
-func dailyWindow(windows []overviewWindow) *overviewWindow {
+func dailyWindow(windows []overviewWindow, linkedAt *time.Time) *overviewWindow {
 	var chosen *overviewWindow
 	for i := range windows {
 		w := &windows[i]
-		if w.Source != "vendor_reported" || w.UsedPercent == nil || w.ReadAt == nil || !longDailyWindow(w) {
+		if w.Source != "vendor_reported" || w.UsedPercent == nil || w.ReadAt == nil || w.ResetsAt.IsZero() || !longDailyWindow(w) {
+			continue
+		}
+		// Filter the previous binding before ranking resets, so retained
+		// history cannot hide a current window with an earlier reset.
+		if linkedAt != nil && w.ReadAt.Before(*linkedAt) {
 			continue
 		}
 		if chosen == nil || w.ResetsAt.After(chosen.ResetsAt) {
@@ -257,10 +260,34 @@ func dailyWindow(windows []overviewWindow) *overviewWindow {
 	return chosen
 }
 
-func unreadableDailyWindow(windows []overviewWindow) bool {
+func unreadableDailyWindow(windows []overviewWindow, linkedAt *time.Time) bool {
 	for i := range windows {
 		w := &windows[i]
-		if w.Source == "vendor_reported" && longDailyWindow(w) && (w.UsedPercent == nil || w.ReadAt == nil) {
+		if linkedAt != nil && w.ReadAt != nil && w.ReadAt.Before(*linkedAt) {
+			continue
+		}
+		if w.Source == "vendor_reported" && longDailyWindow(w) && (w.UsedPercent == nil || w.ReadAt == nil || w.ResetsAt.IsZero()) {
+			return true
+		}
+	}
+	return false
+}
+
+func unreadableDailyFacts(facts []ReadinessFact, linkedAt *time.Time) bool {
+	for _, f := range facts {
+		if f.UsedPercent != nil && f.ReadingAt != nil && f.ResetsAt != nil {
+			continue
+		}
+		// A null capture has no reading time; its observation still binds
+		// the incomplete evidence to the link active when it was reported.
+		at := f.ObservedAt
+		if f.ReadingAt != nil {
+			at = *f.ReadingAt
+		}
+		if linkedAt != nil && at.Before(*linkedAt) {
+			continue
+		}
+		if longDailyWindow(&overviewWindow{Kind: "fact", Bucket: f.WindowKey}) {
 			return true
 		}
 	}
