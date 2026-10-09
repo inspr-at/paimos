@@ -24,6 +24,32 @@
     {
       "classification": "personal",
       "columns": {
+        "tenant_id": "metadata",
+        "id": "metadata",
+        "account_id": "metadata",
+        "person_id": "personal",
+        "binding_revision": "metadata",
+        "policy_revision": "metadata",
+        "state": "metadata",
+        "by_kind": "metadata",
+        "expected_count": "personal",
+        "expired_at": "personal",
+        "requested_at": "personal",
+        "completed_at": "personal",
+        "undo_until": "personal",
+        "raised_pace_points": "personal",
+        "raised_pace_until": "personal",
+        "result": "personal"
+      },
+      "locator": {
+        "person_column": "person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "account_reset_actions"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "boost_link_revision": "metadata",
         "boost_percent": "personal",
         "boost_person_id": "personal",
@@ -36,7 +62,10 @@
         "usage_posture_person_id": "personal",
         "usage_probe_enabled": "personal",
         "usage_probe_revision": "metadata",
-        "usage_revision": "metadata"
+        "usage_revision": "metadata",
+        "reset_report": "personal",
+        "reset_policy_person_id": "personal",
+        "reset_policy_link_revision": "metadata"
       },
       "locator": {
         "person_column": "owner_person_id",

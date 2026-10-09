@@ -139,16 +139,18 @@ func PopulateDailyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, out *ag
 		if _, exists := out.Daily[a.Harness]; !exists {
 			out.Daily[a.Harness] = d
 		}
-		var policy *string
-		if err := tx.QueryRow(ctx, `SELECT daily_reset_policy FROM agent_accounts WHERE id=$1`, a.ID).Scan(&policy); err != nil {
+		reset, err := loadResetState(ctx, tx, a, now)
+		if err != nil {
 			return err
 		}
-		if policy != nil {
-			if *policy != "suggest" && *policy != "auto_before_expiry" {
-				return errors.New("invalid reset policy")
-			}
-			item.ResetPolicy = *policy
+		if reset.Credits != nil {
+			item.Resets = reset.Credits
 		}
+		if reset.Plan != nil {
+			item.ResetPlan = reset.Plan
+		}
+		item.ResetPolicy = reset.Policy
+
 		item.FloorPct = agentplan.Number(float64(u.Floor))
 		item.Routable = advice[a.ID].AvailableSlots > 0
 		item.NoDailyLimit = a.BillingMode == "api"
@@ -190,6 +192,11 @@ func PopulateDailyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, out *ag
 						out.Daily[a.Harness] = d
 					}
 				}
+				raised, err := activeResetPace(ctx, tx, a, now)
+				if err != nil {
+					return err
+				}
+				item.ResetPacePoints = raised
 				if err := agentplan.ApplyDaily(&item, d, points, now); err != nil {
 					return err
 				}
@@ -240,6 +247,16 @@ func dailyBaselineTx(ctx context.Context, tx pgx.Tx, a Account, w overviewWindow
 	bound := start
 	if a.LinkedAt != nil && a.LinkedAt.After(bound) {
 		bound = *a.LinkedAt
+	}
+	// A spend can refresh usage without changing the vendor's natural reset.
+	// Its confirmed reading starts the new daily baseline too.
+	var resetAt *time.Time
+	if err := tx.QueryRow(ctx, `SELECT max((result->'window'->>'read_at')::timestamptz) FROM account_reset_actions
+ WHERE account_id=$1 AND binding_revision=$2 AND state IN ('succeeded','undone') AND completed_at<=$3`, a.ID, a.LinkRevision, now).Scan(&resetAt); err != nil {
+		return nil, err
+	}
+	if resetAt != nil && resetAt.After(bound) {
+		bound = *resetAt
 	}
 	var value float64
 	var err error

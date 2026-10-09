@@ -184,3 +184,23 @@ func TestRedactionNormalizesRevokedOverview(t *testing.T) {
 		t.Fatalf("overview rows missing: %s", body)
 	}
 }
+
+// Risk: sharing revocation leaks reset credits, planning or Undo through
+// finite responses and account audit/SSE snapshots.
+func TestResetPrivacyMasksCreditsPlanAndAudit(t *testing.T) {
+	id := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	raw := []byte(`{"account_id":"` + id + `","resets":{"count":2,"expires_at":["PRIVATE_EXPIRY"],"source":"vendor"},"reset_policy":"auto_before_expiry","reset_plan":{"planned_at":"PRIVATE_PLAN","raised_pace_points":25},"undo_until":"PRIVATE_UNDO","expired_at":"PRIVATE_EXPIRY","raised_pace_points":25,"routable":true}`)
+	for _, redact := range []func([]byte) ([]byte, error){
+		func(b []byte) ([]byte, error) { return Redact(b, Policy{}, "", false) },
+		func(b []byte) ([]byte, error) { return EventSnapshot(b, Policy{}, "") },
+	} {
+		out, err := redact(raw)
+		if err != nil || strings.Contains(string(out), "PRIVATE_") || strings.Contains(string(out), "raised_pace_points") || !strings.Contains(string(out), `"resets":null`) || !strings.Contains(string(out), `"reset_policy":"suggest"`) {
+			t.Fatalf("reset privacy leak %s %v", out, err)
+		}
+	}
+	out, err := Redact(raw, Policy{id: true}, "", false)
+	if err != nil || !strings.Contains(string(out), "PRIVATE_EXPIRY") {
+		t.Fatal("owner lost reset detail", err)
+	}
+}
