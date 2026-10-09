@@ -9,9 +9,15 @@ its existing replay and settlement behavior. Pairing verification retains its
 separate, bounded verification path.
 
 Measured usage at or above the account's `limit_used_pct` refuses with
-`daily_limit`. A missing owner, unreadable/malformed plan, privacy-withheld
-measurement, absent baseline, expired reset, future reading or reading older
-than `ProbeFreshness` (two minutes) refuses with `daily_limit_unknown`.
+`daily_limit`. A door whose `freshness` is `unknown` and which has no
+`used_pct`, `limit_used_pct`, `start_of_day_used_pct`, `read_at` or `resets_at`
+has never reported a vendor percentage. That door has no percentage ceiling.
+It is not `no_daily_limit` (that flag is API billing only), it does not invent
+dial headroom, and it does not prove exhaustion for a model switch. A zero-value
+door or any partial measurement is not this shape. A missing owner,
+unreadable/malformed plan, privacy-withheld measurement, a reported window with
+an absent baseline, expired reset, future reading or reading older than
+`ProbeFreshness` (two minutes) refuses with `daily_limit_unknown`.
 API-billed doors have no percentage-based daily ceiling. Daily waits use the
 canonical person's next local midnight, with calendar/DST arithmetic.
 
@@ -41,11 +47,14 @@ start or substitute a local percentage constant. The required projection is
 
 For the requested harness, inspect every account door, not just the display
 state or active account. Use the server's absolute `limit_used_pct`; do not
-recompute Boost, floors or midnight locally. Require `freshness: fresh`,
-`read_at` no later than now and no older than two minutes, and `resets_at`
-after now. Require numeric `used_pct` and `limit_used_pct` in 0–100. Unknown
-or redacted doors do not prove either headroom or measured exhaustion. A fresh
-door below its limit provides daily room. An account with `no_daily_limit: true` is a visible API-billed door with no
+recompute Boost, floors or midnight locally. A door with `freshness: unknown`
+and no `used_pct`, `limit_used_pct`, `start_of_day_used_pct`, `read_at` or
+`resets_at` has no percentage ceiling. Every other door requires
+`freshness: fresh`, `read_at` no later than now and no older than two minutes,
+`resets_at` after now, and numeric `used_pct` and `limit_used_pct` in 0–100.
+A partial, stale, future, expired or redacted door does not prove headroom or
+measured exhaustion, and one such door keeps the harness unknown. A fresh door
+below its limit provides daily room. An account with `no_daily_limit: true` is a visible API-billed door with no
 percentage ceiling; absence means false. A whole-harness `no_limit` state also
 denotes visible API-billed doors. This discriminant remains explicit when
 subscription and API doors share a harness. Once the day ends, fetch a
