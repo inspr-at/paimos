@@ -60,7 +60,7 @@ for (const width of [390, 1024, 1440]) {
       await settled(page)
       const toolbar = page.getByRole('toolbar', { name: 'Ticket list controls' })
       const controls: Record<string, Locator> = {
-        views: toolbar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), ...(width === 1024 ? {} : { count: toolbar.locator('.count-live') }), new: page.getByRole('button', { name: 'New ticket', exact: true }),
+        views: toolbar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), new: page.getByRole('button', { name: 'New ticket', exact: true }),
         ...(width === 390 ? { filters: page.getByRole('button', { name: 'Filters', exact: true }) } : { status: toolbar.locator('.facet-control[data-dim="status"]'), filters: toolbar.locator('.facets'), clear: toolbar.getByRole('button', { name: 'Clear all', exact: true }) }),
       }
       // The tablet deliberately hides the count; measure the remaining controls,
@@ -98,7 +98,7 @@ for (const width of [390, 1024, 1440]) {
       if (width !== 390) {
         await expect(page.locator('.project-navigation').getByRole('button', { name: 'Display: Display', exact: true })).toBeVisible()
         await expect(toolbar.getByRole('button', { name: 'Display: Display', exact: true })).toHaveCount(0)
-        if (width === 1024) { await expect(toolbar.locator('.facet-value').first()).toBeHidden(); await expect(toolbar.locator('.count')).toBeHidden() }
+        if (width === 1024) { await expect(toolbar.locator('.facet-value').first()).toBeHidden(); await expect(toolbar.locator('.count-live')).toHaveCount(0) }
         else { await expect(toolbar.locator('.facet-value').first()).toContainText('New, Backlog +3'); await expect(page.locator('.description')).toHaveAttribute('data-clip-tip', '') }
       }
       expect(await page.locator('.project-page').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)

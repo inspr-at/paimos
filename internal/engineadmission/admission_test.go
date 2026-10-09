@@ -185,7 +185,7 @@ func TestAdmissionShadowLimitsFloorsFreshnessAndTenantIsolation(t *testing.T) {
 	f.decide(t, f.request("wip-unreadable", "first_build"), "wip_unreadable")
 	f.wipErr = nil
 	f.exec(t, `INSERT INTO user_preferences(tenant_id,principal_id,key,value) VALUES($1,$2,'agents.working','{"total":"unreadable"}')`, f.person.TenantID, f.person.ID)
-	f.decide(t, f.request("plan-unreadable", "fix"), "inputs_unreadable")
+	f.decide(t, f.request("plan-unreadable", "fix"), "daily_limit_unknown")
 	f.exec(t, `UPDATE user_preferences SET value='{"total":3,"limits":{}}' WHERE principal_id=$1 AND key='agents.working'`, f.person.ID)
 	f.exec(t, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,ref_digest,lease_digest) VALUES($1,$2,$3,$4,'claude','fixture','unmanaged','worker',uuid_send(gen_random_uuid()),uuid_send(gen_random_uuid()))`, f.person.TenantID, f.project, f.agent.ID, f.person.ID)
 	f.decide(t, f.request("live-reserve", "first_build"), "finishing_reserve")
@@ -195,8 +195,13 @@ func TestAdmissionShadowLimitsFloorsFreshnessAndTenantIsolation(t *testing.T) {
 	f.exec(t, `UPDATE agent_pairing_computers SET capacity_signals=jsonb_set(capacity_signals,'{load}','5'),capacity_reported_at=$2 WHERE id=$1`, f.computer, f.at.Add(-time.Minute-time.Nanosecond))
 	f.decide(t, f.request("stale-host", "fix"), "host_inputs_unreadable")
 	f.exec(t, `UPDATE agent_pairing_computers SET capacity_reported_at=$2 WHERE id=$1`, f.computer, f.at)
-	f.exec(t, `UPDATE account_allowance_windows SET capacity_read_at=$2 WHERE id=$1`, f.window, f.at.Add(-11*time.Minute))
-	f.decide(t, f.request("stale-account", "fix"), "account_inputs_unreadable")
+	// Age the retained post-link measurement with the injected clock. Moving
+	// only the ledger timestamp before the link instead tests an old binding
+	// and leaves no matching append-only percentage for the daily ceiling.
+	measuredAt := f.at
+	f.at = measuredAt.Add(11 * time.Minute)
+	f.decide(t, f.request("stale-account", "fix"), "daily_limit_unknown")
+	f.at = measuredAt
 	// The current 20% measurement leaves exactly the person's 80% floor.
 	// Retain its append-only reading and give pacing a prior-period baseline.
 	f.exec(t, `UPDATE account_allowance_windows SET capacity_read_at=$2,starts_at=$3 WHERE id=$1`, f.window, f.at, f.at.Add(-24*time.Hour))

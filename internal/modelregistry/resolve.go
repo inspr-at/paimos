@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -38,6 +39,7 @@ type resolveQuery struct {
 	AuthorFamily string
 	Harness      string
 	ProjectID    string
+	OffHarnesses []string
 }
 
 type ladderStep struct {
@@ -186,6 +188,9 @@ func ladderHasHarness(steps []ladderStep, harness string) bool {
 
 func skipReasons(step ladderStep, role roleDef, q resolveQuery, now time.Time, health map[string]agentaccounts.HarnessHealth) []string {
 	var reasons []string
+	if slices.Contains(q.OffHarnesses, step.Profile.Harness) {
+		reasons = append(reasons, "harness unavailable in the plan")
+	}
 	// Immutable legacy mislabels remain in history, but are retired from
 	// dispatch. The same check guards ordinary resolution and managed reviews.
 	if harnesslaunch.ModelFamily(step.Profile.Harness, step.Profile.Model) != step.Profile.Family {

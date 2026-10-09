@@ -246,7 +246,9 @@ func (m *Module) admit(w http.ResponseWriter, r *http.Request) {
 				if errors.Is(err, authz.ErrForbidden) {
 					return err
 				}
-				out.Reason = "inputs_unreadable"
+				if out.Reason != "daily_limit_unknown" {
+					out.Reason = "inputs_unreadable"
+				}
 			} else if err = inputTx.Commit(ctx); err != nil {
 				return err
 			}
@@ -282,10 +284,16 @@ func (m *Module) evaluate(ctx context.Context, tx pgx.Tx, p tenant.Principal, in
 	}
 	plan, err := agentplan.ReadTx(ctx, tx, p)
 	if err != nil {
-		return "", nil, err
+		return "daily_limit_unknown", nil, err
+	}
+	if err := agentaccounts.PopulateDailyTx(ctx, tx, p, &plan, now); err != nil {
+		return "daily_limit_unknown", nil, err
 	}
 	if reason := planReason(in, plan); reason != "" {
 		return reason, nil, nil
+	}
+	if daily := agentplan.DailyStart(plan, in.Harness, now); daily.Reason != "" {
+		return daily.Reason, daily.Until, nil
 	}
 	if in.Kind == "first_build" {
 		if wipErr != nil || wip < 0 || wipAt.IsZero() || now.Sub(wipAt) > time.Minute || wipAt.After(now) {

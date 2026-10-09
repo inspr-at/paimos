@@ -15,8 +15,8 @@ vi.mock('../src/lib/api.ts', () => ({
   APIError: class APIError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; this.name = 'APIError' } },
 }))
 import * as flow from '../src/lib/deliveryFlow'
-import { createTimeline, criticalPath, laneModel, minutesText, refreshTimeline, resetTimeline, runEnd, timeLabel, type FlowData } from '../src/lib/deliveryFlow'
-import { arionTarget, ARION_MINUTES, ARION_PATH, compareData, liveData, recordedRuns, replayData, type ApiFlow, type ApiItem, type ApiRun, type ApiStep } from '../src/lib/deliveryFlowData'
+import { createTimeline, criticalPath, fitAll, laneModel, minutesText, refreshTimeline, resetTimeline, runEnd, timeLabel, type FlowData } from '../src/lib/deliveryFlow'
+import { arionTarget, ARION_LATER_MINUTES, ARION_MINUTES, ARION_PATH, compareData, liveData, recordedRuns, replayData, type ApiFlow, type ApiItem, type ApiRun, type ApiStep } from '../src/lib/deliveryFlowData'
 import { EXAMPLE_NOW, exampleCompare, exampleLive, exampleReplay } from '../src/lib/deliveryFlowExample'
 import * as modes from '../src/lib/deliveryFlowModes'
 import { autoplayOnce, createPlayer, flightRows, headOf, momentOf, PLAY_MS, recordOf, wentOf, type Frames } from '../src/lib/deliveryFlowModes'
@@ -94,7 +94,19 @@ it('Compare races a release from its step a against the Arion target on one rela
   // Project Arion v5 § 4b, "v5 now": 15.4 + 0.5 + 12.2 + 0.5 + 10 + 1.5 + 0.5 + (4.9 + 1.1 = the 6 of h–i) + 3 + 6 + 5.
   expect(ARION_PATH.map(([key, minutes]) => `${key} ${minutes}`).join(', ')).toBe('a 15.4, b 0.5, c 12.2, d 0.5, e 10, f 1.5, g 0.5, h 4.9, i 1.1, j 3, k 6, l 5')
   expect(ARION_MINUTES).toBeCloseTo(60.6)
-  expect(arionTarget('de', 12).steps.at(-1)!.end).toBeCloseTo(12)
+  expect(ARION_LATER_MINUTES).toBeCloseTo(53.9)
+  const scaled = arionTarget('de', 12)
+  expect(runEnd(scaled)).toBeCloseTo(12)
+  expect(criticalPath(scaled).at(-1)!.end).toBeCloseTo(12)
+  const sides = arionTarget('en').steps.filter(step => step.side)
+  expect(sides.map(step => step.stepKey)).toEqual(['catalogue', 'w'])
+  expect(sides[0]).toMatchObject({ lane: 'ci', kind: 'work', start: 0 })
+  expect(sides[0]!.simple.en).toContain('4.6')
+  expect(sides[0]!.simple.en).toContain('not in the total')
+  expect(sides[1]).toMatchObject({ lane: 'you', kind: 'wait' })
+  expect(sides[1]!.facts?.waitReason).toBe('human_gate')
+  expect(sides[1]!.end).toBe(sides[1]!.start)
+  expect(sides[1]!.simple.de).not.toMatch(/\b(du|wir)\b/i)
   // A run without a step a cannot race.
   expect(compareData(recordedRuns(answer(), { extendOpen: false }).runs[1]!, arionTarget('en'))).toBeNull()
 })
@@ -525,6 +537,8 @@ it('Compare lanes leave an open release without a finish line or a completed ava
   expect(classText(avatarNode(nodes, '126').props.class)).not.toContain('done')
   expect(classText(avatarNode(nodes, 'Target').props.class)).not.toContain('done')
   // Past the recorded minutes the open figure stays with the playhead. Only the target has arrived.
+  // The target is 60.6 min, wider than the opening 40 min window, so fit the whole axis first.
+  fitAll(open.view.timeline)
   open.view.timeline.T = open.data.play[1]
   await Vue.nextTick()
   nodes = open.view.nodes()

@@ -46,13 +46,14 @@ Older readiness writers populate history through an additive trigger; no
 existing values are rewritten. Rollback runs the older binary and retains the
 expansion and history. All new storage is classified in the DSAR inventory.
 
-This is plan data groundwork. The start-gate package must call
-`agentaccounts.ReadPlanTx` (or populate the same snapshot within its final
-transaction) before implementing daily refusal and model fallback. Running work
-is unchanged. `next_on_ladder` is null until Models resolves the work-specific
+The start gate now shares this account projection in the final reservation and
+claim transaction. Shadow admission populates the same daily snapshot before
+its decision; Models uses the saved ranked order for qualified fallback. See
+[the start-gate contract](agents-start-gate.md) for refusal and guard behavior.
+Running work is unchanged. `next_on_ladder` is null until Models resolves the work-specific
 ladder; reset credits and reset plans are null until the resets package supplies
 vendor-backed values. `daily_reset_policy` is suggest when unset. This package
-adds no vendor reset action, settings controls, or dial UI.
+adds no vendor reset action, settings controls, or dial UI (the dial is AEON-1036, below).
 
 Validation of source commit `4f05c307d`: the daily behavior tests in agentplan,
 agentaccounts, views and db passed on the approved remote runner, including
@@ -61,3 +62,38 @@ rollback/RLS. The full reportercontract package passed after generating the
 OpenAPI bundle. The final remote `ci-static --merge-main` exited 0 with all
 40 checks passed and no skips. The wider Go run also passed DSAR, engine
 admission and delivery. Coordinator review and release gates remain separate.
+
+## The dial (AEON-1036)
+
+The Agents page dial shows and edits these limits (approved AEON-1030 draft 6).
+Folded, it is one row as high as the other folded cards: the sentence, one chip
+per harness (mark, stepper and, only when needed, a gold flag for over pace or
+a red flag for today's limit) and `● N running (M waiting) ▾`. Everything else
+about a chip, such as `Codex · at most 6 · ≤ 68 % used today · on pace`, is
+hover and keyboard-focus text. A flag, or on a phone a chip's icon with its
+count, opens the dial at that harness. The toggle opens one info area with three
+tiles: running and waiting against the dial, the accounts per harness with the
+existing Verify action, and the checks before every start.
+
+Open, the dial is master and detail. Fixed 88 px rows on the left carry the usage
+lines and the pace state; the detail on the right reads week used and left,
+today's points with a teal, gold and red bar, resets only where the vendor
+reports them, then the folds Pace and Boost today, the choice at the limit
+(follow the model ladder, or wait) and the accounts read-only. Pace and the
+choice at the limit write `daily` through `PUT /api/preferences/agents.working`
+with the whole current `daily` map and the plan's revision; the total and
+limits are never changed by such a write, and a plain total or limit change
+never sends `daily`. Boost today is typed as used or left, stored as the used
+percentage and ends at `daily_until`. It is read-only without `account.manage`
+or for accounts the person cannot change. This supersedes the header Boost today
+of AEON-883; `BoostToday.vue` and its web helper are removed.
+
+The dial never claims more than the server measured: the server also reports
+`at_limit` when a reading is merely stale, which the dial words as "usage not
+measured right now" without a flag; a harness without an account or a reading
+says so. The selected harness (the last pick, else one over pace or at its limit,
+else the first with a daily limit), the info area and the open folds are
+remembered per person in the preference `ui.agents.dial`. Resets, the Resets
+card, the posture control in Settings and the default pace editor belong to other
+packages; the dial links to Settings › Accounts and computers for them.
+
