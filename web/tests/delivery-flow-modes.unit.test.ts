@@ -710,7 +710,7 @@ function releaseRun(over: Partial<ApiItem> = {}, extra: ApiStep[] = []): ApiRun 
   }
 }
 // recordedRuns reads the list shape; a single run is the same answer with one item.
-const asList = (run: ApiRun): ApiFlow => ({ project_id: run.project_id, now: run.now, at: run.at, from: run.now, to: run.now, items: [run.item], steps: run.steps, incidents: run.incidents, truncated: run.truncated })
+const asList = (run: ApiRun): ApiFlow => ({ project_id: run.project_id, now: run.now, at: run.at, from: run.item.started_at ?? run.now, to: run.now, items: [run.item], steps: run.steps, incidents: run.incidents, truncated: run.truncated })
 const recordCtx = (run: ApiRun, lang: 'en' | 'de' = 'en', level: 'simple' | 'expert' = 'simple') => {
   const rec = recordedRuns(asList(run), { extendOpen: false }), main = rec.runs[0]!
   return { main, ctx: { data: replayData(main, rec.origin, null)!, level, lang, text: flowText(lang) } }
@@ -722,7 +722,11 @@ it('an ingested release record shows the catalogue timing, the rehearsal, the qu
   const catalogue = main.steps.find(s => s.stepKey === 'catalogue')!, rehearsal = main.steps.find(s => s.stepKey === 'rehearsal')!
   expect([catalogue.lane, catalogue.end - catalogue.start, catalogue.simple.en, catalogue.expert.en]).toEqual(['ci', 22, 'Full test run: green', 'Catalogue · green'])
   expect([rehearsal.lane, rehearsal.side, rehearsal.simple.de]).toEqual(['ci', true, 'Probelauf des Releases: grün'])
-  expect(main.facts!.record).toEqual({ evidence: 'AEON-487/comment/native-qualification', rollback: 'digest_safe' })
+  expect(main.facts!.record).toEqual({
+    evidence: 'AEON-487/comment/native-qualification', rollback: 'digest_safe', partial: false,
+    catalogue: { startAt: Date.parse(at(1)), minutes: 22, open: false, outcome: 'green', p50: 21, p90: 24, runs: 1 },
+    rehearsal: { startAt: Date.parse(at(0)), minutes: 11, open: false, outcome: 'green', p50: null, p90: null, runs: 1 },
+  })
 
   const simple = recordOf(main, ctx)!
   expect(simple.title).toBe('Release record')
@@ -783,13 +787,34 @@ it('a catalogue still running reads as elapsed time, and a second run names the 
   expect(recordOf(main, ctx)!.rows[0]!.value).toMatch(/^11 min · failed · usually 21 min · 2 runs$/)
 })
 
+it('a list read that starts after the release began says the time read, not "not recorded"', () => {
+  // The server keeps only steps that touch the window. This window opens at minute 30: the rehearsal and the
+  // catalogue ended before it, so they are not in the answer even though the record has them.
+  const run = releaseRun()
+  const window = { ...asList(run), from: at(30), steps: run.steps.filter(s => s.ended_at != null && Date.parse(s.ended_at) >= Date.parse(at(30))) }
+  const main = recordedRuns(window, { extendOpen: false }).runs[0]!
+  const live = recordedRuns(window, { extendOpen: true })
+  const record = recordOf(main, { data: liveData(live)!, level: 'simple', lang: 'en', text: en })!
+  expect(record.rows.map(r => [r.key, r.value, r.missing])).toEqual([
+    ['catalogue', 'outside the time read', true], ['rehearsal', 'outside the time read', true],
+    ['evidence', 'AEON-487/comment/native-qualification', false], ['rollback', 'The previous version can be restarted as it is', false],
+  ])
+  const german = recordOf(main, { data: liveData(live)!, level: 'simple', lang: 'de', text: flowText('de') })!
+  expect(german.rows[0]!.value).toBe('außerhalb des gelesenen Zeitraums')
+  // A window that opens before the release began cannot have lost a step: nothing reported is "not recorded".
+  const whole = recordedRuns({ ...window, from: at(-60), steps: window.steps }, { extendOpen: false }).runs[0]!
+  expect(whole.facts!.record!.partial).toBe(false)
+  // A truncated answer may have lost steps too.
+  expect(recordedRuns({ ...asList(run), truncated: true }, { extendOpen: false }).runs[0]!.facts!.record!.partial).toBe(true)
+})
+
 it('only a release with a reported record has one', () => {
   expect(recordOf(arionTarget('en'), { data: exampleReplay('r126')!, level: 'simple', lang: 'en', text: en })).toBeNull()
   const example = exampleReplay('r126')!, change = exampleReplay('c991')!
   expect(recordOf(example.sets[0]!.main, { data: example, level: 'simple', lang: 'en', text: en })).toBeNull()
   expect(recordOf(change.sets[0]!.main, { data: change, level: 'simple', lang: 'en', text: en })).toBeNull()
   const changes = recordedRuns(answer(), { extendOpen: false }).runs.find(r => r.id === 'c')!
-  expect(changes.facts!.record).toEqual({ evidence: null, rollback: null })
+  expect(changes.facts!.record).toEqual({ evidence: null, rollback: null, catalogue: null, rehearsal: null, partial: false })
   expect(recordOf(changes, { data: liveData(recordedRuns(answer(), { extendOpen: true }))!, level: 'simple', lang: 'en', text: en })).toBeNull()
 })
 
@@ -842,6 +867,15 @@ it('the flow view hands the first run\'s release record to the panel, in every m
   const compare = mount({ data: compareData(rec.runs[0]!, arionTarget('en')), dataKey: 'compare|r127', mode: 'compare' })
   await Vue.nextTick()
   expect((compare.stubNode('record').props.record as modes.ReleaseRecord).rows[2]!.value).toBe('AEON-487/comment/native-qualification')
+  // Compare draws the run from step a on: a rehearsal that began two minutes before it is cut from the lanes, never from the record.
+  const early = releaseRun()
+  early.steps.find(s => s.step_key === 'rehearsal')!.started_at = at(-2)
+  const earlyRec = recordedRuns(asList(early), { extendOpen: false }).runs[0]!
+  const sliced = compareData(earlyRec, arionTarget('en'))!
+  expect(sliced.sets[0]!.main.steps.some(s => s.stepKey === 'rehearsal')).toBe(false)
+  const earlyView = mount({ data: sliced, dataKey: 'compare|r127|early', mode: 'compare' })
+  await Vue.nextTick()
+  expect((earlyView.stubNode('record').props.record as modes.ReleaseRecord).rows[1]!.value).toBe('13 min · green')
   const example = mount({ data: exampleReplay('r126'), dataKey: 'replay|example', mode: 'replay' })
   await Vue.nextTick()
   expect(example.stubNode('record')).toBeUndefined()

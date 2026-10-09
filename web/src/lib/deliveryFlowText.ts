@@ -40,7 +40,7 @@ const EN = {
   kindWords: { work: 'work', wait: 'wait', rework: 'rework' } as Record<string, string>, incidentWord: 'incident', sideWord: 'alongside',
   // The release record under the card (AEON-1022): what a rollout reported besides the steps.
   rec: {
-    title: 'Release record', none: 'not recorded', running: 'running since {t}', soFar: '{m} min so far', runs: '{n} runs', usually: 'usually {m} min',
+    title: 'Release record', none: 'not recorded', partial: 'outside the time read', running: 'running since {t}', soFar: '{m} min so far', runs: '{n} runs', usually: 'usually {m} min',
     terms: {
       simple: { catalogue: 'Full test run', rehearsal: 'Release rehearsal', evidence: 'Agent app test evidence', rollback: 'If it goes wrong' },
       expert: { catalogue: 'Catalogue', rehearsal: 'Rehearsal', evidence: 'Qualification evidence', rollback: 'Rollback class' },
@@ -88,7 +88,7 @@ const DE: FlowText = {
   sources: { github_app: 'GitHub-App', paimos: 'PAIMOS', ops_rollout: 'OPS-Rollout-Eintrag', arion: 'Arion-Ziel (Project Arion v5, § 4b)' },
   kindWords: { work: 'Arbeit', wait: 'Warten', rework: 'Nacharbeit' }, incidentWord: 'Störung', sideWord: 'nebenher',
   rec: {
-    title: 'Release-Nachweise', none: 'nicht erfasst', running: 'läuft seit {t}', soFar: '{m} min bisher', runs: '{n} Läufe', usually: 'üblich {m} min',
+    title: 'Release-Nachweise', none: 'nicht erfasst', partial: 'außerhalb des gelesenen Zeitraums', running: 'läuft seit {t}', soFar: '{m} min bisher', runs: '{n} Läufe', usually: 'üblich {m} min',
     terms: {
       simple: { catalogue: 'Vollständiger Testlauf', rehearsal: 'Probelauf des Releases', evidence: 'Nachweis zum Test der Agent-App', rollback: 'Wenn etwas schiefgeht' },
       expert: { catalogue: 'Katalog', rehearsal: 'Probelauf', evidence: 'Qualifizierungs-Nachweis', rollback: 'Rollback-Klasse' },

@@ -165,7 +165,7 @@ for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'],
 // Risk (AEON-1022): the release record under the card - the full test run and rehearsal timing, the qualification
 // evidence reference and the rollback class - is missing, says more than the record reported, or moves the controls
 // above it when the time moves, the mode changes or the data arrives. It sits below the card and grows downward.
-for (const [width, theme, lang] of [[1440, 'light', 'en'], [1024, 'dark', 'en'], [390, 'light', 'de'], [390, 'dark', 'en']] as const) {
+for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'], [1024, 'light', 'en'], [1024, 'dark', 'en'], [390, 'light', 'de'], [390, 'dark', 'en']] as const) {
   test(`the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (${width} ${theme} ${lang})`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 2800 : 1500 })
     await setup(page, { theme, lang, level: 'simple', record: true })

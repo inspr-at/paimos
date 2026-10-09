@@ -6,7 +6,7 @@
 // Times are minutes after `origin` (local midnight of the earliest moment read).
 import { api, APIError } from './api'
 import type { DeliveryLanguage } from './delivery'
-import { criticalPath, LANES, runEnd, type FlowData, type FlowIncident, type FlowRun, type FlowStep, type Lane, type StepOutcome, type WaitReason, type Words } from './deliveryFlow'
+import { criticalPath, LANES, runEnd, type FlowData, type FlowIncident, type FlowRun, type FlowStep, type Lane, type RecordedAttempt, type StepOutcome, type WaitReason, type Words } from './deliveryFlow'
 import { TO } from './deliveryFlowText'
 import { incidentWords, stepWords } from './deliveryFlowWords'
 
@@ -94,7 +94,16 @@ export function runTitle(item: Pick<ApiItem, 'kind' | 'ref' | 'title'>): Words {
  * waits for; at least a minute past now), drawn as expected past now. A wait (or a person's step) that
  * starts once the run has ended — the next human gate — is drawn as after the run.
  */
-export function recordedRuns(answer: { now: string; items: ApiItem[]; steps: ApiStep[]; incidents: ApiIncident[]; truncated: boolean }, { extendOpen }: { extendOpen: boolean }): Recorded {
+/** The latest attempt of one step key (waits are not attempts), measured from the answer's own clock. */
+function attemptOf(steps: readonly ApiStep[], key: string, nowMs: number): RecordedAttempt | null {
+  const own = steps.filter(s => s.step_key === key && s.kind !== 'wait').sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
+  const last = own.at(-1)
+  if (!last) return null
+  const startAt = Date.parse(last.started_at), open = last.ended_at == null
+  return { startAt, minutes: Math.max(0, ((open ? nowMs : Date.parse(last.ended_at!)) - startAt) / 60_000), open, outcome: last.outcome, p50: last.norm.p50_min, p90: last.norm.p90_min, runs: own.length }
+}
+
+export function recordedRuns(answer: { now: string; from?: string; items: ApiItem[]; steps: ApiStep[]; incidents: ApiIncident[]; truncated: boolean }, { extendOpen }: { extendOpen: boolean }): Recorded {
   const nowMs = Date.parse(answer.now)
   const earliest = Math.min(nowMs, ...answer.steps.map(s => Date.parse(s.started_at)), ...answer.items.flatMap(i => i.started_at ? [Date.parse(i.started_at)] : []))
   const day = new Date(Number.isFinite(earliest) ? earliest : nowMs)
@@ -103,13 +112,16 @@ export function recordedRuns(answer: { now: string; items: ApiItem[]; steps: Api
   const now = at(answer.now)
   const refs = new Map(answer.items.map(item => [item.id, item.ref]))
   const etas = new Map(answer.items.flatMap(item => item.eta.p50_at ? [[item.id, at(item.eta.p50_at)] as const] : []))
+  // The list read keeps only the steps that touch its window: a run that began before it may have lost early steps.
+  const windowStart = answer.from ? Date.parse(answer.from) : null
   const runs: FlowRun[] = []
   for (const item of answer.items) {
     const ended = item.ended_at ? at(item.ended_at) : null
     const incidents = answer.incidents.filter(i => i.item_id === item.id).sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))
     const recovery = new Set(incidents.flatMap(i => i.recovery_step_ids))
     const gate = item.next_human_gate?.what ?? null
-    const steps: FlowStep[] = answer.steps.filter(s => s.item_id === item.id).map(s => {
+    const own = answer.steps.filter(s => s.item_id === item.id)
+    const steps: FlowStep[] = own.map(s => {
       const start = at(s.started_at), open = s.ended_at == null
       let end = open ? Math.max(start, now) : Math.max(start, at(s.ended_at!))
       if (open && extendOpen) {
@@ -141,7 +153,11 @@ export function recordedRuns(answer: { now: string; items: ApiItem[]; steps: Api
       facts: {
         kind: item.kind, ref: item.ref, started: item.started_at ? at(item.started_at) : null, ended, pct: item.pct_done, currentStepId: item.current_step_id,
         eta: { p50: item.eta.p50_at ? at(item.eta.p50_at) : null, p90: item.eta.p90_at ? at(item.eta.p90_at) : null, basis: item.eta.basis, reason: item.eta.reason },
-        gate, record: { evidence: item.qualification_evidence ?? null, rollback: item.rollback_class ?? null },
+        gate, record: {
+          evidence: item.qualification_evidence ?? null, rollback: item.rollback_class ?? null,
+          catalogue: attemptOf(own, 'catalogue', nowMs), rehearsal: attemptOf(own, 'rehearsal', nowMs),
+          partial: answer.truncated || (windowStart != null && item.started_at != null && Date.parse(item.started_at) < windowStart),
+        },
       },
     })
   }

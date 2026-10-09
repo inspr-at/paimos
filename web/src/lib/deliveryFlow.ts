@@ -38,7 +38,22 @@ export interface RunFacts {
   eta: { p50: number | null; p90: number | null; basis: 'history' | 'ops' | 'none'; reason: string | null }
   gate: string | null
   /** The release record a rollout reported (AEON-1022); absent on example data and the Arion target. */
-  record?: { evidence: string | null; rollback: 'digest_safe' | 'restore_required' | null }
+  record?: ReleaseFacts
+}
+/** The latest attempt of the rehearsal or the catalogue, read from every step the answer holds (never from a lane slice). */
+export interface RecordedAttempt {
+  /** Epoch ms of its start. */
+  startAt: number
+  /** Minutes it took, or has taken so far while it is still open. */
+  minutes: number; open: boolean; outcome: StepOutcome | null; p50: number | null; p90: number | null
+  /** How many attempts the record holds. */
+  runs: number
+}
+export interface ReleaseFacts {
+  evidence: string | null; rollback: 'digest_safe' | 'restore_required' | null
+  catalogue: RecordedAttempt | null; rehearsal: RecordedAttempt | null
+  /** The answer may have left steps out (a window that starts after the release did, or a truncated read), so "none" is not a finding. */
+  partial: boolean
 }
 export interface FlowRun {
   id: string; tag: string; title: Words; steps: FlowStep[]

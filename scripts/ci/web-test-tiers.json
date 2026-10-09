@@ -6628,6 +6628,10 @@
     ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1024 dark en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1024 light en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 dark en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 light en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 dark en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -14773,6 +14777,8 @@
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a catalogue still running reads as elapsed time, and a second run names the latest","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a failed run read settles until Retry and does not reload from a cleared list","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a list read that starts after the release began says the time read, not \"not recorded\"","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a live refresh keeps 02:00 when removing an older run moves the axis origin","tier":"ESSENTIAL"}
     ,

@@ -7,7 +7,7 @@ import { reactive } from 'vue'
 import type { DeliveryLanguage } from './delivery'
 import {
   criticalPath, followTick, minutesText, pick, runEnd, stepAt, timeLabel, timeLabelSeconds,
-  type FlowData, type FlowLevel, type FlowRun, type FlowStep, type Lane, type LaneItem, type LaneSet, type Timeline, type Words,
+  type FlowData, type FlowLevel, type FlowRun, type FlowStep, type Lane, type LaneItem, type LaneSet, type RecordedAttempt, type Timeline, type Words,
 } from './deliveryFlow'
 import { put, TIMES, TO, type FlowText } from './deliveryFlowText'
 import { OUTCOME_PLAIN, WAIT_OBJECT } from './deliveryFlowWords'
@@ -265,39 +265,35 @@ export interface RecordRow {
 }
 export interface ReleaseRecord { title: string; rows: RecordRow[] }
 
-/** The latest attempt of a recorded step in words: how long it took (or is taking), its outcome, the usual length, how many runs. */
-function attemptWords(run: FlowRun, key: string, ctx: Ctx): string | null {
-  const { data, level, lang, text } = ctx, expert = level === 'expert'
-  const attempts = run.steps.filter(s => s.stepKey === key && s.kind !== 'wait').sort((a, b) => a.start - b.start)
-  const last = attempts.at(-1)
-  if (!last) return null
-  const f = last.facts, norm = f?.norm
+/** The latest attempt of the rehearsal or the catalogue in words: how long it took (or has taken so far), its outcome, the usual length, how many runs. */
+function attemptWords(attempt: RecordedAttempt, ctx: Ctx): string {
+  const { level, lang, text } = ctx, expert = level === 'expert'
   const parts: string[] = []
-  if (f?.open === true) {
-    // An open step's end is the expected one: elapsed time stops at now.
-    parts.push(put(text.rec.running, { t: timeLabel(data, last.start) }), put(text.rec.soFar, { m: fmtMin(Math.max(0, Math.min(last.end, data.now ?? last.end) - last.start), lang) }))
-  } else {
-    parts.push(minutesText(last.end - last.start))
-    if (f?.outcome) parts.push(expert ? f.outcome : pick(pair(OUTCOME_PLAIN[f.outcome]), lang))
+  if (attempt.open) parts.push(put(text.rec.running, { t: timeLabel({ origin: attempt.startAt }, 0) }), put(text.rec.soFar, { m: fmtMin(attempt.minutes, lang) }))
+  else {
+    parts.push(minutesText(attempt.minutes))
+    if (attempt.outcome) parts.push(expert ? attempt.outcome : pick(pair(OUTCOME_PLAIN[attempt.outcome]), lang))
   }
-  if (norm?.p50 != null) parts.push(expert ? `p50 ${fmtMin(norm.p50, lang)}${norm.p90 != null ? ` · p90 ${fmtMin(norm.p90, lang)}` : ''}` : put(text.rec.usually, { m: fmtMin(norm.p50, lang) }))
-  if (attempts.length > 1) parts.push(put(text.rec.runs, { n: attempts.length }))
+  if (attempt.p50 != null) parts.push(expert ? `p50 ${fmtMin(attempt.p50, lang)}${attempt.p90 != null ? ` · p90 ${fmtMin(attempt.p90, lang)}` : ''}` : put(text.rec.usually, { m: fmtMin(attempt.p50, lang) }))
+  if (attempt.runs > 1) parts.push(put(text.rec.runs, { n: attempt.runs }))
   return parts.join(' · ')
 }
 
 /**
  * What a rollout record reported about a release besides its steps: the full test run (catalogue), the
  * rehearsal, the qualification evidence and the rollback class. Always the same four rows, so the panel does
- * not change shape as facts arrive; a fact nobody reported reads "not recorded". Null for a change, for the
- * Arion target and for example data, which have no record to report.
+ * not change shape as facts arrive; a fact nobody reported reads "not recorded", and one the answer may have
+ * left out (a window that starts after the release did) says so instead. The timing comes from the run's own
+ * facts, not from the lanes, so Compare's slice from step a never hides it. Null for a change, for the Arion
+ * target and for example data, which have no record to report.
  */
 export function recordOf(run: FlowRun, ctx: Ctx): ReleaseRecord | null {
   const record = run.facts?.record
   if (run.isTarget || run.facts?.kind !== 'release' || !record) return null
   const { level, text } = ctx, terms = text.rec.terms[level]
   const timed = (key: 'catalogue' | 'rehearsal'): RecordRow => {
-    const value = attemptWords(run, key, ctx)
-    return { key, term: terms[key], value: value ?? text.rec.none, missing: value == null }
+    const attempt = record[key]
+    return { key, term: terms[key], value: attempt ? attemptWords(attempt, ctx) : record.partial ? text.rec.partial : text.rec.none, missing: attempt == null }
   }
   const ticket = record.evidence ? evidenceTicket(record.evidence) : null
   return {

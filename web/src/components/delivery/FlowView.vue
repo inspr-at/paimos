@@ -4,9 +4,10 @@
 // Live · Replay · Compare and the legend, one headline, then one card with a control
 // bar (48 px), a hint line (20 px), the overview map (64 px), the lanes (330 px) and the
 // moment panel (196 px), all fixed, so zooming, panning, playing and moving the time
-// never move a control. Below: Live lists the runs in flight, Replay and Compare where
-// the time went. Live follows "now" at 65 %; dragging the playhead to the past shows
-// "Viewing HH:MM" and "Back to now". Replay auto-plays once per session (never with
+// never move a control. Below: the release record of the release on screen (AEON-1022),
+// then Live lists the runs in flight, Replay and Compare where the time went. Live
+// follows "now" at 65 %; dragging the playhead to the past shows "Viewing HH:MM" and
+// "Back to now". Replay auto-plays once per session (never with
 // reduced motion): 60 s at 1x, 30 s at 2x. Compare races two lane sets on one axis.
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
