@@ -115,7 +115,7 @@
 //
 // Second-tenant bootstrap is an operator-only CLI and ordinary tenant-admin
 // API sequence, not a migration that seeds a business tenant automatically:
-//  1. paimos tenant create --slug example-business --name Example Business
+//  1. paimos tenant create --slug example-business --name "Example Business"
 //  2. paimos tenant principal bind-oidc --tenant example-business --issuer <issuer>
 //     --subject <operator-subject> --name <name> --role admin
 //  3. GET /auth/login?tenant=example-business, then GET /me; the signed OIDC state
