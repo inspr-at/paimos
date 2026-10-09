@@ -142,6 +142,18 @@
     ,
     "browser:tests/agents-cleanup.spec.ts:a stored open choice opens open, without a flash of the folded line"
     ,
+    "browser:tests/agents-dial-daily.spec.ts:1024 dark: folding, picking a harness, folds and the info area keep every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:1024 light: folding, picking a harness, folds and the info area keep every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:1440 dark: folding, picking a harness, folds and the info area keep every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:1440 light: folding, picking a harness, folds and the info area keep every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:400 dark: folding, picking a harness, folds and the info area keep every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:400 light: folding, picking a harness, folds and the info area keep every control put"
+    ,
     "browser:tests/agents-dial.spec.ts:AEON-781: a dial folded before the fold sections stays folded"
     ,
     "browser:tests/agents-dial.spec.ts:AEON-781: a held + speeds up, pauses before a mode boundary and saves only the final value once"
@@ -5086,10 +5098,6 @@
     ,
     {"kind":"browser","file":"tests/agent-rules.spec.ts","name":"rule details stay behind the row disclosure","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-boost.spec.ts","name":"Boost today preserves the header controls through every option in both themes and languages","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/agents-boost.spec.ts","name":"a failed boost preserves the confirmed choice and non-owners have no buttons","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"Queued folds per person, says what waits, and a run link opens it without changing the preference","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a queued run can be cancelled from /agents","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -5099,6 +5107,70 @@
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a stored open choice opens open, without a flash of the folded line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"accounts and computers fold into one calm line, remembered per person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"1024 dark: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"1024 light: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"1440 dark: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"1440 light: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"400 dark: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"400 light: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: \"● N running (M waiting) ▾\" opens the info area, from the folded dial too, and it is remembered","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a flag opens the dial at that harness, and a pick is remembered per person","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a harness with no account says so and links to add one","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a stale reading never claims the limit, although the server also refuses starts then","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: an older plan without daily fields still draws the dial","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: at the limit the flag is red and says where new work goes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: each row shows its usage lines and pace state in a fixed 88 px row","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: folded, the dial is one row as high as the other folded cards and flags only what needs attention","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: honest states: no reading is not on pace, and nothing is flagged","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the detail reads week, today, the bar and the pace state, then lists the accounts read-only","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the dial and its detail pass axe, open with both folds and folded, in both themes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the folded dial keeps its place when a flag appears","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the info area states demand against the dial, with and without waiting work","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the old header Boost today is gone and nothing writes to its endpoint","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: vendor-reported resets are shown, and nothing else is claimed about them","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: with no pick the dial selects what needs attention","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: with nothing to flag it selects the first harness with a daily limit, and a pick that is no row is ignored","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"phone › AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › At the limit: follow the model ladder or wait, and nothing else","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Boost today is read-only for accounts the person may not change; the server refuses that write too","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Boost today is read-only without the right to manage accounts","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Boost today: one number for today, typed as used or left, restated both ways, ending at the person’s midnight","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Pace: a wrong number is said in place and nothing is written","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Pace: the choice and the points a day are written whole, with every harness and the total untouched","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › a changed plan revision is re-read and the edit is not forced over it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › a failed write keeps the confirmed settings on screen and says so","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"1024 dark wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14090,19 +14162,45 @@
     ,
     {"kind":"vitest","file":"tests/agents-after-write.unit.test.ts","name":"schedule save: an older capacity read does not bring the old schedule back","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/agents-boost.unit.test.ts","name":"drops a held save on identity change and exposes no boost controls to agents or non-owners","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/agents-boost.unit.test.ts","name":"keeps the last confirmed selection on failure and blocks retry until a complete reload","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/agents-boost.unit.test.ts","name":"rejects incomplete overview pagination instead of boosting a partial account list","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/agents-boost.unit.test.ts","name":"shows Boost today when every owned account is withheld and saves without account ids","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/agents-boost.unit.test.ts","name":"writes only owned accounts with captured revisions and expires the confirmed selection at the local cutoff","tier":"ESSENTIAL"}
-    ,
     {"kind":"vitest","file":"tests/agents-cleanup-store.unit.test.ts","name":"a poll in flight during Cancel does not overwrite cancelled with queued","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-cleanup-store.unit.test.ts","name":"a poll in flight during Remove does not restore the removed account","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"Boost today and pace input > accepts only whole numbers in range and never clamps a wrong one into a right one","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"Boost today and pace input > compares settings by value, and a missing harness means the defaults","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"Boost today and pace input > stores the used percentage whichever way it was typed, and restates it both ways","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"saving a daily setting > carries every harness’s current settings and leaves the total and limits as they were","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"saving a daily setting > drops an edit made for another viewer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"saving a daily setting > never sends the effective daily map with a plain total or limit change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"saving a daily setting > shows the new setting at once, ignores an unchanged one, and restores the confirmed settings when the write fails","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"the numbers on the right > draws today’s bar teal to the share, gold over it and red past the limit, and the week when today is unknown","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"the numbers on the right > reads week used and left, then today’s points with the share, in the person’s words","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"the numbers on the right > shows vendor-reported resets only","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > is on pace only with a fresh reading under today’s limit, and says nothing of a harness with no account","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > is over pace in gold with the points above today’s share, and at the limit in red","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > keeps the usage line to the limit, and says no daily limit for a billed-by-use harness and for everything","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > lets only an owner who may manage every account change today’s limit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > never reports the limit for a stale, missing or private reading, although the server also refuses starts then","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > words what happens at the limit without inventing a ladder","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial remembers > keeps only known keys with the right type","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial remembers > selects the pick, else a harness over pace or at its limit, else the first with a daily limit, else the first row","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agents-fixture-clock.unit.test.ts","name":"serves a projection after the browser has ended without evaluating the page","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,

@@ -7,7 +7,7 @@ import { can } from './authz'
 import { DEFAULT_QUOTA_THRESHOLDS, glanceItems } from './accountsGlance'
 import { overviewAccounts, type SignInReference } from './accountsOverview'
 import { HARNESS_NAME } from './capacity'
-import { useVerification } from './useVerification'
+import { signinKey, useVerification } from './useVerification'
 import { useAgents } from '../stores/agents'
 import { useCapacity } from '../stores/capacity'
 import { useSession } from '../stores/session'
@@ -23,19 +23,28 @@ export function useDialVerify() {
   const canVerify = (s: SignInReference) => mayManage.value && s.computer.computer_state === 'connected' && s.enrollment.state === 'connected' && s.enrollment.can_verify === true
     && s.computer.verification_capabilities?.[s.enrollment.harness]?.supported === true
   const verification = useVerification(identityKey, signins, canVerify, () => capacity.refreshComputers())
-  /** The first sign-in per harness that cannot start agents until someone acts. */
+  /** What the tile said about a sign-in when it was acted on, kept while the check runs. */
+  const said = new Map<string, string>()
+  /** The first sign-in per harness that cannot start agents until someone acts, and one whose check is running. */
   const problems = computed<Record<string, DialProblem>>(() => {
     const out: Record<string, DialProblem> = {}
+    const add = (s: SignInReference, text: string, mayVerify: boolean) => {
+      const harness = s.enrollment.harness
+      if (!out[harness]) out[harness] = { text, signin: s, mayVerify, busy: verification.pending(s), feedback: verification.message(s) }
+    }
     for (const item of glanceItems(accounts.value, computers.value, DEFAULT_QUOTA_THRESHOLDS, agents.now)) {
       const s = item.signin
-      if (!s || (item.kind !== 'verify' && item.kind !== 'attention') || out[s.enrollment.harness]) continue
+      if (!s || (item.kind !== 'verify' && item.kind !== 'attention')) continue
       const vendor = HARNESS_NAME[s.enrollment.harness] ?? s.enrollment.harness
-      out[s.enrollment.harness] = {
-        text: item.name.startsWith(`${vendor} `) ? item.name.slice(vendor.length + 1) : item.name,
-        signin: s, mayVerify: item.kind === 'verify' && canVerify(s), busy: verification.pending(s), feedback: verification.message(s),
-      }
+      add(s, item.name.startsWith(`${vendor} `) ? item.name.slice(vendor.length + 1) : item.name, item.kind === 'verify' && canVerify(s))
     }
+    // A check that was asked for stays visible through queue, progress and result, as on Accounts and computers.
+    for (const s of verification.retained.value) add(s, said.get(signinKey(s)) ?? 'needs verifying', canVerify(s))
     return out
   })
-  return { problems, verify: (s: SignInReference) => verification.request(s) }
+  function verify(problem: DialProblem) {
+    said.set(signinKey(problem.signin), problem.text)
+    return verification.request(problem.signin)
+  }
+  return { problems, verify }
 }

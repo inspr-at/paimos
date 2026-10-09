@@ -24,7 +24,8 @@ const props = defineProps<{
   /** Only the height of this detail is wanted: folds closed, no ids, nothing focusable. */
   ghost?: boolean
 }>()
-const emit = defineEmits<{ change: [settings: DailySettings]; fold: [fold: DialFold] }>()
+// A change names the harness it was made for, so a pick made meanwhile never takes it over.
+const emit = defineEmits<{ change: [harness: string, settings: DailySettings]; fold: [fold: DialFold] }>()
 const harness = computed(() => props.view.harness)
 const name = computed(() => HARNESS_NAME[harness.value] ?? harness.value)
 const settings = computed(() => props.view.settings)
@@ -32,7 +33,7 @@ const bar = computed(() => dailyBar(props.view))
 const week = computed(() => weekParts(props.view, props.tz))
 const resets = computed(() => resetsLine(props.view.account, props.tz))
 const open = (fold: DialFold) => !props.ghost && (fold === 'pace' ? props.paceOpen : props.boostOpen)
-const change = (patch: Partial<DailySettings>) => emit('change', { ...settings.value, ...patch })
+const change = (patch: Partial<DailySettings>) => emit('change', harness.value, { ...settings.value, ...patch })
 const id = (part: string) => props.ghost ? undefined : `dial-${harness.value}-${part}`
 const tabbable = (n: 0 | -1 = 0) => props.ghost ? -1 : n
 

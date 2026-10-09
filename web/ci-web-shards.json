@@ -742,9 +742,9 @@
         ,
         {"file":"tests/agent-rules.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/agents-boost.spec.ts","listedTests":2,"weightSeconds":16,"weightSource":"AEON-883 targeted run, 15 seconds including server setup"}
-        ,
         {"file":"tests/agents-cleanup.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/agents-dial-daily.spec.ts","listedTests":32,"weightSeconds":110,"weightSource":"AEON-1036 targeted run, 86 seconds for 30 tests plus the 1024 captures"}
         ,
         {"file":"tests/agents-dial.spec.ts","listedTests":23,"weightSeconds":66.585366,"weightSource":"unmeasured-test-rate"}
         ,

@@ -37,9 +37,8 @@ const checks = computed(() => [`Fewer than ${props.total} running`, 'The harness
         <ul class="wa">
           <li v-for="h in harnesses" :key="h.key" :data-info-harness="h.key">
             <HarnessMark :harness="h.key" :size="14" /><span class="wa-n">{{ h.label }}</span><span class="wa-c">{{ h.places ?? '' }}</span>
-            <span class="wa-s">{{ problems[h.key]?.text ?? h.words }}</span>
-            <VerificationButton v-if="problems[h.key]?.mayVerify" class="sm" :busy="problems[h.key]!.busy" @click="verify(problems[h.key]!.signin)" />
-            <span v-if="problems[h.key]?.feedback" class="wa-f" role="status">{{ problems[h.key]!.feedback }}</span>
+            <span class="wa-s" aria-live="polite">{{ problems[h.key]?.feedback || problems[h.key]?.text || h.words }}</span>
+            <VerificationButton v-if="problems[h.key]?.mayVerify || problems[h.key]?.busy" class="sm" :busy="problems[h.key]!.busy" @click="verify(problems[h.key]!)" />
           </li>
         </ul>
       </section>
@@ -67,12 +66,13 @@ p { margin: 0; }
 .wt-l b { color: var(--ink); font-weight: 650; }
 .wt-s { margin-top: 6px; color: var(--ink-3); font-size: 12.5px; line-height: 1.45; text-wrap: pretty; }
 .wa, .wc { display: grid; gap: 2px; margin: 8px 0 0; padding: 0; list-style: none; }
-.wa li { display: grid; grid-template-columns: 16px auto 22px minmax(0, 1fr) auto; align-items: center; padding: 3px 0; gap: 8px; min-height: 30px; color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+.wa li { display: grid; grid-template-columns: 16px auto 22px minmax(0, 1fr) auto; align-items: start; gap: 8px; min-height: 30px; color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+.wa :deep(.mark) { margin-top: 8px; }
+.wa .wa-n, .wa .wa-c, .wa .wa-s { padding-block: 5px; line-height: 20px; }
 .wa .wa-n { color: var(--ink); font-weight: 600; }
 .wa .wa-c { color: var(--ink); font-weight: 650; text-align: right; }
-.wa .wa-s { min-width: 0; color: var(--ink-3); line-height: 1.4; text-wrap: pretty; }
-.wa .wa-f { grid-column: 2 / -1; color: var(--ink-3); font-size: 12px; line-height: 1.4; }
-.wa :deep(.btn) { min-height: 28px; }
+.wa .wa-s { min-width: 0; color: var(--ink-3); text-wrap: pretty; }
+.wa :deep(.btn) { min-height: 28px; margin-top: 1px; }
 .wc li { display: flex; align-items: flex-start; gap: 8px; min-height: 24px; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
 .wc li svg { flex: none; margin-top: 3px; color: var(--ok); }
 @container working (max-width: 1100px) {

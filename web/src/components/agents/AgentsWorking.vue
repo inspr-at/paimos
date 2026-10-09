@@ -8,7 +8,7 @@
 import { computed, nextTick, reactive, ref, useId, watch } from 'vue'
 import { accountRoomCopy, accountRoomWords, limitMode, liveCopy, modeLimit, nextLimitMode, noOwnTip, nowCopy, setLimit, statusCopy, stepLimit, stepTotal, waitingCopy, workingAccountRoom, workingRows, type HarnessLimit, type LimitMode } from '../../lib/agentsWorking'
 import { can } from '../../lib/authz'
-import { chipTip, dailyOf, dailyView, DEFAULT_DAILY_POINTS, needsAttention, stateWords, usageLine, type DailySettings } from '../../lib/dailyLimits'
+import { chipTip, dailyOf, dailyView, DEFAULT_DAILY_POINTS, needsAttention, stateWords, usageLine } from '../../lib/dailyLimits'
 import { selectedHarness } from '../../lib/dialPrefs'
 import { useAgentPlan } from '../../lib/useAgentPlan'
 import { useAgents } from '../../stores/agents'
@@ -82,7 +82,6 @@ function openAt(key: string) {
 function rowClick(event: MouseEvent, key: string) {
   if (!(event.target as HTMLElement).closest('.limit, .f-mode')) pick(key)
 }
-const changeDaily = (settings: DailySettings) => { if (selected.value) saveDaily(selected.value, settings) }
 const rowWords = (key: string) => stateWords(views.value[key]!, true)
 
 function changeTotal(delta: number) {
@@ -196,7 +195,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
             <DialDetail v-for="row in rows" :key="`ghost-${row.key}`" ghost :view="views[row.key]!" :total="total" :default-points="defaultPoints" :tz="snapshot.daily_timezone" :until="snapshot.daily_until" :pace-open="false" :boost-open="false" :may-manage="mayManage" />
             <DialDetail :key="selectedRow.key" :view="views[selectedRow.key]!" :total="total" :default-points="defaultPoints" :tz="snapshot.daily_timezone" :until="snapshot.daily_until"
               :pace-open="dialPrefs.foldOpen(selectedRow.key, 'pace')" :boost-open="dialPrefs.foldOpen(selectedRow.key, 'boost')" :may-manage="mayManage"
-              @change="changeDaily" @fold="dialPrefs.toggleFold(selectedRow.key, $event)" />
+              @change="saveDaily" @fold="dialPrefs.toggleFold(selectedRow.key, $event)" />
           </div>
         </div>
       </div>

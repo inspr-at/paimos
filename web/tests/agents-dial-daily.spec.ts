@@ -6,13 +6,14 @@ import AxeBuilder from '@axe-core/playwright'
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
-import { capacityWorld, NOW } from './capacity-fixtures'
+import { ACCOUNTS, capacityWorld, NOW } from './capacity-fixtures'
+import type { PairingView } from '../src/lib/agentPairing'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { mockDailyPlan, UNTIL, type DailyPlanOptions } from './agents-daily-fixtures'
 
 const shots = process.env.AEON_1036_SHOTS ?? 'test-results/aeon-1036-capsdial'
-interface SetupOptions extends DailyPlanOptions { folded?: boolean; waiting?: number; dial?: Record<string, unknown>; room?: Record<string, number>; manage?: boolean }
+interface SetupOptions extends DailyPlanOptions { folded?: boolean; waiting?: number; dial?: Record<string, unknown>; room?: Record<string, number>; manage?: boolean; capacityEdit?: (capacity: ReturnType<typeof capacityWorld>) => void }
 async function setup(page: Page, options: SetupOptions = {}) {
   await page.clock.setSystemTime(NOW)
   const work = fixtures()
@@ -21,6 +22,7 @@ async function setup(page: Page, options: SetupOptions = {}) {
   await mockWork(page, work, { admin: true })
   const data = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   const capacity = capacityWorld()
+  options.capacityEdit?.(capacity)
   data.accounts = (capacity.accounts as unknown as typeof data.accounts).filter(a => ['codex', 'claude', 'cursor'].includes(a.harness)).map(a => ({ ...a, registered_by_principal_id: me.id }))
   const calls = await mockAgents(page, data, { capacity })
   await page.route('**/api/me/permissions*', route => {
@@ -45,7 +47,7 @@ async function setup(page: Page, options: SetupOptions = {}) {
   const waiting = options.waiting ?? 1
   const queue = Array.from({ length: waiting }, (_, i) => ({ node_id: `waiting-${i}`, key: `AEON-${i}`, title: 'Waiting work', state: 'open', priority: 'normal', estimate_hours: 1, queued: { model_profile_id: null, waiting: true, wait_reason: '' } }))
   await page.route('**/api/queue', route => route.fulfill({ json: { items: queue, manual_order: false, capacity: {} } }))
-  return { work, calls, backend }
+  return { work, calls, backend, capacity }
 }
 const dial = (page: Page) => page.getByRole('region', { name: 'Agents at once' })
 const more = (page: Page) => dial(page).getByRole('button', { name: 'One agent more at once' })
@@ -139,6 +141,55 @@ test('AEON-1036: "● N running (M waiting) ▾" opens the info area, from the f
   await page.reload()
   await expect(info).toBeVisible()
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+})
+
+/** Every computer is online and its harnesses ready, except Claude on the first computer: its verification ran out. */
+function claudeNeedsVerifying(capacity: ReturnType<typeof capacityWorld>) {
+  const computers = capacity.computers as unknown as PairingView[]
+  for (const c of computers) {
+    const harnesses = [...new Set(c.enrollments.map(e => e.harness))]
+    Object.assign(c, {
+      connectivity: 'online', revision: 1,
+      harness_statuses: Object.fromEntries(harnesses.map(h => [h, 'ready'])), harness_details: Object.fromEntries(harnesses.map(h => [h, { state: 'ready' }])),
+      verification_capabilities: Object.fromEntries(harnesses.map(h => [h, { supported: true, policy: 'read_only', reason: '' }])),
+    })
+  }
+  const enrollment = computers[0]!.enrollments.find(e => e.account_id === ACCOUNTS.claude)!
+  Object.assign(enrollment, { can_verify: true, verification_state: 'expired', verification_expired_ready: false })
+  return { computer: computers[0]!, enrollment }
+}
+
+test('AEON-1036: the Accounts tile names what blocks a harness and offers Verify again in place, as Accounts and computers does', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  let blocked!: ReturnType<typeof claudeNeedsVerifying>
+  await setup(page, { example: 'pace', dial: { info_open: true }, capacityEdit: capacity => { blocked = claudeNeedsVerifying(capacity) } })
+  let posted: unknown = null
+  await page.route('**/api/agent-pairing/computers/*/enrollments/*/verify', route => {
+    posted = route.request().postDataJSON()
+    Object.assign(blocked.enrollment, { verification_state: 'queued', verification_run_id: 'b0000000-0000-4000-8000-000000001036' })
+    return route.fulfill({ json: { account_id: blocked.enrollment.account_id, run_id: 'b0000000-0000-4000-8000-000000001036' } })
+  })
+  await page.goto('/agents')
+  const tile = dial(page).locator('.wt-acc'), claude = tile.locator('[data-info-harness="claude"]')
+  await expect(claude).toContainText('needs verifying on mbp2607')
+  await expect(tile.locator('[data-info-harness="codex"]')).not.toContainText('verifying')
+  const verify = claude.locator('.verify-button')
+  await expect(verify).toBeVisible()
+  await expect(verify).toHaveText(/Verify again/)
+  await expectStableControls({
+    controls: { more: more(page), fewer: fewer(page), fold: dial(page).locator('.fs-tog'), toggle: dial(page).locator('.f-live'), verify, mark: claude.locator('.mark'), name: claude.locator('.wa-n') },
+    interactions: [{ name: 'verify', run: async () => { await verify.click(); await expect(verify).toHaveAttribute('aria-busy', 'true') } }],
+  })
+  expect(posted).toEqual({ expected_revision: blocked.computer.revision, expected_verification_run_id: null })
+  await expect(claude.locator('.wa-s')).toContainText('Waiting for the computer to start')
+})
+
+test('AEON-1036: without the right to manage accounts the Accounts tile names the problem and offers no Verify', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await setup(page, { example: 'pace', manage: false, dial: { info_open: true }, capacityEdit: capacity => { claudeNeedsVerifying(capacity) } })
+  await page.goto('/agents')
+  await expect(dial(page).locator('.wt-acc [data-info-harness="claude"]')).toContainText('needs verifying on mbp2607')
+  await expect(dial(page).locator('.wt-acc').getByRole('button', { name: 'Verify again' })).toHaveCount(0)
 })
 
 test('AEON-1036: the info area states demand against the dial, with and without waiting work', async ({ page }) => {
@@ -464,7 +515,7 @@ test('AEON-1036: the old header Boost today is gone and nothing writes to its en
   expect(calls.filter(c => /agent-accounts\/boost/.test(c.path))).toEqual([])
 })
 
-for (const width of [1440, 400]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as const) {
   test(`${width} ${theme}: folding, picking a harness, folds and the info area keep every control put`, async ({ page }, info) => {
     test.setTimeout(120_000)
     await page.setViewportSize({ width, height: 1000 })
