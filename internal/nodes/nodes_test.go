@@ -135,6 +135,7 @@ func call(t *testing.T, p *tenant.Principal, method, path, body string) (int, []
 }
 
 func TestSchemaAndTagMutationsRequirePersonAdmin(t *testing.T) {
+	t.Run("agent creates seeded tag without kind management", testAgentCreatesSeededTagWithoutKindManagement)
 	admin := newPrincipal(t, "schema-role-test")
 	makePerson := func(name, role string) tenant.Principal {
 		p := tenant.Principal{TenantID: admin.TenantID, Kind: tenant.Person, Name: name, Roles: []string{role}}
@@ -265,15 +266,15 @@ func TestKindCRUD(t *testing.T) {
 	page := decode[struct {
 		Items []kindJSON `json:"items"`
 	}](t, status, body, http.StatusOK)
-	if len(page.Items) != 10 {
+	if len(page.Items) != 11 {
 		t.Fatalf("starter kinds: %d", len(page.Items))
 	}
 	seeded := map[string]bool{}
 	for _, kind := range page.Items {
 		seeded[kind.Slug] = true
 	}
-	if !seeded["work"] || seeded["ticket"] || seeded["epic"] || seeded["task"] {
-		t.Fatalf("starter kinds must contain work without retired kinds: %v", seeded)
+	if !seeded["work"] || !seeded["tag"] || seeded["ticket"] || seeded["epic"] || seeded["task"] {
+		t.Fatalf("starter kinds must contain work and tag without retired kinds: %v", seeded)
 	}
 	if page.Items[0].AllowedChildKinds != nil {
 		t.Fatalf("starter allowed children: %#v", page.Items[0].AllowedChildKinds)

@@ -5120,6 +5120,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestStepupMigrationExpansionRollbackAndLegacyKinds","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestTagKindMigrationSeedsMissingAndPreservesCustomTenants","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestTenantGuardRefreshesVisibilityAfterRevocation","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/db","name":"TestTicketBenefitMigrationPreservesHistoryAndCustomSchema","tier":"GATED-FULL"}
