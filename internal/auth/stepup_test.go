@@ -60,6 +60,18 @@ func TestStepupOIDCFallbackUsesExistingIdentityAndFreshVerifiedAuthTime(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Every holder of the target permission is eligible, including a
+			// minimal custom role that grants no unrelated profile permission.
+			var roleID string
+			if err := adminPool.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'stepup_only','Protected change only') RETURNING id::text`, tid).Scan(&roleID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := adminPool.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'settings.manage')`, tid, roleID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := adminPool.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE tenant_id=$1 AND principal_id IN (SELECT p.id FROM principals p JOIN identities i ON i.id=p.identity_id WHERE p.tenant_id=$1 AND i.subject='owner-subject') AND scope_type='workspace'`, tid, roleID); err != nil {
+				t.Fatal(err)
+			}
 			// Mount a native module at this test origin; no configuration credential
 			// changes or additional OIDC client are needed.
 			native = stepup.New(appPool, phoneapprovals.New(appPool, nil, app.URL, nil, nil), app.URL)

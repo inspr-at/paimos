@@ -5,11 +5,11 @@ package authz
 func init() {
 	registerRoutes("stepup", map[string]string{
 		"POST /api/stepup-requests":                      "approvals.request",
-		"GET /api/stepup-requests":                       "profile.read|approvals.request",
-		"GET /api/stepup-requests/{requestId}":           "profile.read|approvals.request",
-		"POST /api/stepup-requests/{requestId}/options":  "profile.read",
-		"POST /api/stepup-requests/{requestId}/approve":  "profile.read",
-		"POST /api/stepup-requests/{requestId}/decline":  "profile.read",
+		"GET /api/stepup-requests":                       "profile.read|settings.manage|approvals.request",
+		"GET /api/stepup-requests/{requestId}":           "profile.read|settings.manage|approvals.request",
+		"POST /api/stepup-requests/{requestId}/options":  "profile.read|settings.manage",
+		"POST /api/stepup-requests/{requestId}/approve":  "profile.read|settings.manage",
+		"POST /api/stepup-requests/{requestId}/decline":  "profile.read|settings.manage",
 		"POST /api/stepup-requests/{requestId}/withdraw": "approvals.request",
 	})
 	registerDeclarations("stepup", "project_filtered", ProjectFilteredRoutes, map[string]bool{
