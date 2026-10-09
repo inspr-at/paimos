@@ -93,3 +93,13 @@ You item and the ticket state stays unchanged. Remote `./internal/delivery`
 passed on mbp2606. The remote merge-main static gate returned 0 (40 checks
 passed, no optional skips). Tier, shard and audit units passed 210/32/33.
 No origin push.
+
+Owner fallback, `d3ced0ca5`: a project with no lead settings and no lead
+principal completes through an existing person who already holds `nodes.write`
+(project role binding, then workspace owner, admin or member, then the ticket's
+creating person). A configured owner who lost that grant still refuses, with no
+substitute. No person with the grant, including while an agent still has it,
+writes one non-applicable Needs You proposal and leaves the state unchanged.
+No role, key or scope is created. Local and remote `./internal/delivery` passed
+on mbp2606 (`TestMergeDone` included). The merge-main static gate returned 0
+(41 checks passed, no optional skips). No origin push and no live backfill.
