@@ -132,9 +132,19 @@ func TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy(t *testing.T) {
 		t.Fatalf("private-quota boost rejection: %v", err)
 	}
 	// A key creator reads exactly its owner's daily facts, never the daemon's.
-	reader := owner
-	reader.Kind = tenant.Agent
+	reader := addPrincipal(t, owner.TenantID, "agent", "Plan reader", nil)
 	reader.KeyCreatorID = owner.ID
+	reader.Scopes = []string{agentplan.ReadScope}
+	var role string
+	if err := adminPool.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'daily_reader','Daily reader') RETURNING id::text`, owner.TenantID).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adminPool.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,$3)`, owner.TenantID, role, agentplan.ReadScope); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adminPool.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, owner.TenantID, reader.ID, role); err != nil {
+		t.Fatal(err)
+	}
 	agentOut := read(reader, now)
 	rawOwner, _ := json.Marshal(out.DailyState)
 	rawAgent, _ := json.Marshal(agentOut.DailyState)
