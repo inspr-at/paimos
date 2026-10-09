@@ -14,8 +14,12 @@ function request(id: string, patch: Partial<StepupRequest> = {}): StepupRequest 
 const anna = { decided_by: 'person-anna', decided_by_name: 'Anna', decision: 'approve' as const, method: 'oidc_reauth' as const, auth_time: '2026-10-09T11:21:00Z', applied_at: '2026-10-09T11:21:02Z', decided_at: '2026-10-09T11:21:02Z' }
 
 async function mockStepups(page: Page, options: { passkeys?: boolean; theme?: 'light' | 'dark'; rows?: StepupRequest[] } = {}) {
-  const desk = await mockDecisionDesk(page, { theme: options.theme })
-  const control = { rows: options.rows ?? [request('step-1'), request('step-2', { state: 'applied', revision: 2, ...anna })], calls: [] as { path: string; body: Record<string, unknown> }[],
+  const rows = options.rows ?? [request('step-1'), request('step-2', { state: 'applied', revision: 2, ...anna })]
+  const desk = await mockDecisionDesk(page, { theme: options.theme, projectedSources: () => rows.filter(row => row.state === 'pending').map(row => ({
+    id: row.id, kind: 'stepup', project_id: row.project_id ?? undefined, revision: row.revision, title: `Step-up · ${row.permission}`,
+    created_at: row.created_at, expires_at: row.expires_at, held: true, href: `/decision-desk?item=s:${row.id}`, source: `/api/stepup-requests/${row.id}`,
+  })) })
+  const control = { rows, calls: [] as { path: string; body: Record<string, unknown> }[],
     passkeys: options.passkeys ?? true, settle: undefined as undefined | ((row: StepupRequest, path: string) => void), desk,
     // hold delays the next decision call; ended settles the row elsewhere first and answers 409.
     hold: undefined as undefined | Promise<void>, ended: undefined as undefined | ((row: StepupRequest) => void), handled: [] as Promise<void>[] }

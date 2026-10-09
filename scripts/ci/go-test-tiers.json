@@ -3128,6 +3128,8 @@
     ,
     {"kind":"go","package":"internal/approvals","name":"TestDecisionRiskRequiresPersonRole","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/approvals","name":"TestGetApprovalKeepsNativeSourceAndHistoryVisibility","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/approvals","name":"TestListAndGetApprovalAgentName","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/approvals","name":"TestLiveGrantRejectsBadIDs","tier":"GATED-FULL"}
@@ -5230,6 +5232,8 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestCoverageFailureExplainsLimit","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestCutoverLinksKeepSourceIdentity","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestHeldRequestCanonicalizationDoesNotRepeatNotice","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestKeyTrimProjectionRequiresManageRightsAndKeepsNativeSource","tier":"GATED-FULL"}
@@ -5251,6 +5255,8 @@
     {"kind":"go","package":"internal/decisiondesk","name":"TestStepupProjectionBoundsTargetPermissionsAtProjectLimit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestStepupProjectionUsesNativePermissionAndHeldExpiry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestTierCutoverUsesNativeRowsAndCurrentProjectPermissions","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestUndecidableApprovalDoesNotStarveHeldQuestion","tier":"GATED-FULL"}
     ,
@@ -7727,6 +7733,10 @@
     {"kind":"go","package":"internal/questions","name":"TestDeliveryWaitsForSuccessorRegistration","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/questions","name":"TestDeskChainPublishedAlwaysReuseDeliveryAndCorrection","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/questions","name":"TestDeskFenceAcquiresTenantTreeBeforePairing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/questions","name":"TestDeskFenceDoesNotInvertProjectAccessWrite","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/questions","name":"TestDoctrineChangedBaseDuringGraceIsVisibleAndSafe","tier":"NIGHTLY"}
     ,

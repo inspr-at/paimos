@@ -529,18 +529,29 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const autopilot = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/status-autopilot.spec.ts')
   assert.ok(autopilot && autopilot.weightSeconds >= autopilotOnMain, 'Autopilot regressions must remain in the gate')
   const autopilotGrowth = autopilot.weightSeconds - autopilotOnMain
+  // AEON-569 adds two regression files and twelve no-shift cases. Compare
+  // the unchanged prior gate separately, then charge their explicit weights.
+  const deskFiles = new Set(['tests/decision-desk-fix2.spec.ts', 'tests/decision-desk-fix3.spec.ts'])
+  const deskAdded = real.groups.flatMap(group => group.specs).filter(spec => deskFiles.has(spec.file))
+  assert.equal(deskAdded.length, 2, 'Both cutover regression files must remain in the gate')
+  const noShift = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/no-shift.spec.ts')
+  const noShiftOnMain = 10.171603
+  assert.ok(noShift && noShift.weightSeconds >= noShiftOnMain, 'No-shift regressions must remain in the gate')
+  const deskGrowth = deskAdded.reduce((sum, spec) => sum + spec.weightSeconds, 0) + noShift.weightSeconds - noShiftOnMain
   const priorGate = {
     ...real,
     groups: real.groups.filter(group => group !== attention).map(group => ({
       ...group,
-      specs: group.specs.map(spec => spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } : spec),
+      specs: group.specs.filter(spec => !deskFiles.has(spec.file)).map(spec =>
+        spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
+          spec === noShift ? { ...spec, weightSeconds: noShiftOnMain } : spec),
     })),
   }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
-    'expanded gate exceeds the prior estimate plus the attention and autopilot specs')
+    'expanded gate exceeds the prior estimate plus the attention, autopilot and cutover specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {

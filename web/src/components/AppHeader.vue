@@ -8,6 +8,7 @@ import mark from '../assets/brand/aeon-mark.svg'
 import { useSession } from '../stores/session'
 import { useProjects } from '../stores/projects'
 import { useAgents } from '../stores/agents'
+import { useDecisionDesk } from '../stores/decisionDesk'
 import { useBusiness } from '../stores/business'
 import { useCustomers } from '../stores/customers'
 import { useQuotes } from '../stores/quotes'
@@ -35,6 +36,7 @@ import { useProjectHeader } from '../lib/useProjectHeader'
 const session = useSession()
 const projects = useProjects()
 const agents = useAgents()
+const desk = useDecisionDesk()
 const business = useBusiness()
 const customers = useCustomers()
 const quotes = useQuotes()
@@ -80,9 +82,8 @@ const places = computed(() => visiblePlaces({ signedIn: !!session.identity, busi
 // never slides sideways when Business turns up a moment after the first paint.
 const navReady = computed(() => !session.identity || business.placeKnown)
 const activePlace = computed(() => placeOf(route.path))
-const PLACE_ROOT: Record<PlaceId, string> = { projects: '/', agents: '/agents', business: '/business' }
+const PLACE_ROOT: Record<PlaceId, string> = { projects: '/', desk: '/decision-desk', agents: '/agents', business: '/business' }
 const atPlaceRoot = computed(() => !!activePlace.value && (route.path === PLACE_ROOT[activePlace.value] || (activePlace.value === 'agents' && route.path.startsWith('/agents/'))))
-const agentsPage = computed(() => activePlace.value === 'agents')
 const businessPage = computed(() => activePlace.value === 'business')
 // A customer's page reads Customers / its name; the other Business pages their title.
 const businessCrumbs = computed(() => {
@@ -94,7 +95,7 @@ const businessCrumbs = computed(() => {
 // Document profiles live under Business: Settings / Business / Document profiles.
 const profilesPage = computed(() => route.path.startsWith('/settings/business/profiles'))
 const settingsSection = computed(() => route.path.startsWith('/settings') ? SETTINGS_SECTIONS.find(section => section.id === (profilesPage.value ? 'business' : sectionOf(route.params.section))) ?? null : null)
-const placeLabel = (id: PlaceId) => id === 'agents' && agents.needsCount ? `Agents, ${agents.needsCount} ${agents.needsCount === 1 ? 'needs' : 'need'} you` : undefined
+const placeLabel = (id: PlaceId) => id === 'desk' ? `Decision Desk, ${desk.count === null ? 'count unavailable' : `${desk.count} open`}` : undefined
 
 watch(command, value => { if (value?.command.name === 'palette') { consume(); palette.value?.open() } })
 function typing(target: EventTarget | null) {
@@ -158,8 +159,8 @@ function chordPointer(event: PointerEvent) {
   disarmChord()
 }
 function chordFocus(event: FocusEvent) { if (typing(event.target)) disarmChord() }
-// The Agents badge: permission requests and held action requests, checked each minute.
-const needsPoll = usePoller(() => agents.loadNeeds(true), 60_000, { enabled: () => !!session.identity && !agentsPage.value, invalidate: agents.invalidatePolls })
+// One canonical Decision Desk count, independent of live sessions.
+const needsPoll = usePoller(() => desk.refresh(), 30_000, { enabled: () => session.identity?.principal.kind === 'person', invalidate: desk.invalidate })
 // The doctrine inbox (AEON-444): people who can send a proposal to git see a dot
 // while proposals wait, and one toast per new proposal.
 const doctrineReviewer = () => session.identity?.principal.kind === 'person' && can('rules.write')
@@ -167,7 +168,7 @@ async function doctrinePoll() {
   const principal = session.identity?.principal.id
   if (!principal || !doctrineReviewer()) return
   const text = await pollDoctrineInbox(principal)
-  if (text) toast(text, { key: 'doctrine-inbox', timeout: 9000, action: { label: 'Review', run: () => void router.push('/settings/agent-rules#doctrine-inbox') } })
+  if (text) toast(text, { key: 'doctrine-inbox', timeout: 9000, action: { label: 'Review', run: () => void router.push('/decision-desk') } })
 }
 const doctrinePoller = usePoller(doctrinePoll, 30_000, { enabled: () => !!session.identity && doctrineReviewer() })
 // Permissions arrive after the identity: the first read follows them.
@@ -196,7 +197,8 @@ function fitMoon() {
   const el = header.value
   if (!el || !narrow.matches) { moonAway.value = false; return }
   const crumb = el.querySelector<HTMLElement>('.crumbs > .crumb.current')
-  const overflow = crumb ? crumb.scrollWidth - crumb.clientWidth : 0
+  const trail = el.querySelector<HTMLElement>('.crumbs')
+  const overflow = Math.max(el.scrollWidth - el.clientWidth, trail ? trail.scrollWidth - trail.clientWidth : 0, crumb ? crumb.scrollWidth - crumb.clientWidth : 0)
   const width = el.clientWidth
   if (!moonAway.value) {
     if (overflow > 0.5) { moonAway.value = true; if (returnedAt === width) heldAt = width }
@@ -252,13 +254,13 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
     <nav v-if="places.length && !fatal && navReady" class="places" aria-label="Places">
       <RouterLink
         v-for="place in places" :key="place.id" :to="place.to" class="place" :class="{ active: activePlace === place.id }"
-        :aria-current="activePlace === place.id ? (atPlaceRoot ? 'page' : 'true') : undefined" :aria-label="placeLabel(place.id)"
-        :data-tip="agents.needsCount && place.id === 'agents' ? `${agents.needsCount} waiting for you · g then a` : `g then ${place.key}`"
+        :aria-current="activePlace === place.id ? (atPlaceRoot ? 'page' : 'true') : undefined" :aria-label="placeLabel(place.id)" :data-place="place.id"
+        :data-tip="place.id === 'desk' ? `${desk.error || (desk.count === null ? 'Reading Decision Desk' : `${desk.count} open in Decision Desk`)} · g then d` : `g then ${place.key}`"
       >
         <BizIcon v-if="place.id === 'business'" name="briefcase" :size="16" />
-        <AppIcon v-else :name="place.id === 'agents' ? 'agent' : 'folder'" :size="16" />
+        <AppIcon v-else :name="place.id === 'agents' ? 'agent' : place.id === 'desk' ? 'check' : 'folder'" :size="16" />
         <span class="place-text">{{ place.label }}</span>
-        <span v-if="place.id === 'agents' && agents.needsCount" class="needs-badge" aria-hidden="true">{{ agents.needsCount > 99 ? '99+' : agents.needsCount }}</span>
+        <span v-if="place.id === 'desk'" class="needs-badge" :class="{ empty: desk.count === 0 }" aria-hidden="true">{{ desk.count === null ? '?' : desk.count > 99 ? '99+' : desk.count }}</span>
       </RouterLink>
     </nav>
     <nav v-if="session.identity && !fatal && navReady && (projectKey || businessCrumbs.length || settingsSection || pageTitle || allKnowledge || allTickets)" class="crumbs" :class="{ lead: !activePlace }" aria-label="Breadcrumb">
@@ -389,7 +391,8 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .mono-crumb { font: 500 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
 .spacer { flex: 1 1 0; min-width: 0; }
 .search-pill, .header-btn { flex-shrink: 0; }
-.needs-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--gold-2); color: var(--gold-on); font: 700 10.5px/1 var(--mono); font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--surface-raised); }
+.needs-badge { display: inline-grid; place-items: center; min-width: 3ch; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--gold-2); color: var(--gold-on); font: 700 10.5px/1 var(--mono); font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--surface-raised); }
+.needs-badge.empty { visibility: hidden; }
 .search-pill {
   display: inline-flex; align-items: center; gap: 9px; width: 240px; height: 34px; padding: 0 6px 0 12px; border: 1px solid var(--glass-edge); border-radius: 999px;
   background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink-3); font-size: 13px;
@@ -401,7 +404,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .pill-keys { display: inline-flex; gap: 3px; }
 /* Narrower desktops: the wordmark steps back on inner pages, then the place labels. */
 @media (max-width: 1180px) { .lockup.compact .wordmark, .lockup.compact.has-logo .tenant-name { display: none; } }
-@media (max-width: 980px) {
+@media (max-width: 1180px) {
   .place { width: 36px; padding: 0; justify-content: center; }
   .place-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .place .needs-badge { position: absolute; top: -4px; right: -6px; margin: 0; }
@@ -431,6 +434,9 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   /* Phones: the places are round header buttons like search and the avatar. */
   .places { gap: 2px; padding: 0; background: none; box-shadow: none; }
   .place { width: 44px; height: 44px; }
+  /* The desk keeps its place on phones; Business remains in the app menu
+     and on g b, leaving the ticket key and touch targets their room. */
+  .place[data-place="business"] { display: none; }
   .place:not(.active) { border: 1px solid var(--glass-edge); background: var(--btn-bg); box-shadow: var(--shadow-btn); }
   .place.active { box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--chip-teal-line); }
   .place .needs-badge { top: 2px; right: 0; }
@@ -453,6 +459,14 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 /* The narrowest phones: round buttons sit close, as the places do, so a ticket
    key keeps its room. The moon steps aside only when measured room runs out. */
 @media (max-width: 430px) { .app-header { gap: 2px; padding: 0 8px; } }
+/* At the narrowest width the project fold keeps its full touch target; the
+   project name remains in its accessible label and the page header. */
+@media (max-width: 360px) {
+  .app-header { gap: 0; padding: 0 6px; }
+  .places { gap: 0; }
+  .app-header .crumbs > .phone-header-fold { min-inline-size: 44px; }
+  .phone-header-fold .key-badge { display: none; }
+}
 @media (max-width: 600px) { .theme-btn.away { display: none; } }
 /* A square workspace logo leads the places at a place's root; wide logos and inner pages leave the room to them. */
 @media (min-width: 380px) and (max-width: 600px) {
