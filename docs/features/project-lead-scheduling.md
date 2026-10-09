@@ -26,3 +26,15 @@ checks dial, harness, account room and host load. Ready routed workers have
 priority over lead restart; restart remains an explicit intent through ordinary
 admission. No workers are adopted or reassigned. The production admission adapter
 and automatic launch remain disabled until AEON-603 end-to-end qualification.
+
+Lead snapshots expose `automatic_launch_enabled: false`, independently of
+admission adapters. Start and Resume stay unavailable with this explanation;
+an unreadable or older snapshot also keeps them unavailable. An existing start
+intent stays cancellable and says it is waiting for a runtime while automatic
+launch is off. New intents store `awaiting_generation`; the old first-insert
+`start_checks_unavailable` reason is corrected on reads, without changing stored
+history. An actual failed admission names the check when identified; an absent
+or failed adapter reports `admission_unavailable` without exposing error text.
+The wait projection is bounded to five minutes for a future qualified enabled
+launch, then reports `runtime_pickup_timeout`. This only changes visible state:
+it does not launch, retry, cancel, free slots or change Engine W2 dispatch.

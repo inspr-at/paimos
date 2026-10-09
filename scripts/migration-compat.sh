@@ -60,23 +60,7 @@ start_previous() {
     -e "AEON_DATABASE_URL=postgres://aeon:aeon@$db:5432/aeon?sslmode=disable" \
     "$image_id" >/dev/null
   base="http://$(docker port "$app" 8080/tcp)"
-  python3 - "$base" "$root/scripts/migration-compat-probe.py" <<'PY'
-import importlib.util, json, sys, time, urllib.request
-base, probe_path = sys.argv[1], sys.argv[2]
-spec = importlib.util.spec_from_file_location('migration_compat_probe', probe_path)
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-for _ in range(60):
-    try:
-        with urllib.request.urlopen(base + '/api/ready', timeout=2) as response:
-            if response.status == 200 and module.is_ready(json.load(response)):
-                break
-    except (OSError, ValueError):
-        pass
-    time.sleep(1)
-else:
-    raise SystemExit('Previous release did not become ready; compatibility gate failed')
-PY
+  python3 scripts/migration-compat-probe.py wait-ready --base "$base"
 }
 
 start_previous

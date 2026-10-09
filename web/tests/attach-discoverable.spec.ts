@@ -461,6 +461,9 @@ test('a list still on its way when the person changes is never shown to the next
   })
   await page.goto('/agents')
   await expect.poll(() => anyAsked).toBeGreaterThanOrEqual(1)
+  // The first paint's permission reads finish before the next person's are held.
+  // Session rows appear only after those reads. Arming the hold earlier swallows
+  // them, the page stays on Loading, and the click below never finds a row.
   releaseSessions()
   const stateCell = page.locator('[data-row^="s:"] .c-state').first()
   await expect(stateCell).toBeVisible()

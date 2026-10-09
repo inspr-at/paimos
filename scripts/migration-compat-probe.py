@@ -5,13 +5,34 @@ import argparse
 import http.cookiejar
 import json
 from pathlib import Path
+import time
 import urllib.error
 import urllib.request
 
 
-def is_ready(payload):
-    """Readiness is the status field. Release 128 added pool statistics beside it."""
-    return isinstance(payload, dict) and payload.get('status') == 'ready'
+def release_ready(payload):
+    """A previous binary is ready only when status is ready and it names no failure.
+
+    AEON-995 adds pool statistics beside status. Older releases return status
+    alone. A reason, another field, or a non-object is not readiness.
+    """
+    if not isinstance(payload, dict) or set(payload) - {'status', 'pool'}:
+        return False
+    pool = payload.get('pool')
+    return payload.get('status') == 'ready' and (pool is None or isinstance(pool, dict))
+
+
+def wait_ready(base, attempts=60, pause=1):
+    for _ in range(attempts):
+        try:
+            with urllib.request.urlopen(base + '/api/ready', timeout=2) as response:
+                if response.status == 200 and release_ready(json.load(response)):
+                    return
+        except (OSError, ValueError):
+            pass
+        if pause:
+            time.sleep(pause)
+    raise SystemExit('Previous release did not become ready; compatibility gate failed')
 
 
 class Probe:
@@ -57,7 +78,7 @@ class Probe:
     def check(self, state, version):
         if self.call('/api/health') != {'status': 'ok', 'db': 'ok'}:
             raise AssertionError('previous release health is not OK')
-        if not is_ready(self.call('/api/ready')):
+        if not release_ready(self.call('/api/ready')):
             raise AssertionError('previous release is not ready')
         if self.call('/api/version')['version'] != version:
             raise AssertionError('tested binary does not match the previous release')
@@ -82,11 +103,16 @@ class Probe:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['seed', 'check'])
+    parser.add_argument('mode', choices=['seed', 'check', 'wait-ready'])
     parser.add_argument('--base', required=True)
-    parser.add_argument('--state', type=Path, required=True)
-    parser.add_argument('--version', required=True)
+    parser.add_argument('--state', type=Path)
+    parser.add_argument('--version')
     args = parser.parse_args()
+    if args.mode == 'wait-ready':
+        wait_ready(args.base)
+        return
+    if args.state is None or not args.version:
+        parser.error('seed and check require --state and --version')
     probe = Probe(args.base)
     if args.mode == 'seed':
         state = probe.seed()
