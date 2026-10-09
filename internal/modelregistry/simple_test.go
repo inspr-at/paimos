@@ -264,6 +264,68 @@ func TestMinimalSimpleReadPreservesFirstAndFallback(t *testing.T) {
 	}
 }
 
+// Risk: a queued scout or mechanical ticket is shown as blocked because the
+// board does not apply. Dispatch keeps the role ladder; the page must too.
+func TestMinimalQueuedScoutUsesRoleLadderWhenBoardDoesNotApply(t *testing.T) {
+	admin, member := boardFixture(t)
+	ps := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	minimalAccount(t, admin, profileBySlug(ps, "codex-luna-medium"))
+	project := editorProject(t, admin, "SCOUT-3")
+	var ticket string
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state,project_id,fields) SELECT $1,id,'SCOUT-1','Queued scout','open',$2,'{"area":"backend","route_role":"scout"}' FROM node_kinds WHERE slug='work' RETURNING id::text`, admin.TenantID, project).Scan(&ticket); err != nil {
+			return err
+		}
+		var order, runner string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id) SELECT $1,id,'SCOUT-2','Queued order',$2,$3 FROM node_kinds WHERE slug='work_order' RETURNING id::text`, admin.TenantID, ticket, project).Scan(&order); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, admin.TenantID, order, member.ID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT registered_by_principal_id::text FROM agent_accounts WHERE harness='codex' LIMIT 1`).Scan(&runner); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,queue_node_id,queue_by_principal_id,queue_at,queue_security_review_required) VALUES($1,$2,$3,$4,$5,now(),false)`, admin.TenantID, order, runner, ticket, member.ID)
+		return err
+	})
+	var want string
+	inRegistry(t, member, func(tx pgx.Tx) error {
+		now, err := dbNow(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		q := WorkQuery{TicketID: ticket, PersonID: &member.ID, ProjectID: project, Role: "scout", Area: "backend", Situation: "first", ExplicitBoard: true, Queued: true}
+		board, err := resolveBoardWork(t.Context(), tx, member, q, now, nil)
+		if err != nil {
+			return err
+		}
+		if board != nil {
+			t.Fatal("scout unexpectedly used the board; this no longer proves the ladder fallback")
+		}
+		mechanical, err := resolveBoardWork(t.Context(), tx, member, WorkQuery{Role: "mechanical", TicketID: ticket, Area: "backend", ExplicitBoard: true}, now, nil)
+		if err != nil {
+			return err
+		}
+		if mechanical != nil {
+			t.Fatal("mechanical unexpectedly used the board")
+		}
+		resolved, err := ResolveWork(t.Context(), tx, member, q, now)
+		if err != nil {
+			return err
+		}
+		if resolved.Profile == nil {
+			t.Fatal("scout ladder itself has nothing runnable")
+		}
+		want = boardLineID(*resolved.Profile)
+		return nil
+	})
+	doc := boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple", nil, ""), 200)
+	if doc.Next == nil || doc.Next.Ticket != "SCOUT-1" || doc.Next.Column != "backend" || doc.Next.Line == nil || *doc.Next.Line != want {
+		t.Fatalf("queued scout role was reported blocked or left the ladder: next=%+v want=%s", doc.Next, want)
+	}
+}
+
 // Risk: fallback stops at a failed column/default or borrows the wrong
 // account. Every skip must explain the actual selected replacement.
 func TestMinimalFallbackColumnDefaultRoleAndSkipReasons(t *testing.T) {

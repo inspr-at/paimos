@@ -216,6 +216,20 @@ describe('the card’s writes', () => {
     await model.pick(concept, model.entries.value.find(entry => entry.line === 'anthropic:sonnet')!, 'max')
     expect(putOrder).toHaveBeenCalledWith('me', 'concept', { rank: ['anthropic:sonnet', 'anthropic:opus', 'xai:grok', 'openai:sol'], not: ['unknown:x', 'openai:luna'] }, 3, simplePerson)
   })
+  it('restores a saved workspace order on Undo, including its rank, exclusions and effort', async () => {
+    // The board reports a saved For everyone order as "own". A fixture that says "default" hides a DELETE.
+    const saved = { rank: ['anthropic:opus', 'xai:grok', 'openai:sol'], not: ['unknown:x', 'openai:luna'] }
+    const columns = tailBoard().columns.map(column => column.column === 'concept' ? { ...column, source: 'own' as const, stored: saved, stored_effort: 'high' } : column)
+    vi.mocked(getTail).mockResolvedValue(tailBoard({ columns }))
+    const model = await page(); model.setScope('default'); await settle()
+    vi.mocked(getSimple).mockImplementation(async () => simpleDoc({ revision: 5 })); vi.mocked(getTail).mockResolvedValue(tailBoard({ revision: 5, columns }))
+    const concept = model.rows.value.find(row => row.key === 'concept')!
+    expect(await model.pick(concept, model.entries.value.find(entry => entry.line === 'anthropic:sonnet')!, 'max')).toBe(true)
+    toasts.at(-1)!.actions[0]!.run(); await settle()
+    expect(resetOrder).not.toHaveBeenCalled()
+    expect(putOrder).toHaveBeenLastCalledWith('default', 'concept', saved, 5, simplePerson)
+    expect(putEffort).toHaveBeenCalledWith('default', 'concept', 'high', 6, simplePerson)
+  })
   it('undoes with the inverse writes against the revisions the change ended on, and refuses once the page moved on', async () => {
     const model = await page(), concept = model.rows.value.find(row => row.key === 'concept')!
     vi.mocked(getSimple).mockImplementation(async () => simpleDoc({ revision: 5 })); vi.mocked(getTail).mockResolvedValue(tailBoard({ revision: 5 }))

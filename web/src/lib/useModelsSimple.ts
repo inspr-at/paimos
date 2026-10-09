@@ -148,7 +148,8 @@ export function useModelsSimple() {
     const state = doc.value, current = capture(), prefs = state?.revision, rulesRev = state?.rules_revision, target = scope.value
     return { current, same: () => !!doc.value && current() && scope.value === target && doc.value.revision === prefs && doc.value.rules_revision === rulesRev }
   }
-  const storedOrder = (column: TailColumn) => column.source === (scope.value === 'me' ? 'own' : 'default')
+  // The board calls a saved order "own" on both Just me and For everyone. "default" is the workspace order a person follows, not an order For everyone stored.
+  const storedOrder = (column: TailColumn) => column.source === 'own'
   /** An order's existence is not a stored native effort. Skip the write only when that effort is the one on screen. */
   const carriesStoredEffort = (column: TailColumn, wanted: string | null) => !!wanted && column.stored_effort === wanted
 

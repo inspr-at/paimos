@@ -368,7 +368,19 @@ func simpleNextFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, person *s
 	if err != nil {
 		return nil, err
 	}
-	if resolved == nil || resolved.Profile == nil {
+	// Scout, mechanical, and an unadopted board return nil and keep the role
+	// ladder. Nil means the board does not apply, not that nothing can run.
+	if resolved == nil {
+		fallback, err := ResolveWork(ctx, tx, p, q, now)
+		if err != nil {
+			return nil, err
+		}
+		if fallback.Trace.Column == "" && q.Area != "" {
+			fallback.Trace.Column = q.Area
+		}
+		resolved = &fallback
+	}
+	if resolved.Profile == nil {
 		// The ticket is queued. Nothing that can run it is not an empty queue.
 		out := &simpleNext{Ticket: key, Trace: []simpleTrace{}}
 		if resolved != nil {

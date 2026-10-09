@@ -6678,6 +6678,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalOmittedKindFollowsDefaultAndKeepsStoredTail","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalQueuedScoutUsesRoleLadderWhenBoardDoesNotApply","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalRemovePreviewQualificationAndPrivacy","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalScheduledRetirementBoundaryAndUndo","tier":"ESSENTIAL"}

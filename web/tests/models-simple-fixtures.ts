@@ -130,7 +130,7 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     const columns: TailColumn[] = [['other', 'Everything else'], ...KINDS.map(([column, label]) => [column, options.longLabels && column === 'design' ? 'UI design for the customer-facing marketing site and every campaign landing page' : label] as [string, string]), ...REVIEWS.map(column => [column, `Review of ${column.split(':')[1]}`] as [string, string])].map(([column, label]) => {
       const order = inherited(layer, column!), lock = lockOf(column!), direct = own(layer, column!)
       const rank = lock ? [lock.line, ...order.rank!.filter(id => id !== lock.line)] : order.rank!
-      return { column: column!, label: label!, fixed: column === 'other' || column!.startsWith('review:'), hidden: false, source: direct?.rank ? (layer === 'mine' ? 'own' : 'default') : 'template',
+      return { column: column!, label: label!, fixed: column === 'other' || column!.startsWith('review:'), hidden: false, source: direct?.rank ? 'own' : 'template',
         list: rank.map(id => ({ line: id, ...(lock && id === lock.line ? { lock: { kind: 'rule' } } : {}) })), not: order.not.map(id => ({ line: id })),
         stored: { rank: [...(order.rank ?? [])], not: [...order.not] }, ...(direct ? { stored_effort: direct.effort } : {}),
         cant: column === 'concept' || column === 'other' || column!.startsWith('review:') ? [] : [{ line: 'xai:grok', reason: 'No tools in PAIMOS' }, ...(options.fresh ? [{ line: NEW_LINE.id, reason: 'No tools in PAIMOS' }] : [])] } as TailColumn

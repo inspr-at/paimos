@@ -15266,6 +15266,8 @@
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > reports a refused write as refused: refreshes, says it was not saved, shows no success and no Undo","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > restores a saved workspace order on Undo, including its rank, exclusions and effort","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > stops a lock when the rules moved since the page was read","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > undoes with the inverse writes against the revisions the change ended on, and refuses once the page moved on","tier":"ESSENTIAL"}
