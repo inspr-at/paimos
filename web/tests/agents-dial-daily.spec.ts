@@ -442,6 +442,30 @@ test.describe('settings written from the detail', () => {
     expect(backend.puts[1]!.value.daily!.claude!.at_limit).toBe('ladder')
   })
 
+  test('At the limit works from the keyboard: the arrow keys pick the other option and take focus with them', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    const { backend } = await setup(page, { example: 'limit', dial: { selected: 'claude' } })
+    await page.goto('/agents')
+    const choice = detail(page, 'claude').getByRole('radiogroup', { name: 'At the limit' })
+    const ladder = choice.getByRole('radio', { name: 'Follow the model ladder' }), wait = choice.getByRole('radio', { name: 'Wait' })
+    // Only the chosen option is in the tab order, so the arrows are the way to the other one.
+    await expect(ladder).toHaveAttribute('tabindex', '0'); await expect(wait).toHaveAttribute('tabindex', '-1')
+    await ladder.focus()
+    const picks: { key: string; to: 'ladder' | 'wait' }[] = [{ key: 'ArrowRight', to: 'wait' }, { key: 'ArrowLeft', to: 'ladder' }, { key: 'ArrowDown', to: 'wait' }, { key: 'ArrowUp', to: 'ladder' }, { key: 'End', to: 'wait' }, { key: 'Home', to: 'ladder' }]
+    for (const [i, { key, to }] of picks.entries()) {
+      await page.keyboard.press(key)
+      await expect.poll(() => backend.puts.length, key).toBe(i + 1)
+      expect(backend.puts[i]!.value.daily!.claude!.at_limit, key).toBe(to)
+      const [now, other] = to === 'wait' ? [wait, ladder] : [ladder, wait]
+      await expect(now, key).toHaveAttribute('aria-checked', 'true'); await expect(now, key).toBeFocused(); await expect(now, key).toHaveAttribute('tabindex', '0')
+      await expect(other, key).toHaveAttribute('aria-checked', 'false'); await expect(other, key).toHaveAttribute('tabindex', '-1')
+    }
+    // The key on the option that is already chosen writes nothing.
+    await page.keyboard.press('Home')
+    await expect(ladder).toBeFocused()
+    expect(backend.puts).toHaveLength(picks.length)
+  })
+
   test('a failed write keeps the confirmed settings on screen and says so', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
     const { backend } = await setup(page, { example: 'pace', dial: { selected: 'claude', folds: { 'claude:pace': true } } })

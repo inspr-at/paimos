@@ -94,6 +94,19 @@ function boostClear() { if (boost.value) change({ boost_today: null }) }
 
 // ---------- At the limit ----------
 const atLimit = (value: AtLimit) => { if (settings.value.at_limit !== value) change({ at_limit: value }) }
+const AT_LIMIT: AtLimit[] = ['ladder', 'wait']
+// Only the chosen option is in the tab order, so the arrow keys move between the two like native radios:
+// they pick the neighbour and move focus with it. Browser and OS shortcuts (⌘←, Alt+←) stay untouched.
+function atLimitKey(event: KeyboardEvent, index: number) {
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+  const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+  const to = event.key === 'Home' ? 0 : event.key === 'End' ? AT_LIMIT.length - 1 : step ? (index + step + AT_LIMIT.length) % AT_LIMIT.length : -1
+  if (to < 0) return
+  event.preventDefault()
+  atLimit(AT_LIMIT[to]!)
+  const options = (event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLElement>('[role="radio"]')
+  options?.[to]?.focus()
+}
 // A new harness starts from its own drafts.
 watch(harness, () => { paceEditing.value = false; paceNote.value = ''; boostEditing.value = false; boostNote.value = ''; asLocal.value = 'used' })
 const SETTINGS = '/settings/accounts'
@@ -158,7 +171,7 @@ const active = computed(() => props.view.account?.account_id)
         </dd>
         <dt><span :id="id('at-label')" class="eyebrow">At the limit</span></dt>
         <dd>
-          <span class="seg" role="radiogroup" :aria-labelledby="id('at-label')"><button type="button" role="radio" :aria-checked="settings.at_limit === 'ladder'" :tabindex="tabbable(settings.at_limit === 'ladder' ? 0 : -1)" @click="atLimit('ladder')">Follow the model ladder</button><button type="button" role="radio" :aria-checked="settings.at_limit === 'wait'" :tabindex="tabbable(settings.at_limit === 'wait' ? 0 : -1)" @click="atLimit('wait')">Wait</button></span>
+          <span class="seg" role="radiogroup" :aria-labelledby="id('at-label')"><button type="button" role="radio" :aria-checked="settings.at_limit === 'ladder'" :tabindex="tabbable(settings.at_limit === 'ladder' ? 0 : -1)" @click="atLimit('ladder')" @keydown="atLimitKey($event, 0)">Follow the model ladder</button><button type="button" role="radio" :aria-checked="settings.at_limit === 'wait'" :tabindex="tabbable(settings.at_limit === 'wait' ? 0 : -1)" @click="atLimit('wait')" @keydown="atLimitKey($event, 1)">Wait</button></span>
           <p class="cap-note">{{ settings.at_limit === 'ladder' ? `${view.next ? `${atLimitWords(view)}.` : 'New work moves on to the next model for the work at hand.'} ` : 'New work waits until midnight. Running agents finish. ' }}<RouterLink v-if="settings.at_limit === 'ladder'" class="link-btn" to="/settings/models" :tabindex="tabbable()">Models</RouterLink></p>
         </dd>
         <dt><span class="eyebrow">{{ view.accounts.length > 1 ? 'Accounts' : 'Account' }}</span></dt>
