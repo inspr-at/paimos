@@ -12,7 +12,8 @@ import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
 import { planningPresent } from '../lib/planning'
-import { useDensity, useHeaderGraph } from '../lib/prefs'
+import { useDensity } from '../lib/prefs'
+import { useDeveloperSettings } from '../lib/developerSettings'
 import { useProjectHeader } from '../lib/useProjectHeader'
 import { selectionHiddenByPolicy, type HideState } from '../lib/hideStates'
 import { groupStates, reconcileStatusHide, type HeaderStatusGroup } from '../lib/projectStatusCounts'
@@ -237,8 +238,12 @@ function resetColumns() {
 }
 function saveWidths(widths: Partial<Record<ColumnId, number>>) { listPref.value?.save({ ...(listPrefs.value ?? {}), widths }) }
 const { density, set: setDensity } = useDensity()
-const { headerGraph, ready: headerGraphReady, set: setHeaderGraph } = useHeaderGraph()
-const glimpseActive = ref(false)
+// AEON-1042: the header graph is a developer opt-in, off by default. Off, the
+// glimpse is not mounted and the header keeps its plain geometry.
+const { showHeaderGraph, loading: developerLoading } = useDeveloperSettings()
+const headerGraph = computed(() => !developerLoading.value && showHeaderGraph.value)
+const glimpseShown = ref(false)
+const glimpseActive = computed(() => headerGraph.value && !graphActive.value && glimpseShown.value)
 // A status change that met someone else's newer version opens the ticket to review it.
 async function fetchWorkList(query: ListQuery) {
   if (!query.state?.some(state => state === 'queued' || state === '!queued') || !projectId.value) return listNodes(query)
@@ -1763,7 +1768,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         <div v-if="ticketsHeader" class="activity header-activity"><span>Active <time :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time></span>
           <button v-if="queueSnapshot?.items.length || queueError" type="button" class="stat q-stat" aria-haspopup="dialog" :aria-expanded="!!queueAnchor" :aria-label="queueError ? 'Queue read failed. Open the work queue to retry' : `${queueSnapshot?.items.length} queued. Open the work queue`" :data-tip="queueSnapshot ? queueHours(queueSnapshot) : 'Open the work queue to retry'" @click="queueAnchor = queueAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon :name="queueError ? 'alert' : 'queue'" :size="12" /><template v-if="queueError">Queue unavailable</template><template v-else><b>{{ queueSnapshot?.items.length }}</b> queued</template></button>
         </div>
-        <HeaderGlimpse v-if="headerGraphReady && headerGraph && !graphActive" :project-id="project.id" :project-key="project.routeKey" :ticket-count="counts?.total ?? 0" :enabled="headerGraph" @active="glimpseActive = $event" />
+        <HeaderGlimpse v-if="headerGraph && !graphActive" :project-id="project.id" :project-key="project.routeKey" :ticket-count="counts?.total ?? 0" :enabled="headerGraph" @active="glimpseShown = $event" />
         <div v-if="counts" class="head-stats" :aria-label="`${counts.open} open, ${counts.progress} in progress, ${counts.done} done of ${counts.total}`">
           <ProjectStatusCounts v-if="ticketsHeader" :summary="project" :filters="filters" :density="headerDensity" @group="selectCountGroup" @status="selectCountStatus" />
           <div v-if="!ticketsHeader" class="stat-line">
@@ -1809,7 +1814,6 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
           :view="viewMode === 'settings' || viewMode === 'delivery' ? 'list' : viewMode" :knowledge-view="knowledgeView" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
           @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
           :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
-          :header-graph="headerGraph" @header-graph="setHeaderGraph"
         >
           <!-- Collapsed header: the sections and saved views it hides, at the top of the Display menu. -->
           <template #header-nav="{ anchor, close }">
@@ -1894,8 +1898,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :derived="statusMenu.row.status_derived" :children-count="statusMenu.row.work_children_count" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
         ref="filterSheet" :summary="project" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
-        :density="density" :columns="toolbarColumns" :header-graph="headerGraph" :project-header="ticketsHeader"
-        @sort="setSort" @density="setDensity" @columns="saveColumns" @columns-reset="resetColumns" @header-graph="setHeaderGraph"
+        :density="density" :columns="toolbarColumns" :project-header="ticketsHeader"
+        @sort="setSort" @density="setDensity" @columns="saveColumns" @columns-reset="resetColumns"
         @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="manualShowClosed" @hide-states="setHideStates" @group="setGroup" @date="setDate"

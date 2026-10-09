@@ -78,6 +78,14 @@
     ,
     "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › moves a split column row into the slot its new order reserves"
     ,
+    "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 1440 dark"
+    ,
+    "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 1440 light"
+    ,
+    "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 400 dark"
+    ,
+    "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 400 light"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -487,6 +495,8 @@
     "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (full at 1440)"
     ,
     "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (short at 390)"
+    ,
+    "browser:tests/header-glimpse.spec.ts:the glimpse is off unless the developer setting turns it on, even after an earlier Display choice"
     ,
     "browser:tests/knowledge-learnings.spec.ts:a learning that changed after review is refused and shown again"
     ,
@@ -4742,6 +4752,14 @@
     ,
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the ticket count › is gone from the toolbar in every header view at 400px; the footer still says it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1042-headergraph.spec.ts","name":"header graph off by default, developer switch keeps the header still 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1042-headergraph.spec.ts","name":"header graph off by default, developer switch keeps the header still 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1042-headergraph.spec.ts","name":"header graph off by default, developer switch keeps the header still 400 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1042-headergraph.spec.ts","name":"header graph off by default, developer switch keeps the header still 400 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -7404,9 +7422,9 @@
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"the 2D fallback also frames the dense core with faded edges","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"the Display switch hides the glimpse and is remembered","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"the glimpse follows the viewer’s Off motion preference without adding labels","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"the glimpse is off unless the developer setting turns it on, even after an earlier Display choice","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"the glimpse waits until the page is idle","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15129,6 +15147,12 @@
     {"kind":"vitest","file":"tests/graph-motion.unit.test.ts","name":"loads one account preference and publishes the speed for every graph","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/graph-motion.unit.test.ts","name":"maps each pace to its revolution time and OrbitControls speed","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/header-graph-setting.unit.test.ts","name":"Settings › Developer offers the graph switch, off until the person turns it on","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/header-graph-setting.unit.test.ts","name":"the Display menu has no header graph switch","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/header-graph-setting.unit.test.ts","name":"the developer setting is off by default, also after an earlier list:display choice, and toggles the graph","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/indicator-renderers.unit.test.ts","name":"Orbit: inner size scales only the artwork layer and ignores invalid values","tier":"GATED-FULL"}
     ,
