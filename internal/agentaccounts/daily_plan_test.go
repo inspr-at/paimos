@@ -50,7 +50,7 @@ func TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy(t *testing.T) {
 				return err
 			}
 			if spec.key == "private" {
-				_, err := tx.Exec(ctx, `UPDATE agent_accounts SET quota_pool_fingerprint=repeat('f',64) WHERE id=$1`, a.ID)
+				_, err := tx.Exec(ctx, `UPDATE agent_accounts SET quota_fingerprint=repeat('f',64),quota_pool_fingerprint=repeat('f',64) WHERE id=$1`, a.ID)
 				return err
 			}
 			if spec.key == "cursor" {
@@ -78,7 +78,7 @@ func TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy(t *testing.T) {
 	var peer Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"peer","harness":"codex","daemon_id":"daily-daemon","label":"Peer"}`, 201, &peer)
 	ownFixtureAccount(t, other, &peer)
-	if _, err := adminPool.Exec(ctx, `UPDATE agent_accounts SET quota_pool_fingerprint=repeat('f',64) WHERE id=$1`, peer.ID); err != nil {
+	if _, err := adminPool.Exec(ctx, `UPDATE agent_accounts SET quota_fingerprint=repeat('f',64),quota_pool_fingerprint=repeat('f',64) WHERE id=$1`, peer.ID); err != nil {
 		t.Fatal(err)
 	}
 	read := func(p tenant.Principal, at time.Time) agentplan.Snapshot {

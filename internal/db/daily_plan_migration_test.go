@@ -84,7 +84,7 @@ func TestDailyPlanMigrationExpansionRollbackAndRLS(t *testing.T) {
 			if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Old reporter') RETURNING id::text`, tid).Scan(&agent); err != nil {
 				return err
 			}
-			if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id) VALUES($1,'old-writer','codex','old-daemon',$2,'Old writer',$3) RETURNING id::text`, tid, agent, person).Scan(&account); err != nil {
+			if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at) VALUES($1,'old-writer','codex','old-daemon',$2,'Old writer',$3,now()) RETURNING id::text`, tid, agent, person).Scan(&account); err != nil {
 				return err
 			}
 			var resource string
