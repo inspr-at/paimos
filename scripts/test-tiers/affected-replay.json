@@ -5057,5 +5057,490 @@
         "web/tests/journey-work.test.ts"
       ]
     }
-  ]
+  ],
+  "selectorBaseline": {
+    "commit": "04739bc840ddaf785405ddd64a40e80671890fc1",
+    "decisions": [
+      {
+        "number": 199,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 200,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 201,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 202,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 203,
+        "mode": "full",
+        "layout": "full",
+        "reason": "test-pinned instruction input: AGENTS.md"
+      },
+      {
+        "number": 204,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 205,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 206,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 208,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 210,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 211,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 213,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 214,
+        "mode": "full",
+        "layout": "full",
+        "reason": "unmapped or deleted input: version.json"
+      },
+      {
+        "number": 216,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 217,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 219,
+        "mode": "essential",
+        "layout": "full",
+        "reason": "essential plus changed area and reverse dependencies"
+      },
+      {
+        "number": 220,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 221,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 222,
+        "mode": "full",
+        "layout": "full",
+        "reason": "unmapped or deleted input: version.json"
+      },
+      {
+        "number": 223,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 224,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 225,
+        "mode": "full",
+        "layout": "full",
+        "reason": "unmapped or deleted input: version.json"
+      },
+      {
+        "number": 226,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 227,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 228,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 229,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 230,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 231,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 232,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 233,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 234,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 235,
+        "mode": "essential",
+        "layout": "full",
+        "reason": "essential plus changed area and reverse dependencies"
+      },
+      {
+        "number": 236,
+        "mode": "essential",
+        "layout": "full",
+        "reason": "essential plus changed area and reverse dependencies"
+      },
+      {
+        "number": 237,
+        "mode": "essential",
+        "layout": "full",
+        "reason": "essential plus changed area and reverse dependencies"
+      },
+      {
+        "number": 239,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 240,
+        "mode": "essential",
+        "layout": "full",
+        "reason": "essential plus changed area and reverse dependencies"
+      },
+      {
+        "number": 241,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 242,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 243,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 244,
+        "mode": "essential",
+        "layout": "full",
+        "reason": "essential plus changed area and reverse dependencies"
+      },
+      {
+        "number": 245,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 246,
+        "mode": "essential",
+        "layout": "full",
+        "reason": "essential plus changed area and reverse dependencies"
+      },
+      {
+        "number": 247,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 248,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 249,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 250,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 251,
+        "mode": "essential",
+        "layout": "full",
+        "reason": "essential plus changed area and reverse dependencies"
+      },
+      {
+        "number": 252,
+        "mode": "essential",
+        "layout": "full",
+        "reason": "essential plus changed area and reverse dependencies"
+      },
+      {
+        "number": 253,
+        "mode": "full",
+        "layout": "full",
+        "reason": "unmapped or deleted input: web/src/components/journey/ReleaseWalker.vue"
+      },
+      {
+        "number": 254,
+        "mode": "essential",
+        "layout": "full",
+        "reason": "essential plus changed area and reverse dependencies"
+      },
+      {
+        "number": 255,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 256,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 257,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 259,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 260,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 261,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 262,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 263,
+        "mode": "essential",
+        "layout": "full",
+        "reason": "essential plus changed area and reverse dependencies"
+      },
+      {
+        "number": 264,
+        "mode": "essential",
+        "layout": "full",
+        "reason": "essential plus changed area and reverse dependencies"
+      },
+      {
+        "number": 265,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 266,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 267,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 268,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 269,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 270,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 272,
+        "mode": "full",
+        "layout": "full",
+        "reason": "test-pinned instruction input: AGENTS.md"
+      },
+      {
+        "number": 273,
+        "mode": "full",
+        "layout": "full",
+        "reason": "unmapped or deleted input: version.json"
+      },
+      {
+        "number": 275,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 280,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 283,
+        "mode": "essential",
+        "layout": "full",
+        "reason": "essential plus changed area and reverse dependencies"
+      },
+      {
+        "number": 284,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 286,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 288,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 289,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 290,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 291,
+        "mode": "essential",
+        "layout": "full",
+        "reason": "essential plus changed area and reverse dependencies"
+      },
+      {
+        "number": 294,
+        "mode": "full",
+        "layout": "full",
+        "reason": "browser fan-out exceeds 300 cases"
+      },
+      {
+        "number": 295,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 296,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      },
+      {
+        "number": 297,
+        "mode": "full",
+        "layout": "full",
+        "reason": "full event or uncertain impact"
+      }
+    ]
+  }
 }

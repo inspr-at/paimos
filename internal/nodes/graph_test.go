@@ -251,6 +251,13 @@ func TestTicketGraphCap(t *testing.T) {
 		relateFrom, relateTo = relateTo, relateFrom
 	}
 	insertGraphRelation(t, p, relateFrom, relateTo, "relates")
+	// A split package starts with different prior planner statistics. This bulk
+	// fixture proves the graph cap, rather than autovacuum's scheduling: refresh
+	// its isolated database after loading all 1501 nodes, as the aggregate
+	// benchmark does. Keep the full fixture and every response assertion.
+	if _, err := adminPool.Exec(t.Context(), `ANALYZE nodes; ANALYZE node_kinds; ANALYZE harness_sessions; ANALYZE ticket_live_eta`); err != nil {
+		t.Fatal(err)
+	}
 
 	status, body := call(t, &p, http.MethodGet, "/api/tickets/graph?project_id="+project.ID, "")
 	g := decode[TicketGraph](t, status, body, http.StatusOK)

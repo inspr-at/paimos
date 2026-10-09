@@ -13,6 +13,7 @@ import { changedPaths, schedulingDecision, eventBase, sourceTree, promotionsBetw
 import { boundedText } from './inputs.mjs'
 import { manifestsMain, classifyManifest } from './manifests.mjs'
 import { generateOpenAPI } from '../../api/generate.mjs'
+import { nightlyBrowserMap, gitTree, coverageSummary } from './browser-impact.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
@@ -64,9 +65,10 @@ export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',p
   const tree=on?sourceTree(root):undefined
   const promotions=on&&paths.some(path=>tierManifestPattern.test(path))?promotionsBetween(eventBase(),{cwd:root}):undefined
   const readFile=path=>boundedText(root,path)
-  const candidate=schedulingDecision(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined,tree,promotions})
+  const coverage=paths?.some(path=>path.startsWith('web/src/'))?nightlyBrowserMap(root,eventBase(),load('web').tests):{}
+  const candidate=schedulingDecision(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined,tree,promotions,imports:inventory.imports,...coverage})
   const selection=runnerSelection(all,{event,paths,imports:inventory.imports,affectedLane,
-    forceFull:full,forceAll:catalogue,webImports:graph,tree,promotions,readFile},candidate,
+    forceFull:full,forceAll:catalogue,webImports:graph,tree,promotions,readFile,...coverage},candidate,
     {mode:plannerMode,layout:plannerLayout})
   const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
   const weights={}
@@ -79,7 +81,7 @@ export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',p
     for(const pkg of Object.keys(weights)) weights[pkg]*=filtered.filter(row=>row.package===pkg).length/all.filter(row=>row.package===pkg).length
   }
   if(kind==='go'||unit) Object.assign(weights,measuredWeights(manifest,filtered))
-  return {...selection,all,tests:shard(filtered,index,count,weights,{firstShardLast:unit})}
+  return {...selection,all,tests:shard(filtered,index,count,weights,{firstShardLast:unit,ownerTimings:kind==='go'?manifest.timingWeights?.owners:undefined})}
 }
 
 export function browserList(rows,all) {
@@ -110,7 +112,7 @@ function diagnostics(kind,owner,result,failures,env) {
 export async function run(kind,selection,{unit=false,job='local',env=process.env}={},
   {execute:executeCases=execute,command:nativeCommand=command,runPlaywright:browserRunner=runPlaywright,
     loadBrowserPolicy:browserPolicy=loadBrowserPolicy,knownFlaky,saveJSON:save=saveJSON,log=console.log}={}) {
-  const begin=performance.now(),batches=[],ledger=[]
+  const begin=performance.now(),batches=[],ledger=[],coverageReports=[]
   if(kind==='go') generateOpenAPI()
   const mergeGroup=env.GITHUB_EVENT_NAME==='merge_group'
   const quarantines=knownFlakyOwners(knownFlaky)
@@ -213,6 +215,14 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
         writeFileSync(listPath,descriptions.join('\n')+'\n')
         const groupEnv=Object.fromEntries(Object.entries(group.env).map(([k,v])=>[k,v.replaceAll('${RUNNER_TEMP}',env.RUNNER_TEMP??evidence)]))
         const browserEnv={...env,...groupEnv,PW_RETRIES:'0'}
+        const observeCoverage=selection.scope==='catalogue'&&!retry&&env.GITHUB_WORKFLOW==='Nightly full'
+        const coverageDirectory=resolve(evidence,`browser-coverage-${job}-${group.id}-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`)
+        if(observeCoverage) {
+          const casesPath=resolve(evidence,`browser-coverage-${job}-${group.id}-cases.json`)
+          saveJSON(casesPath,rows)
+          Object.assign(browserEnv,{AEON_BROWSER_IMPACT_CASES:casesPath,AEON_BROWSER_IMPACT_DIRECTORY:coverageDirectory,
+            NODE_OPTIONS:`${env.NODE_OPTIONS??''} --import=${new URL('./browser-coverage-hook.mjs',import.meta.url).href}`})
+        }
         const args=['--config',group.config,...group.flags,...(group.project?['--project',group.project]:[]),'--test-list',listPath,'--workers=1','--retries=0','--forbid-only']
         const collected=JSON.parse(nativeCommand(process.execPath,['node_modules/@playwright/test/cli.js','test',...args,'--list','--reporter=json'],{cwd:web,env:browserEnv}))
         if(collected.errors?.length) throw new Error(`Browser collection failed: ${group.id}`)
@@ -220,6 +230,10 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
         if(JSON.stringify(actual)!==JSON.stringify(rows.map(row=>`${row.id}:${row.project}`).sort())) throw new Error(`Browser selection mismatch: ${group.id}`)
         const result=await browserRunner([...args,
           '--reporter=line,json','--output',`test-results/test-tiers/${job}/${group.id}${retry?'-retry':''}`],{cwd:web,env:{...browserEnv,PLAYWRIGHT_JSON_OUTPUT_FILE:reportPath}})
+        if(observeCoverage) {
+          const summary=coverageSummary(coverageDirectory,rows,{tree:gitTree(root),runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT})
+          coverageReports.push(summary)
+        }
         let outcomes=[],reportError=false
         try {
           const report=JSON.parse(readFileSync(reportPath,'utf8'))
@@ -279,6 +293,10 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
     outcomes.push(...final.values())
   }
   printFlakeWarnings(ledger,{log})
+  if(kind==='web'&&!unit&&selection.scope==='catalogue'&&env.GITHUB_WORKFLOW==='Nightly full') {
+    save(resolve(evidence,`browser-impact-${job}.json`),{version:1,tree:gitTree(root),runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT,
+      complete:coverageReports.length>0&&coverageReports.every(row=>row.complete),cases:coverageReports.flatMap(row=>row.cases)})
+  }
   const report=reportCases(selection.tests,outcomes,(performance.now()-begin)/1000,job)
   report.runId=env.GITHUB_RUN_ID
   report.attempt=env.GITHUB_RUN_ATTEMPT
@@ -358,7 +376,9 @@ export async function main(args, dependencies={}) {
   if(mode==='collect') { saveJSON(resolve(evidence,`${kind}-inventory.json`),target(kind));return 0 }
   if(mode==='check') {
     const all=validate(load(kind),target(kind).tests,undefined,{strict:options.strict})
-    measuredWeights(load(kind),all) // malformed timing weights fail the manifest check, not a later plan
+    const checked=load(kind)
+    measuredWeights(checked,all) // malformed timing weights fail the manifest check, not a later plan
+    shard(all,1,1,{}, {ownerTimings:kind==='go'?checked.timingWeights?.owners:undefined})
     if(kind==='web') { console.log(JSON.stringify({inventory:counts(all)}));return 0 }
     let output
     try {

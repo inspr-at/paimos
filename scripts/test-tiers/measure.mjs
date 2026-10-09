@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { command } from './collect.mjs'
+import { measurementCauses, measurementErrorCause } from './measurement-causes.mjs'
 
 export function jobMinutes(job) {
   // Actions returns completed/skipped jobs with a real started_at and Go's
@@ -99,14 +100,19 @@ export function main(directory,env=process.env) {
     if(page===20) throw new Error('Job inventory exceeds measurement bound')
   }
   const report=aggregate(readReports(directory),jobs,{runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT,sha:env.GITHUB_SHA,lane:env.CI_LANE,layout:env.TIER_LAYOUT,reusedFrom:['merge_group','pull_request'].includes(env.REUSE)?env.SOURCE_RUN:undefined,freshTiming:env.REUSE==='pull_request'})
+  report.measurementCauses=measurementCauses(report)
   mkdirSync('tmp',{recursive:true})
   writeFileSync('tmp/test-tier-run-measurement.json',JSON.stringify(report,null,2)+'\n')
-  console.log(JSON.stringify({classes:report.classes,flakeCounts:report.flakeCounts,flakeLedger:report.flakeLedger,measured:report.measured,coverage:report.coverage,coverageReason:report.coverageReason,missingEvidence:report.missingEvidence,upstreamFailures:report.upstreamFailures,skippedJobs:report.skippedJobs}))
+  console.log(JSON.stringify({classes:report.classes,flakeCounts:report.flakeCounts,flakeLedger:report.flakeLedger,measured:report.measured,coverage:report.coverage,coverageReason:report.coverageReason,missingEvidence:report.missingEvidence,upstreamFailures:report.upstreamFailures,skippedJobs:report.skippedJobs,measurementCauses:report.measurementCauses}))
   const coverageLabel=report.coverage+(report.coverageReason?` — ${report.coverageReason}`:'')
   if(env.GITHUB_STEP_SUMMARY) writeFileSync(env.GITHUB_STEP_SUMMARY,`\nTest tiers: ${coverageLabel}; Go ${report.measured.goRunnerMinutes.toFixed(2)} / web ${report.measured.webRunnerMinutes.toFixed(2)} runner-min. Baselines: 22.50 / 42.17.\n\n\`\`\`json\n${JSON.stringify({classes:report.classes,flakeCounts:report.flakeCounts,flakeLedger:report.flakeLedger},null,2)}\n\`\`\`\n${report.reusedFrom?`Verified execution source run: ${report.reusedFrom}. No fresh tier passes are claimed. `:''}Missing case evidence: ${report.missingEvidence.join(', ')||'none'}.\nUpstream jobs that did not succeed: ${report.upstreamFailures.map(job=>`${job.name} (${job.conclusion??job.status})`).join(', ')||'none'}.\n`,{flag:'a'})
   // Missing artifacts remain visibly incomplete, even after a failed setup.
   return report.coverage==='incomplete'?1:0
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
-  try { process.exitCode=main(process.argv[2]) } catch(error) { console.error(error.message);process.exitCode=1 }
+  try { process.exitCode=main(process.argv[2]) } catch(error) {
+    mkdirSync('tmp',{recursive:true})
+    writeFileSync('tmp/test-tier-run-measurement.json',JSON.stringify({version:1,coverage:'incomplete',measurementCauses:[measurementErrorCause(error)]})+'\n')
+    console.error(JSON.stringify({metric:'tier_measurements_failure',cause:measurementErrorCause(error)}));process.exitCode=1
+  }
 }
