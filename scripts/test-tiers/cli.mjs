@@ -245,6 +245,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   let retryAllowed=mergeGroup&&failedCount>0&&failedCount<=3&&!batches.some(batch=>batch.result.signal||batch.result.metrics?.signal||[129,130,143].includes(batch.result.code))
   const outcomes=[]
   let code=0
+  let runnerFailure=false
   for(const batch of batches) {
     const final=new Map(batch.outcomes.map(outcome=>[outcome.key,outcome]))
     const failed=batch.rows.filter(row=>final.get(key(row))?.status==='failed')
@@ -262,7 +263,10 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
         }
       }
     }
-    if(batch.runnerFailure||retry?.runnerFailure) code ||= batch.result.code||retry?.result.code||1
+    if(batch.runnerFailure||retry?.runnerFailure) {
+      runnerFailure=true
+      code ||= batch.result.code||retry?.result.code||1
+    }
     for(const row of failed) {
       const id=key(row),outcome=final.get(id)
       if(mergeGroup&&outcome.status==='failed'&&quarantines.has(id)) {
@@ -286,6 +290,11 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   report.flakeLedger=ledger
   report.exitCode=code
   if(Object.values(report.classes).some(c=>c.notRun||c.failed)) report.exitCode ||= 1
+  save(resolve(evidence,`${job}-failures.json`), {
+    version: 1, job, runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT, sha: env.GITHUB_SHA,
+    cases: outcomes.filter(outcome => outcome.status === 'failed').map(outcome => outcome.key),
+    runnerFailure,
+  })
   save(resolve(evidence,`${job}-measurement.json`),report)
   log(JSON.stringify(report))
   if(env.GITHUB_STEP_SUMMARY) writeFileSync(env.GITHUB_STEP_SUMMARY,`\nTest tier measurement (${job}):\n\n\`\`\`json\n${JSON.stringify(report,null,2)}\n\`\`\`\n`,{flag:'a'})

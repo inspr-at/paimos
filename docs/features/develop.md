@@ -40,13 +40,12 @@ Reports name the selection `scope` (`gated-full`, `catalogue` or `changed-area`)
 Classifications live in the [Go manifest](../../scripts/ci/go-test-tiers.json)
 and [web manifest](../../scripts/ci/web-test-tiers.json). Use
 `node scripts/test-tiers/cli.mjs classify go` (or `web`) for new NIGHTLY cases,
-then `check`. CI reconciles manifests at runtime: unlisted cases default to
-NIGHTLY, stale entries are dropped, and named Actions warnings report the drift.
-New cases retain changed-area and nightly coverage without requiring
-manifest edits in each PR. A separate scheduled classification check runs
-`check go --strict` and `check web --strict` to report cases needing classification;
-it does not gate PRs or the nightly test jobs. Remove stale entries when updating
-the stored manifests. Malformed entries and known-flaky ESSENTIAL cases still
+then `check --strict`. CI and nightly require `check go --strict` in their static
+Go job and `check web --strict` before the web build. Every native case must have
+an explicit classification; missing and stale entries fail these checks. The
+independent scheduled inventory audit remains available. Reconcile stale
+registrations against the native inventory when updating manifests, preserving
+the tier of every surviving case. Malformed entries and known-flaky ESSENTIAL cases still
 fail validation. New browser specs also need a
 launch policy in `web/ci-web-shards.json`. No tests are removed: deletion tags
 remain on nonessential cases, including candidate groups whose exact members need review.
@@ -61,8 +60,21 @@ FULL gate after merge; a full premerge run is required only when impact is
 uncertain. Releases require a green full main-push gate (or full nightly run) on the
 exact freeze SHA, in addition to the release rehearsal. Nightly is separate from
 the required PR/main checks; its failures remain visible for classification.
-A red nightly needs a ticket naming its failing cases and tested SHA; OPS step 2 owns automated
-ticket creation, ownership and budget wiring. Migration compatibility
+A red nightly needs a ticket naming its failing cases and tested SHA. The existing
+PAIMOS reporter can invoke `node scripts/nightly-ticket.mjs --run-id ID` for a
+read-only preview. To deliver it, supply its existing absolute CLI path with
+`--paimos PATH`, its shared state directory with `--state-directory PATH`, and
+`--write`. The reporter verifies the PPM/INSPR account, binds the complete job
+inventory to the run's SHA and attempt, and deduplicates by run before creating a
+hidden bug ticket. A per-run lock serializes writes; an uncertain write is an
+error, never success. No PAIMOS credential is added to Actions. OPS step 2 owns
+activation in the existing reporter, ownership and budget wiring.
+Tier artifacts now include bounded `*-failures.json` case evidence. Download the
+current attempt's artifacts and pass their directory with `--evidence PATH`;
+evidence for another SHA or attempt is rejected. Without case artifacts the
+ticket explicitly identifies only failed jobs and the missing case evidence.
+The AEON lead collects the `nightly_green` outcome seven days after deployment,
+with OPS-257 covering reporter and runner infrastructure. Migration compatibility
 always runs fresh; timing, static and smoke gates stay outside tier impact
 filtering within the full CI lane. Stability cases retain their manifest tiers
 and changed-area/full coverage. Selected cases never retry. `test-tier-run-measurement` reports cases

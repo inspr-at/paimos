@@ -292,6 +292,18 @@ function completionRefusal(node: MockNode, nextState: string, fields: Record<str
 }
 
 export async function mockWork(page: Page, data: Fixtures, options: MockOptions = {}) {
+  // These scenarios drive HTTP snapshots and polling explicitly. A real,
+  // unserved SSE connection would invalidate those reads nondeterministically.
+  await page.addInitScript(() => {
+    // Scenarios that install an event-driven stream keep their own transport,
+    // regardless of Playwright's unspecified init-script order.
+    if (window.EventSource.name !== 'EventSource') return
+    class QuietStream extends EventTarget {
+      private timer = setInterval(() => this.dispatchEvent(new Event('stream.ping')), 5_000)
+      close() { clearInterval(this.timer) }
+    }
+    Object.assign(window, { EventSource: QuietStream })
+  })
   const calls: Call[] = []
   const started = Date.now()
   const bucketOf = (node: MockNode) => options.workBuckets?.[node.kind_slug]?.[canonicalWorkStatus(node.state)] ?? workBucket(node.state)
