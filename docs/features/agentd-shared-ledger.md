@@ -6,7 +6,7 @@ service label and logs. Tickets, tenant identifiers, account identifiers and
 credentials are never written to the shared ledger or sent to a peer's server.
 
 ```sh
-aeon-agentd pair --url https://pm.augmentoring.com --tenant TENANT --workspace /absolute/working/folder --instance pma
+aeon-agentd pair --url https://work.example.test --tenant TENANT --workspace /absolute/working/folder --instance pma
 aeon-agentd ledger status
 aeon-agentd uninstall --instance pma
 ```
