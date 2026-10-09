@@ -107,12 +107,33 @@ function diagnostics(kind,owner,result,failures,env) {
   printFailures(failures.map(failure=>({...failure,output:failure.output||outputTail(result.stderr)})),{summary:env.GITHUB_STEP_SUMMARY})
 }
 
+// OPS-279 integration: export route outputs as runner_class and JSON runs_on. The
+// labels must match this job's event and the runner's own platform identity;
+// opting into a class alone never permits an arbitrary self-hosted runner.
+export function browserRunnerIdentity(env=process.env) {
+  const identity={environment:env.RUNNER_ENVIRONMENT??null,name:env.RUNNER_NAME??null,
+    os:env.RUNNER_OS??null,arch:env.RUNNER_ARCH??null}
+  if(env.RUNNER_ENVIRONMENT==='github-hosted') return {class:'hosted',...identity,labels:[]}
+  const refuse=()=>{throw new Error('Tier browser execution requires GitHub-hosted CI or the approved mbp2606 runner identity (runner_class, runs_on, platform and event); collection is safe locally')}
+  const eventClass=new Map([['pull_request','mbp2606-pr'],['merge_group','mbp2606-mq'],
+    ['push','mbp2606-push'],['workflow_dispatch','mbp2606-dispatch']]).get(env.GITHUB_EVENT_NAME)
+  if(env.GITHUB_ACTIONS!=='true'||env.RUNNER_ENVIRONMENT!=='self-hosted'||env.runner_class!=='mbp2606'||
+    env.RUNNER_OS!=='Linux'||env.RUNNER_ARCH!=='ARM64'||!eventClass||
+    typeof env.runs_on!=='string'||env.runs_on.length>1024) refuse()
+  let labels
+  try { labels=JSON.parse(env.runs_on) } catch { refuse() }
+  const expected=['self-hosted','Linux','ARM64','mbp2606',eventClass]
+  if(!Array.isArray(labels)||labels.length!==expected.length||expected.some(label=>!labels.includes(label))) refuse()
+  return {class:'mbp2606',...identity,labels:expected}
+}
+
 // Inject native runners for policy tests; production retains the supervised
 // browser runner and the same bounded native commands/evidence paths.
 export async function run(kind,selection,{unit=false,job='local',env=process.env}={},
   {execute:executeCases=execute,command:nativeCommand=command,runPlaywright:browserRunner=runPlaywright,
     loadBrowserPolicy:browserPolicy=loadBrowserPolicy,knownFlaky,saveJSON:save=saveJSON,log=console.log}={}) {
   const begin=performance.now(),batches=[],ledger=[],coverageReports=[]
+  const runner=kind==='web'&&!unit?browserRunnerIdentity(env):undefined
   if(kind==='go') generateOpenAPI()
   const mergeGroup=env.GITHUB_EVENT_NAME==='merge_group'
   const quarantines=knownFlakyOwners(knownFlaky)
@@ -198,7 +219,6 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
     batches.push(batch)
   }
   if(kind==='web'&&!unit) {
-    if(env.RUNNER_ENVIRONMENT!=='github-hosted') throw new Error('Tier browser execution requires hosted CI; collection is safe locally')
     // Original OPS-257 configuration/env owns launches. Only the case list is
     // replaced. Nightly/changed-area cases retain their original launch policy.
     const policy=browserPolicy()
@@ -301,6 +321,10 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   report.runId=env.GITHUB_RUN_ID
   report.attempt=env.GITHUB_RUN_ATTEMPT
   report.sha=env.GITHUB_SHA
+  if(runner) {
+    report.runner_class=runner.class
+    report.runner=runner
+  }
   report.full=selection.full
   report.reason=selection.reason
   report.scope=selection.scope??'changed-area'

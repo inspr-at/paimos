@@ -244,6 +244,8 @@ paths:
     get:
       operationId: getModelSituationLimits
       security: *auth
+      parameters:
+        - {name: lang, in: query, schema: {type: string, enum: [en, de], default: en}, description: "Display language of built-in situation words."}
       description: "PAIMOS defines situations; only their limits are editable."
       responses:
         '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelSituationLimits'}}}}
@@ -621,6 +623,18 @@ components:
       type: object
       required: [small_hours, fix_rounds, revision, set_by, set_at]
       properties:
+        words:
+          type: array
+          maxItems: 6
+          description: "Built-in situation wording in both languages, with a complete display_words selection."
+          items:
+            type: object
+            required: [slug, words_en, words_de, display_words]
+            properties:
+              slug: {type: string, enum: [first, small, fix, stuck, review, concept]}
+              words_en: {$ref: '#/components/schemas/WorkDisplayWords'}
+              words_de: {$ref: '#/components/schemas/WorkDisplayWords'}
+              display_words: {$ref: '#/components/schemas/WorkDisplayWords'}
         small_hours: {type: integer, minimum: 1, maximum: 8, default: 2}
         fix_rounds: {type: integer, minimum: 1, maximum: 6, default: 3}
         revision: {type: integer, format: int64}

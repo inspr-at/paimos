@@ -379,10 +379,10 @@ for (const width of [1440, 400] as const) {
     await setup(page, { lang: width === 400 ? 'de' : 'en' })
     await page.goto('/p/AEON/delivery')
     await numbersReady(page, 'simple')
-    const de = width === 400
-    const windows = head(page).getByRole('radiogroup', { name: de ? 'Zeitraum der Diagramme' : 'Chart window' })
-    const levels = head(page).getByRole('radiogroup', { name: de ? 'Detailgrad' : 'Level of detail' })
-    const views = head(page).getByRole('tablist', { name: de ? 'Ansichten der Lieferung' : 'Delivery views' })
+    // Width 400 loads a de-AT profile. The app language stays English (AEON-998).
+    const windows = head(page).getByRole('radiogroup', { name: 'Chart window' })
+    const levels = head(page).getByRole('radiogroup', { name: 'Level of detail' })
+    const views = head(page).getByRole('tablist', { name: 'Delivery views' })
     const guard = await controlStability(page, {
       sections: sections(page), views, windows, w7: windows.getByRole('radio').first(), w365: windows.getByRole('radio').last(),
       levels, simple: levels.getByRole('radio').first(), expert: levels.getByRole('radio').last(), updated: page.getByTestId('delivery-updated'),
@@ -447,7 +447,7 @@ for (const width of [390, 1024, 1440] as const) {
       await page.goto('/p/AEON/delivery')
       await numbersReady(page, 'simple')
       await shot('numbers-simple')
-      await head(page).getByRole('radio').filter({ hasText: /^(Expert|Experte)$/ }).click()
+      await head(page).getByRole('radio').filter({ hasText: /^Expert$/ }).click()
       await numbersReady(page, 'expert')
       await shot('numbers-expert')
       for (const mode of ['live', 'replay', 'compare'] as const) {

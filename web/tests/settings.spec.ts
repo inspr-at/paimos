@@ -30,7 +30,7 @@ test('the account menu opens Settings on Personal: theme, greeting and keys', as
   await page.getByRole('menuitem', { name: 'Personal settings' }).click()
   await expect(page).toHaveURL('/settings/personal')
   await expect(page).toHaveTitle(/^Settings · /)
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Arten von Arbeit/, /^Access/, /^Policies/, /^Models/, /^Agents/, /^Autopilot/, /^Business/, /^Product portal/])
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Kinds of work/, /^Access/, /^Policies/, /^Models/, /^Agents/, /^Autopilot/, /^Business/, /^Product portal/])
   await expect(sections(page).getByRole('link', { name: /^Personal/ })).toHaveAttribute('aria-current', 'page')
 
   await page.getByRole('radio', { name: 'Dark' }).click()
@@ -82,9 +82,9 @@ test('grouped navigation stays put across section changes and places policy card
   const nav = sections(page)
   // Kinds of work sits with Workspace once models.read is granted, beside Models,
   // Agent rules and Accounts. The count is the whole granted list, in section order.
-  await expect(nav.getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Arten von Arbeit/, /^Access/, /^Policies/, /^Models/, /^Agents/, /^Agent rules/, /^Accounts/, /^Autopilot/, /^Business/, /^Product portal/])
+  await expect(nav.getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Kinds of work/, /^Access/, /^Policies/, /^Models/, /^Agents/, /^Agent rules/, /^Accounts/, /^Autopilot/, /^Business/, /^Product portal/])
   await expect(nav.getByRole('link')).toHaveCount(15)
-  await expect(nav.getByRole('link', { name: /^Arten von Arbeit/ })).toBeVisible()
+  await expect(nav.getByRole('link', { name: /^Kinds of work/ })).toBeVisible()
   await expect(nav.getByRole('link', { name: /^Models/ })).toBeVisible()
   await expect(nav.getByRole('link', { name: /^Agent rules/ })).toBeVisible()
   await expect(nav.getByRole('link', { name: /^Accounts/ })).toBeVisible()

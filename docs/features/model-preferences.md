@@ -43,3 +43,61 @@ Operator keys have no You setting. With an empty matrix, existing planning gaps
 and prices remain unchanged; Security now uses the ticket's role route and rate.
 Work-kind lists use `limit`/`cursor` pagination; editor writes reject oversized
 matrices or atomic re-stamp scopes. See `api/openapi.yaml` for the contract.
+
+## Display language (AEON-998)
+
+`web/src/lib/displayLanguage.ts` owns the display-language policy. The shell and
+app pages stay in English until their German translation is complete, regardless
+of the profile's regional locale, browser language, document language or `lang`
+query. Date/number formatting and authored document languages keep their own
+preferences. Release history retains AEON-323: explicit `release_lang`, then the
+remembered choice, then the profile default; changing it does not translate the
+page underneath.
+
+Migration 1295 adds nullable `work_kinds.words_de` and tenant-scoped built-in
+`work_display_words` for kinds and situations. It preserves existing English
+names, sentences, examples and identities; new tenants receive both languages.
+The work-kinds API keeps its legacy English fields. `?lang=en|de` selects the
+additive `display_words` field; `words_de` remains available independently.
+Untranslated custom kinds fall back to a whole English record. POST/PATCH accept
+bounded `words_de` values, while older English-only writes retain German words.
+The English editor, save and Undo preserve both. Situation limits GET supplies
+both languages and selected display words for its six built-in situations.
+
+Inventory reviewed: KindsOfWorkSection, ModelsSection, SessionChat, SessionTabs,
+SessionMessages, SessionPanel, ChatCodeBlock, BoostToday, CrossFamilyReviewCard,
+TicketDelivery, TicketTable, NeedsAttentionView, SettingsView, DeliveryView,
+AccountsSection, App (update toast), BrandCard, TicketTypeIcon, StatusHelpSheet,
+RecurringPill; lib/access, lib/attachCopy, lib/delivery, lib/recurrenceMarker,
+lib/releases and lib/tenantBrand. ModelsSection is already English;
+ModelBoardRoute no longer exists in this checkout. Components that use delivery,
+recurrence and brand wrappers inherit the shared policy through those helpers.
+Additional switches consume that decided language: AttentionBulkPreview,
+AttentionGroupMenu, DisplayPanel and ListToolbar inherit NeedsAttentionView;
+DeliveryRow, DeliveryTrack and FlowView inherit deliveryLanguage. The delivery
+copy/formatting modules deliveryFlowModes, deliveryFlowWords, deliveryFlowText,
+deliveryFlowData, deliveryNumbers, deliveryNumbersText, deliverySimple and
+deliverySimpleText consume that same language. ReleaseDetail and ReleasesSheet
+consume the independent releaseLang choice.
+PublicReleasesView and PublicRoadmapView have explicit content-language choices.
+PublicQuoteView, QuoteDocument, InspectorDocument, lib/quotes/profile and
+lib/quotes/publicCopy use authored document languages. These content choices
+remain independent; RulesBudgetSection has an explicit tip-content selector.
+
+The static source guard checks future app locale detectors, with a regression
+case that introduces a new component switch. Component tests cover German and
+English profiles and bilingual save/Undo. Database tests cover migration,
+existing edits, new tenant seeds and isolation. API tests cover language
+selection, legacy clients, custom fallback and invalid translation bounds.
+Playwright spot checks cover Kinds of work, Models, session chat, Tickets and
+Needs attention with an actually loaded German profile and stable controls;
+evidence uses `testInfo.outputPath()` under `web/test-results/aeon-998-onelang/`.
+No layout was added; the existing components are retained (needs Opus design).
+
+AEON-998 validation: all 40 static checks passed with no skips (`--merge-main`,
+exit 0). Remote modelregistry, modelprefs, db, dsar and reportercontract tests
+passed; the database check includes migration 1295 and tenant isolation.
+Targeted helper/guard and DE/EN editor tests passed, as did the five browser
+scenarios at 1440, 1024 and 390 pixels in light and dark themes (30 screenshots).
+The screenshot paths are indexed in
+`web/test-results/aeon-998-onelang/evidence.json`.

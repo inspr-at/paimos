@@ -97,13 +97,13 @@ func LoadBoard(ctx context.Context, tx pgx.Tx, person *string, project string) (
 	if len(s.Rules) > 4096 {
 		return s, ErrBoardBounds
 	}
-	rows, err = tx.Query(ctx, `SELECT id::text,slug,coalesce(label_override,label),hint,project_id::text,system,position,coalesce(examples,'{}'),coalesce(labels,'{}') FROM work_kinds WHERE archived_at IS NULL AND (project_id IS NULL OR project_id=$1::uuid) ORDER BY position,slug,id LIMIT 257`, optional(project))
+	rows, err = tx.Query(ctx, `SELECT id::text,slug,coalesce(label_override,label),hint,project_id::text,system,position,coalesce(examples,'{}'),coalesce(labels,'{}'),`+KindWordsDeSQL+` FROM work_kinds WHERE archived_at IS NULL AND (project_id IS NULL OR project_id=$1::uuid) ORDER BY position,slug,id LIMIT 257`, optional(project))
 	if err != nil {
 		return s, err
 	}
 	for rows.Next() {
 		var k Kind
-		if err := rows.Scan(&k.ID, &k.Slug, &k.Label, &k.Hint, &k.ProjectID, &k.System, &k.Position, &k.Examples, &k.Labels); err != nil {
+		if err := rows.Scan(&k.ID, &k.Slug, &k.Label, &k.Hint, &k.ProjectID, &k.System, &k.Position, &k.Examples, &k.Labels, &k.WordsDe); err != nil {
 			rows.Close()
 			return s, err
 		}

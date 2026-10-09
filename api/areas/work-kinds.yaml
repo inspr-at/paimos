@@ -6,6 +6,7 @@ paths:
       operationId: listWorkKinds
       security: *auth
       parameters:
+        - {name: lang, in: query, schema: {type: string, enum: [en, de], default: en}, description: "Selects display_words; legacy English fields and German words_de remain available."}
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_archived, in: query, schema: {type: boolean, default: false}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
@@ -109,6 +110,7 @@ components:
       additionalProperties: false
       minProperties: 1
       properties:
+        words_de: {allOf: [{$ref: '#/components/schemas/WorkDisplayWords'}, {properties: {hint: {minLength: 1}}}]}
         examples: {type: array, maxItems: 3, items: {type: string, maxLength: 120}}
         labels: {type: array, maxItems: 32, items: {type: string, maxLength: 48}}
         label: {type: string, minLength: 1, maxLength: 60}
@@ -119,6 +121,7 @@ components:
       additionalProperties: false
       required: [label]
       properties:
+        words_de: {allOf: [{$ref: '#/components/schemas/WorkDisplayWords'}, {properties: {hint: {minLength: 1}}}]}
         examples: {type: array, maxItems: 3, items: {type: string, maxLength: 120}}
         labels: {type: array, maxItems: 32, items: {type: string, maxLength: 48}}
         position: {type: integer, minimum: -1000000, maximum: 1000000}

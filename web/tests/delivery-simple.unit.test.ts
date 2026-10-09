@@ -206,9 +206,8 @@ it('Learn opens on focus, pins with Enter or a click, and Esc closes it and keep
 // neither alert nor its retry may take another place or size when the other failure comes or goes.
 for (const lang of ['en', 'de'] as const) {
   it(`with a refused save and a failed read together, both alerts and both retries stay reachable (${lang})`, async () => {
-    const labels = lang === 'de'
-      ? { load: 'Erneut versuchen', save: 'Erneut speichern', failed: 'Die Lieferzahlen konnten nicht geladen werden.' }
-      : { load: 'Retry', save: 'Save again', failed: 'Delivery numbers could not be loaded.' }
+    // AEON-998: a de-AT profile still uses the one English app language.
+    const labels = { load: 'Retry', save: 'Save again', failed: 'Delivery numbers could not be loaded.' }
     vi.stubGlobal('document', { addEventListener() {}, removeEventListener() {} })
     vi.stubGlobal('window', { addEventListener() {}, removeEventListener() {}, innerWidth: 1440, innerHeight: 900 })
     let read: () => Promise<unknown> = async () => deliveryMetrics()

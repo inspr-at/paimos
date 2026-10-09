@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api, APIError } from './api.ts'
+import { displayLanguage } from './displayLanguage.ts'
 
 // AEON-876 wire types. Ticket area identities are assigned by the server.
+export interface WorkDisplayWords { label: string; hint: string; examples: string[] }
 export interface WorkKind {
+  words_de?: WorkDisplayWords; display_words?: WorkDisplayWords
   id: string; slug: string; label: string; hint: string; position: number
   examples: string[]; labels: string[]; ticket_count: number
   project_id?: string | null; system?: 'other' | 'security' | 'review' | null; archived_at?: string | null
 }
-export interface KindWords { label: string; hint: string; examples: string[]; labels: string[] }
+export interface KindWords { words_de?: WorkDisplayWords; label: string; hint: string; examples: string[]; labels: string[] }
 export interface SituationLimits { small_hours: number; fix_rounds: number; revision: number; set_by: string | null; set_at: string | null }
 interface KindPage { items: WorkKind[]; next_cursor: string | null }
 const MAX_PAGES = 16, MAX_BYTES = 1024 * 1024
@@ -41,7 +44,7 @@ export async function listWorkKinds(signal: AbortSignal): Promise<{ items: WorkK
   const items: WorkKind[] = [], cursors = new Set<string>()
   let cursor: string | null = null
   for (let page = 0; page < MAX_PAGES; page++) {
-    const query = new URLSearchParams({ include_archived: 'true', limit: '100', ...(cursor ? { cursor } : {}) })
+    const query = new URLSearchParams({ include_archived: 'true', limit: '100', lang: displayLanguage(), ...(cursor ? { cursor } : {}) })
     const result: KindPage = await request(`/work-kinds?${query}`, 'GET', undefined, signal)
     if (!Array.isArray(result.items) || result.items.length > 100) throw new Error('Invalid kinds page')
     items.push(...result.items)
@@ -58,7 +61,7 @@ export const restoreKind = (id: string, signal: AbortSignal) => request<WorkKind
 export const orderKinds = (slugs: string[], signal: AbortSignal) => request<KindPage>('/work-kinds/order', 'PUT', { slugs }, signal)
 export const getSituationLimits = (signal: AbortSignal) => request<SituationLimits>('/model-preferences/situations', 'GET', undefined, signal)
 export const putSituationLimits = (limits: Pick<SituationLimits, 'small_hours' | 'fix_rounds' | 'revision'>, signal: AbortSignal) => request<SituationLimits>('/model-preferences/situations', 'PUT', limits, signal)
-export const kindWords = (kind: WorkKind): KindWords => ({ label: kind.label, hint: kind.hint, examples: [...kind.examples], labels: [...kind.labels] })
+export const kindWords = (kind: WorkKind): KindWords => ({ label: kind.label, hint: kind.hint, examples: [...kind.examples], labels: [...kind.labels], ...(kind.words_de ? { words_de: { ...kind.words_de, examples: [...kind.words_de.examples] } } : {}) })
 export const activeKinds = (items: WorkKind[]) => items.filter(kind => !kind.archived_at && kind.system !== 'review').sort((a, b) => Number(a.system === 'other') - Number(b.system === 'other') || a.position - b.position || a.id.localeCompare(b.id))
 export function movedKinds(items: WorkKind[], id: string, direction: -1 | 1): string[] | null {
   const visible = activeKinds(items), index = visible.findIndex(kind => kind.id === id), target = index + direction

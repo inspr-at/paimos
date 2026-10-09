@@ -7,6 +7,7 @@ import * as apiClient from '../src/lib/api.ts'
 import * as statusAutopilot from '../src/lib/statusAutopilot'
 import * as identityScope from '../src/lib/identityScope'
 import { mountView, settle, textOf } from './webcore-view-harness'
+import { displayLanguage } from '../src/lib/displayLanguage'
 
 const identity = (event_id: number, extra: Partial<AttentionIdentity> = {}): AttentionIdentity => ({ event_id, node_id: `node-${event_id}`, revision: '2026-10-05T08:00:00Z', release_id: 'release', release_revision: 7, release_project_revision: 4, ...extra })
 const receipt: AttentionResult = { event_id: 1, ok: true, release_id: 'release', previous_release_revision: 7, release_revision: 8, previous_release_project_revision: 4, release_project_revision: 5 }
@@ -167,6 +168,7 @@ async function fallbackVisit(change: 'stay' | 'identity' | 'filter') {
    return Promise.resolve(emptyFallbackPage)
   } },
   '../lib/identityScope': identityScope,
+  '../lib/displayLanguage': { displayLanguage },
   '../lib/preferences': { usePreference: () => ({ value: ref(null), ready: Promise.resolve(), save() {} }) },
   '../lib/ticketList': { filtersFromQuery: () => ({}) },
   '../lib/toast': { toast: () => 1, dismiss() {}, toastBottomClearance: ref(0) },
@@ -193,6 +195,10 @@ it('a finished fallback group scan shows the scanned project, count and facets',
  expect(visit.text).toContain('17')
  expect(visit.text).toContain('Old Project')
  expect(visit.text).toContain('Previous assignee')
+ expect(visit.text).toContain('All projects')
+ expect(visit.text).toContain('Needs attention collects what the autopilot flagged for a person.')
+ expect(visit.text).not.toContain('Alle Projekte')
+ expect(visit.text).not.toContain('Braucht Aufmerksamkeit')
 })
 
 it('a resolved fallback group scan cannot restore groups, counts or facets after an identity change', async () => {
@@ -204,6 +210,9 @@ it('a resolved fallback group scan cannot restore groups, counts or facets after
  expect(visit.text).not.toContain('17')
  expect(visit.text).not.toContain('Old Project')
  expect(visit.text).not.toContain('Previous assignee')
+ expect(visit.text).toContain('All projects')
+ expect(visit.text).not.toContain('Alle Projekte')
+ expect(visit.text).not.toContain('Braucht Aufmerksamkeit')
 })
 
 it('a resolved fallback group scan cannot restore groups, counts or facets after a filter change', async () => {
@@ -215,6 +224,9 @@ it('a resolved fallback group scan cannot restore groups, counts or facets after
  expect(visit.text).not.toContain('17')
  expect(visit.text).not.toContain('Old Project')
  expect(visit.text).not.toContain('Previous assignee')
+ expect(visit.text).toContain('All projects')
+ expect(visit.text).not.toContain('Alle Projekte')
+ expect(visit.text).not.toContain('Braucht Aufmerksamkeit')
 })
 
 type ResolutionEvent = { id: number; actor_principal_id: string; node_id: string; type: string; before?: { updated_at?: string }; after?: { updated_at?: string }; undo_of?: number }

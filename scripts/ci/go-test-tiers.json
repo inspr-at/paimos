@@ -4990,6 +4990,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestDataMigrationsAsAppOwner","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestDisplayWordsMigrationPreservesExistingEditsAndTenantIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestEnsureTenant","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestEnsureTenantSeedsBuiltinRolesUnderForcedRLS","tier":"GATED-FULL"}
@@ -5311,6 +5313,22 @@
     {"kind":"go","package":"internal/delivery","name":"TestMergeAuditPendingAlertsAndAtomicFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeAuditWebhookReconciliationAndIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeBackfillDeliveredNeedsPublishedMembership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeBackfillPreviewApplyAndSafety","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeDoneProtectsOwnershipParentsAndHumanChecks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeDoneQueueConstituentsRequireActualMerge","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeDoneRecordedWebhookReplay","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeDoneReferencesAndCanonicalGroupReads","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeDoneRefusalNeedsYouAndRecovery","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeDoneRefusesWaitingLifecycleAction","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestPreflightAdmissionMissingRedStaleAndLookupFailure","tier":"ESSENTIAL"}
     ,
@@ -6583,6 +6601,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestDefaultRefreshNoNetworkAndOneAuditPerRun","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestDiscoveryVaultIsAccountBoundAndOutageKeepsPolicy","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestDisplayLanguageWordsPreserveLegacyFieldsAndEdits","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestEditorArchiveWaitsBehindFencedRowUndo","tier":"GATED-FULL"}
     ,
