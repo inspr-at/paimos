@@ -8922,6 +8922,8 @@
     ,
     {"kind":"go","package":"internal/stepup/server","name":"TestStepupFirstDecisionWinsWithTwoApprovers","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/stepup/server","name":"TestStepupListExpiredResultsPrecedeEvents","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/stepup/server","name":"TestStepupListKeysetsExpiryAndTenantIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/stepup/server","name":"TestStepupOwnershipBoundsAndCurrentAuthority","tier":"ESSENTIAL"}
