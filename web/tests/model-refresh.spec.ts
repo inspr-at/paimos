@@ -25,9 +25,9 @@ test('the Models page carries the registry card: the old freshness links land on
   await expect(card.getByRole('heading', { name: 'Model registry' })).toBeVisible()
   await expect(card.locator('[data-reg-row="gpt-6.1-sol"]')).toBeVisible()
   await expect(card.getByRole('switch', { name: 'Auto-update' })).toBeChecked()
-  // Catalog freshness lives here now, not in the proof fold.
+  // Catalog freshness lives on the registry card. The minimal Models page removed the old proof fold with the board.
   await expect(page.locator('#models-freshness')).toHaveCount(0)
-  await expect(page.locator('#models-proof')).not.toContainText('Catalog freshness')
+  await expect(page.locator('#models-proof')).toHaveCount(0)
   await card.getByRole('button', { name: 'Check now' }).click()
   await expect(card.getByRole('button', { name: 'Checked · again in 2 min' })).toBeVisible()
   expect(world.writes.map(write => `${write.method} ${write.path}`)).toEqual(['POST /models/refresh'])

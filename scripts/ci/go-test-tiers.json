@@ -6494,6 +6494,8 @@
     ,
     {"kind":"go","package":"internal/modelprefs","name":"TestRankedBoardExpertSituationThinking","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelprefs","name":"TestRankedBoardOmittedKindsFollowDefault","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelprefs","name":"TestRankedBoardSixStepResolution","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelprefs","name":"TestRankedBoardSparseSituationsAndReviewRules","tier":"ESSENTIAL"}
@@ -6673,6 +6675,10 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalModelSourceAndNoteOwnership","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalNativeEffortRetainedAndNearestTieUp","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalOmittedKindFollowsDefaultAndKeepsStoredTail","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalQueuedScoutUsesRoleLadderWhenBoardDoesNotApply","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalRemovePreviewQualificationAndPrivacy","tier":"ESSENTIAL"}
     ,

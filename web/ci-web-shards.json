@@ -328,8 +328,6 @@
         ,
         {"file":"tests/managed-controls.spec.ts","listedTests":25,"tierTiming":{"caseSeconds":{"max":3.674,"median":1.823,"min":1.574},"seconds":50.762087,"selectedTests":25},"weightSeconds":61.988304,"weightSource":"web-13"}
         ,
-        {"file":"tests/models-board-controls.spec.ts","listedTests":13,"weightSeconds":1,"weightSource":"AEON-878 prior-gate ceiling"}
-        ,
         {"file":"tests/no-shift.spec.ts","listedTests":46,"tierTiming":{"caseSeconds":{"max":19.97,"median":4.001,"min":0.151},"seconds":234.324689,"selectedTests":47},"weightSeconds":114.05848,"weightSource":"web-13"}
         ,
         {"file":"tests/record-ownership.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
@@ -520,17 +518,15 @@
         ,
         {"file":"tests/model-refresh.spec.ts","listedTests":1,"tierTiming":{"caseSeconds":{"max":4.248,"median":4.248,"min":4.248},"seconds":7.561739,"selectedTests":1},"weightSeconds":3.5,"weightSource":"e2e-4"}
         ,
-        {"file":"tests/models-board.spec.ts","listedTests":9,"weightSeconds":15,"weightSource":"local-single-worker-AEON-879-11.2s-plus-margin"}
-        ,
-        {"file":"tests/models-expert.spec.ts","listedTests":8,"weightSeconds":17,"weightSource":"AEON-881 focused Expert behavior and viewport evidence estimate"}
-        ,
         {"file":"tests/models-registry.spec.ts","listedTests":26,"weightSeconds":22,"weightSource":"AEON-1012 fix3 adds the revision-snapshot spec to the fix2 16.0s run"}
         ,
-        {"file":"tests/models-setup.spec.ts","listedTests":1,"weightSeconds":25,"weightSource":"AEON-882 focused atomic setup, identity and stability evidence estimate"}
+        {"file":"tests/models-simple-shots.spec.ts","listedTests":18,"weightSeconds":8,"weightSource":"AEON-1011 local-single-worker-5.3s-plus-margin"}
+        ,
+        {"file":"tests/models-simple.spec.ts","listedTests":21,"weightSeconds":12,"weightSource":"AEON-1011 local-single-worker-7.1s-plus-margin"}
         ,
         {"file":"tests/policy-editors.spec.ts","listedTests":32,"weightSeconds":73,"weightSource":"local-single-worker-AEON-879-60.8s-plus-margin"}
         ,
-        {"file":"tests/usage-posture.spec.ts","listedTests":18,"weightSeconds":20,"weightSource":"local-single-worker-AEON-880-15.8s-plus-margin"}
+        {"file":"tests/usage-posture.spec.ts","listedTests":8,"weightSeconds":14,"weightSource":"local-single-worker-AEON-880-15.8s-plus-margin"}
       ]
     }
     ,
@@ -873,8 +869,6 @@
         {"file":"tests/live-panel.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/markdown-ticket-links.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/models-board-evidence.spec.ts","listedTests":12,"weightSeconds":15,"weightSource":"AEON-878 estimate moved from models-board-controls"}
         ,
         {"file":"tests/multiple-account-pairing.spec.ts","listedTests":6,"weightSeconds":13.317072,"weightSource":"unmeasured-test-rate"}
         ,
