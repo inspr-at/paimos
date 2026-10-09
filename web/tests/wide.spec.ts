@@ -46,10 +46,11 @@ test.describe('wide lists', () => {
     const box = (await handle.boundingBox())!
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
     await page.mouse.down()
-    await page.mouse.move(box.x - 200, box.y + box.height / 2, { steps: 4 })
+    await page.mouse.move(box.x - 500, box.y + box.height / 2, { steps: 4 })
     await page.mouse.up()
     await expect.poll(async () => Math.round((await page.locator('thead th.c-title').boundingBox())!.width)).toBeLessThan(title.width - 150)
-    // Loaded-content fits stay still until an explicit Title resize returns spare width.
+    // Loaded-content fits stay still until an explicit Title resize returns enough
+    // spare width after Status, Priority and Assignee reach their maxima.
     await expect.poll(async () => (await page.locator('thead th.c-epic').boundingBox())!.width).toBeGreaterThan(260)
     expect((await page.locator('thead th.c-epic').boundingBox())!.width).toBeGreaterThan(epicBefore)
   })
@@ -73,6 +74,7 @@ test.describe('wide lists', () => {
     for (let i = 0; i < from - target; i++) {
       await page.keyboard.press('Alt+ArrowUp')
       await expect.poll(async () => (await order()).indexOf('updated')).toBe(from - i - 1)
+      await expect(menu.getByRole('checkbox', { name: 'Updated', exact: true })).toBeFocused()
     }
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Updated', 'Assignee'])
     await menu.getByRole('checkbox', { name: 'Estimate' }).check()

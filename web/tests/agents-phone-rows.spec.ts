@@ -113,7 +113,11 @@ for (const theme of ['light', 'dark'] as const) for (const width of [375, 390, 4
       expect(Math.abs(state.x - avatar.x)).toBeLessThanOrEqual(1)
       if (await r.locator('.ticket-chip').count()) {
         const chip = await box(r.locator('.ticket-chip'))
-        expect(Math.abs(midY(chip) - midY(state)), `state and ticket on one line (row ${n})`).toBeLessThanOrEqual(3)
+        // Listening can wrap below the primary state on a narrow row; align
+        // the ticket with the state itself, keeping the original 3px bound.
+        const primaryState = await box(r.locator('.agent-state-label'))
+        expect(primaryState.height).toBeLessThanOrEqual(22)
+        expect(Math.abs(midY(chip) - midY(primaryState)), `state and ticket on one line (row ${n})`).toBeLessThanOrEqual(3)
       }
     }
     // Long titles use the full width up to the menu before wrapping.
