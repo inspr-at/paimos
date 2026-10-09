@@ -58,6 +58,11 @@ func TestStepupProjectionBoundsTargetPermissionsAtProjectLimit(t *testing.T) {
 	}
 	f.exec(t, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'settings.manage')`, f.person.TenantID, role)
 	f.exec(t, `UPDATE role_bindings SET role_id=$3 WHERE tenant_id=$1 AND principal_id=$2 AND scope_type='project' AND scope_id=$4`, f.person.TenantID, f.reader.ID, role, f.project)
+	approver := tenant.Principal{TenantID: f.person.TenantID, Kind: tenant.Person}
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Feature approver') RETURNING id::text`, f.person.TenantID).Scan(&approver.ID); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, f.d, f.person.TenantID, approver.ID, "feature_approver")
 	agent := f.agent
 	agent.Scopes = append(agent.Scopes, "approvals.request", "nodes.read")
 	mod := stepup.New(f.d.App, nil, "")
@@ -86,7 +91,9 @@ func TestStepupProjectionBoundsTargetPermissionsAtProjectLimit(t *testing.T) {
 		wantScope int
 	}{
 		{"workspace owner", f.person, map[string]bool{requests[""]: true, requests[f.project]: true, requests[f.otherProject]: true}, 1001},
-		{"project approver", f.reader, map[string]bool{requests[f.project]: true}, 1},
+		{"minimal workspace approver", approver, map[string]bool{requests[""]: true, requests[f.project]: true, requests[f.otherProject]: true}, 1001},
+		// settings.manage is workspace-only; a project binding cannot grant it.
+		{"project-bound reader", f.reader, map[string]bool{}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var page Page
@@ -107,9 +114,6 @@ func TestStepupProjectionBoundsTargetPermissionsAtProjectLimit(t *testing.T) {
 			}
 			if len(permissions) != 1 || len(permissions["settings.manage"]) != tc.wantScope || len(visibility) > 64<<10 {
 				t.Fatalf("step-up input includes unrelated permissions or wrong coverage: permissions=%d scopes=%d bytes=%d", len(permissions), len(permissions["settings.manage"]), len(visibility))
-			}
-			if tc.person.ID == f.reader.ID && permissions["settings.manage"][0] != f.project {
-				t.Fatal("project authority escaped its binding")
 			}
 			if len(page.Items) != len(tc.wantItems) || page.Counts.Open != len(tc.wantItems) || page.Counts.Held != len(tc.wantItems) {
 				t.Fatalf("wrong authorized request count: %+v", page)
