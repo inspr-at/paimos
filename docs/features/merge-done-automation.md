@@ -61,7 +61,7 @@ this implementation branch.
 Correctness coverage uses checked-in sanitized App-shaped payload fixtures for
 PR closure and merge-queue events, plus canonical reader validation. It checks
 redelivery, multiple queue constituents, refusal visibility/recovery, parent and
-human-check protection, a waiting split or cancel with no live session or run,
+human-check protection, a waiting split with no live session or run,
 permission revocation during the external read, dry-run/apply replay, stale
 revisions, open follow-up PRs, partial reads, and published membership.
 Existing assertions and CI gates are retained.
@@ -71,3 +71,10 @@ returned 0 (40 checks passed, no optional skips). Delivery, Status Autopilot and
 authorization, pairing and reporter contract package tests passed remotely.
 The contract-dependent remote run generated OpenAPI before testing. The tier/shard/ownership unit checks passed
 with 210/32/33 tests, and the shared-fence inventory passed remotely.
+
+Fix round 2, `7ff41ce06`: merge completion also refuses when `aeon_work_pending`
+is set and no session or run is live. The refusal is one non-applicable Needs
+You item and the ticket state stays unchanged. Remote `./internal/delivery`
+passed on mbp2606. The remote merge-main static gate returned 0 (40 checks
+passed, no optional skips). Tier, shard and audit units passed 210/32/33.
+No origin push.
