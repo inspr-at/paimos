@@ -64,3 +64,9 @@ redelivery, multiple queue constituents, refusal visibility/recovery, parent and
 human-check protection, permission revocation during the external read,
 dry-run/apply replay, stale revisions, open follow-up PRs, partial reads, and
 published membership. Existing assertions and CI gates are retained.
+
+Validation of code candidate `d92d288ac`: the remote merge-main static gate
+returned 0 (40 checks passed, no optional skips). Delivery, Status Autopilot and
+authorization, pairing and reporter contract package tests passed remotely.
+The contract-dependent remote run generated OpenAPI before testing. The tier/shard/ownership unit checks passed
+with 210/32/33 tests, and the shared-fence inventory passed remotely.
