@@ -73,7 +73,7 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 			if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/attach" {
 				return nil
 			}
-			if r.URL.Path == "/api/agent-pairing/self" && r.Method == "GET" || (r.URL.Path == "/api/agent-pairing/self/disconnect" || r.URL.Path == "/api/agent-pairing/self/capacity") && r.Method == "POST" {
+			if r.URL.Path == "/api/agent-pairing/self" && r.Method == "GET" || (r.URL.Path == "/api/agent-pairing/self/disconnect" || r.URL.Path == "/api/agent-pairing/self/capacity" || r.URL.Path == "/api/agent-pairing/self/ledger") && r.Method == "POST" {
 				return nil
 			}
 		case "models":

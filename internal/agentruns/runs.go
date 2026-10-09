@@ -271,6 +271,10 @@ func (m *module) get(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error
 	return v, err
 }
 func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	ledgerAllowed, err := agentpairing.LedgerWorkAllowed(r.Context(), tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader))
+	if err != nil {
+		return nil, err
+	}
 	var pending []events.Change
 	if err := retryVendorStops(r.Context(), tx, p, &pending); err != nil {
 		return nil, err
@@ -284,6 +288,7 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	}
 	rows, err := tx.Query(r.Context(), `SELECT `+columns+` FROM agent_runs WHERE agent_principal_id=$1 AND status='queued'
 
+ AND $5::bool
  AND (NOT EXISTS(SELECT 1 FROM agent_pairing_computers WHERE principal_id=$1) OR EXISTS(
   SELECT 1 FROM agent_pairing_computers c
   JOIN agent_pairing_enrollments e ON e.tenant_id=c.tenant_id AND e.computer_id=c.id
@@ -300,7 +305,7 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	 ORDER BY (queue_target_agent_id IS NOT NULL) DESC,
 	 CASE WHEN queue_target_agent_id IS NOT NULL THEN queue_at END DESC,queue_rank NULLS LAST,
 	 (SELECT CASE ticket.fields->>'priority' WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'low' THEN 3 ELSE 2 END FROM nodes ticket WHERE ticket.id=agent_runs.queue_node_id),
-	 queue_at,created_at,id LIMIT $2`, p.ID, limit, agentpairing.VerificationTargets(), r.Header.Get(reviewgate.PolicyHeader) == reviewgate.Policy)
+	 queue_at,created_at,id LIMIT $2`, p.ID, limit, agentpairing.VerificationTargets(), r.Header.Get(reviewgate.PolicyHeader) == reviewgate.Policy, ledgerAllowed)
 	if err != nil {
 		return nil, err
 	}
@@ -576,6 +581,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	if v.ReadOnlyReview && r.Header.Get(reviewgate.PolicyHeader) != reviewgate.Policy {
 		return nil, workorders.Fail(409, "review-capable daemon policy required")
+	}
+	if err := agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
+		return nil, err
 	}
 	if in.Refusal != "" {
 		if len(in.Reservations) != 0 {

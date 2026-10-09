@@ -87,6 +87,9 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if err := authorizeRoute(ctx, tx, r, p, run.AgentID, run.ID); err != nil {
 		return RouteResult{}, err
 	}
+	if err := agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
+		return RouteResult{}, err
+	}
 	// A person's account choice narrows the daemon's enrolled set; it never
 	// bypasses ownership, probe, capacity or allowance checks. No fallback.
 	if run.RequestedAccountID != nil {
