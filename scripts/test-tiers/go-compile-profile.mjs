@@ -11,6 +11,7 @@ import { collectGo, root, saveJSON } from './collect.mjs'
 import { load } from './cli.mjs'
 import { exactPattern, key, splitOwner, validate } from './core.mjs'
 import { goOutcomes } from './report.mjs'
+import { goFailures, outputTail } from './failures.mjs'
 import { generateOpenAPI } from '../../api/generate.mjs'
 
 export function goExecutionIdentity(text) {
@@ -34,7 +35,8 @@ export function goExecutionIdentity(text) {
   return { started: started.sort(), terminal: terminal.sort() }
 }
 
-export function profile(output) {
+export function profile(output, { part: onlyPart } = {}) {
+  if (onlyPart !== undefined && ![1, 2].includes(onlyPart)) throw new Error('Expected profile part 1 or 2')
   const owner = 'internal/nodes', pkg = `github.com/inspr-at/paimos/${owner}`
   const scratch = mkdtempSync(resolve(tmpdir(), 'aeon-go-profile-'))
   const env = { ...process.env, GOMAXPROCS: '2' }
@@ -44,7 +46,14 @@ export function profile(output) {
     const seconds = (performance.now() - begin) / 1000
     writeFileSync(resolve(scratch, `${name}.stdout`), result.stdout ?? '')
     writeFileSync(resolve(scratch, `${name}.stderr`), result.stderr ?? '')
-    if (result.error || result.status !== 0) throw new Error(`${name} failed: ${result.error?.code ?? result.status}; ${result.stdout?.slice(-3000)} ${result.stderr?.slice(-3000)}`)
+    if (result.error || result.status !== 0) {
+      let failures = []
+      if (args.includes('-json') || args.includes('test2json')) {
+        try { failures = goFailures(result.stdout ?? '') } catch { /* Interrupted output retains its tail. */ }
+      }
+      const detail = failures.length ? failures.slice(0, 5).map(row => `${row.name}: ${row.output}`).join('\n') : outputTail(result.stdout)
+      throw new Error(`${name} failed: ${result.error?.code ?? result.status}; ${detail} ${outputTail(result.stderr)}`)
+    }
     return { seconds, output: result.stdout }
   }
   try {
@@ -56,6 +65,7 @@ export function profile(output) {
     const listNames = text => text.split('\n').filter(name => /^(?:Test|Fuzz)\w+$/.test(name)).sort()
     const names = all.map(row => row.name).sort(), cases = [], measurements = []
     for (const [index, part] of parts.entries()) {
+      if (onlyPart !== undefined && index + 1 !== onlyPart) continue
       const pattern = exactPattern(part.rows.map(row => row.name))
       const beforeList = native('go', ['test', '-p', '2', '-list', '^(Test|Fuzz)', `./${owner}`], `before-list-${index}`)
       assert.deepEqual(listNames(beforeList.output), names)
@@ -79,12 +89,13 @@ export function profile(output) {
       cases.push(...part.rows.map(key))
       console.log(JSON.stringify(measurements.at(-1)))
     }
-    assert.equal(new Set(cases).size, selected.length)
+    assert.equal(new Set(cases).size, onlyPart === undefined ? selected.length : parts[onlyPart - 1].rows.length)
     const report = { version: 1, ticket: 'AEON-1025', sourceCommit: native('git', ['rev-parse', 'HEAD'], 'commit').output.trim(),
       runnerClass: 'approved-mbp2606-offload', goVersion: native('go', ['version'], 'version').output.trim(),
       cache: 'Existing Go build cache; no cache purge and no test-result reuse (-count=1).',
       package: owner, nativeTests: names.length, selectedTests: cases.length, listSetEqual: true,
       executedSetEqual: true, subtestSetEqual: true, measurements, cases: cases.sort(),
+      part: onlyPart ?? 'both',
       subtestIdentityNormalization: 'Only TestListEpicMembershipSetBasedAndScoped runtime UUIDs use a per-run bijection in first-appearance order; distinct IDs, reuse, punctuation and outcomes remain exact.',
       followUpOwner: 'AEON lead / AEON-1014 coordinator: post the seven-day CI outcome after deployment.' }
     saveJSON(output, report)
@@ -95,6 +106,6 @@ export function profile(output) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (process.argv.length !== 3) throw new Error('Usage: node scripts/test-tiers/go-compile-profile.mjs OUTPUT.json')
-  profile(resolve(process.argv[2]))
+  if (![3, 4].includes(process.argv.length)) throw new Error('Usage: node scripts/test-tiers/go-compile-profile.mjs OUTPUT.json [1|2]')
+  profile(resolve(process.argv[2]), { part: process.argv[3] === undefined ? undefined : Number(process.argv[3]) })
 }
