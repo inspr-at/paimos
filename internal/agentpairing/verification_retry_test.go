@@ -320,11 +320,10 @@ func TestVerifyAgainConnectOnlyPreservesOrdinaryAllowanceAndTenantBoundary(t *te
 
 // The daemon's actual DTO and wire order reproduce the release-123 failure.
 func TestVerificationTelemetryPrestartBatchAndRetry(t *testing.T) {
-	for _, recovery := range []bool{false, true} {
-		name := "exact_four_event_batch"
-		if recovery {
-			name = "rejected_batch_terminal_recovery"
-		}
+	// AEON-1041: the Fable model-only status must also reach a successful
+	// terminal check, without manufacturing an app_server_protocol failure.
+	for _, name := range []string{"exact_four_event_batch", "rejected_batch_terminal_recovery", "successful_fable_batch"} {
+		recovery := name == "rejected_batch_terminal_recovery"
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
 			p := f.propose("claude")
@@ -332,8 +331,18 @@ func TestVerificationTelemetryPrestartBatchAndRetry(t *testing.T) {
 			v := f.redeem(p)
 			e := v.Enrollments[0]
 			key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+			readSettlement := func(want bool) {
+				t.Helper()
+				var read agentruns.Run
+				decodeResult(t, f.call("GET", "/api/runs/"+*e.VerificationRunID, nil, false, key, 200), &read)
+				if read.ReservationsSettled == nil || *read.ReservationsSettled != want {
+					t.Fatalf("wrong reservation proof: %+v, want %t", read.ReservationsSettled, want)
+				}
+			}
+			readSettlement(false) // No reservations is not a settled reservation.
 			f.probe(v, e, key, 200)
 			f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+			readSettlement(false) // Active reservations remain unconfirmed.
 			batch := []agentd.Telemetry{
 				{Sequence: 1, Kind: "status", EffectiveModel: "claude-fable-5-1", ModelEvidence: "vendor_reported"},
 				{Sequence: 2, Kind: "turn", TurnCountDelta: 1},
@@ -357,6 +366,11 @@ func TestVerificationTelemetryPrestartBatchAndRetry(t *testing.T) {
 				return run
 			}
 			count, turns, errorCode := 4, 1, "app_server_protocol"
+			terminalStatus := "failed"
+			if name == "successful_fable_batch" {
+				terminalStatus, errorCode = "completed", ""
+				batch[3].Status, batch[3].ErrorCode = terminalStatus, errorCode
+			}
 			if recovery {
 				var logs bytes.Buffer
 				old := slog.Default()
@@ -392,18 +406,45 @@ func TestVerificationTelemetryPrestartBatchAndRetry(t *testing.T) {
 			if err := f.db.Admin.QueryRow(t.Context(), `SELECT r.status,
     (SELECT count(*) FROM run_telemetry WHERE run_id=r.id),
     (SELECT coalesce(sum(turn_count_delta),0) FROM run_telemetry WHERE run_id=r.id),
-    (SELECT error_code FROM run_telemetry WHERE run_id=r.id ORDER BY sequence DESC LIMIT 1),
+    (SELECT coalesce(error_code,'') FROM run_telemetry WHERE run_id=r.id ORDER BY sequence DESC LIMIT 1),
     (SELECT count(*) FROM account_reservations WHERE run_id=r.id AND state='active')
     FROM agent_runs r WHERE r.id=$1`, *e.VerificationRunID).Scan(&status, &n, &gotTurns, &code, &held); err != nil {
 				t.Fatal(err)
 			}
-			if status != "failed" || n != count || gotTurns != turns || code != errorCode || held != 0 {
+			if status != terminalStatus || n != count || gotTurns != turns || code != errorCode || held != 0 {
 				t.Fatalf("wrong settlement: %s rows=%d turns=%d code=%s holds=%d", status, n, gotTurns, code, held)
+			}
+			readSettlement(true)
+			// A second unsettled reservation must defeat a settled first row.
+			var extraReservation string
+			if err := f.db.Admin.QueryRow(t.Context(), `WITH extra_window AS (
+ INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance)
+ SELECT tenant_id,account_id,clock_timestamp(),clock_timestamp()+interval '1 hour','requests',1
+ FROM account_allowance_windows WHERE id=(SELECT window_id FROM account_reservations WHERE run_id=$1 LIMIT 1)
+ RETURNING tenant_id,id
+ ) INSERT INTO account_reservations(tenant_id,run_id,window_id,reserved_units)
+ SELECT tenant_id,$1,id,1 FROM extra_window RETURNING id::text`, *e.VerificationRunID).Scan(&extraReservation); err != nil {
+				t.Fatal(err)
+			}
+			readSettlement(false)
+			if _, err := f.db.Admin.Exec(t.Context(), `UPDATE account_reservations SET state='settled',actual_units=0,settled_at=clock_timestamp() WHERE id=$1`, extraReservation); err != nil {
+				t.Fatal(err)
+			}
+			readSettlement(true)
+			// Retain the fixture row and independently vary reservation state:
+			// terminal status and released capacity must not count as settlement.
+			for _, reservationState := range []string{"active", "released", "settled"} {
+				if _, err := f.db.Admin.Exec(t.Context(), `UPDATE account_reservations SET state=$2,
+ settled_at=CASE WHEN $2='active' THEN NULL ELSE clock_timestamp() END,
+ actual_units=CASE WHEN $2='settled' THEN 0 ELSE NULL END WHERE run_id=$1`, *e.VerificationRunID, reservationState); err != nil {
+					t.Fatal(err)
+				}
+				readSettlement(reservationState == "settled")
 			}
 			var current agentpairing.View
 			decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &current)
 			result := current.Enrollments[0]
-			if result.VerificationState != "failed" || result.VerificationError != errorCode || result.VerificationStalled || !result.CanVerify {
+			if result.VerificationState != terminalStatus || result.VerificationError != errorCode || result.VerificationStalled || !result.CanVerify {
 				t.Fatal("failed verification missing from owner projection")
 			}
 			var retried struct {
