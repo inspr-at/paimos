@@ -874,6 +874,10 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestResetPolicyReportingOwnershipRevisionAndPrivacy","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetProbeBetweenPrepareAndExecuteCancelsAndRetries","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetUndoPreVendorFailureRestoresSucceeded","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestResetUnknownOutcomeAndFinalAuthorization","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestResetUseAuditCountConfirmationAndVendorUndo","tier":"ESSENTIAL"}
