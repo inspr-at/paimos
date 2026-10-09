@@ -147,7 +147,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 					if account != nil {
 						native := true
 						if profile.Harness == "grok" {
-							err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_pairing_requests r ON r.tenant_id=e.tenant_id AND r.id=e.request_id WHERE e.account_id=$1 AND r.details->>'platform'='darwin' AND r.details->>'arch'='arm64')`, account.ID).Scan(&native)
+							native, err = nativeGrokEnrolled(ctx, tx, account.ID)
 							if err != nil {
 								callbackErr = err
 								return false, "enrollment unavailable"
