@@ -31,7 +31,9 @@ export function createGoRunner({ execute, command, env, compileOwners = compiled
       if (measurement.compiled) {
         scratch ??= mkdtempSync(resolve(tmpdir(), 'aeon-go-binaries-'))
         entry.binary = resolve(scratch, `${owner.replaceAll('/', '-')}.test`)
-        const result = timed(() => execute('go', ['test', '-p', '2', '-c', '-o', entry.binary, `./${owner}`], `${stem}.compile.log`, options),
+        // Normal go test omits linker debug symbols; -c otherwise keeps them,
+        // increasing link/copy/startup work without strengthening the tests.
+        const result = timed(() => execute('go', ['test', '-p', '2', '-c', '-ldflags=-s -w', '-o', entry.binary, `./${owner}`], `${stem}.compile.log`, options),
           seconds => { measurement.compileSeconds = seconds })
         if (result.code || result.error || result.signal) throw new Error(`Go test compilation failed: ${owner}; ${outputTail(`${result.output}\n${result.stderr}`) || result.error || result.signal || result.code}`)
       }

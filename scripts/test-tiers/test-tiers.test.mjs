@@ -64,6 +64,7 @@ test('AEON-1025 compiled Go owners retain exact execution, blocking failures and
           assert.equal(options.env.GOMAXPROCS,'2')
           assert.equal(options.env.FIXTURE,'retained')
           if(args.includes('-c')) {
+            assert.ok(args.includes('-ldflags=-s -w'),'retain normal go test linker symbol policy')
             const binary=args[args.indexOf('-o')+1]
             binaries.push(binary);calls.push({compile:true,args,path,options})
             assert.ok(existsSync(resolve(binary,'..')))

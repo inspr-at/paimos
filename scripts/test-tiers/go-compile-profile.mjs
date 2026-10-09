@@ -71,7 +71,7 @@ export function profile(output, { part: onlyPart } = {}) {
       assert.deepEqual(listNames(beforeList.output), names)
       const before = native('go', ['test', '-p', '2', '-count=1', '-timeout=25m', '-json', '-run', pattern, `./${owner}`], `before-run-${index}`)
       const binary = resolve(scratch, `nodes-${index}.test`)
-      const compile = native('go', ['test', '-p', '2', '-c', '-o', binary, `./${owner}`], `compile-${index}`)
+      const compile = native('go', ['test', '-p', '2', '-c', '-ldflags=-s -w', '-o', binary, `./${owner}`], `compile-${index}`)
       const afterList = native(binary, ['-test.paniconexit0', '-test.list=^(Test|Fuzz)'], `after-list-${index}`, resolve(root, owner))
       assert.deepEqual(listNames(afterList.output), names)
       const after = native('go', ['tool', 'test2json', '-t', '-p', pkg, binary, '-test.paniconexit0', '-test.v=test2json', '-test.count=1', '-test.timeout=25m', `-test.run=${pattern}`], `after-run-${index}`, resolve(root, owner))
