@@ -43,7 +43,7 @@ for (const width of [1440, 390]) for (const look of ['light', 'dark'] as const) 
     const put = state.calls.find(c => c.method === 'PUT' && c.path.endsWith('/lead-settings'))
     expect(put?.body).toEqual({ revision: 2, overrides: { allowed_host_ids: [HOST_A] } })
     expect(state.calls.find(c => c.method === 'POST' && c.path === '/api/projects/p-pharos/lead')?.body).toEqual({ expected_revision: 0 })
-    await expect(band(page)).toContainText('Requested · waiting for its session')
+    await expect(band(page)).toContainText('Requested · waiting for a runtime')
     await expect(band(page).getByRole('button', { name: 'Cancel start' })).toBeVisible()
   })
 }

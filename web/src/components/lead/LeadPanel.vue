@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } fro
 import { useRouter } from 'vue-router'
 import { api } from '../../lib/api'
 import { can } from '../../lib/authz'
-import { canPause, canResume, checksSummary, decisionLine, LEAD_WORDS, unmanagedLeadCopy, startChecks } from '../../lib/lead'
+import { canLaunchLead, canPause, canResume, checksSummary, decisionLine, leadLaunchReason, LEAD_WORDS, unmanagedLeadCopy, startChecks } from '../../lib/lead'
 import { closeLeadPanel, leadOverlay, openLeadPause, openStartLead } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
 import { usePoller } from '../../lib/usePolledData'
@@ -85,6 +85,7 @@ async function cancelAdoption() {
   } catch (e) { if (project === props.projectId) toast(e instanceof Error ? e.message : 'The adoption was not cancelled.', { tone: 'error' }) }
 }
 async function resume() {
+  if (!canLaunchLead(lead.value)) return
   const project = props.projectId, who = session.identity?.principal.id
   try {
     const result = await leads.start(project)
@@ -173,13 +174,13 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
         <button type="button" class="btn" data-act="cancel-adoption" :aria-disabled="!mayStart || leads.busy[projectId]" @click="mayStart && !leads.busy[projectId] && cancelAdoption()">Cancel</button>
       </template>
       <template v-else-if="lead?.reason === 'selection_cleared' && !lead.session_id">
-        <p>The previous choice was cleared. Start a lead or adopt another running session.</p>
-        <button type="button" class="btn primary" data-act="start" :aria-disabled="!mayStart || leads.busy[projectId]" @click="mayStart && !leads.busy[projectId] && openStartLead([projectId], $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="15" />Start {{ w.l }}</button>
+        <p>{{ !canLaunchLead(lead) ? leadLaunchReason(lead) : 'The previous choice was cleared. Start a lead or adopt another running session.' }}</p>
+        <button type="button" class="btn primary" data-act="start" :data-tip="!canLaunchLead(lead) ? leadLaunchReason(lead) : undefined" :aria-disabled="!mayStart || !canLaunchLead(lead) || leads.busy[projectId]" @click="mayStart && canLaunchLead(lead) && !leads.busy[projectId] && openStartLead([projectId], $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="15" />Start {{ w.l }}</button>
       </template>
       <p v-else-if="unmanaged && lead?.state === 'paused'">{{ unmanagedLeadCopy }}. Continue from the session itself.</p>
       <template v-else-if="lead?.state === 'paused'">
-        <p>{{ canResume(lead) ? 'Restarts through the usual start checks.' : 'Resume waits until its session has stopped.' }}</p>
-        <button type="button" class="btn primary" data-act="resume" :aria-disabled="!mayStart || !canResume(lead) || leads.busy[projectId]" @click="mayStart && canResume(lead) && resume()"><AppIcon name="play" :size="15" />Resume</button>
+        <p>{{ !canLaunchLead(lead) ? leadLaunchReason(lead) : canResume(lead) ? 'Restarts through the usual start checks.' : 'Resume waits until its session has stopped.' }}</p>
+        <button type="button" class="btn primary" data-act="resume" :data-tip="!canLaunchLead(lead) ? leadLaunchReason(lead) : undefined" :aria-disabled="!mayStart || !canResume(lead) || !canLaunchLead(lead) || leads.busy[projectId]" @click="mayStart && canResume(lead) && resume()"><AppIcon name="play" :size="15" />Resume</button>
       </template>
       <template v-else>
         <p>Workers finish their step; nothing new starts.</p>

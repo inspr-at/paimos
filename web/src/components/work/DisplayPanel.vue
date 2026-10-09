@@ -18,7 +18,6 @@ defineProps<{
   density: 'comfortable' | 'compact'
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
   grouped?: boolean
-  headerGraph?: boolean
   sheet?: boolean
   projectHeader?: boolean
   attentionGroup?: AttentionGrouping
@@ -26,14 +25,11 @@ defineProps<{
   // Collapsed header: the add action stays above the key list, on the desktop as in the sheet.
   stableSort?: boolean
 }>()
-// The header graph is on until a person turns it off. Callers that omit the
-// prop keep that default so the switch does not flash off.
 const { modelDisplay, set: setModelDisplay } = useModelDisplay()
 const emit = defineEmits<{
   group: [value: GroupBy]; sort: [keys: SortKey[]]; density: [value: 'comfortable' | 'compact']
   columns: [order: ColumnId[], visible: ColumnId[]]; columnsReset: []
   expandAll: []; collapseAll: []; expandGroups: []; collapseGroups: []
-  headerGraph: [value: boolean]
   attentionGroup: [value: AttentionGrouping]
 }>()
 </script>
@@ -91,12 +87,6 @@ const emit = defineEmits<{
       <div class="model-choice"><span>Version</span><div class="seg" role="radiogroup" aria-label="Version">
         <button v-for="version in ['show', 'hide'] as const" :key="version" type="button" role="radio" :aria-checked="modelDisplay.modelVersion === version" @click="setModelDisplay('modelVersion', version)">{{ version === 'show' ? 'Show' : 'Hide' }}</button>
       </div></div>
-    </div>
-    <div class="section">
-      <label class="switch">
-        <input type="checkbox" :checked="headerGraph !== false" @change="emit('headerGraph', ($event.target as HTMLInputElement).checked)" />
-        <span>Graph in project header</span>
-      </label>
     </div>
     </template>
   </div>

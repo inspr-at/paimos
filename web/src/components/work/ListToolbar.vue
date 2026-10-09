@@ -43,7 +43,6 @@ const props = defineProps<{
   // The table's columns for the Display menu's picker.
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
   facetLoading?: boolean
-  headerGraph?: boolean
   settingsTarget?: string
   projectHeader?: boolean
   // The project header is collapsed: Display moves into the toolbar and carries what the header hid.
@@ -72,7 +71,6 @@ const emit = defineEmits<{
   collapseGroups: []
   columns: [order: ColumnId[], visible: ColumnId[]]
   columnsReset: []
-  headerGraph: [value: boolean]
   attentionFilter: [field: keyof AttentionFilters, value: string]
   attentionGroup: [value: AttentionGrouping]
 }>()
@@ -346,10 +344,9 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
           v-if="!graph"
           :attention-group="attention?.group" :locale="attention?.locale" @attention-group="value => emit('attentionGroup', value)"
           :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns" :grouped="view === 'list' && filters.group !== 'none'"
-          :header-graph="headerGraph" :project-header="projectHeader" :sheet="collapsedMenu && sheetMode" :stable-sort="collapsedMenu"
+          :project-header="projectHeader" :sheet="collapsedMenu && sheetMode" :stable-sort="collapsedMenu"
           @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
           @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
-          @header-graph="value => emit('headerGraph', value)"
           @expand-all="emit('expandAll'); closeDisplay(false)" @collapse-all="emit('collapseAll'); closeDisplay(false)"
           @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')"
         />

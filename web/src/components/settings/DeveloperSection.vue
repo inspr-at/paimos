@@ -5,7 +5,7 @@ import { useSession } from '../../stores/session'
 import SettingsCard from './SettingsCard.vue'
 
 const session = useSession()
-const { showReservedVersions, setShowReservedVersions, showExpertStart, setShowExpertStart, saving, failed } = useDeveloperSettings()
+const { showReservedVersions, setShowReservedVersions, showExpertStart, setShowExpertStart, showHeaderGraph, setShowHeaderGraph, saving, failed } = useDeveloperSettings()
 async function changeReserved(event: Event) {
   const input = event.target as HTMLInputElement
   await setShowReservedVersions(input.checked)
@@ -15,6 +15,11 @@ async function changeExpert(event: Event) {
   const input = event.target as HTMLInputElement
   await setShowExpertStart(input.checked)
   input.checked = showExpertStart.value
+}
+async function changeHeaderGraph(event: Event) {
+  const input = event.target as HTMLInputElement
+  await setShowHeaderGraph(input.checked)
+  input.checked = showHeaderGraph.value
 }
 </script>
 
@@ -34,6 +39,12 @@ async function changeExpert(event: Event) {
         <span>Start agents manually (expert)</span>
       </label>
       <p id="expert-start-hint" class="hint">Shows Start agent manually on the Agents page and Start now on… on a queued ticket: you pick ticket, host, harness, account, model and thinking yourself. The same start checks apply. Off by default; project leads start workers for you.</p>
+      <label id="header-graph" class="developer-choice follow">
+        <input type="checkbox" role="switch" :checked="showHeaderGraph" :disabled="saving || session.identity?.principal.kind !== 'person'"
+          aria-describedby="header-graph-hint" @change="changeHeaderGraph" />
+        <span>Graph in project header</span>
+      </label>
+      <p id="header-graph-hint" class="hint">Shows a small live ticket graph in the project header on wide screens. Off by default, also for anyone who had it on before.</p>
       <p v-if="saving" role="status" class="hint">Saving your preference…</p>
       <p v-if="failed" role="alert" class="error-line">Your developer preference could not be saved. Please try the switch again.</p>
     </SettingsCard>
