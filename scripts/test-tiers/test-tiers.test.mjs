@@ -22,6 +22,7 @@ import './manifests.test.mjs'
 import './tiers-merge-driver.test.mjs'
 import '../merge-drivers/merge-drivers.test.mjs'
 import './slow-owners.test.mjs'
+import './web-batches.test.mjs'
 
 const g=(pkg,name,tier='NIGHTLY')=>({kind:'go',package:pkg,name,tier,active:true})
 const w=(file,name,tier='NIGHTLY')=>({kind:'node',file,name,tier})
@@ -2061,7 +2062,9 @@ test('AEON-980 web retry uses exact browser registrations and native unit patter
   const identity={GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:'a'.repeat(40)}
   const rows=[11,12,21,22].map((line,index)=>({kind:'browser',file:`tests/${index<2?'a':'b'}.spec.ts`,
     name:index===0?'failed %\n::error::title':`case ${index}`,tier:'GATED-FULL',id:`id-${index}`,project:'chromium',line,active:true}))
-  const policy={groups:['a','b'].map(id=>({id,config:'playwright.ui.config.ts',project:'chromium',flags:[],env:{FIXTURE_ROOT:'${RUNNER_TEMP}/fixture'},specs:[{file:`tests/${id}.spec.ts`}]}))}
+  // Conflicting per-group settings deliberately exercise the separate-launch
+  // retry path; AEON-1023 also covers compatible groups in web-batches.test.mjs.
+  const policy={groups:['a','b'].map(id=>({id,config:'playwright.ui.config.ts',project:'chromium',flags:[],env:{FIXTURE_ROOT:'${RUNNER_TEMP}/fixture',FIXTURE_GROUP:id},specs:[{file:`tests/${id}.spec.ts`}]}))}
   const simulate=async({event='merge_group',failed=[rows[0],rows[2]],again=[],known=noFlaky,reportErrors=false,automaticRetries=false,missing=false,collectionMismatch=false,interrupted=false,retryInterrupted=false}={})=>{
     const calls=[],collections=[],attempts=new Map(),logs=[]
     let report

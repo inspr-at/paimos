@@ -1,5 +1,39 @@
 # CI push and merge-queue reuse (AEON-423, OPS-257 L5)
 
+AEON-1023 reduces browser shard discovery and launch overhead. Tier browser
+jobs collect only the native Playwright catalogue. Unit classifications remain
+planner metadata so that source-impact decisions retain their existing
+semantics; strict web setup and unit jobs still discover the complete web
+catalogue. Case selection, shard weights, required checks and retry limits are
+unchanged. Compatible groups share a supervised Playwright execution and Vite
+server: config, project, remaining flags and host restriction must match, and
+environment values must not conflict. Screenshot variables are combined and
+failure tracing is retained when any contributing group requests it. The tier
+runner still forces one worker and disables automatic retries. Conflicting
+policies and the separate performance config keep their own execution.
+
+Each browser shard measurement includes `webShardTiming`: monotonic collection,
+planning and run seconds, summed native case durations including explicit
+retries, residual non-case seconds, and per-launch group membership, native
+list and execution timing. Missing case duration evidence leaves the residual
+unknown. `browserCases` records case/file/config/project identities and final
+statuses for comparison across a full run; a missing result is `notRun`.
+Existing case accounting and full-execution checks remain authoritative.
+
+`node scripts/test-tiers/prove-web-shards.mjs` checks exact native old/new
+selection identities across all twelve full browser shards; `--all` checks the
+whole catalogue. It compares full versus browser-only discovery, resolves both
+the old group lists and the combined lists through Playwright `--list`, and
+writes `tmp/test-tiers/web-shard-set-equality.json`. This is a discovery proof;
+it does not claim browser execution. The runner regression executes a full
+twelve-shard layout with native-result fixtures and rejects missing/duplicate
+identities. Actual browser execution and before/after non-case timing require
+the approved browser lane or the coordinator's CI run. The AEON lead owns the
+seven-day outcome: compare actual per-shard residuals, runner minutes and
+first-attempt results with the pre-change run, and post on AEON-1023 after
+deployment. The reference Arion W2 full run `37815054461` has web shards
+4.8–12.8 minutes, 99.7 minutes in selected-UI steps and 71.7 summed case minutes.
+
 Main-push reuse keeps its existing `CI_TREE_REUSE` semantics: unless set to
 `off`, a successful full merge-group run at the **same commit SHA** can replace
 heavy execution. The verifier checks repository, workflow name/path/ID, latest
