@@ -33,11 +33,11 @@ const rule = computed(() => matrix.value?.rules.new_accounts === 'allow' ? 'allo
 <template>
   <section class="use-preview" aria-labelledby="pairing-use-title" data-pairing-use>
     <h3 id="pairing-use-title">Where these accounts may work</h3>
-    <p v-if="!allowed" class="sub">The workspace rule decides. Owners and admins see and change it in Settings › Accounts.</p>
-    <p v-else-if="failed" class="sub">The workspace rule could not be read. It still applies; check the accounts in Settings › Accounts after connecting.</p>
+    <p v-if="!allowed" class="sub">The workspace rule decides. Owners and admins see and change it in Settings under Accounts and computers.</p>
+    <p v-else-if="failed" class="sub">The workspace rule could not be read. It still applies; check the accounts in Settings under Accounts and computers after connecting.</p>
     <p v-else-if="!matrix" class="sub" role="status">Reading the workspace rule…</p>
     <template v-else>
-      <p class="sub">New accounts: {{ rule }}. {{ rows.some(r => r.allowed) ? 'Each account starts with these ticks; change them in Settings › Accounts.' : 'They start allowed nowhere until someone ticks them in Settings › Accounts.' }}</p>
+      <p class="sub">New accounts: {{ rule }}. {{ rows.some(r => r.allowed) ? 'Each account starts with these ticks; change them in Settings under Accounts and computers.' : 'They start allowed nowhere until someone ticks them in Settings under Accounts and computers.' }}</p>
       <ul class="rows">
         <li v-for="r in rows" :key="r.id" :data-pairing-use-row="r.id"><AppIcon :name="r.allowed ? 'check' : 'minus'" :size="14" :class="r.allowed ? 'yes' : 'no'" /><span>{{ r.name }}</span><small>{{ r.allowed ? 'Allowed' : r.never ? 'Never for new accounts' : 'Not allowed' }}</small></li>
       </ul>

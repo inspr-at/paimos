@@ -89,6 +89,6 @@ test('a project summary says when the account count is incomplete', () => {
   assert.equal(projectContextSummary(false, null, [], false), 'This project has no context yet, so no account may work on it. Choose one.')
   assert.equal(projectContextSummary(true, null, [], false), 'No account may work on this project until it gets a context.')
   assert.equal(projectContextSummary(true, acme, ['Main', 'Extra'], false), '2 accounts may work here: Main, Extra.')
-  assert.equal(projectContextSummary(true, acme, ['Main'], true), 'At least 1 account may work here: Main. Only the first 1,000 accounts were counted; see Settings › Accounts for all.')
+  assert.equal(projectContextSummary(true, acme, ['Main'], true), 'At least 1 account may work here: Main. Only the first 1,000 accounts were counted; see Settings under Accounts and computers for all.')
   assert.match(projectContextSummary(true, acme, Array.from({ length: 14 }, (_, i) => `A${i}`), false), /A11 and 2 more\.$/)
 })

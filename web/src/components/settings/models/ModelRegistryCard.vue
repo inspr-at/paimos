@@ -308,7 +308,7 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose(); stopTicker() })
     </header>
 
     <div v-if="readable" class="reg-strip" data-reg-strip>
-      <label v-if="manageable && status" class="switch reg-switch" :data-tip="autoManageable ? undefined : 'Owners and admins change this as New model versions in Settings › Accounts.'"><input type="checkbox" role="switch" data-reg-auto :checked="autoOn" :disabled="!autoManageable" :aria-busy="autoBusy" @change="toggleAuto"><span>Auto-update</span></label>
+      <label v-if="manageable && status" class="switch reg-switch" :data-tip="autoManageable ? undefined : 'Owners and admins change this as New model versions in Settings under Accounts and computers.'"><input type="checkbox" role="switch" data-reg-auto :checked="autoOn" :disabled="!autoManageable" :aria-busy="autoBusy" @change="toggleAuto"><span>Auto-update</span></label>
       <p v-if="stripError" class="reg-text reg-text-error" role="alert"><AppIcon name="alert" :size="14" />{{ stripError }}</p>
       <p v-else class="reg-text" data-reg-when>{{ stripText }}</p>
       <span class="reg-grow" />

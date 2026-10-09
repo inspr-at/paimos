@@ -111,8 +111,8 @@ export function projectContextSummary(mapped: boolean, context: WorkContext | nu
   if (!mapped) return 'This project has no context yet, so no account may work on it. Choose one.'
   if (!context || context.kind === 'holding') return 'No account may work on this project until it gets a context.'
   const n = names.length, listed = names.slice(0, 12).join(', ') + (n > 12 ? ` and ${n - 12} more` : '')
-  if (truncated) return `At least ${n === 1 ? '1 account may' : `${n} accounts may`} work here${n ? `: ${listed}` : ''}. Only the first ${(MAX_PAGES * PAGE).toLocaleString('en')} accounts were counted; see Settings › Accounts for all.`
-  return n ? `${n === 1 ? '1 account may' : `${n} accounts may`} work here: ${listed}.` : 'No account is allowed in this context yet. Tick accounts in Settings › Accounts.'
+  if (truncated) return `At least ${n === 1 ? '1 account may' : `${n} accounts may`} work here${n ? `: ${listed}` : ''}. Only the first ${(MAX_PAGES * PAGE).toLocaleString('en')} accounts were counted; see Settings under Accounts and computers for all.`
+  return n ? `${n === 1 ? '1 account may' : `${n} accounts may`} work here: ${listed}.` : 'No account is allowed in this context yet. Tick accounts in Settings under Accounts and computers.'
 }
 export const saveCells = (expected_revision: number, change: { changes: UseCell[] } | { bulk: Bulk }, signal?: AbortSignal) =>
   call<CellResult>('/account-use/cells', 'PATCH', { expected_revision, ...change }, signal)
