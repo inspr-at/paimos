@@ -62,7 +62,7 @@ func newResetsFixture(t *testing.T) resetsFixture {
 	f.report = capacity.ResetReport{ResetCredits: capacity.ResetCredits{Count: 2, ExpiresAt: []time.Time{f.now.Add(time.Hour), f.now.Add(24 * time.Hour)}, Source: "vendor"}, ReadAt: f.now.Add(-time.Second), BindingRevision: f.account.LinkRevision, UndoSupported: true}
 	ctx := context.WithValue(dbtest.Seed(t.Context()), clockKey{}, f.now)
 	if err := db.InTenant(ctx, appPool, f.owner.TenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET usage_probe_enabled=true,usage_probe_revision=link_revision,linked_at=$2::timestamptz-interval '1 hour',last_probe_at=$2,last_probe_ok=true WHERE id=$1`, f.account.ID, f.now); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET usage_probe_enabled=true,usage_probe_revision=link_revision,linked_at=$2::timestamptz-interval '1 hour',last_probe_at=$2,last_probe_ok=true,last_daemon_generation='reset-generation' WHERE id=$1`, f.account.ID, f.now); err != nil {
 			return err
 		}
 		if err := ingestReadings(ctx, tx, f.runner, f.account.ID, []capacity.Reading{f.window}); err != nil {
@@ -195,6 +195,16 @@ func TestResetUseAuditCountConfirmationAndVendorUndo(t *testing.T) {
 			}
 		}
 		return nil
+	})
+	// A normal fresh vendor capture must not invalidate an otherwise valid Undo.
+	f.seed(t, func(tx pgx.Tx) error {
+		report := result.Report
+		report.ReadAt = f.now.Add(500 * time.Millisecond)
+		a, err := getAccount(t.Context(), tx, f.account.ID)
+		if err != nil {
+			return err
+		}
+		return storeResetReport(t.Context(), tx, a, report, report.ReadAt)
 	})
 	restored := f.report
 	restored.ReadAt = f.now.Add(time.Second)
