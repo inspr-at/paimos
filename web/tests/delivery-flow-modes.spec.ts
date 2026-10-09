@@ -13,7 +13,7 @@ import { mockFlow, RUN, ZONE } from './delivery-flow-fixtures'
 
 test.use({ timezoneId: ZONE })
 
-async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en' | 'de'; level?: 'simple' | 'expert'; empty?: boolean } = {}) {
+async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en' | 'de'; level?: 'simple' | 'expert'; empty?: boolean; record?: boolean } = {}) {
   const work = fixtures()
   work.preferences.theme = { choice: options.theme ?? 'light' }
   work.preferences['delivery:numbers'] = { level: options.level ?? 'simple', window: 7 }
@@ -22,7 +22,7 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en
   await mockWork(page, work, { nativeEvents: true })
   if (options.lang === 'de') { const data = settingsData(); data.profile.locale = 'de-AT'; await mockSettings(page, data) }
   await mockDelivery(page, async () => ({ status: 200, body: deliveryMetrics() }), ['delivery.read'])
-  return mockFlow(page, { empty: options.empty })
+  return mockFlow(page, { empty: options.empty, record: options.record })
 }
 const lanes = (page: Page) => page.getByTestId('flow-lanes')
 const chip = (page: Page) => page.getByTestId('flow-chip').locator('.shown')
@@ -131,12 +131,12 @@ test('Compare races release 126 from step a against the Arion target on one axis
   await expect(page.getByTestId('flow-pick')).toHaveValue(RUN.r126)
   await expect(lanes(page).locator('.fl-ttl')).toHaveText(['Release 126 (a → l)', 'Arion target'])
   await expect(lanes(page).getByTestId('flow-avatar')).toHaveCount(2)
-  await expect(page.getByTestId('flow-head')).toContainText('Release 126 vs. the Arion target, queue to live: 1 h 10 instead of 1 h 01')
+  await expect(page.getByTestId('flow-head')).toContainText('Release 126 vs. the Arion target, queue to live: 1 h 10 instead of 24 min')
   await expect(clock(page)).toHaveText('+0 min')
   await lanes(page).focus()
   await page.keyboard.press('End')
   await expect(clock(page)).toHaveText(/ · target reached$/)
-  await expect(page.getByTestId('flow-moment-head')).toContainText(/the Arion target was live after 1 h 01\./i)
+  await expect(page.getByTestId('flow-moment-head')).toContainText(/the Arion target was live after 24 min\./i)
   await expect(page.getByTestId('flow-went').locator('.went')).toHaveCount(2)
 })
 
@@ -156,13 +156,63 @@ for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'],
       await guard.check(async () => { await lanes(page).focus(); await page.keyboard.press('End') })
       await guard.check(() => page.getByTestId('flow-follow').click())
       guard.done()
-      if (mode === 'compare') await expect(page.getByTestId('flow-moment-head')).toContainText(lang === 'de' ? /das Arion-Ziel war nach 1 h 01 live/i : /the Arion target was live after 1 h 01/i)
+      if (mode === 'compare') await expect(page.getByTestId('flow-moment-head')).toContainText(/the Arion target was live after 24 min/i)
       await page.mouse.move(0, 0)
       await page.locator('.fl').evaluate(el => el.scrollIntoView({ block: 'start' }))
       await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-994-p6-modes/flow-${mode}-${width}-${theme}-${lang}.png`) })
     }
   })
 }
+
+// Risk (AEON-1022): the release record under the card - the full test run and rehearsal timing, the qualification
+// evidence reference and the rollback class - is missing, says more than the record reported, or moves the controls
+// above it when the time moves, the mode changes or the data arrives. It sits below the card and grows downward.
+for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'], [1024, 'light', 'en'], [1024, 'dark', 'en'], [390, 'light', 'de'], [390, 'dark', 'en']] as const) {
+  test(`the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (${width} ${theme} ${lang})`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: width === 390 ? 2800 : 1500 })
+    await setup(page, { theme, lang, level: 'simple', record: true })
+    // AEON-998: a de-AT profile still uses the one English app language; the German wording is covered by the unit test.
+    const copy = { title: 'Release record', catalogue: '22 min · green · usually 21 min', rehearsal: '11 min · green', rollback: 'The previous version can be restarted as it is' }
+    const record = page.getByTestId('flow-record')
+    for (const mode of ['replay', 'compare', 'live'] as const) {
+      await page.goto(`/p/AEON/delivery?view=flow&mode=${mode}`)
+      await expect(page.getByTestId('flow-moment')).toBeVisible()
+      await expect(record, mode).toBeVisible()
+      await expect(record.locator('h3'), mode).toHaveText(copy.title)
+      await expect(page.getByTestId('flow-record-catalogue'), mode).toHaveText(copy.catalogue)
+      await expect(page.getByTestId('flow-record-rehearsal'), mode).toHaveText(copy.rehearsal)
+      await expect(page.getByTestId('flow-record-evidence'), mode).toContainText('AEON-487/comment/native-qualification')
+      await expect(page.getByTestId('flow-record-rollback'), mode).toHaveText(copy.rollback)
+      await expect(record.locator('dd'), mode).toHaveCount(4)
+      // Controls and the card keep their boxes while the time moves; the panel below does not shift either.
+      const guard = await controlStability(page, {
+        modes: modes(page), follow: page.getByTestId('flow-follow'), lanes: lanes(page), moment: page.getByTestId('flow-moment'), record,
+        ...(mode === 'live' ? { chip: page.getByTestId('flow-chip') } : { pick: page.getByTestId('flow-pick'), play: play(page) }),
+      })
+      await guard.check(async () => { await lanes(page).focus(); await page.keyboard.press('Shift+ArrowRight') })
+      await guard.check(async () => { await lanes(page).focus(); await page.keyboard.press('End') })
+      await guard.check(() => page.getByTestId('flow-follow').click())
+      guard.done()
+      // Phones read it in one column and nothing runs past the screen.
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      expect(overflow, `${mode}: horizontal overflow`).toBeLessThanOrEqual(0)
+      await page.mouse.move(0, 0)
+      await record.scrollIntoViewIfNeeded()
+      await record.screenshot({ path: info.outputPath(`aeon-1022-flowcontract/record-${mode}-${width}-${theme}-${lang}.png`) })
+    }
+  })
+}
+
+test('a release no record has reported on says "not recorded" in the same four rows', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1300 })
+  await setup(page)
+  await page.goto('/p/AEON/delivery?view=flow&mode=replay')
+  const record = page.getByTestId('flow-record')
+  await expect(record).toBeVisible()
+  await expect(record.locator('dd')).toHaveCount(4)
+  await expect(record.locator('dd')).toHaveText(['not recorded', 'not recorded', 'not recorded', 'not recorded'])
+  await expect(page.getByRole('status').filter({ hasText: 'example' })).toHaveCount(0)
+})
 
 // Risk (AEON-1003 round 7, kept with the reviewed AEON-1007 placement): a refused preference save covers or moves the
 // Flow mode buttons. The failure takes the headline's fixed slot: with recorded runs, the labelled example and while

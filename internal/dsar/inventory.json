@@ -168,7 +168,9 @@
         "ops_eta_p90_at": "metadata",
         "project_id": "metadata",
         "prs": "metadata",
+        "qualification_evidence": "metadata",
         "ref": "metadata",
+        "rollback_class": "metadata",
         "started_at": "metadata",
         "target_from_step": "metadata",
         "target_minutes": "metadata",
@@ -763,11 +765,11 @@
     {
       "classification": "metadata",
       "columns": {
-        "tenant_id": "metadata",
-        "subject_kind": "metadata",
         "slug": "metadata",
-        "words_en": "metadata",
-        "words_de": "metadata"
+        "subject_kind": "metadata",
+        "tenant_id": "metadata",
+        "words_de": "metadata",
+        "words_en": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"

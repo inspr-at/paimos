@@ -6,7 +6,7 @@
 // Times are minutes after `origin` (local midnight of the earliest moment read).
 import { api, APIError } from './api'
 import type { DeliveryLanguage } from './delivery'
-import { criticalPath, LANES, runEnd, type FlowData, type FlowIncident, type FlowRun, type FlowStep, type Lane, type StepOutcome, type WaitReason, type Words } from './deliveryFlow'
+import { criticalPath, LANES, runEnd, type FlowData, type FlowIncident, type FlowRun, type FlowStep, type Lane, type RecordedAttempt, type StepOutcome, type WaitReason, type Words } from './deliveryFlow'
 import { TO } from './deliveryFlowText'
 import { incidentWords, stepWords } from './deliveryFlowWords'
 
@@ -18,12 +18,16 @@ export interface ApiStep {
   side: boolean; source: 'github_app' | 'paimos' | 'ops_rollout'; norm: { p50_min: number | null; p90_min: number | null; arion_min: number | null }
 }
 export interface ApiIncident { id: string; item_id: string; started_at: string; ended_at: string | null; severity: 'degraded' | 'down'; summary: string; recovery_step_ids: string[] }
+export type RollbackClass = 'digest_safe' | 'restore_required'
 export interface ApiItem {
   id: string; kind: 'release' | 'change'; ref: string; title: string; prs: number[]; started_at: string | null; ended_at: string | null
   pct_done: number; current_step_id: string | null
   eta: { p50_at: string | null; p90_at: string | null; basis: 'history' | 'ops' | 'none'; reason: string | null }
   target: { minutes: number; from_step: string; source: string } | null
   next_human_gate: { principal_id: string | null; what: string } | null
+  /** The release record (AEON-1022): null until a rollout record reports it. A server older than this field omits both. */
+  qualification_evidence?: string | null
+  rollback_class?: RollbackClass | null
 }
 export interface ApiFlow { project_id: string; now: string; at: string; from: string; to: string; items: ApiItem[]; steps: ApiStep[]; incidents: ApiIncident[]; truncated: boolean }
 export interface ApiRun { project_id: string; now: string; at: string; item: ApiItem; steps: ApiStep[]; incidents: ApiIncident[]; truncated: boolean }
@@ -72,7 +76,7 @@ export function laneOf(actor: ApiActor, key: string): Lane {
   if (/review|gate/.test(label)) return 'review'
   if (/build/.test(label)) return 'build'
   if (/check|\bci\b|queue/.test(label)) return 'ci'
-  const byKey: Record<string, Lane> = { build: 'build', merge_round: 'build', review: 'review', copy_gate: 'review', pin_gate: 'review', h: 'review', ci: 'ci', queue: 'ci', a: 'ci', c: 'ci', f: 'ci', i: 'ci', hold: 'lead' }
+  const byKey: Record<string, Lane> = { build: 'build', merge_round: 'build', review: 'review', copy_gate: 'review', pin_gate: 'review', h: 'review', ci: 'ci', queue: 'ci', a: 'ci', c: 'ci', f: 'ci', i: 'ci', rehearsal: 'ci', catalogue: 'ci', hold: 'lead' }
   return byKey[key] ?? 'ops'
 }
 /** The short tag on bars and the avatar: a release label, or a ticket number. */
@@ -90,7 +94,16 @@ export function runTitle(item: Pick<ApiItem, 'kind' | 'ref' | 'title'>): Words {
  * waits for; at least a minute past now), drawn as expected past now. A wait (or a person's step) that
  * starts once the run has ended — the next human gate — is drawn as after the run.
  */
-export function recordedRuns(answer: { now: string; items: ApiItem[]; steps: ApiStep[]; incidents: ApiIncident[]; truncated: boolean }, { extendOpen }: { extendOpen: boolean }): Recorded {
+/** The latest attempt of one step key (waits are not attempts), measured from the answer's own clock. */
+function attemptOf(steps: readonly ApiStep[], key: string, nowMs: number): RecordedAttempt | null {
+  const own = steps.filter(s => s.step_key === key && s.kind !== 'wait').sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
+  const last = own.at(-1)
+  if (!last) return null
+  const startAt = Date.parse(last.started_at), open = last.ended_at == null
+  return { startAt, minutes: Math.max(0, ((open ? nowMs : Date.parse(last.ended_at!)) - startAt) / 60_000), open, outcome: last.outcome, p50: last.norm.p50_min, p90: last.norm.p90_min, runs: own.length }
+}
+
+export function recordedRuns(answer: { now: string; from?: string; items: ApiItem[]; steps: ApiStep[]; incidents: ApiIncident[]; truncated: boolean }, { extendOpen }: { extendOpen: boolean }): Recorded {
   const nowMs = Date.parse(answer.now)
   const earliest = Math.min(nowMs, ...answer.steps.map(s => Date.parse(s.started_at)), ...answer.items.flatMap(i => i.started_at ? [Date.parse(i.started_at)] : []))
   const day = new Date(Number.isFinite(earliest) ? earliest : nowMs)
@@ -99,13 +112,16 @@ export function recordedRuns(answer: { now: string; items: ApiItem[]; steps: Api
   const now = at(answer.now)
   const refs = new Map(answer.items.map(item => [item.id, item.ref]))
   const etas = new Map(answer.items.flatMap(item => item.eta.p50_at ? [[item.id, at(item.eta.p50_at)] as const] : []))
+  // The list read keeps only the steps that touch its window: a run that began before it may have lost early steps.
+  const windowStart = answer.from ? Date.parse(answer.from) : null
   const runs: FlowRun[] = []
   for (const item of answer.items) {
     const ended = item.ended_at ? at(item.ended_at) : null
     const incidents = answer.incidents.filter(i => i.item_id === item.id).sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))
     const recovery = new Set(incidents.flatMap(i => i.recovery_step_ids))
     const gate = item.next_human_gate?.what ?? null
-    const steps: FlowStep[] = answer.steps.filter(s => s.item_id === item.id).map(s => {
+    const own = answer.steps.filter(s => s.item_id === item.id)
+    const steps: FlowStep[] = own.map(s => {
       const start = at(s.started_at), open = s.ended_at == null
       let end = open ? Math.max(start, now) : Math.max(start, at(s.ended_at!))
       if (open && extendOpen) {
@@ -137,7 +153,11 @@ export function recordedRuns(answer: { now: string; items: ApiItem[]; steps: Api
       facts: {
         kind: item.kind, ref: item.ref, started: item.started_at ? at(item.started_at) : null, ended, pct: item.pct_done, currentStepId: item.current_step_id,
         eta: { p50: item.eta.p50_at ? at(item.eta.p50_at) : null, p90: item.eta.p90_at ? at(item.eta.p90_at) : null, basis: item.eta.basis, reason: item.eta.reason },
-        gate,
+        gate, record: {
+          evidence: item.qualification_evidence ?? null, rollback: item.rollback_class ?? null,
+          catalogue: attemptOf(own, 'catalogue', nowMs), rehearsal: attemptOf(own, 'rehearsal', nowMs),
+          partial: answer.truncated || (windowStart != null && item.started_at != null && Date.parse(item.started_at) < windowStart),
+        },
       },
     })
   }
@@ -178,15 +198,20 @@ export function replayData(run: FlowRun, origin: number, now: number | null): Fl
 
 // ---------- Compare: a release against the Arion target, aligned at step a ----------
 type ArionStep = readonly [key: string, minutes: number, lane: Lane, en: string, de: string]
-/** Critical path a to l as Project Arion v5 §4b measures it now, in minutes: 60.6.
- *  h and i split the one combined 6 min stretch (model review, pin CI, merge) evenly.
- *  The human wait (W) and the catalogue overrun are side steps on the target run
- *  and are not in this sum. After Phases 2 and 4 the same path is ARION_LATER. */
+/**
+ * The release path a to l as Project Arion v5 § 4b plans it today ("v5 now"), in minutes: 60.6 in all,
+ * without the wait for a person (W). The rehearsal and the catalogue run inside segment a (the merge-group
+ * run is the longest of the suite, the rehearsal and the catalogue), so they are not segments of their own.
+ * § 4b gives h and i as one segment of 6 (model review, pin CI, merge); i is the measured pin-CI p50 of
+ * 1.1 (§ 1b), h the rest. When the catalogue is the pole, a release's own step a runs past 15.4.
+ * The wait for a person (W) and the catalogue overrun are side steps of the target run and are not in this sum.
+ * After Phases 2 and 4 the same path is ARION_LATER.
+ */
 export const ARION_PATH: readonly ArionStep[] = [
   ['a', 15.4, 'ci', 'Through the queue', 'Durch die Queue'], ['b', 0.5, 'ops', 'Version tagged', 'Version getaggt'], ['c', 12.2, 'ci', 'Release built', 'Release gebaut'],
-  ['d', 0.5, 'ops', 'Draft inspected', 'Entwurf geprüft'], ['e', 10, 'ops', 'Qualification', 'Qualifikation'], ['f', 1.5, 'ci', 'Published', 'Veröffentlicht'],
-  ['g', 0.5, 'ops', 'Pin prepared', 'Pin vorbereitet'], ['h', 3, 'review', 'Model review', 'Modellprüfung'], ['i', 3, 'ci', 'Pin merged', 'Pin gemergt'],
-  ['j', 3, 'ops', 'Snapshot', 'Schnappschuss'], ['k', 6, 'ops', 'Server switched', 'Server umgestellt'], ['l', 5, 'ops', 'Probes', 'Sonden'],
+  ['d', 0.5, 'ops', 'Draft inspected', 'Entwurf geprüft'], ['e', 10, 'ops', 'Agent app tested', 'Agent-App getestet'], ['f', 1.5, 'ci', 'Published', 'Veröffentlicht'],
+  ['g', 0.5, 'ops', 'Server update prepared', 'Server-Update vorbereitet'], ['h', 4.9, 'review', 'Server update reviewed', 'Server-Update geprüft'], ['i', 1.1, 'ci', 'Server config checked and merged', 'Server-Konfiguration geprüft und gemergt'],
+  ['j', 3, 'ops', 'Database backed up', 'Datenbank gesichert'], ['k', 6, 'ops', 'Server switched', 'Server umgestellt'], ['l', 5, 'ops', 'Checked live', 'Live geprüft'],
 ]
 /** Same path after Phases 2 and 4: the queue is 10.7 and the switch is a 4 min pre-pull. 53.9 in all. */
 export const ARION_LATER: readonly ArionStep[] = ARION_PATH.map(([key, minutes, lane, en, de]) => [key, key === 'a' ? 10.7 : key === 'k' ? 4 : minutes, lane, en, de] as const)
