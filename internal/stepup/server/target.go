@@ -8,7 +8,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	confirmation "github.com/inspr-at/paimos/internal/stepup"
 	"io"
+	"strings"
 
 	"github.com/inspr-at/paimos/internal/features"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -152,4 +154,9 @@ func nullable(id string) *string {
 		return nil
 	}
 	return &id
+}
+
+func ValidID(id string) bool { return confirmation.ValidID(id) }
+func validHash(hash string) bool {
+	return len(hash) == 64 && strings.Trim(hash, "0123456789abcdef") == ""
 }

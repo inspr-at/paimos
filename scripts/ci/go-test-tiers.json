@@ -8886,19 +8886,19 @@
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestWorkspaceActivityPagingAndCurrentUndoAuthority","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/stepup","name":"TestStepupApprovalRechecksAuthorityAfterFenceWait","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/stepup/server","name":"TestStepupApprovalRechecksAuthorityAfterFenceWait","tier":"ESSENTIAL"}
     ,
-    {"kind":"go","package":"internal/stepup","name":"TestStepupFirstDecisionWinsWithTwoApprovers","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/stepup/server","name":"TestStepupFirstDecisionWinsWithTwoApprovers","tier":"ESSENTIAL"}
     ,
-    {"kind":"go","package":"internal/stepup","name":"TestStepupListKeysetsExpiryAndTenantIsolation","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/stepup/server","name":"TestStepupListKeysetsExpiryAndTenantIsolation","tier":"ESSENTIAL"}
     ,
-    {"kind":"go","package":"internal/stepup","name":"TestStepupOwnershipBoundsAndCurrentAuthority","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/stepup/server","name":"TestStepupOwnershipBoundsAndCurrentAuthority","tier":"ESSENTIAL"}
     ,
-    {"kind":"go","package":"internal/stepup","name":"TestStepupPasskeyProofBindingAndHTTPBoundary","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/stepup/server","name":"TestStepupPasskeyProofBindingAndHTTPBoundary","tier":"ESSENTIAL"}
     ,
-    {"kind":"go","package":"internal/stepup","name":"TestStepupReauthOneUseFreshnessAndBinding","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/stepup/server","name":"TestStepupReauthOneUseFreshnessAndBinding","tier":"ESSENTIAL"}
     ,
-    {"kind":"go","package":"internal/stepup","name":"TestStepupTransitionsAndAtomicAudit","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/stepup/server","name":"TestStepupTransitionsAndAtomicAudit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/tenant","name":"TestPrincipalContextPreservesLegacyLabels","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,

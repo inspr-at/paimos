@@ -119,7 +119,7 @@ func (m *Module) decision(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, err)
 		return
 	}
-	if !hex256.MatchString(in.Digest) || in.Revision < 1 {
+	if !validHash(in.Digest) || in.Revision < 1 {
 		respond(w, 0, nil, fault(400, "digest and revision required"))
 		return
 	}
@@ -139,7 +139,7 @@ func (m *Module) options(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("requestId")
-	if !ValidID(id) || !hex256.MatchString(in.Digest) || in.Revision < 1 {
+	if !ValidID(id) || !validHash(in.Digest) || in.Revision < 1 {
 		respond(w, 0, nil, fault(400, "invalid request"))
 		return
 	}

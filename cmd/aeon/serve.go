@@ -86,7 +86,7 @@ import (
 	"github.com/inspr-at/paimos/internal/search"
 	"github.com/inspr-at/paimos/internal/stagehandoff"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
-	"github.com/inspr-at/paimos/internal/stepup"
+	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbrand"
 	"github.com/inspr-at/paimos/internal/themes"

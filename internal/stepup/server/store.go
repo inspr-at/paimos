@@ -145,7 +145,7 @@ func decorate(ctx context.Context, tx pgx.Tx, r *ApprovalRequest) error {
 	return tx.QueryRow(ctx, `SELECT left(name,256) FROM principals WHERE id=$1`, *r.DecidedBy).Scan(&r.DecidedByName)
 }
 func requestDigest(p tenant.Principal, r ApprovalRequest) string {
-	raw, _ := json.Marshal([]any{"aeon.stepup.request.v1", p.TenantID, r.ID, r.RequestedBy, r.SessionID, r.ProjectID, r.Permission, r.Payload, r.BeforeHash, r.AfterHash, r.CreatedAt, r.ExpiresAt})
+	raw, _ := json.Marshal([]any{"aeon.stepup.request.v1", p.TenantID, r.ID, r.RequestedBy, r.SessionID, r.ProjectID, r.Permission, r.Payload, r.BeforeHash, r.AfterHash, r.CreatedAt.UTC(), r.ExpiresAt.UTC()})
 	return Hash(raw)
 }
 func (m *Module) Create(ctx context.Context, p tenant.Principal, in Create) (ApprovalRequest, error) {
@@ -153,7 +153,7 @@ func (m *Module) Create(ctx context.Context, p tenant.Principal, in Create) (App
 	if p.Kind != tenant.Agent {
 		return out, authz.ErrForbidden
 	}
-	if !hex256.MatchString(in.BeforeHash) || in.SessionID != "" && !ValidID(in.SessionID) {
+	if !validHash(in.BeforeHash) || in.SessionID != "" && !ValidID(in.SessionID) {
 		return out, fault(400, "invalid request")
 	}
 	target, payload, project, err := m.target(in.Payload)
@@ -198,7 +198,7 @@ func (m *Module) Create(ctx context.Context, p tenant.Principal, in Create) (App
 		if Hash(before) != in.BeforeHash {
 			return fault(409, "before hash mismatch; read the target again")
 		}
-		now := m.now().UTC()
+		now := m.now().UTC().Truncate(time.Microsecond)
 		out = ApprovalRequest{RequestedBy: p.ID, SessionID: nullable(in.SessionID), ProjectID: nullable(project), Permission: target.Permission(), Payload: payload, Before: before, After: after, BeforeHash: Hash(before), AfterHash: Hash(after), CreatedAt: now, ExpiresAt: now.Add(RequestLifetime), State: "pending", Revision: 1}
 		if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&out.ID); err != nil {
 			return err

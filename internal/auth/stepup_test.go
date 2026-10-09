@@ -12,7 +12,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/phoneapprovals"
-	"github.com/inspr-at/paimos/internal/stepup"
+	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
