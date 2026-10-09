@@ -67,7 +67,8 @@ async function start() {
   if (busy.value || !launchAvailable.value) return
   const turn = generation, mine = ++submission, who = identity(), id = chosen.value, lead = leads.views[id]?.lead
   if (!lead) { error.value = `The ${w.l} could not be read. Try again.`; return }
-  if (lead.state !== 'none' && !(lead.state === 'cannot_start' && lead.reason === 'owner_revoked')) { error.value = `${key.value} already has a ${w.l}. Open it from the project.`; return }
+  const clearToStart = lead.reason === 'selection_cleared' && !lead.session_id
+  if (lead.state !== 'none' && !(lead.state === 'cannot_start' && lead.reason === 'owner_revoked') && !clearToStart) { error.value = `${key.value} already has a ${w.l}. Open it from the project.`; return }
   busy.value = true; error.value = ''
   try {
     // A changed host is saved first; if that fails, nothing is requested.

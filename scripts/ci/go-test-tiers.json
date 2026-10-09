@@ -4164,6 +4164,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessInvokePinsArgumentsAndBudget","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestHarnessLeadClaimUsesExistingFilesAndRedactsProof","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessLeadUsageReadAndFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessLegacyDecoderIgnoresFinished","tier":"GATED-FULL"}
@@ -5194,6 +5196,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowNormsSeparateWaitsAndNeedHistory","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowOpenCatalogueIsTheCurrentStepNotAPhase","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowParkAfterMergeStaysClosed","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowParkEpisodesStayDistinct","tier":"ESSENTIAL"}
@@ -5208,11 +5212,17 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowReworkReopensCompletedPhase","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRolloutAcceptsCatalogueRehearsalAndReleaseFacts","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRolloutIngestIsIdempotentAndRead","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRolloutRecordsCatalogueRehearsalQualificationAndRollbackClass","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRolloutValidation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRunsMapToChecksQueueAndFlakes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowStepKeyCheckKeepsGuardingAfterWidening","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowStreamRevokesDuringBacklog","tier":"ESSENTIAL"}
     ,
@@ -5802,6 +5812,10 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadAdmissionIsFreshAndFailClosed","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadAdoptionNeedsPersonAndExactLease","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadAdoptionRejectsChangedEligibility","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadAssignmentFenceAndArchive","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadCompetingStartsClaimsAndRevocation","tier":"ESSENTIAL"}
@@ -5823,6 +5837,8 @@
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadRemovalSerializesClaimAndRevocation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadReportingCadenceAndBoundaries","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadUnclaimedAdoptionRejectsPauseAndCancelClearsSelection","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadWaitProjection","tier":"GATED-FULL"}
     ,

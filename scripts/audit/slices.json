@@ -87,6 +87,7 @@
         "internal/agentsetup/**",
         "internal/harness/**",
         "internal/harness/lead_remove_test.go",
+        "internal/harness/lead_adopt.go",
         "internal/servicetier/**",
         "internal/harnesslaunch/**",
         "internal/agentdwire/**",
@@ -123,6 +124,7 @@
       "title": "CLI, inbox, client, plugins, events",
       "paths": [
         "internal/cli/**",
+        "internal/cli/harness_lead.go",
         "internal/inbox/**",
         "internal/chat/**",
         "internal/client/**",
@@ -239,7 +241,8 @@
         "web/src/components/lead/LeadMenu.vue",
         "web/src/components/work/AttentionGroupMenu.vue",
         "web/src/components/work/AttentionBulkPreview.vue",
-        "web/src/components/agents/ChatCodeBlock.vue"
+        "web/src/components/agents/ChatCodeBlock.vue",
+        "web/src/components/lead/LeadAdoption.vue"
       ]
     },
     {
@@ -253,7 +256,9 @@
         "web/*",
         "web/.vscode/**",
         "web/public/**",
-        "web/src/lib/displayLanguage.ts"
+        "web/src/lib/displayLanguage.ts",
+        "web/tests/lead-adoption.unit.test.ts",
+        "web/tests/lead-adoption.spec.ts"
       ],
       "exclude": [
         "web/src/views/**",

@@ -37,6 +37,23 @@ export interface RunFacts {
   pct: number | null; currentStepId: string | null
   eta: { p50: number | null; p90: number | null; basis: 'history' | 'ops' | 'none'; reason: string | null }
   gate: string | null
+  /** The release record a rollout reported (AEON-1022); absent on example data and the Arion target. */
+  record?: ReleaseFacts
+}
+/** The latest attempt of the rehearsal or the catalogue, read from every step the answer holds (never from a lane slice). */
+export interface RecordedAttempt {
+  /** Epoch ms of its start. */
+  startAt: number
+  /** Minutes it took, or has taken so far while it is still open. */
+  minutes: number; open: boolean; outcome: StepOutcome | null; p50: number | null; p90: number | null
+  /** How many attempts the record holds. */
+  runs: number
+}
+export interface ReleaseFacts {
+  evidence: string | null; rollback: 'digest_safe' | 'restore_required' | null
+  catalogue: RecordedAttempt | null; rehearsal: RecordedAttempt | null
+  /** The answer may have left steps out (a window that starts after the release did, or a truncated read), so "none" is not a finding. */
+  partial: boolean
 }
 export interface FlowRun {
   id: string; tag: string; title: Words; steps: FlowStep[]
@@ -102,17 +119,31 @@ export function minutesText(minutes: number): string {
   if (rounded < 60) return `${rounded}${NB}min`
   return `${Math.floor(rounded / 60)}${NB}h${NB}${String(rounded % 60).padStart(2, '0')}`
 }
-function wallClock(origin: number, minutes: number, seconds: boolean): string {
+function wallClock(origin: number, minutes: number, seconds: boolean, timeZone?: string): string {
   const at = new Date(origin + Math.round(minutes * 60) * 1000)
-  const hh = String(at.getHours()).padStart(2, '0'), mm = String(at.getMinutes()).padStart(2, '0'), ss = at.getSeconds()
+  let hh: string, mm: string, ss: number
+  if (timeZone) {
+    // The named zone, so CI (UTC) and a Vienna reader agree on the same instant.
+    const options: Intl.DateTimeFormatOptions = { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }
+    if (seconds) options.second = '2-digit'
+    const parts = new Intl.DateTimeFormat('en-GB', options).formatToParts(at)
+    const pick = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? '00'
+    hh = pick('hour') === '24' ? '00' : pick('hour')
+    mm = pick('minute')
+    ss = seconds ? Number(pick('second')) : 0
+  } else {
+    hh = String(at.getHours()).padStart(2, '0')
+    mm = String(at.getMinutes()).padStart(2, '0')
+    ss = at.getSeconds()
+  }
   return `${hh}:${mm}${seconds && ss ? `:${String(ss).padStart(2, '0')}` : ''}`
 }
-/** "20:25" on an absolute axis, "+14 min" on a relative one. */
-export function timeLabel(data: Pick<FlowData, 'origin'>, minutes: number): string {
-  return data.origin == null ? `+${minutesText(Math.max(0, minutes))}` : wallClock(data.origin, Math.floor(minutes + 1e-6), false)
+/** "20:25" on an absolute axis, "+14 min" on a relative one. `timeZone` names the wall clock; omitted, it is the host's. */
+export function timeLabel(data: Pick<FlowData, 'origin'>, minutes: number, timeZone?: string): string {
+  return data.origin == null ? `+${minutesText(Math.max(0, minutes))}` : wallClock(data.origin, Math.floor(minutes + 1e-6), false, timeZone)
 }
 /** As timeLabel, to the second where the second is not :00. */
-export const timeLabelSeconds = (data: Pick<FlowData, 'origin'>, minutes: number) => data.origin == null ? timeLabel(data, minutes) : wallClock(data.origin, minutes, true)
+export const timeLabelSeconds = (data: Pick<FlowData, 'origin'>, minutes: number, timeZone?: string) => data.origin == null ? timeLabel(data, minutes) : wallClock(data.origin, minutes, true, timeZone)
 
 /** Grid step in minutes so that labels sit about `every` px apart. */
 export function tickStep(span: number, px: number, every = 90): number {
