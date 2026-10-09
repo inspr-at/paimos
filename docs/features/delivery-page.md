@@ -116,3 +116,11 @@ second, took, usual, target, outcome, round, waits for, source) or the incident.
 avatar, the PAIMOS Orbit agent cube carrying the run's parcel, stands at the playhead on
 the main run's current step, with a clock badge while waiting and a red one during an
 incident.
+
+**Phone, dark and keyboard.** On a phone the project sections show only the selected
+section's word; the others keep their icon, with the name read aloud and shown as a
+tooltip. Every Delivery control is at least 44 px there, including the time handle and
+the overview's brush edges and playhead. Every text reaches 4.5:1 against what is painted
+behind it in light and dark. Each switch group is one tab stop with arrows, Home and End
+inside; Learn opens on focus, Enter pins it and Esc closes it. In Flow a refused save of
+the window or level takes the headline's place, so the mode switch and the card stay put.

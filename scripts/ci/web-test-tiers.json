@@ -258,6 +258,18 @@
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 390"
     ,
+    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 dark"
+    ,
+    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 light"
+    ,
+    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1440 dark"
+    ,
+    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1440 light"
+    ,
+    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 390 dark"
+    ,
+    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 390 light"
+    ,
     "browser:tests/dialog-full-text.spec.ts:1024 dark › keyboard full text: business"
     ,
     "browser:tests/dialog-full-text.spec.ts:1024 dark › keyboard full text: facet"
@@ -6647,6 +6659,40 @@
     {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"tiles and charts tell partial, missing and clipped data apart and never show stale numbers","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"window, level and view switches keep every control still and are the person’s own","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"every text on Delivery reaches 4.5:1 in dark at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"every text on Delivery reaches 4.5:1 in dark at 400","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"every text on Delivery reaches 4.5:1 in light at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"every text on Delivery reaches 4.5:1 in light at 400","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"on a phone every Delivery control and the section tabs are at least 44 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"on a phone only the selected project section shows its word; the others keep icon, name and tooltip","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"window and level switches keep every control still at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"window and level switches keep every control still at 400","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"zoom and playhead keep every control still at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"zoom and playhead keep every control still at 400","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-rating.spec.ts","name":"a person marks rework with a reason and can undo it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

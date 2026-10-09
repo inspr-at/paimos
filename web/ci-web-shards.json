@@ -792,6 +792,8 @@
         ,
         {"file":"tests/delivery-numbers.spec.ts","listedTests":14,"weightSeconds":30,"weightSource":"aeon-1002-estimate"}
         ,
+        {"file":"tests/delivery-polish.spec.ts","listedTests":17,"weightSeconds":45,"weightSource":"aeon-1007-estimate"}
+        ,
         {"file":"tests/delivery-rating.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/delivery-simple.spec.ts","listedTests":11,"weightSeconds":26,"weightSource":"aeon-1003-estimate"}

@@ -368,7 +368,7 @@ const emptyText = computed(() => {
   .fl-card { padding: 6px 10px 10px; }
   .fl-bar { flex-wrap: wrap; height: auto; gap: 8px; padding: 8px 0; }
   .fl-bar .grow { display: none; }
-  .fl-bar .seg button { height: 44px; }
+  .fl-bar .seg button { height: 44px; min-width: 44px; }
   .fl-pick { flex: 1 1 100%; width: auto; height: 44px; }
   .play { width: 44px; height: 44px; }
   .fl-rm { flex: 1 1 140px; width: auto; white-space: normal; }
