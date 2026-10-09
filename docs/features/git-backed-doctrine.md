@@ -90,11 +90,11 @@ previous registration behavior.
 ### PMA host mirror
 
 The PMA deployment uses its own host authority. An INSPR App key is not copied
-into that trust context. For `augmentoring-team/agm-doctrine`, configure:
+into that trust context. For `example-business-team/agm-doctrine`, configure:
 
 ```text
 AEON_DOCTRINE_PUBLIC_REPOSITORY=
-AEON_DOCTRINE_PRIVATE_REPOSITORY=augmentoring-team/agm-doctrine
+AEON_DOCTRINE_PRIVATE_REPOSITORY=example-business-team/agm-doctrine
 AEON_DOCTRINE_APP_TENANT_ID=<PMA workspace UUID>
 AEON_DOCTRINE_MIRROR_DIR=/run/paimos/doctrine-mirrors
 ```
@@ -106,7 +106,7 @@ the key nor git metadata is mounted into PAIMOS. The job publishes an exported
 tree at:
 
 ```text
-/run/paimos/doctrine-mirrors/augmentoring-team/agm-doctrine/
+/run/paimos/doctrine-mirrors/example-business-team/agm-doctrine/
   .aeon-commit
   docs/AGENTS-KERNEL.md
   ...
@@ -115,7 +115,7 @@ tree at:
 
 `.aeon-commit` contains the full lowercase 40-digit commit SHA, optionally
 followed by one newline. The allowlist uses the same `grants` JSON format
-shown above, naming the PMA workspace and `augmentoring-team/agm-doctrine`.
+shown above, naming the PMA workspace and `example-business-team/agm-doctrine`.
 This is host policy with no tenant write API. Publish a complete immutable
 export and marker together, mounted read-only in PAIMOS's filesystem namespace;
 file mode bits alone are insufficient. The reader checks the actual mount of
