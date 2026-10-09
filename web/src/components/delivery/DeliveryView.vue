@@ -2,7 +2,8 @@
 <script setup lang="ts">
 // Project › Delivery (AEON-994 draft 5, package 2): the page head — Numbers | Flow,
 // the 7 · 30 · 90 · 180 · 365-day window and Simple | Expert, both the person's
-// own (saved server-side) — and the Numbers Expert view: ten tiles, ten trends.
+// own (saved server-side) — and the Numbers views: Simple (the default; summary,
+// three plain sections, small charts) and Expert (ten tiles, ten trends).
 // Controls sit in the head and never move; content below grows downward. Flow
 // (package 6) reads the recorded runs: ?mode=live|replay|compare and ?run=.
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
@@ -12,6 +13,7 @@ import ProjectTabs from '../work/ProjectTabs.vue'
 import ExpertTile from './ExpertTile.vue'
 import FlowView from './FlowView.vue'
 import LevelSwitch from './LevelSwitch.vue'
+import SimpleNumbers from './SimpleNumbers.vue'
 import TrendChart from './TrendChart.vue'
 import WindowSwitch from './WindowSwitch.vue'
 import { deliveryLanguage } from '../../lib/delivery'
@@ -21,8 +23,9 @@ import { FLOW_MODES, type FlowMode } from '../../lib/deliveryFlowModes'
 import { timeLabel } from '../../lib/deliveryFlow'
 import { flowText, put } from '../../lib/deliveryFlowText'
 import { useDeliveryFlow } from '../../lib/useDeliveryFlow'
-import { usePreference } from '../../lib/preferences'
+import { onPreferenceFailure, preferenceSaves, usePreference } from '../../lib/preferences'
 import { usePoller } from '../../lib/usePolledData'
+import { vClipTip } from '../../directives/clipTip'
 import { useProfile } from '../../stores/profile'
 
 const props = defineProps<{ project: { id: string; routeKey: string; title: string } }>()
@@ -52,10 +55,23 @@ const prefsReady = ref(false)
 void pref.ready.then(() => { prefsReady.value = true })
 const chosen = ref<DeliveryPrefs | null>(null)
 const prefs = computed<DeliveryPrefs>(() => chosen.value ?? (prefsReady.value ? readPrefs(pref.value.value) : DEFAULT_PREFS))
+// A refused save shows inside the "Updated …" line under the head, never as a second element.
+// The listener fires inside the failed write, before the set records it. The watch only
+// clears the failure, so a retry does not flash the failure that is still in the set.
+const prefFailed = ref(false)
+onBeforeUnmount(onPreferenceFailure(key => { if (key === DELIVERY_PREFS_KEY) prefFailed.value = true }))
+watch(() => [...preferenceSaves.failed], ids => {
+  if (!ids.some(id => id.endsWith(`/${DELIVERY_PREFS_KEY}`))) prefFailed.value = false
+})
 function choose(next: Partial<DeliveryPrefs>) {
   const value = { ...prefs.value, ...next }
   chosen.value = value
+  prefFailed.value = false
   pref.save(value, 0)
+}
+function retryPrefs() {
+  prefFailed.value = false
+  pref.save(chosen.value ?? prefs.value, 0)
 }
 const setWindow = (window: WindowDays) => choose({ window })
 const setLevel = (level: Level) => choose({ level })
@@ -172,7 +188,16 @@ onBeforeUnmount(() => {
   window.removeEventListener('scroll', closeTip, { capture: true })
 })
 // The tile behind an open popover belongs to this window and this answer.
-watch([() => prefs.value.window, view, lang], closeTip)
+watch([() => prefs.value.window, () => prefs.value.level, view, lang], closeTip)
+
+// Source chips wrap onto several rows on a phone. A failed read must keep that box,
+// or the shorter banner collapses it and every Learn button below jumps (AEON-541).
+const statusEl = ref<HTMLElement>()
+const statusHold = ref(0)
+watch(state, (next, prev) => {
+  if (prev === 'ready' && next !== 'ready') statusHold.value = statusEl.value?.getBoundingClientRect().height ?? 0
+  else if (next === 'ready') statusHold.value = 0
+}, { flush: 'pre' })
 </script>
 
 <template>
@@ -196,35 +221,43 @@ watch([() => prefs.value.window, view, lang], closeTip)
           <WindowSwitch :class="{ 'slot-hidden': view === 'flow' }" :model-value="prefs.window" :label="text.windowLabel" :unit="text.days" @update:model-value="setWindow" />
           <LevelSwitch :model-value="prefs.level" :label="text.levelLabel" :names="text.level" @update:model-value="setLevel" />
         </div>
-        <span class="dl-updated" data-testid="delivery-updated">{{ updated || ' ' }}</span>
+        <!-- One fixed line for both views: "Updated …" (or Flow's "Now …"), or a refused save with its Retry in the same
+             box. It never changes size or place, so no control or tile moves (AEON-541). -->
+        <div class="dl-updated" data-testid="delivery-updated">
+          <span v-if="prefFailed" class="dl-fail" role="alert" data-testid="delivery-pref-error">
+            <span v-clip-tip class="dl-fail-text">{{ text.prefErr }}</span>
+            <button type="button" class="link-btn" @click="retryPrefs">{{ text.prefRetry }}</button>
+          </span>
+          <template v-else>{{ updated || ' ' }}</template>
+        </div>
       </div>
     </div>
 
     <template v-if="view === 'numbers'">
-      <div class="dl-status">
+      <div ref="statusEl" class="dl-status" :style="statusHold > 0 ? { minHeight: `${statusHold}px` } : undefined">
         <div v-if="state === 'loading'" class="sources" aria-hidden="true">
           <span class="sk chip-sk" style="width: 210px" /><span class="sk chip-sk" style="width: 250px" /><span class="sk chip-sk" style="width: 230px" />
         </div>
-        <div v-else-if="state === 'error'" class="banner err" role="alert">
+        <div v-else-if="state === 'error'" class="banner err half" role="alert" data-testid="delivery-load-error">
           <AppIcon name="alert" :size="16" />
-          <span class="grow"><b>{{ text.errT }}</b> {{ text.errB }}</span>
-          <button type="button" class="btn sm" @click="retry"><AppIcon name="refresh" :size="14" />{{ text.retry }}</button>
+          <span v-clip-tip class="grow"><b>{{ text.errT }}</b> {{ text.errB }}</span>
+          <button type="button" class="btn sm" :data-tip="text.retry" @click="retry"><AppIcon name="refresh" :size="14" /><span class="lbl">{{ text.retry }}</span></button>
         </div>
         <div v-else-if="!source" class="banner" role="status">
           <AppIcon name="info" :size="16" />
-          <span class="grow"><b>{{ text.norepoT }}</b> {{ text.norepoB }}</span>
+          <span v-clip-tip class="grow"><b>{{ text.norepoT }}</b> {{ text.norepoB }}</span>
         </div>
         <div v-else-if="noData" class="banner" role="status">
           <AppIcon name="info" :size="16" />
-          <span class="grow"><b>{{ text.nodataT }}</b> {{ fill(text.nodataB, { repo: source.repository }) }}</span>
+          <span v-clip-tip class="grow"><b>{{ text.nodataT }}</b> {{ fill(text.nodataB, { repo: source.repository }) }}</span>
         </div>
         <div v-else class="sources">
           <span v-for="chip in chips" :key="chip.b" class="src"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span></span>
         </div>
       </div>
 
-      <!-- Simple (package 3) is not built yet; both levels show the Expert numbers until it lands. -->
-      <div class="expert" :data-level="prefs.level">
+      <SimpleNumbers v-if="prefs.level === 'simple'" :data="data" :window="prefs.window" :state="state" :no-data="noData || (state === 'ready' && !source)" :lang="lang" />
+      <div v-else class="expert">
         <p class="tiles-cap">{{ fill(text.cap, { w: prefs.window }) }}</p>
         <div class="tiles" role="list" data-testid="delivery-tiles">
           <ExpertTile v-for="tile in tiles" :key="tile.def.key" :tile="tile" :state="state" :text="text" :info-open="tip?.tile.def.key === tile.def.key"
@@ -287,8 +320,15 @@ watch([() => prefs.value.window, view, lang], closeTip)
 .dl-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .dl-ctrls { display: flex; align-items: center; gap: 10px; }
 .slot-hidden { visibility: hidden; }
-.dl-updated { font: 500 11.5px/1.4 var(--mono); color: var(--ink-3); white-space: nowrap; }
+/* The line takes the width of the controls above it and never widens them: a long failure clips, with its full text as a tip. */
+.dl-updated { display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: 0; min-width: 100%; min-height: 1.4em; font: 500 11.5px/1.4 var(--mono); color: var(--ink-3); white-space: nowrap; }
+.dl-fail { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--danger); }
+.dl-fail-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dl-updated .link-btn { flex: none; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--teal-ink); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.dl-updated .link-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .dl-status { min-height: 40px; }
+/* The read alert keeps the right half of the row; the half beside it stays free, so its place never depends on anything else (AEON-541). */
+.dl-status .banner.half { margin-left: calc(50% + 6px); }
 .sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 28px; margin-top: 12px; }
 .src { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 12px; }
 .src svg { flex: none; color: var(--teal-ink); }
@@ -301,6 +341,9 @@ watch([() => prefs.value.window, view, lang], closeTip)
 .banner.err { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .banner.err svg { color: var(--danger); }
 .banner .btn { flex: none; gap: 6px; }
+/* While a read is in flight or has failed, the row keeps the height measured from the chips (AEON-541). */
+.dl-status .banner { min-height: 28px; padding-block: 0; flex-wrap: nowrap; }
+.dl-status .banner .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flow-empty { margin-top: 16px; }
 .tiles-cap { margin: 18px 0 0; font: 500 10.5px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
 .tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 8px; }
@@ -327,13 +370,24 @@ watch([() => prefs.value.window, view, lang], closeTip)
   .sk { background: linear-gradient(90deg, var(--skeleton) 0%, var(--skeleton-hi) 50%, var(--skeleton) 100%) 0 0 / 200% 100%; animation: dl-sk 1.4s ease-in-out infinite; }
 }
 @keyframes dl-sk { to { background-position: -200% 0; } }
+@container delivery (max-width: 900px) {
+  /* Half a row has no room for the label: the retry keeps its icon and its name (read aloud, shown as a tip). */
+  .half .btn { width: 28px; padding: 0; }
+  .half .btn .lbl { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+}
 @container delivery (max-width: 1000px) {
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+@media (max-width: 720px), (pointer: coarse) {
+  /* The line is one 44 px slot, so the retry's touch area (base.css) stays inside it and never overlaps the controls above. */
+  .dl-updated { min-height: 44px; }
+}
 @container delivery (max-width: 640px) {
   .dl-titleline { flex-wrap: wrap; gap: 8px; }
   .dl-right { width: 100%; align-items: stretch; }
+  .dl-updated { justify-content: flex-start; }
+  .dl-fail-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
   .dl-ctrls { flex-wrap: wrap; gap: 8px; }
   .dl-views :deep(button) { min-height: 44px; padding: 0 14px; }
   .src { height: auto; padding: 4px 10px; }
@@ -343,6 +397,12 @@ watch([() => prefs.value.window, view, lang], closeTip)
   .defs { grid-template-columns: minmax(0, 1fr); }
   .banner { flex-wrap: wrap; }
   .banner .btn { min-height: 44px; }
+  .dl-status .sources, .dl-status .banner { min-height: 44px; }
+  .dl-status .banner { flex-wrap: nowrap; }
+  /* The read alert fills its half of one 44 px row: the sentence takes up to three lines, the retry is a 44 px icon. */
+  .dl-status .banner.half { gap: 6px; padding: 0 4px 0 10px; }
+  .dl-status .banner.half .grow { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; white-space: normal; font-size: 12px; line-height: 1.2; }
+  .half .btn { width: 44px; }
 }
 @container delivery (max-width: 460px) { .tiles { grid-template-columns: minmax(0, 1fr); } }
 </style>
