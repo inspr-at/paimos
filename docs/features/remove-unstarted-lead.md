@@ -10,11 +10,12 @@ that has run uses the existing pause, yield and succession controls, even after
 its process stops. Removal requires the displayed revision, rechecks permission
 under the same project fence as start/claim, and writes `lead.removed` with the
 previous lead snapshot in the same transaction. Generation history remains
-immutable. A later start uses a revision newer than the removed intent, so an
-old confirmation cannot remove its replacement. No launch authority, scopes or
-credentials are added.
+immutable. A later start or adoption uses a revision newer than the removed
+intent, so an old confirmation cannot remove its replacement, including after an
+adoption selection is cancelled. No launch authority, scopes or credentials are
+added.
 
 Regression coverage checks audited removal, started/history refusal, permission
-revocation and claim races, and stale confirmations and reads. Browser checks
-measure both entry points within ±0.5 px at 390, 1024 and 1440 px in light and
-dark themes, including inline server errors.
+revocation and claim races, and stale confirmations and reads across start and
+adoption creation paths. Browser checks measure both entry points within ±0.5 px
+at 390, 1024 and 1440 px in light and dark themes, including inline server errors.
