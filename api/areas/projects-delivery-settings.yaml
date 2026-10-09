@@ -24,7 +24,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: getProjectDeliveryMetrics
-      description: 'Requires delivery.read on the project; an invisible project is absent (404). Computes the ten Project Arion delivery numbers for the repository linked to the project, from GitHub App events, the backfill and reported facts. Every metric names its source and definition; windows without samples are no_data and windows before complete coverage are partial, never zero. Windows of 7, 30, 90, 180 and 365 whole UTC days end today; each names its coverage and the window just before it; 90 and 180 days are bucketed by week and 365 by calendar month in series. Nothing is extrapolated.'
+      description: 'Requires delivery.read on the project; an invisible project is absent (404). Computes the Project Arion delivery numbers (the original ten and the v5 readings: time to first green per commit, required checks green, confirmed flakes and suspects, inferred ejections, runner wait, preflight red rate, review audits and escaped defects) for the repository linked to the project, from GitHub App events, the backfill and reported facts. Every metric names its source and definition; windows without samples are no_data and windows before complete coverage are partial, never zero. Windows of 7, 30, 90, 180 and 365 whole UTC days end today; each names its coverage and the window just before it; 90 and 180 days are bucketed by week and 365 by calendar month in series. Nothing is extrapolated.'
       security: [{session: []}, {agentKey: []}]
       responses:
         '200': {description: 'Delivery metrics', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetrics'}}}}
@@ -36,7 +36,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: backfillProjectDeliveryMetrics
-      description: 'Requires delivery.manage. Runs one bounded backfill step (at most about 40 GitHub reads with the App installation token) from the stored cursor and stores workflow runs and pull requests idempotently. Call again while state is running. restart begins a new backfill over days (1 to 90, default 30). A failed GitHub read writes nothing and returns 502; a concurrent step or source change returns 409.'
+      description: 'Requires delivery.manage. Runs one bounded backfill step (at most about 40 GitHub reads with the App installation token) from the stored cursor and stores workflow runs and pull requests idempotently. Once the runs and pulls are in, further steps are the jobs pass: each reads the jobs of first attempts that still lack them (required checks and the worst runner wait); a run whose jobs GitHub could not return is tried again after an hour, and nothing readable at all returns 502. The backfill is done when no run lacks its job facts. Call again while state is running. restart begins a new backfill over days (1 to 90, default 30). A failed GitHub read writes nothing and returns 502; a concurrent step or source change returns 409.'
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricsBackfillInput'}}}}
       responses:
@@ -51,7 +51,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: reportProjectDeliveryMetricFacts
-      description: 'Requires delivery.manage. Reports facts PAIMOS cannot observe itself: review verdicts of gates that post no aeon/review status, merge rounds (scripted or model) and releases (merge queue to live). Keys are idempotent per kind; a repeated key corrects the earlier report. At most 100 facts per call.'
+      description: 'Requires delivery.manage. Reports facts PAIMOS cannot observe itself: review verdicts of gates that post no aeon/review status, merge rounds (scripted or model), releases (merge queue to live), review audits (a merged pull request re-reviewed by a second model, with the highest severity of its findings) and escaped defects (a bug or incident ticket linked as caused by a merged pull request or a release). Keys are idempotent per kind; a repeated key corrects the earlier report. At most 100 facts per call.'
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricFactsInput'}}}}
       responses:

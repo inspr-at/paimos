@@ -34,11 +34,17 @@ export type SimpleSummary =
 
 // Simple's order along the path: making a change ready · getting it merged · shipping it.
 export const SECTIONS: readonly MetricTextKey[][] = [
-  ['pr_ci_wall', 'first_attempt_green', 'time_to_first_green', 'review_time'],
-  ['pr_open_to_merged', 'queue_run_wall', 'queue_runs_per_pr', 'merge_rounds_model_share'],
+  ['pr_ci_wall', 'first_attempt_green', 'time_to_first_green', 'review_time', 'runner_wait', 'flaked_failures', 'time_to_first_green_commit', 'preflight_red_rate'],
+  ['pr_open_to_merged', 'queue_run_wall', 'queue_runs_per_pr', 'merge_rounds_model_share', 'queue_ejections', 'queue_unclassified'],
   ['release_queue_to_live', 'nightly_green'],
+  ['review_audits', 'escaped_defects'],
 ]
-const percentKind = (kind: TileKind) => kind === 'share' || kind === 'merge' || kind === 'nightly'
+/** The number is shown in percent. */
+const percentKind = (kind: TileKind) => kind === 'share' || kind === 'merge' || kind === 'nightly' || kind === 'rate'
+/** Higher is better when no target says so: green shares, scripted merges and green nights; everything else counts trouble. */
+const higherIsBetter = (kind: TileKind) => kind === 'share' || kind === 'merge' || kind === 'nightly'
+/** The small chart scales 0 to 100 only for shares that can reach 100; a rare rate scales to its own values. */
+const sparkPercent = (kind: TileKind) => kind === 'share' || kind === 'merge' || kind === 'nightly'
 
 /** Minutes the way people say them: "16 min", "2 h 10". */
 export function plainDuration(minutes: number, lang: DeliveryLanguage): string {
@@ -49,8 +55,19 @@ export function plainDuration(minutes: number, lang: DeliveryLanguage): string {
 
 /** The tile's number in its own unit: merge rounds count the scripted share, so higher is better there. */
 function current(def: TileDef, window: MetricWindow | null): number | null {
+  // Inside the time reports are watched, no recorded audit or defect is said as zero recorded, never as "no data".
+  if (def.kind === 'count' && window && window.n === 0 && window.coverage.covered_days > 0) return 0
   if (!window || window.n === 0 || window.value == null) return null
   return def.kind === 'merge' ? 100 - window.value : window.value
+}
+/** The exact counts of a window as sentence placeholders: never recomputed from a rounded share. */
+function countValues(window: MetricWindow, lang: DeliveryLanguage): Record<string, string> {
+  const c = window.counts ?? {}, of = (name: string) => num(c[name] ?? 0, lang)
+  return {
+    never: of('never_green'), sup: of('superseded'), first: of('first_run_green'), total: num(window.n + (c.never_green ?? 0), lang),
+    confirmed: of('confirmed'), suspect: of('suspect'), e: of('events'), b: of('base'),
+    high: of('high'), medium: of('medium'), low: of('low'), clean: of('clean'),
+  }
 }
 /** The Arion target in the tile's own unit and which way is better. */
 export function targetOf(def: TileDef, metric: Metric | undefined): { value: number; up: boolean } | null {
@@ -83,7 +100,7 @@ export function verdictOf(def: TileDef, value: number | null, target: { value: n
 }
 
 function targetLabel(def: TileDef, target: { value: number }, text: SimpleText, lang: DeliveryLanguage): string {
-  const value = percentKind(def.kind) ? pct(target.value, lang) : def.kind === 'runs' ? num(target.value, lang, 1) : `${num(target.value, lang)}${NB}min`
+  const value = percentKind(def.kind) ? pct(target.value, lang) : def.kind === 'runs' ? num(target.value, lang, 1) : def.kind === 'per100' || def.kind === 'count' ? num(target.value, lang) : `${num(target.value, lang)}${NB}min`
   return `${text.target} ${value}`
 }
 
@@ -91,6 +108,12 @@ function valueParts(def: TileDef, window: MetricWindow, value: number, text: Sim
   const n = window.n, u = text.units
   switch (def.kind) {
     case 'share': return [{ text: num(value, lang), unit: '%' }]
+    case 'rate': return [{ text: num(value, lang, value < 10 && value % 1 ? 1 : 0), unit: '%' }]
+    case 'per100': return [{ text: num(value, lang), unit: u.per100 }]
+    case 'count': {
+      const key = def.key as 'review_audits' | 'escaped_defects'
+      return [{ text: num(value, lang), unit: n === 0 ? u.recorded : value === 1 ? u.countOne[key] : u.count[key] }]
+    }
     case 'runs': return [{ text: num(value, lang, 1), unit: u.times }]
     case 'merge': return [{ text: `${num(n - Math.round(n * window.value! / 100), lang)} ${u.of} ${num(n, lang)}`, unit: u.byScript }]
     case 'nightly': return [{ text: `${num(Math.round(n * value / 100), lang)} ${u.of} ${num(n, lang)}`, unit: n === 1 ? u.nightGreen : u.nightsGreen }]
@@ -137,7 +160,7 @@ export function simpleTile(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
   let say = words.wants, learn = expert.definition, nightlyGap = ''
   if (value != null && window) {
     const p50 = duration(window.p50 ?? window.value!, lang), p90 = window.p90 == null ? '–' : def.kind === 'runs' ? num(window.p90, lang, window.p90 % 1 ? 1 : 0) : duration(window.p90, lang)
-    const values: Record<string, string> = { p50, p90, n: num(n, lang), d: from }
+    const values: Record<string, string> = { p50, p90, n: num(n, lang), d: from, ...countValues(window, lang) }
     let sentence = words.say
     switch (def.kind) {
       case 'duration': values.v = plainDuration(value, lang); break
@@ -146,11 +169,15 @@ export function simpleTile(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
         values.v = pct(value, lang)
         values.v2 = also?.value != null && also.n > 0 ? pct(also.value, lang) : '–'
         values.t = target ? pct(target.value, lang) : '–'
-        const flake = metrics.get('flaked_failures')?.target?.value
-        values.t2 = flake == null ? '–' : pct(flake, lang)
         if (values.v2 === '–') sentence = words.sayAlt ?? sentence
         break
       }
+      case 'rate': values.v = pct(value, lang); break
+      case 'per100': values.v = num(value, lang); break
+      case 'count':
+        values.v = num(value, lang)
+        if (n === 0) sentence = words.sayAlt ?? sentence
+        break
       case 'review':
         values.v = plainDuration(value, lang)
         if (also?.value != null && also.n > 0) Object.assign(values, { k: num(Math.round(also.n * also.value / 100), lang), n: num(also.n, lang) })
@@ -186,7 +213,7 @@ export function simpleTile(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
 
   const { buckets, samples } = bucketsOf(metric, days, lang)
   const spark: SparkModel = {
-    kind: def.kind === 'nightly' ? 'nightly' : 'line', percent: percentKind(def.kind), mode, unit: bucketOf(days),
+    kind: def.kind === 'nightly' ? 'nightly' : 'line', percent: sparkPercent(def.kind), mode, unit: bucketOf(days),
     statuses: buckets.map(bucket => bucket.status),
     values: samples.map(sample => {
       if (!ready || sample.n === 0 || sample.value == null) return null
@@ -197,7 +224,7 @@ export function simpleTile(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
     nights: nights.slice(-14),
   }
   return {
-    key: def.key, name: words.name, hasTarget: !!target, up: target?.up ?? percentKind(def.kind), value: value != null && window ? valueParts(def, window, value, text, lang) : null,
+    key: def.key, name: words.name, hasTarget: !!target, up: target?.up ?? higherIsBetter(def.kind), value: value != null && window ? valueParts(def, window, value, text, lang) : null,
     empty: mode === 'error' ? text.notLoaded : deliveryText(lang).noData,
     verdict: verdictOf(def, value, target, mode, text, lang, nightlyGap),
     trend: trendOf(def, window, target, mode, days, text, lang, source?.backfill === 'running'),
@@ -238,7 +265,7 @@ export function simpleNumbersOf(data: DeliveryMetrics | null, days: WindowDays, 
   const sections: SimpleSection[] = SECTIONS.map((keys, index) => {
     const tiles = keys.map(key => byKey.get(key)!)
     const withTarget = tiles.filter(tile => tile.hasTarget)
-    return { ...text.sections[index], tiles, count: mode === 'ready' && !noData ? fill(text.onTarget, { k: withTarget.filter(tile => tile.verdict.level === 'on').length, t: withTarget.length }) : '' }
+    return { ...text.sections[index], tiles, count: mode === 'ready' && !noData && withTarget.length ? fill(text.onTarget, { k: withTarget.filter(tile => tile.verdict.level === 'on').length, t: withTarget.length }) : '' }
   })
   return { summary: summaryOf([...byKey.values()], days, source, mode, noData, text, lang), sections }
 }

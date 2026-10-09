@@ -40,7 +40,9 @@ const ICON = { on: 'v-on', close: 'v-close', far: 'v-far', none: 'v-none' } as c
       </template>
       <template v-else-if="page.summary.kind === 'ready'">
         <p class="big">{{ page.summary.big }}</p>
-        <p v-if="page.summary.gaps.length" class="line">
+        <!-- The line keeps its slot when no number is off target, and every line below reserves the rows its longest
+             wording needs, so Learn does not move when another window changes the names and counts (AEON-541). -->
+        <p class="line">
           <template v-for="(gap, index) in page.summary.gaps" :key="gap.label">{{ index ? ' ' : '' }}{{ gap.label }}: <b>{{ gap.name }}</b> ({{ gap.gap }}).</template>
         </p>
         <p class="line">{{ page.summary.week }}</p>
@@ -79,7 +81,7 @@ const ICON = { on: 'v-on', close: 'v-close', far: 'v-far', none: 'v-none' } as c
 .s-sum { display: grid; gap: 6px; padding: 16px 18px 14px; border-radius: 16px; background: var(--glass); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), 0 14px 34px -22px color-mix(in srgb, var(--primary-line) 35%, transparent); }
 .s-sum p { margin: 0; }
 .s-sum .big { font: 650 18px/1.35 var(--font); letter-spacing: -.01em; color: var(--ink); }
-.s-sum .line { font-size: 13.5px; line-height: 1.5; color: var(--ink-2); }
+.s-sum .line { min-height: 1lh; font-size: 13.5px; line-height: 1.5; color: var(--ink-2); }
 .s-sum .line b { color: var(--ink); font-weight: 600; }
 .s-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 4px; font-size: 12px; color: var(--ink-2); }
 .s-legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -102,9 +104,10 @@ const ICON = { on: 'v-on', close: 'v-close', far: 'v-far', none: 'v-none' } as c
   .sk { background: linear-gradient(90deg, var(--skeleton) 0%, var(--skeleton-hi) 50%, var(--skeleton) 100%) 0 0 / 200% 100%; animation: dl-sk 1.4s ease-in-out infinite; }
 }
 @keyframes dl-sk { to { background-position: -200% 0; } }
-@container delivery (max-width: 1100px) { .s-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container delivery (max-width: 1100px) { .s-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .s-sum .line { min-height: 2lh; } }
 @container delivery (max-width: 640px) {
   .s-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .s-sum .line { min-height: 3lh; }
   .defs { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

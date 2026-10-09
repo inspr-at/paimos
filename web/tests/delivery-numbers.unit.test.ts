@@ -81,15 +81,15 @@ it('long windows use the server’s weeks and months and label only some of them
   expect(month.filter(bucket => bucket.show).map(bucket => bucket.label)).toEqual(['Oct', 'Jan', 'Apr', 'Jul', 'Oct'])
 })
 
-it('the paired numbers count what they say: flakes, “changes”, scripted rounds and green nights', () => {
+it('the paired numbers count what they say: required checks, “changes”, scripted rounds and green nights', () => {
   const window = (key: MetricKey, n: number, value: number, unit: Metric['unit'] = 'percent') => [key, metric(key, { unit }, { n, value })] as const
   const metrics = new Map<MetricKey, Metric>([
-    window('first_attempt_green', 168, 35), window('flaked_failures', 40, 24),
+    window('first_attempt_green', 168, 35), window('required_checks_green', 40, 24),
     window('review_time', 12, 13, 'minutes'), window('review_changes_share', 12, 58.3),
     window('merge_rounds_model_share', 10, 80),
   ])
   expect(tileModel(def('first_attempt_green'), metrics, 7, null, 'en')).toMatchObject({ value: { main: '35', unit: '%' }, lineB: '168 first attempts' })
-  expect(tileModel(def('first_attempt_green'), metrics, 7, null, 'en').lineA.parts.map(part => part.text).join('')).toBe('Failed only by flakes 24%')
+  expect(tileModel(def('first_attempt_green'), metrics, 7, null, 'en').lineA.parts.map(part => part.text).join('')).toBe('Required checks 24%')
   expect(tileModel(def('review_time'), metrics, 7, null, 'en').lineB).toBe('“changes” verdicts 7 of 12 (58%)')
   const merge = tileModel(def('merge_rounds_model_share'), metrics, 7, null, 'en')
   expect(merge).toMatchObject({ value: { main: '2 of 10', unit: 'scripted' }, lineB: '10 merge rounds reported' })
@@ -164,4 +164,91 @@ it('German numbers use the German decimal comma and impersonal words', () => {
   expect(tile.value).toEqual({ main: '1,8', unit: 'Läufe' })
   expect(tile.delta).toMatchObject({ cls: 'better', text: '−0,3', word: 'besser' })
   expect(tile.lineB).toBe('61 gemergte PRs')
+})
+
+// ---------- The Arion v5 readings (AEON-1016) ----------
+const counted = (key: MetricKey, n: number, value: number | null, counts: Record<string, number>, unit: Metric['unit'] = 'minutes', fields: Partial<MetricWindow> = {}) =>
+  new Map<MetricKey, Metric>([[key, metric(key, { unit }, { n, value, p50: value, p90: value, counts, ...fields })]])
+
+it('time to first green names how many never went green, per branch and per commit, from exact counts', () => {
+  // Risk: the never-green branches vanish from the tile (so the median looks better than it is), or the count is
+  // rounded back from a share.
+  const branch = tileModel(def('time_to_first_green'), counted('time_to_first_green', 130, 51.9, { never_green: 19, first_run_green: 47 }), 7, null, 'en')
+  expect(branch.lineB).toBe('130 went green · 19 never green')
+  const commit = tileModel(def('time_to_first_green_commit'), counted('time_to_first_green_commit', 267, 15.9, { never_green: 192, superseded: 169 }), 7, null, 'en')
+  expect(commit.lineB).toBe('267 went green · 192 never, 169 superseded')
+  expect(commit.target).toBe('No Arion target yet')
+  // Nothing went green at all: no time, but the never-green commits are still said.
+  const none = tileModel(def('time_to_first_green_commit'), counted('time_to_first_green_commit', 0, null, { never_green: 5, superseded: 2 }), 7, null, 'en')
+  expect(none.value).toBeNull()
+  expect(none.lineB).toBe('0 went green · 5 never, 2 superseded')
+})
+
+it('confirmed flaky runs and suspects are two numbers; the suspects never enter the share', () => {
+  const tile = tileModel(def('flaked_failures'), counted('flaked_failures', 427, 0.2, { confirmed: 1, suspect: 3 }, 'percent'), 7, null, 'en')
+  expect(tile.value).toEqual({ main: '0.2', unit: '%' })
+  expect(tile.lineA.parts.map(part => part.text).join('')).toBe('1 confirmed · 3 suspect')
+  expect(tile.lineB).toBe('427 first attempts')
+  // A rate moves in points, and 1 point is within the "about the same" band for a share of the runs.
+  const before = counted('flaked_failures', 400, 5.5, { confirmed: 22, suspect: 0 }, 'percent', { previous: { status: 'ok', n: 400, value: 1.5, p50: null, p90: null, coverage: coverage(7, day(13)) } })
+  expect(tileModel(def('flaked_failures'), before, 7, null, 'en').delta).toMatchObject({ cls: 'worse', text: '+4\u00a0pts' })
+})
+
+it('queue readings say events of base from exact counts, and the unclassified cause stays unclassified', () => {
+  const ejections = tileModel(def('queue_ejections'), counted('queue_ejections', 151, 59.6, { events: 90, base: 151 }, 'per100'), 7, null, 'en')
+  expect(ejections.value).toEqual({ main: '60', unit: 'per 100 PRs' })
+  expect(ejections.lineA.parts[0].text).toBe('90 ejections · 151 merged PRs')
+  expect(ejections.lineB).toBe('Inferred from required checks')
+  const extra = tileModel(def('queue_unclassified'), counted('queue_unclassified', 151, 15.9, { events: 24, base: 151 }, 'per100'), 7, null, 'en')
+  expect(extra.value).toEqual({ main: '16', unit: 'per 100 PRs' })
+  expect(extra.lineB).toBe('Cause not classified yet')
+  expect(extra.target).toBe('Target set after the causes are classified')
+})
+
+it('runner wait leads with p90, the number the plan judges, and says p50 beside it', () => {
+  const tile = tileModel(def('runner_wait'), counted('runner_wait', 427, 6.2, {}, 'minutes', { p50: 1.2, p90: 6.2 }), 7, null, 'en')
+  expect(tile.value).toEqual({ main: '6.2', unit: 'min' })
+  expect(tile.lineA.parts.map(part => part.text).join('')).toBe('p50 1.2\u00a0min · p90 6.2\u00a0min')
+  expect(tile.target).toBe('Target p90 ≤ 3 min, then 1')
+})
+
+it('audits and defects show severities; inside the watched time nothing recorded is said as that, outside it is "no data"', () => {
+  const audits = tileModel(def('review_audits'), counted('review_audits', 3, 3, { high: 1, medium: 1, low: 0, clean: 1 }, 'audits'), 7, null, 'en')
+  expect(audits.value).toEqual({ main: '3', unit: 'audits' })
+  expect(audits.lineA.parts[0].text).toBe('1 high · 1 medium · 0 low · 1 clean')
+  const one = tileModel(def('escaped_defects'), counted('escaped_defects', 1, 1, { high: 0, medium: 1, low: 0 }, 'defects'), 7, null, 'en')
+  expect(one.value).toEqual({ main: '1', unit: 'defect' })
+  // Reports watched for 3 of the 7 days: none recorded in them is a zero recorded, never an average.
+  const watched = tileModel(def('escaped_defects'), counted('escaped_defects', 0, null, {}, 'defects', { coverage: coverage(7, day(2), { full: false, covered_days: 3, buckets_covered: 3 }) }), 7, null, 'en')
+  expect(watched.value).toEqual({ main: '0', unit: 'recorded' })
+  expect(watched.lineA.parts[0].text).toBe('None recorded')
+  // Before the first report: no data, as for any other reading.
+  const unwatched = tileModel(def('escaped_defects'), counted('escaped_defects', 0, null, {}, 'defects', { coverage: coverage(7, null, { full: false, covered_days: 0, buckets_covered: 0 }) }), 7, null, 'en')
+  expect(unwatched.value).toBeNull()
+})
+
+it('every reading draws a chart with its own target, and its readout names counts without extrapolating', () => {
+  const rate = chartModel(def('flaked_failures'), new Map([['flaked_failures', metric('flaked_failures', { unit: 'percent', target: { value: 2, direction: 'max', note: '', source: 'Arion' } }, { n: 4, value: 1.5 })]]), 7, null, 'en')
+  expect(rate.unit).toBe('%')
+  expect(rate.panels[0].targets).toEqual([{ value: 2, label: 'Target ≤ 2 %' }])
+  expect(rate.panels[0].top).toBeGreaterThanOrEqual(2)
+  expect(rate.readouts.at(-1)).toMatch(/^Today · 12% · 2 runs$/)
+  const per100 = chartModel(def('queue_ejections'), new Map([['queue_ejections', metric('queue_ejections', { unit: 'per100' })]]), 7, null, 'en')
+  expect(per100.unit).toBe('per 100 PRs')
+  expect(per100.readouts.at(-1)).toMatch(/^Today · 12 per 100 PRs · 2 PRs$/)
+  const count = chartModel(def('escaped_defects'), new Map([['escaped_defects', metric('escaped_defects', { unit: 'defects', target: null })]]), 7, null, 'en')
+  expect(count.panels[0].targets).toEqual([])
+  expect(count.readouts.at(-1)).toMatch(/^Today · 12 defects$/)
+  // Green and required checks share one line pair and one target.
+  const both = chartModel(def('first_attempt_green'), new Map([['first_attempt_green', metric('first_attempt_green', { unit: 'percent' })], ['required_checks_green', metric('required_checks_green', { unit: 'percent' })]]), 7, null, 'en')
+  expect(both.panels[0].lines).toHaveLength(2)
+  expect(both.panels[0].targets).toHaveLength(1)
+  expect(both.readouts.at(-1)).toContain('required checks')
+})
+
+it('the v5 readings read German, impersonal', () => {
+  const tile = tileModel(def('queue_ejections'), counted('queue_ejections', 151, 59.6, { events: 90, base: 151 }, 'per100'), 7, null, 'de')
+  expect(tile.value).toEqual({ main: '60', unit: 'pro 100 PRs' })
+  expect(tile.lineA.parts[0].text).toBe('90 Auswürfe · 151 gemergte PRs')
+  expect(deliveryText('de').metrics.flaked_failures.definition).not.toMatch(/\b(du|dein|wir|unser)\b/i)
 })

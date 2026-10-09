@@ -9,19 +9,20 @@ import type { DeliveryLanguage } from './delivery'
 import { deliveryText, fill, type DeliveryText, type MetricTextKey } from './deliveryNumbersText'
 
 // ---------- Contract (api/openapi.yaml DeliveryMetrics) ----------
-export type MetricKey = MetricTextKey | 'flaked_failures' | 'review_changes_share'
+export type MetricKey = MetricTextKey | 'required_checks_green' | 'review_changes_share'
 export type SampleStatus = 'ok' | 'partial' | 'no_data'
 export type BucketUnit = 'day' | 'week' | 'month'
 export interface MetricCoverage { window_days: number; bucket: BucketUnit; buckets_total: number; buckets_covered: number; covered_days: number; from: string | null; full: boolean }
 interface Measured { status: SampleStatus; n: number; value: number | null; p50: number | null; p90: number | null }
 export interface MetricPrevious extends Measured { coverage: MetricCoverage }
-export interface MetricWindow extends Measured { days: number; coverage: MetricCoverage; previous: MetricPrevious | null }
+/** `counts` are the exact numbers behind the value (never green, suspects, severities, events and base); a rounded share cannot give them back. */
+export interface MetricWindow extends Measured { days: number; coverage: MetricCoverage; previous: MetricPrevious | null; counts?: Record<string, number> }
 export interface MetricPoint extends Measured { date: string }
 export interface MetricBucket extends Measured { days: number; from: string; to: string; bucket: 'week' | 'month' }
 export interface MetricTarget { value: number; direction: 'max' | 'min'; note: string; source: string }
 export interface MetricRelease { key: string; release: string | null; tag: string | null; outcome: 'live' | 'failed'; queued_at: string; live_at: string | null; healthy_at: string | null }
 export interface Metric {
-  number: number; key: MetricKey; label: string; unit: 'minutes' | 'percent' | 'runs'; source: string; definition: string
+  number: number; key: MetricKey; label: string; unit: 'minutes' | 'percent' | 'runs' | 'per100' | 'audits' | 'defects'; source: string; definition: string
   status: SampleStatus; reason: string | null; latest: { value: number; at: string } | null
   windows: MetricWindow[]; daily: MetricPoint[]; series: MetricBucket[]; target: MetricTarget | null; releases?: MetricRelease[]
 }
@@ -76,14 +77,14 @@ const fmtDate = (iso: string, lang: DeliveryLanguage, options: Intl.DateTimeForm
 export const shortDate = (iso: string, lang: DeliveryLanguage) => fmtDate(iso, lang, { day: 'numeric', month: 'short' })
 export const clockTime = (iso: string, lang: DeliveryLanguage) => new Date(iso).toLocaleTimeString(locale(lang), { hour: '2-digit', minute: '2-digit', hour12: false })
 
-// ---------- The ten tiles (numbers 3 and 7 carry two metrics) ----------
-export type TileKind = 'duration' | 'runs' | 'share' | 'review' | 'merge' | 'release' | 'nightly'
-export type SourceKey = 'gh' | 'review' | 'merge' | 'release' | 'nightly'
+// ---------- The tiles: ten Arion numbers (3 and 7 carry two metrics), then the v5 readings ----------
+export type TileKind = 'duration' | 'runs' | 'share' | 'review' | 'merge' | 'release' | 'nightly' | 'rate' | 'per100' | 'count'
+export type SourceKey = 'gh' | 'review' | 'merge' | 'release' | 'nightly' | 'jobs' | 'preflight' | 'audit' | 'defects'
 export interface TileDef { key: MetricTextKey; also?: MetricKey; kind: TileKind; src: SourceKey }
 export const TILES: readonly TileDef[] = [
   { key: 'pr_ci_wall', kind: 'duration', src: 'gh' },
   { key: 'queue_run_wall', kind: 'duration', src: 'gh' },
-  { key: 'first_attempt_green', also: 'flaked_failures', kind: 'share', src: 'gh' },
+  { key: 'first_attempt_green', also: 'required_checks_green', kind: 'share', src: 'gh' },
   { key: 'time_to_first_green', kind: 'duration', src: 'gh' },
   { key: 'pr_open_to_merged', kind: 'duration', src: 'gh' },
   { key: 'queue_runs_per_pr', kind: 'runs', src: 'gh' },
@@ -91,7 +92,20 @@ export const TILES: readonly TileDef[] = [
   { key: 'merge_rounds_model_share', kind: 'merge', src: 'merge' },
   { key: 'release_queue_to_live', kind: 'release', src: 'release' },
   { key: 'nightly_green', kind: 'nightly', src: 'nightly' },
+  // The Arion v5 readings (AEON-1016).
+  { key: 'time_to_first_green_commit', kind: 'duration', src: 'gh' },
+  { key: 'flaked_failures', kind: 'rate', src: 'gh' },
+  { key: 'queue_ejections', kind: 'per100', src: 'jobs' },
+  { key: 'queue_unclassified', kind: 'per100', src: 'jobs' },
+  { key: 'runner_wait', kind: 'duration', src: 'jobs' },
+  { key: 'preflight_red_rate', kind: 'rate', src: 'preflight' },
+  { key: 'review_audits', kind: 'count', src: 'audit' },
+  { key: 'escaped_defects', kind: 'count', src: 'defects' },
 ]
+/** A percent that is not "green": the unit is % and lower is better. */
+export const isRate = (kind: TileKind) => kind === 'rate'
+/** Shares move in points; counts and per-100 readings move in plain numbers. */
+const movesInPoints = (kind: TileKind) => kind === 'share' || kind === 'merge' || kind === 'nightly' || kind === 'rate'
 export const windowOf = (metric: Metric | undefined, days: number) => metric?.windows.find(window => window.days === days) ?? null
 
 export function sourceLabel(def: TileDef, source: MetricSource | null, text: DeliveryText): string {
@@ -112,13 +126,13 @@ export function deltaOf(def: TileDef, window: MetricWindow | null, direction: 'm
   if (!window || window.value == null || !before || before.value == null) {
     return { cls: 'none', icon: 'minus', text: ctx.historyLoading && !before?.coverage.full ? text.tLoading : fill(text.tNone, { w: days }), word: '' }
   }
-  const share = def.kind === 'share' || def.kind === 'merge' || def.kind === 'nightly'
+  const share = movesInPoints(def.kind)
   const change = window.value - before.value
   const steady = share ? Math.abs(change) < 3 : before.value === 0 ? change === 0 : Math.abs(change) / Math.abs(before.value) < 0.1
   const good = direction === 'max' ? change < 0 : change > 0
   const cls = steady ? 'same' : good ? 'better' : 'worse'
   const magnitude = Math.abs(change)
-  const amount = share ? `${num(magnitude, lang)}${NB}${text.pts}` : def.kind === 'runs' ? num(magnitude, lang, 1) : duration(magnitude, lang)
+  const amount = share ? `${num(magnitude, lang, def.kind === 'rate' && Math.round(magnitude * 10) / 10 % 1 ? 1 : 0)}${NB}${text.pts}` : def.kind === 'runs' ? num(magnitude, lang, 1) : def.kind === 'per100' || def.kind === 'count' ? num(magnitude, lang) : duration(magnitude, lang)
   const sign = change > 0 ? '+' : change < 0 ? '−' : '±'
   return { cls, icon: change < 0 ? 'arrow-down' : change > 0 ? 'arrow-up' : 'arrow', text: `${sign}${amount}`, word: text[cls] }
 }
@@ -166,18 +180,23 @@ export function tileModel(def: TileDef, metrics: Map<MetricKey, Metric>, days: W
   const cover = coverText(window?.coverage, text)
   const partial = status === 'partial' || !!cover
   const base = {
-    def, label: words.label, definition: words.definition, reason: partial ? metric?.reason ?? null : null, target: words.target, source: sourceText,
+    def, label: words.label, definition: words.definition, reason: partial || status === 'no_data' ? metric?.reason ?? null : null, target: words.target, source: sourceText,
     status, partial, foot: cover || sourceText,
     delta: deltaOf(def, window, metric?.target?.direction ?? 'max', { days, text, lang, historyLoading: source?.backfill === 'running' }),
   }
-  const empty = { ...base, value: null, lineA: { parts: [{ text: 'p50 · p90 –' }], mono: true }, lineB: '' }
+  if (def.kind === 'count' && window && window.n === 0 && window.coverage.covered_days > 0) {
+    // Inside the time reports are watched, nothing recorded is said as that, never as "no data".
+    return { ...base, value: { main: '0', unit: text.unitRecorded }, lineA: { parts: [{ text: text.counts.nothingRecorded }], mono: false }, lineB: details(def, window, text, lang).b }
+  }
+  const empty = { ...base, value: null, lineA: { parts: [{ text: 'p50 · p90 –' }], mono: true }, lineB: details(def, window, text, lang).b }
   if (!window || window.n === 0 || window.value == null) return def.kind === 'nightly' ? nightlyTile(base, metric, window, days, text, lang, true) : empty
   const n = window.n, count = `${num(n, lang)} ${words.count}`
+  const more = details(def, window, text, lang)
   switch (def.kind) {
     case 'duration': case 'review': {
       const [main, unit] = durationParts(window.value, lang)
       const pp: Part[] = [{ text: 'p50 ' }, { text: duration(window.p50 ?? window.value, lang), strong: true }, { text: ' · p90 ' }, { text: window.p90 == null ? '–' : duration(window.p90, lang), strong: true }]
-      let lineB = count
+      let lineB = more.b || count
       if (def.kind === 'review' && also && also.value != null && also.n > 0) {
         const asked = Math.round(also.n * also.value / 100)
         lineB = `${text.changesVerdicts} ${asked} ${text.of} ${also.n} (${pct(also.value, lang)})`
@@ -189,7 +208,14 @@ export function tileModel(def: TileDef, metrics: Map<MetricKey, Metric>, days: W
         lineA: { parts: [{ text: `${text.mean} ` }, { text: num(window.value, lang, 1), strong: true }, { text: ' · p90 ' }, { text: window.p90 == null ? '–' : num(window.p90, lang, window.p90 % 1 ? 1 : 0), strong: true }], mono: true }, lineB: count }
     case 'share':
       return { ...base, value: { main: num(window.value, lang), unit: '%' },
-        lineA: { parts: also?.value != null ? [{ text: `${text.flakesOnly} ` }, { text: pct(also.value, lang), strong: true }] : [{ text: `${text.flakesOnly} –` }], mono: false }, lineB: count }
+        lineA: { parts: also?.value != null ? [{ text: `${text.requiredChecks} ` }, { text: pct(also.value, lang), strong: true }] : [{ text: `${text.requiredChecks} –` }], mono: false }, lineB: count }
+    case 'rate':
+      return { ...base, value: { main: num(window.value, lang, window.value < 10 && window.value % 1 ? 1 : 0), unit: '%' }, lineA: { parts: [{ text: more.a }], mono: false }, lineB: more.b || count }
+    case 'per100':
+      return { ...base, value: { main: num(window.value, lang), unit: text.unitPerHundred }, lineA: { parts: [{ text: more.a }], mono: false }, lineB: more.b }
+    case 'count':
+      return { ...base, value: { main: num(window.value, lang), unit: window.value === 1 ? (def.key === 'review_audits' ? text.unitAuditOne : text.unitDefectOne) : (def.key === 'review_audits' ? text.unitAudits : text.unitDefects) },
+        lineA: { parts: [{ text: more.a }], mono: false }, lineB: more.b }
     case 'merge': {
       const byModel = Math.round(n * window.value / 100)
       return { ...base, value: { main: `${num(n - byModel, lang)} ${text.of} ${num(n, lang)}`, unit: text.scripted },
@@ -203,6 +229,22 @@ export function tileModel(def: TileDef, metrics: Map<MetricKey, Metric>, days: W
         lineB: shown ? `${text.release} ${shown.release ?? shown.tag ?? shown.key} · ${shortDate((shown.live_at ?? shown.queued_at).slice(0, 10), lang)}` : '' }
     }
     case 'nightly': return nightlyTile(base, metric, window, days, text, lang, false)
+  }
+}
+/** The two lines a v5 reading adds under its number: exact counts from the window, never recomputed from a rounded share. */
+export function details(def: TileDef, window: MetricWindow | null, text: DeliveryText, lang: DeliveryLanguage): { a: string; b: string } {
+  const c = window?.counts ?? {}, k = text.counts, n = window?.n ?? 0
+  const of = (name: string) => num(c[name] ?? 0, lang)
+  switch (def.key) {
+    case 'time_to_first_green': return { a: '', b: window && (n > 0 || (c.never_green ?? 0) > 0) ? fill(k.branches, { n: num(n, lang), never: of('never_green') }) : '' }
+    case 'time_to_first_green_commit': return { a: '', b: window && (n > 0 || (c.never_green ?? 0) > 0) ? fill(k.commits, { n: num(n, lang), never: of('never_green'), sup: of('superseded') }) : '' }
+    case 'flaked_failures': return { a: fill(k.flakes, { c: of('confirmed'), s: of('suspect') }), b: fill(k.firstAttempts, { n: num(n, lang) }) }
+    case 'preflight_red_rate': return { a: fill(k.preflights, { n: num(n, lang) }), b: k.preflightNote }
+    case 'queue_ejections': return { a: fill(k.ejections, { e: of('events'), b: of('base') }), b: k.inferred }
+    case 'queue_unclassified': return { a: fill(k.unclassified, { e: of('events'), b: of('base') }), b: k.unclassifiedNote }
+    case 'review_audits': return { a: fill(k.severityClean, { high: of('high'), medium: of('medium'), low: of('low'), clean: of('clean') }), b: k.auditNote }
+    case 'escaped_defects': return { a: fill(k.severity, { high: of('high'), medium: of('medium'), low: of('low') }), b: k.defectNote }
+    default: return { a: '', b: '' }
   }
 }
 type TileBase = Omit<TileModel, 'value' | 'lineA' | 'lineB'>
@@ -302,7 +344,7 @@ export function chartModel(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
   const alsoSamples = def.also ? bucketsOf(metrics.get(def.also), days, lang).samples : []
   const target = metric?.target?.value ?? null
   const panels: ChartPanel[] = []
-  const unit = def.kind === 'share' || def.kind === 'merge' ? '%' : def.kind === 'runs' ? (lang === 'de' ? 'Läufe' : 'runs') : def.kind === 'nightly' ? '' : 'min'
+  const unit = def.kind === 'share' || def.kind === 'merge' || def.kind === 'rate' ? '%' : def.kind === 'runs' ? (lang === 'de' ? 'Läufe' : 'runs') : def.kind === 'per100' ? text.unitPerHundred : def.kind === 'count' ? (def.key === 'review_audits' ? text.unitAudits : text.unitDefects) : def.kind === 'nightly' ? '' : 'min'
   let clippedTo: number | null = null
   if (def.kind === 'duration' || def.kind === 'review' || def.kind === 'release') {
     const p50 = values(samples, sample => sample.p50 ?? sample.value), p90 = def.kind === 'release' ? [] : values(samples, sample => sample.p90)
@@ -321,10 +363,14 @@ export function chartModel(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
     panels.push({ top: Math.max(4, niceCeil(Math.max(4, ...present(p90)))), share: 1, caption: '', lines: [{ values: mean, tone: 'teal', connect: true }],
       band: p50.map((low, index) => low != null && p90[index] != null ? [low, p90[index]!] : null), fade: false, targets: target != null ? [{ value: target, label: words.line }] : [] })
   } else if (def.kind === 'share') {
-    const flake = metrics.get('flaked_failures')?.target?.value ?? null
+    // Green and required checks side by side: one Arion target holds for both.
     panels.push({ top: 100, share: 1, caption: '', band: null, fade: false,
       lines: [{ values: values(samples, sample => sample.value), tone: 'teal', connect: true }, { values: values(alsoSamples, sample => sample.value), tone: 'gold', connect: true }],
-      targets: [...(target != null ? [{ value: target, label: fill(text.targetGreen, { v: pct(target, lang) }) }] : []), ...(flake != null ? [{ value: flake, label: fill(text.targetFlake, { v: pct(flake, lang) }) }] : [])] })
+      targets: target != null ? [{ value: target, label: fill(text.targetGreen, { v: pct(target, lang) }) }] : [] })
+  } else if (def.kind === 'rate' || def.kind === 'per100' || def.kind === 'count') {
+    const line = values(samples, sample => sample.value)
+    panels.push({ top: niceCeil(Math.max(...present(line), target ?? 0, def.kind === 'rate' ? 2 : 3) * 1.25), share: 1, caption: '', band: null, fade: false,
+      lines: [{ values: line, tone: 'teal', connect: true }], targets: target != null ? [{ value: target, label: words.line }] : [] })
   } else if (def.kind === 'merge') {
     panels.push({ top: 100, share: 1, caption: '', band: null, fade: false, lines: [{ values: values(samples, sample => sample.value), tone: 'teal', connect: true }],
       targets: target != null ? [{ value: target, label: words.line }] : [] })
@@ -358,7 +404,10 @@ export function readout(def: TileDef, bucket: ChartBucket, sample: Measured | un
     case 'duration': return `${head}${partial} · ${pair(sample.p50 ?? sample.value, sample.p90)} · ${count}`
     case 'review': return `${head}${partial} · ${pair(sample.p50 ?? sample.value, sample.p90)}${also?.value != null && also.n > 0 ? ` · ${text.changes} ${pct(also.value, lang)}` : ''} · ${count}`
     case 'runs': return `${head}${partial} · ${text.mean} ${sample.value == null ? '–' : num(sample.value, lang, 1)} · p90 ${sample.p90 == null ? '–' : num(sample.p90, lang, sample.p90 % 1 ? 1 : 0)} · ${count}`
-    case 'share': return `${head}${partial} · ${sample.value == null ? '–' : pct(sample.value, lang)} ${text.greenWord} · ${also?.value == null ? '–' : pct(also.value, lang)} ${text.flake} · ${count}`
+    case 'share': return `${head}${partial} · ${sample.value == null ? '–' : pct(sample.value, lang)} ${text.greenWord} · ${also?.value == null ? '–' : pct(also.value, lang)} ${text.required} · ${count}`
+    case 'rate': return `${head}${partial} · ${sample.value == null ? '–' : pct(sample.value, lang)} · ${count}`
+    case 'per100': return `${head}${partial} · ${sample.value == null ? '–' : num(sample.value, lang)} ${text.unitPerHundred} · ${count}`
+    case 'count': return `${head}${partial} · ${sample.value == null ? '–' : num(sample.value, lang)} ${sample.value === 1 ? words.one : words.many}`
     case 'merge': return `${head}${partial} · ${sample.value == null ? '–' : pct(sample.value, lang)} ${text.byModel} · ${Math.round(sample.n * (sample.value ?? 0) / 100)} ${text.of} ${count}`
     case 'release': return `${head}${partial} · ${sample.value == null ? '–' : duration(sample.p50 ?? sample.value, lang)} · ${count}`
     case 'nightly': {

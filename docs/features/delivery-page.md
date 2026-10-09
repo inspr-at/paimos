@@ -14,7 +14,8 @@ top-anchored head, the window switch keeps its slot (hidden) on Flow, and conten
 below grows downward.
 
 **Numbers · Expert** reads `GET /api/projects/{projectId}/delivery/metrics` once and
-refreshes it every minute while the page is visible. Ten tiles show, for the chosen
+refreshes it every minute while the page is visible. Eighteen tiles (the ten Arion
+numbers, then the eight v5 readings described below) show, for the chosen
 window, the value (p50 for durations, the mean for queue runs, the share for rates),
 p50/p90 or the number's own detail, the count, the change against the same number of
 days just before (steady within 10 %, or 3 points for shares; no comparison when that
@@ -24,7 +25,7 @@ metrics (green on first try with flake-only failures; review time with the share
 nights of nights with a run. A tile is **Partial** when its window is partial or not
 fully covered, and names the coverage ("covers 4 of 7 days").
 
-Ten trend charts use one point per day (7 and 30 days), per week (90 and 180) or per
+A trend chart per tile uses one point per day (7 and 30 days), per week (90 and 180) or per
 month (365) from the contract's daily points and series. Days before a source covers
 them are hatched "no data yet"; covered days without samples stay empty ("nothing
 recorded"); partial buckets are tinted, with hollow points and dashed lines. When p90
@@ -42,10 +43,13 @@ language (English or German).
 says how many of the numbers with an Arion target are on target, names the closest one
 and the biggest gap, counts the changes against the window before (better, worse,
 steady, without a comparison) and says how to read the small charts. Below it the ten
-numbers sit in three plain sections along the path: making a change ready (PR checks,
-green on the first try, time until green, review), getting it merged (PR opened to
-merged, one merge-queue run, queue tries per change, conflicts solved by script) and
-shipping it (release to live, the full test run each night).
+numbers sit in four plain sections along the path: making a change ready (PR checks, green on the
+first try, time until green per branch and per commit, review, runner wait, runs that
+failed and then passed, pre-checks), getting it merged (PR opened to merged, one
+merge-queue run, queue tries per change, conflicts solved by script, changes thrown out
+of the queue, extra queue runs of unknown cause), shipping it (release to live, the full
+test run each night) and keeping it safe (review-audit findings, defects that reached
+production). A section whose numbers have no target shows no "0 of 0 on target".
 
 Each Simple tile has a plain name, the value in its own unit with "lower/higher is
 better", a verdict against the target as shape and word (on target up to 1×, close up
@@ -124,3 +128,75 @@ the overview's brush edges and playhead. Every text reaches 4.5:1 against what i
 behind it in light and dark. Each switch group is one tab stop with arrows, Home and End
 inside; Learn opens on focus, Enter pins it and Esc closes it. In Flow a refused save of
 the window or level takes the headline's place, so the mode switch and the card stay put.
+
+## Project Arion v5 readings (AEON-1016)
+
+The page is steered by Project Arion v5 (WP1.1). Every definition below is the one
+`measure-v2.py` uses, so the tiles equal it on the same window: a run is counted on the
+day it was created, a pull request on the day it merged, durations are rounded to 0.01
+minutes before the percentile. `TestDeliveryNumbersEqualMeasureV2` holds the Go
+computation against the plan's own records (`internal/delivery/testdata/arion_w2.json.gz`,
+built by `arion_w2_convert.py` from the value-free records `measure-v2.py` wrote) on its
+W2 window, 5 Oct 00:00 to 9 Oct 04:00 UTC: 427 first attempts, 62.3 % green, 65.8 % with
+the required checks only, 267 commits and 130 branches that went green with 192 and 19
+that never did, 90 inferred ejections and 24 extra queue runs for 151 merged pull
+requests, runner wait p90 6.2 minutes. A run that completes after the window's end is not
+a fact yet, so a window ending in the past equals the plan's figures.
+
+**Targets** follow v5 section 4: PR CI wall and merge-queue run 10 minutes, then 7
+(conditional), with no "3 on a reuse hit"; first-attempt green 70 %, then 80 %; time to
+first green per branch p50 30, then 20; PR opened to merged p50 80, then 60; queue runs
+per PR 1.25, then 1.1; review 10, then 8 minutes with changes at most 40 %, then 25 %;
+release about 61 minutes plus W (the wait for a person), then about 54 plus W; runner wait
+p90 3 minutes, then 1; confirmed flaky runs at most 2 % of runs; inferred ejections 25,
+then 10 per 100 merged PRs. Readings the plan sets no target for (time to first green per
+commit, unclassified queue runs, preflight, audits, defects) show "No target yet", never a
+verdict.
+
+**Readings.**
+
+- *Time to first green* per branch (first run created to first green on any commit) and per
+  commit (to the first green attempt of that commit). Branches and commits that never went
+  green are counted beside the time, never inside it; for commits, how many a later commit
+  of the branch superseded. A branch that began before the window is not in it, even when it
+  went green inside.
+- *Required checks green* beside the workflow's green: only the project's required checks
+  (delivery settings, default `go`, `web`, `release-check`, `e2e`, `migration-compat`) decide,
+  skipped counts as passing, a required job that never ran is red.
+- *Inferred ejections* and *extra queue runs, cause unclassified*, each per 100 merged pull
+  requests that had a queue run: a queue run with a red required check is an inferred
+  ejection; an earlier run of a merged pull request that was cancelled or required-green is
+  counted as unclassified (predecessor failure, reordering or manual removal cannot be told
+  apart before the queue events are joined, WP1.6).
+- *Runner wait*: per first attempt the longest wait of any job that ran (skipped jobs have
+  none); the big number is p90, with p50 beside it.
+- *Confirmed flaky runs* and *suspects*: confirmed is a first attempt that failed and passed on
+  a later attempt of the same run. A suspect is a run that failed on a commit whose next
+  commit passed on the very same tree (the commit's tree id is stored with the run). That is
+  a subset of the plan's definition (no change in the failing owner package, spec or
+  fixtures); the wider form needs the complete impact map of WP1.4 and is not counted. Suspects
+  never enter the share.
+- *Preflight red rate*: first attempts of `ci-preflight.yml` runs that ended red, on their own
+  line; never counted as CI green.
+- *Review audits* and *escaped defects* are reported facts (`POST .../delivery/metrics/facts`):
+  `review_audit` (key, `pull_request`, outcome `clean|low|medium|high`) and `escaped_defect`
+  (key = the bug or incident ticket, `pull_request` and/or `release` that caused it, outcome
+  `low|medium|high`). The same key corrects the earlier report. Rollout incidents of releases
+  (Flow, `down` high, `degraded` medium) count as escaped defects too. Coverage starts with the
+  first report; inside it, nothing recorded is shown as "0 recorded", before it as "no data yet".
+
+**Where the facts come from.** The check-suite webhook stores each run attempt with the tree of
+its head commit; for the first attempt of a pull-request or merge-queue run of the CI workflow
+it also reads the jobs and keeps only the required checks' conclusions and the worst wait for a
+runner. A jobs read that fails never loses the run: the run is stored without job facts and the
+windows that hold it are partial and name how many runs lack them. The backfill ends with a jobs
+pass (`phase: jobs`) that reads the jobs of first attempts still lacking them, at most 40 GitHub
+reads a step, newest first; a run whose jobs GitHub could not return is tried again after an
+hour, and nothing readable at all answers 502. The backfill is done when no run lacks its job facts.
+A deployment whose backfill finished before this release restarts it once for the history of
+head trees and `ci-preflight.yml` runs.
+
+Not part of this release: the machine-readable job-summary marker for strata lane, runner class
+and reuse result (it needs a producer in `ci.yml`, which OPS owns), and a native "caused by"
+link between tickets (a new relation type changes the shared relation contract; escaped defects
+are reported with their link instead).
