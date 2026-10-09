@@ -18,17 +18,19 @@ function worker() {
 }
 const id = '11111111-1111-4111-8111-111111111111'
 test('push exposes no request context or approval actions and never caches responses', () => {
+ for (const kind of ['approval', 'attach', 'stepup']) {
   const w = worker()
-  w.handlers.get('push')!({ data: { json: () => ({ url: `/phone-approvals/approval/${id}`, decision: 'approved', secret: 'private context' }) }, waitUntil: () => {} })
+  w.handlers.get('push')!({ data: { json: () => ({ url: `/phone-approvals/${kind}/${id}`, decision: 'approved', secret: 'private context' }) }, waitUntil: () => {} })
   assert.equal(w.notices.length, 1)
   assert.equal(JSON.stringify(w.notices).includes('private context'), false)
   assert.equal(w.notices[0].options.actions, undefined)
   assert.equal(w.handlers.has('fetch'), false)
   w.handlers.get('notificationclick')!({ notification: { data: w.notices[0].options.data, close: () => {} }, waitUntil: () => {} })
-  assert.equal(w.opened[0], `https://aeon.example/phone-approvals/approval/${id}`)
+  assert.equal(w.opened[0], `https://aeon.example/phone-approvals/${kind}/${id}`)
+ }
 })
 test('malformed and foreign notification paths remain on the same origin', () => {
-  for (const url of ['https://attacker.example/approve', '//attacker.example', `/phone-approvals/approval/${id}?approve=true`, '/api/approvals/decision', '/phone-approvals/approval/invalid']) {
+  for (const url of ['https://attacker.example/approve', '//attacker.example', `/phone-approvals/approval/${id}?approve=true`, `/phone-approvals/stepup/${id}?approve=true`, '/api/approvals/decision', '/phone-approvals/approval/invalid']) {
     const w = worker()
     w.handlers.get('push')!({ data: { json: () => ({ url }) }, waitUntil: () => {} })
     assert.equal((w.notices[0].options.data as { path: string }).path, '/agents')

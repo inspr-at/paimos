@@ -82,6 +82,7 @@ func TestStepupPasskeyProofBindingAndHTTPBoundary(t *testing.T) {
 		t.Run(attack, func(t *testing.T) {
 			f := setup(t)
 			f.m.phone = phoneapprovals.New(f.d.App, nil, testOrigin, nil, nil)
+			f.m.phone.StepUpReviewTx = f.m.phoneReviewTx
 			key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 			if err != nil {
 				t.Fatal(err)
@@ -96,6 +97,23 @@ func TestStepupPasskeyProofBindingAndHTTPBoundary(t *testing.T) {
 				t.Fatal(err)
 			}
 			r := f.create(t)
+			phoneMux := http.NewServeMux()
+			f.m.phone.Mount(phoneMux)
+			phoneRead := func(p tenant.Principal) *httptest.ResponseRecorder {
+				req := httptest.NewRequest("GET", "/api/phone-approvals/stepup/"+r.ID, nil)
+				req = req.WithContext(authz.BindPool(tenant.WithPrincipal(t.Context(), p), f.d.App))
+				response := httptest.NewRecorder()
+				phoneMux.ServeHTTP(response, req)
+				return response
+			}
+			view := phoneRead(f.person)
+			var review phoneapprovals.Review
+			if view.Code != 200 || json.Unmarshal(view.Body.Bytes(), &review) != nil || review.Kind != "stepup" || review.ID != r.ID || review.Hash != r.Digest || !review.Pending || len(review.StepUp) == 0 {
+				t.Fatalf("phone card %d %s", view.Code, view.Body.String())
+			}
+			if forbidden := phoneRead(f.agent); forbidden.Code != 403 {
+				t.Fatalf("agent phone review %d", forbidden.Code)
+			}
 			w := f.call(t, f.person, "POST", "/api/stepup-requests/"+r.ID+"/options", input(r))
 			if w.Code != 200 {
 				t.Fatalf("options %d %s", w.Code, w.Body.String())
@@ -147,6 +165,10 @@ func TestStepupPasskeyProofBindingAndHTTPBoundary(t *testing.T) {
 				var out ApprovalRequest
 				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.State != "applied" || out.Method == nil || *out.Method != "passkey_platform" {
 					t.Fatalf("valid %d %s", w.Code, w.Body.String())
+				}
+				ended := phoneRead(f.person)
+				if ended.Code != 200 || json.Unmarshal(ended.Body.Bytes(), &review) != nil || review.Pending {
+					t.Fatal("decided phone card stayed actionable")
 				}
 				replay := f.call(t, p, "POST", "/api/stepup-requests/"+r.ID+"/approve", proof)
 				if replay.Code != 200 {

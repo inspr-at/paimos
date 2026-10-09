@@ -66,6 +66,7 @@ func TestStepupProjectionBoundsTargetPermissionsAtProjectLimit(t *testing.T) {
 	agent := f.agent
 	agent.Scopes = append(agent.Scopes, "approvals.request", "nodes.read")
 	mod := stepup.New(f.d.App, nil, "")
+	mod.RecordResultsTx = inbox.RecordResults
 	requests := map[string]string{}
 	for _, project := range []string{"", f.project, f.otherProject} {
 		var projectValue any
@@ -134,6 +135,7 @@ func TestStepupProjectionUsesNativePermissionAndHeldExpiry(t *testing.T) {
 	agent := f.agent
 	agent.Scopes = append(agent.Scopes, "approvals.request", "nodes.read")
 	mod := stepup.New(f.d.App, nil, "")
+	mod.RecordResultsTx = inbox.RecordResults
 	before := json.RawMessage(`{"key":"workspace-summary","project_id":null,"override":null,"revision":0}`)
 	request, err := mod.Create(t.Context(), agent, stepup.Create{Payload: json.RawMessage(`{"kind":"feature","key":"workspace-summary","enabled":true,"expected_revision":0}`), BeforeHash: stepup.Hash(before)})
 	if err != nil {

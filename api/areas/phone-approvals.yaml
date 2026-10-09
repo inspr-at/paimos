@@ -4,9 +4,9 @@ paths:
   /phone-approvals/{kind}/{requestId}:
     get:
       operationId: getPhoneApproval
-      description: Review live server context. Attach is restricted to its computer owner. Gates preserve existing permission checks.
+      description: "Review live server context. Attach is restricted to its computer owner. Step-up requires the current target permission; its decisions use the native stepup-requests options, approve and decline routes."
       security: [{session: []}]
-      parameters: [{name: kind, in: path, required: true, schema: {type: string, enum: [approval, attach]}}, {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters: [{name: kind, in: path, required: true, schema: {type: string, enum: [approval, attach, stepup]}}, {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
         '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneApprovalReview'}}}}
         '400': {$ref: '#/components/responses/Error'}
@@ -54,12 +54,13 @@ components:
       type: object
       required: [kind, request_id, request_hash, pending]
       properties:
-        kind: {type: string, enum: [approval, attach]}
+        kind: {type: string, enum: [approval, attach, stepup]}
         request_id: {type: string, format: uuid}
         request_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
         pending: {type: boolean}
         approval: {$ref: '#/components/schemas/Approval'}
         attach: {$ref: '#/components/schemas/AttachView'}
+        stepup: {$ref: '#/components/schemas/StepupRequest'}
     PhoneDecision:
       type: object
       additionalProperties: false
