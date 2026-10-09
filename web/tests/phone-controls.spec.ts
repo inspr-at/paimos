@@ -120,11 +120,8 @@ for (const width of [390, 768, 1024, 1440]) {
           } })),
         })
       }
-      const graph = dialog.getByRole('checkbox', { name: 'Graph in project header' })
-      await expectStableControls({ controls: { ...pinned, graph, graphRow: dialog.locator('.section').filter({ has: page.getByRole('checkbox', { name: 'Graph in project header' }) }) }, scrollAreas: { body: scroll }, interactions: [
-        { name: 'enable header graph', run: async () => { await graph.check(); await expect.poll(() => data.preferences['list:display']?.headerGraph).toBe(true) } },
-        { name: 'disable header graph', run: async () => { await graph.uncheck(); await expect.poll(() => data.preferences['list:display']?.headerGraph).toBe(false) } },
-      ] })
+      // AEON-1042: the header graph switch lives in Settings › Developer only.
+      await expect(dialog.getByRole('checkbox', { name: 'Graph in project header' })).toHaveCount(0)
 
       const select = dialog.getByRole('combobox', { name: 'Sort key 1' })
       await expectStableControls({ controls: { ...pinned, select, sortRow: dialog.locator('[data-sort-row="0"]') }, scrollAreas: { body: scroll }, interactions: [

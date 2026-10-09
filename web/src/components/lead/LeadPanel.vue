@@ -174,8 +174,8 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
         <button type="button" class="btn" data-act="cancel-adoption" :aria-disabled="!mayStart || leads.busy[projectId]" @click="mayStart && !leads.busy[projectId] && cancelAdoption()">Cancel</button>
       </template>
       <template v-else-if="lead?.reason === 'selection_cleared' && !lead.session_id">
-        <p>The previous choice was cleared. Start a lead or adopt another running session.</p>
-        <button type="button" class="btn primary" data-act="start" :aria-disabled="!mayStart || leads.busy[projectId]" @click="mayStart && !leads.busy[projectId] && openStartLead([projectId], $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="15" />Start {{ w.l }}</button>
+        <p>{{ !canLaunchLead(lead) ? leadLaunchReason(lead) : 'The previous choice was cleared. Start a lead or adopt another running session.' }}</p>
+        <button type="button" class="btn primary" data-act="start" :data-tip="!canLaunchLead(lead) ? leadLaunchReason(lead) : undefined" :aria-disabled="!mayStart || !canLaunchLead(lead) || leads.busy[projectId]" @click="mayStart && canLaunchLead(lead) && !leads.busy[projectId] && openStartLead([projectId], $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="15" />Start {{ w.l }}</button>
       </template>
       <p v-else-if="unmanaged && lead?.state === 'paused'">{{ unmanagedLeadCopy }}. Continue from the session itself.</p>
       <template v-else-if="lead?.state === 'paused'">
