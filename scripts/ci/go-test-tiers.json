@@ -1562,6 +1562,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestOfflineNoForkEvidenceRequiresExplicitMarker","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestOldSettlementGapCheckpointReconciliation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestOneDaemonGenerationPerStateRoot","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestOriginHEADIsTheDefaultBranch","tier":"GATED-FULL"}

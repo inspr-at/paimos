@@ -5,6 +5,7 @@ package agentd
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 const (
@@ -162,6 +163,48 @@ func (s *Supervisor) hasUnresolvedOldClaim(account string) bool {
 		}
 	}
 	return false
+}
+
+// reconcileOldSettlement requires independent accounting and local exit
+// evidence. It never adopts a PID, rotates claim authority or posts telemetry.
+// Caller holds entry.mu, serializing this read and checkpoint with its outbox.
+func (s *Supervisor) reconcileOldSettlement(ctx context.Context, entry *owned) error {
+	r := entry.record
+	if r.Generation == s.generation || !r.SettlementGap || !noLocalProcess(r) || entry.process != nil {
+		return nil
+	}
+	// A still-retryable outbox retains its exact original-claim delivery path.
+	// Read-only reconciliation repairs gaps after delivery or permanent parking.
+	if len(r.Pending) > 0 && !r.ReportParked {
+		return nil
+	}
+	switch r.State {
+	case "completed", "failed", "cancelled":
+	default:
+		return errSettlementParked
+	}
+	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	run, err := s.api.GetRun(readCtx, r.RunID)
+	if err != nil {
+		return errors.Join(errSettlementParked, pollContextError(ctx, err))
+	}
+	if run.ID != r.RunID || run.WorkOrderID != r.WorkOrderID || run.AgentPrincipalID != r.PrincipalID ||
+		run.AccountID != r.AccountID || run.Purpose != r.ExecutionMode || run.Status != r.State ||
+		run.ReservationsSettled == nil || !*run.ReservationsSettled {
+		return errSettlementParked
+	}
+	next := r
+	// Parked reports were never accepted. Keep them as evidence, without
+	// relabeling disputed usage as server-applied or replaying a terminal run.
+	next.DeadLetters = append(append([]Telemetry(nil), r.DeadLetters...), r.Pending...)
+	next.Pending = nil
+	next.SettlementGap = false
+	if err := s.journal.Put(next); err != nil {
+		return err
+	}
+	entry.record = next
+	return nil
 }
 
 // A durable refusal is retried on each queue receipt, including after restart.

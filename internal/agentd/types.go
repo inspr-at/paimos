@@ -47,6 +47,7 @@ var (
 
 // Run is the content-free AEON run projection returned by /runs endpoints.
 type Run struct {
+	ReservationsSettled       *bool           `json:"reservations_settled,omitempty"`
 	Trace                     json.RawMessage `json:"trace,omitempty"`
 	RecoveryBrief             string          `json:"recovery_brief,omitempty"`
 	RecoveryTier              string          `json:"recovery_service_tier,omitempty"`

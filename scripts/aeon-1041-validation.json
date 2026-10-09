@@ -1,0 +1,16 @@
+{
+  "ticket": "AEON-1041",
+  "scope": "Assigned worktree only; no push, deployment, model review or live checkpoint changes.",
+  "cause": "A retained old-generation settlement_gap bypassed the probe and froze the account as probe_failed even after the server closed its run and settled its reservation. The Fable app_server_protocol failure originated in rejected model-only prestart telemetry (AEON-716 diagnosis).",
+  "fix": "Expose explicit reservation settlement proof through the existing authorized run detail; close old local gaps only after local exit and matching terminal run/account/agent/order/purpose plus all reservations settled. Preserve dead letters, original generation and process provenance; retain exact retryable reports. Report unsettled_previous_run with operator guidance in lifecycle, diagnostics and existing UI.",
+  "tests": {
+    "checkpoint_and_existing_telemetry": "passed, 4.786s",
+    "pairing_ui_node": "55 passed",
+    "remote_integration": "pending",
+    "ci_static_merge_main": "pending"
+  },
+  "limitations": [
+    "No live verification requested; mbp2607 checkpoint preserved.",
+    "UI reuses existing presentation and changes only specified text; needs Opus design."
+  ]
+}

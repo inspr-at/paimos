@@ -32,6 +32,26 @@ and a bounded cause, independently of account probing. Connect-only approval
 creates no verification, and a later approval cancels older queued verification
 on that same computer without interrupting claimed work.
 
+**Previous-run settlement (AEON-1041).** A retained old-generation settlement
+gap blocks that account with `unsettled_previous_run`, independently of sign-in.
+On each poll, the helper reads the existing run detail with its existing authority.
+It clears the local gap only with proven local exit, matching run, work order,
+agent, account, purpose and terminal outcome, and explicit server confirmation
+that every reservation is settled with recorded usage and settlement time.
+Missing proof, released reservations, a server outage or disagreement keeps the
+block. Rejected telemetry, claim generation and process provenance remain in the
+checkpoint; reconciliation neither replays rejected usage nor launches a child.
+Restore the helper's connection to Aeon; reconciliation retries automatically.
+If the block persists, an operator must inspect the previous run and reservations.
+The next successful account probe clears the reason and permits queued work.
+No checkpoint deletion, repin or vendor login is a settlement repair.
+
+The 2026-10-05 Fable verification failure came from rejecting Claude's model-only
+status event before startup completed. The server accepts that bounded model
+evidence while preserving `starting`; regression coverage sends the original
+four-event batch through authenticated telemetry, successful completion and
+reservation settlement, as well as the failed and recovery outcomes.
+
 Failed Claude sign-in checks include an allowlisted `reason_detail` in
 `aeon-agentd status --json` and the person account views. No raw vendor output,
 credential paths or arbitrary error strings are published. In particular,
@@ -54,8 +74,8 @@ The paired daemon writes bounded `agentd polling diagnostic` lines to stderr
 when the set of causes changes, then at most one reminder per cause every
 15 minutes while the set persists. A healthy poll clears the set, so a recurring
 cause is logged immediately. Multiple accounts sharing a cause produce one line:
-`reason=probe_failed` records an account readiness failure (a failed probe/report
-or a retained ownership/reporting block);
+`reason=probe_failed` records an account readiness failure (a failed probe/report);
+`reason=unsettled_previous_run` records a retained old-generation settlement block;
 `reason=probe_timeout` confirms an account exhausted its own pending probe wait;
 `reason=queue_unavailable` confirms `Queued()` returned an error before probing;
 `reason=dispatch_not_allowed` confirms a dispatch fence, fence-read failure or
