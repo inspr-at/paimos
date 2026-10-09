@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/phoneapprovals"
+	stepupwire "github.com/inspr-at/paimos/internal/stepup"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -67,6 +68,7 @@ type Module struct {
 	// Reauthenticate starts the existing OIDC flow, with its existing signing
 	// key and callback. No credential or proof is accepted from an agent.
 	Reauthenticate func(http.ResponseWriter, *http.Request, tenant.Principal, ReauthStart) (string, error)
+	RecordResultTx func(context.Context, pgx.Tx, tenant.Principal, stepupwire.OutcomeMessage) error
 }
 type ReauthStart struct {
 	RequestID, ChallengeID, Digest string
@@ -260,7 +262,7 @@ func (m *Module) settle(ctx context.Context, tx pgx.Tx, p tenant.Principal, r *A
 	if err := decorate(ctx, tx, r); err != nil {
 		return err
 	}
-	if err := recordResult(ctx, tx, p, *r); err != nil {
+	if err := m.recordResult(ctx, tx, p, *r); err != nil {
 		return err
 	}
 	return audit(ctx, tx, p, *r)

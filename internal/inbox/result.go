@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/inspr-at/paimos/internal/events"
+	stepupwire "github.com/inspr-at/paimos/internal/stepup"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -12,12 +13,17 @@ import (
 // Result is a code-owned native outcome, never user-authored message input.
 // The caller owns tenant/tree/request fences and has checked the exact session
 // and recipient. Call after all existing-row mutations and before audit.
-type Result struct {
-	ID, ProjectID, RecipientID, SessionID, Body string
-}
+type Result = stepupwire.OutcomeMessage
 
 func RecordResult(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Result) error {
-	_, err := tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_label) VALUES($1,$2,$3,$4,NULL,$5,$6,$7,'Step-up approval')`, p.TenantID, in.ID, p.ID, in.RecipientID, in.Body, "stepup-result/"+in.ID, deskNullable(in.SessionID))
+	// Withdrawal and expiry can be settled by the requesting agent. A System
+	// result preserves the no-self-message rule and names the decider in its body.
+	actor, err := systemActor(ctx, tx, p.TenantID)
+	if err != nil {
+		return err
+	}
+	p = actor
+	_, err = tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_label) VALUES($1,$2,$3,$4,NULL,$5,$6,$7,'Step-up approval')`, p.TenantID, in.ID, p.ID, in.RecipientID, in.Body, "stepup-result/"+in.ID, deskNullable(in.SessionID))
 	if err != nil {
 		return err
 	}
@@ -27,12 +33,14 @@ func RecordResult(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Result)
 			return err
 		}
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO inbox_message_deliveries(tenant_id,message_id,state,reason) VALUES($1,$2,'pending','')`, p.TenantID, in.ID); err != nil {
-		return err
-	}
 	var pending []events.Change
-	if err = recordAcceptanceReceiptWith(ctx, tx, p, in.ID, func(c events.Change) error { pending = append(pending, c); return nil }); err != nil {
-		return err
+	if in.ProjectID != "" {
+		if _, err = tx.Exec(ctx, `INSERT INTO inbox_message_deliveries(tenant_id,message_id,state,reason) VALUES($1,$2,'pending','')`, p.TenantID, in.ID); err != nil {
+			return err
+		}
+		if err = recordAcceptanceReceiptWith(ctx, tx, p, in.ID, func(c events.Change) error { pending = append(pending, c); return nil }); err != nil {
+			return err
+		}
 	}
 	var project *string
 	typ := "inbox.sent"

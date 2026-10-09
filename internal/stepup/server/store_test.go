@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -43,6 +44,7 @@ func setup(t *testing.T) *fixture {
 	f.person = principal(tenant.Person, "Markus")
 	f.other = principal(tenant.Person, "Anna")
 	f.m = New(f.d.App, nil, "https://aeon.example")
+	f.m.RecordResultTx = inbox.RecordResult
 	f.m.now = func() time.Time { return f.now }
 	return f
 }
@@ -145,13 +147,14 @@ func TestStepupTransitionsAndAtomicAudit(t *testing.T) {
 			if strings.Contains(string(raw), "credential") || strings.Contains(string(raw), "token") {
 				t.Fatal("proof material in audit")
 			}
-			var body, recipient, messageState string
-			if err := f.d.Admin.QueryRow(t.Context(), `SELECT m.body,m.recipient_principal_id::text,d.state FROM inbox_messages m JOIN inbox_message_deliveries d ON d.tenant_id=m.tenant_id AND d.message_id=m.id WHERE m.id=$1`, r.ID).Scan(&body, &recipient, &messageState); err != nil {
+			var body, recipient string
+			var unread bool
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT body,recipient_principal_id::text,acked_at IS NULL FROM inbox_messages WHERE id=$1`, r.ID).Scan(&body, &recipient, &unread); err != nil {
 				t.Fatal(err)
 			}
 			want := map[string]string{"applied": "Approved by Markus with device passkey · applied", "declined": "Declined by Markus", "withdrawn": "Withdrawn", "expired": "Expired after 15 min · ask again", "stale": "Not applied · changed meanwhile", "failed": "Not applied · the change could not be saved"}[outcome]
-			if body != want || recipient != f.agent.ID || messageState != "pending" || event["result_line"] != body {
-				t.Fatalf("wrong result delivery %q %s %s", body, recipient, messageState)
+			if body != want || recipient != f.agent.ID || !unread || event["result_line"] != body {
+				t.Fatalf("wrong result delivery %q %s %t", body, recipient, unread)
 			}
 			if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM inbox_messages WHERE id=$1`, r.ID).Scan(&count); err != nil || count != 1 {
 				t.Fatal("later decision duplicated result")

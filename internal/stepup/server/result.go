@@ -5,7 +5,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/inspr-at/paimos/internal/inbox"
+	stepupwire "github.com/inspr-at/paimos/internal/stepup"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -44,7 +44,10 @@ func resultLine(r ApprovalRequest) string {
 
 // Called exactly once by the conditional pending -> terminal write, before
 // the audit counter. No arbitrary session successor or process is selected.
-func recordResult(ctx context.Context, tx pgx.Tx, p tenant.Principal, r ApprovalRequest) error {
+func (m *Module) recordResult(ctx context.Context, tx pgx.Tx, p tenant.Principal, r ApprovalRequest) error {
+	if m.RecordResultTx == nil {
+		return fault(503, "step-up result delivery unavailable")
+	}
 	project := nullableValue(r.ProjectID)
 	if r.SessionID != nil {
 		// Workspace requests keep workspace authority, but their result belongs
@@ -53,5 +56,5 @@ func recordResult(ctx context.Context, tx pgx.Tx, p tenant.Principal, r Approval
 			return err
 		}
 	}
-	return inbox.RecordResult(ctx, tx, p, inbox.Result{ID: r.ID, ProjectID: project, RecipientID: r.RequestedBy, SessionID: nullableValue(r.SessionID), Body: resultLine(r)})
+	return m.RecordResultTx(ctx, tx, p, stepupwire.OutcomeMessage{ID: r.ID, ProjectID: project, RecipientID: r.RequestedBy, SessionID: nullableValue(r.SessionID), Body: resultLine(r)})
 }
