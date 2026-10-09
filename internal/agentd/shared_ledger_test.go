@@ -191,11 +191,15 @@ func TestSharedLedgerConflictReleasesOnlyIndependentlyObsoleteAttempt(t *testing
 	for _, observed := range []Run{
 		{Status: "starting"}, {Status: "running"}, {Status: "waiting"},
 		{Status: "completed"}, {Status: "failed"}, {Status: "cancelled"},
+		{Status: "ownership_lost"},
 		{Status: "queued", AccountID: "elsewhere"},
 		{Status: "queued"}, {Status: ""},
 		{Status: "completed", ID: "foreign-run"},
 		{Status: "completed", WorkOrderID: "foreign-order"},
 		{Status: "completed", AgentPrincipalID: "foreign-agent"},
+		{Status: "ownership_lost", ID: "foreign-run"},
+		{Status: "ownership_lost", WorkOrderID: "foreign-order"},
+		{Status: "ownership_lost", AgentPrincipalID: "foreign-agent"},
 	} {
 		t.Run(observed.Status+"/"+observed.AccountID+observed.ID+observed.WorkOrderID+observed.AgentPrincipalID, func(t *testing.T) {
 			s, a, _ := testSupervisor(t)
