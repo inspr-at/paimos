@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
@@ -447,6 +448,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			decisiondesk.New(pool),
 			modelMod,
 			agentaccounts.New(pool),
+			accountuse.New(pool),
 			pairingMod,
 			// Retired Flow compatibility routes
 			journey.New(pool),

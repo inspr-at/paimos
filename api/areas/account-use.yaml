@@ -1,0 +1,213 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /account-use:
+    get:
+      operationId: getAccountUseMatrix
+      description: "Person account.use.manage required. Reads one consistent matrix page under its shared lock. Account and context cursors are independent; missing cells in the returned rectangle are denied. Defaults and migration confirmation are included. Running work outside the matrix continues and is returned separately with explicit truncation. No credentials or quota readings."
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+        - {name: after_account, in: query, schema: {type: string, format: uuid}}
+        - {name: after_context, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: "Matrix rectangle", content: {application/json: {schema: {$ref: '#/components/schemas/AccountUseMatrix'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /account-use/rules:
+    put:
+      operationId: putAccountUseRules
+      description: "Person account.use.manage required. Tenant, tree, catalog and exclusive matrix fences precede live authority and revision checks. Changes only future defaults, bumps the revision, writes the Auto-update mirror and audits persisted rules. Activation is monotonic."
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountUseRuleWrite'}}}}
+      responses:
+        '200': {description: "Saved rules", content: {application/json: {schema: {$ref: '#/components/schemas/AccountUseRules'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /account-use/cells:
+    patch:
+      operationId: patchAccountUseCells
+      description: "Person account.use.manage required. At most 1000 cells per atomic save, including bulk all, account row or context column. Holding and archived contexts cannot be allowed. Undo sends the returned inverse cells with the revision returned by this save; a competing change returns 409. Running work is not stopped. Request bodies are bounded to 256 KiB before transaction admission and operations have a five-second deadline."
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountUseCellWrite'}}}}
+      responses:
+        '200': {description: "Saved cells and inverse", content: {application/json: {schema: {$ref: '#/components/schemas/AccountUseCellResult'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+  /account-use/confirm:
+    post:
+      operationId: confirmAccountUseMigration
+      description: "A person with account.use.manage acknowledges the preserved migration matrix. An ordinary revision-checked write audits the confirmation. Repeating confirmation at the current revision does not add an event."
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountUseRevisionWrite'}}}}
+      responses:
+        '200': {description: "Confirmed rules", content: {application/json: {schema: {$ref: '#/components/schemas/AccountUseRules'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /work-contexts:
+    post:
+      operationId: createWorkContext
+      description: "Person account.use.manage required. Creates a regular context and stamps active accounts according to the current new-context rule. The default and holding contexts are permanent."
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkContextWrite'}}}}
+      responses:
+        '200': {description: "Saved context", content: {application/json: {schema: {$ref: '#/components/schemas/WorkContextResult'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /work-contexts/{contextId}:
+    patch:
+      operationId: updateWorkContext
+      description: "Person account.use.manage required. Edits a context name, its future-account override or archive status. Every save uses the matrix revision and returns its next value. Default and holding kinds cannot be changed or archived."
+      parameters: [{name: contextId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkContextWrite'}}}}
+      responses:
+        '200': {description: "Saved context", content: {application/json: {schema: {$ref: '#/components/schemas/WorkContextResult'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/work-context:
+    get:
+      operationId: getProjectWorkContext
+      description: "Person account.use.manage and project visibility required. An unmapped project returns 404 and never falls back to the default context."
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: "Project context", content: {application/json: {schema: {$ref: '#/components/schemas/ProjectWorkContext'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: setProjectWorkContext
+      description: "Person account.use.manage required. Re-reads the visible current project under tenant, tree and exclusive matrix fences. Saves and audits the persisted mapping with a new matrix revision. Holding mappings remain denied."
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, context_id]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                context_id: {type: string, format: uuid}
+      responses:
+        '200': {description: "Saved project context", content: {application/json: {schema: {$ref: '#/components/schemas/ProjectWorkContext'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    AccountUseRevisionWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+    AccountUseRuleWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, new_accounts, new_contexts, new_projects, new_models]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        new_accounts: {type: string, enum: [allow, ask]}
+        new_contexts: {type: string, enum: [allow, ask]}
+        new_projects: {type: string, enum: [default, holding]}
+        new_models: {type: string, enum: [allow, shipped_only, deny]}
+    AccountUseRules:
+      type: object
+      required: [new_accounts, new_contexts, new_projects, new_models, revision, enforced_at, confirmation_required, confirmed_at]
+      properties:
+        new_accounts: {type: string, enum: [allow, ask]}
+        new_contexts: {type: string, enum: [allow, ask]}
+        new_projects: {type: string, enum: [default, holding]}
+        new_models: {type: string, enum: [allow, shipped_only, deny]}
+        revision: {type: integer, minimum: 1}
+        enforced_at: {type: [string, 'null']}
+        confirmation_required: {type: boolean}
+        confirmed_at: {type: [string, 'null']}
+    AccountUseCell:
+      type: object
+      additionalProperties: false
+      required: [account_id, context_id, allowed]
+      properties:
+        account_id: {type: string, format: uuid}
+        context_id: {type: string, format: uuid}
+        allowed: {type: boolean}
+    AccountUseCellWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        changes: {type: array, maxItems: 1000, items: {$ref: '#/components/schemas/AccountUseCell'}}
+        bulk:
+          type: object
+          additionalProperties: false
+          required: [scope, allowed]
+          properties:
+            scope: {type: string, enum: [all, account, context]}
+            account_id: {type: string, format: uuid}
+            context_id: {type: string, format: uuid}
+            allowed: {type: boolean}
+    AccountUseCellResult:
+      type: object
+      required: [revision, changes, undo]
+      properties:
+        revision: {type: integer}
+        changes: {type: array, maxItems: 1000, items: {$ref: '#/components/schemas/AccountUseCell'}}
+        undo: {type: array, maxItems: 1000, items: {$ref: '#/components/schemas/AccountUseCell'}}
+    WorkContext:
+      type: object
+      required: [id, name, kind, new_accounts_override, archived_at, revision]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string, minLength: 1, maxLength: 128}
+        kind: {type: string, enum: [default, regular, holding]}
+        new_accounts_override: {type: [string, 'null'], enum: [deny, null]}
+        archived_at: {type: [string, 'null']}
+        revision: {type: integer}
+    WorkContextWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, name]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        name: {type: string, minLength: 1, maxLength: 128}
+        new_accounts_override: {type: [string, 'null'], enum: [deny, null]}
+        archived: {type: boolean, default: false}
+    WorkContextResult:
+      type: object
+      required: [context, revision]
+      properties:
+        context: {$ref: '#/components/schemas/WorkContext'}
+        revision: {type: integer}
+    ProjectWorkContext:
+      type: object
+      required: [project_id, context_id, revision]
+      properties:
+        project_id: {type: string, format: uuid}
+        context_id: {type: string, format: uuid}
+        revision: {type: integer}
+    AccountUseMatrix:
+      type: object
+      required: [rules, accounts, contexts, cells, next_account, next_context, running_outside, running_outside_truncated]
+      properties:
+        rules: {$ref: '#/components/schemas/AccountUseRules'}
+        accounts:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [id, label, harness, plan, billing_mode, owner_id]
+            properties:
+              id: {type: string, format: uuid}
+              label: {type: string}
+              harness: {type: string}
+              plan: {type: [string, 'null']}
+              billing_mode: {type: string}
+              owner_id: {type: [string, 'null'], format: uuid}
+        contexts: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/WorkContext'}}
+        cells: {type: array, maxItems: 40000, items: {$ref: '#/components/schemas/AccountUseCell'}}
+        next_account: {type: [string, 'null'], format: uuid}
+        next_context: {type: [string, 'null'], format: uuid}
+        running_outside:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [run_id, account_id, node_id]
+            properties:
+              run_id: {type: string, format: uuid}
+              account_id: {type: string, format: uuid}
+              node_id: {type: [string, 'null'], format: uuid}
+        running_outside_truncated: {type: boolean}

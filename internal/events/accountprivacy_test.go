@@ -35,6 +35,13 @@ func TestAccountEventHistoryAndSSEUseCurrentOwnerSharing(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at) VALUES($1,'local','codex','daemon',$2,'Main',$3,now()) RETURNING id::text`, agent.TenantID, agent.ID, owner.ID).Scan(&id); err != nil {
 			return err
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Commit account-creation audits before the privacy replay cursor.
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, agent.TenantID, func(tx pgx.Tx) error {
 		var err error
 		event, err = Append(t.Context(), tx, agent, Change{Type: "account.probed", After: map[string]any{"account_id": id, "state": "available", "openrouter_credits": map[string]any{"remaining": 17}, "windows": []any{map[string]any{"used_percent": 41, "resets_at": "2026-10-03T12:00:00Z"}}, "probe_failure": "private-code"}})
 		return err

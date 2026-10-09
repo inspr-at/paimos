@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -386,7 +387,10 @@ func (m *Module) putSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var in *RefreshSettings
+	var in *struct {
+		RefreshSettings
+		AccountUseRevision *int64 `json:"account_use_revision,omitempty"`
+	}
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeErr(w, err)
 		return
@@ -400,6 +404,37 @@ func (m *Module) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) (err error) {
+		if err := db.LockTree(r.Context(), tx, p.TenantID); err != nil {
+			return err
+		}
+		if err := catalogLock(r.Context(), tx); err != nil {
+			return err
+		}
+		if err := accountuse.LockExclusive(r.Context(), tx); err != nil {
+			return err
+		}
+		if err := authz.RequireTx(r.Context(), tx, p, "models.manage", authz.Scope{}); err != nil {
+			return fail(403, "permission denied")
+		}
+		currentRules, err := accountuse.ReadRules(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		if in.AutoAddProfiles != (currentRules.NewModels == "allow") {
+			// Catalog preparation can write profile/settings rows. Complete
+			// the person and revision checks before that work, under matrix.
+			var revision int64
+			if in.AccountUseRevision != nil {
+				revision = *in.AccountUseRevision
+			}
+			if _, err := accountuse.FenceWrite(r.Context(), tx, p, revision); err != nil {
+				var conflict *accountuse.Error
+				if errors.As(err, &conflict) {
+					return fail(conflict.Status, conflict.Message)
+				}
+				return err
+			}
+		}
 		pending, err := prepareCatalogDeferred(r.Context(), tx, p)
 		if err != nil {
 			return err
@@ -409,29 +444,52 @@ func (m *Module) putSettings(w http.ResponseWriter, r *http.Request) {
 				err = flushCatalogChanges(r.Context(), tx, p, pending)
 			}
 		}()
-		if err := catalogLock(r.Context(), tx); err != nil {
-			return err
-		}
-		if err := authz.RequireTx(r.Context(), tx, p, "models.manage", authz.Scope{}); err != nil {
-			return fail(403, "permission denied")
-		}
 		before, err := settings(r.Context(), tx)
 		if err != nil {
 			return err
 		}
-		if before == *in {
+		if before == in.RefreshSettings {
 			return nil
 		}
-		if _, err := tx.Exec(r.Context(), `UPDATE model_refresh_settings SET agent_reports_enabled=$1,auto_add_profiles=$2,api_enabled=$3,interval_minutes=$4`, in.AgentReportsEnabled, in.AutoAddProfiles, in.APIEnabled, in.IntervalMinutes); err != nil {
+		if before.AutoAddProfiles != in.AutoAddProfiles {
+			if p.Kind != tenant.Person || authz.RequireTx(r.Context(), tx, p, accountuse.Permission, authz.Scope{}) != nil {
+				return authz.ErrForbidden
+			}
+			if in.AccountUseRevision == nil {
+				return fail(409, "account_use_revision_conflict")
+			}
+			rules, err := accountuse.ReadRules(r.Context(), tx)
+			if err != nil {
+				return err
+			}
+			if in.AutoAddProfiles {
+				rules.NewModels = "allow"
+			} else {
+				rules.NewModels = "shipped_only"
+			}
+			if _, err := accountuse.WriteRules(r.Context(), tx, p, *in.AccountUseRevision, rules.RuleValues); err != nil {
+				var conflict *accountuse.Error
+				if errors.As(err, &conflict) {
+					return fail(conflict.Status, conflict.Message)
+				}
+				return err
+			}
+		}
+		if _, err := tx.Exec(r.Context(), `UPDATE model_refresh_settings SET agent_reports_enabled=$1,api_enabled=$2,interval_minutes=$3`, in.AgentReportsEnabled, in.APIEnabled, in.IntervalMinutes); err != nil {
 			return err
 		}
-		return writeEvent(r.Context(), tx, p, "model.refresh_settings_changed", before, in)
+		stored, err := settings(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		in.RefreshSettings = stored
+		return writeEvent(r.Context(), tx, p, "model.refresh_settings_changed", before, stored)
 	})
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, 200, in)
+	httpapi.WriteJSON(w, 200, in.RefreshSettings)
 }
 
 func (m *Module) putCredential(w http.ResponseWriter, r *http.Request) {

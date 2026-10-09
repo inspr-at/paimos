@@ -296,6 +296,11 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 			return fmt.Errorf("backfill %s: %w", name, err)
 		}
 	}
+	if name == "1309_account_use_matrix.sql" {
+		if err := backfillAccountUse(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
 	if name == "1215_one_work_kind.sql" {
 		if err := migrateWorkNodes(ctx, tx); err != nil {
 			return fmt.Errorf("reconcile %s: %w", name, err)

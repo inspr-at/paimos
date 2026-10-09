@@ -32,6 +32,13 @@ func TestLateUsageReportHasAuthorizedNodeHint(t *testing.T) {
  VALUES($1,$2,$3,$4,'codex','fixture','unmanaged','worker','ship',decode('01','hex'),decode('02','hex'),'stopped',now(),'completed') RETURNING id::text`, reader.TenantID, project, reader.ID, ticket).Scan(&session); err != nil {
 			return err
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Commit project-creation audits before appending the report to replay.
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, reader.TenantID, func(tx pgx.Tx) error {
 		// Matches the usage reporter payload: usage identity only, no ticket id.
 		var err error
 		reported, err = Append(t.Context(), tx, reader, Change{NodeID: &project, Type: "harness.usage_reported", After: map[string]any{"id": "usage-row", "session_id": session, "input_tokens": 100, "output_tokens": 20}})
