@@ -14,6 +14,7 @@ import { boundedText } from './inputs.mjs'
 import { manifestsMain, classifyManifest } from './manifests.mjs'
 import { generateOpenAPI } from '../../api/generate.mjs'
 import { nightlyBrowserMap, gitTree, coverageSummary } from './browser-impact.mjs'
+import { browserBatches, browserCaseSeconds } from './web-batches.mjs'
 import { createGoRunner } from './go-runner.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
@@ -21,9 +22,10 @@ export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
 // Collection spawns the Vitest, Node and Playwright listers. One process may
 // plan repeatedly (tests, multi-step runs), so collect each inventory once.
 const inventories = new Map()
-const target = kind => {
-  if (!inventories.has(kind)) inventories.set(kind, kind==='go' ? collectGo() : collectWeb())
-  return inventories.get(kind)
+const target = (kind, options = {}) => {
+  const scope = `${kind}:${options.browserOnly ? 'browser' : 'all'}`
+  if (!inventories.has(scope)) inventories.set(scope, kind==='go' ? collectGo() : collectWeb(options))
+  return inventories.get(scope)
 }
 
 // Planner input is authoritative. Candidate uncertainty can widen it to full,
@@ -55,9 +57,16 @@ export function runnerSelection(tests,options,candidate,planner) {
 // process). Normal CLI invocations always use fresh discovery.
 export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,plannerMode=process.env.AEON_TEST_TIER_MODE,plannerLayout=process.env.AEON_TEST_TIER_LAYOUT,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false,inventory:supplied}={}, { collect=target }={}) {
   if(supplied!==undefined&&!Array.isArray(supplied?.tests)) throw new Error('Supplied inventory needs a tests array')
-  const inventory=supplied??collect(kind)
+  const begin=performance.now()
+  const inventory=supplied??collect(kind,{browserOnly:kind==='web'&&!unit})
+  const collected=performance.now()
   const manifest=load(kind)
-  const all=validate(manifest,inventory.tests)
+  // Unit rows remain planner metadata: removing them would change decisions
+  // for sources imported only by units. Strict web-setup still discovers and
+  // validates the entire catalogue; browser shards discover only browsers.
+  const browserOnly=kind==='web'&&inventory.scope==='browser'
+  const catalogueRows=browserOnly?[...inventory.tests,...manifest.tests.filter(row=>row.kind!=='browser')]:inventory.tests
+  const all=validate(manifest,catalogueRows)
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
   const graph=kind==='web'||affectedLane==='on'?webGraph(web):{}
   // Consumer rules read the candidate tree; manifest promotions compare the
@@ -82,7 +91,9 @@ export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',p
     for(const pkg of Object.keys(weights)) weights[pkg]*=filtered.filter(row=>row.package===pkg).length/all.filter(row=>row.package===pkg).length
   }
   if(kind==='go'||unit) Object.assign(weights,measuredWeights(manifest,filtered))
-  return {...selection,all,tests:shard(filtered,index,count,weights,{firstShardLast:unit,ownerTimings:kind==='go'?manifest.timingWeights?.owners:undefined})}
+  const tests=shard(filtered,index,count,weights,{firstShardLast:unit,ownerTimings:kind==='go'?manifest.timingWeights?.owners:undefined})
+  return {...selection,all,tests,collectionScope:browserOnly?'browser':'all',
+    timing:{collectSeconds:supplied===undefined?(collected-begin)/1000:0,planSeconds:(performance.now()-collected)/1000}}
 }
 
 export function browserList(rows,all) {
@@ -139,8 +150,9 @@ export async function run(kind,selection,options={},dependencies={}) {
 
 async function runCases(kind,selection,{unit=false,job='local',env=process.env}={},
   {execute:executeCases=execute,command:nativeCommand=command,runPlaywright:browserRunner=runPlaywright,
-    loadBrowserPolicy:browserPolicy=loadBrowserPolicy,knownFlaky,saveJSON:save=saveJSON,log=console.log,goRunner}={}) {
-  const begin=performance.now(),batches=[],ledger=[],coverageReports=[]
+    loadBrowserPolicy:browserPolicy=loadBrowserPolicy,knownFlaky,saveJSON:save=saveJSON,log=console.log,
+    now=()=>performance.now(),goRunner}={}) {
+  const begin=now(),batches=[],ledger=[],coverageReports=[],browserLaunches=[]
   const runner=kind==='web'&&!unit?browserRunnerIdentity(env):undefined
   if(kind==='go') generateOpenAPI()
   const mergeGroup=env.GITHUB_EVENT_NAME==='merge_group'
@@ -227,13 +239,11 @@ async function runCases(kind,selection,{unit=false,job='local',env=process.env}=
     batches.push(batch)
   }
   if(kind==='web'&&!unit) {
-    // Original OPS-257 configuration/env owns launches. Only the case list is
-    // replaced. Nightly/changed-area cases retain their original launch policy.
+    // OPS-257 still owns configs/env. Compatible groups share one supervised
+    // launch and server; incompatible policies retain separate launches.
     const policy=browserPolicy()
-    for(const group of policy.groups) {
-      const files=new Set(group.specs.map(spec=>spec.file))
-      const rows=selection.tests.filter(row=>row.kind==='browser'&&row.active!==false&&files.has(row.file))
-      if(!rows.length) continue
+    for(const group of browserBatches(selection.tests,policy)) {
+      const rows=group.rows
       const executeBrowser=async(rows,retry=false)=>{
         const stem=resolve(evidence,`${job}-${group.id}${retry?'-retry':''}`),listPath=`${stem}.txt`,reportPath=`${stem}.json`
         saveJSON(reportPath,{})
@@ -252,22 +262,29 @@ async function runCases(kind,selection,{unit=false,job='local',env=process.env}=
             NODE_OPTIONS:`${env.NODE_OPTIONS??''} --import=${new URL('./browser-coverage-hook.mjs',import.meta.url).href}`})
         }
         const args=['--config',group.config,...group.flags,...(group.project?['--project',group.project]:[]),'--test-list',listPath,'--workers=1','--retries=0','--forbid-only']
+        const listBegin=now()
         const collected=JSON.parse(nativeCommand(process.execPath,['node_modules/@playwright/test/cli.js','test',...args,'--list','--reporter=json'],{cwd:web,env:browserEnv}))
+        const listSeconds=(now()-listBegin)/1000
         if(collected.errors?.length) throw new Error(`Browser collection failed: ${group.id}`)
         const actual=collected.suites.flatMap(function walk(suite) { return [...(suite.specs??[]).flatMap(spec=>(spec.tests??[]).map(test=>`${spec.id}:${test.projectName??''}`)),...(suite.suites??[]).flatMap(walk)] }).sort()
         if(JSON.stringify(actual)!==JSON.stringify(rows.map(row=>`${row.id}:${row.project}`).sort())) throw new Error(`Browser selection mismatch: ${group.id}`)
+        const runBegin=now()
         const result=await browserRunner([...args,
           '--reporter=line,json','--output',`test-results/test-tiers/${job}/${group.id}${retry?'-retry':''}`],{cwd:web,env:{...browserEnv,PLAYWRIGHT_JSON_OUTPUT_FILE:reportPath}})
+        const runSeconds=(now()-runBegin)/1000
         if(observeCoverage) {
           const summary=coverageSummary(coverageDirectory,rows,{tree:gitTree(root),runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT})
           coverageReports.push(summary)
         }
-        let outcomes=[],reportError=false
+        let outcomes=[],reportError=false,caseSeconds=null
         try {
           const report=JSON.parse(readFileSync(reportPath,'utf8'))
           reportError=!!report.errors?.length
           outcomes=browserOutcomes(report,rows)
+          caseSeconds=browserCaseSeconds(report)
         } catch(error) { console.error(JSON.stringify(error.message));reportError=true }
+        browserLaunches.push({groups:group.groups,retry,listSeconds,runSeconds,caseSeconds,
+          nonCaseSeconds:caseSeconds===null?null:Math.max(0,runSeconds-caseSeconds)})
         const failures=outcomes.filter(outcome=>outcome.status==='failed').map(outcome=>{
           const row=rows.find(row=>key(row)===outcome.key)
           return {kind:'browser',owner:row.file,name:row.name,output:'See supervised Playwright output and JSON evidence.'}
@@ -325,13 +342,21 @@ async function runCases(kind,selection,{unit=false,job='local',env=process.env}=
     save(resolve(evidence,`browser-impact-${job}.json`),{version:1,tree:gitTree(root),runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT,
       complete:coverageReports.length>0&&coverageReports.every(row=>row.complete),cases:coverageReports.flatMap(row=>row.cases)})
   }
-  const report=reportCases(selection.tests,outcomes,(performance.now()-begin)/1000,job)
+  const runSeconds=(now()-begin)/1000
+  const report=reportCases(selection.tests,outcomes,runSeconds,job)
   report.runId=env.GITHUB_RUN_ID
   report.attempt=env.GITHUB_RUN_ATTEMPT
   report.sha=env.GITHUB_SHA
   if(runner) {
     report.runner_class=runner.class
     report.runner=runner
+    const collectSeconds=selection.timing?.collectSeconds??null,planSeconds=selection.timing?.planSeconds??null
+    const caseSeconds=browserLaunches.some(launch=>launch.caseSeconds===null)?null:browserLaunches.reduce((sum,launch)=>sum+launch.caseSeconds,0)
+    report.webShardTiming={collectSeconds,planSeconds,runSeconds,caseSeconds,
+      nonCaseSeconds:collectSeconds===null||planSeconds===null||caseSeconds===null?null:Math.max(0,collectSeconds+planSeconds+runSeconds-caseSeconds),
+      launches:browserLaunches,note:'Monotonic wall seconds; non-case time is collection + planning + execution minus summed native case durations (including explicit retries).'}
+    report.browserCases=selection.tests.filter(row=>row.kind==='browser').map(row=>({key:key(row),file:row.file,config:row.config,project:row.project,
+      status:outcomes.find(outcome=>outcome.key===key(row))?.status??'notRun'}))
   }
   report.full=selection.full
   report.reason=selection.reason
@@ -434,7 +459,7 @@ export async function main(args, dependencies={}) {
   }
   if(options.paths===undefined) options.paths=changedPaths(options.event??process.env.GITHUB_EVENT_NAME,process.env,{fetchBase:true})
   const selection=plan(kind,{...options,inventory:dependencies.inventory},dependencies)
-  console.log(JSON.stringify({kind,full:selection.full,layout:selection.layout??'full',reason:selection.reason,scope:selection.scope??'changed-area',deferredBrowserCases:selection.deferredBrowserCases??0,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
+  console.log(JSON.stringify({kind,full:selection.full,layout:selection.layout??'full',reason:selection.reason,scope:selection.scope??'changed-area',collectionScope:selection.collectionScope,timing:selection.timing,deferredBrowserCases:selection.deferredBrowserCases??0,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
   if(mode==='run') return run(kind,selection,options)
   return 0
 }
