@@ -12,7 +12,7 @@ const fresh = (patch: Partial<leadAPI.ProjectLead> = {}): leadAPI.ProjectLead =>
 function environment(initial = fresh()) {
   const current = ref(initial)
   const start = vi.fn(), pause = vi.fn(), open = vi.fn()
-  const leads = { views: reactive({ p1: { lead: current } }), busy: {}, load: async () => {}, loadLead: async () => {}, start, pause }
+  const leads = { views: reactive({ p1: { lead: current } }), busy: {}, load: async () => {}, loadLead: async () => {}, loadMany: async () => {}, start, pause }
   const session = { identity: { tenant: { id: 't1' }, principal: { id: 'person', kind: 'person' } } }
   const modules = {
     'vue-router': { useRouter: () => ({ push: vi.fn() }) },
@@ -53,6 +53,17 @@ it('AEON-1038: the card disables Start and Resume with a reason, preserves Cance
   env.current.value = fresh({ automatic_launch_enabled: undefined })
   expect(component.state.action.value.disabled).toBe(true)
   expect(component.state.action.value.tip).toContain('could not be read')
+  const list = setupSource('components/lead/LeadsList.vue', {}, {
+    ...env.modules,
+    '../../stores/projects': { useProjects: () => ({ projects: [{ id: 'p1', routeKey: 'AIT' }] }) },
+    '../../stores/agents': { useAgents: () => ({ views: [] }) },
+    '../../lib/workQueue': { queueRequest: async () => ({ items: [] }) },
+  })
+  scopes.push(list)
+  expect(list.state.launchAvailable.value).toBe(false)
+  expect(list.state.launchReason.value).toContain('could not be read')
+  env.current.value = fresh()
+  expect(list.state.launchReason.value).toBe(leadAPI.LEAD_LAUNCH_OFF)
 })
 
 it('AEON-1038: a sheet with launch off rejects pointer and keyboard submissions before any settings write', async () => {

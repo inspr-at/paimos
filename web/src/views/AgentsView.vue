@@ -34,7 +34,7 @@ import AgentsWorking from '../components/agents/AgentsWorking.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import LeadsList from '../components/lead/LeadsList.vue'
 import { openStartLead } from '../lib/leadOverlay'
-import { LEAD_LAUNCH_OFF, LEAD_WORDS } from '../lib/lead'
+import { leadLaunchReason, LEAD_WORDS } from '../lib/lead'
 import { useDeveloperSettings } from '../lib/developerSettings'
 import RunQueue from '../components/agents/RunQueue.vue'
 import AttachApproval from '../components/agents/AttachApproval.vue'
@@ -119,7 +119,7 @@ const manualStart = computed(() => canStart.value && showExpertStart.value)
 const leadless = computed(() => leadsList.value?.withoutLead ?? [])
 const canStartLead = computed(() => !!leadsList.value?.mayStart && leadless.value.length > 0)
 const leadLaunchAvailable = computed(() => !!leadsList.value?.launchAvailable)
-const leadlessNote = computed(() => !leadLaunchAvailable.value ? LEAD_LAUNCH_OFF : leadless.value.length === 1 ? `${projects.byId(leadless.value[0]!)?.routeKey ?? 'One project'} has none. One per project.` : `${leadless.value.length} projects have none. One per project.`)
+const leadlessNote = computed(() => !leadLaunchAvailable.value ? leadsList.value?.launchReason ?? leadLaunchReason(null) : leadless.value.length === 1 ? `${projects.byId(leadless.value[0]!)?.routeKey ?? 'One project'} has none. One per project.` : `${leadless.value.length} projects have none. One per project.`)
 const showNew = computed(() => manualStart.value || canStartLead.value || canAttach.value || showConnect.value)
 watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => { headerMenu.value = null; filter.value = null })
 

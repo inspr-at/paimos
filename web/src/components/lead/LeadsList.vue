@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { can } from '../../lib/authz'
-import { canLaunchLead, leadBand, leadLaunchReason, LEAD_WORDS, type ProjectLead } from '../../lib/lead'
+import { canLaunchLead, leadBand, leadLaunchReason, LEAD_LAUNCH_OFF, LEAD_WORDS, type ProjectLead } from '../../lib/lead'
 import { openLeadPanel, openStartLead } from '../../lib/leadOverlay'
 import { usePoller } from '../../lib/usePolledData'
 import { queueRequest, type QueueWireSnapshot } from '../../lib/workQueue'
@@ -54,12 +54,13 @@ const mayStart = computed(() => session.identity?.principal.kind === 'person' &&
 /** Projects a person could start a lead for: the + menu offers Start lead only while one exists. */
 const withoutLead = computed(() => active.value.filter(p => leads.views[p.id]?.lead?.state === 'none').map(p => p.id))
 const launchAvailable = computed(() => withoutLead.value.some(id => canLaunchLead(leads.views[id]?.lead)))
+const launchReason = computed(() => withoutLead.value.length && withoutLead.value.every(id => leads.views[id]?.lead?.automatic_launch_enabled === false) ? LEAD_LAUNCH_OFF : leadLaunchReason(null))
 function open(row: Row, event: MouseEvent) {
   const from = event.currentTarget as HTMLElement
   if (row.lead?.state === 'none') { if (mayStart.value && canLaunchLead(row.lead)) openStartLead([row.id], from, true) }
   else openLeadPanel(row.id, from)
 }
-defineExpose({ withoutLead, mayStart, launchAvailable })
+defineExpose({ withoutLead, mayStart, launchAvailable, launchReason })
 </script>
 
 <template>
