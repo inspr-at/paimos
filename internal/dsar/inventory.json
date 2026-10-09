@@ -70,6 +70,7 @@
         "confirmed_at": "personal",
         "confirmed_by": "personal",
         "enforced_at": "metadata",
+        "ledger_mode_at": "metadata",
         "new_accounts": "metadata",
         "new_contexts": "metadata",
         "new_models": "metadata",
@@ -130,6 +131,17 @@
         "tenant_column": "tenant_id"
       },
       "table": "agent_keys"
+    },
+    {
+      "table": "agent_pairing_computers",
+      "classification": "metadata",
+      "columns": {
+        "ledger_enrolled_at": "metadata",
+        "ledger_generation": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      }
     },
     {
       "classification": "personal",

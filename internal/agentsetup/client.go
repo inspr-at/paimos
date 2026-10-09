@@ -110,6 +110,10 @@ type Enrollment struct {
 	ActiveRunIDs       []string `json:"active_run_ids"`
 }
 type View struct {
+	ServerCapabilities []string                 `json:"server_capabilities,omitempty"`
+	LedgerMode         bool                     `json:"ledger_mode"`
+	LedgerGeneration   *string                  `json:"ledger_generation"`
+	LedgerEnrolledAt   *time.Time               `json:"ledger_enrolled_at"`
 	HookCapabilities   []hookcap.Capability     `json:"hook_capabilities,omitempty"`
 	LocalAuthPinned    *bool                    `json:"local_auth_pinned,omitempty"`
 	AgentCompatibility *agentcompat.Result      `json:"agent_compatibility,omitempty"`
@@ -144,6 +148,7 @@ type View struct {
 	Revision           int64                    `json:"revision"`
 }
 type Guide struct {
+	ServerCapabilities []string            `json:"server_capabilities,omitempty"`
 	AgentCompatibility *agentcompat.Policy `json:"agent_compatibility,omitempty"`
 	InstanceURL        string              `json:"instance_url"`
 	DefaultTenantSlug  string              `json:"default_tenant_slug"`
