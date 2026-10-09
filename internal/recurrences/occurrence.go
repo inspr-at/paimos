@@ -258,6 +258,23 @@ func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence,
 				tags = append(tags, tagName)
 			}
 			fields := map[string]any{"type": r.Template.Type, "tags": tags, "priority": r.Template.Priority, "acceptance_criteria": criteria, "recurrence_id": r.ID, "occurrence_key": key, "occurrence_number": o.Number}
+			fields["hide_from_release_notes"] = r.Template.HideFromReleaseNotes == nil || *r.Template.HideFromReleaseNotes
+			for _, copy := range []struct {
+				key, value string
+				limit      int
+			}{
+				{"pill_en", r.Template.PillEN, 512}, {"pill_de", r.Template.PillDE, 512},
+				{"benefit_en", r.Template.BenefitEN, 4096}, {"benefit_de", r.Template.BenefitDE, 4096},
+			} {
+				if copy.value == "" {
+					continue
+				}
+				text := render(copy.value, o.Number, at, r.Trigger, name, version)
+				if len(text) > copy.limit {
+					o.Reason = "rendered_template_invalid"
+				}
+				fields[copy.key] = text
+			}
 			if r.Template.EstimateHours > 0 {
 				fields["estimate_hours"] = r.Template.EstimateHours
 				fields["estimate_source"] = "agent"

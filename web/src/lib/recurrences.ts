@@ -9,6 +9,7 @@ export interface RecurrenceTrigger {
 export interface RecurrenceTemplate {
   name?: string; title: string; description: string; acceptance_criteria: string[]; estimate_hours: number
   priority: string; tags: string[]; type: 'work' | 'ticket' | 'task' | 'epic'
+  pill_en?: string; pill_de?: string; benefit_en?: string; benefit_de?: string; hide_from_release_notes?: boolean
 }
 export interface RecurrenceInput {
   project_id: string; parent_id: string; template: RecurrenceTemplate; trigger: RecurrenceTrigger
@@ -63,7 +64,13 @@ export function recurrenceEstimate(raw: string): number | null { return parseEst
 export const recurrenceSourceIsParent = (source?: ListItem | null) => source?.kind_slug === 'epic' || source?.kind_slug === 'work' && (source.is_leaf === false || (source.work_children_count ?? 0) > 0)
 export function templateFrom(source?: ListItem | null): RecurrenceTemplate {
   const fields = source?.fields ?? {}
-  return { name: source?.title.slice(0, 80) ?? '', title: source ? `${source.title} · {{date}}` : '', description: source?.body ?? '', acceptance_criteria: parseCriteria(criteriaText(fields.acceptance_criteria)), estimate_hours: source?.estimate?.hours ?? (typeof fields.estimate_hours === 'number' ? fields.estimate_hours : 0), priority: source?.priority === 'none' ? 'medium' : source?.priority || 'medium', type: 'work', tags: Array.isArray(fields.tags) ? fields.tags.flatMap(tag => typeof tag === 'object' && tag && 'id' in tag && typeof tag.id === 'string' && /^[0-9a-f-]{36}$/i.test(tag.id) ? [tag.id] : []) : [] }
+  return { name: source?.title.slice(0, 80) ?? '', title: source ? `${source.title} · {{date}}` : '', description: source?.body ?? '', acceptance_criteria: parseCriteria(criteriaText(fields.acceptance_criteria)), estimate_hours: source?.estimate?.hours ?? (typeof fields.estimate_hours === 'number' ? fields.estimate_hours : 0), priority: source?.priority === 'none' ? 'medium' : source?.priority || 'medium', type: 'work', tags: Array.isArray(fields.tags) ? fields.tags.flatMap(tag => typeof tag === 'object' && tag && 'id' in tag && typeof tag.id === 'string' && /^[0-9a-f-]{36}$/i.test(tag.id) ? [tag.id] : []) : [],
+    pill_en: typeof fields.pill_en === 'string' ? fields.pill_en : undefined,
+    pill_de: typeof fields.pill_de === 'string' ? fields.pill_de : undefined,
+    benefit_en: typeof fields.benefit_en === 'string' ? fields.benefit_en : undefined,
+    benefit_de: typeof fields.benefit_de === 'string' ? fields.benefit_de : undefined,
+    hide_from_release_notes: typeof fields.hide_from_release_notes === 'boolean' ? fields.hide_from_release_notes : true,
+  }
 }
 export function templateProblems(input: RecurrenceInput, estimate: string): string[] {
   const t = input.template, problems: string[] = [], bytes = (s: string) => new TextEncoder().encode(s).length
@@ -71,7 +78,8 @@ export function templateProblems(input: RecurrenceInput, estimate: string): stri
   if (bytes(t.name || '') > 80) problems.push('Keep the name within 80 bytes.')
   if (!t.title.trim()) problems.push('Give each ticket a title.')
   if (bytes(t.title) > 512 || bytes(t.description) > 65536 || t.acceptance_criteria.length > 100 || t.acceptance_criteria.some(c => bytes(c) > 4096)) problems.push('The template exceeds its size limits.')
-  const values = [t.title, t.description, ...t.acceptance_criteria].join('\n')
+  if ([t.pill_en, t.pill_de].some(value => bytes(value || '') > 512) || [t.benefit_en, t.benefit_de].some(value => bytes(value || '') > 4096)) problems.push('The release copy exceeds its size limits.')
+  const values = [t.title, t.description, t.pill_en, t.pill_de, t.benefit_en, t.benefit_de, ...t.acceptance_criteria].join('\n')
   const rest = values.replace(/\{\{(occurrence|date|release_name|release_version)\}\}/g, '')
   if (rest.includes('{{') || rest.includes('}}')) problems.push('Use Number, Date or Release for template variables.')
   if (input.trigger.kind === 'time' && /\{\{release_(name|version)\}\}/.test(values)) problems.push('Release only has a value with the Event trigger. Remove it or switch to Event.')

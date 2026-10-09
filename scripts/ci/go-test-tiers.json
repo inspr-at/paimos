@@ -7812,6 +7812,8 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceFenceAllowsTenantKeyShare","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceReleaseCopySurvivesEditsAndDoneGate","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceTenantBeforeTree","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceWriteLockOrderWithTreeWriters","tier":"GATED-FULL"}

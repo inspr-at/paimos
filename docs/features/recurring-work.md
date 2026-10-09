@@ -94,6 +94,16 @@ production audit schedules automatically. Template variables also work in
 descriptions and criteria. `tags` contains existing tag-node UUIDs; occurrence
 creation resolves their current names into ordinary ticket `fields.tags`.
 
+Templates also accept optional `pill_en`, `pill_de`, `benefit_en`, `benefit_de`
+and `hide_from_release_notes`. Recurring routines default to hidden, including
+older definitions without the flag; explicit `false` makes generated tickets
+visible in release notes. Repeat copies all five fields from the source, and
+editing a definition preserves them. Release copy supports the same variables
+as the title, with limits of 512 bytes per pill and 4096 bytes per benefit,
+checked before and after rendering. Templates may omit or draft the copy;
+generated tickets still need both 2–4-word pills and both nonblank benefits
+before successful Done, including when hidden.
+
 The server uses the database clock and tenant/tree claims, with durable unique
 occurrence keys. Each pass consumes at most the latest missed time or release
 per recurrence, avoiding a downtime burst. `overlap_policy=skip` suppresses work
