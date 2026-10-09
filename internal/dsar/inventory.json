@@ -4,10 +4,31 @@
     {
       "classification": "personal",
       "columns": {
+        "account_id": "metadata",
+        "binding_revision": "metadata",
+        "id": "metadata",
+        "person_id": "personal",
+        "read_at": "personal",
+        "resets_at": "personal",
+        "resource_id": "metadata",
+        "tenant_id": "metadata",
+        "used_pct": "personal",
+        "window_key": "metadata"
+      },
+      "locator": {
+        "person_column": "person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "account_daily_observations"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "boost_link_revision": "metadata",
         "boost_percent": "personal",
         "boost_person_id": "personal",
         "boost_until": "personal",
+        "daily_reset_policy": "personal",
         "usage_budget": "personal",
         "usage_floor_percent": "metadata",
         "usage_posture": "personal",
@@ -737,6 +758,17 @@
         "tenant_column": "tenant_id"
       },
       "table": "model_situation_limits"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "daily_points_per_day": "personal"
+      },
+      "locator": {
+        "person_column": "principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "personal_profiles"
     },
     {
       "classification": "metadata",

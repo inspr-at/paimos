@@ -68,6 +68,7 @@ func TestReadinessNamesEveryPendingOrBlockedEnrollment(t *testing.T) {
 		{"probe_pending", "checking", "60 seconds", "provisioning"},
 		{"probe_timeout", "blocked", "did not finish within 60 seconds", "blocked"},
 		{"probe_failed", "blocked", "availability check failed", "blocked"},
+		{UnsettledPreviousRun, "blocked", "reconciliation retries automatically", "blocked"},
 		{"capacity_capture", "checking", "within 10 seconds", "provisioning"},
 		{"capacity_timeout", "blocked", "10-second limit", "blocked"},
 		{"pin_missing", "blocked", "pin missing", "blocked"},

@@ -12452,6 +12452,8 @@
     ,
     {"kind":"node","file":"tests/agent-login.test.ts","name":"project-only agent ceiling excludes workspace-only permissions and fails closed for missing roles","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/agent-pairing.test.ts","name":"AEON-1041: old settlement gaps name the cause and account-scoped repair","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"AEON-623: a ready sibling does not inherit another account probe repair","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"AEON-623: an account absent from a blocked diagnostic list is not ready","tier":"GATED-FULL"}

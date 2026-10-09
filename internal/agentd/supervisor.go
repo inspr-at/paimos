@@ -575,7 +575,7 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			return err
 		}
 		if s.hasUnresolvedOldClaim(account.ID) {
-			s.freezeOnError(account.ID)
+			s.freezePreviousRun(account.ID)
 			continue
 		}
 		fenced, fenceErr := s.readFence(account.ID)
@@ -791,16 +791,20 @@ func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
 		reasons = append(reasons, reason)
 	}
 	// Multiple accounts produce at most one line per readiness cause per poll.
-	failed, timedOut := false, false
+	failed, timedOut, unsettled := false, false, false
 	for _, detail := range s.lifecycleAt("", now).AccountStatuses {
 		failed = failed || detail.Reason == "probe_failed"
 		timedOut = timedOut || detail.Reason == "probe_timeout"
+		unsettled = unsettled || detail.Reason == agentsetup.UnsettledPreviousRun
 	}
 	if failed {
 		reasons = append(reasons, "probe_failed")
 	}
 	if timedOut {
 		reasons = append(reasons, "probe_timeout")
+	}
+	if unsettled {
+		reasons = append(reasons, agentsetup.UnsettledPreviousRun)
 	}
 	s.pollDiagnosticMu.Lock()
 	changed := len(reasons) != len(s.pollDiagnosticLast)

@@ -1,0 +1,44 @@
+{
+  "ticket": "AEON-1041",
+  "scope": "Assigned worktree only; no push, deployment, model review or live checkpoint changes.",
+  "cause": "A retained old-generation settlement_gap bypassed the probe and froze the account as probe_failed even after the server closed its run and settled its reservation. The Fable app_server_protocol failure originated in rejected model-only prestart telemetry (AEON-716 diagnosis).",
+  "fix": "Expose explicit reservation settlement proof through the existing authorized run detail; close old local gaps only after local exit and matching terminal run/account/agent/order/purpose plus all reservations settled. Preserve dead letters, original generation and process provenance; retain exact retryable reports. Report unsettled_previous_run with operator guidance in lifecycle, diagnostics and existing UI.",
+  "tests": {
+    "checkpoint_and_existing_telemetry": "passed, 4.786s",
+    "pairing_ui_node": "55 passed",
+    "remote_integration": "All five affected Go packages passed: agentd, agentsetup, agentpairing, agentruns, reportercontract.",
+    "ci_static_merge_main": "exit 0; 41 checks passed, 0 skipped, 110.19s; origin/main d3c91cd676aaa59f195e53e1876c98f409d92d38; published base v261009095632.0.0",
+    "remote_agentd": "full package passed, 202.782s",
+    "remote_agentsetup": "full package passed, 21.204s",
+    "remote_agentruns": "full package passed, 385.166s",
+    "remote_reportercontract": "full package passed, 4.489s",
+    "remote_pairing_regressions": "Fable failure/recovery/success, empty/active/released/mixed reservation proof and attached contract cases passed, 3.060s",
+    "web_lint": "passed",
+    "remote_agentpairing": "full package passed, 140.507s after fixture/setup corrections"
+  },
+  "limitations": [
+    "No live verification requested; mbp2607 checkpoint preserved.",
+    "UI reuses existing presentation and changes only specified text; needs Opus design."
+  ],
+  "validation_transport": "Transferred incremental Git bundles over existing SSH to a new isolated checkout on the approved test host; no git push or shared source-ref updates. Generated api/openapi.yaml there from authored sources. Temporary test databases and runner markers are cleaned after each run.",
+  "test_corrections": [
+    "Initial isolated checkout lacked generated api/openapi.yaml; generated it and reran the affected contract tests.",
+    "Successful Fable telemetry has NULL error_code; normalize it to the absent error in the fixture assertion. No production telemetry behavior was changed."
+  ],
+  "checked_code_commit": "5f29a9bfa5673f54b0891624e177bc9184f32321",
+  "fix_round_2": {
+    "cause": "A nested 5s GetRun timeout was passed through pollContextError, so context.DeadlineExceeded aborted the whole poll while the 20s parent context was still live. Other accounts were not probed, queued work was not dispatched, and unsettled_previous_run was not reported.",
+    "fix": "On GetRun failure, return errSettlementParked joined only with the parent context error. The child timeout is not a poll deadline. The account still freezes through freezePreviousRun and the gap is read again on the next poll.",
+    "regression": "TestSettlementReadTimeoutDoesNotAbortLivePoll failed on 05c5cb2f with a live parent and context.DeadlineExceeded, then passed after the fix together with the existing settlement and poll-context tests.",
+    "remote_agentd": "full package passed, 179.796s, head 5f29a9bfa5673f54b0891624e177bc9184f32321, mbp2606",
+    "ci_static_merge_main": "exit 0; 41 checks passed, 0 skipped, 132.31s",
+    "left_non_blocking": "Old-generation gaps whose local state is not completed, failed, or cancelled stay unread. An existing harness, pin, or profile block can still be reported ahead of unsettled_previous_run."
+  },
+  "safety": [
+    "Assigned branch and worktree only; selected PPM/workstation-agents/INSPR identity and coordinator worker attribution verified.",
+    "Only an additive optional response field was added to the existing run detail; no routes, scopes, secrets, DB migrations or checkpoint schema changes.",
+    "Original rejected accounting evidence and claim/process provenance remain durable; unreachable, unsettled, mismatched or unconfirmed state stays blocked.",
+    "No live checkpoint reads or writes, helper release/signing, model calls, review gates, push or deployment.",
+    "Remote validation used isolated bundle checkouts, owned temporary databases and the shared static-check lock."
+  ]
+}
