@@ -148,7 +148,7 @@ func validID(id string) bool {
 }
 
 func validKind(kind string) bool {
-	return kind == "question" || kind == "approval" || kind == "action_request" || kind == "doctrine" || kind == "key_trim"
+	return kind == "question" || kind == "approval" || kind == "action_request" || kind == "doctrine" || kind == "key_trim" || kind == "stepup"
 }
 
 func (m *Module) Read(ctx context.Context, p tenant.Principal, limit int, after *cursor) (Page, error) {

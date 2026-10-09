@@ -69,6 +69,7 @@ import (
 	"github.com/inspr-at/paimos/internal/search"
 	"github.com/inspr-at/paimos/internal/stagehandoff"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
+	"github.com/inspr-at/paimos/internal/stepup"
 	"github.com/inspr-at/paimos/internal/tenantbrand"
 	"github.com/inspr-at/paimos/internal/themes"
 	"github.com/inspr-at/paimos/internal/ticketwork"
@@ -100,7 +101,7 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 		journey.New(nil), requirements.New(nil), releases.New(nil), recurrences.New(nil), statusautopilot.New(nil), parentbenefits.New(nil, nil), intake.New(nil),
 		plugins.New(nil), stagehandoff.New(nil, nil), costunits.New(nil, nil), crm.New(nil, nil),
 		&quotes.Module{}, &collaboration.Module{}, &publicquotes.Module{}, &confirmation.Module{}, portal.New(nil, false, nil),
-		hours.New(nil, nil), directory.New(nil, nil), &phoneapprovals.Module{},
+		hours.New(nil, nil), directory.New(nil, nil), &phoneapprovals.Module{}, stepup.New(nil, nil, ""),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(http.ResponseWriter, *http.Request) {})

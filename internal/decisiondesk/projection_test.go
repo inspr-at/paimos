@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/questions"
+	"github.com/inspr-at/paimos/internal/stepup"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -25,6 +26,54 @@ type fixture struct {
 	person, reader, agent         tenant.Principal
 	project, otherProject, ticket string
 	mux                           *http.ServeMux
+}
+
+// Risk: a step-up is hidden from eligible people, disclosed to other readers,
+// or sorted outside the held approval expiry bucket.
+func TestStepupProjectionUsesNativePermissionAndHeldExpiry(t *testing.T) {
+	f := setup(t)
+	agent := f.agent
+	agent.Scopes = append(agent.Scopes, "approvals.request", "nodes.read")
+	mod := stepup.New(f.d.App, nil, "")
+	before := json.RawMessage(`{"key":"workspace-summary","project_id":null,"override":null,"revision":0}`)
+	request, err := mod.Create(t.Context(), agent, stepup.Create{Payload: json.RawMessage(`{"kind":"feature","key":"workspace-summary","enabled":true,"expected_revision":0}`), BeforeHash: stepup.Hash(before)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := f.m.Read(t.Context(), f.person, 100, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *Item
+	for i := range page.Items {
+		if page.Items[i].ID == request.ID {
+			found = &page.Items[i]
+		}
+	}
+	if found == nil || found.Kind != "stepup" || !found.Held || found.Bucket != 0 || found.Source != "/api/stepup-requests" || found.Href != "/decision-desk?needs=s:"+request.ID || !found.OrderAt.Equal(request.ExpiresAt) {
+		t.Fatalf("step-up projection %+v", found)
+	}
+	page, err = f.m.Read(t.Context(), f.reader, 100, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range page.Items {
+		if item.ID == request.ID {
+			t.Fatal("reader saw protected request")
+		}
+	}
+	if _, err = mod.Decide(t.Context(), f.person, request.ID, stepup.Decide{Digest: request.Digest, Revision: request.Revision}, "decline", nil); err != nil {
+		t.Fatal(err)
+	}
+	page, err = f.m.Read(t.Context(), f.person, 100, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range page.Items {
+		if item.ID == request.ID {
+			t.Fatal("decided request stayed in queue")
+		}
+	}
 }
 
 func setup(t *testing.T) *fixture {

@@ -1,0 +1,21 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "routes": {
+    "GET /api/stepup-requests": "profile.read|approvals.request",
+    "GET /api/stepup-requests/{requestId}": "profile.read|approvals.request",
+    "POST /api/stepup-requests": "approvals.request",
+    "POST /api/stepup-requests/{requestId}/approve": "profile.read",
+    "POST /api/stepup-requests/{requestId}/decline": "profile.read",
+    "POST /api/stepup-requests/{requestId}/options": "profile.read",
+    "POST /api/stepup-requests/{requestId}/withdraw": "approvals.request"
+  },
+  "project_filtered": {
+    "GET /api/stepup-requests": true,
+    "GET /api/stepup-requests/{requestId}": true,
+    "POST /api/stepup-requests": true,
+    "POST /api/stepup-requests/{requestId}/approve": true,
+    "POST /api/stepup-requests/{requestId}/decline": true,
+    "POST /api/stepup-requests/{requestId}/options": true,
+    "POST /api/stepup-requests/{requestId}/withdraw": true
+  }
+}

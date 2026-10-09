@@ -23,7 +23,7 @@ paths:
       security: [{session: []}]
       description: >-
         Person-only canonical open desk pointers and exact counts, reauthorized per source and project.
-        Held approvals sort by expiry, then other held items by creation time, then other items by creation time;
+        Held approvals and step-ups sort by expiry, then other held items by creation time, then other items by creation time;
         stable source ID breaks ties. Merged askers count once and a question replaces its linked held request.
         Answered questions (including grace/corrections), decided/expired approvals and resolved requests are excluded.
         A parked/paused/stopped question is held only with a live unfinished work link; carries_on alone is quiet.
@@ -48,7 +48,7 @@ components:
       required: [id, kind, revision, title, created_at, held, href, source]
       properties:
         id: {type: string, format: uuid}
-        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim]}
+        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim, stepup]}
         project_id: {type: string, format: uuid}
         revision: {type: integer, minimum: 1}
         title: {type: string}

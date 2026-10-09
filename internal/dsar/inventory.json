@@ -771,6 +771,38 @@
       "table": "personal_profiles"
     },
     {
+      "classification": "personal",
+      "columns": {
+        "after_hash": "metadata",
+        "after_value": "review",
+        "applied_at": "metadata",
+        "auth_time": "personal",
+        "before_hash": "metadata",
+        "before_value": "review",
+        "created_at": "metadata",
+        "decided_at": "metadata",
+        "decided_by": "personal",
+        "decision": "metadata",
+        "expires_at": "metadata",
+        "id": "metadata",
+        "method": "personal",
+        "payload": "review",
+        "permission": "metadata",
+        "project_id": "metadata",
+        "request_digest": "metadata",
+        "requested_by": "personal",
+        "revision": "metadata",
+        "session_id": "metadata",
+        "state": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "decided_by",
+        "tenant_column": "tenant_id"
+      },
+      "table": "stepup_requests"
+    },
+    {
       "classification": "metadata",
       "columns": {
         "tenant_id": "metadata",

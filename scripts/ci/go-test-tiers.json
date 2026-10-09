@@ -3428,6 +3428,10 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestStatusHelpCustomerSessionDenied","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestStepupAgentRouteCeiling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestStepupOIDCFallbackUsesExistingIdentityAndFreshVerifiedAuthTime","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestVerifiedInviteRejectsUnicodeMailboxCaseMappings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestWorkVocabularyProjectOnlyCreation","tier":"ESSENTIAL"}
@@ -5092,6 +5096,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestSplitSQL","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestStepupMigrationExpansionRollbackAndLegacyKinds","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestTenantGuardRefreshesVisibilityAfterRevocation","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/db","name":"TestTicketBenefitMigrationPreservesHistoryAndCustomSchema","tier":"GATED-FULL"}
@@ -5187,6 +5193,8 @@
     {"kind":"go","package":"internal/decisiondesk","name":"TestScopeDeniedApprovalReceivesTerminalSkippedClaim","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestSourceClaimDoesNotScanProjectionAndCoverageIsExplicit","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestStepupProjectionUsesNativePermissionAndHeldExpiry","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestUndecidableApprovalDoesNotStarveHeldQuestion","tier":"GATED-FULL"}
     ,
@@ -8835,6 +8843,20 @@
     {"kind":"go","package":"internal/statusautopilot","name":"TestUpgradeSuggestsWithoutTicketMutationsUntilOwnerConfirms","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestWorkspaceActivityPagingAndCurrentUndoAuthority","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/stepup","name":"TestStepupApprovalRechecksAuthorityAfterFenceWait","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/stepup","name":"TestStepupFirstDecisionWinsWithTwoApprovers","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/stepup","name":"TestStepupListKeysetsExpiryAndTenantIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/stepup","name":"TestStepupOwnershipBoundsAndCurrentAuthority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/stepup","name":"TestStepupPasskeyProofBindingAndHTTPBoundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/stepup","name":"TestStepupReauthOneUseFreshnessAndBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/stepup","name":"TestStepupTransitionsAndAtomicAudit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/tenant","name":"TestPrincipalContextPreservesLegacyLabels","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
