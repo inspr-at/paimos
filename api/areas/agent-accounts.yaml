@@ -1209,7 +1209,7 @@ components:
         - type: object
           required: [id, registered_by_principal_id, state, created_at]
           properties:
-        contexts: {type: array, items: {$ref: '#/components/schemas/AccountContextLabel'}}
+            contexts: {type: array, items: {$ref: '#/components/schemas/AccountContextLabel'}}
             pending_check: {$ref: "#/components/schemas/AccountCheck"}
             readiness_resources: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/ReadinessResource"}}
             share_usage: {type: boolean, description: "Owner-controlled quota sharing, false until opted in."}

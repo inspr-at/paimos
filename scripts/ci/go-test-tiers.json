@@ -564,6 +564,8 @@
     ,
     {"kind":"go","package":"internal/accountuse","name":"TestAccountUseLegacyEntryGuardEmptyAndPopulatedPools","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/accountuse","name":"TestAccountUseSelectionCallSiteGuard","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/activity","name":"TestAuthorsSayWhetherTheyHaveAPicture","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/activity","name":"TestCommentLifecycleAuthorizationIsolationAndConcurrency","tier":"ESSENTIAL"}
@@ -593,6 +595,8 @@
     {"kind":"go","package":"internal/activity","name":"TestTimelineMergePaginationAndImportedDiffs","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestAccountBillingPersonDeclarationPreserved","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestAccountContextSelectionPaths","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestAccountMetadataCharacterBoundary","tier":"GATED-FULL"}
     ,
@@ -817,6 +821,8 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestPinWritesNeedTicketEditAndListsRespectVisibility","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestPoolConfirmationDoesNotSilentlyIncludeSpare","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestProjectDailySnapshotCapsContract","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestProjectLookupPreservesQueryFailure","tier":"NIGHTLY"}
     ,
@@ -2302,6 +2308,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPairingUnsupportedVerificationFailsAndComputerBecomesReady","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestPairingVerificationAccountContextExceptionIsBound","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPairingVerificationAndOngoingBudgetsAreIsolated","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPairingVerificationCannotSubstituteAnotherPairingWindow","tier":"GATED-FULL"}
@@ -2492,6 +2500,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestProjectWritesSerializeWithPairingTenantBeforeTree","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestQueueAccountContextDiscoveryAndPickup","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestQueueCancellationInterruptsHTTPTransport","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestQueueEscalationCannotBypassBoundedRetry","tier":"ESSENTIAL"}
@@ -2507,6 +2517,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestQueuedRecoveryClaimsKeepTheirExactReservation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRequestedAccountIsValidatedAndAuditedWithoutReservation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRunAndQueueAccountContextChecks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunClaimTelemetryReplayAndBudget","tier":"GATED-FULL"}
     ,
@@ -4022,6 +4034,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestAccountLinkWatchReportsOnlyFirstLinkedResultAndStops","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestAccountProjectFolderLinksFailClosed","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestAgentsPlanDenialHasNoOutput","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestAgentsPlanHumanAndJSON","tier":"GATED-FULL"}
@@ -5530,6 +5544,8 @@
     ,
     {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionWIPInventoryRejectsPartialReads","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/engineadmission","name":"TestEngineAccountContextCapsContract","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/escalation","name":"TestCICheckIdentityAndBounds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/escalation","name":"TestDistinctFailureEvidence","tier":"ESSENTIAL"}
@@ -6119,6 +6135,8 @@
     {"kind":"go","package":"internal/harness","name":"TestTierUsageDoesNotRepriceEarlierTokens","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestTierUsagePersistsFrozenCostAcrossChanges","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestUnmanagedAccountContextRequestsAndAttribution","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestUnmanagedCannotDrainOrCompleteManagedDelivery","tier":"GATED-FULL"}
     ,
@@ -6941,6 +6959,10 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestResolveWorkPropagatesLateReviewLookupErrors","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestResolveWorkReviewInfersCanonicalStarter","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestResolverNoPoolPreviewAndDeniedContext","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestResolverProjectDailyCapsAndContextLadder","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRestoringUnretiredProfileDoesNotInventAnEvent","tier":"GATED-FULL"}
     ,

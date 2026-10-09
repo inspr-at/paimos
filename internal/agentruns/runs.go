@@ -517,6 +517,9 @@ func releaseObsoleteClaim(ctx context.Context, tx pgx.Tx, p tenant.Principal, v 
 		return nil, err
 	}
 	// Returning the failure as the response commits the release before the 409.
+	if reason == accountuse.NotAllowed {
+		return &accountuse.Error{Status: 409, Message: reason}, nil
+	}
 	return workorders.Fail(http.StatusConflict, reason), nil
 }
 

@@ -699,7 +699,7 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/2.10",
+    "version": "harness-session/2.11",
     "sha256": "7168e041b7c237c6fffa17d8552bb40a7a4c2496453338f9105fe3b19550a919",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {

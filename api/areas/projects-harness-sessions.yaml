@@ -913,7 +913,7 @@ paths:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
 components:
   headers:
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.10']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.11']}}
   schemas:
     HarnessManagedControl:
       type: object

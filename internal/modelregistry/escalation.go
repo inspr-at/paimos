@@ -135,18 +135,23 @@ func ResolveEscalation(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Wor
 		if err != nil {
 			return out, err
 		}
-		if len(ids) == 0 {
+		preview := requirement == "any" && health[pr.Harness].Accounts == 0
+		if len(ids) == 0 && !preview {
 			reasons = append(reasons, "no qualified account; wait for live admission")
 		}
 		c := Candidate{ProfileID: pr.ID, SkipReasons: reasons}
 		if len(reasons) == 0 && out.Profile == nil {
 			out.Profile = &pr
+			out.Preview = preview
 			out.OwnerRequired = false
 			c.Selected = true
 			out.Trace.QualifyingAccountIDs = ids
 			out.CommandTemplate, err = commandTemplate(pr.Harness, pr.Model, pr.Effort, false)
 			if err != nil {
 				return out, err
+			}
+			if out.Preview {
+				out.CommandTemplate = ""
 			}
 		}
 		out.Ladder = append(out.Ladder, c)
