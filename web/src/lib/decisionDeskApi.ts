@@ -10,7 +10,7 @@ import { listAttachments, type Attachment } from './attachments'
 import { loadTicketOutcomes, type OutcomeEvent } from './ticketOutcomes'
 import { decidePhone, phoneRequest, reviewPath, type PhoneReview } from './deskPhoneApproval'
 import { readTierResponse, decideTierResponse } from './agentRows'
-import { answerFor, CUSTOM_ANSWER, deskItemID, type DeskChoice, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskProjectionItem, type DeskOutcomeAvailability, type DeskDoctrineTarget, type DeskOutcomeEffect } from './decisionDesk'
+import { answerFor, CUSTOM_ANSWER, deskItemID, deskLinkOut, type DeskChoice, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskProjectionItem, type DeskOutcomeAvailability, type DeskDoctrineTarget, type DeskOutcomeEffect } from './decisionDesk'
 
 export interface QuestionInput {
   request_id: string; question: string; context?: string; findings?: string; options: DeskChoice[]
@@ -386,11 +386,13 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
       }
     }
     const open = (projection?.items ?? []).map(row => {
-      const id = deskItemID(row), item = byID.get(id)
+      const id = deskItemID(row), item = byID.get(id), linkOut = deskLinkOut(row)
+      if (linkOut) return { ...base(id, 'account_matrix', row.title, '', []), linkOut, revision: row.revision, createdAt: row.created_at, held: row.held, source: row.source,
+        meanwhile: 'Confirm which accounts agents may use in Settings.', destination: 'Settings · Accounts', unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : undefined }
       if (item && !item.decided) return { ...item, held: row.held, source: row.source,
         unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : item.unavailable }
       warnings.push('Some source details could not be confirmed. Retry remains available.')
-      return { ...base(id, row.kind === 'question' ? 'question' : row.kind === 'action_request' ? 'action' : row.kind === 'doctrine' ? 'rule' : row.kind === 'tier_request' ? 'tier' : row.kind === 'key_trim' ? 'key_trim' : row.kind === 'stepup' ? 'stepup' : 'approval', row.title, '', []),
+      return { ...base(id, row.kind === 'question' ? 'question' : row.kind === 'action_request' ? 'action' : row.kind === 'doctrine' ? 'rule' : row.kind === 'tier_request' ? 'tier' : row.kind === 'key_trim' ? 'key_trim' : row.kind === 'stepup' ? 'stepup' : row.kind === 'account_matrix' ? 'account_matrix' : 'approval', row.title, '', []),
         projectId: row.project_id ?? '', projectName: row.project_id ? name(row.project_id) : 'Workspace', revision: row.revision, createdAt: row.created_at,
         held: row.held, source: row.source, unavailable: 'Source details are unavailable or changed. Close and Retry before deciding.' }
     })

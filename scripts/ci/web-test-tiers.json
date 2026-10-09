@@ -15004,6 +15004,8 @@
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"keeps invalid native tier revision null unavailable","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"turns an account_matrix projection row into a settings link-out without a source warning","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"accepts source-only links and rejects arrays, destinations and injected selectors","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"appends one answered page, dedupes corrections and refreshes from newest","tier":"GATED-FULL"}

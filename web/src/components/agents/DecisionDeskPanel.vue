@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useDecisionDesk } from '../../stores/decisionDesk'
-import { deskItemID } from '../../lib/decisionDesk'
+import { deskItemID, deskLinkOut } from '../../lib/decisionDesk'
 import AppIcon from '../AppIcon.vue'
 
 const desk = useDecisionDesk()
@@ -28,7 +28,7 @@ const incomplete = computed(() => !!desk.projection && (desk.projection.has_more
       <p class="group-title">{{ group.label }}<small>{{ group.note }}</small></p>
       <ul :aria-label="group.label">
         <li v-for="item in group.items" :key="deskItemID(item)">
-          <RouterLink :to="{ path: '/decision-desk', query: { item: deskItemID(item) } }" class="desk-item">
+          <RouterLink :to="deskLinkOut(item) || { path: '/decision-desk', query: { item: deskItemID(item) } }" class="desk-item" :data-testid="`agents-desk-item-${deskItemID(item)}`">
             <AppIcon name="chevron-right" :size="14" /><span>{{ item.title }}</span>
           </RouterLink>
         </li>
