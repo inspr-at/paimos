@@ -192,14 +192,9 @@ func (m *Module) simple(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			row := simpleRowFor(s, c, k.Slug)
-			// Compare against the inherited pick with just this rank row removed.
-			inherited := s
-			inherited.Orders = slices.DeleteFunc(slices.Clone(s.Orders), func(o modelprefs.BoardOrder) bool {
-				return o.ProfileID == targetBoardProfile(s, level).ID && o.Column == k.Slug && o.Situation == "first"
-			})
-			inheritRow := simpleRowFor(inherited, c, k.Slug)
-			own := row.Mine || level == "default" && hasColumnOrder(s, s.Workspace.ID, k.Slug)
-			if row.Lock != nil || row.Mine || own && !sameSimplePick(row.simplePick, inheritRow.simplePick) || hasColumnOrder(s, s.Workspace.ID, k.Slug) && !sameSimplePick(row.simplePick, out.All.simplePick) {
+			// An omitted kind follows Default. Show a row when this scope owns it, it is locked, or the pick
+			// actually differs from that default — never because a column template disagrees with itself.
+			if row.Lock != nil || row.Mine || !sameSimplePick(row.simplePick, out.All.simplePick) {
 				out.Exceptions = append(out.Exceptions, row)
 				columns = append(columns, k.Slug)
 			}
@@ -334,14 +329,6 @@ func (m *Module) simple(w http.ResponseWriter, r *http.Request) {
 	}
 	httpapi.WriteJSON(w, 200, out)
 }
-func hasColumnOrder(s modelprefs.BoardState, id, column string) bool {
-	for _, o := range s.Orders {
-		if o.ProfileID == id && o.Column == column && o.Situation == "first" {
-			return true
-		}
-	}
-	return false
-}
 func sameSimplePick(a, b simplePick) bool {
 	return (a.Line == nil && b.Line == nil || a.Line != nil && b.Line != nil && *a.Line == *b.Line) && (a.Effort == nil && b.Effort == nil || a.Effort != nil && b.Effort != nil && *a.Effort == *b.Effort)
 }
@@ -381,8 +368,14 @@ func simpleNextFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, person *s
 	if err != nil {
 		return nil, err
 	}
-	if resolved == nil {
-		return nil, nil
+	if resolved == nil || resolved.Profile == nil {
+		// The ticket is queued. Nothing that can run it is not an empty queue.
+		out := &simpleNext{Ticket: key, Trace: []simpleTrace{}}
+		if resolved != nil {
+			out.Column = resolved.Trace.Column
+			out.Trace = simpleTraceFor(resolved, c)
+		}
+		return out, nil
 	}
 	out := &simpleNext{simplePick: pickProfile(resolved.Profile), Column: resolved.Trace.Column, Ticket: key, Trace: simpleTraceFor(resolved, c)}
 	if resolved.Profile != nil {

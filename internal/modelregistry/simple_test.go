@@ -538,4 +538,82 @@ func TestMinimalThinkingWriteKeepsNativeEffort(t *testing.T) {
 		return nil
 	})
 }
+
+// Risk: an omitted kind dispatches on its own template while the page shows only
+// Default, and a first pick rewrites away a line the resolved list hid.
+func TestMinimalOmittedKindFollowsDefaultAndKeepsStoredTail(t *testing.T) {
+	admin, _ := boardFixture(t)
+	shown := func(doc simpleDocument, column string) (simpleRow, bool) {
+		t.Helper()
+		if doc.All.Column == column {
+			return doc.All, true
+		}
+		for _, row := range doc.Exceptions {
+			if row.Column == column {
+				return row, true
+			}
+		}
+		return simpleRow{}, false
+	}
+	simple := boardDecode[simpleDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200)
+	if _, ok := shown(simple, "concept"); ok || simple.All.Line == nil || *simple.All.Line != "openai:sol" {
+		t.Fatalf("empty concept left Default: all=%+v exceptions=%+v", simple.All, simple.Exceptions)
+	}
+	rank := []string{"anthropic:opus", "xai:grok", "openai:sol"}
+	excluded := []string{"anthropic:sonnet"}
+	saved := boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/first?for=default", map[string]any{"rank": rank, "not": excluded, "revision": 0}, ""), 200)
+	if saved.Revision != 1 {
+		t.Fatal(saved)
+	}
+	board := boardDecode[boardDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/board?layer=default", nil, ""), 200)
+	var backend boardColumn
+	for _, column := range board.Columns {
+		if column.Column == "backend" {
+			backend = column
+		}
+	}
+	if !slices.Equal(backend.Stored.Rank, rank) || !slices.Equal(backend.Stored.Not, excluded) {
+		t.Fatalf("stored order dropped a line the list can hide: %+v", backend.Stored)
+	}
+	for _, card := range backend.List {
+		if card.Line == "xai:grok" {
+			t.Fatal("resolved list kept the tool-free line")
+		}
+	}
+	held := false
+	for _, line := range backend.Cant {
+		if line.Line == "xai:grok" {
+			held = true
+		}
+	}
+	if !held {
+		t.Fatalf("tool-free line missing from cant: %+v", backend.Cant)
+	}
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"anthropic:sonnet"}, "not": []string{}, "revision": 1}, ""), 200)
+	concept := boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/concept/first?for=default", map[string]any{"rank": []string{"anthropic:opus"}, "not": []string{}, "revision": 2}, ""), 200)
+	if concept.Revision != 3 {
+		t.Fatal(concept)
+	}
+	withConcept := boardDecode[simpleDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200)
+	row, ok := shown(withConcept, "concept")
+	if !ok || row.Line == nil || *row.Line != "anthropic:opus" {
+		t.Fatalf("explicit concept was hidden: %+v exceptions=%+v", row, withConcept.Exceptions)
+	}
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "DELETE", "/api/model-preferences/orders/concept/first?for=default&revision=3", nil, ""), 200)
+	after := boardDecode[simpleDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200)
+	if _, ok := shown(after, "concept"); ok || after.All.Line == nil || *after.All.Line != "anthropic:sonnet" {
+		t.Fatalf("reset concept stayed its own pick: all=%+v exceptions=%+v", after.All, after.Exceptions)
+	}
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		s, err := modelprefs.LoadBoard(t.Context(), tx, nil, "")
+		if err != nil {
+			return err
+		}
+		d := modelprefs.ResolveBoard(s, modelprefs.BoardQuery{Column: "concept"}, nil)
+		if d.Source != "follows" || len(d.Rank) == 0 || d.Rank[0] != "anthropic:sonnet" {
+			t.Fatalf("concept dispatch left Default: %+v", d)
+		}
+		return nil
+	})
+}
 func ptrInt(n int) *int { return &n }

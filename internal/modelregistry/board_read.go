@@ -175,6 +175,14 @@ type boardColumn struct {
 	Bottom []boardCard           `json:"bottom"`
 	Not    []boardCard           `json:"not"`
 	Cant   []modelprefs.HeldLine `json:"cant"`
+	// Stored is the order a first-pick rewrite must keep, including lines the resolved list omits.
+	Stored boardStoredOrder `json:"stored"`
+	// StoredEffort is the native effort on this column's own order. Nil means it was not stored.
+	StoredEffort *string `json:"stored_effort,omitempty"`
+}
+type boardStoredOrder struct {
+	Rank []string `json:"rank"`
+	Not  []string `json:"not"`
 }
 type boardDocument struct {
 	PersonID  *string                 `json:"person_id"`
@@ -310,9 +318,14 @@ func boardDocumentFor(ctx context.Context, tx pgx.Tx, s modelprefs.BoardState, c
 		col := boardColumn{Column: k.Slug, Label: k.Label, Short: k.Label, Sentence: k.Hint, Fixed: k.Slug == "other" || k.Slug == "concept" || strings.HasPrefix(k.Slug, "review:"), Hidden: slices.Contains(out.Profile.HiddenKinds, k.Slug), Source: d.Source, List: []boardCard{}, Top: []boardCard{}, Free: []boardCard{}, Bottom: []boardCard{}, Not: []boardCard{}, Cant: d.Cant}
 		col.Thinking.Word, col.Thinking.Source = d.Thinking, d.ThinkingSource
 		col.FollowsFirst, col.Thinking.FromColumn = d.FollowsFirst, d.ThinkingColumn
+		rank, exclusions := modelprefs.PreservedOrder(s, out.Profile, k.Slug, d.Situation)
+		col.Stored = boardStoredOrder{Rank: rank, Not: exclusions}
 		for _, order := range s.Orders {
 			if order.ProfileID == out.Profile.ID && order.Column == k.Slug && order.Situation == d.Situation {
 				col.Thinking.Own = order.Thinking
+				if order.Rank != nil {
+					col.StoredEffort = order.Effort
+				}
 				break
 			}
 		}

@@ -143,61 +143,95 @@ export function useModelsSimple() {
   const conflict = 'Changed elsewhere. The page was refreshed; the change was not saved.'
   /** Refresh first, then say why: a refresh clears the line it replaces. */
   async function refreshWith(message: string) { const current = capture(); await load(); if (current()) error.value = message }
-  /** The rules read happens before the write so the lock follows the exact state the person is looking at. */
-  async function freshRules() {
-    const document = await getWorkspaceRules()
-    if (document.revision !== doc.value?.rules_revision) throw new APIError(409, 'Changed elsewhere.', {})
-    return document
+  /** Scope, generation and revisions from the moment the person acts. A later await must not commit for someone else. */
+  function seenNow() {
+    const state = doc.value, current = capture(), prefs = state?.revision, rulesRev = state?.rules_revision, target = scope.value
+    return { current, same: () => !!doc.value && current() && scope.value === target && doc.value.revision === prefs && doc.value.rules_revision === rulesRev }
   }
   const storedOrder = (column: TailColumn) => column.source === (scope.value === 'me' ? 'own' : 'default')
+  /** An order's existence is not a stored native effort. Skip the write only when that effort is the one on screen. */
+  const carriesStoredEffort = (column: TailColumn, wanted: string | null) => !!wanted && column.stored_effort === wanted
 
   /** Pick a model (and optionally its level) for a row; a draft row or a row without an order of its own gets one. */
   async function pick(row: RowView, entry: ModelEntry, effort: string | null = null): Promise<boolean> {
     const state = doc.value, column = columnOf(row.column)
     if (!state || !editable.value || !row.editable || !column) return false
+    const seen = seenNow()
     const target = scope.value, who = person(), had = storedOrder(column)
     const wanted = effort ?? nearestEffort(entry, row.effort, effortLevel(row.entry, row.effort))
     // Choosing exactly what the default already gives, for everyone, leaves nothing to store.
     if (row.draft && target === 'default' && entry.line === state.all.line && wanted === state.all.effort) { draft.value = null; return true }
-    const before = orderBody(column), carried = nearestEffort(entry, row.effort, effortLevel(row.entry, row.effort))
-    const forward: Step[] = [order(target, who, row.column, orderWithFirst(column, entry.line))]
-    if (wanted && !(had && wanted === carried)) forward.push(effortStep(target, who, row.column, wanted))
+    const before = orderBody(column)
+    const forward: Step[] = []
     const backward: Step[] = had ? [order(target, who, row.column, before), ...(row.effort ? [effortStep(target, who, row.column, row.effort)] : [])] : [reset(target, who, row.column)]
     let rules = false
     if (target === 'default' && row.lock && row.line && row.line !== entry.line) {
       try {
-        const document = await freshRules(), previous = rulesBody(document, row.column)
-        forward.push(rulesStep(row.column, movePin(previous, row.line, entry.line))); backward.push(rulesStep(row.column, previous)); rules = true
-      } catch (failure) { await refreshWith(failure instanceof APIError ? conflict : 'Could not read the lock.'); return false }
+        const document = await getWorkspaceRules()
+        if (!seen.same() || scope.value !== 'default') return false
+        if (document.revision !== state.rules_revision) { await refreshWith(conflict); return false }
+        const previous = rulesBody(document, row.column)
+        // The pin moves first, so the replacement's effort is checked against the new model.
+        forward.push(rulesStep(row.column, movePin(previous, row.line, entry.line)))
+        backward.unshift(rulesStep(row.column, previous))
+        rules = true
+      } catch (failure) {
+        if (!seen.current()) return false
+        await refreshWith(failure instanceof APIError ? conflict : 'Could not read the lock.')
+        return false
+      }
     }
+    if (!seen.same()) return false
+    forward.push(order(target, who, row.column, orderWithFirst(column, entry.line)))
+    if (wanted && !carriesStoredEffort(column, wanted)) forward.push(effortStep(target, who, row.column, wanted))
     return commit({ forward, backward, rules }, ok => { if (ok) draft.value = null })
   }
 
   /** Remove an exception, or reset a person's own row: the kind follows the default again. */
   async function clear(row: RowView): Promise<boolean> {
-    const column = columnOf(row.column)
-    if (!doc.value || !editable.value || row.isDefault && scope.value === 'default' || !column) return false
+    const state = doc.value, column = columnOf(row.column)
+    if (!state || !editable.value || row.isDefault && scope.value === 'default' || !column) return false
+    const seen = seenNow()
     const target = scope.value, who = person()
     const before = orderBody(column), forward: Step[] = [reset(target, who, row.column)]
     const backward: Step[] = [order(target, who, row.column, before), ...(row.effort ? [effortStep(target, who, row.column, row.effort)] : [])]
     let rules = false
     if (target === 'default' && row.lock && row.line) {
       try {
-        const previous = rulesBody(await freshRules(), row.column)
-        forward.push(rulesStep(row.column, unpin(previous, row.line))); backward.push(rulesStep(row.column, previous)); rules = true
-      } catch { await refreshWith(conflict); return false }
+        const document = await getWorkspaceRules()
+        if (!seen.same() || scope.value !== 'default') return false
+        if (document.revision !== state.rules_revision) { await refreshWith(conflict); return false }
+        const previous = rulesBody(document, row.column)
+        forward.push(rulesStep(row.column, unpin(previous, row.line)))
+        backward.unshift(rulesStep(row.column, previous))
+        rules = true
+      } catch {
+        if (!seen.current()) return false
+        await refreshWith(conflict)
+        return false
+      }
     }
+    if (!seen.same()) return false
     return commit({ forward, backward, rules })
   }
 
   /** Members can't change a locked row: a workspace pin of the pick to the top of its column. */
   async function lock(row: RowView, on: boolean): Promise<boolean> {
-    if (!doc.value || scope.value !== 'default' || !can('model_prefs.manage') || !row.line) return false
+    const state = doc.value
+    if (!state || scope.value !== 'default' || !can('model_prefs.manage') || !row.line) return false
+    const seen = seenNow()
     try {
-      const previous = rulesBody(await freshRules(), row.column), name = session.identity?.principal.name || 'an admin'
+      const document = await getWorkspaceRules()
+      if (!seen.same() || scope.value !== 'default') return false
+      if (document.revision !== state.rules_revision) { await refreshWith(conflict); return false }
+      const previous = rulesBody(document, row.column), name = session.identity?.principal.name || 'an admin'
       const next = on ? pinFirst(previous, row.line, lockReason(name)) : unpin(previous, row.line)
       return commit({ forward: [rulesStep(row.column, next)], backward: [rulesStep(row.column, previous)], rules: true })
-    } catch { await refreshWith(conflict); return false }
+    } catch {
+      if (!seen.current()) return false
+      await refreshWith(conflict)
+      return false
+    }
   }
 
   async function dismiss(line: string): Promise<boolean> {

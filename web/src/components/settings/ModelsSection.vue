@@ -119,7 +119,6 @@ watch(() => [route.hash, shown.value], async () => {
           <button type="button" data-scope="me" :aria-pressed="scope === 'me'" @click="model.setScope('me')">Just me</button>
         </div>
       </div>
-      <div v-if="error && shown" class="m-note" role="alert" data-models-error><AppIcon name="alert" :size="14" /><span>{{ error }}</span></div>
       <div v-if="failed && !shown" class="m-err" role="alert"><AppIcon name="alert" :size="18" /><p>Models couldn’t load. Agents keep running on the last saved choices.</p><button type="button" class="btn" data-retry @click="model.load()"><AppIcon name="refresh" :size="14" />Try again</button></div>
       <div v-else-if="!shown" class="m-list" aria-busy="true" aria-label="Loading models" role="status"><div class="row def"><span class="sk" style="width: 120px" /><span class="sk f" style="grid-area: p" /></div><div v-for="n in 2" :key="n" class="row"><span class="sk" style="width: 96px" /><span class="sk f" style="grid-area: p" /></div><div class="next"><span class="sk" style="width: 70%" /></div></div>
       <template v-else>
@@ -138,7 +137,9 @@ watch(() => [route.hash, shown.value], async () => {
             <div class="rv-v"><span class="hg" aria-hidden="true"><AppIcon name="compare" :size="13" /></span><span>Automatic · always another family</span><span class="grow" /><RouterLink class="link-btn quiet" to="/settings/policies">Rule in Policies</RouterLink></div>
           </div>
         </div>
-        <p class="next" data-next-line><AppIcon name="arrow" :size="14" /><span><template v-for="(part, index) in next.parts" :key="index"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template><template v-if="next.why">{{ ' ' }}<button id="why" type="button" class="link-btn" aria-haspopup="dialog" :aria-expanded="!!why" data-why @click="why = why ? null : ($event.currentTarget as HTMLElement)">Why?</button></template></span></p>
+        <p class="next" data-next-line><AppIcon name="arrow" :size="14" /><span class="next-copy"><template v-for="(part, index) in next.parts" :key="index"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template></span><button v-if="next.why" id="why" type="button" class="link-btn" aria-haspopup="dialog" :aria-expanded="!!why" data-why @click="why = why ? null : ($event.currentTarget as HTMLElement)">Why?</button></p>
+        <!-- A refusal grows under the rows. Putting it above them shifts every picker (AEON-541). -->
+        <div v-if="error" class="m-note" role="alert" data-models-error><AppIcon name="alert" :size="14" /><span>{{ error }}</span></div>
       </template>
     </section>
     <!-- Until the model registry card (AEON-1012) replaces it, the catalog settings stay one fold away. -->

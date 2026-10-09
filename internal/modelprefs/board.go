@@ -194,7 +194,9 @@ func profileOrder(s BoardState, p BoardProfile, column, situation string) (Board
 	if situation != "first" {
 		keys = append(keys, [2]string{column, "first"})
 	}
-	if column != "other" && !strings.HasPrefix(column, "review:") && column != "concept" {
+	// Concepts follow Default the same way every other unshown kind does.
+	// Reviews keep their own order: they are chosen, not inherited.
+	if column != "other" && !strings.HasPrefix(column, "review:") {
 		keys = append(keys, [2]string{"other", situation})
 		if situation != "first" {
 			keys = append(keys, [2]string{"other", "first"})
@@ -210,6 +212,40 @@ func profileOrder(s BoardState, p BoardProfile, column, situation string) (Board
 		}
 	}
 	return BoardOrder{}, "", false
+}
+
+// defaultRankColumn is the rank an omitted or reset kind uses. Reviews keep a
+// column template; every other kind follows Default rather than its own.
+func defaultRankColumn(column string) string {
+	if strings.HasPrefix(column, "review:") {
+		return column
+	}
+	return "other"
+}
+
+// PreservedOrder is the rank and exclusions a first-pick rewrite must keep:
+// this profile's stored or inherited Default order, the workspace order a
+// template-less profile follows, or the Default template. It includes lines
+// the resolved board hides as incapable or locked.
+func PreservedOrder(s BoardState, p BoardProfile, column, situation string) (rank, not []string) {
+	chosen := p
+	order, _, found := profileOrder(s, chosen, column, situation)
+	if !found && chosen.Template == nil && chosen.ID != s.Workspace.ID {
+		chosen = s.Workspace
+		order, _, found = profileOrder(s, chosen, column, situation)
+	}
+	if found {
+		not = slices.Clone(order.Not)
+		if not == nil {
+			not = []string{}
+		}
+		return slices.Clone(order.Rank), not
+	}
+	template := "balanced"
+	if chosen.Template != nil {
+		template = *chosen.Template
+	}
+	return TemplateRank(template, defaultRankColumn(column)), []string{}
 }
 
 // ResolveBoard implements the six steps for both dispatch and board reads.
@@ -295,7 +331,7 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 		if chosen.Template != nil {
 			template = *chosen.Template
 		}
-		d.Rank = TemplateRank(template, d.Column)
+		d.Rank = TemplateRank(template, defaultRankColumn(d.Column))
 	}
 	d.FollowsFirst = d.Situation != "first" && (!found || order.Situation == "first")
 	if chosen.Scope == "person" && (found || chosen.Template != nil) {

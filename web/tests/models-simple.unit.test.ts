@@ -38,7 +38,7 @@ function simpleDoc(overrides: Partial<SimpleDocument> = {}): SimpleDocument {
   }
 }
 function tailBoard(overrides: Partial<TailBoard> = {}): TailBoard {
-  const column = (id: string, source: 'own' | 'default' | 'template', list: string[], locked?: string) => ({ column: id, label: label.get(id) ?? id, fixed: id === 'other', hidden: false, source, list: list.map(line => ({ line, ...(line === locked ? { lock: { kind: 'rule' } } : {}) })), not: [{ line: 'unknown:x' }], cant: [] })
+  const column = (id: string, source: 'own' | 'default' | 'template', list: string[], locked?: string) => ({ column: id, label: label.get(id) ?? id, fixed: id === 'other', hidden: false, source, list: list.map(line => ({ line, ...(line === locked ? { lock: { kind: 'rule' } } : {}) })), not: [{ line: 'unknown:x' }], cant: [], stored: { rank: [...list], not: ['unknown:x'] }, ...(id === 'design' ? { stored_effort: 'xhigh' } : {}) })
   return { person_id: simplePerson, revision: 3, profile: { dismissed_lines: ['xai:old'] }, columns: [column('other', 'template', ['openai:sol', 'anthropic:opus', 'anthropic:sonnet']), column('design', 'default', ['anthropic:opus', 'anthropic:sonnet'], 'anthropic:opus'), column('concept', 'template', ['anthropic:opus', 'openai:sol']), column('backend', 'template', ['openai:sol', 'anthropic:sonnet'])], ...overrides }
 }
 const rulesDoc = (revision = 2) => ({ revision, rules: [{ scope: 'workspace' as const, project_id: null, column: 'design', line: 'anthropic:opus', lock: 'top' as const, position: 0, why: 'Design mocks stay on Opus.', set_by: simplePerson, set_at: '2026-10-02T09:00:00Z' }] })
@@ -107,9 +107,14 @@ describe('rows', () => {
 describe('orders and locks', () => {
   it('moves one line to the front of the stored order and keeps everything else, never writing a rule', () => {
     const column = tailBoard().columns.find(item => item.column === 'design')!
-    expect(orderWithFirst(column, 'anthropic:sonnet')).toEqual({ rank: ['anthropic:sonnet'], not: ['unknown:x'] })
+    expect(orderWithFirst(column, 'anthropic:sonnet')).toEqual({ rank: ['anthropic:sonnet', 'anthropic:opus'], not: ['unknown:x'] })
     const other = tailBoard().columns.find(item => item.column === 'other')!
     expect(orderWithFirst(other, 'anthropic:sonnet')).toEqual({ rank: ['anthropic:sonnet', 'openai:sol', 'anthropic:opus'], not: ['unknown:x'] })
+  })
+  it('keeps a locked line and a fallback the resolved list omitted', () => {
+    const column = tailBoard().columns.find(item => item.column === 'design')!
+    const hidden = { ...column, list: column.list.filter(card => card.line !== 'xai:grok'), stored: { rank: ['anthropic:opus', 'xai:grok', 'anthropic:sonnet'], not: ['unknown:x', 'openai:luna'] } }
+    expect(orderWithFirst(hidden, 'anthropic:sonnet')).toEqual({ rank: ['anthropic:sonnet', 'anthropic:opus', 'xai:grok'], not: ['unknown:x', 'openai:luna'] })
   })
   it('pins to the top with a reason, moves the pin with the pick and removes only that pin', () => {
     const before = rulesBody({ revision: 2, rules: [...rulesDoc().rules, { ...rulesDoc().rules[0]!, scope: 'project' as const, project_id: 'p', line: 'xai:grok' }, { ...rulesDoc().rules[0]!, column: 'concept', line: 'openai:sol' }] }, 'design')
@@ -139,6 +144,12 @@ describe('what runs next', () => {
     expect(quiet.parts.map(part => part.text).join('')).toBe('The next Backend build runs on GPT-6.1 Sol · high, reviewed by GPT-6.1 Sol.')
     expect(quiet.why!.steps[0]!.map(part => part.text).join('')).toBe('Backend build has no override, so it uses the default: GPT-6.1 Sol · xhigh.')
     expect(nextView({ next: null, rows, entries, labels })).toEqual({ parts: [{ text: 'No work is queued right now.' }], why: null })
+  })
+  it('keeps a queued ticket that nothing can run, and the skip trace behind Why', () => {
+    const blocked = nextView({ next: { ticket: 'AEON-1011', column: 'backend', line: null, trace: [{ role: 'build', line: 'anthropic:opus', stage: 'column', reason: 'no qualified account', selected: false }] }, rows, entries, labels })
+    expect(blocked.parts.map(part => part.text).join('')).toBe('AEON-1011 is queued, but nothing available can run it.')
+    expect(blocked.why!.title).toBe('Why is AEON-1011 waiting?')
+    expect(blocked.why!.steps.map(step => step.map(part => part.text).join(''))).toEqual(['Skipped Opus 5.5: no qualified account.'])
   })
 })
 
@@ -186,11 +197,24 @@ describe('the card’s writes', () => {
     expect(putEffort).toHaveBeenCalledWith('me', 'concept', 'max', 4, simplePerson)
     expect(toasts.at(-1)!.message).toBe('Saved'); expect(toasts.at(-1)!.actions.map(action => action.label)).toEqual(['Undo'])
   })
-  it('does not write the level again when the order already carried it', async () => {
-    vi.mocked(getTail).mockResolvedValue(tailBoard({ columns: tailBoard().columns.map(column => column.column === 'concept' ? { ...column, source: 'own' as const } : column) }))
+  it('does not write the level again when the stored native effort is already the one selected', async () => {
+    vi.mocked(getTail).mockResolvedValue(tailBoard({ columns: tailBoard().columns.map(column => column.column === 'concept' ? { ...column, source: 'own' as const, stored_effort: 'high' } : column) }))
     const model = await page(), concept = model.rows.value.find(row => row.key === 'concept')!
     await model.pick(concept, model.entries.value.find(entry => entry.line === 'anthropic:sonnet')!)
     expect(putOrder).toHaveBeenCalledTimes(1); expect(putEffort).not.toHaveBeenCalled()
+  })
+  it('writes the selected level when an existing order has no stored native effort', async () => {
+    vi.mocked(getTail).mockResolvedValue(tailBoard({ columns: tailBoard().columns.map(column => column.column === 'concept' ? { ...column, source: 'own' as const, stored_effort: null } : column) }))
+    const model = await page(), concept = model.rows.value.find(row => row.key === 'concept')!, sonnet = model.entries.value.find(entry => entry.line === 'anthropic:sonnet')!
+    expect(await model.pick(concept, sonnet)).toBe(true)
+    expect(putEffort).toHaveBeenCalledWith('me', 'concept', 'high', 4, simplePerson)
+  })
+  it('writes a stored tail the resolved list hid, including its locked line', async () => {
+    const columns = tailBoard().columns.map(column => column.column === 'concept' ? { ...column, source: 'own' as const, list: [{ line: 'anthropic:opus' }], stored: { rank: ['anthropic:opus', 'xai:grok', 'openai:sol'], not: ['unknown:x', 'openai:luna'] } } : column)
+    vi.mocked(getTail).mockResolvedValue(tailBoard({ columns }))
+    const model = await page(), concept = model.rows.value.find(row => row.key === 'concept')!
+    await model.pick(concept, model.entries.value.find(entry => entry.line === 'anthropic:sonnet')!, 'max')
+    expect(putOrder).toHaveBeenCalledWith('me', 'concept', { rank: ['anthropic:sonnet', 'anthropic:opus', 'xai:grok', 'openai:sol'], not: ['unknown:x', 'openai:luna'] }, 3, simplePerson)
   })
   it('undoes with the inverse writes against the revisions the change ended on, and refuses once the page moved on', async () => {
     const model = await page(), concept = model.rows.value.find(row => row.key === 'concept')!
@@ -233,8 +257,9 @@ describe('the card’s writes', () => {
     const design = model.rows.value.find(row => row.key === 'design')!, sonnet = model.entries.value.find(entry => entry.line === 'anthropic:sonnet')!
     expect(design.editable).toBe(true)
     await model.pick(design, sonnet, 'xhigh')
-    expect(putOrder).toHaveBeenCalledWith('default', 'design', { rank: ['anthropic:sonnet'], not: ['unknown:x'] }, 3, simplePerson)
+    expect(putOrder).toHaveBeenCalledWith('default', 'design', { rank: ['anthropic:sonnet', 'anthropic:opus'], not: ['unknown:x'] }, 3, simplePerson)
     expect(putWorkspaceRules).toHaveBeenCalledWith('design', { top: [{ line: 'anthropic:sonnet', why: 'Design mocks stay on Opus.' }], bottom: [], not: {} }, 2)
+    expect(vi.mocked(putWorkspaceRules).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(putOrder).mock.invocationCallOrder[0]!)
     vi.mocked(putWorkspaceRules).mockClear()
     await model.clear(model.rows.value.find(row => row.key === 'design')!)
     expect(resetOrder).toHaveBeenCalledWith('default', 'design', expect.any(Number), simplePerson)
@@ -249,6 +274,39 @@ describe('the card’s writes', () => {
     state.manage = false; state.access?.(); await settle()
     expect(model.scope.value).toBe('me'); expect(await model.lock(model.rows.value.find(row => row.key === 'concept')!, true)).toBe(false); expect(putWorkspaceRules).not.toHaveBeenCalled()
     model.setScope('default'); expect(model.scope.value).toBe('me')
+  })
+  it('moves a locked pin before the replacement effort, so the old model is not what rejects it', async () => {
+    const model = await page(); model.setScope('default'); await settle()
+    const calls: string[] = []
+    vi.mocked(putWorkspaceRules).mockImplementation(async (_column, _body, revision) => { calls.push('rules'); return { ...rulesDoc(), revision: revision + 1 } })
+    vi.mocked(putOrder).mockImplementation(async (_scope, _column, _body, revision) => { calls.push('order'); return { revision: revision + 1, person_id: simplePerson } })
+    vi.mocked(putEffort).mockImplementation(async (_scope, _column, _effort, revision) => {
+      if (!calls.includes('rules')) throw new APIError(422, 'effort_not_registered', { error: 'effort_not_registered' })
+      calls.push('effort'); return { revision: revision + 1, person_id: simplePerson }
+    })
+    const design = model.rows.value.find(row => row.key === 'design')!, sonnet = model.entries.value.find(entry => entry.line === 'anthropic:sonnet')!
+    expect(await model.pick(design, sonnet, 'max')).toBe(true)
+    expect(calls).toEqual(['rules', 'order', 'effort'])
+  })
+  it('drops a workspace lock, a locked pick and a locked removal when Just me is selected before the rules return', async () => {
+    const model = await page(); model.setScope('default'); await settle()
+    const held = deferred<ReturnType<typeof rulesDoc>>()
+    vi.mocked(getWorkspaceRules).mockReturnValueOnce(held.promise)
+    const locking = model.lock(model.rows.value.find(row => row.key === 'concept')!, true); await settle()
+    model.setScope('me'); await settle(); held.resolve(rulesDoc())
+    expect(await locking).toBe(false); expect(putWorkspaceRules).not.toHaveBeenCalled(); expect(model.scope.value).toBe('me')
+    model.setScope('default'); await settle()
+    const pickHeld = deferred<ReturnType<typeof rulesDoc>>()
+    vi.mocked(getWorkspaceRules).mockReturnValueOnce(pickHeld.promise)
+    const saving = model.pick(model.rows.value.find(row => row.key === 'design')!, model.entries.value.find(entry => entry.line === 'anthropic:sonnet')!, 'max'); await settle()
+    model.setScope('me'); await settle(); pickHeld.resolve(rulesDoc()); expect(await saving).toBe(false)
+    expect(putOrder).not.toHaveBeenCalled(); expect(putWorkspaceRules).not.toHaveBeenCalled()
+    model.setScope('default'); await settle()
+    const clearHeld = deferred<ReturnType<typeof rulesDoc>>()
+    vi.mocked(getWorkspaceRules).mockReturnValueOnce(clearHeld.promise)
+    const removing = model.clear(model.rows.value.find(row => row.key === 'design')!); await settle()
+    model.setScope('me'); await settle(); clearHeld.resolve(rulesDoc()); expect(await removing).toBe(false)
+    expect(resetOrder).not.toHaveBeenCalled(); expect(putWorkspaceRules).not.toHaveBeenCalled()
   })
   it('stops a lock when the rules moved since the page was read', async () => {
     const model = await page(); model.setScope('default'); await settle()

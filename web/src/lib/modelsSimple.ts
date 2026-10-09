@@ -18,7 +18,15 @@ export interface SimpleDocument {
 }
 /** The part of the ranked board this page needs: the stored order behind each first pick, and what a column cannot do. */
 export interface TailCard { line: string; lock?: unknown }
-export interface TailColumn { column: string; label: string; fixed: boolean; hidden: boolean; source: 'own' | 'default' | 'template' | 'follows'; list: TailCard[]; not: TailCard[]; cant: { line: string; reason: string }[] }
+/** The order a first-pick rewrite must keep, including lines the resolved list omits. */
+export interface StoredOrder { rank: string[]; not: string[] }
+export interface TailColumn {
+  column: string; label: string; fixed: boolean; hidden: boolean; source: 'own' | 'default' | 'template' | 'follows'
+  list: TailCard[]; not: TailCard[]; cant: { line: string; reason: string }[]
+  stored?: StoredOrder
+  /** Native effort stored on this column's own order. Absent or null is not proof one was stored. */
+  stored_effort?: string | null
+}
 export interface TailBoard { person_id: string | null; revision: number; profile: { dismissed_lines: string[] }; columns: TailColumn[] }
 export interface OrderBody { rank: string[]; not: string[] }
 export interface ModelRule { scope: 'workspace' | 'project'; project_id: string | null; column: string; line: string; lock: 'top' | 'bottom' | 'not'; position: number; why: string; set_by: string | null; set_at: string }
@@ -150,9 +158,10 @@ export function buildRows(input: { doc: SimpleDocument; workspace: SimpleDocumen
   return rows
 }
 
-/** The stored order behind a column with one line moved to the front; everything else keeps its place. */
+/** The stored order behind a column. The resolved list drops incapable lines and used to drop locks; neither is the saved tail. */
 export function orderBody(column: TailColumn): OrderBody {
-  return { rank: column.list.filter(card => !card.lock).map(card => card.line), not: column.not.filter(card => !card.lock).map(card => card.line) }
+  if (column.stored && Array.isArray(column.stored.rank) && Array.isArray(column.stored.not)) return { rank: [...column.stored.rank], not: [...column.stored.not] }
+  return { rank: column.list.map(card => card.line), not: column.not.map(card => card.line) }
 }
 export function orderWithFirst(column: TailColumn, line: string): OrderBody {
   const body = orderBody(column)
@@ -201,8 +210,15 @@ export interface NextView { parts: Part[]; why: WhyView | null }
 /** The one quiet line under the rows, and the numbered trace behind "Why?". */
 export function nextView(input: { next: SimpleNext | null; rows: RowView[]; entries: ModelEntry[]; labels: Map<string, string> }): NextView {
   const { next, rows, entries, labels } = input
-  if (!next || !next.line) return { parts: [{ text: 'No work is queued right now.' }], why: null }
   const name = (line: string | null | undefined, effort: string | null | undefined) => pickText(entryFor(entries, line), effort ?? null, lineFallback(line))
+  if (!next || (!next.ticket && !next.line)) return { parts: [{ text: 'No work is queued right now.' }], why: null }
+  if (!next.line) {
+    const skipped = (next.trace ?? []).filter(step => step.role !== 'review-gate' && step.reason)
+    const steps = skipped.map(step => [{ text: `Skipped ${entryFor(entries, step.line)?.name ?? lineFallback(step.line)}: ${reasonText(step.reason)}.` }])
+    if (!steps.length) steps.push([{ text: 'Nothing in the order can run it.' }])
+    const ticket = next.ticket ?? 'Work'
+    return { parts: [{ text: `${ticket} is queued, but nothing available can run it.` }], why: { title: `Why is ${ticket} waiting?`, steps } }
+  }
   const column = next.column ?? ALL_COLUMN, kind = column === ALL_COLUMN ? 'work' : labels.get(column) ?? column
   const trace = (next.trace ?? []).filter(step => step.role !== 'review-gate'), skipped = trace.filter(step => !step.selected && step.reason)
   const runs = name(next.line, next.effort), reviewer = next.reviewer?.line ? entryFor(entries, next.reviewer.line)?.name ?? lineFallback(next.reviewer.line) : ''

@@ -182,3 +182,71 @@ func TestRankedBoardExpertSituationThinking(t *testing.T) {
 		}
 	})
 }
+
+// Risk: an omitted kind keeps its own template after the page shows only Default,
+// and a first-pick rewrite drops a line the resolved list hid.
+func TestRankedBoardOmittedKindsFollowDefault(t *testing.T) {
+	s := rankedFixture()
+	concept := ResolveBoard(s, BoardQuery{Column: "concept"}, nil)
+	other := ResolveBoard(s, BoardQuery{Column: "other"}, nil)
+	design := ResolveBoard(s, BoardQuery{Column: "design"}, nil)
+	if concept.Source != "template" || !reflect.DeepEqual(concept.Rank, other.Rank) || reflect.DeepEqual(concept.Rank, TemplateRank("balanced", "concept")) || concept.Rank[0] != "openai:sol" {
+		t.Fatalf("empty concept kept its own template: %+v", concept.Rank)
+	}
+	if !reflect.DeepEqual(design.Rank, other.Rank) {
+		t.Fatalf("empty design kept its own template: %+v", design.Rank)
+	}
+	s.Orders = []BoardOrder{{ProfileID: "person", Column: "other", Situation: "first", Rank: []string{"anthropic:sonnet", "openai:sol"}, Not: []string{"xai:grok"}}}
+	concept = ResolveBoard(s, BoardQuery{Column: "concept"}, nil)
+	if concept.Source != "follows" || !reflect.DeepEqual(concept.Rank, []string{"anthropic:sonnet", "openai:sol"}) || !reflect.DeepEqual(concept.Not, []string{"xai:grok"}) {
+		t.Fatalf("concept did not inherit Default: %+v", concept)
+	}
+	s.Orders = append(s.Orders, BoardOrder{ProfileID: "person", Column: "concept", Situation: "first", Rank: []string{"anthropic:opus", "openai:sol"}, Not: []string{}})
+	concept = ResolveBoard(s, BoardQuery{Column: "concept"}, nil)
+	if concept.Source != "own" || concept.Rank[0] != "anthropic:opus" {
+		t.Fatalf("explicit concept lost: %+v", concept)
+	}
+	s.Orders = s.Orders[:1]
+	concept = ResolveBoard(s, BoardQuery{Column: "concept"}, nil)
+	if concept.Source != "follows" || concept.Rank[0] != "anthropic:sonnet" {
+		t.Fatalf("reset concept left Default: %+v", concept)
+	}
+	review := ResolveBoard(s, BoardQuery{Column: "review:openai"}, nil)
+	if review.Column != "review:openai" || review.Source != "template" || len(review.Rank) == 0 || review.Rank[0] != "xai:grok" {
+		t.Fatalf("review inherited Default: %+v", review)
+	}
+	s.Orders = []BoardOrder{{ProfileID: "person", Column: "backend", Situation: "first", Rank: []string{"anthropic:opus", "xai:grok", "openai:sol"}, Not: []string{"openai:luna"}}}
+	rank, exclusions := PreservedOrder(s, *s.Person, "backend", "first")
+	if !reflect.DeepEqual(rank, s.Orders[0].Rank) || !reflect.DeepEqual(exclusions, s.Orders[0].Not) {
+		t.Fatalf("preserved order dropped a stored line: %v %v", rank, exclusions)
+	}
+	resolved := ResolveBoard(s, BoardQuery{Column: "backend"}, nil)
+	for _, line := range resolved.Rank {
+		if line == "xai:grok" {
+			t.Fatal("resolved list kept the tool-free line")
+		}
+	}
+	held := false
+	for _, line := range resolved.Cant {
+		if line.Line == "xai:grok" {
+			held = true
+		}
+	}
+	if !held {
+		t.Fatalf("tool-free line was not held: %+v", resolved.Cant)
+	}
+	s.Orders = []BoardOrder{{ProfileID: "workspace", Column: "other", Situation: "first", Rank: []string{"anthropic:sonnet", "xai:grok"}, Not: []string{"openai:luna"}}}
+	rank, exclusions = PreservedOrder(s, *s.Person, "concept", "first")
+	if !reflect.DeepEqual(rank, s.Orders[0].Rank) || !reflect.DeepEqual(exclusions, s.Orders[0].Not) {
+		t.Fatalf("a person with no order lost the workspace tail: %v %v", rank, exclusions)
+	}
+	s.Orders = nil
+	rank, exclusions = PreservedOrder(s, *s.Person, "concept", "first")
+	if !reflect.DeepEqual(rank, TemplateRank("balanced", "other")) || len(exclusions) != 0 {
+		t.Fatalf("empty concept preserved its own template: %v %v", rank, exclusions)
+	}
+	rank, _ = PreservedOrder(s, *s.Person, "review:openai", "first")
+	if !reflect.DeepEqual(rank, TemplateRank("balanced", "review:openai")) {
+		t.Fatalf("review preserved Default: %v", rank)
+	}
+}

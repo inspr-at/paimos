@@ -93,9 +93,9 @@ test('admins switch between For everyone and Just me; the lock lives in the pick
   const lock = page.locator('.mdl-pop .pm-lock input'); await expect(lock).toBeChecked(); await expect(page.locator('.mdl-pop')).toContainText('Members can’t change this')
   await option(page, 'anthropic:sonnet').locator('.lvc[data-eff="xhigh"]').click()
   await expect(pick(page, 'design')).toContainText('Sonnet 5.5 · xhigh'); await expect(row(page, 'design').locator('[data-lock]')).toBeVisible()
-  expect(state.writes.map(write => `${write.method} ${write.path}`)).toEqual(['PUT /model-preferences/orders/design/first', 'PUT /model-rules/workspace/design'])
+  expect(state.writes.map(write => `${write.method} ${write.path}`)).toEqual(['PUT /model-rules/workspace/design', 'PUT /model-preferences/orders/design/first'])
   expect(state.writes.some(write => write.person)).toBe(false)
-  expect(state.writes[0]!.search).toBe('?for=default'); expect(state.writes[1]!.body).toMatchObject({ top: [{ line: 'anthropic:sonnet', why: 'Design mocks stay on Opus while the design gate is tuned (AEON-912).' }], bottom: [], not: {}, revision: 2 })
+  expect(state.writes[1]!.search).toBe('?for=default'); expect(state.writes[0]!.body).toMatchObject({ top: [{ line: 'anthropic:sonnet', why: 'Design mocks stay on Opus while the design gate is tuned (AEON-912).' }], bottom: [], not: {}, revision: 2 })
   await expect(toast(page, 'Saved for everyone')).toBeVisible()
   await page.getByRole('button', { name: 'Undo', exact: true }).last().click()
   await expect(pick(page, 'design')).toContainText('Opus 5.5 · xhigh')
@@ -221,6 +221,26 @@ for (const status of [409, 403]) test(`a ${status} refusal says so, keeps what w
   await expect(page.locator('[data-models-error]')).toContainText(status === 409 ? 'Changed elsewhere. The page was refreshed; the change was not saved.' : 'You do not have permission to do this. The change was not saved.')
   await expect(pick(page, 'all')).toContainText('GPT-6.1 Sol · xhigh'); await expect(page.getByRole('button', { name: 'Undo', exact: true })).toHaveCount(0)
   expect(state.writes).toHaveLength(1)
+})
+
+test('a save refusal and its recovery leave every model control where it was', async ({ page }) => {
+  const state = await open(page)
+  const controls = { scope: page.locator('[data-scope-group]'), defaultPick: pick(page, 'all'), designPick: pick(page, 'design'), conceptPick: pick(page, 'concept'), why: page.getByRole('button', { name: 'Why?' }) }
+  const guard = await controlStability(page, controls)
+  await guard.check(async () => {
+    state.setFail(409)
+    await pick(page, 'all').click(); await option(page, 'anthropic:opus').locator('.lvc[data-eff="max"]').click()
+    await expect(page.locator('[data-models-error]')).toContainText('Changed elsewhere. The page was refreshed; the change was not saved.')
+  })
+  await guard.check(async () => {
+    state.setFail(undefined)
+    await pick(page, 'all').click(); await option(page, 'anthropic:opus').locator('.lvc[data-eff="max"]').click()
+    await expect(page.locator('[data-models-error]')).toHaveCount(0)
+    await expect(pick(page, 'all')).toContainText('Opus 5.5 · max')
+  })
+  guard.done()
+  // Chromium reports the refused write. Anything else on the console is a real fault.
+  expect(state.problems).toEqual(['Failed to load resource: the server responded with a status of 409 (Conflict)'])
 })
 
 test('a failing read shows one honest line with Try again, in place of the card', async ({ page }) => {
