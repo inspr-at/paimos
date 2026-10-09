@@ -354,6 +354,27 @@ CREATE CONSTRAINT TRIGGER principals_use_system_audit AFTER INSERT ON principals
           AND current_setting('aeon.account_use_seeding',true)='on')
     EXECUTE FUNCTION aeon_account_use_system_audit();
 
+-- A migration can seed several tenants in one transaction. Its audit must
+-- wait until every tenant's contexts, cells and mappings have been prepared.
+CREATE FUNCTION aeon_account_use_migration_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE actor uuid; prior text := current_setting('aeon.tenant_id',true);
+BEGIN
+    PERFORM set_config('aeon.tenant_id',NEW.tenant_id::text,true);
+    SELECT id INTO STRICT actor FROM principals WHERE tenant_id=NEW.tenant_id
+        AND kind='agent' AND name='System' AND roles @> ARRAY['system']::text[];
+    INSERT INTO events(tenant_id,actor_principal_id,type,after,metadata)
+        VALUES(NEW.tenant_id,actor,'account_use.migrated',jsonb_build_object('confirmation_required',true),
+               jsonb_build_object('migration','1309','policy','preserve_pre_matrix_behaviour'));
+    PERFORM set_config('aeon.tenant_id',coalesce(prior,''),true);
+    RETURN NULL;
+EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('aeon.tenant_id',coalesce(prior,''),true);
+    RAISE;
+END $$;
+CREATE CONSTRAINT TRIGGER account_use_rules_migration_audit AFTER INSERT ON account_use_rules
+    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.confirmation_required)
+    EXECUTE FUNCTION aeon_account_use_migration_audit();
+
 CREATE FUNCTION aeon_seed_account_use(p_tenant uuid,p_migrated boolean) RETURNS boolean
 LANGUAGE plpgsql AS $$
 DECLARE inserted integer; actor uuid; default_context uuid; prior text := current_setting('aeon.account_use_seeding',true);
@@ -387,9 +408,6 @@ BEGIN
             SELECT p_tenant,a.id,default_context,'migration',a.registered_by_principal_id FROM agent_accounts a WHERE a.tenant_id=p_tenant AND a.archived_at IS NULL;
         INSERT INTO project_work_contexts(tenant_id,project_id,context_id)
             SELECT p_tenant,n.id,default_context FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.tenant_id=p_tenant AND k.slug='project';
-        INSERT INTO events(tenant_id,actor_principal_id,type,after,metadata)
-            VALUES(p_tenant,actor,'account_use.migrated',jsonb_build_object('confirmation_required',true),
-                   jsonb_build_object('migration','1309','policy','preserve_pre_matrix_behaviour'));
     END IF;
     PERFORM set_config('aeon.account_use_seeding',coalesce(prior,''),true);
     RETURN true;
