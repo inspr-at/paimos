@@ -57,7 +57,7 @@ func TestStepupProjectionBoundsTargetPermissionsAtProjectLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.exec(t, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'settings.manage')`, f.person.TenantID, role)
-	f.exec(t, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.person.TenantID, f.reader.ID, role, f.project)
+	f.exec(t, `UPDATE role_bindings SET role_id=$3 WHERE tenant_id=$1 AND principal_id=$2 AND scope_type='project' AND scope_id=$4`, f.person.TenantID, f.reader.ID, role, f.project)
 	agent := f.agent
 	agent.Scopes = append(agent.Scopes, "approvals.request", "nodes.read")
 	mod := stepup.New(f.d.App, nil, "")
