@@ -6554,7 +6554,15 @@
     ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"every kind names its project with a new-tab link; P opens it, but not while typing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"revisiting a question after Decide & next retains its project link, colour and P action","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"tablet toolbar stays visible and stable on opening and resizing dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"tablet toolbar stays visible and stable on opening and resizing light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the Agents desk panel names each item's project with a new-tab link","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the Agents doctrine row resolves its project through the authorized ticket lookup","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -14957,6 +14965,10 @@
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"keeps invalid native tier revision 9007199254740992 unavailable","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"keeps invalid native tier revision null unavailable","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-project.unit.test.ts","name":"Decision Desk project identity > keeps the canonical run approval project and resolves run approval history through its work order","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-project.unit.test.ts","name":"Decision Desk project identity > keeps the project link and colour on a question or handover after deciding","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-project.unit.test.ts","name":"Decision Desk project identity > links a project by key, keeps one hue per key and leaves workspace items neutral","tier":"ESSENTIAL"}
     ,

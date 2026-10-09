@@ -14,12 +14,18 @@ import { useAgents } from '../stores/agents'
 import type { KeyTrimCursors } from '../lib/keyTrim'
 import { useDecisionDesk } from '../stores/decisionDesk'
 import { revokeApproval } from '../lib/agents'
+import { getRun } from '../lib/agentRows'
 import { doctrineInbox, inboxChanged } from '../lib/doctrineInbox'
 
 const session = useSession()
 const agents = useAgents()
 const desk = useDecisionDesk(), route = useRoute()
-const makeAdapters = () => ({ tiers: nativeTierAdapter(async () => { await agents.refreshSessions(); return agents.sessions }, can, async (project, id) => {
+const makeAdapters = () => ({ approvalRun: async (id: string) => {
+  const identity = session.identity
+  const run = await getRun(id)
+  if (session.identity !== identity || !session.authenticationCurrent()) throw new Error('The person changed while reading approval ownership.')
+  return agents.admitRun(run)
+}, tiers: nativeTierAdapter(async () => { await agents.refreshSessions(); return agents.sessions }, can, async (project, id) => {
   await agents.loadSessionDetail(project, id)
   return agents.sessionById(id)
 }) })

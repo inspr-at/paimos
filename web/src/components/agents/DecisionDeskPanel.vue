@@ -1,16 +1,42 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDecisionDesk } from '../../stores/decisionDesk'
 import { useProjects } from '../../stores/projects'
 import { deskItemID, deskProject, projectColor, type DeskProjectionItem } from '../../lib/decisionDesk'
+import { getDoctrineInbox } from '../../lib/doctrine'
+import { readDoctrineProjects } from '../../lib/decisionDeskApi'
 import AppIcon from '../AppIcon.vue'
 
 const desk = useDecisionDesk(), projects = useProjects()
 onMounted(() => { void projects.load() })
+const doctrineProjects = ref(new Map<string, string>()), projectError = ref('')
+let projectGeneration = 0
+watch(() => desk.projection, async projection => {
+  const turn = ++projectGeneration
+  doctrineProjects.value = new Map(); projectError.value = ''
+  const ids = new Set(projection?.items.filter(item => item.kind === 'doctrine' && !item.project_id).map(item => item.id))
+  if (!ids.size) return
+  try {
+    const inbox = await getDoctrineInbox()
+    if (turn !== projectGeneration || desk.projection !== projection) return
+    const rules = inbox.items.filter(rule => ids.has(rule.id))
+    const tickets = await readDoctrineProjects(rules)
+    if (turn !== projectGeneration || desk.projection !== projection) return
+    doctrineProjects.value = new Map(rules.flatMap(rule => {
+      const project = rule.ticket ? tickets.get(rule.ticket) : undefined
+      return project ? [[rule.id, project] as const] : []
+    }))
+  } catch {
+    if (turn === projectGeneration && desk.projection === projection) projectError.value = 'The projects of some rule changes could not be read.'
+  }
+}, { immediate: true, flush: 'sync' })
+onBeforeUnmount(() => { projectGeneration++ })
+const panelError = computed(() => desk.error || projectError.value)
 // AEON-1057: each row names its project; the link opens it in a new tab.
 function rowProject(item: DeskProjectionItem) {
-  const project = item.project_id ? projects.byId(item.project_id) : undefined
+  const id = item.project_id || (item.kind === 'doctrine' ? doctrineProjects.value.get(item.id) : undefined)
+  const project = id ? projects.byId(id) : undefined
   return project ? deskProject({ projectId: project.id, projectName: project.title, projectKey: project.key }) : undefined
 }
 const groups = computed(() => {
@@ -41,7 +67,7 @@ const incomplete = computed(() => !!desk.projection && (desk.projection.has_more
         </li>
       </ul>
     </div>
-    <p v-if="desk.error" class="desk-status" role="status">{{ desk.error }} <button type="button" class="btn sm ghost" :disabled="desk.loading" @click="desk.refresh()">Retry</button></p>
+    <p v-if="panelError" class="desk-status" role="status">{{ panelError }} <button type="button" class="btn sm ghost" :disabled="desk.loading" @click="desk.refresh()">Retry</button></p>
     <p v-else-if="desk.count === null" class="desk-status" role="status">Reading the desk…</p>
     <p v-else-if="desk.count === 0" class="desk-status">Nothing waits on you.</p>
     <p v-else-if="incomplete" class="desk-status">Some source items are outside this page. <RouterLink to="/decision-desk">Open the desk for current coverage.</RouterLink></p>

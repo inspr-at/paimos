@@ -111,6 +111,74 @@ test('the Agents desk panel names each item\'s project with a new-tab link', asy
   await expect(page).toHaveURL(/item=q:question-2$/)
 })
 
+test('revisiting a question after Decide & next retains its project link, colour and P action', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await openRound(page)
+  await move(page, 'j', 'Which migration should carry the index?')
+  const link = page.getByTestId('desk-project-link')
+  const color = await link.evaluate(element => getComputedStyle(element).color)
+  await page.getByTestId('desk-decide').click()
+  await expect(page.getByTestId('desk-paper').getByRole('heading', { level: 2 })).toHaveText('Should the successor continue the review?')
+  await move(page, 'k', 'Which migration should carry the index?')
+  await expect(page.getByTestId('desk-paper').locator('.waiting')).toHaveText('Decided')
+  await expect(link).toHaveAttribute('href', AEON.href)
+  expect(await link.evaluate(element => getComputedStyle(element).color)).toBe(color)
+  await page.keyboard.press('p')
+  expect(await opened(page)).toEqual([[AEON.href, '_blank']])
+})
+
+test('the Agents doctrine row resolves its project through the authorized ticket lookup', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const world = await mockDecisionDesk(page)
+  world.rule.ticket = 'AEON-1'
+  await page.goto('/agents')
+  const panel = page.getByRole('region', { name: 'Decision Desk', exact: true })
+  const row = panel.getByRole('listitem').filter({ hasText: 'Doctrine change' })
+  const link = row.getByTestId('agents-desk-project')
+  await expect(link).toHaveText(AEON.name)
+  await expect(link).toHaveAttribute('href', AEON.href)
+  await expect(link).toHaveAttribute('target', '_blank')
+  await expect(link).toHaveAttribute('rel', /\bnoopener\b/)
+  expect(world.reads.some(path => path.startsWith('/api/nodes/lookup?') && path.includes('AEON-1'))).toBe(true)
+  await expectStableControls({
+    controls: { review: panel.getByTestId('agents-desk-review'), history: panel.getByTestId('agents-desk-history'), project: link },
+    interactions: [{ name: 'hover the doctrine project', run: async () => { await link.hover() } }],
+  })
+  await row.getByRole('link', { name: 'Doctrine change', exact: true }).click()
+  await expect(page).toHaveURL(/item=r:rule-1$/)
+})
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`tablet toolbar stays visible and stable on opening and resizing ${theme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 768, height: 1000 })
+    await openRound(page, theme)
+    const actions = { pager: page.getByTestId('desk-pager'), decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close') }
+    const fits = async () => {
+      const dialog = await page.locator('dialog.desk-dialog').boundingBox()
+      expect(dialog).not.toBeNull()
+      for (const [name, control] of Object.entries(actions)) {
+        const box = await control.boundingBox()
+        expect(box, name).not.toBeNull()
+        expect(box!.width, name).toBeGreaterThan(0)
+        expect(box!.x, name).toBeGreaterThanOrEqual(dialog!.x)
+        expect(box!.x + box!.width, `${name} fits inside the dialog`).toBeLessThanOrEqual(dialog!.x + dialog!.width)
+      }
+      expect(await page.locator('.desk-toolbar').evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1)
+    }
+    await fits()
+    await expectStableControls({ controls: { ...actions, frame: page.getByTestId('desk-frame') }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
+      { name: 'question in the same project', run: async () => { await move(page, 'j', 'Which migration should carry the index?'); await fits() } },
+      { name: 'handover in another project', run: async () => { await move(page, 'j', 'Should the successor continue the review?'); await fits() } },
+      { name: 'rule with its native action', run: async () => { await move(page, 'j', 'An agent needs your steer'); await move(page, 'j', 'Keep mutation checks in the transaction'); await fits() } },
+    ] })
+    await page.screenshot({ path: testInfo.outputPath(`tablet-${theme}.png`) })
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await fits()
+    await page.setViewportSize({ width: 768, height: 1000 })
+    await fits()
+  })
+}
+
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`the desk controls stay still across a change of project ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })

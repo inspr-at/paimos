@@ -37,7 +37,7 @@ let shown: { id: string; project: DeskProject } | undefined
 const tabWidth = ref(360)
 const tabPath = computed(() => { const w = tabWidth.value; return `M0 46V12Q0 0 12 0H${w - 62}Q${w - 50} 0 ${w - 46} 13L${w - 39} 32Q${w - 35} 46 ${w - 21} 46Z` })
 const tabOutline = computed(() => { const w = tabWidth.value; return `M.5 45.5V12 Q.5 .5 12 .5H${w - 62} Q${w - 50} .5 ${w - 46} 13L${w - 39} 32Q${w - 35} 45.5 ${w - 21} 45.5` })
-function sizeTab() { tabWidth.value = window.matchMedia('(max-width: 720px)').matches ? Math.min(360, window.innerWidth - 28) : 360 }
+function sizeTab() { tabWidth.value = window.matchMedia('(max-width: 960px)').matches ? Math.min(360, window.innerWidth - 28) : 360 }
 sizeTab(); window.addEventListener('resize', sizeTab)
 const roundProjects = computed(() => new Set(props.round.map(id => props.items.find(row => row.id === id)?.projectId).filter(Boolean)).size)
 function jumpProject(at: number) { const row = props.items.find(row => row.id === props.round[at]); return row ? deskProject(row) : undefined }
@@ -66,7 +66,7 @@ watch(frame, element => {
   // Pattern A grows downward until the body needs scrolling. From that point
   // the series is pattern B and keeps its frame, even for a later short memo.
   sizeObserver = new ResizeObserver(() => {
-    if (scrollingHeight.value || window.matchMedia('(max-width: 720px)').matches || !body.value) return
+    if (scrollingHeight.value || window.matchMedia('(max-width: 960px)').matches || !body.value) return
     if (body.value.scrollHeight > body.value.clientHeight + 1) scrollingHeight.value = element.getBoundingClientRect().height
   })
   sizeObserver.observe(element)
@@ -446,7 +446,9 @@ h3 { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacin
 /* Where the project changes in the round, a dashed hairline between the rows. */
 .jump-popover li.project-change { border-top: 1px dashed var(--line-2); }
 @media (prefers-reduced-motion: no-preference) { .slam { animation: stamp-slam .28s ease-out; } @keyframes stamp-slam { from { transform: scale(1.18); } to { transform: scale(1); } } }
-@media (max-width: 720px) {
+/* Small tablets use the same pinned action bar as phones, so the folder tab
+   never competes with the reserved action widths in a narrow toolbar. */
+@media (max-width: 960px) {
   .action-buttons .native-action { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
   .action-buttons button[data-testid="desk-skip"] { grid-column: 1; grid-row: 1; }
   .action-buttons .desk-primary { grid-column: 2; grid-row: 1; }
