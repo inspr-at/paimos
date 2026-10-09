@@ -154,6 +154,62 @@
     ,
     "browser:tests/agents-dial-daily.spec.ts:400 light: folding, picking a harness, folds and the info area keep every control put"
     ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: \"● N running (M waiting) ▾\" opens the info area, from the folded dial too, and it is remembered"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: a flag opens the dial at that harness, and a pick is remembered per person"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: a harness with no account says so and links to add one"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: a stale reading never claims the limit, although the server also refuses starts then"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: an older plan without daily fields still draws the dial"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: at the limit the flag is red and says where new work goes"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: each row shows its usage lines and pace state in a fixed 88 px row"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: folded, the dial is one row as high as the other folded cards and flags only what needs attention"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: honest states: no reading is not on pace, and nothing is flagged"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the Accounts tile names what blocks a harness and offers Verify again in place, as Accounts and computers does"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the detail reads week, today, the bar and the pace state, then lists the accounts read-only"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the dial and its detail pass axe, open with both folds and folded, in both themes"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the folded dial keeps its place when a flag appears"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the info area states demand against the dial, with and without waiting work"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the old header Boost today is gone and nothing writes to its endpoint"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: vendor-reported resets are shown, and nothing else is claimed about them"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: with no pick the dial selects what needs attention"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: with nothing to flag it selects the first harness with a daily limit, and a pick that is no row is ignored"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: without the right to manage accounts the Accounts tile names the problem and offers no Verify"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:phone › AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › At the limit: follow the model ladder or wait, and nothing else"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › Boost today is read-only for accounts the person may not change; the server refuses that write too"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › Boost today is read-only without the right to manage accounts"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › Boost today: one number for today, typed as used or left, restated both ways, ending at the person’s midnight"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › Pace: a wrong number is said in place and nothing is written"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › Pace: the choice and the points a day are written whole, with every harness and the total untouched"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › a changed plan revision is re-read and the edit is not forced over it"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › a failed write keeps the confirmed settings on screen and says so"
+    ,
     "browser:tests/agents-dial.spec.ts:AEON-781: a dial folded before the fold sections stays folded"
     ,
     "browser:tests/agents-dial.spec.ts:AEON-781: a held + speeds up, pauses before a mode boundary and saves only the final value once"
@@ -5120,57 +5176,61 @@
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"400 light: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: \"● N running (M waiting) ▾\" opens the info area, from the folded dial too, and it is remembered","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: \"● N running (M waiting) ▾\" opens the info area, from the folded dial too, and it is remembered","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a flag opens the dial at that harness, and a pick is remembered per person","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a flag opens the dial at that harness, and a pick is remembered per person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a harness with no account says so and links to add one","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a harness with no account says so and links to add one","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a stale reading never claims the limit, although the server also refuses starts then","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a stale reading never claims the limit, although the server also refuses starts then","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: an older plan without daily fields still draws the dial","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: an older plan without daily fields still draws the dial","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: at the limit the flag is red and says where new work goes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: at the limit the flag is red and says where new work goes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: each row shows its usage lines and pace state in a fixed 88 px row","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: each row shows its usage lines and pace state in a fixed 88 px row","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: folded, the dial is one row as high as the other folded cards and flags only what needs attention","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: folded, the dial is one row as high as the other folded cards and flags only what needs attention","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: honest states: no reading is not on pace, and nothing is flagged","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: honest states: no reading is not on pace, and nothing is flagged","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the detail reads week, today, the bar and the pace state, then lists the accounts read-only","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the Accounts tile names what blocks a harness and offers Verify again in place, as Accounts and computers does","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the dial and its detail pass axe, open with both folds and folded, in both themes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the detail reads week, today, the bar and the pace state, then lists the accounts read-only","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the folded dial keeps its place when a flag appears","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the dial and its detail pass axe, open with both folds and folded, in both themes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the info area states demand against the dial, with and without waiting work","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the folded dial keeps its place when a flag appears","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the old header Boost today is gone and nothing writes to its endpoint","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the info area states demand against the dial, with and without waiting work","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: vendor-reported resets are shown, and nothing else is claimed about them","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the old header Boost today is gone and nothing writes to its endpoint","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: with no pick the dial selects what needs attention","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: vendor-reported resets are shown, and nothing else is claimed about them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: with nothing to flag it selects the first harness with a daily limit, and a pick that is no row is ignored","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: with no pick the dial selects what needs attention","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"phone › AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: with nothing to flag it selects the first harness with a daily limit, and a pick that is no row is ignored","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › At the limit: follow the model ladder or wait, and nothing else","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: without the right to manage accounts the Accounts tile names the problem and offers no Verify","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Boost today is read-only for accounts the person may not change; the server refuses that write too","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"phone › AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Boost today is read-only without the right to manage accounts","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › At the limit: follow the model ladder or wait, and nothing else","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Boost today: one number for today, typed as used or left, restated both ways, ending at the person’s midnight","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Boost today is read-only for accounts the person may not change; the server refuses that write too","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Pace: a wrong number is said in place and nothing is written","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Boost today is read-only without the right to manage accounts","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Pace: the choice and the points a day are written whole, with every harness and the total untouched","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Boost today: one number for today, typed as used or left, restated both ways, ending at the person’s midnight","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › a changed plan revision is re-read and the edit is not forced over it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Pace: a wrong number is said in place and nothing is written","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › a failed write keeps the confirmed settings on screen and says so","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Pace: the choice and the points a day are written whole, with every harness and the total untouched","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › a changed plan revision is re-read and the edit is not forced over it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › a failed write keeps the confirmed settings on screen and says so","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"1024 dark wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
