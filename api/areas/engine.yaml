@@ -4,7 +4,7 @@ paths:
   /engine/admission:
     post:
       summary: Evaluate shadow admission without starting or reserving work
-      description: "Requires engine.admission and agents.plan.read, plus account.read for people or explicit account.overview.read for agents when capacity is evaluated. The live person's plan, two-slot first-build finishing reserve, work PR WIP ceiling, fresh host signals and account capacity floors decide. Missing inputs deny. Every successful evaluation is an event. The result grants no launch, claim, merge or deployment authority."
+      description: "Requires engine.admission and agents.plan.read, plus account.read for people or explicit account.overview.read for agents when capacity is evaluated. The live person's plan, two-slot first-build finishing reserve, work PR WIP ceiling, fresh host signals, account capacity floors and the daily ceiling decide. Exhausted daily headroom denies with daily_limit; missing, malformed, redacted, future or older-than-two-minute daily evidence denies with daily_limit_unknown. Resolve an allowed ladder successor through /models/resolve, then evaluate that harness with a new request ID. Missing inputs deny. Every successful evaluation is an event. The result grants no launch, claim, merge or deployment authority."
       security: *auth
       requestBody:
         required: true
@@ -46,7 +46,7 @@ components:
           description: "Advisory result only. A shadow allow neither reserves a slot nor authorizes a start."
         reason:
           type: string
-          description: "Stable reason code, with no private account or host measurements."
+          description: "Stable reason code, with no private account or host measurements. daily_limit means measured daily exhaustion; daily_limit_unknown means daily evidence cannot authorize a start."
         retry_after:
           type: [integer, 'null']
           minimum: 1
