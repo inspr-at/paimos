@@ -1141,12 +1141,13 @@ export function describeEnrollmentDiagnostic(view: HarnessView, enrollment: { ac
   if (!item) return null
   const cause = probeDetail(item.reason, item.reason_detail, enrollment.harness)
   return {
-    hint: cause ? `${harnessDisplayName(enrollment.harness)}: ${item.reason === 'login_required' ? '' : item.reason === 'pairing_sync_failed' ? 'pairing sync failed: ' : 'sign-in check failed: '}${cause}.` : '',
+    hint: item.reason === 'unsettled_previous_run' ? HARNESS_HINTS.unsettled_previous_run! : cause ? `${harnessDisplayName(enrollment.harness)}: ${item.reason === 'login_required' ? '' : item.reason === 'pairing_sync_failed' ? 'pairing sync failed: ' : 'sign-in check failed: '}${cause}.` : '',
     command: harnessFix(enrollment.harness, item.reason, cause)?.command ?? '',
   }
 }
 
 const HARNESS_HINTS: Record<string, string> = {
+  unsettled_previous_run: "Restore the helper's connection to Aeon; settlement reconciliation retries automatically. If the block persists, ask the operator to inspect the previous run and its reservations.",
   repin_pending: 'Retries automatically.',
   cli_unavailable: 'Restore the approved executable, then retry.',
   harness_failed: 'Restore the approved installation, then retry.',
@@ -1187,7 +1188,7 @@ export function describeHarnessHint(view: HarnessView, harness: string): string 
 
 function reasonLabel(status: string, reason?: string): string {
   const labels: Record<string, string> = { ready: 'Ready', blocked: 'Needs attention', login_required: 'Sign in required', checking: 'Checking', draining: 'Draining' }
-  const reasons: Record<string, string> = { pairing_sync_failed: 'Pairing sync failed', repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair', binding_missing: 'Approved, not set up here', probe_pending: 'Checking account (up to 60 seconds)', probe_timeout: 'Account check timed out after 60 seconds', probe_failed: 'Account availability check failed', capacity_capture: 'Capturing capacity (up to 10 seconds)', capacity_timeout: 'Capacity capture timed out after 10 seconds' }
+  const reasons: Record<string, string> = { unsettled_previous_run: 'Previous run settlement unconfirmed', pairing_sync_failed: 'Pairing sync failed', repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair', binding_missing: 'Approved, not set up here', probe_pending: 'Checking account (up to 60 seconds)', probe_timeout: 'Account check timed out after 60 seconds', probe_failed: 'Account availability check failed', capacity_capture: 'Capturing capacity (up to 10 seconds)', capacity_timeout: 'Capacity capture timed out after 10 seconds' }
   // A code from a newer daemon is shown raw rather than dropped or guessed.
   if (!HARNESS_STATES.includes(status as typeof HARNESS_STATES[number])) return `Needs attention · ${reason ?? status}`
   if (reason) return reasons[reason] ?? `Needs attention · ${reason}`

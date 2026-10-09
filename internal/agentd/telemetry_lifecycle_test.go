@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -18,6 +19,273 @@ import (
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/client"
 )
+
+type oldSettlementAPI struct {
+	*fakeAPI
+	runRead       Run
+	readErr       error
+	reads, probes int
+}
+
+type oldSettlementAdapter struct{ diagnosticProbeAdapter }
+
+func (*oldSettlementAdapter) Name() string { return Claude }
+
+func (a *oldSettlementAPI) Queued(context.Context) ([]Run, error) { return nil, nil }
+func (a *oldSettlementAPI) GetRun(context.Context, string) (Run, error) {
+	a.reads++
+	return a.runRead, a.readErr
+}
+func (a *oldSettlementAPI) Probe(context.Context, string, string, string, bool) error {
+	a.probes++
+	return nil
+}
+
+// Risk: the 863fe008 checkpoint can block Claude forever even after the server
+// settled it. Server status alone, a different binding or an unowned PID must
+// never authorize clearing the gap or changing generation through a probe.
+func TestOldSettlementGapCheckpointReconciliation(t *testing.T) {
+	for _, scenario := range []string{"settled", "unsettled", "unreachable", "missing_proof", "wrong_run", "wrong_agent", "wrong_account", "wrong_order", "wrong_purpose", "wrong_outcome", "still_running", "exit_unconfirmed", "current_generation", "parked_report"} {
+		t.Run(scenario, func(t *testing.T) {
+			s, api, _ := testSupervisor(t)
+			s.accounts[0].Harness = Claude
+			s.adapters[Claude] = &oldSettlementAdapter{diagnosticProbeAdapter{fakeAdapter: &fakeAdapter{}, statuses: map[string]ProbeStatus{"local": {OK: true}}}}
+			raw, err := os.ReadFile("testdata/checkpoint-aeon-1041.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var checkpoint struct {
+				Version int      `json:"version"`
+				Records []Record `json:"records"`
+			}
+			if err := json.Unmarshal(raw, &checkpoint); err != nil || checkpoint.Version != RecordSchemaVersion || len(checkpoint.Records) != 1 {
+				t.Fatal("invalid checkpoint fixture", err)
+			}
+			r := checkpoint.Records[0]
+			r.Workspace = s.workspace
+			if scenario == "exit_unconfirmed" {
+				r.ExitObserved = false
+			}
+			if scenario == "parked_report" {
+				r.ReportParked = true
+				r.Pending = []Telemetry{{Sequence: 5, Kind: "finished", Status: "failed", ErrorCode: "reporter_unavailable"}}
+			}
+			if err := s.journal.Put(r); err != nil {
+				t.Fatal(err)
+			}
+			confirmed := true
+			remote := &oldSettlementAPI{fakeAPI: api, runRead: Run{ID: r.RunID, WorkOrderID: r.WorkOrderID, AgentPrincipalID: r.PrincipalID, AccountID: r.AccountID, Purpose: r.ExecutionMode, Status: "failed", ReservationsSettled: &confirmed}}
+			s.api = remote
+			s = restartTelemetryFixture(t, s)
+			if scenario == "current_generation" {
+				r = s.runs[r.RunID].record
+				r.Generation = s.generation
+				r.Pending = []Telemetry{{Sequence: 5, Kind: "finished", Status: "failed", ErrorCode: "reporter_unavailable"}}
+				r.ReportParked = true
+				if err := s.journal.Put(r); err != nil {
+					t.Fatal(err)
+				}
+				s.runs[r.RunID].record = r
+			}
+			switch scenario {
+			case "unsettled":
+				confirmed = false
+			case "unreachable":
+				remote.readErr = errors.New("fixture server unreachable")
+			case "missing_proof":
+				remote.runRead.ReservationsSettled = nil
+			case "wrong_run":
+				remote.runRead.ID = "another-run"
+			case "wrong_agent":
+				remote.runRead.AgentPrincipalID = "another-agent"
+			case "wrong_account":
+				remote.runRead.AccountID = "another-account"
+			case "wrong_order":
+				remote.runRead.WorkOrderID = "another-order"
+			case "wrong_purpose":
+				remote.runRead.Purpose = "managed"
+			case "wrong_outcome":
+				remote.runRead.Status = "cancelled"
+			case "still_running":
+				remote.runRead.Status = "running"
+			}
+			before := s.journal.Snapshot()[0]
+			var diagnostics []string
+			s.pollDiagnostic = func(reason string) { diagnostics = append(diagnostics, reason) }
+			err = s.PollOnce(t.Context())
+			status := s.Lifecycle("")
+			resolved := scenario == "settled" || scenario == "parked_report"
+			if resolved {
+				if err != nil || !status.Ready || remote.probes != 1 || len(status.SettlementPendingRunIDs) != 0 || len(status.UnconfirmedRunIDs) != 0 || len(diagnostics) != 0 {
+					t.Fatalf("settled account did not recover: %+v probes=%d error=%v diagnostics=%v", status, remote.probes, err, diagnostics)
+				}
+				before.SettlementGap = false
+				before.DeadLetters = append(before.DeadLetters, before.Pending...)
+				before.Pending = nil
+			} else if scenario != "current_generation" {
+				if remote.probes != 0 || status.Ready || len(status.SettlementPendingRunIDs) != 1 || status.AccountStatuses["account"].Reason != agentsetup.UnsettledPreviousRun || status.HarnessDetails[Claude].Reason != agentsetup.UnsettledPreviousRun || !reflect.DeepEqual(diagnostics, []string{agentsetup.UnsettledPreviousRun}) {
+					t.Fatalf("unsafe gap did not remain frozen with its cause: %+v probes=%d diagnostics=%v", status, remote.probes, diagnostics)
+				}
+				if scenario != "exit_unconfirmed" && !errors.Is(err, errSettlementParked) {
+					t.Fatal("wrong failure reason", err)
+				}
+			}
+			if scenario == "exit_unconfirmed" || scenario == "current_generation" {
+				if remote.reads != 0 {
+					t.Fatal("reconciled without prior-generation local exit proof")
+				}
+			} else if remote.reads != 1 {
+				t.Fatal("reconciliation did not read the run")
+			}
+			if !reflect.DeepEqual(s.journal.Snapshot(), []Record{before}) || len(api.reports) != 0 || api.claims != 0 {
+				t.Fatal("reconciliation lost evidence, posted telemetry or claimed work")
+			}
+			if scenario == "unreachable" || scenario == "unsettled" {
+				remote.readErr, confirmed = nil, true
+				if err := s.ProbeOnce(t.Context()); err != nil || !s.Lifecycle("").Ready {
+					t.Fatal("later server confirmation did not clear freeze", err)
+				}
+				resolved = true
+			}
+			if resolved {
+				s = restartTelemetryFixture(t, s)
+				reads := remote.reads
+				if err := s.ProbeOnce(t.Context()); err != nil || !s.Lifecycle("").Ready || remote.reads != reads || s.journal.Snapshot()[0].SettlementGap {
+					t.Fatal("reconciled checkpoint was not durable", err)
+				}
+			}
+		})
+	}
+}
+
+// settlementTimeoutAPI returns the error a nested GetRun deadline produces.
+// onRead runs while the parent poll context is still the caller's context.
+type settlementTimeoutAPI struct {
+	*fakeAPI
+	reads, queues int
+	probed        []string
+	onRead        func()
+}
+
+func (a *settlementTimeoutAPI) GetRun(context.Context, string) (Run, error) {
+	a.reads++
+	if a.onRead != nil {
+		a.onRead()
+	}
+	return Run{}, context.DeadlineExceeded
+}
+
+func (a *settlementTimeoutAPI) Probe(_ context.Context, accountID, _, _ string, _ bool) error {
+	a.probed = append(a.probed, accountID)
+	return nil
+}
+
+func (a *settlementTimeoutAPI) Queued(context.Context) ([]Run, error) {
+	a.queues++
+	return []Run{a.run}, nil
+}
+
+func settlementTimeoutSupervisor(t *testing.T) (*Supervisor, *settlementTimeoutAPI, string) {
+	t.Helper()
+	s, api, _ := testSupervisor(t)
+	s.accounts = []EnrolledAccount{
+		{ID: "gapped", Key: "gapped-key", Harness: Codex},
+		{ID: "account", Key: "local", Harness: Codex},
+	}
+	raw, err := os.ReadFile("testdata/checkpoint-aeon-1041.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checkpoint struct {
+		Version int      `json:"version"`
+		Records []Record `json:"records"`
+	}
+	if err := json.Unmarshal(raw, &checkpoint); err != nil || checkpoint.Version != RecordSchemaVersion || len(checkpoint.Records) != 1 {
+		t.Fatal("invalid checkpoint fixture", err)
+	}
+	r := checkpoint.Records[0]
+	r.AccountID = "gapped"
+	r.Workspace = s.workspace
+	if err := s.journal.Put(r); err != nil {
+		t.Fatal(err)
+	}
+	remote := &settlementTimeoutAPI{fakeAPI: api}
+	s.api = remote
+	s = restartTelemetryFixture(t, s)
+	return s, remote, r.RunID
+}
+
+// Risk: the 5s run-detail deadline is a child timeout. Passing it through
+// pollContextError aborts a still-live 20s poll before other accounts are
+// probed or queued work is dispatched, and it suppresses unsettled_previous_run.
+// The timed-out account stays frozen and is read again on the next poll.
+// A parent that ends during the read still aborts the poll.
+func TestSettlementReadTimeoutDoesNotAbortLivePoll(t *testing.T) {
+	t.Run("live parent", func(t *testing.T) {
+		s, remote, gapID := settlementTimeoutSupervisor(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		var diagnostics []string
+		s.pollDiagnostic = func(reason string) { diagnostics = append(diagnostics, reason) }
+		err := s.PollOnce(ctx)
+		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, errSettlementParked) {
+			t.Fatalf("child deadline aborted the live poll: parent=%v err=%v", ctx.Err(), err)
+		}
+		status := s.Lifecycle("")
+		if remote.reads != 1 || remote.queues != 1 || !reflect.DeepEqual(remote.probed, []string{"account"}) || remote.claims != 1 || len(remote.routeAccounts) != 1 || remote.routeAccounts[0] != "account" || !reflect.DeepEqual(diagnostics, []string{agentsetup.UnsettledPreviousRun}) {
+			t.Fatalf("live poll did not freeze, probe and dispatch: reads=%d queues=%d probed=%v claims=%d routes=%v diagnostics=%v err=%v", remote.reads, remote.queues, remote.probed, remote.claims, remote.routeAccounts, diagnostics, err)
+		}
+		if !status.Ready || status.AccountStatuses["gapped"].Reason != agentsetup.UnsettledPreviousRun || status.AccountStatuses["account"].State != "ready" || len(status.SettlementPendingRunIDs) != 1 || status.SettlementPendingRunIDs[0] != gapID || len(status.ActiveRunIDs) != 1 || status.ActiveRunIDs[0] != "run" {
+			t.Fatalf("sibling dispatch or settlement cause lost: %+v", status)
+		}
+		if err := s.PollOnce(ctx); ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, errSettlementParked) {
+			t.Fatalf("repeated child deadline aborted the live poll: parent=%v err=%v", ctx.Err(), err)
+		}
+		if remote.reads != 2 || remote.queues != 2 || !reflect.DeepEqual(remote.probed, []string{"account", "account"}) || remote.claims != 1 {
+			t.Fatalf("hung run detail did not stay local to the frozen account: reads=%d queues=%d probed=%v claims=%d", remote.reads, remote.queues, remote.probed, remote.claims)
+		}
+		for _, saved := range s.journal.Snapshot() {
+			if saved.RunID == gapID && !saved.SettlementGap {
+				t.Fatal("timed-out reconciliation cleared the gap")
+			}
+		}
+		entry := s.runs["run"]
+		entry.mu.Lock()
+		proc, done := entry.process, entry.monitorDone
+		entry.mu.Unlock()
+		if proc != nil {
+			_ = proc.Stop(context.Background())
+		}
+		if done != nil {
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("dispatched run did not exit")
+			}
+		}
+	})
+	t.Run("parent ended during read", func(t *testing.T) {
+		s, remote, gapID := settlementTimeoutSupervisor(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		remote.onRead = cancel
+		var diagnostics []string
+		s.pollDiagnostic = func(reason string) { diagnostics = append(diagnostics, reason) }
+		err := s.PollOnce(ctx)
+		if !errors.Is(err, context.Canceled) || remote.queues != 0 || len(remote.probed) != 0 || remote.claims != 0 || len(diagnostics) != 0 {
+			t.Fatalf("ended parent kept probing or dispatching: err=%v queues=%d probed=%v claims=%d diagnostics=%v", err, remote.queues, remote.probed, remote.claims, diagnostics)
+		}
+		status := s.Lifecycle("")
+		if remote.reads != 1 || status.AccountStatuses["gapped"].Reason != agentsetup.UnsettledPreviousRun || status.Ready {
+			t.Fatalf("ended parent lost the freeze or probed the sibling: reads=%d %+v", remote.reads, status)
+		}
+		for _, saved := range s.journal.Snapshot() {
+			if saved.RunID == gapID && !saved.SettlementGap {
+				t.Fatal("cancelled reconciliation cleared the gap")
+			}
+		}
+	})
+}
 
 type telemetryHTTPAPI struct {
 	*fakeAPI

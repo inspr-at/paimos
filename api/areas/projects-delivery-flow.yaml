@@ -22,7 +22,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: reportProjectDeliveryRollout
-      description: 'Requires delivery.manage. Records a release run from the coordinator''s aeon.rollout.v1 record: the cut, live and healthy times, the release steps a to l with gates, waits and repeats, incidents with their recovery steps, the next human gate and an optional OPS estimate. Other rollout fields are accepted and not stored. The record is authoritative: a repeated report converges on the same rows and corrects them; unchanged rows emit no event. Labels and summaries that look like a credential are refused. At most 200 steps and 20 incidents, 256 KiB.'
+      description: 'Requires delivery.manage. Records a release run from the coordinator''s aeon.rollout.v1 record: the cut, live and healthy times, the release steps a to l with the exact-SHA rehearsal and the full test catalogue, gates, waits and repeats, incidents with their recovery steps, the next human gate, an optional OPS estimate, the reference to the qualification evidence (qualification.evidence) and the rollback class. Both release facts keep their recorded value when a later report omits them and are replaced when a report carries a value. Other rollout fields, including the rest of the qualification object, are accepted and not stored. The record is authoritative: a repeated report converges on the same rows and corrects them; unchanged rows emit no event. Labels and summaries that look like a credential are refused. At most 200 steps and 20 incidents, 256 KiB.'
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryFlowRolloutInput'}}}}
       responses:
@@ -105,7 +105,7 @@ components:
     DeliveryFlowItem:
       type: object
       additionalProperties: false
-      required: [id, kind, ref, title, prs, started_at, ended_at, pct_done, current_step_id, eta, target, next_human_gate]
+      required: [id, kind, ref, title, prs, started_at, ended_at, pct_done, current_step_id, eta, target, next_human_gate, qualification_evidence, rollback_class]
       properties:
         id: {type: string, format: uuid}
         kind: {type: string, enum: [release, change]}
@@ -144,6 +144,15 @@ components:
               properties:
                 principal_id: {type: [string, 'null'], format: uuid}
                 what: {type: string, maxLength: 120}
+        qualification_evidence:
+          type: [string, 'null']
+          maxLength: 200
+          pattern: '^[A-Za-z0-9._/#-]{1,200}$'
+          description: 'Reference to the hands-on native qualification evidence of a release, for example AEON-487/comment/native-qualification; never a URL. Null until a record reports it.'
+        rollback_class:
+          type: [string, 'null']
+          enum: [digest_safe, restore_required, null]
+          description: 'Rollback class of a release (Arion v5 section 3b): digest_safe lets the controller restart the previous digest, restore_required needs the approved restore. Null until a record reports it; no default is assumed.'
     DeliveryFlowRolloutInput:
       type: object
       additionalProperties: true
@@ -181,6 +190,16 @@ components:
           properties:
             p50_at: {type: string, format: date-time}
             p90_at: {type: string, format: date-time}
+        qualification:
+          type: [object, 'null']
+          additionalProperties: true
+          description: 'The qualification object scripts/verify-live.mjs validates. Only evidence is stored; the other fields are accepted and ignored.'
+          properties:
+            evidence: {type: string, pattern: '^[A-Za-z0-9._/#-]{1,200}$', maxLength: 200, description: 'Reference to the qualification evidence, not a URL. Kept when a later report omits it.'}
+        rollback_class:
+          type: [string, 'null']
+          enum: [digest_safe, restore_required, null]
+          description: 'Rollback class computed for this release. Kept when a later report omits it.'
         steps:
           type: array
           maxItems: 200
@@ -190,7 +209,7 @@ components:
             required: [key, step, kind, actor, started_at]
             properties:
               key: {type: string, pattern: '^[A-Za-z0-9._:/+-]{1,120}$', description: 'Idempotency key of the step within this release.'}
-              step: {type: string, enum: [a, b, c, d, e, f, g, h, i, j, k, l, copy_gate, pin_gate, build, review, ci, queue, merge_round, hold, mitigation, switch, live_check]}
+              step: {type: string, enum: [a, b, c, d, e, f, g, h, i, j, k, l, copy_gate, pin_gate, build, review, ci, queue, merge_round, hold, mitigation, switch, live_check, rehearsal, catalogue]}
               round: {type: [integer, 'null'], minimum: 1, maximum: 1000}
               kind: {type: string, enum: [work, wait, rework, recovery]}
               actor: {$ref: '#/components/schemas/DeliveryFlowActor'}
@@ -241,7 +260,7 @@ components:
       properties:
         id: {type: string, format: uuid}
         item_id: {type: string, format: uuid}
-        step_key: {type: string, enum: [a, b, c, d, e, f, g, h, i, j, k, l, copy_gate, pin_gate, build, review, ci, queue, merge_round, hold, mitigation, switch, live_check]}
+        step_key: {type: string, enum: [a, b, c, d, e, f, g, h, i, j, k, l, copy_gate, pin_gate, build, review, ci, queue, merge_round, hold, mitigation, switch, live_check, rehearsal, catalogue]}
         round: {type: integer, minimum: 1}
         kind: {type: string, enum: [work, wait, rework, recovery]}
         actor: {$ref: '#/components/schemas/DeliveryFlowActor'}
