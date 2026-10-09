@@ -4,18 +4,23 @@
 // rows reserved for the whole data set, so zooming and panning never move a lane.
 // Only the playhead moves the time: drag its pill, or Shift+←/→. A click selects a
 // step (or clears) and never moves the time; a "+N" click zooms in. Dragging empty
-// space or a sideways wheel pans; ⌘/Ctrl+wheel zooms around the pointer.
+// space or a sideways wheel pans; ⌘/Ctrl+wheel zooms around the pointer. Package 6
+// adds the avatar: the PAIMOS Orbit agent cube carrying the run's parcel, at the
+// playhead on the main run's current step (a clock badge while waiting, a red one in
+// an incident); in Compare it stops at its finish line.
 import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import type { DeliveryLanguage } from '../../lib/delivery'
 import {
-  criticalPath, fitLabel, keyInput, laneFrame, minutesText, pick, placeIncidentCaption, rowPieces, setTime, setWindow, tickStep, timeLabel, wheelInput,
+  criticalPath, fitLabel, keyInput, laneFrame, minutesText, pick, placeIncidentCaption, rowPieces, runEnd, setTime, setWindow, stepAt, tickStep, timeLabel, wheelInput,
   type FlowData, type FlowLevel, type FlowStep, type LaneItem, type LaneSet, type Timeline,
 } from '../../lib/deliveryFlow'
 import type { FlowText } from '../../lib/deliveryFlowText'
 
 const props = defineProps<{ data: FlowData; sets: LaneSet[]; timeline: Timeline; selected: FlowStep | null; level: FlowLevel; lang: DeliveryLanguage; text: FlowText }>()
-const emit = defineEmits<{ select: [item: LaneItem | null] }>()
+const emit = defineEmits<{ select: [item: LaneItem | null]; scrub: [] }>()
+/** The lane the arrow keys are on; the moment panel marks the same lane. */
+const focusLane = defineModel<number>('focusLane', { default: 0 })
 
 const LANES_H = 330, AX = 20, GAPS = 4
 const clipId = `ln-clip-${useId()}`
@@ -154,17 +159,37 @@ const playhead = computed(() => {
   const label = at(props.timeline.T), w = label.length * 6.6 + 26, hit = coarse || narrow.value ? 44 : 14
   return { x: xp, label, w, hit, y: LANES_H - AX - 19 }
 })
+// The avatar of each set's main run, at the playhead (or at its finish line once done).
+const avatars = computed(() => {
+  const g = geo.value, T = props.timeline.T, out: { key: string; x: number; y: number; tag: string; pill: boolean; waiting: boolean; incident: boolean; done: boolean }[] = []
+  const xp = g.X(T)
+  if (xp < g.x0 - 1 || xp > g.x1 + 1) return out
+  props.sets.forEach((set, si) => {
+    const path = criticalPath(set.main), s = stepAt(path, T)
+    if (!s || T < path[0]!.start - 1e-6) return
+    const piece = layout.value.pieces.find(p => p.item?.step === s || p.items?.some(i => i.step === s))
+    if (!piece) return
+    const end = runEnd(set.main), done = rel.value && T >= end, inc = set.main.incident
+    out.push({
+      key: `${si}`, x: done ? g.X(end) : xp, y: piece.kind === 'cluster' ? piece.y - 1 : piece.y + 1, tag: set.main.tag, pill: !live.value,
+      waiting: !done && s.kind === 'wait', incident: !done && !!inc && T >= inc.start && T < inc.end, done,
+    })
+  })
+  return out
+})
+const pillWidth = (tag: string) => Math.max(18, tag.length * 6 + 8)
+
 const selBox = computed(() => {
   if (!props.selected) return null
   return layout.value.pieces.find(p => p.item?.step === props.selected || p.items?.some(i => i.step === props.selected)) ?? null
 })
 
 // ---------- Keyboard: the lanes are one focusable group ----------
-const focusLane = ref(0)
 function onKey(event: KeyboardEvent) {
   if (event.altKey || event.ctrlKey || event.metaKey) return
   const result = keyInput(props.timeline, event.key, event.shiftKey)
   if (!result) return
+  if (result === 'time') emit('scrub')
   const n = layout.value.lanes.length || 1
   if (result === 'lane-up') focusLane.value = (focusLane.value + n - 1) % n
   else if (result === 'lane-down') focusLane.value = (focusLane.value + 1) % n
@@ -189,7 +214,7 @@ function onDown(event: PointerEvent) {
   const part = (event.target as Element).closest?.('[data-part]')?.getAttribute('data-part')
   const t = props.timeline
   drag = { kind: part === 'ph' ? 'ph' : 'pan', x: localX(event), v0: t.v0, v1: t.v1, moved: part === 'ph', target: event.target, id: event.pointerId }
-  if (part === 'ph') { t.follow = false; dragging.value = true; event.preventDefault() }
+  if (part === 'ph') { t.follow = false; dragging.value = true; emit('scrub'); event.preventDefault() }
   host.value?.setPointerCapture?.(event.pointerId)
 }
 function onMove(event: PointerEvent) {
@@ -231,7 +256,7 @@ function onWheel(event: WheelEvent) {
   })
   if (handled) event.preventDefault()
 }
-defineExpose({ focusLane, setTime: (m: number) => setTime(props.timeline, m) })
+defineExpose({ setTime: (m: number) => setTime(props.timeline, m) })
 </script>
 
 <template>
@@ -285,6 +310,21 @@ defineExpose({ focusLane, setTime: (m: number) => setTime(props.timeline, m) })
       <g v-if="nowX != null">
         <line class="fl-now" :x1="nowX" :x2="nowX" y1="14" :y2="LANES_H - AX + 2" />
         <text class="fl-nowt" :x="nowX + 4" :y="LANES_H - AX - 2">{{ text.now }}</text>
+      </g>
+      <g v-for="av in avatars" :key="av.key" class="fl-av" :class="{ waiting: av.waiting, incident: av.incident, done: av.done }" :transform="`translate(${av.x},${av.y})`" data-testid="flow-avatar">
+        <g transform="translate(-13,-27) scale(.8)">
+          <path class="av-core" d="m16 8 7 4v8l-7 4-7-4v-8Z" />
+          <path class="av-light" d="m9 12 7 4v8l-7-4Z" />
+          <path class="av-facet" d="m9 12 7 4 7-4M16 16v8" />
+          <rect class="av-box" x="19" y="18" width="10" height="8" rx="1.6" />
+          <path class="av-strap" d="M24 18v8M19 22h10" />
+        </g>
+        <g v-if="av.pill" class="av-pill" :transform="av.y >= 44 ? `translate(${-pillWidth(av.tag) / 2},-42)` : 'translate(14,-30)'">
+          <rect :width="pillWidth(av.tag)" height="13" rx="6.5" />
+          <text :x="pillWidth(av.tag) / 2" y="9.6" text-anchor="middle">{{ av.tag }}</text>
+        </g>
+        <g class="av-inc" transform="translate(11,-24)"><circle class="av-inc-bg" r="6.2" /><path class="av-inc-h" d="M0-3v3.2M0 2.6v.1" /></g>
+        <g class="av-wait" transform="translate(11,-24)"><circle class="av-wait-bg" r="6.2" /><path class="av-wait-h" d="M0-3.2V0l2 1.4" /></g>
       </g>
       <g v-if="playhead" class="ln-phg" data-part="ph" data-testid="flow-playhead">
         <line class="ln-ph" :x1="playhead.x" :x2="playhead.x" y1="10" :y2="LANES_H - AX + 2" />
@@ -346,6 +386,21 @@ defineExpose({ focusLane, setTime: (m: number) => setTime(props.timeline, m) })
 .ln-cluster { fill: var(--surface-raised); stroke: var(--ink-3); stroke-width: 1; cursor: zoom-in; }
 .ln-clut { font: 600 10px var(--mono); fill: var(--ink-2); pointer-events: none; }
 .ln-selbox { fill: none; stroke: var(--ink); stroke-width: 2; pointer-events: none; }
+.fl-av { pointer-events: none; }
+.av-core { fill: color-mix(in srgb, var(--teal) 30%, var(--surface-raised)); stroke: var(--teal-ink); stroke-width: 1.6; stroke-linejoin: round; }
+.av-light { fill: color-mix(in srgb, var(--teal) 12%, var(--surface-raised)); }
+.av-facet { fill: none; stroke: var(--teal-ink); stroke-width: 1.2; stroke-linejoin: round; }
+.av-box { fill: var(--gold); stroke: var(--gold-ink); stroke-width: 1.2; }
+.av-strap { fill: none; stroke: var(--gold-ink); stroke-width: 1; }
+.av-pill rect { fill: var(--ink); }
+.av-pill text { font: 700 9.5px var(--mono); fill: var(--canvas); }
+.av-wait, .av-inc { opacity: 0; }
+.fl-av.waiting .av-wait, .fl-av.incident .av-inc { opacity: 1; }
+.av-wait-bg { fill: var(--surface-raised); stroke: var(--queue-wait-ink); stroke-width: 1.4; }
+.av-wait-h { fill: none; stroke: var(--queue-wait-ink); stroke-width: 1.4; stroke-linecap: round; }
+.av-inc-bg { fill: var(--danger); }
+.av-inc-h { fill: none; stroke: var(--canvas); stroke-width: 1.8; stroke-linecap: round; }
+.fl-av.done { opacity: .9; }
 .ln-phg, .ln-phhit, .ln-phpill { cursor: ew-resize; }
 .ln-ph { stroke: var(--teal); stroke-width: 2; pointer-events: none; }
 .ln-phhit { fill: transparent; }
