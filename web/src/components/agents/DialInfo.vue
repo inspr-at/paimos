@@ -56,7 +56,7 @@ p { margin: 0; }
 /* Expanded: full width between the dial's divider and "Each harness may use"; it only moves what is below. */
 .wh { margin: -2px 0 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
 .wts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; }
-.wt { min-width: 0; padding: 14px 16px; border-radius: 14px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(32, 60, 61, .04); }
+.wt { min-width: 0; padding: 14px 16px; border-radius: 14px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow-color) 4%, transparent); }
 .wt-h { display: flex; align-items: center; gap: 9px; margin: 0 0 10px; color: var(--ink); font: 650 13px/1.3 var(--font); }
 .wt-ic { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 9px; background: var(--aqua-3); color: var(--teal-ink); }
 .wt-big { display: flex; flex-wrap: wrap; gap: 4px 18px; color: var(--ink-2); font-size: 13.5px; }

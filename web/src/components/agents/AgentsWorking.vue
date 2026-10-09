@@ -257,7 +257,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
 /* The phone's icon with its count: not shown while the stepper is. */
 .f-ph { display: none; }
 /* The low-priority details: hover or keyboard focus on the chip. */
-.chip-tip { display: none; position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; width: max-content; max-width: 300px; padding: 7px 10px; border-radius: 8px; background: var(--tip-bg); color: var(--tip-ink); font-size: 12px; font-weight: 500; line-height: 1.4; white-space: normal; box-shadow: 0 8px 24px -8px rgba(16, 35, 39, .35); pointer-events: none; }
+.chip-tip { display: none; position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; width: max-content; max-width: 300px; padding: 7px 10px; border-radius: 8px; background: var(--tip-bg); color: var(--tip-ink); font-size: 12px; font-weight: 500; line-height: 1.4; white-space: normal; box-shadow: 0 8px 24px -8px color-mix(in srgb, var(--shadow-color) 35%, transparent); pointer-events: none; }
 .f-chip:hover .chip-tip, .f-chip:focus-within .chip-tip { display: block; }
 /* The live state: one toggle, right-aligned with the chevron last, so the brackets come and go without moving anything else. */
 .f-live { display: flex; align-items: center; flex: 0 1 auto; gap: 7px; min-width: 0; min-height: 32px; margin: 0 0 0 auto; padding: 0 8px 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font: 500 13.5px/1.3 var(--font); white-space: nowrap; font-variant-numeric: tabular-nums; cursor: pointer; }
