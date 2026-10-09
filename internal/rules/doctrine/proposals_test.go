@@ -459,7 +459,7 @@ func TestDeploymentDoctrineRepositoryBoundary(t *testing.T) {
 			}
 			path := "/api/rules/doctrine/inbox/" + proposal.ID + "/pull-request"
 			f.call(agent, "POST", path, nil, 403)
-			if err := json.Unmarshal(f.call(owner, "POST", path, nil, 200), &proposal); err != nil || proposal.Repository != pair.Private() || proposal.PRNumber == 0 || !strings.Contains(proposal.PRURL, "/agm-doctrine/") {
+			if err := json.Unmarshal(f.call(owner, "POST", path, map[string]any{}, 200), &proposal); err != nil || proposal.Repository != pair.Private() || proposal.PRNumber == 0 || !strings.Contains(proposal.PRURL, "/agm-doctrine/") {
 				t.Fatal("person did not publish to the configured private repository")
 			}
 			approve := "/api/rules/doctrine/proposals/" + proposal.ID + "/approve"
