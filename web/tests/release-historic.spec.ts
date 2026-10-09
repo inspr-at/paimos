@@ -72,7 +72,7 @@ for (const width of [1600, 390]) {
         ['Clear Done check', 'AEON-303', 'benefit', '3 commits'],
         ['Honest project counts', 'AEON-302', 'benefit', '6 commits'],
       ])
-      await expect(detail(page).getByRole('region', { name: 'Other changes, 9' })).toContainText('Sign and notarize darwin paimos-agentd in the release workflow')
+      await expect(detail(page).getByRole('region', { name: 'Other, 9' })).toContainText('Sign and notarize darwin paimos-agentd in the release workflow')
       // The missing capture says nothing: no gap, no label, no tag message.
       await expect(detail(page)).not.toContainText('were not captured')
       await noTagTitle(page, 'release: v260929113854.0.0')
@@ -100,7 +100,7 @@ for (const width of [1600, 390]) {
       await expect(deploy.getByText('P0.x:')).toHaveCount(0)
       await deploy.locator('summary').click()
       // The hidden ticket's commits stay under Other; the notes say one is hidden.
-      await expect(detail(page).getByRole('region', { name: 'Other changes, 3' })).toContainText('Quote OpenAPI flow descriptions so contract pins drop parse artifacts')
+      await expect(detail(page).getByRole('region', { name: 'Other, 3' })).toContainText('Quote OpenAPI flow descriptions so contract pins drop parse artifacts')
       const notes = detail(page).getByRole('region', { name: 'Release notes' })
       await expect(notes.getByText('One ticket is hidden from release notes.', { exact: true })).toBeVisible()
       // Written after the release: one small, muted line, no label or card.

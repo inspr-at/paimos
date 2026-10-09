@@ -7,8 +7,6 @@
 //   AEON304_SHOTS=<dir> npx playwright test -c playwright.ui.config.ts tests/agents-phone-rows.spec.ts
 //
 // writes <width>-<theme>.png (the sessions card) for review by eye.
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import type { HarnessSession } from '../src/lib/agents'
 import { fixtures, me, mockWork } from './work-fixtures'
@@ -65,8 +63,7 @@ const midY = (b: Box) => b.y + b.height / 2
 const midX = (b: Box) => b.x + b.width / 2
 async function capture(page: Page, name: string) {
   if (!shots) return
-  mkdirSync(shots, { recursive: true })
-  await page.locator('.sessions').screenshot({ path: join(shots, `${name}.png`), animations: 'disabled' })
+  await page.locator('.sessions').screenshot({ path: test.info().outputPath(`${name}.png`), animations: 'disabled' })
 }
 
 for (const theme of ['light', 'dark'] as const) for (const width of [375, 390, 430]) {
@@ -102,7 +99,13 @@ for (const theme of ['light', 'dark'] as const) for (const width of [375, 390, 4
       expect(title.height).toBeLessThanOrEqual(lineHeight * 2 + 1)
       // The execution and state lines start under the glyph (AEON-784): the fold column keeps the tree.
       expect(exec.y).toBeGreaterThanOrEqual(identity.y + identity.height - 1)
-      expect(exec.height).toBeLessThanOrEqual(22)
+      // Tier controls now have their own reserved line. The execution copy
+      // still fits one compact line, and the group grows only by that control.
+      const executionCopy = await box(r.locator('.exec-copy'))
+      const tier = await box(r.locator('.phone-tier'))
+      expect(executionCopy.height).toBeLessThanOrEqual(22)
+      expect(tier.y).toBeGreaterThanOrEqual(executionCopy.y + executionCopy.height)
+      expect(exec.height).toBeLessThanOrEqual(executionCopy.height + tier.height + 6.5)
       expect(Math.abs(exec.x - avatar.x)).toBeLessThanOrEqual(1)
       expect(state.y).toBeGreaterThanOrEqual(exec.y + exec.height - 1)
       expect(Math.abs(state.x - avatar.x)).toBeLessThanOrEqual(1)

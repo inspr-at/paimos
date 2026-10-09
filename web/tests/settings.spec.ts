@@ -8,7 +8,6 @@ import { agentData, mockAgents } from './agents-fixtures'
 import { mockSettings, settingsData, type SettingsMockOptions } from './settings-fixtures'
 import { accessWorld, mockAccess } from './access-fixtures'
 import { controlStability } from './control-stability'
-import { mkdir } from 'node:fs/promises'
 
 const sections = (page: Page) => page.getByRole('navigation', { name: 'Settings sections' })
 async function setup(page: Page, options: SettingsMockOptions & { role?: 'admin' | 'member' } = {}) {
@@ -256,10 +255,8 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       await guard.check(() => navigation.getByRole('link', { name: /^Vocabulary/ }).hover())
     }
     guard.done()
-    await mkdir('test-results/aeon-694-fix3', { recursive: true })
-    await page.screenshot({ path: `test-results/aeon-694-fix3/vocabulary-member-${width}-${theme}.png`, fullPage: true })
-    await mkdir('test-results/aeon-996-vocabui', { recursive: true })
-    await card.screenshot({ path: `test-results/aeon-996-vocabui/readonly-${width}-${theme}.png` })
+    await page.screenshot({ path: test.info().outputPath(`vocabulary-member-${width}-${theme}.png`), fullPage: true })
+    await card.screenshot({ path: test.info().outputPath(`readonly-${width}-${theme}.png`) })
   })
 }
 
@@ -315,16 +312,17 @@ test('old workspace bookmarks redirect during section and hash changes inside Se
 test('settings layout evidence in light and dark at phone, tablet and desktop sizes', async ({ page }) => {
   await setup(page)
   await mockAccess(page, accessWorld(), { also: ['account.read', 'rules.read', 'models.read'] })
-  await mkdir('test-results/aeon-694-shots', { recursive: true })
   for (const width of [390, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 })
     for (const theme of ['light', 'dark']) {
       await page.addInitScript(value => localStorage.setItem('aeon-theme', value), theme)
-      for (const section of ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'access', 'agents', 'agent-rules', 'accounts', 'autopilot', 'business', 'portal']) {
+      for (const section of ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'kinds', 'access', 'agents', 'agent-rules', 'accounts', 'autopilot', 'business', 'portal']) {
         await page.goto(`/settings/${section}`)
-        await expect(page.locator('.body > .who')).toBeVisible()
+        const audience = section === 'kinds' ? page.locator('.kinds-section > .who') : page.locator('.body > .who')
+        await expect(audience).toBeVisible()
+        if (section === 'kinds') await expect(audience).toContainText('Admins define the kinds; you can read them.')
         await page.evaluate(value => document.documentElement.setAttribute('data-theme', value), theme)
-        await page.screenshot({ path: `test-results/aeon-694-shots/${section}-${width}-${theme}.png` })
+        await page.screenshot({ path: test.info().outputPath(`${section}-${width}-${theme}.png`) })
         expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `${section} at ${width}`).toBeLessThanOrEqual(1)
       }
     }
