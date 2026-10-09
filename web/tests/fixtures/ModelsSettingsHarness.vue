@@ -4,12 +4,12 @@ import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useSession } from '../../src/stores/session'
 import { refreshPermissions } from '../../src/lib/authz'
-import { boardPerson } from '../models-board-fixtures'
+import { simplePerson } from '../models-simple-fixtures'
 import TooltipHost from '../../src/components/TooltipHost.vue'
 import ToastHost from '../../src/components/ToastHost.vue'
 const session = useSession(), route = useRoute()
 onMounted(async () => {
-  session.identity = { tenant: { id: 'board-tenant', name: 'INSPR' }, principal: { id: boardPerson, name: 'Markus', kind: route.query.agent ? 'agent' : 'person' } }
+  session.identity = { tenant: { id: 'board-tenant', name: 'INSPR' }, principal: { id: simplePerson, name: 'Markus', kind: route.query.agent ? 'agent' : 'person' } }
   await refreshPermissions()
 })
 function changePerson() { session.identity = { tenant: { id: 'board-tenant', name: 'INSPR' }, principal: { id: '22222222-2222-4222-8222-222222222222', name: 'Other person', kind: 'person' } } }

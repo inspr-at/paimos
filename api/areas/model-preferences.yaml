@@ -314,7 +314,7 @@ components:
         lock: {$ref: '#/components/schemas/ModelBoardLock'}
     ModelBoardColumn:
       type: object
-      required: [column, label, short, sentence, fixed, hidden, source, thinking, list, top, free, bottom, not, cant]
+      required: [column, label, short, sentence, fixed, hidden, source, thinking, list, top, free, bottom, not, cant, stored]
       properties:
         column: {type: string}
         label: {type: string}
@@ -338,6 +338,14 @@ components:
         bottom: {type: array, items: {$ref: '#/components/schemas/ModelBoardCard'}}
         not: {type: array, items: {$ref: '#/components/schemas/ModelBoardCard'}}
         cant: {type: array, items: {type: object, required: [line, reason], properties: {line: {type: string}, reason: {type: string}}}}
+        stored:
+          type: object
+          description: 'Rank and exclusions a first-pick rewrite must keep. Includes lines the resolved list omits because they cannot run or are locked.'
+          required: [rank, not]
+          properties:
+            rank: {type: array, maxItems: 512, items: {type: string, maxLength: 128}}
+            not: {type: array, maxItems: 512, items: {type: string, maxLength: 128}}
+        stored_effort: {type: [string, 'null'], description: 'Native effort stored on this column order. Null when that order has none. Omitted when this column has no order of its own.'}
     ModelBoardCoverage:
       type: object
       required: [consumers]
