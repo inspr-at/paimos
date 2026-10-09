@@ -69,8 +69,9 @@ func TestDeliveryMetricsFromFixedFacts(t *testing.T) {
 			metricFixtureRun(4, 1, ci, "pull_request", "work/c", h("4"), d(1), 0, 1, "cancelled"),
 			// Another workflow never counts as CI.
 			metricFixtureRun(5, 1, ".github/workflows/docs.yml", "pull_request", "work/a", h("1"), d(1), 0, 99, "success"),
-			metricFixtureRun(10, 1, ci, "merge_group", "gh-readonly-queue/main/pr-7-"+h("a"), h("a"), d(1), 0, 15, "failure"),
-			metricFixtureRun(11, 1, ci, "merge_group", "gh-readonly-queue/main/pr-7-"+h("b"), h("b"), d(1).Add(time.Hour), 0, 14, "success"),
+			metricFixtureRun(10, 1, ci, "merge_group", "gh-readonly-queue/main/pr-7-"+h("a"), h("a"), d(1).Add(-50*time.Minute), 0, 15, "failure"),
+			// The queue runs of PR 7 come before its merge, as measure-v2 counts them.
+			metricFixtureRun(11, 1, ci, "merge_group", "gh-readonly-queue/main/pr-7-"+h("b"), h("b"), d(1).Add(-30*time.Minute), 0, 14, "success"),
 			metricFixtureRun(12, 1, ci, "merge_group", "gh-readonly-queue/main/pr-8-"+h("c"), h("c"), d(25), 0, 16, "success"),
 			metricFixtureRun(20, 1, nightly, "schedule", "main", h("d"), d(1), 0, 50, "success"),
 			metricFixtureRun(21, 1, nightly, "schedule", "main", h("e"), d(2), 0, 50, "failure"),
@@ -101,21 +102,34 @@ func TestDeliveryMetricsFromFixedFacts(t *testing.T) {
 			t.Fatalf("%s daily series %d points from %s", m.Key, len(m.Daily), m.Daily[0].Date)
 		}
 	}
-	if len(numbers) != 10 {
+	// The ten Arion numbers, then the eight v5 readings (AEON-1016): time to
+	// first green per commit, confirmed flakes, inferred ejections, unclassified
+	// queue runs, runner wait, preflight, review audits and escaped defects.
+	for n := 1; n <= 18; n++ {
+		if !numbers[n] {
+			t.Fatalf("numbers covered: %v", numbers)
+		}
+	}
+	if len(numbers) != 18 {
 		t.Fatalf("numbers covered: %v", numbers)
 	}
 
 	wall := metricByKey(t, metrics, "pr_ci_wall")
 	wantWindow(t, wall, 7, "ok", 2, f64(15), f64(15), f64(19))
 	wantWindow(t, wall, 30, "ok", 3, f64(20), f64(20), f64(28))
-	if wall.Status != "ok" || wall.Reason != nil || wall.Latest == nil || wall.Latest.Value != 20 || wall.Target == nil || wall.Target.Value != 5 {
+	if wall.Status != "ok" || wall.Reason != nil || wall.Latest == nil || wall.Latest.Value != 20 || wall.Target == nil || wall.Target.Value != 7 {
 		t.Fatalf("PR CI wall: %+v", wall)
 	}
 	wantWindow(t, metricByKey(t, metrics, "queue_run_wall"), 30, "ok", 3, f64(15), f64(15), f64(15.8))
 	green := metricByKey(t, metrics, "first_attempt_green")
 	wantWindow(t, green, 7, "ok", 2, f64(50), nil, nil)
 	wantWindow(t, green, 30, "ok", 3, f64(33.3), nil, nil)
-	wantWindow(t, metricByKey(t, metrics, "flaked_failures"), 30, "ok", 3, f64(33.3), nil, nil)
+	flaky := metricByKey(t, metrics, "flaked_failures")
+	wantWindow(t, flaky, 30, "no_data", 3, nil, nil, nil)
+	wantCounts(t, flaky, 30, map[string]int{"confirmed": 0, "workflow_rescue": 1, "suspect": 0})
+	if flaky.Status != "no_data" || flaky.Latest != nil || flaky.Reason == nil || !strings.Contains(*flaky.Reason, "unavailable") {
+		t.Fatalf("a same-run rescue is not a confirmed share: %+v", flaky.Reason)
+	}
 	wantWindow(t, metricByKey(t, metrics, "time_to_first_green"), 7, "ok", 2, f64(33), f64(33), f64(41.8))
 	wantWindow(t, metricByKey(t, metrics, "pr_open_to_merged"), 30, "ok", 2, f64(45), f64(45), f64(57))
 	wantWindow(t, metricByKey(t, metrics, "queue_runs_per_pr"), 30, "ok", 2, f64(1.5), f64(1.5), f64(1.9))

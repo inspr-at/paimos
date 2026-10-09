@@ -1,5 +1,65 @@
 # CI push and merge-queue reuse (AEON-423, OPS-257 L5)
 
+AEON-1023 reduces browser shard discovery and launch overhead. Tier browser
+jobs collect only the native Playwright catalogue. Unit classifications remain
+planner metadata so that source-impact decisions retain their existing
+semantics; web setup, strict classification and unit jobs still discover the
+complete web catalogue. Case selection, shard weights, required checks and retry limits are
+unchanged. Compatible groups share a supervised Playwright execution and Vite
+server: config, project, remaining flags and host restriction must match, and
+execution environment must match, including presence versus absence. The
+known screenshot output variables are combined when their values do not conflict.
+Failure tracing stays with the groups that request it and does not spread to a
+neighbour. The tier runner still forces one worker and disables automatic
+retries. Conflicting policies, including trace retention, and the separate
+performance config keep their own execution.
+
+Each browser shard measurement includes `webShardTiming`: monotonic collection,
+planning and run seconds, summed native case durations including explicit
+retries, residual non-case seconds, and per-launch group membership, native
+list and execution timing. Missing case duration evidence leaves the residual
+unknown. `browserCases` records case/file/config/project identities and final
+statuses for comparison across a full run; a missing result is `notRun`.
+Existing case accounting and full-execution checks remain authoritative.
+
+`node scripts/test-tiers/prove-web-shards.mjs` checks exact native old/new
+selection identities across all twelve full browser shards; `--all` checks the
+whole catalogue. It compares full versus browser-only discovery, resolves both
+the old group lists and the combined lists through Playwright `--list`, and
+writes `tmp/test-tiers/web-shard-set-equality.json`. This is a discovery proof;
+it does not claim browser execution. The runner regression executes a full
+twelve-shard layout with native-result fixtures and rejects missing/duplicate
+identities. Actual browser execution and before/after non-case timing require
+the approved browser lane or the coordinator's CI run. The AEON lead owns the
+seven-day outcome: compare actual per-shard residuals, runner minutes and
+first-attempt results with the pre-change run, and post on AEON-1023 after
+deployment. The reference Arion W2 full run `37815054461` has web shards
+4.8–12.8 minutes, 99.7 minutes in selected-UI steps and 71.7 summed case minutes.
+
+Validation on mbp2606 (2026-10-09, code commit `d75181f6b`) passed all 40
+`ci-static --merge-main` checks without skips. Native collection compared the
+same 3,979 browser registrations and the same 1,721 selected cases in 111 specs
+across all twelve full shards. Planned execution launches changed from 84 to
+13: one UI execution per shard, with an additional performance execution on
+shard 8. One sequential discovery sample measured full collection at 24.50 s
+and browser-only collection at 1.49 s; native selection-list checks summed to
+21.04 s before and 3.89 s after. These measurements cover discovery, exclude
+browser cases and server startup, and establish no end-to-end latency claim.
+Actual browser execution set equality and the requested before/after runtime
+overhead sample remain a coordinator handoff: the remote browser launcher is
+closed pending OPS-247, and this worker is not authorised to push or deploy.
+
+Hosted run 37923530553 then showed the cost of widening trace. Shard 6 put
+dispatch, which does not request tracing, in `release-combined` with traced
+groups. `the routed panel keeps usable list space and stable controls` finished
+17 of 24 viewport iterations and exceeded its 120s budget while following
+PHAROS-14; the manifest's untraced maximum for that file is 102.5s. Trace
+retention is now part of launch compatibility. The same full twelve-shard
+layout plans 25 executions: one untraced UI launch and one traced UI launch on
+every shard, plus the separate performance execution. That is still far below
+the previous 84 group launches, and a group that asked for `retain-on-failure`
+still gets it.
+
 Main-push reuse keeps its existing `CI_TREE_REUSE` semantics: unless set to
 `off`, a successful full merge-group run at the **same commit SHA** can replace
 heavy execution. The verifier checks repository, workflow name/path/ID, latest

@@ -113,7 +113,7 @@ func ResolveEscalation(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Wor
 	role, _ := roleByName("build-hard")
 	for _, step := range steps {
 		pr := step.Profile
-		reasons := skipReasons(step, role, resolveQuery{Role: "build-hard", Harness: q.Harness}, now, health)
+		reasons := skipReasons(step, role, resolveQuery{Role: "build-hard", Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, health)
 		if locked && preferred[pr.ID] == 0 {
 			reasons = append(reasons, "locked model preference")
 		}
@@ -123,7 +123,7 @@ func ResolveEscalation(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Wor
 		if identities[pr.Harness+"/"+pr.Model+"/"+pr.Effort] {
 			reasons = append(reasons, "already attempted")
 		}
-		policyReasons := skipReasons(step, role, resolveQuery{Role: "build-hard", Harness: q.Harness}, now, nil)
+		policyReasons := skipReasons(step, role, resolveQuery{Role: "build-hard", Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, nil)
 		if len(policyReasons) == 0 && escalationRank(pr, q.Area) < 99 && !identities[pr.Harness+"/"+pr.Model+"/"+pr.Effort] && (!locked || preferred[pr.ID] > 0) {
 			waiting = true
 		}

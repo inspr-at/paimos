@@ -30,7 +30,7 @@ const id = (suffix: string) => `dl-${props.tile.def.key}-${suffix}`
     <template v-else-if="state === 'error' || !tile.value">
       <div class="t-value empty">{{ state === 'error' ? text.notLoaded : text.noData }}</div>
       <div class="t-line"><span class="t-pp">p50 · p90 –</span></div>
-      <div class="t-line"><span>&nbsp;</span></div>
+      <div class="t-line"><span v-clip-tip>{{ state === 'error' ? ' ' : tile.lineB || ' ' }}</span></div>
       <div class="t-line t-delta none"><AppIcon name="minus" :size="13" /><span v-clip-tip>{{ state === 'error' ? text.notLoaded : tile.delta.text }}</span></div>
     </template>
     <template v-else>

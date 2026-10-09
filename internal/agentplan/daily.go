@@ -142,7 +142,7 @@ type DailyAccount struct {
 	Routable           bool       `json:"routable"`
 	DetailsRedacted    bool       `json:"details_redacted"`
 	CanEdit            bool       `json:"can_edit"`
-	NoDailyLimit       bool       `json:"-"`
+	NoDailyLimit       bool       `json:"no_daily_limit,omitempty"`
 	TodayPointsAllowed *float64   `json:"-"`
 	OverPacePoints     *float64   `json:"-"`
 }

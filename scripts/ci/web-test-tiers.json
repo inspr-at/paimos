@@ -6462,6 +6462,34 @@
     ,
     {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 390 coarse light › approval and held controls fit both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 1440 dark expert","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 1440 dark simple","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 1440 light expert","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 1440 light simple","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 400 dark expert","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 400 dark simple","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 400 light expert","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 400 light simple","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Simple keeps every Learn and section still through every window at 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Simple keeps every Learn and section still through every window at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Simple keeps every Learn and section still through every window at 400","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"a v5 reading never moves its own tile or a control when the window or the level changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"missing, partial and unwatched facts are said as that, never as zero","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"the v5 readings sit in their tiles with exact counts and the plan’s targets","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 light de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -14728,17 +14756,35 @@
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"a run of nights ends at a night without a run; only tonight may still be due","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"a withheld measurement with recorded runs is unavailable, not \"Nothing recorded\"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"audits and defects show severities; inside the watched time nothing recorded is said as that, outside it is \"no data\"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"confirmed flaky runs and suspects are two numbers; the suspects never enter the share","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"days after coverage ends stay \"no data yet\", including a night after the App disconnects","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"days before the source covers them are \"no data yet\", later empty days are not, and nothing is invented","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"every reading draws a chart with its own target, and its readout names counts without extrapolating","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"long windows use the server’s weeks and months and label only some of them","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"p90 stretches the duration scale at most to twice its room, else it is clipped and named","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"queue readings say events of base from exact counts, and the unclassified cause stays unclassified","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"runner wait leads with p90, the number the plan judges, and says p50 beside it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"runs without job facts say 0 of N and why, on the tile and on the chart","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"the page preferences fall back to Simple and 7 days and refuse anything else","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"the paired numbers count what they say: flakes, “changes”, scripted rounds and green nights","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"the paired numbers count what they say: required checks, “changes”, scripted rounds and green nights","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"the v5 readings read German, impersonal","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"time to first green names how many never went green, per branch and per commit, from exact counts","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"Learn opens on focus, pins with Enter or a click, and Esc closes it and keeps focus on the button","tier":"ESSENTIAL"}
     ,
@@ -14750,9 +14796,13 @@
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"each tile shows its verdict as shape and word: the icon follows the level","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"missing job facts read as unavailable, never as a measured 0 of N, in the sentence and in Learn","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"the small chart shades the good side of the target and hatches only what no source covers","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"the summary counts numbers on target and names the closest and the biggest gap from this window’s numbers","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"the v5 readings get a verdict, a sentence and a direction from this window’s exact numbers","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"with a refused save and a failed read together, both alerts and both retries stay reachable (de)","tier":"ESSENTIAL"}
     ,

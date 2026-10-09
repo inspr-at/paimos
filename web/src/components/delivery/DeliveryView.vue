@@ -3,7 +3,8 @@
 // Project › Delivery (AEON-994 draft 5, package 2): the page head — Numbers | Flow,
 // the 7 · 30 · 90 · 180 · 365-day window and Simple | Expert, both the person's
 // own (saved server-side) — and the Numbers views: Simple (the default; summary,
-// three plain sections, small charts) and Expert (ten tiles, ten trends).
+// four plain sections, small charts) and Expert (eighteen tiles and trends: the ten
+// Arion numbers and the eight v5 readings of AEON-1016).
 // Controls sit in the head and never move; content below grows downward. Flow
 // (package 6) reads the recorded runs: ?mode=live|replay|compare and ?run=.
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
@@ -306,7 +307,7 @@ watch(state, (next, prev) => {
       <div v-if="tip" ref="tipEl" class="dl-tip" role="tooltip" :style="{ left: `${tip.x}px`, top: `${tip.y}px`, visibility: tip.placed ? undefined : 'hidden' }" @mouseleave="leaveTip">
         <b>{{ tip.tile.label }}</b>
         <p>{{ tip.tile.definition }}</p>
-        <p v-if="tip.tile.reason"><span class="meta">{{ text.why }}</span><br>{{ tip.tile.reason }}</p>
+        <p v-if="tip.tile.reason"><span class="meta">{{ tip.tile.status === 'no_data' ? text.whyNone : text.why }}</span><br>{{ tip.tile.reason }}</p>
         <p class="meta">{{ text.source }}: {{ tip.tile.source }}<br>{{ text.window }}: {{ fill(text.windowT, { w: prefs.window }) }}<br>{{ tip.tile.target }} · {{ text.arion }}</p>
       </div>
     </Teleport>

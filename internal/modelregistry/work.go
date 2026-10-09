@@ -151,7 +151,7 @@ func expandPreference(cell modelprefs.Cell, profiles []Profile) []Profile {
 // ResolveWork preserves resolveRole byte-for-byte with an empty matrix and an
 // any requirement. Placement chooses a cell; it never changes the role ladder.
 func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time) (WorkResolution, error) {
-	return resolveWorkWithCatalog(ctx, tx, p, q, now, nil)
+	return resolveDailyWork(ctx, tx, p, q, now)
 }
 
 func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog) (WorkResolution, error) {
@@ -268,7 +268,7 @@ func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 				if err != nil {
 					return out, err
 				}
-				reasons := skipReasons(step, role, resolveQuery{Role: q.Role, Harness: q.Harness}, now, health)
+				reasons := skipReasons(step, role, resolveQuery{Role: q.Role, Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, health)
 				ids, err := agentaccounts.QualifyingAccountIDs(ctx, tx, profile.ID, profile.Harness, q.ProjectID, requirement, now)
 				if err != nil {
 					return out, err
@@ -302,7 +302,7 @@ func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 			}
 		}
 	}
-	out.Resolution, err = resolveRoleWithCatalog(ctx, tx, resolveQuery{Role: q.Role, Harness: q.Harness, ProjectID: q.ProjectID}, now, catalog)
+	out.Resolution, err = resolveRoleWithCatalog(ctx, tx, resolveQuery{Role: q.Role, Harness: q.Harness, ProjectID: q.ProjectID, OffHarnesses: q.OffHarnesses}, now, catalog)
 	if err != nil {
 		return out, err
 	}

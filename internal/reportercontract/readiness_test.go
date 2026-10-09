@@ -36,7 +36,7 @@ func TestFix3AvailabilitySchemaEnums(t *testing.T) {
 		items          bool
 		want           []any
 	}{
-		{"CapacityWait", "code", false, []any{"schedule", "reserve", "reading", "vendor", "offline", "sign_in", "hold", "approval", "capacity", "allowance", "models", "state", "residency"}},
+		{"CapacityWait", "code", false, []any{"schedule", "reserve", "reading", "vendor", "offline", "sign_in", "hold", "approval", "capacity", "allowance", "models", "state", "residency", "daily_limit", "daily_limit_unknown"}},
 		{"AccountCatalogChoice", "unavailable_reasons", true, []any{"state", "probe", "capacity", "allowance", "models"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
