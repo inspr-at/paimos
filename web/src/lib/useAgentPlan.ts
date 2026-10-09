@@ -3,7 +3,8 @@
 // Polls may update counts, but never replace a newer edit with an older total.
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { api } from './api.ts'
-import { planValue, type PlanSnapshot, type WaitingWork, type WorkingPreference } from './agentsWorking.ts'
+import { basePlan, planValue, type PlanSnapshot, type WaitingWork, type WorkingPreference } from './agentsWorking.ts'
+import { cloneDaily, sameDaily, type DailySettings } from './dailyLimits.ts'
 import { queueRequest, type QueueWireSnapshot } from './workQueue.ts'
 import { usePoller } from './usePolledData.ts'
 /** After − or + is released, the final value is saved once this long passes without another press. */
@@ -15,7 +16,7 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
   let generation = 0, version = 0, readVersion = 0
   let confirmed: WorkingPreference | null = null
   let confirmedAt: string | null = null
-  let pending: { value: WorkingPreference; version: number } | undefined
+  let pending: { value: WorkingPreference; version: number; daily: boolean } | undefined
   let writer = false, reconciling = false
   // Steps made while − or + is held (and briefly after) only change the screen; the final value is saved once.
   let holds = 0, settle: ReturnType<typeof setTimeout> | undefined, leaving = false, disposed = false
@@ -35,7 +36,7 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
       snapshot.value = answer
       readError.value = ''
       if ((reconcile || !writer && !pending) && edit === version) {
-        confirmed = planValue(answer); plan.value = planValue(answer); confirmedAt = answer.updated_at
+        confirmed = basePlan(answer); plan.value = basePlan(answer); confirmedAt = answer.updated_at
       }
     } catch (e) {
       if (current(turn, who) && read === readVersion) readError.value = e instanceof Error ? e.message : 'Couldn’t read the total.'
@@ -75,7 +76,7 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
           interrupts.value++
           break
         }
-        if (!response.ok) throw new Error('Couldn’t save the total and limits. Please try again.')
+        if (!response.ok) throw new Error(job.daily ? 'Couldn’t save the daily limit. Please try again.' : 'Couldn’t save the total and limits. Please try again.')
         const stored = await response.json() as { updated_at?: string }
         if (!current(turn, who)) return
         if (typeof stored.updated_at !== 'string' || !Number.isFinite(Date.parse(stored.updated_at))) throw new Error('Couldn’t confirm the save. Please try again.')
@@ -96,14 +97,27 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
     // Retain an unsuccessful write's feedback until the next deliberate change.
     if (!saveError.value && !disposed) void refresh()
   }
-  function save(next: WorkingPreference) {
+  function save(next: WorkingPreference, dailyEdit = false) {
     if (!plan.value || !snapshot.value || !viewer() || reconciling || interrupted) return
-    if (next.total === plan.value.total && Object.keys(next.limits).length === Object.keys(plan.value.limits).length && Object.entries(next.limits).every(([key, limit]) => plan.value!.limits[key] === limit)) return
+    if (next.total === plan.value.total && Object.keys(next.limits).length === Object.keys(plan.value.limits).length && Object.entries(next.limits).every(([key, limit]) => plan.value!.limits[key] === limit) && sameDaily(next.daily, plan.value.daily)) return
     plan.value = planValue(next); saveError.value = ''
-    pending = { value: planValue(next), version: ++version }
+    pending = { value: planValue(next), version: ++version, daily: dailyEdit }
     if (holds) return
     clearTimeout(settle); settle = undefined
     void drain(generation, viewer())
+  }
+  /** The daily settings now on screen: the unsaved or unconfirmed edit first, else what the server reads. */
+  const daily = computed(() => plan.value?.daily ?? snapshot.value?.daily)
+  /**
+   * One harness's daily settings. The write carries every harness's current settings, because the
+   * server replaces the map as a whole; the total and limits ride along unchanged.
+   */
+  function saveDaily(harness: string, settings: DailySettings) {
+    if (!plan.value || !snapshot.value) return
+    const next = cloneDaily(daily.value)
+    next[harness] = { pace: { ...settings.pace }, boost_today: settings.boost_today && { ...settings.boost_today }, at_limit: settings.at_limit }
+    if (sameDaily(next, daily.value)) return
+    save({ ...planValue(plan.value), daily: next }, true)
   }
   function hold(active: boolean) {
     clearTimeout(settle); settle = undefined
@@ -140,5 +154,5 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
     disposed = true; poller.stop()
     flush()
   })
-  return { snapshot, plan, error, saving, waiting, interrupts, save, hold, refresh: () => refresh() }
+  return { snapshot, plan, daily, error, saving, waiting, interrupts, save, saveDaily, hold, refresh: () => refresh() }
 }

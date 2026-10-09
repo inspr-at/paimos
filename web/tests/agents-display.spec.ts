@@ -69,7 +69,8 @@ test('live families count all external workers, hide hundreds of ended siblings 
   await expect(page.locator('.sessions .row')).toHaveCount(4)
   await expect(row(page, 1).locator('.history-toggle')).toHaveText('696 stopped')
   await expect(row(page, 1).locator('.history-toggle')).toHaveAttribute('aria-expanded', 'false')
-  await expect(dial(page).locator('.f-live')).toContainText('4 running · room for 16 more · your agents')
+  await expect(dial(page).locator('.f-live')).toContainText('4 running')
+  await expect(dial(page).locator('.f-status')).toContainText('4 running · room for 16 more · your agents')
   await expect(dial(page).locator('.f-live')).toHaveAttribute('data-tip', /including sessions started outside PAIMOS/)
   const toggle = familyFold(page, 1)
   await expectStableControls({
@@ -99,7 +100,7 @@ test('another person’s visible account never becomes your full account or your
   await page.route('**/api/agents/plan', route => route.fulfill({ json: { total: 20, limits: {}, principal_id: me.id, running: {}, running_total: 0, source: 'plan', updated_at: null } }))
   await page.goto('/agents')
   await expect(page.locator('.live-total')).toHaveText('4 live')
-  await expect(dial(page).locator('.f-live')).toContainText('0 running · account room not measured yet · your agents')
+  await expect(dial(page).locator('.f-status')).toContainText('0 running · account room not measured yet · your agents')
   await expect(dial(page).locator('.f-live')).not.toContainText('accounts full')
 })
 
@@ -217,7 +218,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await setup(page, theme)
     await page.goto('/agents')
     await expect(liveCount(page)).toHaveText('4')
-    await expect(dial(page).locator('.f-live')).toContainText('room for 16 more')
+    await expect(dial(page).locator('.f-status')).toContainText('room for 16 more')
     await expect(row(page, 2).locator('.report-source')).toBeVisible()
     await expect(row(page, 2).locator('.pct')).toHaveText('80%')
     await expectStableControls({
