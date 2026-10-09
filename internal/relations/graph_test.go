@@ -45,6 +45,7 @@ func TestCRMRelationKindsDirectionAndUndo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	baseline := len(logEvents(t, f))
 	customer := create(t, f, ids["org"], ids["project"], crm.CustomerOf)
 	if customer.SourceNodeID != ids["org"] || customer.TargetNodeID != ids["project"] || customer.Type != crm.CustomerOf {
 		t.Fatalf("direction changed %+v", customer)
@@ -54,7 +55,7 @@ func TestCRMRelationKindsDirectionAndUndo(t *testing.T) {
 	create(t, f, ids["contact"], ids["project"], crm.ContactFor)
 	create(t, f, ids["contact"], ids["quote"], crm.ContactFor)
 	create(t, f, ids["org"], ids["project"], "relates")
-	if len(logEvents(t, f)) != 6 {
+	if len(logEvents(t, f)) != baseline+6 {
 		t.Fatalf("events %d", len(logEvents(t, f)))
 	}
 	refused := []struct{ source, target, typ string }{
@@ -69,7 +70,7 @@ func TestCRMRelationKindsDirectionAndUndo(t *testing.T) {
 		expect(t, request(f.handler, f.a, "POST", "/api/relations", fmt.Sprintf(`{"source_node_id":%q,"target_node_id":%q,"type":%q}`, tc.source, tc.target, tc.typ)), 409)
 	}
 	expect(t, request(f.handler, f.b, "POST", "/api/relations", fmt.Sprintf(`{"source_node_id":%q,"target_node_id":%q,"type":%q}`, ids["org"], ids["project"], crm.CustomerOf)), 404)
-	if len(logEvents(t, f)) != 6 {
+	if len(logEvents(t, f)) != baseline+6 {
 		t.Fatal("rejected CRM link wrote an event")
 	}
 	w := request(f.handler, f.b, "GET", "/api/relations?node_id="+ids["org"], "")

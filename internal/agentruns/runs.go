@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"net/http"
 	"time"
 
@@ -527,6 +528,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	ctx := r.Context()
 	// The tenant/tree fence is already held. Check the accepting project lead
 	// before order/run row locks, then retain that fence through final claim.
+	if err := accountuse.LockShared(ctx, tx); err != nil {
+		return nil, err
+	}
 	var project *string
 	var leadBinding []byte
 	var claimState string

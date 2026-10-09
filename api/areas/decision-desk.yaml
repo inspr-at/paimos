@@ -48,7 +48,7 @@ components:
       required: [id, kind, revision, title, created_at, held, href, source]
       properties:
         id: {type: string, format: uuid}
-        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim, stepup, tier_request]}
+        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim, stepup, tier_request, account_matrix]}
         project_id: {type: string, format: uuid}
         revision: {type: integer, minimum: 0, description: "Native tier revisions can begin at zero; other source revisions begin at one."}
         title: {type: string}
