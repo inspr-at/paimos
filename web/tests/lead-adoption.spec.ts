@@ -18,7 +18,7 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
       if (!path.endsWith('/adopt')) return route.fallback()
       const body = route.request().postDataJSON()
       writes.push(body)
-      state.leads['p-pharos'] = { project_id: 'p-pharos', revision: 1, generation: 0, session_id: body.session_id, state: 'waiting_for_room', reason: 'adoption_pending', process_active: true }
+      state.leads['p-pharos'] = { ...state.leads['p-pharos']!, project_id: 'p-pharos', revision: 1, generation: 0, session_id: body.session_id, state: 'waiting_for_room', reason: 'adoption_pending', process_active: true }
       return route.fulfill({ json: state.leads['p-pharos'] })
     })
     await page.goto('/p/PHAROS')
@@ -114,7 +114,7 @@ test('cancelling an unclaimed adoption clears only the selection', async ({ page
     if (path.endsWith('/pause')) { pauses.push(route.request().method()); return route.fulfill({ status: 500, json: { error: 'pause must not run' } }) }
     if (!path.endsWith('/adopt')) return route.fallback()
     const body = route.request().postDataJSON()
-    state.leads['p-pharos'] = { project_id: 'p-pharos', revision: 1, generation: 0, session_id: body.session_id, state: 'waiting_for_room', reason: 'adoption_pending', process_active: true }
+    state.leads['p-pharos'] = { ...state.leads['p-pharos']!, project_id: 'p-pharos', revision: 1, generation: 0, session_id: body.session_id, state: 'waiting_for_room', reason: 'adoption_pending', process_active: true }
     return route.fulfill({ json: state.leads['p-pharos'] })
   })
   await page.goto('/p/PHAROS')

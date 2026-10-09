@@ -20,7 +20,7 @@ import (
 func TestProjectLeadRemovalAuditsOnlyNeverStartedIntent(t *testing.T) {
 	f := projectLeadFixture(t, readyLeadChecks)
 	path := "/api/projects/" + f.project + "/lead"
-	leadCandidate(t, f)
+	session, _, _ := leadCandidate(t, f)
 	l := startLead(t, f, 0)
 	w := f.call(f.person, "POST", path+"/pause", map[string]any{"expected_revision": l["revision"], "generation": 0}, "")
 	expect(t, w, 200)
@@ -62,6 +62,25 @@ func TestProjectLeadRemovalAuditsOnlyNeverStartedIntent(t *testing.T) {
 	if decode(t, w)["error"] != "lead revision conflict" {
 		t.Fatal("stale confirmation crossed a remove/recreate boundary")
 	}
+
+	// Adoption is another explicit creation path. Cancelling its selection must
+	// not make a stale removal confirmation valid against the recreated intent.
+	expect(t, f.call(f.person, "DELETE", path, map[string]any{"expected_revision": recreated["revision"]}, ""), 200)
+	w = f.call(f.person, "POST", path+"/adopt", map[string]any{"expected_revision": 0, "session_id": session}, "")
+	expect(t, w, 200)
+	adopted := decode(t, w)
+	if adopted["revision"].(float64) <= recreated["revision"].(float64) {
+		t.Fatal("adoption reused a removed revision")
+	}
+	w = f.call(f.person, "POST", path+"/adopt/cancel", map[string]any{"expected_revision": adopted["revision"]}, "")
+	expect(t, w, 200)
+	cleared := decode(t, w)
+	w = f.call(f.person, "DELETE", path, map[string]any{"expected_revision": l["revision"]}, "")
+	expect(t, w, 409)
+	if decode(t, w)["error"] != "lead revision conflict" {
+		t.Fatal("stale confirmation crossed a remove/adopt/cancel boundary")
+	}
+	expect(t, f.call(f.person, "DELETE", path, map[string]any{"expected_revision": cleared["revision"]}, ""), 200)
 }
 
 func TestProjectLeadRemovalRejectsStartedAndHistoricalGenerations(t *testing.T) {
