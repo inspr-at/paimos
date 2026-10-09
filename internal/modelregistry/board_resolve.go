@@ -174,15 +174,13 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 					}
 				}
 			}
-			preview := !review && requirement == "any" && health[profile.Harness].Accounts == 0
-			if len(ids) == 0 && len(skipped) == 0 && !preview {
+			if len(ids) == 0 && len(skipped) == 0 {
 				skipped = append(skipped, "no qualified account with available capacity")
 			}
 			candidate := Candidate{ProfileID: profile.ID, SkipReasons: skipped, Stage: stage}
 			if len(skipped) == 0 {
 				candidate.Selected = true
 				out.Profile = &profile
-				out.Preview = preview
 				out.Trace.QualifyingAccountIDs = ids
 				out.OwnerRequired = false
 				out.Ladder = append(out.Ladder, candidate)
@@ -299,7 +297,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	}
 	out.Trace.Residency = modelprefs.ResolveResidency(chain)
 	out.Trace.Residency.Value = requirement
-	if out.Profile != nil && !out.Preview {
+	if out.Profile != nil {
 		out.CommandTemplate, err = commandTemplate(out.Profile.Harness, out.Profile.Model, out.Profile.Effort, role.readOnly)
 		if err != nil {
 			return nil, err

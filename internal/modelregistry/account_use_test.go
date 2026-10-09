@@ -89,7 +89,7 @@ func TestResolverProjectDailyCapsAndContextLadder(t *testing.T) {
 				d := agentplan.DefaultDaily()
 				d.AtLimit = tc.atLimit
 				d.BoostToday = &agentplan.DailyBoost{LimitUsedPct: 50, EnteredAs: "used", Until: end}
-				raw, err := json.Marshal(agentplan.Plan{Total: 5, Daily: map[string]agentplan.DailySettings{"codex": d, "claude": agentplan.DefaultDaily()}})
+				raw, err := json.Marshal(agentplan.Plan{Total: 5, Limits: map[string]agentplan.Limit{}, Daily: map[string]agentplan.DailySettings{"codex": d, "claude": agentplan.DefaultDaily()}})
 				if err != nil {
 					return err
 				}
@@ -180,7 +180,7 @@ func TestEscalationSkipsAccountlessHarnessForRunnableSuccessor(t *testing.T) {
 		if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes WHERE role='build-hard'`); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,profile_id,position) SELECT $1,'build-hard',id,CASE slug WHEN 'claude-opus-xhigh' THEN 0 ELSE 1 END FROM model_profiles WHERE slug IN ('claude-opus-xhigh','codex-astra-xhigh')`, p.TenantID); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,profile_id,priority) SELECT $1,'build-hard',id,CASE slug WHEN 'claude-opus-xhigh' THEN 1 ELSE 2 END FROM model_profiles WHERE slug IN ('claude-opus-xhigh','codex-astra-xhigh')`, p.TenantID); err != nil {
 			return err
 		}
 		out, err := ResolveEscalation(ctx, tx, p, WorkQuery{Role: "build", Area: "backend"}, nil, now)
@@ -266,7 +266,7 @@ func TestResolverNoPoolPreviewAndDeniedContext(t *testing.T) {
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Denied resolver') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok) VALUES($1,'denied-resolve','codex','test',$2,'Denied',$3,true) RETURNING id::text`, p.TenantID, runner, now).Scan(&account); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation) VALUES($1,'denied-resolve','codex','test',$2,'Denied',$3,true,'generation') RETURNING id::text`, p.TenantID, runner, now).Scan(&account); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM account_use_cells WHERE account_id=$1`, account); err != nil {
