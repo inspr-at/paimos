@@ -49,7 +49,8 @@ func TestQuarantineInventoryParsesWithWorkflowColumn(t *testing.T) {
 	for i := range doc.Tables {
 		entry := &doc.Tables[i]
 		seen[entry.Table]++
-		if entry.Table == "" || !allowed[entry.Classification] || entry.Locator.TenantColumn == "" {
+		globalCapabilities := entry.Table == "aeon_required_capabilities" && entry.Classification == "metadata" && entry.Locator.PersonColumn == "" && reflect.DeepEqual(entry.Columns, map[string]string{"capability": "metadata", "since": "metadata"})
+		if entry.Table == "" || !allowed[entry.Classification] || entry.Locator.TenantColumn == "" && !globalCapabilities {
 			t.Fatalf("table entry %q is not a classified array element", entry.Table)
 		}
 		for column, class := range entry.Columns {

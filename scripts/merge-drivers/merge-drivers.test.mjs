@@ -183,6 +183,15 @@ function checkout(t) {
 test('regeneration is idempotent and invalid documents or symlinks prevent every write', t => {
   const directory = checkout(t)
   const semantic = registryPaths.map(file => normalizeRegistry(JSON.parse(readFileSync(resolve(directory, file), 'utf8')), file))
+  // Only the exact global capability metadata may omit its tenant locator.
+  for (const change of [r => { r.table = 'another_global_table' }, r => { r.classification = 'personal' },
+    r => { r.columns.capability = 'personal' }, r => { r.locator.person_column = 'principal_id' }]) {
+    const invalid = structuredClone(semantic[3])
+    const capability = invalid.tables.find(r => r.table === 'aeon_required_capabilities')
+    assert.ok(capability)
+    change(capability)
+    assert.throws(() => normalizeRegistry(invalid, registryPaths[3]), /Invalid tenant\/person locator/)
+  }
   regenerate(directory)
   const first = [...registryPaths, ...manifestPaths].map(file => readFileSync(resolve(directory, file), 'utf8'))
   regenerate(directory)

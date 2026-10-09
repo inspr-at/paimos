@@ -50,6 +50,9 @@ func migratedTemplate(ctx context.Context, maint string) (_ *DB, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("migrate template: %w", err)
 	}
+	if err = seedAccountUseFixturePolicy(ctx, d); err != nil {
+		return nil, fmt.Errorf("account-use fixture policy: %w", err)
+	}
 	// CREATE DATABASE TEMPLATE rejects a source with other connections.
 	// Close both pools and prohibit new connections before publishing it.
 	d.App.Close()
@@ -69,6 +72,33 @@ func migratedTemplate(ctx context.Context, maint string) (_ *DB, err error) {
 	}
 	templates.db, templates.lease = d, lease
 	return d, nil
+}
+
+// Existing fixtures describe pre-matrix, all-allowed tenants. Preserve that
+// starting policy explicitly, without relaxing any production predicate or
+// removing audits. The capability sweep additionally activates every such
+// tenant. Migration tests use NewUnmigrated and retain the production seed;
+// policy tests opt out on their tenant INSERT with a transaction-local flag.
+func seedAccountUseFixturePolicy(ctx context.Context, d *DB) error {
+	activate := "false"
+	if os.Getenv("AEON_TEST_ACCOUNT_USE_ACTIVATED") == "1" {
+		activate = "true"
+	}
+	_, err := d.App.Exec(ctx, `CREATE FUNCTION aeon_test_account_use_seed() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE prior text := current_setting('aeon.tenant_id',true);
+BEGIN
+    IF current_setting('aeon.test_account_use_defaults',true)='production' THEN RETURN NEW; END IF;
+    PERFORM set_config('aeon.tenant_id',NEW.id::text,true);
+    UPDATE account_use_rules SET new_accounts='allow',new_contexts='allow',
+        enforced_at=CASE WHEN `+activate+` THEN coalesce(enforced_at,clock_timestamp()) ELSE enforced_at END;
+    PERFORM set_config('aeon.tenant_id',coalesce(prior,''),true);
+    RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('aeon.tenant_id',coalesce(prior,''),true);
+    RAISE;
+END $$;
+CREATE TRIGGER zz_test_account_use_seed AFTER INSERT ON tenants FOR EACH ROW EXECUTE FUNCTION aeon_test_account_use_seed();`)
+	return err
 }
 
 const templateCleanupArg = "--aeon-dbtest-template-cleanup"
