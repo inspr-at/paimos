@@ -360,7 +360,7 @@ p { margin: 0; }
   .f-live .f-waitn { display: block; }
   .f-pad { padding: 12px 12px 14px; }
   /* Rows: name, running and limit, pace state; then the controls across the full width. Same height for every row. */
-  .row { height: 186px; grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: 70px auto; align-items: start; gap: 8px 6px; padding: 10px 6px; }
+  .row { height: 200px; grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: 70px auto; align-items: start; gap: 8px 6px; padding: 10px 6px; }
   .f-sel { grid-column: 2; width: calc(100% + 12px); margin: 0 -6px; padding: 4px 6px; min-height: 66px; align-content: start; }
   .f-mode.initial { width: 44px; height: 44px; margin: 0; }
   .limit { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }

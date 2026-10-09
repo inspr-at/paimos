@@ -692,7 +692,7 @@ test.describe('phone', () => {
     await targets()
     // The detail sits under the list on a phone; the rows keep one height and nothing runs off the side.
     expect((await detail(page, 'claude').boundingBox())!.y).toBeGreaterThan((await row(page, 'cursor').boundingBox())!.y)
-    for (const key of ['codex', 'claude', 'cursor']) expect((await row(page, key).boundingBox())!.height).toBe(186)
+    for (const key of ['codex', 'claude', 'cursor']) expect((await row(page, key).boundingBox())!.height).toBe(200)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
   })
 })
