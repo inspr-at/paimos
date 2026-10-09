@@ -2,7 +2,7 @@
 // AEON-1003 (AEON-994 package 3): Numbers · Simple. Risks: switching the window or
 // level moves a control or a tile's Learn button; Learn cannot be opened, pinned
 // and closed from the keyboard; the verdicts or the summary disagree with the numbers.
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Route } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
@@ -137,6 +137,86 @@ test('a failed refresh keeps Learn still through the error and the retry', async
       await expect(simple.getByRole('listitem').filter({ has: page.getByRole('heading', { name: text.tile, level: 4 }) }).locator('.s-val')).toHaveText('16min')
     })
     guard.done()
+  }
+})
+
+// Risk: a refused save and a failed read stand together, and the save warning's veil hides the
+// read error with its Retry. Each alert and each retry must stay visible and work on its own,
+// in either order, without moving the controls or a Learn button (AEON-541).
+test('a refused save and a failed read together keep both alerts and both retries, and Learn still', async ({ page }) => {
+  test.setTimeout(240_000)
+  let reject = false
+  const refuseSave = async (route: Route) => {
+    if (route.request().method() !== 'PUT') return route.fallback()
+    if (reject) return route.fulfill({ status: 500, json: { error: 'not saved' } })
+    return route.fallback()
+  }
+  for (const width of [1440, 800, 400]) for (const lang of ['en', 'de'] as const) {
+    const text = copy(lang)
+    const phone = width === 400
+    await page.setViewportSize({ width, height: phone ? 860 : 1000 })
+    const world = await setup(page, { lang })
+    reject = false
+    await page.route('**/api/preferences/delivery*', refuseSave)
+    await page.goto('/p/AEON/delivery')
+    const simple = page.getByTestId('delivery-simple')
+    const learn = simple.getByRole('button', { name: text.learn })
+    const last = simple.getByRole('button', { name: text.last })
+    const summary = page.getByTestId('delivery-summary')
+    const windows = head(page).getByRole('radiogroup', { name: text.window })
+    const saveAlert = page.getByTestId('delivery-pref-error'), loadAlert = page.getByTestId('delivery-load-error')
+    const saveRetry = saveAlert.getByRole('button', { name: text.retrySave, exact: true })
+    const loadRetry = loadAlert.getByRole('button', { name: text.retry, exact: true })
+    await expect(summary).toContainText(text.summary)
+    const guard = await controlStability(page, {
+      learn, last, summary, head: head(page), windows,
+      levels: head(page).getByRole('radiogroup', { name: text.level }),
+    })
+    const refresh = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+    const choose = (days: number) => windows.getByRole('radio', { name: text.days(days) }).click()
+    // Two alerts on one row, side by side, each holding its own retry, both above Learn.
+    const bothShown = async () => {
+      await expect(saveAlert).toBeVisible(); await expect(loadAlert).toBeVisible()
+      await expect(saveAlert).toContainText(text.warning); await expect(loadAlert).toContainText(text.failed)
+      await expect(saveRetry).toBeVisible(); await expect(loadRetry).toBeVisible()
+      const [save, load, saveButton, loadButton, learnBox] = await Promise.all([saveAlert, loadAlert, saveRetry, loadRetry, learn].map(item => item.boundingBox()))
+      expect(save!.x + save!.width, `${width} ${lang} save alert ends before the read alert`).toBeLessThanOrEqual(load!.x + .5)
+      expect(Math.abs(save!.y - load!.y), 'one row').toBeLessThanOrEqual(.5)
+      for (const [alert, button, name] of [[save, saveButton, 'save'], [load, loadButton, 'read']] as const) {
+        expect(button!.x, `${name} retry inside its alert`).toBeGreaterThanOrEqual(alert!.x - .5)
+        expect(button!.x + button!.width, `${name} retry inside its alert`).toBeLessThanOrEqual(alert!.x + alert!.width + .5)
+        expect(button!.y, `${name} retry inside its alert`).toBeGreaterThanOrEqual(alert!.y - .5)
+        expect(button!.y + button!.height, `${name} retry inside its alert`).toBeLessThanOrEqual(alert!.y + alert!.height + .5)
+        expect(alert!.y + alert!.height, `${name} alert above Learn`).toBeLessThanOrEqual(learnBox!.y + .5)
+        if (phone) { expect(button!.width, `${name} retry touch width`).toBeGreaterThanOrEqual(44); expect(button!.height, `${name} retry touch height`).toBeGreaterThanOrEqual(44) }
+      }
+    }
+
+    // The save fails first, then the read.
+    reject = true
+    await guard.check(async () => { await choose(30); await expect(saveAlert).toBeVisible() })
+    world.answer(500, { error: 'boom' })
+    await guard.check(async () => { await refresh(); await bothShown() })
+    // The save retry works alone: the read error stays.
+    reject = false
+    await guard.check(async () => { await saveRetry.click(); await expect(saveAlert).toHaveCount(0); await expect(loadAlert).toBeVisible() })
+    // The read retry works alone.
+    world.metrics({})
+    await guard.check(async () => { await loadRetry.click(); await expect(loadAlert).toHaveCount(0); await expect(summary).not.toContainText(text.failed) })
+
+    // The read fails first, then the save; a read retry that fails again keeps both.
+    world.answer(500, { error: 'boom' })
+    await guard.check(async () => { await refresh(); await expect(loadAlert).toBeVisible() })
+    reject = true
+    await guard.check(async () => { await choose(90); await bothShown() })
+    await guard.check(async () => { await loadRetry.click(); await bothShown() })
+    // The read retry works while the save warning stays.
+    world.metrics({})
+    await guard.check(async () => { await loadRetry.click(); await expect(loadAlert).toHaveCount(0); await expect(saveAlert).toBeVisible() })
+    reject = false
+    await guard.check(async () => { await saveRetry.click(); await expect(saveAlert).toHaveCount(0) })
+    guard.done()
+    await page.unroute('**/api/preferences/delivery*', refuseSave)
   }
 })
 

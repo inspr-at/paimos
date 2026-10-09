@@ -6642,6 +6642,8 @@
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed refresh keeps Learn still through the error and the retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a refused save and a failed read together keep both alerts and both retries, and Learn still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"a failed refresh keeps the delivery rows and notes the failure","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"a later hold on a lifted row can be lifted again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -14591,6 +14593,10 @@
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"the small chart shades the good side of the target and hatches only what no source covers","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"the summary counts numbers on target and names the closest and the biggest gap from this window’s numbers","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"with a refused save and a failed read together, both alerts and both retries stay reachable (de)","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"with a refused save and a failed read together, both alerts and both retries stay reachable (en)","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a denied or failed review-policy read selects no saved mode","tier":"ESSENTIAL"}
     ,

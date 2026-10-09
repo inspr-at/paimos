@@ -97,6 +97,9 @@ onBeforeUnmount(() => { poller.stop(); reading?.abort() })
 watch(() => props.project.id, () => { data.value = null; status.value = 'loading'; poller.restart() })
 
 const state = computed<'loading' | 'error' | 'ready'>(() => status.value === 'ready' && !prefsReady.value ? 'loading' : status.value)
+// A refused save and a failed read can stand together. Each keeps its own alert and its own retry:
+// they share the status row side by side, so neither hides the other and Learn stays put.
+const both = computed(() => view.value === 'numbers' && prefFailed.value && state.value === 'error')
 const numbers = computed(() => data.value ? numbersOf(data.value, prefs.value.window, lang.value) : null)
 // Placeholders keep every tile and chart in its slot while loading or after a failed read.
 const empty = computed(() => numbersOf({ project_id: props.project.id, generated_at: '', source: null, metrics: [] }, prefs.value.window, lang.value))
@@ -199,22 +202,22 @@ watch(state, (next, prev) => {
         <span class="dl-updated" data-testid="delivery-updated">{{ updated || ' ' }}</span>
       </div>
       <!-- Save feedback sits on the status row. It is out of flow, so Learn does not move when it appears or clears. -->
-      <p v-if="prefFailed" class="banner err pref-warn" role="alert" data-testid="delivery-pref-error">
+      <p v-if="prefFailed" class="banner err pref-warn" :class="{ beside: both }" role="alert" data-testid="delivery-pref-error">
         <AppIcon name="alert" :size="16" />
         <span v-clip-tip class="grow">{{ text.prefErr }}</span>
-        <button type="button" class="btn sm" @click="retryPrefs">{{ text.prefRetry }}</button>
+        <button type="button" class="btn sm" :data-tip="both ? text.prefRetry : undefined" @click="retryPrefs"><AppIcon name="refresh" :size="14" /><span class="lbl">{{ text.prefRetry }}</span></button>
       </p>
     </div>
 
     <template v-if="view === 'numbers'">
-      <div ref="statusEl" class="dl-status" :class="{ veiled: prefFailed }" :style="statusHold > 0 ? { minHeight: `${statusHold}px` } : undefined">
+      <div ref="statusEl" class="dl-status" :class="{ veiled: prefFailed && !both, beside: both }" :style="statusHold > 0 ? { minHeight: `${statusHold}px` } : undefined">
         <div v-if="state === 'loading'" class="sources" aria-hidden="true">
           <span class="sk chip-sk" style="width: 210px" /><span class="sk chip-sk" style="width: 250px" /><span class="sk chip-sk" style="width: 230px" />
         </div>
-        <div v-else-if="state === 'error'" class="banner err" role="alert">
+        <div v-else-if="state === 'error'" class="banner err" role="alert" data-testid="delivery-load-error">
           <AppIcon name="alert" :size="16" />
           <span v-clip-tip class="grow"><b>{{ text.errT }}</b> {{ text.errB }}</span>
-          <button type="button" class="btn sm" @click="retry"><AppIcon name="refresh" :size="14" />{{ text.retry }}</button>
+          <button type="button" class="btn sm" :data-tip="both ? text.retry : undefined" @click="retry"><AppIcon name="refresh" :size="14" /><span class="lbl">{{ text.retry }}</span></button>
         </div>
         <div v-else-if="!source" class="banner" role="status">
           <AppIcon name="info" :size="16" />
@@ -293,6 +296,9 @@ watch(state, (next, prev) => {
 /* The warning replaces the status row in place: same anchor, no extra flow, so tiles stay put. */
 .banner.pref-warn { position: absolute; z-index: 2; top: calc(100% + 12px); right: 0; left: 0; margin: 0; min-height: 28px; padding-block: 0; flex-wrap: nowrap; }
 .banner.pref-warn .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A refused save and a failed read together: two alerts, one row, each with its own retry (AEON-541). */
+.banner.pref-warn.beside { right: calc(50% + 6px); }
+.dl-status.beside .banner { margin-left: calc(50% + 6px); }
 .sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 28px; margin-top: 12px; }
 .src { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 12px; }
 .src svg { flex: none; color: var(--teal-ink); }
@@ -334,6 +340,11 @@ watch(state, (next, prev) => {
   .sk { background: linear-gradient(90deg, var(--skeleton) 0%, var(--skeleton-hi) 50%, var(--skeleton) 100%) 0 0 / 200% 100%; animation: dl-sk 1.4s ease-in-out infinite; }
 }
 @keyframes dl-sk { to { background-position: -200% 0; } }
+@container delivery (max-width: 900px) {
+  /* Half a row has no room for the label: the retry keeps its icon and its name (read aloud, shown as a tip). */
+  .beside .btn { width: 28px; padding: 0; }
+  .beside .btn .lbl { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+}
 @container delivery (max-width: 1000px) {
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -353,6 +364,10 @@ watch(state, (next, prev) => {
   .banner .btn { min-height: 44px; }
   .dl-status .sources, .dl-status .banner { min-height: 44px; }
   .dl-status .banner { flex-wrap: nowrap; }
+  /* Both alerts on one 44 px row: the sentence takes up to three lines, the retry is a 44 px icon. */
+  .banner.pref-warn.beside, .dl-status.beside .banner { gap: 6px; padding: 0 4px 0 10px; }
+  .banner.pref-warn.beside .grow, .dl-status.beside .banner .grow { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; white-space: normal; font-size: 12px; line-height: 1.2; }
+  .beside .btn { width: 44px; }
 }
 @container delivery (max-width: 460px) { .tiles { grid-template-columns: minmax(0, 1fr); } }
 </style>

@@ -10,6 +10,8 @@ import ts from 'typescript'
 import * as Vue from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 vi.mock('../src/lib/api.ts', () => ({ api: async () => new Response('{}'), APIError: class extends Error {} }))
+import * as delivery from '../src/lib/delivery'
+import * as numbers from '../src/lib/deliveryNumbers'
 import * as simple from '../src/lib/deliverySimple'
 import { simpleNumbersOf, sparkGeometry, verdictOf, type SparkModel } from '../src/lib/deliverySimple'
 import { TILES } from '../src/lib/deliveryNumbers'
@@ -130,7 +132,7 @@ const detach = (child: El) => { if (child.parent) child.parent.children.splice(c
 const renderer = Vue.createRenderer<El, El>({
   createElement: el, createText: text => ({ ...el('#text'), text }), createComment: () => el('#comment'),
   setText: (node, text) => { node.text = text }, setElementText: (node, text) => { node.children = [{ ...el('#text'), text, parent: node }] },
-  parentNode: node => node.parent, nextSibling: node => node.parent?.children[node.parent.children.indexOf(node) + 1] ?? null,
+  querySelector: () => el('body'), parentNode: node => node.parent, nextSibling: node => node.parent?.children[node.parent.children.indexOf(node) + 1] ?? null,
   patchProp: (node, key, _old, value) => { node.props[key] = value }, remove: detach,
   insert: (child, parent, anchor) => {
     detach(child); child.parent = parent
@@ -194,3 +196,79 @@ it('Learn opens on focus, pins with Enter or a click, and Esc closes it and keep
   key({ key: 'Escape', stopPropagation: () => { throw new Error('nothing to close') } })
   scope.stop()
 })
+
+// Risk: a refused save and a failed read stand together, and the save warning's veil hides the
+// read error and its Retry. Both alerts and both retries must stay reachable, in either order.
+for (const lang of ['en', 'de'] as const) {
+  it(`with a refused save and a failed read together, both alerts and both retries stay reachable (${lang})`, async () => {
+    const labels = lang === 'de'
+      ? { load: 'Erneut versuchen', save: 'Erneut speichern', failed: 'Die Lieferzahlen konnten nicht geladen werden.' }
+      : { load: 'Retry', save: 'Save again', failed: 'Delivery numbers could not be loaded.' }
+    vi.stubGlobal('document', { addEventListener() {}, removeEventListener() {} })
+    vi.stubGlobal('window', { addEventListener() {}, removeEventListener() {}, innerWidth: 1440, innerHeight: 900 })
+    let read: () => Promise<unknown> = async () => deliveryMetrics()
+    let reload = async () => {}
+    const failures = new Set<(key: string) => void>()
+    const preferenceSaves = Vue.reactive({ saving: new Set<string>(), failed: new Set<string>() })
+    const pref = { value: Vue.ref({}), ready: Promise.resolve(), save: () => {} }
+    // A .vue module is imported through __importDefault, so it needs the ES module flag to be seen as a default export.
+    const sfc = (component: Vue.Component) => ({ __esModule: true, default: component })
+    const stub = sfc({ render: () => null })
+    const DeliveryView = component('DeliveryView.vue', {
+      vue: Vue,
+      'vue-router': { useRoute: () => Vue.reactive({ query: {}, path: '/p/AEON/delivery', hash: '' }), useRouter: () => ({ replace: () => {} }) },
+      '../AppIcon.vue': sfc({ props: ['name', 'size'], render: () => Vue.h('svg') }),
+      '../work/ProjectTabs.vue': stub, './ExpertTile.vue': stub, './LevelSwitch.vue': stub,
+      './SimpleNumbers.vue': stub, './TrendChart.vue': stub, './WindowSwitch.vue': stub,
+      '../../lib/delivery': delivery, '../../lib/deliveryNumbersText': numbersText,
+      '../../lib/deliveryNumbers': { ...numbers, readDeliveryMetrics: () => read() },
+      '../../lib/preferences': { onPreferenceFailure: (listener: (key: string) => void) => { failures.add(listener); return () => { failures.delete(listener) } }, preferenceSaves, usePreference: () => pref },
+      '../../lib/usePolledData': { usePoller: (load: () => Promise<void>) => { reload = load; return { start: () => { void load() }, stop() {}, restart() {} } } },
+      '../../directives/clipTip': { vClipTip: {} },
+      '../../stores/profile': { useProfile: () => ({ profile: { locale: lang === 'de' ? 'de-AT' : 'en' }, load: async () => {} }) },
+    })
+    const app = renderer.createApp(DeliveryView, { project: { id: 'p1', routeKey: 'AEON', title: 'Aeon' } })
+    const root = el('root'); apps.push(app); app.mount(root)
+    const settle = async () => { for (let turn = 0; turn < 6; turn++) { await Promise.resolve(); await Vue.nextTick() } }
+    await settle()
+    const alert = (id: string) => all(root).find(node => node.props['data-testid'] === id)
+    const veiled = (node: El | null): boolean => node ? /\bveiled\b/.test(String(node.props.class ?? '')) || veiled(node.parent) : false
+    const retryOf = (id: string) => all(alert(id)!).find(node => node.tag === 'button')!
+    const hiddenStatus = () => all(root).find(node => /\bdl-status\b/.test(String(node.props.class ?? '')))!
+    hiddenStatus().getBoundingClientRect = () => ({ height: 40 })
+    const refuseSave = async () => { for (const listener of failures) listener(numbers.DELIVERY_PREFS_KEY); await settle() }
+    const failRead = async () => { read = async () => { throw new Error('boom') }; await reload(); await settle() }
+    const bothReachable = () => {
+      for (const [id, label] of [['delivery-pref-error', labels.save], ['delivery-load-error', labels.load]] as const) {
+        expect(alert(id), id).toBeDefined()
+        expect(veiled(alert(id)!), `${id} is not hidden by a veil`).toBe(false)
+        expect(textOf(retryOf(id)), `${id} retry`).toBe(label)
+      }
+      expect(textOf(alert('delivery-load-error')!)).toContain(labels.failed)
+    }
+
+    // The save is refused first, then the read fails.
+    expect(alert('delivery-load-error')).toBeUndefined()
+    await refuseSave()
+    expect(alert('delivery-pref-error')).toBeDefined()
+    await failRead()
+    bothReachable()
+    // The read retry works alone: the save warning stays and stays reachable.
+    read = async () => deliveryMetrics()
+    ;(retryOf('delivery-load-error').props.onClick as () => void)(); await settle()
+    expect(alert('delivery-load-error')).toBeUndefined()
+    expect(veiled(alert('delivery-pref-error')!)).toBe(false)
+
+    // The read fails first, then the save is refused; the save retry works alone.
+    await failRead()
+    expect(veiled(alert('delivery-load-error')!)).toBe(false)
+    preferenceSaves.failed.add('me/delivery:numbers')
+    await refuseSave()
+    bothReachable()
+    preferenceSaves.failed.clear()
+    ;(retryOf('delivery-pref-error').props.onClick as () => void)(); await settle()
+    expect(alert('delivery-pref-error')).toBeUndefined()
+    expect(veiled(alert('delivery-load-error')!)).toBe(false)
+    expect(textOf(retryOf('delivery-load-error'))).toBe(labels.load)
+  })
+}
