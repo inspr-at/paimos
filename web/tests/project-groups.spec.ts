@@ -300,7 +300,9 @@ test('a member sees shared groups, may not add to them, and has no Share or Dele
   await page.keyboard.press('m')
   const option = page.getByRole('option', { name: /Clients/ })
   await expect(option).toHaveAttribute('aria-disabled', 'true')
-  await expect(option).toContainText('Only a workspace admin can add projects to a shared group.')
+  await expect(option).toHaveAttribute('aria-description', 'Only a workspace admin can add projects to a shared group.')
+  await option.hover()
+  await expect(page.locator('.option-note')).toHaveText('Only a workspace admin can add projects to a shared group.')
 })
 
 test('a server without shared groups still has personal ones', async ({ page }) => {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, truncateSync, utimesSync } from 'node:fs'
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, truncateSync, utimesSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync, execFileSync } from 'node:child_process'
@@ -13,6 +13,7 @@ import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
 import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain, effectiveLane, sourceTree, promotionsBetween } from './diff.mjs'
 import { runnerDecision, runnerSelection, browserRunnerIdentity, run } from './cli.mjs'
+import { createGoRunner } from './go-runner.mjs'
 import { treeStamp, reuse, webStampEntries } from './collect.mjs'
 import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs'
 import { buildBrowserMap } from './browser-impact.mjs'
@@ -21,6 +22,27 @@ import './browser-impact.test.mjs'
 import './manifests.test.mjs'
 import './tiers-merge-driver.test.mjs'
 import '../merge-drivers/merge-drivers.test.mjs'
+import '../nightly-ticket.test.mjs'
+
+test('nightly failure artifacts bind failed cases and incomplete runners to the exact attempt', async () => {
+  const { run } = await import('./cli.mjs')
+  const rows = ['failed case', 'passed sibling'].map(name => ({ kind: 'node', file: 'tests/fixture.test.ts', name, tier: 'GATED-FULL' }))
+  const env = { GITHUB_EVENT_NAME: 'schedule', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '2', GITHUB_SHA: 'a'.repeat(40) }
+  const simulate = async incomplete => {
+    const artifacts = new Map()
+    const code = await run('web', { tests: rows, all: rows, full: true, scope: 'catalogue' }, { unit: true, job: 'web-unit', env }, {
+      knownFlaky: { version: 1, entries: [] }, log: () => {}, saveJSON: (path, value) => artifacts.set(path.split('/').at(-1), value),
+      execute: () => incomplete ? { code: 2, output: '', stderr: '', error: 'ETIMEDOUT' } : {
+        code: 1, stderr: '', output: rows.map((row, i) => JSON.stringify({ type: i ? 'test:pass' : 'test:fail', fullName: row.name })).join('\n'),
+      },
+    })
+    assert.notEqual(code, 0)
+    assert.equal(artifacts.get('web-unit-measurement.json').exitCode, code)
+    return artifacts.get('web-unit-failures.json')
+  }
+  assert.deepEqual(await simulate(false), { version: 1, job: 'web-unit', runId: '123', attempt: '2', sha: env.GITHUB_SHA, cases: [key(rows[0])], runnerFailure: false })
+  assert.deepEqual(await simulate(true), { version: 1, job: 'web-unit', runId: '123', attempt: '2', sha: env.GITHUB_SHA, cases: [], runnerFailure: true })
+})
 import './slow-owners.test.mjs'
 import './web-batches.test.mjs'
 
@@ -33,6 +55,164 @@ const mapTree='a'.repeat(40)
 const completeMap=(source,specs)=>({baseTree:mapTree,browserMap:{version:1,tree:mapTree,complete:true,specs,modules:{[source]:specs}}})
 const fixture=()=>({version:1,tests:structuredClone(cases)})
 const noFlaky={version:1,entries:[]}
+
+// R13 release integrity: replacing go test must retain exact native inventory,
+// execution outcomes and retry policy, including failures outside a test body.
+test('AEON-1025 compiled Go owners retain exact execution, blocking failures and retry evidence',async t=>{
+  const rows=[g('internal/nodes','TestFailed','GATED-FULL'),g('internal/nodes','TestPassed','GATED-FULL'),
+    g('internal/nodes','FuzzSeed','GATED-FULL'),g('internal/auth','TestLegacy','GATED-FULL')]
+  const all=[...rows,g('internal/nodes','TestUnselected'),{...g('internal/nodes','TestOtherPlatform'),active:false}]
+  const selection={tests:rows,all,full:true,scope:'gated-full',reason:'fixture'}
+  const simulate=async({event='merge_group',failed=[rows[0]],again=[],compileFailure=false,listMismatch=false,
+    missing=false,unexpected=false,packageFailure=false,signal=false,saveFailure=false,goFlags}={})=>{
+    const calls=[],lists=[],attempts=new Map(),binaries=[]
+    let report,clock=0,error,code
+    try {
+      code=await run('go',selection,{env:{GITHUB_EVENT_NAME:event,FIXTURE:'retained',GOFLAGS:goFlags},job:'aeon1025-fixture'}, {
+        knownFlaky:noFlaky,now:()=>{clock+=100;return clock},log:()=>{},
+        saveJSON:(_path,value)=>{if(saveFailure) throw new Error('fixture save failure');report=value},
+        command:(bin,args,options)=>{
+          const compiled=bin!=='go',owner=compiled?'internal/nodes':args.at(-1).slice(2)
+          lists.push({bin,args,options})
+          if(compiled) {
+            assert.equal(bin,binaries[0])
+            assert.deepEqual(args,['-test.paniconexit0','-test.list=^(Test|Fuzz)'])
+            assert.equal(options.cwd,resolve(new URL('../../internal/nodes',import.meta.url).pathname))
+            assert.equal(options.env.PWD,options.cwd)
+          }
+          return all.filter(row=>row.package===owner&&row.active&&(!listMismatch||row!==rows[0])).map(row=>row.name).join('\n')
+        },
+        execute:(bin,args,path,options)=>{
+          assert.equal(bin,'go')
+          assert.equal(options.env.GOMAXPROCS,'2')
+          assert.equal(options.env.FIXTURE,'retained')
+          if(args.includes('-c')) {
+            assert.ok(args.includes('-ldflags=-s -w'),'retain normal go test linker symbol policy')
+            const binary=args[args.indexOf('-o')+1]
+            binaries.push(binary);calls.push({compile:true,args,path,options})
+            assert.ok(existsSync(resolve(binary,'..')))
+            return {code:compileFailure?1:0,output:'',stderr:compileFailure?'fixture compile failure':''}
+          }
+          const compiled=args[0]==='tool',owner=compiled?'internal/nodes':args.at(-1).slice(2)
+          if(compiled) {
+            assert.deepEqual(args.slice(0,5),['tool','test2json','-t','-p','github.com/inspr-at/paimos/internal/nodes'])
+            assert.equal(args[5],binaries[0])
+            assert.ok(args.includes('-test.v=test2json'))
+            assert.ok(args.includes('-test.paniconexit0'))
+            assert.ok(args.includes('-test.count=1'))
+            assert.ok(args.includes('-test.timeout=25m'))
+            assert.equal(options.cwd,lists[0].options.cwd)
+            assert.equal(options.env.PWD,options.cwd)
+          } else {
+            assert.ok(args.includes('-count=1'))
+            assert.ok(args.includes('-timeout=25m'))
+            assert.ok(args.includes('-json'))
+          }
+          const pattern=new RegExp(compiled?args.find(arg=>arg.startsWith('-test.run=')).slice('-test.run='.length):args[args.indexOf('-run')+1])
+          const chosen=all.filter(row=>row.package===owner&&row.active&&pattern.test(row.name))
+          calls.push({compile:false,compiled,keys:chosen.map(key),args,path,options})
+          const attempt=(attempts.get(owner)??0)+1
+          attempts.set(owner,attempt)
+          const failures=attempt===1?failed:again,Package=`github.com/inspr-at/paimos/${owner}`,output=[]
+          for(const row of chosen) {
+            if(missing&&row===rows[1])continue
+            output.push({Package,Test:row.name,Action:'run'})
+            output.push({Package,Test:`${row.name}/nested`,Action:'run'},{Package,Test:`${row.name}/nested`,Action:'pass'})
+            output.push({Package,Test:row.name,Action:failures.includes(row)?'fail':'pass'})
+          }
+          if(unexpected)output.push({Package,Test:'TestUnexpected',Action:'run'},{Package,Test:'TestUnexpected',Action:'pass'})
+          const failedAny=chosen.some(row=>failures.includes(row))||packageFailure
+          output.push({Package,Action:failedAny?'fail':'pass'})
+          return {code:failedAny?1:0,output:output.map(JSON.stringify).join('\n'),stderr:'',signal:signal?'SIGTERM':undefined}
+        },
+      })
+    } catch(caught) { error=caught }
+    for(const binary of binaries)assert.equal(existsSync(resolve(binary,'..')),false,'owned binaries are removed on success and every failure')
+    return {code,error,report,calls,lists,binaries}
+  }
+  await t.test('one profiled build serves listing, first execution and failed-case retry; other owners retain go test',async()=>{
+    const {code,error,report,calls,lists,binaries}=await simulate()
+    assert.equal(error,undefined)
+    assert.equal(code,0)
+    assert.equal(binaries.length,1)
+    assert.equal(lists.length,2)
+    assert.deepEqual(calls.filter(call=>!call.compile).map(call=>call.keys),[rows.slice(0,3).map(key),[key(rows[3])],[key(rows[0])]])
+    assert.ok(calls.at(-1).path.endsWith('-retry.jsonl'))
+    assert.equal(report.classes['GATED-FULL'].run,4)
+    assert.equal(report.classes['GATED-FULL'].passed,4)
+    assert.deepEqual(report.flakeLedger.map(row=>row.key),[key(rows[0])])
+    assert.deepEqual(report.goPhases,[
+      {owner:'internal/nodes',compiled:true,compileSeconds:0.1,listSeconds:0.1,executions:[{attempt:1,selectedTests:3,seconds:0.1},{attempt:2,selectedTests:1,seconds:0.1}]},
+      {owner:'internal/auth',compiled:false,compileSeconds:0,listSeconds:0.1,executions:[{attempt:1,selectedTests:1,seconds:0.1}]},
+    ])
+  })
+  await t.test('inventory mismatch and compile failure stop before any case execution',async()=>{
+    for(const options of [{compileFailure:true},{listMismatch:true}]) {
+      const {error,report,calls}=await simulate(options)
+      assert.match(error.message,options.compileFailure?/Go test compilation failed:[\s\S]*fixture compile failure/:/Native Go inventory mismatch/)
+      assert.equal(report,undefined)
+      assert.equal(calls.filter(call=>!call.compile).length,0)
+    }
+  })
+  await t.test('CI count flag retains compile reuse; other GOFLAGS retain the original go test runtime semantics',async()=>{
+    assert.equal((await simulate({failed:[],goFlags:'-count=1'})).binaries.length,1)
+    for(const goFlags of ['-short','-race','-shuffle=on -failfast']) {
+      const {code,error,calls,report,binaries}=await simulate({failed:[],goFlags})
+      assert.equal(error,undefined)
+      assert.equal(code,0)
+      assert.deepEqual(binaries,[])
+      assert.ok(calls.every(call=>!call.compile&&!call.compiled&&call.options.env.GOFLAGS===goFlags))
+      assert.ok(report.goPhases.every(row=>!row.compiled))
+    }
+  })
+  await t.test('CI count flag stays off go tool test2json, which rejects GOFLAGS=-count=1',async()=>{
+    const cli=readFileSync(new URL('./cli.mjs',import.meta.url),'utf8')
+    assert.match(cli,/goRunner\.execute\(owner,rows,stem,'-count=1'\)/)
+    const {code,error,calls}=await simulate({failed:[],goFlags:'-count=1'})
+    assert.equal(error,undefined)
+    assert.equal(code,0)
+    const compiled=calls.filter(call=>call.compiled)
+    assert.ok(compiled.length>=1)
+    for(const call of compiled) {
+      assert.equal(call.options.env.GOFLAGS,undefined)
+      assert.ok(call.args.includes('-test.count=1'))
+    }
+    for(const call of calls.filter(call=>!call.compile&&!call.compiled)) {
+      assert.equal(call.options.env.GOFLAGS,'-count=1')
+      assert.ok(call.args.includes('-count=1'))
+    }
+    assert.equal(calls.find(call=>call.compile).options.env.GOFLAGS,'-count=1')
+  })
+  await t.test('a shard count other than -count=1 is refused before execution',()=>{
+    const runner=createGoRunner({env:{},execute:()=>{throw new Error('must not run')},command:()=>{throw new Error('must not list')}})
+    assert.throws(()=>runner.execute('internal/nodes',[{name:'TestA'}],'stem','-count=2'),/reject cached success/)
+    runner.close()
+  })
+  await t.test('native comparison retains subtest identity and outcomes when fixture UUID values change',async()=>{
+    const {goExecutionIdentity}=await import('./go-compile-profile.mjs')
+    const fixture=(first,second,status='pass')=>['none',first,second,`${first},!${second}`].flatMap(name=>
+      ['run',status].map(Action=>JSON.stringify({Package:'github.com/inspr-at/paimos/internal/nodes',
+        Test:`TestListEpicMembershipSetBasedAndScoped/${name}`,Action}))).join('\n')
+    const ids=['11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222',
+      '33333333-3333-4333-8333-333333333333','44444444-4444-4444-8444-444444444444']
+    const original=goExecutionIdentity(fixture(ids[0],ids[1]))
+    assert.deepEqual(original,goExecutionIdentity(fixture(ids[2],ids[3])))
+    assert.notDeepEqual(original,goExecutionIdentity(fixture(ids[2],ids[2])),'distinct fixture IDs must remain distinct')
+    assert.notDeepEqual(original,goExecutionIdentity(fixture(ids[2],ids[3],'skip')),'subtest status must remain exact')
+    assert.notDeepEqual(original,goExecutionIdentity(fixture(ids[2],ids[3]).replaceAll(',!',',')),'filter semantics must remain exact')
+  })
+  await t.test('PR failures, repeat failures, missing or unexpected cases, package failure and interrupted execution stay red',async()=>{
+    for(const options of [{event:'pull_request'},{again:[rows[0]]},{failed:rows},{missing:true},
+      {unexpected:true},{failed:[],packageFailure:true},{signal:true}]) {
+      const {code,error,report}=await simulate(options)
+      assert.equal(error,undefined)
+      assert.notEqual(code,0,JSON.stringify(options))
+      assert.deepEqual(report.flakeLedger,[],JSON.stringify(options))
+    }
+    const {error}=await simulate({failed:[],saveFailure:true})
+    assert.match(error.message,/fixture save failure/)
+  })
+})
 
 const poolBrowserEnv=(event='pull_request',eventClass='mbp2606-pr')=>({
   GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:event,RUNNER_ENVIRONMENT:'self-hosted',
@@ -1597,7 +1777,7 @@ for(const [label,pkg,tier,names] of [
   assert.deepEqual(select(rows,{event:'pull_request',forceAll:true}).tests.map(key).sort(),ids)
 })
 
-test('strict classification maintenance is scheduled separately and never a required PR or nightly test dependency',()=>{
+test('strict classification is required before tests in CI and nightly; the independent inventory audit remains',()=>{
   const nightly=readFileSync(new URL('../../.github/workflows/nightly-full.yml',import.meta.url),'utf8')
   const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
   const job=nightly.slice(nightly.indexOf('\n  nightly-tier-classification:'),nightly.indexOf('\n  nightly-web-shard:'))
@@ -1605,7 +1785,13 @@ test('strict classification maintenance is scheduled separately and never a requ
   assert.match(job,/cli\.mjs check go --strict/)
   assert.match(job,/cli\.mjs check web --strict/)
   assert.match(job,/Report web cases needing classification\n\s+if: always\(\)/)
-  assert.doesNotMatch(ci,/--strict/)
+  for (const [source, prefix] of [[ci, ''], [nightly, 'nightly-']]) {
+    const job = name => source.match(new RegExp(`\\n  ${prefix}${name}:[\\s\\S]*?(?=\\n  [a-z][a-z0-9-]*:|$)`))?.[0] ?? ''
+    const go = job('go-static'), web = job('web-setup')
+    assert.match(go,/cli\.mjs check go --strict/)
+    assert.match(web,/Require every web case to be classified\n\s+run: node scripts\/test-tiers\/cli\.mjs check web --strict/)
+    assert.ok(web.indexOf('check web --strict') < web.indexOf('Build web'))
+  }
   assert.doesNotMatch(nightly,/needs:.*nightly-tier-classification/)
 })
 
@@ -1938,6 +2124,7 @@ test('AEON-980 merge-group Go retry and quarantine preserve the blocking gate an
     const selected={...selection,tests,all:tests}
     const env={...identity,...(event===null?{}:{GITHUB_EVENT_NAME:event})}
     const code=await run('go',selected,{env,job:'aeon980-go-fixture'}, {
+      compileOwners:[],
       knownFlaky:known,saveJSON:(_path,value)=>{report=value},log:line=>logs.push(line),
       command:(_bin,args)=>tests.filter(row=>`./${row.package}`===args.at(-1)).map(row=>row.name).join('\n'),
       execute:(_bin,args,path)=>{

@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
@@ -66,7 +64,6 @@ async function setup(page: Page, options: { manage?: boolean; desk?: boolean; co
 async function shoot(page: Page, name: string, locator: Locator) {
   const dir = process.env.ADD_ACCOUNT_SHOTS
   if (!dir) return
-  mkdirSync(dir, { recursive: true })
   const previous = page.viewportSize()
   for (const theme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: theme })
@@ -75,7 +72,7 @@ async function shoot(page: Page, name: string, locator: Locator) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await locator.scrollIntoViewIfNeeded()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
-      await locator.screenshot({ path: join(dir, `${name}-${width}-${theme}.png`) })
+      await locator.screenshot({ path: test.info().outputPath(`${name}-${width}-${theme}.png`) })
     }
   }
   if (previous) await page.setViewportSize(previous)
@@ -104,7 +101,7 @@ test('the steps name the machine, the known sign-in, and a path-proof add-harnes
   await expect(page.getByText(CALM)).toHaveCount(1)
   await expect(page.getByRole('combobox', { name: 'Machine' }).locator('option')).toHaveText(['mbp2607', 'studio'])
   const harness = page.getByRole('combobox', { name: 'Harness' })
-  await expect(harness.locator('option')).toHaveText(['Pi', 'Another Codex account', 'Another Claude account', 'Another Grok account', 'Another Cursor account'])
+  await expect(harness.locator('option')).toHaveText(['Pi', 'Gemini CLI', 'OpenCode', 'Another Codex account', 'Another Claude account', 'Another Grok account', 'Another Cursor account'])
   await expect(page.getByRole('combobox', { name: 'Installed with' }).locator('option')).toHaveText(['Homebrew', 'Nix profile', 'Direct download'])
   await expect(page.getByLabel('Sign-in step')).toHaveValue('For pi, use /login and /model in pi first.')
   await expect(page.getByLabel('Enroll command')).toHaveValue(homebrew('pi'))
@@ -113,6 +110,13 @@ test('the steps name the machine, the known sign-in, and a path-proof add-harnes
   await expect(harness.locator('option').first()).toHaveText('Claude')
   await expect(page.getByLabel('Sign-in command')).toHaveValue('claude /login')
   await page.getByRole('combobox', { name: 'Machine' }).selectOption({ label: 'mbp2607' })
+
+  await harness.selectOption({ label: 'Gemini CLI' })
+  await expect(page.getByLabel('Sign-in command')).toHaveValue('gemini')
+  await expect(page.getByLabel('Enroll command')).toHaveValue(homebrew('gemini'))
+  await harness.selectOption({ label: 'OpenCode' })
+  await expect(page.getByLabel('Sign-in command')).toHaveValue('opencode auth login')
+  await expect(page.getByLabel('Enroll command')).toHaveValue(homebrew('opencode'))
 
   await harness.selectOption({ label: 'Another Grok account' })
   await expect(page.getByLabel('Sign-in step')).toHaveValue("Sign in with Grok's CLI.")

@@ -86,6 +86,34 @@ func named(t *testing.T, j job, name string) (int, step) {
 	return -1, step{}
 }
 
+// Risk: a host's older pg_dump can neither read pg18 nor perform the vector-free
+// backup drill. Both CI lanes must use the clients from their exact service.
+func TestNightlyBackupUsesItsPostgresServiceClients(t *testing.T) {
+	for _, lane := range []struct{ file, job string }{
+		{"ci.yml", "go-test"}, {"nightly-full.yml", "nightly-go-test"},
+	} {
+		t.Run(lane.file, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(root(t), ".github/workflows", lane.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var w struct {
+				Jobs map[string]struct{ Steps []step }
+			}
+			if err := yaml.Unmarshal(data, &w); err != nil {
+				t.Fatal(err)
+			}
+			_, run := named(t, job{Steps: w.Jobs[lane.job].Steps}, "Test this shard (essential plus changed area, or full on main)")
+			if run.Env["AEON_TEST_POSTGRES_CONTAINER"] != "${{ job.services.postgres.id }}" {
+				t.Fatal("backup/restore must use the PostgreSQL service's exact client version")
+			}
+			if run.ContinueOnError || run.If != "" {
+				t.Fatal("the database regressions must remain mandatory")
+			}
+		})
+	}
+}
+
 func TestImageDoesNotWaitForClients(t *testing.T) {
 	w := readWorkflow(t, "release.yml")
 	if len(w.On) != 1 || w.On["push"] == nil {
