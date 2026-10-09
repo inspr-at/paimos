@@ -4,9 +4,10 @@
 // Live · Replay · Compare and the legend, one headline, then one card with a control
 // bar (48 px), a hint line (20 px), the overview map (64 px), the lanes (330 px) and the
 // moment panel (196 px), all fixed, so zooming, panning, playing and moving the time
-// never move a control. Below: Live lists the runs in flight, Replay and Compare where
-// the time went. Live follows "now" at 65 %; dragging the playhead to the past shows
-// "Viewing HH:MM" and "Back to now". Replay auto-plays once per session (never with
+// never move a control. Below: the release record of the release on screen (AEON-1022),
+// then Live lists the runs in flight, Replay and Compare where the time went. Live
+// follows "now" at 65 %; dragging the playhead to the past shows "Viewing HH:MM" and
+// "Back to now". Replay auto-plays once per session (never with
 // reduced motion): 60 s at 1x, 30 s at 2x. Compare races two lane sets on one axis.
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
@@ -14,6 +15,7 @@ import FlowLanes from './FlowLanes.vue'
 import FlowOverview from './FlowOverview.vue'
 import InFlightTable from './InFlightTable.vue'
 import MomentPanel from './MomentPanel.vue'
+import ReleaseRecord from './ReleaseRecord.vue'
 import TimeWent from './TimeWent.vue'
 import type { DeliveryLanguage } from '../../lib/delivery'
 import {
@@ -21,7 +23,7 @@ import {
   type FlowData, type FlowLevel, type LaneItem,
 } from '../../lib/deliveryFlow'
 import {
-  autoplayOnce, clockOf, createPlayer, flightRows, FLOW_MODES, headOf, momentOf, reducedMotionQuery, takeAutoplay, wentOf,
+  autoplayOnce, clockOf, createPlayer, flightRows, FLOW_MODES, headOf, momentOf, recordOf, reducedMotionQuery, takeAutoplay, wentOf,
   type FlowMode, type Frames,
 } from '../../lib/deliveryFlowModes'
 import { flowText, hintParts, TIMES } from '../../lib/deliveryFlowText'
@@ -180,11 +182,14 @@ const focusKey = computed(() => {
   for (const [si, set] of sets.value.entries()) for (const lane of set.lanes) { if (i++ === focusLane.value) return `${si}:${lane}` }
   return null
 })
-const ctx = computed(() => props.data ? { data: props.data, level: props.level, lang: props.lang, text: text.value } : null)
+const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
+const ctx = computed(() => props.data ? { data: props.data, level: props.level, lang: props.lang, text: text.value, timeZone: viewerZone } : null)
 const moment = computed(() => ctx.value ? momentOf({ ...ctx.value, sets: sets.value, T: timeline.T, selected: selected.value }) : null)
 const head = computed(() => ctx.value ? headOf(props.mode, { ...ctx.value, reduced: reduced.value }) : null)
 const rows = computed(() => ctx.value && props.mode === 'live' ? flightRows(ctx.value) : [])
 const went = computed(() => ctx.value && props.mode !== 'live' ? sets.value.map(set => wentOf(set.main, ctx.value!)) : [])
+// The release on screen is the first set's run (the headline's): its record sits under the card in every mode.
+const releaseRecord = computed(() => ctx.value && sets.value[0] ? recordOf(sets.value[0].main, ctx.value) : null)
 const emptyText = computed(() => {
   const t = text.value
   return props.empty === 'live' ? [t.nothingLive, t.nothingLiveB] : props.empty === 'release' ? [t.noRelease, ''] : [t.noRuns, '']
@@ -291,6 +296,7 @@ const emptyText = computed(() => {
     </div>
 
     <p v-if="data && truncated" class="fl-note" role="status">{{ text.truncated }}</p>
+    <ReleaseRecord v-if="data && releaseRecord" :record="releaseRecord" />
     <InFlightTable v-if="data && mode === 'live'" :rows="rows" :level="level" :text="text" />
     <TimeWent v-else-if="data && went.length" :runs="went" :text="text" />
   </div>
