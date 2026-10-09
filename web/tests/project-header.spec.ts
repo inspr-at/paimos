@@ -60,9 +60,12 @@ for (const width of [390, 1024, 1440]) {
       await settled(page)
       const toolbar = page.getByRole('toolbar', { name: 'Ticket list controls' })
       const controls: Record<string, Locator> = {
-        views: toolbar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), count: toolbar.locator('.count-live'), new: page.getByRole('button', { name: 'New ticket', exact: true }),
+        views: toolbar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), ...(width === 1024 ? {} : { count: toolbar.locator('.count-live') }), new: page.getByRole('button', { name: 'New ticket', exact: true }),
         ...(width === 390 ? { filters: page.getByRole('button', { name: 'Filters', exact: true }) } : { status: toolbar.locator('.facet-control[data-dim="status"]'), filters: toolbar.locator('.facets'), clear: toolbar.getByRole('button', { name: 'Clear all', exact: true }) }),
       }
+      // The tablet deliberately hides the count; measure the remaining controls,
+      // and retain its responsive visibility assertion at every density below.
+      if (width === 1024) await expect(toolbar.locator('.count')).toBeHidden()
       const before = await samples(controls)
       await capture(page, `${width}-${theme}-compact`)
       if (width === 390) {
@@ -74,13 +77,13 @@ for (const width of [390, 1024, 1440]) {
           interactions: ['Comfortable', 'Collapsed', 'Compact', 'Comfortable'].map(name => ({ name, run: async () => { await density(page, name).click(); await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${name.toLowerCase()}`)) } })) })
       }
       await expect(page.locator('.project-page')).toHaveClass(/header-comfortable/)
-      await settled(page); await noSideways(controls, before)
+      await settled(page); await noSideways(controls, before); if (width === 1024) await expect(toolbar.locator('.count')).toBeHidden()
       await capture(page, `${width}-${theme}-comfortable`)
       if (width === 390) {
         await expectStableControls({ controls: { fold: fold(page), appbar: page.locator('.app-header') }, interactions: ['collapsed', 'comfortable', 'collapsed'].map(mode => ({ name: mode, run: async () => { await fold(page).click(); await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${mode}`)) } })) })
       } else await density(page, 'Collapsed').click()
       await expect(page.locator('#project-header-fold')).toBeHidden()
-      await settled(page); await noSideways(controls, before)
+      await settled(page); await noSideways(controls, before); if (width === 1024) await expect(toolbar.locator('.count')).toBeHidden()
       await capture(page, `${width}-${theme}-collapsed`)
       await search(page).focus(); await search(page).press('Escape')
       await expect(page.locator('.project-page')).toHaveClass(/header-collapsed/)
@@ -88,9 +91,9 @@ for (const width of [390, 1024, 1440]) {
       const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent))
       await search(page).focus(); await search(page).press(mac ? 'Meta+Shift+Period' : 'Control+Shift+Period')
       await expect(page.locator('.project-page')).toHaveClass(/header-comfortable/)
-      await settled(page); await noSideways(controls, before)
+      await settled(page); await noSideways(controls, before); if (width === 1024) await expect(toolbar.locator('.count')).toBeHidden()
       if (width === 390) await phoneRoomy(page, 'Compact'); else await density(page, 'Compact').click()
-      await settled(page); await noSideways(controls, before)
+      await settled(page); await noSideways(controls, before); if (width === 1024) await expect(toolbar.locator('.count')).toBeHidden()
       await expect(page.locator('.chips')).toHaveCount(0)
       if (width !== 390) {
         await expect(page.locator('.project-navigation').getByRole('button', { name: 'Display: Display', exact: true })).toBeVisible()
