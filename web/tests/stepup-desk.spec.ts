@@ -118,7 +118,11 @@ for (const theme of ['light', 'dark'] as const) {
       }
     })
     for (const [name, values] of Object.entries(styles)) expect(new Set(values).size, `${name}: ${values.join(' | ')}`).toBe(1)
-    await capture(page, testInfo, `stepup-memo-1024-${theme}`)
+    for (const width of [1024, 390, 1440]) {
+      await page.setViewportSize({ width, height: 900 })
+      await expect(page.getByTestId('stepup-change')).toBeVisible()
+      await capture(page, testInfo, `stepup-memo-${width}-${theme}`)
+    }
   })
 }
 for (const [width, theme] of [[390, 'light'], [1440, 'light'], [1440, 'dark']] as const) {
