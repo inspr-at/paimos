@@ -61,9 +61,10 @@ this implementation branch.
 Correctness coverage uses checked-in sanitized App-shaped payload fixtures for
 PR closure and merge-queue events, plus canonical reader validation. It checks
 redelivery, multiple queue constituents, refusal visibility/recovery, parent and
-human-check protection, permission revocation during the external read,
-dry-run/apply replay, stale revisions, open follow-up PRs, partial reads, and
-published membership. Existing assertions and CI gates are retained.
+human-check protection, a waiting split or cancel with no live session or run,
+permission revocation during the external read, dry-run/apply replay, stale
+revisions, open follow-up PRs, partial reads, and published membership.
+Existing assertions and CI gates are retained.
 
 Validation of code candidate `d92d288ac`: the remote merge-main static gate
 returned 0 (40 checks passed, no optional skips). Delivery, Status Autopilot and

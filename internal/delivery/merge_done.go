@@ -229,10 +229,15 @@ func mergeGateTx(ctx context.Context, tx pgx.Tx, e mergeEntry) (string, error) {
 	if e.category == "cancelled" || e.category == "archived" {
 		return "ticket is cancelled or archived", nil
 	}
-	var busy bool
+	var busy, handover bool
 	var human *string
-	if err := tx.QueryRow(ctx, `SELECT aeon_work_busy(id),human_check FROM nodes WHERE id=$1`, e.Ticket).Scan(&busy, &human); err != nil {
+	// aeon_work_busy is live sessions, queued runs and running child orders.
+	// A waiting split or cancel is aeon_work_pending after that work has stopped.
+	if err := tx.QueryRow(ctx, `SELECT aeon_work_busy(id),aeon_work_pending(id) IS NOT NULL,human_check FROM nodes WHERE id=$1`, e.Ticket).Scan(&busy, &handover, &human); err != nil {
 		return "", err
+	}
+	if handover {
+		return "waiting for handover", nil
 	}
 	if busy {
 		return "a worker is still running or waiting for handover", nil

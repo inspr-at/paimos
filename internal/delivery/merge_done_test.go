@@ -292,6 +292,59 @@ func TestMergeDoneProtectsOwnershipParentsAndHumanChecks(t *testing.T) {
 	}
 }
 
+func TestMergeDoneRefusesWaitingLifecycleAction(t *testing.T) {
+	// Risk: a person-authorized split or cancel remains in work_lifecycle_actions
+	// after the worker has stopped. aeon_work_busy does not see that row, so a
+	// main-merge must still refuse on the Needs You path and leave state unchanged.
+	f, g := mergeFixture(t)
+	g.facts[7] = mergeFactFixture(f, 7, "AEON-848", strings.Repeat("c", 40))
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO work_lifecycle_actions(tenant_id,id,node_id,requested_by,kind,targets) VALUES($1,gen_random_uuid(),$2::uuid,$3,'split',jsonb_build_array(jsonb_build_object('id',$2::text,'updated_at','2000-01-01T00:00:00Z')))`, f.person.TenantID, f.ticket, f.person.ID)
+		return err
+	})
+	f.tx(t, func(tx pgx.Tx) error {
+		var busy, pending bool
+		var sessions, liveRuns, runningOrders int
+		err := tx.QueryRow(t.Context(), `SELECT aeon_work_busy($1),aeon_work_pending($1) IS NOT NULL,
+ (SELECT count(*) FROM harness_sessions WHERE ticket_node_id=$1),
+ (SELECT count(*) FROM agent_runs r WHERE r.status IN ('queued','starting','running','waiting')
+   AND (r.queue_node_id=$1 OR r.work_order_id IN (SELECT id FROM nodes WHERE parent_id=$1))),
+ (SELECT count(*) FROM work_orders w JOIN nodes n ON n.id=w.node_id WHERE n.parent_id=$1 AND w.status='running')`, f.ticket).Scan(&busy, &pending, &sessions, &liveRuns, &runningOrders)
+		if err != nil {
+			return err
+		}
+		if busy || !pending || sessions != 0 || liveRuns != 0 || runningOrders != 0 {
+			return fmt.Errorf("fixture is not a stopped worker with a waiting action: busy=%v pending=%v sessions=%d runs=%d orders=%d", busy, pending, sessions, liveRuns, runningOrders)
+		}
+		return nil
+	})
+	recordedMergeWebhook(t, f, "pull_request.closed", "handover-merge", 204, nil)
+	if mergedState(t, f, f.ticket) != "qa" {
+		t.Fatal("waiting lifecycle action did not block completion")
+	}
+	var page struct {
+		Items []struct {
+			NodeID     string `json:"node_id"`
+			Reason     string `json:"reason"`
+			Applicable bool   `json:"applicable"`
+		} `json:"items"`
+	}
+	f.call(t, f.person, "GET", "/api/status-autopilot/attention", nil, 200, &page)
+	if len(page.Items) != 1 || page.Items[0].NodeID != f.ticket || page.Items[0].Applicable || !strings.Contains(page.Items[0].Reason, "waiting for handover") {
+		t.Fatalf("Needs You handover refusal: %+v", page)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var receipts int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='delivery.merge_done' AND node_id=$1`, f.ticket).Scan(&receipts); err != nil {
+			return err
+		}
+		if receipts != 0 {
+			return fmt.Errorf("refused merge wrote %d completion receipts", receipts)
+		}
+		return nil
+	})
+}
+
 func TestMergeBackfillPreviewApplyAndSafety(t *testing.T) {
 	// Risk: historical repair writes before preview, completes open follow-up
 	// work, replays mutations, trusts stale revisions, or uses revoked access.

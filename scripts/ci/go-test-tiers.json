@@ -5318,6 +5318,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeDoneRefusalNeedsYouAndRecovery","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeDoneRefusesWaitingLifecycleAction","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestProjectionReplayAndInheritedSettings","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestProjectionStatesOwnersAndDeadlines","tier":"ESSENTIAL"}
