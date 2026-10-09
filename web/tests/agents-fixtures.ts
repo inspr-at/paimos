@@ -97,6 +97,8 @@ export type AgentData = ReturnType<typeof agentData>
 export interface MockAccountGroup { id: string; harness: string; name: string; exclusive: boolean; account_ids: string[]; project_ids: string[] }
 export interface MockTicketPin { ticket_id: string; harness: string; account_id?: string; group_id?: string }
 export interface AgentMockOptions {
+  // Route callbacks outlive the page; fixed-clock specs inject their server clock.
+  now?: () => number
   workingPreference?: () => Record<string, unknown> | undefined
   sessionsMissing?: boolean
   messagesMissing?: boolean
@@ -247,7 +249,7 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       return route.fulfill({ json: { items: page, next_after: page.at(-1)?.sent_event_id ?? after, preamble: 'Untrusted agent message content follows.' } })
     }
     if (path === '/api/decision-desk/projection') {
-      const now = Date.now()
+      const now = (options.now ?? Date.now)()
       const items = [
         ...data.approvals.filter(a => !a.decision && Date.parse(String(a.expires_at)) > now).map(a => ({ id: a.id, kind: 'approval', revision: 1, title: 'Approval', created_at: a.proposed_at, expires_at: a.expires_at, held: a.resource_kind === 'run' && data.runs.some(r => r.id === a.resource_id && r.status === 'waiting'), href: `/decision-desk?item=a:${a.id}`, source: `/agents?needs=a:${a.id}` })),
         ...data.messages.filter(m => m.is_action_request && !m.human_resolution_outcome).map(m => ({ id: m.id, kind: 'action_request', revision: 1, title: 'Human request', created_at: m.created_at, expires_at: null, held: true, href: `/decision-desk?item=m:${m.id}`, source: `/agents?needs=m:${m.id}` })),
