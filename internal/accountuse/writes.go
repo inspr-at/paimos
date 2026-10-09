@@ -203,9 +203,9 @@ func (m *Module) context(r *http.Request, tx pgx.Tx, p tenant.Principal, create 
 		if !uuid(r.PathValue("contextId")) {
 			return nil, fail(400, "invalid context id")
 		}
-		c, err := scanContext(tx.QueryRow(ctx, `SELECT `+contextColumns+` FROM work_contexts WHERE id=$1 FOR UPDATE`, r.PathValue("contextId")))
-		if err != nil {
-			return nil, missing(err)
+		c, readErr := scanContext(tx.QueryRow(ctx, `SELECT `+contextColumns+` FROM work_contexts WHERE id=$1 FOR UPDATE`, r.PathValue("contextId")))
+		if readErr != nil {
+			return nil, missing(readErr)
 		}
 		before = &c
 		out, err = scanContext(tx.QueryRow(ctx, `UPDATE work_contexts SET name=$2,new_accounts_override=$3,archived_at=CASE WHEN $4 THEN coalesce(archived_at,clock_timestamp()) ELSE NULL END,revision=revision+1 WHERE id=$1 RETURNING `+contextColumns, c.ID, strings.TrimSpace(in.Name), in.NewAccountsOverride, in.Archived))

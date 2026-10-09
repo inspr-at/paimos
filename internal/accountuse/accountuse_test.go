@@ -101,7 +101,7 @@ func (f *fixture) addWork(t *testing.T, project bool) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, f.p.TenantID, order, f.p.ID); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,account_id,queue_node_id) VALUES($1,$2,$3,$4,$5) RETURNING id::text`, f.p.TenantID, order, f.agent, f.account, f.work).Scan(&f.run); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,account_id) VALUES($1,$2,$3,$4) RETURNING id::text`, f.p.TenantID, order, f.agent, f.account).Scan(&f.run); err != nil {
 			return err
 		}
 		return tx.QueryRow(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model,burst_ratio) VALUES($1,$2,now(),now()+interval '1 day','requests',100,'unrestricted',1) RETURNING id::text`, f.p.TenantID, f.account).Scan(&f.window)
@@ -190,6 +190,20 @@ func TestAccountUseCreationRulesAndDatabaseFences(t *testing.T) {
 		return nil
 	})
 	rules = f.rules(t, accountuse.RuleValues{"allow", "allow", "holding", "allow"})
+	f.in(t, func(tx pgx.Tx) error {
+		var project string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Ask first' FROM node_kinds k WHERE k.slug='project' RETURNING id::text`, f.p.TenantID).Scan(&project); err != nil {
+			return err
+		}
+		var stamped, allowed bool
+		if err := tx.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM project_work_contexts WHERE project_id=$1 AND context_id=$2),aeon_account_use_allowed_for_project($3,$1)`, project, f.holding, f.account).Scan(&stamped, &allowed); err != nil {
+			return err
+		}
+		if !stamped || allowed {
+			t.Fatal("T4 ask-first creation escaped holding denial")
+		}
+		return nil
+	})
 	f.call(t, f.p, "PUT", "/api/projects/"+f.project+"/work-context", map[string]any{"expected_revision": rules.Revision, "context_id": f.holding}, 200)
 	f.in(t, func(tx pgx.Tx) error {
 		var projectAllowed, projectless bool
@@ -223,6 +237,45 @@ func TestAccountUseCreationRulesAndDatabaseFences(t *testing.T) {
 			t.Fatal("unmapped project borrowed the default context")
 		}
 		return nil
+	})
+	t.Run("context rule and future-account override", func(t *testing.T) {
+		f := setup(t)
+		rules := f.rules(t, accountuse.RuleValues{"allow", "allow", "default", "allow"})
+		first := f.addAccount(t, "existing")
+		w := f.call(t, f.p, "POST", "/api/work-contexts", map[string]any{"expected_revision": rules.Revision, "name": "Restricted future accounts", "new_accounts_override": "deny"}, 200)
+		var created struct {
+			Context  accountuse.WorkContext `json:"context"`
+			Revision int64                  `json:"revision"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+			t.Fatal(err)
+		}
+		second := f.addAccount(t, "future")
+		f.in(t, func(tx pgx.Tx) error {
+			var existing, future, activated bool
+			if err := tx.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM account_use_cells WHERE account_id=$1 AND context_id=$3),EXISTS(SELECT 1 FROM account_use_cells WHERE account_id=$2 AND context_id=$3),(SELECT enforced_at IS NOT NULL FROM account_use_rules)`, first, second, created.Context.ID).Scan(&existing, &future, &activated); err != nil {
+				return err
+			}
+			if !existing || future || !activated {
+				t.Fatal("context rule/override precedence or activation changed")
+			}
+			return nil
+		})
+		f.call(t, f.p, "PATCH", "/api/work-contexts/"+f.holding, map[string]any{"expected_revision": created.Revision, "name": "Unassigned", "archived": true}, 400)
+	})
+	t.Run("empty pool ask-first context activates", func(t *testing.T) {
+		f := setup(t)
+		f.call(t, f.p, "POST", "/api/work-contexts", map[string]any{"expected_revision": 1, "name": "Ask first"}, 200)
+		f.in(t, func(tx pgx.Tx) error {
+			var activated bool
+			if err := tx.QueryRow(t.Context(), `SELECT enforced_at IS NOT NULL FROM account_use_rules`).Scan(&activated); err != nil {
+				return err
+			}
+			if !activated {
+				t.Fatal("saved ask-first context left empty tenant below the capability floor")
+			}
+			return nil
+		})
 	})
 }
 

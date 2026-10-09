@@ -228,11 +228,14 @@ CREATE TRIGGER work_contexts_use_guard BEFORE UPDATE OR DELETE ON work_contexts
 
 CREATE FUNCTION aeon_account_use_stamp_context() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF NEW.kind='regular' AND NEW.archived_at IS NULL AND NEW.new_accounts_override IS NULL THEN
+    IF NEW.kind='regular' AND NEW.archived_at IS NULL THEN
         INSERT INTO account_use_cells(tenant_id,account_id,context_id,source,set_by)
             SELECT NEW.tenant_id,a.id,NEW.id,'rule',p.id FROM agent_accounts a CROSS JOIN account_use_rules r
             JOIN principals p ON p.tenant_id=r.tenant_id AND p.kind='agent' AND p.name='System' AND p.roles @> ARRAY['system']::text[]
             WHERE r.new_contexts='allow' AND a.archived_at IS NULL;
+        -- An ask-first context is a saved denial even with an empty pool.
+        UPDATE account_use_rules SET enforced_at=clock_timestamp()
+            WHERE enforced_at IS NULL AND new_contexts='ask';
     END IF;
     RETURN NEW;
 END $$;
@@ -323,14 +326,19 @@ BEGIN
         RAISE EXCEPTION 'tenant setting does not match account-use seed tenant';
     END IF;
     IF EXISTS (SELECT 1 FROM account_use_rules WHERE tenant_id=p_tenant) THEN RETURN false; END IF;
+    -- Rules INSERT has an activation trigger too. Suppress it before the
+    -- first row: existing projects have not received their mappings yet.
+    PERFORM set_config('aeon.account_use_seeding','on',true);
     INSERT INTO account_use_rules(tenant_id,new_accounts,new_contexts,new_models,confirmation_required)
         VALUES(p_tenant,CASE WHEN p_migrated THEN 'allow' ELSE 'ask' END,
                CASE WHEN p_migrated THEN 'allow' ELSE 'ask' END,
                CASE WHEN p_migrated AND EXISTS(SELECT 1 FROM model_refresh_settings WHERE NOT auto_add_profiles) THEN 'shipped_only' ELSE 'allow' END,
                p_migrated);
     GET DIAGNOSTICS inserted = ROW_COUNT;
-    IF inserted=0 THEN RETURN false; END IF;
-    PERFORM set_config('aeon.account_use_seeding','on',true);
+    IF inserted=0 THEN
+        PERFORM set_config('aeon.account_use_seeding',coalesce(prior,''),true);
+        RETURN false;
+    END IF;
     -- Prepare System before any resource or event-counter locks.
     SELECT id INTO actor FROM principals WHERE tenant_id=p_tenant AND kind='agent' AND name='System' AND roles @> ARRAY['system']::text[];
     IF actor IS NULL THEN
