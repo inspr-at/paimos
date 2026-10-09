@@ -6552,6 +6552,24 @@
     ,
     {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"revision-zero native tier request can decline with exact ownership","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"every kind names its project with a new-tab link; P opens it, but not while typing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the Agents desk panel names each item's project with a new-tab link","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the switch notice follows the item shown before, through J/K, the jump list and Decide & next","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"Decided rounds count only items arriving after the round starts","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"Enter on focused Deny selects Deny without granting the preselected approval","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -14939,6 +14957,10 @@
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"keeps invalid native tier revision 9007199254740992 unavailable","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"keeps invalid native tier revision null unavailable","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-project.unit.test.ts","name":"Decision Desk project identity > links a project by key, keeps one hue per key and leaves workspace items neutral","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-project.unit.test.ts","name":"Decision Desk project identity > names the previous project only when the project changed","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"accepts source-only links and rejects arrays, destinations and injected selectors","tier":"ESSENTIAL"}
     ,

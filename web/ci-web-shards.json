@@ -404,6 +404,8 @@
         ,
         {"file":"tests/decision-desk-fix3.spec.ts","listedTests":9,"weightSeconds":40,"weightSource":"AEON-569 regression port; conservative initial estimate"}
         ,
+        {"file":"tests/decision-desk-project.spec.ts","listedTests":9,"weightSeconds":30,"weightSource":"AEON-1057 new spec; 11 s locally, conservative initial estimate"}
+        ,
         {"file":"tests/decision-desk.spec.ts","listedTests":52,"tierTiming":{"caseSeconds":{"max":13.265,"median":1.782,"min":1.257},"seconds":133.356542,"selectedTests":35},"weightSeconds":128,"weightSource":"web-14"}
       ]
     }

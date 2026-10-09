@@ -481,7 +481,7 @@ test('a source refresh during a blocked response clears Recording without advanc
 })
 test('approval project names and doctrine PR context stay visible', async ({ page }) => {
   await mockDecisionDesk(page); await page.goto('/decision-desk')
-  await page.getByTestId('desk-row-a:approval-1').click(); await expect(page.locator('.memo-heading .eyebrow')).toHaveText('Paimos Aeon')
+  await page.getByTestId('desk-row-a:approval-1').click(); await expect(page.getByTestId('desk-project-link')).toHaveText(/^Paimos Aeon/)
   await page.getByTestId('desk-close').click(); await page.getByTestId('desk-row-r:rule-1').click()
   await expect(page.getByRole('link', { name: 'Open the doctrine pull request' })).toHaveAttribute('href', 'https://github.com/inspr-at/inspr-modules/pull/123')
   await expect(page.getByRole('region', { name: 'Unavailable stamps' })).toContainText('own protected decision flow')

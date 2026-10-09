@@ -245,6 +245,8 @@ export async function nativePhoneApproval(approval: Approval, decision: 'approve
 export interface DeskRead {
   items: DeskItem[]; sources: DeskSources; warnings: string[]; hasMore: Record<QuestionState, boolean>
   questionPositions: Record<QuestionState, QuestionPosition | undefined>; projectNames: Map<string, string>
+  /** Project id to key, for the project link (AEON-1057). */
+  projectKeys?: Map<string, string>
   nextKeyTrims: KeyTrimCursors
   canonical?: boolean
 }
@@ -260,7 +262,7 @@ export async function loadMoreQuestions(previous: DeskRead, state: QuestionState
   const sources = { ...current.sources, questions: new Map(current.sources.questions), actions: new Map(current.sources.actions) }
   const items = new Map(current.items.filter(item => item.kind === 'question' || item.kind === 'handover').map(item => [item.id, item]))
   for (const question of result.items) {
-    const item = questionItem(question, current.projectNames.get(question.project_id) ?? 'Project name unavailable')
+    const item = { ...questionItem(question, current.projectNames.get(question.project_id) ?? 'Project name unavailable'), projectKey: current.projectKeys?.get(question.project_id) }
     sources.questions.set(item.id, question); items.set(item.id, item)
   }
   if (current.canonical) {
@@ -297,21 +299,35 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     const nodes = new Map<string, Promise<WorkNode>>()
     const readNode = (id: string) => { if (!nodes.has(id)) nodes.set(id, getNode(id)); return nodes.get(id)! }
     const nodeIds = [...new Set(approvalsResult.value.filter(row => row.resource_kind === 'node').map(row => row.resource_id).filter((id): id is string => !!id))].slice(0, 30)
-    const names = new Map<string, string>()
+    const owners = new Map<string, { id: string; title: string }>()
     await Promise.all(nodeIds.map(async resource => {
       let id: string | null = resource
       try {
         for (let depth = 0; id && depth < 8; depth++) {
           const project = projects.find(project => project.id === id)
-          if (project) { names.set(resource, project.title); break }
+          if (project) { owners.set(resource, project); break }
           id = (await readNode(id)).parent_id
         }
       } catch { /* A missing name never becomes a fictitious Workspace. */ }
     }))
-    for (const approval of approvalsResult.value.slice(0, 200)) { sources.approvals.set(`a:${approval.id}`, approval); items.push(approvalItem(approval, approval.resource_id ? names.get(approval.resource_id) : undefined)) }
+    for (const approval of approvalsResult.value.slice(0, 200)) {
+      const owner = approval.resource_id ? owners.get(approval.resource_id) : undefined
+      sources.approvals.set(`a:${approval.id}`, approval); items.push({ ...approvalItem(approval, owner?.title), projectId: owner?.id ?? '' })
+    }
   } else warnings.push('Approvals could not be read.')
-  if (rulesResult.status === 'fulfilled') for (const rule of rulesResult.value.items) { sources.rules.set(`r:${rule.id}`, rule); items.push(ruleItem(rule)) }
-  else warnings.push('Rule changes could not be read.')
+  if (rulesResult.status === 'fulfilled') {
+    // A rule change names its project through its ticket: one bounded key lookup.
+    const tickets = [...new Set(rulesResult.value.items.map(rule => rule.ticket).filter((key): key is string => !!key))].slice(0, 100)
+    const ticketProjects = new Map<string, string>()
+    if (tickets.length) {
+      try { for (const node of (await lookupNodeKeys(tickets)).items) if (node.project_id) ticketProjects.set(node.requested_key ?? node.key, node.project_id) }
+      catch { warnings.push('The projects of some rule changes could not be read.') }
+    }
+    for (const rule of rulesResult.value.items) {
+      const project = rule.ticket ? projects.find(project => project.id === ticketProjects.get(rule.ticket!)) : undefined
+      sources.rules.set(`r:${rule.id}`, rule); items.push(project ? { ...ruleItem(rule), projectId: project.id, projectName: project.title } : ruleItem(rule))
+    }
+  } else warnings.push('Rule changes could not be read.')
   if (projects.length > 30) warnings.push('Action requests are limited to the first 30 visible projects in this read.')
   const actionReads = await Promise.allSettled(projects.slice(0, 30).map(async project => ({ project, page: await listMessages(project.id, { pending: true, limit: 100 }) })))
   for (const read of actionReads) {
@@ -379,9 +395,11 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     else if (projection.has_more || open.length !== projection.counts.open) warnings.push('The canonical desk is partial or changed while reading. Retry for current coverage.')
     items.splice(0, items.length, ...open, ...history.filter(item => !open.some(row => row.id === item.id)))
   }
+  const projectKeys = new Map(projects.map(project => [project.id, project.key]))
+  for (const item of items) if (item.projectId) item.projectKey = projectKeys.get(item.projectId)
   return { items, sources, warnings: [...new Set(warnings)], hasMore: { open: openResult.status === 'fulfilled' && openResult.value.has_more, answered: answeredResult.status === 'fulfilled' && answeredResult.value.has_more },
     questionPositions: { open: openResult.status === 'fulfilled' ? openResult.value.position : undefined, answered: answeredResult.status === 'fulfilled' ? answeredResult.value.position : undefined },
-    projectNames: new Map(projects.map(project => [project.id, project.title])), nextKeyTrims: trimsResult.status === 'fulfilled' ? trimsResult.value.next : {}, canonical: projection !== undefined }
+    projectNames: new Map(projects.map(project => [project.id, project.title])), projectKeys, nextKeyTrims: trimsResult.status === 'fulfilled' ? trimsResult.value.next : {}, canonical: projection !== undefined }
 }
 export function decisionPermission(item: DeskItem, sources: DeskSources, can: (permission: string, project?: string) => boolean, adapters: ProtectedDeskAdapters = {}): boolean {
   if (item.kind === 'question' || item.kind === 'handover') return can('questions.read', item.projectId) && can('questions.decide', item.projectId)

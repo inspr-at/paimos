@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { answerFor, draftFor, fieldTarget, kindLabels, macPlatform, outcomeLabels, outcomeUnavailable, roundCounts, submitModifier, type DeskDraft, type DeskItem, type DeskOutcome } from '../../lib/decisionDesk'
+import { answerFor, deskProject, draftFor, fieldTarget, kindLabels, projectColor, projectSwitch, type DeskProject, macPlatform, outcomeLabels, outcomeUnavailable, roundCounts, submitModifier, type DeskDraft, type DeskItem, type DeskOutcome } from '../../lib/decisionDesk'
 import { deliveryTime, loadDeskContext, type DeskContext } from '../../lib/decisionDeskApi'
 import { RISK_LABEL, riskFor, scopeLabel } from '../../lib/agentState'
 import { contentUrl, fileKind, hasThumbnail } from '../../lib/attachments'
@@ -28,6 +28,30 @@ const item = computed(() => props.items.find(item => item.id === props.round[ind
 const draft = computed(() => item.value ? drafts.value[item.value.id] : undefined)
 const selectedChoice = computed(() => item.value?.choices.find(choice => choice.id === draft.value?.optionId))
 const titleClipped = ref(false)
+// AEON-1057: the project of the item shown before, kept for this desk session,
+// so a change of project is named however the person moved (J/K, jump list, Decide & next).
+const project = computed(() => item.value ? deskProject(item.value) : undefined)
+const switchedFrom = ref<DeskProject>()
+let shown: { id: string; project: DeskProject } | undefined
+// The folder tab is sized when the memo opens or the window resizes, never per item.
+const tabWidth = ref(360)
+const tabPath = computed(() => { const w = tabWidth.value; return `M0 46V12Q0 0 12 0H${w - 62}Q${w - 50} 0 ${w - 46} 13L${w - 39} 32Q${w - 35} 46 ${w - 21} 46Z` })
+const tabOutline = computed(() => { const w = tabWidth.value; return `M.5 45.5V12 Q.5 .5 12 .5H${w - 62} Q${w - 50} .5 ${w - 46} 13L${w - 39} 32Q${w - 35} 45.5 ${w - 21} 45.5` })
+function sizeTab() { tabWidth.value = window.matchMedia('(max-width: 720px)').matches ? Math.min(360, window.innerWidth - 28) : 360 }
+sizeTab(); window.addEventListener('resize', sizeTab)
+const roundProjects = computed(() => new Set(props.round.map(id => props.items.find(row => row.id === id)?.projectId).filter(Boolean)).size)
+function jumpProject(at: number) { const row = props.items.find(row => row.id === props.round[at]); return row ? deskProject(row) : undefined }
+function projectChange(at: number) {
+  const before = at ? jumpProject(at - 1) : undefined, here = jumpProject(at)
+  return !!before && !!here && before.id !== here.id
+}
+function openProject() {
+  const href = project.value?.href
+  if (!href) return
+  // A new tab without access back to the desk; the desk stays as it is.
+  const opened = window.open(href, '_blank')
+  if (opened) opened.opener = null
+}
 function measureTitle(clipped: boolean) { titleClipped.value = clipped }
 const counts = computed(() => roundCounts(props.items, props.round, skipped.value))
 const mac = macPlatform(navigator.platform), submitKey = mac ? 'Cmd+Enter' : 'Ctrl+Enter'
@@ -83,6 +107,11 @@ function focusDecision() {
 }
 watch(item, async (current, previous) => {
   const turn = ++contextGeneration
+  if (current && current.id !== shown?.id) {
+    const here = deskProject(current)
+    switchedFrom.value = projectSwitch(shown?.project, here); shown = { id: current.id, project: here }
+    if (switchedFrom.value) announcement.value = `${announcement.value} Now in ${here.name}. The item before was in ${switchedFrom.value.name}.`.trim()
+  }
   if (current && (!drafts.value[current.id] || current.decided && current.id === previous?.id && !previous.decided && current.kind !== 'question' && current.kind !== 'handover')) drafts.value[current.id] = draftFor(current)
   error.value = ''; status.value = ''; editing.value = ''; pager.value = false; brokenThumbs.value = new Set()
   context.value = { attachments: [], related: [], outcomes: [], warnings: [] }; contextLoading.value = false
@@ -226,6 +255,7 @@ function keys(event: KeyboardEvent) {
     event.preventDefault(); const choices = item.value?.choices ?? [], at = choices.findIndex(choice => choice.id === draft.value?.optionId)
     const choice = choices[(at + (key === 'arrowdown' ? 1 : -1) + choices.length) % choices.length]; if (choice) choose(choice.id)
   } else if (key === 's') { event.preventDefault(); skip() }
+  else if (key === 'p') { if (project.value?.href) { event.preventDefault(); openProject() } }
   else if (key === 'enter' && (event.target === memo.value || event.target === decideButton.value)) { event.preventDefault(); void submit() }
   else if (key === 'escape') { event.preventDefault(); event.stopPropagation(); close() }
 }
@@ -235,16 +265,16 @@ watch(dialog, element => {
   opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
   element.showModal(); void nextTick(() => memo.value?.focus({ preventScroll: true }))
 })
-onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTimer); sizeObserver?.disconnect(); dialog.value?.close(); if (opener?.isConnected) opener.focus({ preventScroll: true }) })
+onBeforeUnmount(() => { window.removeEventListener('resize', sizeTab); live = false; contextGeneration++; clearTimeout(expiryTimer); sizeObserver?.disconnect(); dialog.value?.close(); if (opener?.isConnected) opener.focus({ preventScroll: true }) })
 </script>
 
 <template>
   <dialog ref="dialog" class="desk-dialog" aria-label="Decision Desk memo" @keydown="keys" @cancel.prevent="close">
-    <div ref="frame" class="desk-frame" :style="scrollingHeight ? { height: `${scrollingHeight}px` } : undefined" data-testid="desk-frame">
+    <div ref="frame" class="desk-frame" :style="{ '--tab-w': `${tabWidth}px`, ...(scrollingHeight ? { height: `${scrollingHeight}px` } : {}) }" data-testid="desk-frame">
       <div class="desk-toolbar" data-testid="desk-actions">
-        <button ref="pagerButton" class="desk-pager" type="button" aria-haspopup="listbox" :aria-expanded="pager" :disabled="busy" data-testid="desk-pager" @click="openPager">
-          <svg class="folder-outline" viewBox="0 0 270 46" preserveAspectRatio="none" aria-hidden="true"><path d="M.5 45.5V12 Q.5 .5 12 .5H208 Q220 .5 224 13L231 32Q235 45.5 249 45.5" /></svg>
-          <span>{{ item ? kindLabels[item.kind] : 'Memo' }}</span><span class="pager-count">{{ index + 1 }} of {{ round.length }}<AppIcon name="chevron" :size="12" /></span>
+        <button ref="pagerButton" class="desk-pager" type="button" aria-haspopup="listbox" :aria-expanded="pager" :disabled="busy" data-testid="desk-pager" :style="{ width: `${tabWidth}px`, clipPath: `path('${tabPath}')` }" @click="openPager">
+          <svg class="folder-outline" :viewBox="`0 0 ${tabWidth} 46`" preserveAspectRatio="none" aria-hidden="true"><path :d="tabOutline" /></svg>
+          <span class="pager-label"><span v-if="project" class="ft-project" :class="{ switched: !!switchedFrom }" :style="{ '--pc': projectColor(project) }" :title="switchedFrom ? `${project.name}: another project than the item before (${switchedFrom.name})` : `Project: ${project.name}`" data-testid="desk-tab-project"><i class="project-dot" aria-hidden="true" /><span>{{ project.name }}</span></span><span class="pager-kind">{{ item ? kindLabels[item.kind] : 'Memo' }}</span></span><span class="pager-count">{{ index + 1 }} of {{ round.length }}<AppIcon name="chevron" :size="12" /></span>
         </button>
         <span class="toolbar-space"><span v-if="arrivalsCount" class="arrival-hint" role="status">{{ arrivalsCount }} new for the next round</span></span>
         <div class="action-buttons">
@@ -257,10 +287,10 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
           <button class="close-desk" type="button" aria-label="Close memo" data-testid="desk-close" @click="close"><AppIcon name="close" :size="18" /></button>
         </div>
         <div v-if="pager" class="jump-popover">
-          <p>{{ counts.open }} open · {{ counts.decided }} decided · {{ counts.skipped }} skipped</p>
+          <p data-testid="desk-jump-head">{{ counts.open }} open · {{ counts.decided }} decided · {{ counts.skipped }} skipped<template v-if="roundProjects > 1"> · {{ roundProjects }} projects</template></p>
           <ol role="listbox" tabindex="0" aria-label="Jump to a memo" :aria-activedescendant="`jump-${jumpIndex}`">
-            <li v-for="(id, at) in round" :id="`jump-${at}`" :key="id" role="option" :aria-selected="jumpIndex === at" @click="pickJump(at)">
-              <span>{{ at + 1 }}</span><span>{{ items.find(row => row.id === id)?.title ?? 'Unavailable item' }}</span><small>{{ items.find(row => row.id === id)?.decided ? 'Decided' : skipped.has(id) ? 'Skipped' : 'Open' }}</small>
+            <li v-for="(id, at) in round" :id="`jump-${at}`" :key="id" role="option" :class="{ 'project-change': projectChange(at) }" :aria-selected="jumpIndex === at" :data-testid="`desk-jump-${at}`" @click="pickJump(at)">
+              <span>{{ at + 1 }}</span><span class="jump-project" :style="jumpProject(at) ? { '--pc': projectColor(jumpProject(at)!) } : undefined" data-testid="desk-jump-project"><template v-if="jumpProject(at)"><i class="project-dot" aria-hidden="true" /><span>{{ jumpProject(at)!.name }}</span></template></span><span>{{ items.find(row => row.id === id)?.title ?? 'Unavailable item' }}</span><small>{{ items.find(row => row.id === id)?.decided ? 'Decided' : skipped.has(id) ? 'Skipped' : 'Open' }}</small>
             </li>
           </ol>
         </div>
@@ -268,8 +298,8 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
       <span class="sr-only" role="status" aria-live="polite" data-testid="desk-announcement">{{ announcement }}</span>
       <article ref="memo" class="desk-paper" tabindex="-1" data-testid="desk-paper">
         <template v-if="item && draft">
-          <header class="memo-heading">
-            <div><p class="eyebrow">{{ item.projectName }}</p><h2 v-clip-tip="{ text: item.title, onClip: measureTitle }">{{ item.title }}</h2></div>
+          <header class="memo-heading" :class="{ switched: !!switchedFrom }">
+            <div><div class="memo-meta" data-testid="desk-project-line"><span class="meta-label">Project</span><a v-if="project?.href" class="project-link" :href="project.href" target="_blank" rel="noopener" :style="{ '--pc': projectColor(project) }" :title="`Open ${project.name} in a new tab`" data-testid="desk-project-link"><i class="project-dot" aria-hidden="true" /><span>{{ project.name }}</span><AppIcon name="external" :size="12" /><kbd>P</kbd></a><span v-else-if="project" class="project-link" :style="{ '--pc': projectColor(project) }" data-testid="desk-project-link"><i class="project-dot" aria-hidden="true" /><span>{{ project.name }}</span></span><p v-if="switchedFrom && project" class="project-switch" :style="{ '--pc': projectColor(project) }" data-testid="desk-project-switch"><AppIcon name="arrow" :size="12" /><span v-clip-tip><b>Now in {{ project.name }}.</b> The item before was in {{ switchedFrom.name }}.</span></p></div><h2 v-clip-tip="{ text: item.title, onClip: measureTitle }">{{ item.title }}</h2></div>
             <div class="heading-side"><span class="waiting">{{ expired ? 'Expired' : item.decided ? 'Decided' : item.held ? 'Holding work' : 'Waiting' }}</span><strong class="large-stamp" :class="[{ slam }, `stamp-${draft.outcome}`]" @animationend="slam = false">{{ outcomeLabels[draft.outcome] }}</strong></div>
           </header>
           <div class="stamp-line" data-testid="desk-stamps" role="group" aria-label="Stamp it as">
@@ -355,7 +385,20 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
 .desk-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(5px); }
 .desk-frame { display: flex; flex-direction: column; max-height: calc(86dvh - 26px); min-height: 0; }
 .desk-toolbar { position: relative; display: flex; flex: none; height: 46px; align-items: stretch; gap: 12px; }
-.desk-pager { position: relative; flex: none; display: flex; align-items: center; justify-content: space-between; width: 270px; padding: 0 40px 0 16px; border: 0; background: var(--surface); color: var(--ink); font-size: 12px; isolation: isolate; clip-path: path('M0 46V12Q0 0 12 0H208Q220 0 224 13L231 32Q235 46 249 46Z'); }
+.desk-pager { position: relative; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 360px; padding: 0 40px 0 16px; border: 0; background: var(--surface); color: var(--ink); font-size: 12px; isolation: isolate; }
+/* AEON-1057: the project on the folder tab, filled when it changed from the item before. */
+.pager-label { display: flex; align-items: center; gap: 8px; min-width: 0; }.pager-kind { white-space: nowrap; }
+.ft-project { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 24px; max-width: 124px; padding: 0 8px; border-radius: 6px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pc) 35%, transparent); color: var(--pc); font-size: 12px; font-weight: 650; }
+.ft-project > span, .jump-project > span, .project-link > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ft-project.switched { background: color-mix(in srgb, var(--pc) 14%, transparent); box-shadow: inset 0 0 0 1.5px var(--pc); }
+.project-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pc); }
+.memo-meta { display: flex; align-items: center; gap: 10px; height: 26px; margin-bottom: 6px; min-width: 0; font-size: 12px; }
+.meta-label { flex: none; font-size: 11px; color: var(--ink-3); }
+.project-link { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; color: var(--pc); font-weight: 650; text-decoration: none; }
+a.project-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.project-link svg { flex: none; opacity: .75; }.project-link kbd { margin-left: 2px; }
+.project-switch { display: flex; align-items: center; gap: 7px; flex: 0 1 auto; min-width: 0; height: 24px; margin: 0; padding: 0 9px; border-radius: 6px; background: color-mix(in srgb, var(--pc) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pc) 35%, transparent); color: var(--ink-2); white-space: nowrap; overflow: hidden; }
+.project-switch > span { overflow: hidden; text-overflow: ellipsis; }.project-switch svg { flex: none; color: var(--pc); }.project-switch b { color: var(--pc); font-weight: 700; }
 .folder-outline { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; fill: none; stroke: var(--line-2); stroke-width: 1; }
 .pager-count { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .toolbar-space { flex: 1; display: flex; align-items: center; min-width: 0; }
@@ -377,9 +420,8 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
 .action-buttons .close-desk { width: 42px; padding: 0; display: grid; place-items: center; }
 button { cursor: pointer; } button:disabled { cursor: default; } button:focus-visible, input:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; } kbd { font: 11px var(--mono); opacity: .65; margin-left: 7px; }
 .desk-paper { flex: 1 1 auto; min-height: 0; position: relative; display: flex; flex-direction: column; padding: 24px 30px 28px; background: var(--surface); border-radius: 0 12px 12px 12px; border: 1px solid var(--line-2); border-top: 0; outline: 0; }
-.desk-paper::before { content: ''; position: absolute; top: 0; left: 249px; right: 12px; height: 1px; background: var(--line-2); }
+.desk-paper::before { content: ''; position: absolute; top: 0; left: calc(var(--tab-w, 360px) - 21px); right: 12px; height: 1px; background: var(--line-2); }
 .memo-heading { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 20px; height: 92px; }
-.eyebrow { font-size: 11px; color: var(--ink-3); margin: 0 0 6px; }
 h2 { margin: 0; font-size: 23px; line-height: 1.25; font-weight: 550; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }h2:focus-visible, .answer-slot:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .heading-side { display: grid; align-content: start; justify-items: end; gap: 14px; }
 .waiting { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
@@ -399,13 +441,18 @@ h3 { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacin
 .context-column section { margin-bottom: 22px; }.context-column p { font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }.context-column a { font-size: 12px; color: var(--teal-ink); text-decoration: none; overflow-wrap: anywhere; }.context-column dl { font-size: 12px; margin-bottom: 0; }.context-column dl>div { display: grid; grid-template-columns: 75px minmax(0,1fr); gap: 8px; margin: 6px 0; }.context-column dt { color: var(--ink-3); }.context-column dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }.related-link { display: block; margin: 5px 0; }.context-warning { color: var(--warn-ink); }
 .answer-slot p { margin: 4px 0; white-space: pre-wrap; }
 .attachments { display: flex; flex-wrap: wrap; gap: 10px; }.attachment { width: 88px; border: 0; background: transparent; color: var(--ink); padding: 0; }.attachment img, .attachment>span { width: 88px; height: 58px; object-fit: cover; background: var(--surface-2); display: grid; place-items: center; border-radius: 4px; }.attachment small { display: block; font-size: 10px; margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.jump-popover { position: absolute; z-index: 5; left: 0; top: 46px; width: min(480px, calc(100vw - 48px)); padding: 14px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: var(--shadow-pop); }.jump-popover p { margin: 0 0 10px; font-size: 12px; color: var(--ink-3); }.jump-popover ol { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow: auto; }.jump-popover li { display: grid; grid-template-columns: 20px minmax(0, 1fr) 55px; align-items: center; gap: 8px; height: 40px; padding: 0 8px; font-size: 12px; cursor: pointer; }.jump-popover li[aria-selected=true] { background: var(--row-selected); }.jump-popover li>span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.jump-popover small { font-size: 10px; color: var(--ink-3); }
+.jump-popover { position: absolute; z-index: 5; left: 0; top: 46px; width: min(600px, calc(100vw - 48px)); padding: 14px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: var(--shadow-pop); }.jump-popover p { margin: 0 0 10px; font-size: 12px; color: var(--ink-3); }.jump-popover ol { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow: auto; }.jump-popover li { display: grid; grid-template-columns: 20px 112px minmax(0, 1fr) 55px; align-items: center; gap: 8px; height: 40px; padding: 0 8px; font-size: 12px; cursor: pointer; }.jump-popover li[aria-selected=true] { background: var(--row-selected); }.jump-popover li>span:nth-child(3) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.jump-popover small { font-size: 10px; color: var(--ink-3); }
+.jump-project { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--pc, var(--ink-3)); font-weight: 650; }
+/* Where the project changes in the round, a dashed hairline between the rows. */
+.jump-popover li.project-change { border-top: 1px dashed var(--line-2); }
 @media (prefers-reduced-motion: no-preference) { .slam { animation: stamp-slam .28s ease-out; } @keyframes stamp-slam { from { transform: scale(1.18); } to { transform: scale(1); } } }
 @media (max-width: 720px) {
   .action-buttons .native-action { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
   .action-buttons button[data-testid="desk-skip"] { grid-column: 1; grid-row: 1; }
   .action-buttons .desk-primary { grid-column: 2; grid-row: 1; }
   .action-buttons .close-desk { grid-column: 3; grid-row: 1; }
-  .desk-dialog { top: 0; width: 100vw; height: 100dvh; max-height: none; padding: 0; border-radius: 0; border: 0; }.desk-frame { height: 100%; max-height: none; }.desk-toolbar { display: contents; }.desk-pager { order: 0; flex: none; height: 46px; margin-top: 12px; margin-left: 14px; }.toolbar-space { display: none; }.action-buttons { order: 2; display: grid; grid-template-columns: max-content minmax(0,1fr) 42px; flex: none; padding: 10px 14px max(10px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--glass); }.action-buttons .desk-primary { width: 100%; }.action-buttons button { padding: 0 8px; min-height: 44px; }.desk-paper { order: 1; border: 0; border-radius: 0; padding: 22px 18px 0; overflow: hidden; }.desk-paper::before { display: none; }.memo-heading { height: 92px; grid-template-columns: minmax(0,1fr) 100px; gap: 12px; }h2 { font-size: 20px; }.large-stamp { font-size: 13px; }.stamp-line { gap: 14px; height: 44px; }.stamp-label { display: none; }.stamp { font-size: 10px; }.memo-status { font-size: 11px; height: 48px; }.memo-body { display: flex; flex-direction: column; gap: 24px; padding-bottom: 20px; }.context-column { border-left: 0; padding-left: 0; }.jump-popover { position: fixed; top: 58px; left: 14px; width: calc(100vw - 28px); }kbd { display: none; }.choice-row button { gap: 6px; }.answer-field { margin-left: 8px; width: calc(100% - 16px); }
+  .desk-dialog { top: 0; width: 100vw; height: 100dvh; max-height: none; padding: 0; border-radius: 0; border: 0; }.desk-frame { height: 100%; max-height: none; }.desk-toolbar { display: contents; }.desk-pager { order: 0; flex: none; height: 46px; margin-top: 12px; margin-left: 14px; }.toolbar-space { display: none; }.action-buttons { order: 2; display: grid; grid-template-columns: max-content minmax(0,1fr) 42px; flex: none; padding: 10px 14px max(10px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--glass); }.action-buttons .desk-primary { width: 100%; }.action-buttons button { padding: 0 8px; min-height: 44px; }.desk-paper { order: 1; border: 0; border-radius: 0; padding: 22px 18px 0; overflow: hidden; }.desk-paper::before { display: none; }.memo-heading { height: 92px; grid-template-columns: minmax(0,1fr) 100px; gap: 12px; }h2 { font-size: 20px; }.large-stamp { font-size: 13px; }.meta-label { display: none; }.ft-project { max-width: 96px; }.memo-meta { flex-wrap: wrap; height: auto; row-gap: 4px; margin-bottom: 4px; }.project-link { height: 20px; }.memo-heading.switched h2 { -webkit-line-clamp: 1; }
+  /* The notice reads in full on two lines; the question gives up its second line meanwhile (it stays in full below). */
+  .project-switch { height: auto; padding: 2px 8px; white-space: normal; line-height: 1.3; }.project-switch > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }.jump-popover li { grid-template-columns: 20px 84px minmax(0, 1fr) 55px; }.project-switch { font-size: 11px; }.stamp-line { gap: 14px; height: 44px; }.stamp-label { display: none; }.stamp { font-size: 10px; }.memo-status { font-size: 11px; height: 48px; }.memo-body { display: flex; flex-direction: column; gap: 24px; padding-bottom: 20px; }.context-column { border-left: 0; padding-left: 0; }.jump-popover { position: fixed; top: 58px; left: 14px; width: calc(100vw - 28px); }kbd { display: none; }.choice-row button { gap: 6px; }.answer-field { margin-left: 8px; width: calc(100% - 16px); }
 }
 </style>
