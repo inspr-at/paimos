@@ -1,8 +1,7 @@
 {
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "builtin_agent_exclusions": [
-    "account.overview.read",
-    "account.use.manage"
+    "account.overview.read"
   ],
   "words": {
     "resources": {
