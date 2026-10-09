@@ -1,5 +1,11 @@
 # Recurring work
 
+Recurring tickets are shipped (AEON-573, [Coral Cargo](https://github.com/inspr-at/paimos/releases/tag/v261005070923.0.0))
+and are the simplest routine: the scheduler creates a ticket.
+[Routines (AEON-680) are planned](web-workspace.md#planned-work) to add saved
+agent assignments, typed action gates, budgets and run logbooks. The recurring
+ticket scheduler does not supply those capabilities or Flow 2.
+
 In the web app, **Repeat…** in a ticket or epic's More menu (Shift+R while
 its panel is focused) opens the recurrence editor. Project **Settings →
 Recurring work** lists definitions with Pause/Resume, revision-checked Undo,
@@ -109,8 +115,9 @@ excluded for the rest of that pass so later rows can run. The pass reports
 the accumulated failures. Its original cursor remains available for retry
 on the next pass; failed attempts do not increment the occurrence number.
 
-Journey publications and the configured product's immutable release history
-produce tenant/project-scoped `release.published` events; the same project and
+The configured product's immutable release history produces tenant/project-scoped
+`release.published` events. Historical Journey publications remain stored; the
+retired Flow / Journey (AEON-723) no longer publishes new releases. The same project and
 version are deduplicated across sources. Newly configured schedules ignore
 publications from before their creation. Occurrence tickets and their node,
 queue and recurrence audit events use the keyless system actor **Recurring

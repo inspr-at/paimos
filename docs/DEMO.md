@@ -21,8 +21,12 @@ What the first successful run writes through the application modules and operato
 
 The seed commits all its changes in one database transaction. An interrupted run rolls back its nodes, keys, bindings, and events; a retry starts cleanly. The completion marker is `fields.demo_seed` = `complete` on the Lumen Archive project node. A later run reads that marker and returns without new events or refreshed account probes, windows, gates, or provenance. Already completed demo tenants are not backfilled: create a fresh demo tenant to capture these additions.
 
-The seed no longer creates Flow stages, gate grants, or handoffs. Existing work,
-harness sessions, runs and ordinary approval evidence remain.
+The seed no longer creates stages, gate grants, or handoffs from the historical
+INSPR Flow / Journey, retired by AEON-723 in
+[Direct Dome](https://github.com/inspr-at/paimos/releases/tag/v261007035250.0.0).
+Existing work, harness sessions, runs and ordinary approval evidence remain.
+[Flow 2 (AEON-821) is planned](features/web-workspace.md#planned-work);
+the seed does not demonstrate it.
 
 Money in the seed is an exact decimal rate (`80.00` internal, `140.00` bill, EUR per hour). Durations are whole seconds. Nothing is stored as a binary float.
 
@@ -50,7 +54,7 @@ Server startup opens and migrates the database and creates the configured bootst
 
 Use the dev sign-in at that origin with `demo.operator@demo.aeon.invalid` and tenant `lumen-demo`. The dev login creates a separate fictional capture operator; the seed's Demo Operator remains the author of its historical decisions. A headless capture context can POST `{"email":"demo.operator@demo.aeon.invalid","tenant":"lumen-demo"}` to `/api/auth/dev-login` and keep the response cookie in that context. Do not print, copy into a manifest, or commit the cookie. This route requires dev mode; it does not demonstrate IdP sign-in.
 
-Capture targets are the Start agent dialog on `LT-1`, Harbor Clerk's pending ticket approval in Needs you, the North Glass Requirements gate, and `LT-1` Activity filtered to People and agents. Follow the agent comment's session link for state evidence and instruction provenance. The session is ended and its run is completed, so it does not turn into a fabricated live delivery or a stale-heartbeat failure line.
+Capture targets are the Start agent dialog on `LT-1`, Harbor Clerk's pending ticket approval in Needs you, and `LT-1` Activity filtered to People and agents. Follow the agent comment's session link for state evidence and instruction provenance. The session is ended and its run is completed, so it does not turn into a fabricated live delivery or a stale-heartbeat failure line.
 
 Account probes and the two-hour allowance windows are fictional seed snapshots. They expire normally and replay does not refresh them. Use a fresh tenant for a new set of seed snapshots, or an actually paired account for live availability. Harness and model controls retain their registered names. The promo-owner decision for AEON-497 (2026-10-01) is to show a mix of Codex, Claude and Grok in the picker and session list so no single vendor is featured; promo framing must not ring or caption a vendor name. Local-provider configuration and IdP sign-in need their respective real setup; the seed supplies neither a provider service nor IdP credentials.
 
