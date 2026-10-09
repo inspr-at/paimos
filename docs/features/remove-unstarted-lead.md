@@ -13,3 +13,8 @@ previous lead snapshot in the same transaction. Generation history remains
 immutable. A later start uses a revision newer than the removed intent, so an
 old confirmation cannot remove its replacement. No launch authority, scopes or
 credentials are added.
+
+Regression coverage checks audited removal, started/history refusal, permission
+revocation and claim races, and stale confirmations and reads. Browser checks
+measure both entry points within ±0.5 px at 390, 1024 and 1440 px in light and
+dark themes, including inline server errors.
