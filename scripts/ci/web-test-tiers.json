@@ -516,6 +516,8 @@
     ,
     "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 390"
     ,
+    "browser:tests/palette.spec.ts:knowledge keys open visible scoped entries and superseded responses stay discarded"
+    ,
     "browser:tests/phone-approvals.spec.ts:ended requests offer context without a decision button"
     ,
     "browser:tests/phone-approvals.spec.ts:personal phone settings save quiet hours and revoke a device"
@@ -9184,7 +9186,7 @@
     ,
     {"kind":"browser","file":"tests/palette.spec.ts","name":"inside a project the search is scoped; Backspace on an empty input widens it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/palette.spec.ts","name":"knowledge keys open visible scoped entries and superseded responses stay discarded","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/palette.spec.ts","name":"knowledge keys open visible scoped entries and superseded responses stay discarded","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/palette.spec.ts","name":"no results suggest a key, and a scoped search can widen with one click","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
