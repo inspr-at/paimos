@@ -48,6 +48,7 @@ h3 { margin: 0 0 8px; font: 650 14px/1.3 var(--font); color: var(--ink); }
 .went-list li.wait svg { color: var(--queue-wait-ink); }
 .went-list li.rework svg, .went-list li.inc svg { color: var(--danger); }
 .went-list b { flex: none; color: var(--ink); font-weight: 650; }
+.went-list .mu { color: var(--ink-2); }
 .txt { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @container delivery (max-width: 640px) {
   .went-list { grid-template-columns: minmax(0, 1fr); }

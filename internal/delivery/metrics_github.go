@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"path"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
@@ -53,6 +55,9 @@ type githubRun struct {
 	Pulls      []struct {
 		Number int64 `json:"number"`
 	} `json:"pull_requests"`
+	HeadCommit struct {
+		Tree string `json:"tree_id"`
+	} `json:"head_commit"`
 }
 
 // metricRunFrom validates one workflow run attempt. An incomplete run is not
@@ -70,6 +75,9 @@ func metricRunFrom(r githubRun) (metricRun, bool, error) {
 		started = *r.Started
 	}
 	out := metricRun{ID: r.ID, Attempt: r.Attempt, Workflow: r.Path, Name: r.Name, Event: r.Event, Branch: r.Branch, Head: r.Head, Created: r.Created.UTC(), Started: started.UTC(), Completed: r.Updated.UTC(), Conclusion: *r.Conclusion}
+	if reviewgate.ValidSHA(r.HeadCommit.Tree) {
+		out.HeadTree = r.HeadCommit.Tree
+	}
 	if len(r.Pulls) > 0 && r.Pulls[0].Number > 0 {
 		n := r.Pulls[0].Number
 		out.PR = &n
@@ -153,6 +161,171 @@ func readRunAttempts(get func(string, any) error, r githubRun, from int, include
 	return out, 0, nil
 }
 
+// Job facts (AEON-1016). The Delivery numbers need two things from the jobs of
+// attempt 1 of a pull-request or merge-queue run: whether the required checks
+// passed, and how long the worst job waited for a runner. Nothing else of a job
+// is kept: no step, log, runner name or label.
+const (
+	jobPageSize  = 100
+	jobPageLimit = 5
+)
+
+type githubJob struct {
+	Name       string     `json:"name"`
+	Conclusion *string    `json:"conclusion"`
+	Created    time.Time  `json:"created_at"`
+	Started    *time.Time `json:"started_at"`
+}
+
+// jobNameLimit bounds one job name stored in the conclusion map. A longer
+// name, or a conclusion longer than 32 characters, fails the read: a partial
+// map is not stored.
+const jobNameLimit = 200
+
+type jobFacts struct {
+	Conclusions map[string]string
+	WorstWaitMS *int
+	Complete    bool
+}
+
+// storedJobFacts is the required_jobs JSON written for a complete read.
+// Older rows are a flat name→conclusion map and are not complete.
+type storedJobFacts struct {
+	Complete    bool              `json:"complete"`
+	Conclusions map[string]string `json:"conclusions"`
+}
+
+func conclusionRank(conclusion string) int {
+	switch conclusion {
+	case "failure", "timed_out", "startup_failure", "action_required", "cancelled", "missing":
+		return 3
+	case "success":
+		return 1
+	case "skipped", "neutral":
+		return 0
+	default:
+		return 2
+	}
+}
+
+// worseConclusion keeps the conclusion that hides a failure least. A failed
+// matrix leg must not disappear behind an earlier success of the same name.
+func worseConclusion(current, next string) string {
+	if conclusionRank(next) > conclusionRank(current) {
+		return next
+	}
+	return current
+}
+
+func encodeStoredJobs(facts jobFacts) ([]byte, error) {
+	if !facts.Complete {
+		return nil, errRead
+	}
+	conclusions := facts.Conclusions
+	if conclusions == nil {
+		conclusions = map[string]string{}
+	}
+	return json.Marshal(storedJobFacts{Complete: true, Conclusions: conclusions})
+}
+
+func decodeJobFacts(raw []byte) (map[string]string, bool, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil, false, nil
+	}
+	var wrapped storedJobFacts
+	if err := json.Unmarshal(raw, &wrapped); err != nil {
+		return nil, false, err
+	}
+	if wrapped.Complete && wrapped.Conclusions != nil {
+		return wrapped.Conclusions, true, nil
+	}
+	var flat map[string]string
+	if err := json.Unmarshal(raw, &flat); err != nil {
+		// A wrapper that is not a complete map is not a legacy flat map either.
+		if wrapped.Complete || wrapped.Conclusions != nil {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return flat, false, nil
+}
+
+// jobRunEvents are the events whose runs the numbers read jobs for.
+func jobRunEvent(event string) bool { return event == "pull_request" || event == "merge_group" }
+
+// readJobFacts reads every job of one attempt, up to a bound, and keeps each
+// job's conclusion. A partial list is a read error: a fact is stored whole or
+// not at all. The map is complete, so any project's required check is either
+// in it or truly absent. A job with no conclusion is "missing". Two jobs with
+// the same name keep the worse conclusion, so a failed matrix leg is not
+// hidden by an earlier success. A skipped job has no runner wait.
+func readJobFacts(get func(string, any) error, runID int64, attempt int) (jobFacts, error) {
+	var jobs []githubJob
+	for page := 1; ; page++ {
+		var response struct {
+			Total int         `json:"total_count"`
+			Jobs  []githubJob `json:"jobs"`
+		}
+		if err := get(fmt.Sprintf("/actions/runs/%d/attempts/%d/jobs?per_page=%d&page=%d", runID, attempt, jobPageSize, page), &response); err != nil {
+			return jobFacts{}, err
+		}
+		if response.Total < 0 || response.Total > jobPageSize*jobPageLimit || len(response.Jobs) > jobPageSize {
+			return jobFacts{}, errRead
+		}
+		jobs = append(jobs, response.Jobs...)
+		if len(jobs) >= response.Total {
+			break
+		}
+		if page >= jobPageLimit || len(response.Jobs) == 0 {
+			return jobFacts{}, errRead
+		}
+	}
+	facts := jobFacts{Conclusions: map[string]string{}, Complete: true}
+	for _, job := range jobs {
+		if job.Name == "" || len(job.Name) > jobNameLimit {
+			return jobFacts{}, errRead
+		}
+		conclusion := "missing"
+		if job.Conclusion != nil && *job.Conclusion != "" {
+			if len(*job.Conclusion) > 32 {
+				return jobFacts{}, errRead
+			}
+			conclusion = *job.Conclusion
+		}
+		if old, ok := facts.Conclusions[job.Name]; ok {
+			conclusion = worseConclusion(old, conclusion)
+		}
+		facts.Conclusions[job.Name] = conclusion
+		if job.Started == nil || job.Started.IsZero() || job.Created.IsZero() || conclusion == "skipped" {
+			continue
+		}
+		wait := int(max(0, job.Started.Sub(job.Created).Milliseconds()))
+		if facts.WorstWaitMS == nil || wait > *facts.WorstWaitMS {
+			facts.WorstWaitMS = &wait
+		}
+	}
+	return facts, nil
+}
+
+// attachJobFacts reads the jobs of each eligible attempt-1 run into the run. A
+// failed read leaves that run without job facts: its numbers are then missing
+// and the windows holding it partial, never guessed. eligible decides whether
+// the run is one of the CI workflow's.
+func attachJobFacts(get func(string, any) error, runs []metricRun, eligible func(metricRun) bool) {
+	for i := range runs {
+		run := &runs[i]
+		if run.Attempt != 1 || !jobRunEvent(run.Event) || !eligible(*run) {
+			continue
+		}
+		facts, err := readJobFacts(get, run.ID, run.Attempt)
+		if err != nil {
+			continue
+		}
+		run.JobsRead, run.JobsComplete, run.Required, run.WorstWaitMS = true, facts.Complete, facts.Conclusions, facts.WorstWaitMS
+	}
+}
+
 type githubPullFact struct {
 	Number  int64      `json:"number"`
 	Created time.Time  `json:"created_at"`
@@ -211,6 +384,18 @@ type backfillCursor struct {
 	AttemptRun int64    `json:"attempt_run,omitempty"`
 	Attempt    int      `json:"attempt,omitempty"`
 	DoneRuns   doneRuns `json:"done_runs,omitempty"`
+	// Workflows is the list this backfill is reading. Empty on a cursor that
+	// started before preflight was part of the list: an in-progress runs or
+	// pulls phase keeps the old CI and nightly list, and a finished one is
+	// caught up once. ResumePhase, when set, is where a one-workflow catch-up
+	// returns (jobs or done) instead of entering pulls. ThenWorkflows is the
+	// full list stored when that catch-up finishes.
+	Workflows     []string `json:"workflows,omitempty"`
+	ResumePhase   string   `json:"resume_phase,omitempty"`
+	ThenWorkflows []string `json:"then_workflows,omitempty"`
+	// PreflightAbsent is set when GitHub confirms ci-preflight.yml does not
+	// exist. The other workflows still finish, and a later catch-up does not start.
+	PreflightAbsent bool `json:"preflight_absent,omitempty"`
 }
 
 // doneRun is one run on the current page and the highest attempt stored for
@@ -288,7 +473,12 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 		switch cursor.Phase {
 		case "runs":
 			if cursor.Workflow >= len(workflows) {
-				cursor = backfillCursor{Since: cursor.Since, Phase: "pulls", Page: 1, Truncated: cursor.Truncated}
+				if cursor.ResumePhase != "" {
+					// A preflight catch-up returns to jobs or done. It must
+					// not walk pulls again. A confirmed absence is not listed.
+					return backfillCursor{Since: cursor.Since, Phase: cursor.ResumePhase, Truncated: cursor.Truncated, Workflows: storedWorkflows(cursor, cursor.ThenWorkflows), PreflightAbsent: cursor.PreflightAbsent}, batch, nil
+				}
+				cursor = backfillCursor{Since: cursor.Since, Phase: "pulls", Page: 1, Truncated: cursor.Truncated, Workflows: storedWorkflows(cursor, cursor.Workflows), PreflightAbsent: cursor.PreflightAbsent}
 				continue
 			}
 			day, err := time.Parse("2006-01-02", cursor.Day)
@@ -296,7 +486,7 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 				return cursor, batch, errRead
 			}
 			if day.After(today) {
-				cursor = backfillCursor{Since: cursor.Since, Phase: "runs", Workflow: cursor.Workflow + 1, Day: dayStart(cursor.Since).Format("2006-01-02"), Page: 1, Truncated: cursor.Truncated}
+				cursor = backfillCursor{Since: cursor.Since, Phase: "runs", Workflow: cursor.Workflow + 1, Day: dayStart(cursor.Since).Format("2006-01-02"), Page: 1, Truncated: cursor.Truncated, Workflows: cursor.Workflows, ResumePhase: cursor.ResumePhase, ThenWorkflows: cursor.ThenWorkflows, PreflightAbsent: cursor.PreflightAbsent}
 				continue
 			}
 			var response struct {
@@ -306,6 +496,12 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 			batch.Calls++
 			file := url.PathEscape(path.Base(workflows[cursor.Workflow]))
 			if err := get(fmt.Sprintf("/actions/workflows/%s/runs?created=%s&status=completed&per_page=100&page=%d", file, cursor.Day, cursor.Page), &response); err != nil {
+				// Only a confirmed absence of the preflight file is skipped.
+				// Any other miss, including a 404 of CI or nightly, stops the step.
+				if errors.Is(err, crossreview.ErrNotFound) && isPreflightFile(workflows[cursor.Workflow]) {
+					cursor = backfillCursor{Since: cursor.Since, Phase: "runs", Workflow: cursor.Workflow + 1, Day: dayStart(cursor.Since).Format("2006-01-02"), Page: 1, Truncated: cursor.Truncated, Workflows: cursor.Workflows, ResumePhase: cursor.ResumePhase, ThenWorkflows: cursor.ThenWorkflows, PreflightAbsent: true}
+					continue
+				}
 				return cursor, batch, err
 			}
 			if response.Total < 0 || len(response.Runs) > 100 {
@@ -413,7 +609,7 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 				if capped {
 					cursor.Truncated = true
 				}
-				cursor = backfillCursor{Since: cursor.Since, Phase: "done", Truncated: cursor.Truncated}
+				cursor = backfillCursor{Since: cursor.Since, Phase: "done", Truncated: cursor.Truncated, Workflows: storedWorkflows(cursor, cursor.Workflows), PreflightAbsent: cursor.PreflightAbsent}
 				return cursor, batch, nil
 			}
 			cursor.Page++
@@ -424,6 +620,25 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 		}
 	}
 	return cursor, batch, nil
+}
+
+func isPreflightFile(name string) bool {
+	return path.Base(name) == path.Base(defaultPreflightWorkflow)
+}
+
+// storedWorkflows drops a confirmed-absent preflight file when the runs phase
+// ends. Stripping it earlier would shift the workflow index mid-pass.
+func storedWorkflows(cursor backfillCursor, list []string) []string {
+	if !cursor.PreflightAbsent {
+		return list
+	}
+	out := make([]string, 0, len(list))
+	for _, name := range list {
+		if !isPreflightFile(name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func metricDefaultBranch(name string) bool {
