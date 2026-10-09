@@ -283,6 +283,7 @@ func TestStepupFirstDecisionWinsWithTwoApprovers(t *testing.T) {
 	r := f.create(t)
 	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return sql == db.TenantFenceSQL })
 	first := New(pool, nil, "")
+	first.RecordResultTx = inbox.RecordResult
 	first.now = f.m.now
 	type result struct {
 		r   ApprovalRequest

@@ -75,7 +75,7 @@ onBeforeUnmount(() => { clearInterval(tick); stopAccess() })
           <dl><dt>Requested by</dt><dd>{{ review.stepup.requested_by }}</dd><dt>Permission</dt><dd>{{ review.stepup.permission }}</dd></dl>
           <section aria-label="Before and after"><h3>Before</h3><pre>{{ JSON.stringify(review.stepup.before, null, 2) }}</pre><h3>After</h3><pre>{{ JSON.stringify(review.stepup.after, null, 2) }}</pre></section>
           <p>Expires <time :datetime="expires">{{ new Date(expires).toLocaleString() }}</time></p>
-          <RouterLink :to="{ path: '/decision-desk', query: { needs: `stepup:${review.stepup.id}` } }">Open in Decision Desk</RouterLink>
+          <RouterLink :to="{ path: '/decision-desk', query: { needs: `s:${review.stepup.id}` } }">Open in Decision Desk</RouterLink>
           <p>Only a person holding this permission can decide. The first decision is final.</p>
         </article>
       </div>

@@ -279,7 +279,7 @@ test('account pause stays available when this browser has no Web Push', async ({
 // Risk: opening a phone pointer approves automatically, native outcomes are
 // misreported, or verification/status changes move the next tap.
 async function stepupPhone(page: Page, state = 'applied') {
-  await mockWork(page, fixtures({ admin: true }))
+  await mockWork(page, fixtures(), { admin: true })
   await mockSettings(page, settingsData())
   const request = { id, requested_by: '22222222-2222-4222-8222-222222222222', permission: 'settings.manage',
     request_digest: hash, revision: 1, state: 'pending', created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 900_000).toISOString(),
@@ -341,7 +341,7 @@ test('step-up phone card binds passkey approval and keeps its footer still in bo
       await expect(approve).toBeDisabled(); await expect(decline).toBeDisabled()
     })
     expect(calls.approves).toBe(approvesBefore + 1)
-    expect(new URL((await page.getByRole('link', { name: 'Open in Decision Desk' }).getAttribute('href'))!, 'https://aeon.example').searchParams.get('needs')).toBe(`stepup:${id}`)
+    expect(new URL((await page.getByRole('link', { name: 'Open in Decision Desk' }).getAttribute('href'))!, 'https://aeon.example').searchParams.get('needs')).toBe(`s:${id}`)
     guard.done()
   }
 })
