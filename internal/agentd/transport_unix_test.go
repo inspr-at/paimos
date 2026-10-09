@@ -52,6 +52,19 @@ func TestLocalSocketAuthAndBound(t *testing.T) {
 	}}
 	client := &http.Client{Transport: transport}
 	defer transport.CloseIdleConnections()
+	// Every local ownership mutation shares the existing socket-token boundary.
+	for _, path := range []string{"/v1/ledger/import", "/v1/ledger/leave"} {
+		request, _ := http.NewRequest("POST", "http://agentd"+path, nil)
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode != 401 {
+			t.Fatalf("unauthenticated %s status %d", path, response.StatusCode)
+		}
+	}
 	request, _ := http.NewRequest("GET", "http://agentd/v1/status", nil)
 	response, err := client.Do(request)
 	if err != nil {
@@ -109,6 +122,19 @@ func TestLocalSocketAuthAndBound(t *testing.T) {
 	_ = response.Body.Close()
 	if response.StatusCode != 400 {
 		t.Fatalf("oversized control status %d", response.StatusCode)
+	}
+	for _, path := range []string{"/v1/ledger/import", "/v1/ledger/leave"} {
+		request, _ := http.NewRequest("POST", "http://agentd"+path, strings.NewReader(strings.Repeat("x", 9<<10)))
+		request.Header.Set("Authorization", "Bearer "+string(token))
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode != 400 {
+			t.Fatalf("oversized %s status %d", path, response.StatusCode)
+		}
 	}
 }
 

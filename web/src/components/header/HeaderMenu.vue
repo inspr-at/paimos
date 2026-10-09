@@ -26,7 +26,7 @@ const phone = ref(narrow.matches)
 const onNarrow = (event: MediaQueryListEvent) => { phone.value = event.matches }
 
 const ITEMS = '[role="menuitem"]:not([aria-disabled="true"]), [role="menuitemradio"][aria-checked="true"]'
-function items() { return [...(panel.value?.querySelectorAll<HTMLElement>(ITEMS) ?? [])] }
+function items() { return [...(panel.value?.querySelectorAll<HTMLElement>(ITEMS) ?? [])].filter(item => item.getClientRects().length > 0) }
 function focusAt(index: number) {
   const list = items()
   if (list.length) list[(index + list.length) % list.length].focus()

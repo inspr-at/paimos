@@ -5,6 +5,7 @@ import { fixtures, mockWork } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { expectDialRowsFitContent } from './helpers/dial-layout'
 import type { Shell } from './helpers/no-shift-shells'
+import { mockDecisionDesk, sampleQuestion } from './decision-desk-fixtures'
 
 for (const width of [1440, 1024, 390]) {
   test(`ticket relation popover keeps its selectors through result changes at ${width}`, async ({ page }) => {
@@ -35,6 +36,55 @@ for (const width of [1440, 1024, 390]) {
     }
   })
 
+}
+
+for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+  test(`Decision Desk Agents panel keeps review and history controls still ${width} ${theme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    const world = await mockDecisionDesk(page, { theme, long: true })
+    world.questions[0]!.input.question = 'Welche Berechtigungen und Nachweise werden vor einer mandantenbezogenen Änderung benötigt?'
+    await page.goto('/agents')
+    const panel = page.getByRole('region', { name: 'Decision Desk', exact: true })
+    const count = panel.getByLabel('Open decisions')
+    await expect(count).toHaveText('5')
+    await expect(page.getByRole('region', { name: 'Needs you', exact: true })).toHaveCount(0)
+    const refresh = () => page.evaluate(async () => {
+      const path = '/src/stores/decisionDesk.ts'
+      const { useDecisionDesk } = await import(/* @vite-ignore */ path)
+      await useDecisionDesk().refresh()
+    })
+    await expectStableControls({
+      controls: { review: page.getByTestId('agents-desk-review'), history: page.getByTestId('agents-desk-history'), count },
+      interactions: [
+        { name: 'new question', run: async () => { world.questions.push(sampleQuestion('new-source')); await refresh(); await expect(count).toHaveText('6') } },
+        { name: 'failed source read', run: async () => { world.failProjection = true; await refresh(); await expect(count).toHaveText('?'); await expect(panel.getByRole('button', { name: 'Retry' })).toBeVisible() } },
+        { name: 'retry preserves the source count', run: async () => { world.failProjection = false; await panel.getByRole('button', { name: 'Retry' }).click(); await expect(count).toHaveText('6') } },
+      ],
+    })
+    await page.screenshot({ path: testInfo.outputPath(`agents-desk-${width}-${theme}.png`), fullPage: true })
+    await page.getByTestId('agents-desk-history').click()
+    await expect(page.getByRole('button', { name: /^Decided / })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  test(`Decision Desk native choices, reason and failure stay still ${width} ${theme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    const world = await mockDecisionDesk(page, { theme, long: true }); world.denyWrite = true
+    await page.goto('/agents?needs=a:approval-1')
+    const submit = page.getByTestId('desk-decide'), reason = page.getByRole('textbox', { name: 'Reason', exact: true })
+    await page.getByTestId('choice-0').click()
+    await expect(submit).toBeEnabled()
+    await expectStableControls({
+      controls: { choices: page.getByTestId('desk-choices'), approve: page.getByTestId('choice-0'), deny: page.getByTestId('choice-1'), close: page.getByTestId('desk-close'), submit, pager: page.getByTestId('desk-pager') },
+      scrollAreas: { body: page.getByTestId('desk-body') },
+      interactions: [
+        ...[1, 0].map(index => ({ name: `native option ${index}`, run: async () => { await page.getByTestId(`choice-${index}`).click(); await expect(page.getByTestId(`choice-${index}`)).toHaveAttribute('aria-checked', 'true') } })),
+        { name: 'long German reason', run: async () => { await reason.fill('Die vorhandenen Berechtigungen und die Mandantentrennung müssen erhalten bleiben. '.repeat(12)); await reason.press('Enter') } },
+        { name: 'failed decision', run: async () => { await submit.click(); await expect(page.getByTestId('desk-status')).toContainText('Approval expired'); await expect(submit).toBeEnabled(); expect(world.approval.decision).toBeNull() } },
+      ],
+    })
+    expect(world.calls.map(call => call.path)).toEqual(['/api/approvals/approval-1/decision'])
+    await page.screenshot({ path: testInfo.outputPath(`memo-${width}-${theme}.png`), fullPage: true })
+  })
 }
 
 for (const width of [1440, 390]) {

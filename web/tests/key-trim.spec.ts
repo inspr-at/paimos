@@ -5,7 +5,6 @@ import { expectStableControls } from './helpers/stable'
 import type { KeyTrimProposal } from '../src/lib/keyTrim'
 
 async function mockTrims(page: Page, long = false, paginated = false) {
-  await mockDecisionDesk(page)
   const now = Date.now()
   const proposal = (id: string, scopes: number): KeyTrimProposal => ({ id, key_id: `key-${id}`, key_name: `worker-${id}`, owner_id: `agent-${id}`, owner_name: 'Worker owner', previous_scopes: ['nodes.read', ...Array.from({ length: scopes }, (_, i) => `unused.scope${i}`)], snapshot_digest: 'a'.repeat(64), candidate_scopes: ['nodes.read'], candidate_digest: 'b'.repeat(64), evidence: { summary: 'Reviewed ticket workload and retained its read dependency.', observed_at: new Date(now - 86400_000).toISOString(), risks: Array.from({ length: scopes }, (_, i) => ({ scope: `unused.scope${i}`, evidence: 'No recorded use; earlier use remains unknown.', risk_if_dropped: 'Creating and editing tickets can fail without this permission.' })) }, usage: [], created_by: 'coordinator', created_at: new Date(now).toISOString(), expires_at: new Date(now + 3600_000).toISOString(), state: 'pending', revision: 1, applied_at: null, restore_until: null })
   const rows = [proposal('trim-1', long ? 25 : 1), proposal('trim-2', 1)]
@@ -16,6 +15,10 @@ async function mockTrims(page: Page, long = false, paginated = false) {
     }
   }
   const control = { rows, calls: [] as { path: string; body: Record<string, unknown> }[], deny: false }
+  await mockDecisionDesk(page, { projectedSources: () => rows.filter(row => row.state === 'pending').map(row => ({
+    id: row.id, kind: 'key_trim', revision: row.revision, title: `Trim key · ${row.key_name}`, created_at: row.created_at,
+    expires_at: row.expires_at, held: false, href: `/decision-desk?item=k:${row.id}`, source: '/api/key-trim-proposals',
+  })) })
   await page.route('**/api/key-trim-proposals**', async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname
     if (request.method() === 'GET') {
@@ -93,11 +96,16 @@ for (const width of [390, 1440]) {
     await page.goto('/decision-desk')
     const next = page.getByRole('button', { name: 'Next key trims', exact: true })
     const first = page.getByRole('button', { name: 'First key trims', exact: true })
-    await expect(page.getByTestId('desk-row-k:trim-1')).toHaveCount(0)
+    // Canonical membership remains visible; native paging confirms its details.
+    await page.getByTestId('desk-row-k:trim-1').click()
+    await expect(page.getByTestId('desk-decide')).toBeDisabled()
+    await expect(page.getByTestId('desk-status')).toContainText('Source details are unavailable')
+    expect(control.calls).toHaveLength(0)
+    await page.getByTestId('desk-close').click()
     await expectStableControls({ controls: { next, first }, interactions: [
-      { name: 'next open page', run: async () => { await next.click(); await expect(page.getByTestId('desk-row-k:trim-1')).toBeVisible(); await expect(next).toBeDisabled() } },
-      { name: 'return to first open page', run: async () => { await first.click(); await expect(page.getByTestId('desk-row-k:pending-0')).toBeVisible(); await expect(first).toBeDisabled() } },
-      { name: 'reopen next open page', run: async () => { await next.click(); await expect(page.getByTestId('desk-row-k:trim-1')).toBeVisible() } },
+      { name: 'next open page', run: async () => { await next.click(); await expect(page.getByTestId('desk-row-k:trim-1')).toContainText('Trim worker-trim-1?'); await expect(next).toBeDisabled() } },
+      { name: 'return to first open page', run: async () => { await first.click(); await expect(page.getByTestId('desk-row-k:pending-0')).toContainText('Trim worker-pending-0?'); await expect(first).toBeDisabled() } },
+      { name: 'reopen next open page', run: async () => { await next.click(); await expect(page.getByTestId('desk-row-k:trim-1')).toContainText('Trim worker-trim-1?') } },
     ] })
     await page.getByTestId('desk-row-k:trim-1').click(); await page.getByTestId('desk-decide').click()
     await expect.poll(() => control.calls.length).toBe(1)

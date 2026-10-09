@@ -311,3 +311,28 @@ func (c Client) CompleteAttachedHook(ctx context.Context, session string, delive
 	var out []agentd.HarnessDelivery
 	return c.lifecycleRequest(ctx, "POST", "/v1/attached-hook", agentd.AttachedHookRequest{Operation: "complete", SessionID: session, DeliveryID: delivery.ID, Cursor: delivery.Cursor}, &out)
 }
+
+func (c Client) ImportLedger(ctx context.Context, config agentd.LedgerConfig) error {
+	var out struct {
+		Imported bool `json:"imported"`
+	}
+	if err := c.lifecycleRequest(ctx, "POST", "/v1/ledger/import", config, &out); err != nil {
+		return err
+	}
+	if !out.Imported {
+		return errors.New("ledger import unconfirmed")
+	}
+	return nil
+}
+func (c Client) LeaveLedger(ctx context.Context) error {
+	var out struct {
+		Left bool `json:"left"`
+	}
+	if err := c.lifecycleRequest(ctx, "POST", "/v1/ledger/leave", nil, &out); err != nil {
+		return err
+	}
+	if !out.Left {
+		return errors.New("ledger leave unconfirmed")
+	}
+	return nil
+}

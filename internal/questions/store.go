@@ -10,6 +10,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
@@ -43,16 +44,10 @@ func writeCapability(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
-// Mutations lock tenant -> tree -> session/question -> decision. Event append
-// comes last. The tenant fence also serializes permission changes.
-func treeLock(ctx context.Context, tx pgx.Tx, tenantID string) error {
-	// Access-management writes fence on this row. Hold it before the tree and
-	// RequireTx so a concurrent revocation cannot slip between check and write.
-	if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, tenantID); err != nil {
-		return err
-	}
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID)
-	return err
+// Mutations use the canonical tenant -> tree -> pairing -> resource prefix.
+// Transactional permission checks remain under the fence; event append is last.
+func treeLock(ctx context.Context, tx pgx.Tx, _ string) error {
+	return agentpairing.LockMutation(ctx, tx)
 }
 func checkNode(ctx context.Context, tx pgx.Tx, tenantID, project, id string, ticket bool) error {
 	var found bool

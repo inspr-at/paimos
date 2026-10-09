@@ -334,6 +334,20 @@ test('execution kinds and person-specific host names on the real agents table', 
           expectModelGlyphFits(glyph, `${width}px ${child.display_label}: ${characters} execution characters fit after the separator and before any ellipsis`, true)
         }
         if (width === 390) {
+          // Risk: platform font metrics squeeze a short command beside Host.
+          // Reserve a line wide enough for the command and half the harness;
+          // the command must remain whole when the harness needs truncation.
+          const terminalCopy = page.locator(`[data-row="s:${terminal.id}"] .exec-copy`)
+          await terminalCopy.evaluate(el => {
+            const model = el.querySelector('.exec-model')!, harness = el.querySelector('.exec-harness')!
+            const width = model.getBoundingClientRect().width + harness.getBoundingClientRect().width / 2
+            ;(el as HTMLElement).style.maxWidth = `${width}px`
+          })
+          const model = terminalCopy.locator('.exec-model')
+          expectModelGlyphFits(await modelGlyphSize(model, terminal.command.length), 'the complete terminal command survives narrower font-dependent capacity')
+          await terminalCopy.evaluate(el => { (el as HTMLElement).style.removeProperty('max-width') })
+        }
+        if (width === 390) {
           await expectStableControls({ controls: { host: workerHost, pencil, row, menu: row.locator('.more') }, scrollAreas: { row }, interactions: [
             { name: 'hover compact host', run: async () => {
               await workerHost.hover()
@@ -368,6 +382,7 @@ test('execution kinds and person-specific host names on the real agents table', 
           await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
         }
         expect.soft(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+        await page.locator('.sessions').screenshot({ path: info.outputPath(`terminal-command-${width}-${theme}.png`), animations: 'disabled' })
         if (shots) await page.locator('.sessions').screenshot({ path: join(shots, `${width}-${theme}.png`), animations: 'disabled' })
       })
     }

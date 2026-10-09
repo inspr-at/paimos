@@ -44,7 +44,7 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	accounts := []agentd.EnrolledAccount{}
 	for _, a := range c.Accounts {
 		block, isBlocked := blocked[a.AccountID]
-		accounts = append(accounts, agentd.EnrolledAccount{ID: a.AccountID, Key: a.Key, Harness: a.Harness, DependencyBlocked: isBlocked, PinReason: block.Reason, PinFix: block.Fix.Kind})
+		accounts = append(accounts, agentd.EnrolledAccount{ID: a.AccountID, Key: a.Key, Harness: a.Harness, VerifiedIdentity: a.Identity, DependencyBlocked: isBlocked, PinReason: block.Reason, PinFix: block.Fix.Kind})
 		if isBlocked {
 			continue
 		}
@@ -216,6 +216,13 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	if s.TenantID() != c.TenantID || s.PrincipalID() != c.PrincipalID {
 		return errors.New("runtime identity differs from approved pairing")
 	}
+	ledgerConfig, err := ledgerConfig(root, c)
+	if err != nil {
+		return err
+	}
+	if err = s.RefreshLedger(ctx, ledgerConfig); err != nil {
+		return fmt.Errorf("ledger enrollment unconfirmed: %w", err)
+	}
 	diagnostic("", "", "daemon_ready", "")
 	watches, err := pairedAttach(root, c, remote)
 	if err != nil {
@@ -318,6 +325,13 @@ func pairedPollIteration(ctx context.Context, s *agentd.Supervisor, root string,
 			return c, errors.Join(err, s.ProbeOnce(ctx))
 		}
 		return c, err
+	}
+	config, configErr := ledgerConfig(root, c)
+	if configErr != nil {
+		return c, configErr
+	}
+	if ledgerErr := s.RefreshLedger(ctx, config); ledgerErr != nil {
+		return c, ledgerErr
 	}
 	next, _, err := agentsetup.ReadRuntime(root)
 	if err != nil {
