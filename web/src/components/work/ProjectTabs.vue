@@ -43,5 +43,10 @@ button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
   button { flex: 1; min-height: 40px; padding: 0 9px; }
   .sections { display: flex; }
   .sections button { flex: 1; min-width: 0; min-height: 44px; padding: 0 8px; }
+  /* Four sections no longer fit as words at 360 px (AEON-1007): only the selected one shows its word;
+     the others keep their icon, with the name in aria-label and the tooltip. */
+  .sections button:not([aria-selected="true"]) .tab-label { display: none; }
+  .sections button[aria-selected="true"] { flex: 2.4; }
+  .sections .tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 }
 </style>

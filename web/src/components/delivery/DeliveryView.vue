@@ -225,7 +225,7 @@ watch(state, (next, prev) => {
       <!-- Save feedback sits on the status row. It is out of flow, so Learn does not move when it appears or clears.
            A refused save and a failed read can stand together: each owns one half of the row for good (save left,
            read right), so neither alert nor its retry changes place or size when the other comes or goes (AEON-541). -->
-      <p v-if="prefFailed" class="banner err half pref-warn" role="alert" data-testid="delivery-pref-error">
+      <p v-if="prefFailed && view === 'numbers'" class="banner err half pref-warn" role="alert" data-testid="delivery-pref-error">
         <AppIcon name="alert" :size="16" />
         <span v-clip-tip class="grow">{{ text.prefErr }}</span>
         <button type="button" class="btn sm" :data-tip="text.prefRetry" @click="retryPrefs"><AppIcon name="refresh" :size="14" /><span class="lbl">{{ text.prefRetry }}</span></button>
@@ -284,13 +284,22 @@ watch(state, (next, prev) => {
     </template>
     <template v-else>
       <!-- Without any recorded run, Flow shows the approved example, and says so. -->
-      <div v-if="flow.example.value" class="flow-empty banner" :class="{ veiled: prefFailed }" role="status">
+      <div v-if="flow.example.value" class="flow-empty banner" role="status">
         <AppIcon name="flow" :size="16" />
         <span class="grow"><b>{{ text.flowNone }}</b> {{ flowText(lang).example }}</span>
       </div>
+      <!-- In Flow a refused save takes the headline's fixed slot, so the mode switch and the card never move (AEON-1007). -->
       <FlowView :data="flow.data.value" :data-key="flow.key.value" :mode="flowMode" :status="flow.status.value" :empty="flow.empty.value"
         :choices="flow.choices.value" :choice="flow.runId.value" :truncated="flow.truncated.value" :level="prefs.level" :lang="lang"
-        @update:mode="setFlowMode" @choose="setFlowRun" @retry="flow.retry" />
+        @update:mode="setFlowMode" @choose="setFlowRun" @retry="flow.retry">
+        <template v-if="prefFailed" #notice>
+          <p class="banner err flow-pref-warn" role="alert" data-testid="delivery-pref-error">
+            <AppIcon name="alert" :size="16" />
+            <span v-clip-tip class="grow">{{ text.prefErr }}</span>
+            <button type="button" class="btn sm" @click="retryPrefs"><AppIcon name="refresh" :size="14" /><span class="lbl">{{ text.prefRetry }}</span></button>
+          </p>
+        </template>
+      </FlowView>
     </template>
 
     <Teleport to="body">
@@ -321,7 +330,7 @@ watch(state, (next, prev) => {
 .slot-hidden { visibility: hidden; }
 .dl-updated { font: 500 11.5px/1.4 var(--mono); color: var(--ink-3); white-space: nowrap; }
 .dl-status { min-height: 40px; }
-.dl-status.veiled, .flow-empty.veiled { visibility: hidden; }
+.dl-status.veiled { visibility: hidden; }
 /* The warning replaces the status row in place: same anchor, no extra flow, so tiles stay put. */
 .banner.pref-warn { position: absolute; z-index: 2; top: calc(100% + 12px); right: calc(50% + 6px); left: 0; margin: 0; min-height: 28px; padding-block: 0; flex-wrap: nowrap; }
 .banner.pref-warn .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -343,6 +352,8 @@ watch(state, (next, prev) => {
 .dl-status .banner { min-height: 28px; padding-block: 0; flex-wrap: nowrap; }
 .dl-status .banner .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flow-empty { margin-top: 16px; }
+.banner.flow-pref-warn { margin: 0; min-height: 40px; padding-block: 0; flex-wrap: nowrap; }
+.banner.flow-pref-warn .grow { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .tiles-cap { margin: 18px 0 0; font: 500 10.5px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
 .tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 8px; }
 .trends-head { display: flex; align-items: center; gap: 10px 20px; flex-wrap: wrap; margin-top: 26px; }
@@ -388,7 +399,8 @@ watch(state, (next, prev) => {
   .tr-cap { flex-basis: 100%; margin-left: 0; }
   .defs { grid-template-columns: minmax(0, 1fr); }
   .banner { flex-wrap: wrap; }
-  .banner.pref-warn { flex-wrap: nowrap; min-height: 44px; }
+  .banner.pref-warn, .banner.flow-pref-warn { flex-wrap: nowrap; min-height: 44px; }
+  .banner.flow-pref-warn .grow { -webkit-line-clamp: 3; font-size: 12px; line-height: 1.3; }
   .banner .btn { min-height: 44px; }
   .dl-status .sources, .dl-status .banner { min-height: 44px; }
   .dl-status .banner { flex-wrap: nowrap; }

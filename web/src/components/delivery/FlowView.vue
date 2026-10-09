@@ -209,7 +209,9 @@ const emptyText = computed(() => {
       </div>
     </div>
     <div class="fl-head" data-testid="flow-head">
-      <template v-if="head && data">
+      <!-- A notice from the page (a refused save) replaces the headline in its fixed slot. -->
+      <slot v-if="$slots.notice" name="notice" />
+      <template v-else-if="head && data">
         <p class="big" :title="head.big.map(p => p.text).join('')"><template v-for="(part, i) in head.big" :key="i"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template></p>
         <p v-if="head.small" class="small" :title="head.small">{{ head.small }}</p>
       </template>

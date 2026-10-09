@@ -16,6 +16,10 @@ import * as simple from '../src/lib/deliverySimple'
 import { simpleNumbersOf, sparkGeometry, verdictOf, type SparkModel } from '../src/lib/deliverySimple'
 import { TILES } from '../src/lib/deliveryNumbers'
 import * as numbersText from '../src/lib/deliveryNumbersText'
+import * as flowLib from '../src/lib/deliveryFlow'
+import * as flowModes from '../src/lib/deliveryFlowModes'
+import * as flowTextLib from '../src/lib/deliveryFlowText'
+import * as useFlow from '../src/lib/useDeliveryFlow'
 import { simpleText } from '../src/lib/deliverySimpleText'
 import { deliveryMetrics } from './delivery-numbers-fixtures'
 
@@ -220,8 +224,9 @@ for (const lang of ['en', 'de'] as const) {
       'vue-router': { useRoute: () => Vue.reactive({ query: {}, path: '/p/AEON/delivery', hash: '' }), useRouter: () => ({ replace: () => {} }) },
       '../AppIcon.vue': sfc({ props: ['name', 'size'], render: () => Vue.h('svg') }),
       '../work/ProjectTabs.vue': stub, './ExpertTile.vue': stub, './LevelSwitch.vue': stub,
-      './SimpleNumbers.vue': stub, './TrendChart.vue': stub, './WindowSwitch.vue': stub,
+      './SimpleNumbers.vue': stub, './TrendChart.vue': stub, './WindowSwitch.vue': stub, './FlowView.vue': stub,
       '../../lib/delivery': delivery, '../../lib/deliveryNumbersText': numbersText,
+      '../../lib/deliveryFlow': flowLib, '../../lib/deliveryFlowModes': flowModes, '../../lib/deliveryFlowText': flowTextLib, '../../lib/useDeliveryFlow': useFlow,
       '../../lib/deliveryNumbers': { ...numbers, readDeliveryMetrics: () => read() },
       '../../lib/preferences': { onPreferenceFailure: (listener: (key: string) => void) => { failures.add(listener); return () => { failures.delete(listener) } }, preferenceSaves, usePreference: () => pref },
       '../../lib/usePolledData': { usePoller: (load: () => Promise<void>) => { reload = load; return { start: () => { void load() }, stop() {}, restart() {} } } },

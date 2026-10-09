@@ -50,6 +50,16 @@ const map = computed(() => {
   return { lines, segs, bands, targets, ticks, nowX: live ? g.X(now) : null }
 })
 const brush = computed(() => { const g = geo.value, t = props.timeline; return { x0: g.X(t.v0), x1: g.X(t.v1) } })
+// Touch and phone (AEON-1007): each handle and the playhead get a 44 px hit area. A handle's
+// area reaches outward, so on a narrow brush the two never cover each other or the brush.
+const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
+const hit = computed(() => coarse || geo.value.W < 640 ? 44 : 0)
+const handles = computed(() => {
+  const { x0, x1 } = brush.value, h = hit.value
+  return ([[x0, 'hl'], [x1, 'hr']] as const).map(([x, side]) => ({
+    x, side, hx: h ? (side === 'hl' ? x - h + 6 : x - 6) : x - 4, hw: h || 8, hy: h ? (OV_H - 14 - h) / 2 : 10, hh: h || OV_H - 33,
+  }))
+})
 const playX = computed(() => geo.value.X(props.timeline.T))
 const valueText = computed(() => `${timeLabel(props.data, props.timeline.v0)} – ${timeLabel(props.data, props.timeline.v1)}`)
 
@@ -111,13 +121,14 @@ function onKey(event: KeyboardEvent) {
       <text v-for="tick in map.ticks" :key="tick.x" class="ln-ovax" :x="tick.x" :y="OV_H - 3" text-anchor="middle">{{ tick.label }}</text>
       <line v-if="map.nowX != null" class="ov-now" :x1="map.nowX" :x2="map.nowX" y1="4" :y2="OV_H - 14" />
       <rect class="ln-brush" data-part="brush" :x="brush.x0" y="1" :width="Math.max(6, brush.x1 - brush.x0)" :height="OV_H - 15" rx="4" />
-      <g v-for="[x, side] in ([[brush.x0, 'hl'], [brush.x1, 'hr']] as const)" :key="side">
-        <rect class="ln-handle" :data-part="side" :x="x - 4" y="10" width="8" :height="OV_H - 33" rx="3" />
-        <path class="ln-grip" :d="`M${x - 1},${(OV_H - 14) / 2 - 4}v8M${x + 1},${(OV_H - 14) / 2 - 4}v8`" />
+      <g v-for="h in handles" :key="h.side">
+        <rect class="ln-handle" :data-part="h.side" :x="h.x - 4" y="10" width="8" :height="OV_H - 33" rx="3" />
+        <path class="ln-grip" :d="`M${h.x - 1},${(OV_H - 14) / 2 - 4}v8M${h.x + 1},${(OV_H - 14) / 2 - 4}v8`" />
+        <rect class="ln-hhit" :data-part="h.side" :data-testid="`flow-overview-${h.side}`" :x="h.hx" :y="h.hy" :width="h.hw" :height="h.hh" />
       </g>
       <line class="ln-ph" :x1="playX" :x2="playX" y1="1" :y2="OV_H - 14" />
       <path class="ln-phtri" :d="`M${playX - 5},1h10l-5,6z`" />
-      <rect class="ln-phhit" data-part="ovph" :x="playX - 7" y="0" width="14" :height="OV_H - 14" />
+      <rect class="ln-phhit" data-part="ovph" data-testid="flow-overview-playhead" :x="playX - (hit || 14) / 2" y="0" :width="hit || 14" :height="OV_H - 14" />
     </svg>
   </div>
 </template>
@@ -143,5 +154,5 @@ function onKey(event: KeyboardEvent) {
 .ln-grip { stroke: var(--teal-ink); stroke-width: 1; pointer-events: none; }
 .ln-ph { stroke: var(--teal); stroke-width: 2; pointer-events: none; }
 .ln-phtri { fill: var(--teal); pointer-events: none; }
-.ln-phhit { fill: transparent; cursor: ew-resize; }
+.ln-phhit, .ln-hhit { fill: transparent; cursor: ew-resize; }
 </style>
