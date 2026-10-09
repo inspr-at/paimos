@@ -223,7 +223,11 @@ test('phone cards render saved column visibility and order at 390px', async ({ p
     if (await checkbox.isEnabled()) await checkbox.uncheck()
   }
   await sheet.locator('footer button').click()
-  await expect(card.locator('td')).toHaveCount(2)
+  // Selection is a fixed independent control; saved visibility still leaves
+  // exactly Key and Title as data columns.
+  await expect(card.locator('td')).toHaveCount(3)
+  await expect(card.locator('td:not(.c-check)')).toHaveCount(2)
+  await expect(card.locator('.c-check').getByRole('checkbox', { name: 'Select PHAROS-11', exact: true })).toBeVisible()
   await expect(card.locator('.c-key')).toContainText('PHAROS-11')
   await expect(card.locator('.c-title')).toContainText(data.nodes.find(n => n.id === 'n-1')!.title)
   await opener.click()
