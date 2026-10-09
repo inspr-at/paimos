@@ -14,6 +14,12 @@ paths:
         row is absent. Conflicting effective plans across linked rows fail closed.
         An unset plan defaults to total 15 and no harness limits. Legacy cap
         maps to total; legacy area/model reservations are ignored.
+        Daily settings and read-only daily_state use the canonical person's
+        IANA local day. Missing settings use pace at the person's default
+        (10 percentage points a day), no Boost today, and ladder. Expired boosts
+        read as null. Account usage follows the overview privacy boundary;
+        withheld or unknown readings remain null and never imply headroom.
+        This package publishes daily limits; daily start enforcement is separate.
         Running counts include all unended, unarchived sessions owned by this
         person across projects, including starting, waiting, idle, throttled and
         stopping sessions. Silence alone never frees a slot. Legacy sessions
@@ -45,9 +51,13 @@ components:
               - {type: integer, minimum: 0, maximum: 30, description: At most this many; numeric zero allows no starts.}
               - {type: string, enum: [no_limit, off]}
           description: Missing harnesses have no limit. Off explicitly disables a harness. Limits may sum above total.
+        daily:
+          type: object
+          propertyNames: {enum: [claude, codex, cursor, gemini, grok, opencode, pi]}
+          additionalProperties: {$ref: '#/components/schemas/AgentsDailySettings'}
     AgentsPlanSnapshot:
       type: object
-      required: [total, limits, principal_id, running, running_total, source, updated_at]
+      required: [total, limits, principal_id, running, running_total, source, updated_at, daily, daily_state]
       properties:
         total: {$ref: '#/components/schemas/AgentsPlan/properties/total'}
         limits: {$ref: '#/components/schemas/AgentsPlan/properties/limits'}
@@ -56,3 +66,69 @@ components:
         running_total: {type: integer, minimum: 0}
         source: {type: string, enum: [default, legacy, plan]}
         updated_at: {type: [string, 'null'], format: date-time}
+        daily: {$ref: '#/components/schemas/AgentsPlan/properties/daily'}
+        daily_state:
+          type: object
+          additionalProperties: {$ref: '#/components/schemas/AgentsDailyState'}
+        daily_default_points: {type: integer, minimum: 1, maximum: 50}
+        daily_timezone: {type: string, description: 'IANA timezone; UTC when no personal timezone is saved.'}
+        daily_until: {type: string, format: date-time, description: 'Next local midnight.'}
+    AgentsDailySettings:
+      type: object
+      additionalProperties: false
+      required: [pace, boost_today, at_limit]
+      properties:
+        pace:
+          type: object
+          additionalProperties: false
+          required: [mode, points_per_day]
+          properties:
+            mode: {type: string, enum: [pace, everything]}
+            points_per_day: {type: [integer, 'null'], minimum: 1, maximum: 50, description: 'Null uses the person default, initially 10 percentage points a day.'}
+        boost_today:
+          oneOf:
+            - {type: 'null'}
+            - type: object
+              additionalProperties: false
+              required: [limit_used_pct, entered_as, until]
+              properties:
+                limit_used_pct: {type: number, minimum: 0, maximum: 100}
+                entered_as: {type: string, enum: [used, left]}
+                until: {type: string, format: date-time, description: 'The person next local midnight; used percentage is stored for either input mode.'}
+        at_limit: {type: string, enum: [ladder, wait]}
+    AgentsDailyState:
+      type: object
+      required: [state, limit_used_pct, today_points_used, today_points_allowed, over_pace_points, active_account_id, next_on_ladder, accounts]
+      properties:
+        state: {type: string, enum: [on_pace, over_pace, at_limit, no_limit]}
+        limit_used_pct: {type: [number, 'null'], minimum: 0, maximum: 100}
+        today_points_used: {type: [number, 'null'], minimum: 0}
+        today_points_allowed: {type: [number, 'null'], minimum: 0}
+        over_pace_points: {type: [number, 'null'], minimum: 0}
+        active_account_id: {type: [string, 'null'], format: uuid}
+        next_on_ladder: {type: [string, 'null'], description: 'Null until resolved for the work at hand by Models; no generic ladder is invented.'}
+        accounts:
+          type: array
+          maxItems: 1024
+          items: {$ref: '#/components/schemas/AgentsDailyAccount'}
+    AgentsDailyAccount:
+      type: object
+      required: [account_id, label, order, used_pct, left_pct, start_of_day_used_pct, limit_used_pct, floor_pct, resets_at, freshness, resets, reset_policy, reset_plan, routable, details_redacted, can_edit]
+      properties:
+        account_id: {type: string, format: uuid}
+        label: {type: string}
+        order: {type: integer, minimum: 1}
+        used_pct: {type: [number, 'null'], minimum: 0, maximum: 100}
+        left_pct: {type: [number, 'null'], minimum: 0, maximum: 100}
+        start_of_day_used_pct: {type: [number, 'null'], minimum: 0, maximum: 100}
+        limit_used_pct: {type: [number, 'null'], minimum: 0, maximum: 100}
+        floor_pct: {type: [number, 'null'], minimum: 0, maximum: 100}
+        resets_at: {type: [string, 'null'], format: date-time}
+        read_at: {type: [string, 'null'], format: date-time}
+        freshness: {type: string, enum: [fresh, stale, expired, unknown]}
+        resets: {type: [object, 'null'], description: 'Vendor reset credits; null until the resets package supplies them.'}
+        reset_policy: {type: string, enum: [suggest, auto_before_expiry]}
+        reset_plan: {type: [object, 'null'], description: 'Null until the resets package supplies a plan.'}
+        routable: {type: boolean}
+        details_redacted: {type: boolean}
+        can_edit: {type: boolean, description: 'The canonical owner has live account.manage permission and privacy-visible usage.'}
