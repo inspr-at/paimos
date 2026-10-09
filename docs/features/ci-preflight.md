@@ -84,8 +84,12 @@ artifact storage URLs.
 
 `ci-preflight-report.mjs` emits `preflight_red_rate` separately: red completed
 preflight attempts / all completed preflight attempts, including setup failure
-without a receipt. Pending attempts are counted separately; no observations
-mean a null rate. CI's PR-only `first_attempt_green` calculation is unchanged.
+without a receipt. A nominally successful workflow with missing or invalid
+SHA/attempt evidence is also red (for example, skipped work after a non-hosted
+route). Its input inventory supplies `workflow_runs`, matching `total_count`
+and the downloaded combined receipts in `results`. Pending attempts are
+counted separately; no observations mean a null rate. CI's PR-only
+`first_attempt_green` calculation is unchanged.
 The Delivery page fit work (WP1.1) owns displaying this line beside that tile.
 
 `tier-measurements` now reports evidence categories: upstream setup/planner

@@ -55,9 +55,17 @@ test('preflight binds each command to the SHA and never turns failure, skip or t
 test('preflight red rate stays separate from CI and measurement causes never invent root causes', () => {
   const run = { id: 42, run_attempt: 1, path: '.github/workflows/ci-preflight.yml', event: 'workflow_dispatch',
     head_branch: 'main', display_title: `preflight:${sha}`, head_sha: base, status: 'completed', conclusion: 'failure' };
-  assert.deepEqual(preflightMetrics([run, { ...run, id: 43, conclusion: 'success' }, { path: '.github/workflows/ci.yml', conclusion: 'success' }]),
-    { metric: 'preflight_red_rate', unit: 'percent', attempts: 2, red: 1, pending: 0, value: 50,
-      scope: 'completed preflight workflow attempts; CI first attempts remain separate' });
+  const receipt = combine(greenLocal(), browserGroups.map(group => ({ schema: 1, kind: 'browser', sha, group,
+    run_id: 43, run_attempt: 1, runner_class: 'hosted', status: 'passed' })), { sha, run: 43, attempt: 1 });
+  const runs = [run, { ...run, id: 43, conclusion: 'success' }, { path: '.github/workflows/ci.yml', conclusion: 'success' }];
+  assert.deepEqual(preflightMetrics(runs, [receipt]),
+    { metric: 'preflight_red_rate', unit: 'percent', attempts: 2, red: 1, pending: 0, missing_receipt: 0, invalid_receipt: 0, value: 50,
+      scope: 'completed preflight attempts; green requires the exact SHA/attempt receipt; CI first attempts remain separate' });
+  // All work jobs can skip after a non-hosted route while Actions labels the
+  // workflow successful. No artifact must remain red, including in this tile.
+  assert.equal(preflightMetrics(runs).red, 2);
+  assert.equal(preflightMetrics(runs).missing_receipt, 1);
+  assert.equal(preflightMetrics(runs, [{ ...receipt, sha: base }]).invalid_receipt, 1);
   assert.equal(preflightMetrics([]).value, null);
   assert.throws(() => preflightMetrics([run, run]), /duplicate_attempt/);
   assert.deepEqual(measurementCauses({ upstreamFailures: ['setup'], skippedJobs: ['browser'], missingEvidence: ['browser'], excludedEvidence: ['stale'] }),
