@@ -440,7 +440,7 @@ func TestDeploymentDoctrineRepositoryBoundary(t *testing.T) {
 				bad = publicInput
 				bad.Explanation = guardRule
 				refusal(bad, "private_doctrine")
-				// An unindexed public pin cannot silently turn off the guard.
+				// A missing private source cannot silently turn off the guard.
 				f.call(owner, "DELETE", "/api/rules/doctrine/sources/"+private.ID, nil, 200)
 				refusal(publicInput, "private_index_unavailable")
 				private = seedPrivateGuard(t, f, m, owner)
@@ -471,6 +471,16 @@ func TestDeploymentDoctrineRepositoryBoundary(t *testing.T) {
 			f.call(owner, "POST", approve, map[string]string{"head_sha": proposal.HeadSHA}, 200)
 			if forge.mergeCalls != 1 || forge.dispatches != 1 {
 				t.Fatal("configured private proposal did not reach its gated release dispatch")
+			}
+			forge.released = true
+			f.fake.commit(pair.Private(), privateSHA, forge.treeFiles, "refs/tags/v26.9.29.1")
+			item := "/api/rules/doctrine/proposals/" + proposal.ID
+			if err := json.Unmarshal(f.call(owner, "POST", item+"/refresh", nil, 200), &proposal); err != nil || proposal.ReleaseCommit != privateSHA {
+				t.Fatal("custom repository release was not observed")
+			}
+			pin := map[string]string{"machine_key": strings.Repeat("a", 64), "commit": privateSHA}
+			if err := json.Unmarshal(f.call(owner, "POST", item+"/pins", pin, 200), &proposal); err != nil || proposal.PinnedMachines != 1 || proposal.State != "pinned" {
+				t.Fatal("custom repository release pin was not retained")
 			}
 		})
 	}

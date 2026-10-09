@@ -55,3 +55,10 @@ corpora fail closed. Reindex the configured private source to populate its
 quotation guard; startup can rebuild an absent or outdated guard. Agents save
 inbox drafts; a person publishes, and the independent gate controls merge and
 release dispatch. Repository configuration grants none of those authorities.
+
+Migration `1308_doctrine_repository_boundary.sql` widens the released proposal
+and machine-pin repository checks to bounded GitHub names without changing
+rows or tenant isolation. Its exact-byte policy exception is a draft review
+artifact: coordinator approval and the previous-binary compatibility gate are
+required before merge or release. Configure destinations only after this
+migration is deployed through the normal release process.
