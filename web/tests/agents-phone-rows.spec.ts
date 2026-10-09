@@ -120,10 +120,16 @@ for (const theme of ['light', 'dark'] as const) for (const width of [375, 390, 4
         expect(Math.abs(midY(chip) - midY(primaryState)), `state and ticket on one line (row ${n})`).toBeLessThanOrEqual(3)
       }
     }
-    // Long titles use the full width up to the menu before wrapping.
+    // Long titles use the full width up to the first reserved action. Pause
+    // now shares the title line with More, including its idle reservation.
     const lead0 = await box(row(page, 1).locator('.result'))
-    const leadMenu = await box(row(page, 1).locator('.more'))
-    expect(leadMenu.x - (lead0.x + lead0.width)).toBeLessThanOrEqual(16)
+    const leadActions = await box(row(page, 1).locator('.c-actions'))
+    expect(leadActions.x - (lead0.x + lead0.width)).toBeLessThanOrEqual(16)
+    for (const action of await row(page, 1).locator('.c-actions button').all()) {
+      const target = await box(action)
+      expect(target.width).toBeGreaterThanOrEqual(44)
+      expect(target.height).toBeGreaterThanOrEqual(44)
+    }
 
     // Tree lines run in the fold column, 16 px per level (AEON-784), never through glyphs or text.
     const leadFold = await box(row(page, 1).locator('.tree-fold'))

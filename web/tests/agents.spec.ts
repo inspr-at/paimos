@@ -348,9 +348,12 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   const sent = calls.find(c => c.method === 'POST' && c.path.endsWith('/messages'))?.body as Record<string, unknown>
   expect(sent).toMatchObject({ to: 'claude:camy', recipient_session_id: camy, body: 'Sort stale hosts last.', delivery_level: 'steer', expects_reply: false, is_action_request: false, reply_to: '3e000000-0000-4000-8000-000000000004' })
   expect(typeof sent.idempotency_key).toBe('string')
-  // B7: runs by agent, messages newest first in one page, sessions tenant-wide.
+  // B7: runs by agent, bounded session messages, sessions tenant-wide. The
+  // native thread now uses 50-post windows and keyset catch-up after sends.
   expect(calls.some(c => c.path === '/api/runs' && c.query?.get('agent') === 'a0000000-0000-4000-8000-000000000001')).toBe(true)
-  expect(calls.some(c => c.path === '/api/projects/p-pharos/messages' && c.method === 'GET' && c.query?.get('session') === camy && c.query?.get('newest_first') === 'true' && c.query?.get('limit') === '200')).toBe(true)
+  const threadReads = calls.filter(c => c.path === '/api/projects/p-pharos/messages' && c.method === 'GET' && c.query?.get('session') === camy)
+  expect(threadReads.some(c => c.query?.get('newest_first') === 'true' && c.query?.get('limit') === '50')).toBe(true)
+  expect(threadReads.every(c => c.query?.get('limit') === '50')).toBe(true)
   expect(calls.some(c => /\/api\/projects\/[^/]+\/harness-sessions$/.test(c.path))).toBe(false)
 })
 
