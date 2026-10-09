@@ -35,7 +35,7 @@ async function releasePinnedGlimpse(page: Page) {
   await expect(surface(page)).toHaveAttribute('data-glimpse-pin', String(GLIMPSE_PIN_FRAMES), { timeout: 20_000 })
 }
 
-const protectedSelectors = ['.title-line > *', '.description', '.head-stats', '.head-stats > *', '.project-tabs', '.view-bar .view-tab', '.view-bar .tab', '.view-bar .changes', '.toolbar-wrap']
+const protectedSelectors = ['.title-line > *', '.description', '.head-stats', '.head-stats > *', '.project-tabs', '.project-navigation a', '.project-navigation button', '.project-navigation label', '.view-bar .view-tab', '.view-bar .tab', '.view-bar .changes', '.toolbar-wrap']
 async function protectedBoxes(page: Page) {
   return page.locator(protectedSelectors.join(', ')).evaluateAll(elements => elements.filter(el => el.getClientRects().length).map(el => {
     const box = el.getBoundingClientRect()
