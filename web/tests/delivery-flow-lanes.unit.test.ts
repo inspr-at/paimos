@@ -79,6 +79,28 @@ it('panning an incident onto the right edge keeps its caption inside a 320 px fr
   expect(cramped.x + 14 + cramped.text.length * CHAR_W).toBeLessThanOrEqual(x1)
 })
 
+it('a wider face than the 5.9 px estimate still ends the incident caption inside the frame', () => {
+  // CI web-shard 11 (Linux Chromium, 368 px frame): the painted caption ended at
+  // 378.6. CHAR_W 5.9 plus no outline said that string ended on the plot edge.
+  const ink = (value: string) => value.length * 6.3 + 2
+  const label = 'Live, but not working properly · since 20:14'
+  const { x0, x1 } = laneFrame(368)
+  const anchor = x1 - 28
+  const placed = placeIncidentCaption({ text: label, x0, x1, anchor, textWidth: ink })
+  const right = placed.x + (placed.text ? 14 + ink(placed.text) : 10)
+  expect(placed.x).toBeGreaterThanOrEqual(x0)
+  expect(right).toBeLessThanOrEqual(x1)
+  expect(placed.full).toBe(label)
+  expect(placed.text.endsWith('…')).toBe(true)
+  expect(ink(label)).toBeGreaterThan(x1 - x0 - 14)
+  const healthy = placeIncidentCaption({
+    text: label, x0, x1, anchor, textWidth: ink, healthy: { text: 'healthy again', anchor: x1 - 4 },
+  })
+  expect(healthy.healthyX).toBeNull()
+  expect(healthy.full).toBe(`${label} · healthy again`)
+  expect(healthy.x + 14 + ink(healthy.text)).toBeLessThanOrEqual(x1)
+})
+
 it('slivers in a row merge into one "+N" cluster; a lone sliver stays a step', () => {
   const row = [step(0, 0.5), step(0.6, 1), step(1.1, 1.5), step(10, 20), step(30, 30.5)].map(s => ({ step: s }))
   const X = (m: number) => m * 4

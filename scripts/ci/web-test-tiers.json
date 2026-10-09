@@ -14582,6 +14582,8 @@
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"a label falls back from tag and text, to the text, to the duration, to an ellipsis that keeps \"since\"","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"a wider face than the 5.9 px estimate still ends the incident caption inside the frame","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"following: Live keeps now at 65 % until the playhead leaves now; a run keeps its playhead in view","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"panning an incident onto the right edge keeps its caption inside a 320 px frame","tier":"ESSENTIAL"}

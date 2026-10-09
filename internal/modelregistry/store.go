@@ -35,6 +35,10 @@ func (d Display) FullName() string { return strings.TrimSpace(d.DisplayName + " 
 
 // Profile is one immutable model pin.
 type Profile struct {
+	Source   string     `json:"source"`
+	Note     string     `json:"note"`
+	RetireAt *time.Time `json:"retire_at"`
+	Retired  bool       `json:"retired"`
 	Display
 	EffortLevel *int      `json:"effort_level"`
 	Provider    string    `json:"provider"`
@@ -62,6 +66,9 @@ type Route struct {
 }
 
 type profileWrite struct {
+	Source                string `json:"-"`
+	Note                  string `json:"note"`
+	RegisteredEffortLevel *int   `json:"-"`
 	Display
 	Slug    string `json:"slug"`
 	Version string `json:"version"`
@@ -166,10 +173,10 @@ func insertProfileWithState(ctx context.Context, tx pgx.Tx, tenantID string, in 
 	}
 	err = tx.QueryRow(ctx, `
 		INSERT INTO model_profiles
-			(tenant_id, slug, version, harness, family, model, effort, tier, enabled, display_overrides)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+			(tenant_id, slug, version, harness, family, model, effort, tier, enabled, display_overrides,source,note,registered_effort_level)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb,$11,$12,$13)
 		RETURNING id::text, slug, version, harness, family, model, effort, tier, enabled, created_at`,
-		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier, enabled, string(raw)).
+		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier, enabled, string(raw), profileSource(in.Source), in.Note, in.RegisteredEffortLevel).
 		Scan(&out.ID, &out.Slug, &out.Version, &out.Harness, &out.Family, &out.Model, &out.Effort, &out.Tier, &out.Enabled, &out.CreatedAt)
 	if err == nil {
 		err = tx.QueryRow(ctx, `SELECT model_display->>'display_name',model_display->>'short_name',model_display->>'model_version',effort_level,provider
@@ -179,7 +186,17 @@ func insertProfileWithState(ctx context.Context, tx pgx.Tx, tenantID string, in 
 	if out.Harness == "gemini" {
 		out.EffortLevel = harnesslaunch.GeminiEffortLevel(out.Effort)
 	}
+	out.Source, out.Note = profileSource(in.Source), in.Note
+	if in.RegisteredEffortLevel != nil {
+		out.EffortLevel = in.RegisteredEffortLevel
+	}
 	return out, err
+}
+func profileSource(source string) string {
+	if source == "manual" {
+		return "manual"
+	}
+	return "auto"
 }
 
 // Only these constant identifiers enter SQL; the caller's role is never SQL.
@@ -204,7 +221,9 @@ func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 
 func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int) ([]Profile, error) {
 	query := `
-		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', d.effort_level, d.provider
+		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.note,''),
+ (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
+ EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
 		ORDER BY p.slug, p.version, p.id`
 	if limit > 0 {
@@ -216,9 +235,11 @@ func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int) ([]Profile, er
 // listPickerProfiles bounds editor metadata before decoding and excludes retired revisions.
 func listPickerProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	return readProfiles(ctx, tx, `
-		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', d.effort_level, d.provider
+		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.note,''),
+ (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
+ EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
-		WHERE NOT EXISTS (SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id)
+		WHERE NOT EXISTS (SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
 		ORDER BY p.slug, p.version, p.id LIMIT 257`)
 }
 
@@ -231,7 +252,7 @@ func readProfiles(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]
 	out := []Profile{}
 	for rows.Next() {
 		var profile Profile
-		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider); err != nil {
+		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider, &profile.Source, &profile.Note, &profile.RetireAt, &profile.Retired); err != nil {
 			return nil, err
 		}
 		if profile.Harness == "gemini" {
@@ -263,6 +284,10 @@ func listRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
 }
 
 func validateProfile(in profileWrite) error {
+	if !boundedText(in.Note, 80) || strings.ContainsAny(in.Note, "\x00\r\n") {
+		return fail(400, "invalid model note")
+	}
+
 	for _, field := range []struct {
 		value string
 		max   int
@@ -318,6 +343,7 @@ func normalizeProfileWrite(in profileWrite) profileWrite {
 
 func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite) (Profile, error) {
 	in = normalizeProfileWrite(in)
+	in.Source = "manual"
 	if err := validateProfile(in); err != nil {
 		return Profile{}, err
 	}

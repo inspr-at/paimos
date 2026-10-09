@@ -12,7 +12,7 @@ import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import type { DeliveryLanguage } from '../../lib/delivery'
 import {
-  criticalPath, fitLabel, keyInput, laneFrame, minutesText, pick, placeIncidentCaption, rowPieces, runEnd, setTime, setWindow, stepAt, tickStep, timeLabel, wheelInput,
+  CHAR_W, criticalPath, fitLabel, keyInput, laneFrame, minutesText, pick, placeIncidentCaption, rowPieces, runEnd, setTime, setWindow, stepAt, tickStep, timeLabel, wheelInput,
   type FlowData, type FlowLevel, type FlowStep, type LaneItem, type LaneSet, type Timeline,
 } from '../../lib/deliveryFlow'
 import type { FlowText } from '../../lib/deliveryFlowText'
@@ -26,13 +26,66 @@ const LANES_H = 330, AX = 20, GAPS = 4
 const clipId = `ln-clip-${useId()}`
 const host = ref<HTMLElement>()
 const width = ref(0)
+const inkEpoch = ref(0)
 let observer: ResizeObserver | null = null
+let probeSvg: SVGSVGElement | null = null
+let probeText: SVGTextElement | null = null
+const inkCache = new Map<string, number>()
+// The caption stroke is 3px, centred on the glyphs, so the painted box extends
+// 1.5px past the advance. The extra pixel covers side bearings. CHAR_W alone
+// let a Linux UI face end ~10px past a 368px frame (CI web-shard 11).
+const CAPTION_INK = 4
+function ensureProbe(): SVGTextElement | null {
+  if (probeText?.isConnected) return probeText
+  if (typeof document === 'undefined') return null
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('aria-hidden', 'true')
+  svg.setAttribute('focusable', 'false')
+  svg.setAttribute('width', '8')
+  svg.setAttribute('height', '8')
+  svg.setAttribute('viewBox', '0 0 8 8')
+  svg.style.cssText = 'position:fixed;left:0;top:0;width:8px;height:8px;overflow:hidden;opacity:0;pointer-events:none'
+  const text = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+  text.setAttribute('x', '0')
+  text.setAttribute('y', '8')
+  text.style.fontWeight = '650'
+  text.style.fontSize = '11px'
+  text.style.fontFamily = 'var(--font)'
+  svg.appendChild(text)
+  document.body.appendChild(svg)
+  probeSvg = svg
+  probeText = text
+  return text
+}
+function textWidth(value: string): number {
+  if (!value) return 0
+  const hit = inkCache.get(value)
+  if (hit != null) return hit
+  const node = probeText?.isConnected ? probeText : null
+  if (!node || typeof node.getComputedTextLength !== 'function') return value.length * CHAR_W
+  node.textContent = value
+  const measured = node.getComputedTextLength()
+  const size = parseFloat(getComputedStyle(node).fontSize)
+  if (!(measured > 0) || Math.abs(size - 11) > 0.5) return value.length * CHAR_W
+  const ink = measured + CAPTION_INK
+  inkCache.set(value, ink)
+  return ink
+}
 onMounted(() => {
   width.value = host.value?.clientWidth ?? 0
   observer = new ResizeObserver(() => { width.value = host.value?.clientWidth ?? 0 })
   if (host.value) observer.observe(host.value)
+  ensureProbe()
+  inkEpoch.value++
+  void document.fonts?.ready.then(() => { inkCache.clear(); inkEpoch.value++ })
 })
-onBeforeUnmount(() => observer?.disconnect())
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  probeSvg?.remove()
+  probeSvg = null
+  probeText = null
+  inkCache.clear()
+})
 
 const narrow = computed(() => width.value < 640)
 const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
@@ -53,6 +106,7 @@ interface Piece {
   rects: { x: number; w: number; cls: string }[]; label: string; labelX: number; icon: 'clock' | 'refresh' | null; iconX: number; textCls: string
 }
 const layout = computed(() => {
+  void inkEpoch.value
   const g = geo.value, H = LANES_H, sets = props.sets, now = props.data.now
   const headH = rel.value ? 16 : 0
   const totalRows = sets.reduce((n, s) => n + s.lanes.reduce((m, a) => m + (s.rows[a] ?? 1), 0), 0)
@@ -84,6 +138,7 @@ const layout = computed(() => {
       const caption = placeIncidentCaption({
         text: label, x0: g.x0, x1: g.x1, anchor: Math.max(ix0 + 6, g.x0 + 4),
         healthy: !open ? { text: props.text.healthy, anchor: ix1 + 4 } : null,
+        textWidth,
       })
       incidentLabels.push({ key: `${si}:incl`, x: caption.x, y: bottom + 10, text: caption.text, full: caption.full, healthyX: caption.healthyX })
     }

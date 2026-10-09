@@ -40,7 +40,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if q.Role == "scout" || q.Role == "mechanical" {
 		return nil, nil
 	}
-	if q.PersonID == nil {
+	if q.PersonID == nil && !q.WorkspaceOnly {
 		person, err := currentPreferencePerson(ctx, tx, p)
 		if err != nil {
 			return nil, err
@@ -69,6 +69,9 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	c, err := loadBoardCatalog(ctx, tx)
 	if err != nil {
 		return nil, err
+	}
+	if q.WorkspaceOnly {
+		s.Person = nil
 	}
 	s.Lines = c.lines
 	requirement, err := boardResidency(ctx, tx, s, q.PersonID, q.ProjectID, q.TicketResidency)
@@ -101,8 +104,9 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	}
 	var callbackErr error
 	admissionWait := false
-	d := modelprefs.ResolveBoard(s, query, func(line string, level int) (bool, string) {
-		ps := c.candidates(line, level, review)
+	stage := "column"
+	available := func(line string, level int) (bool, string) {
+		ps := c.effortCandidates(line, initial.Effort, level, review)
 		reasons := []string{}
 		for _, profile := range ps {
 			step, err := preferenceStep(ctx, tx, profile, roleName)
@@ -111,13 +115,19 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 				return false, "policy unavailable"
 			}
 			skipped := skipReasons(step, role, resolveQuery{Role: roleName, AuthorFamily: q.AuthorFamily, Harness: q.Harness}, now, health)
+			if profile.Family == "xai" && !review && !q.Concept {
+				skipped = append(skipped, "No tools in PAIMOS")
+			}
+			if review && (profile.Effort != "xhigh" || profile.Tier != "strong" && profile.Tier != "frontier") {
+				skipped = append(skipped, "Review requires a qualified strong or frontier model at xhigh")
+			}
 			if slices.Contains(q.OffHarnesses, profile.Harness) {
 				skipped = append(skipped, "harness is off in the plan")
 			}
 			if slices.Contains(excluded, profile.ID) {
 				skipped = append(skipped, "already attempted")
 			}
-			if len(excluded) > 0 && escalationRank(profile, q.Area) >= 99 {
+			if q.Situation == "stuck" && len(excluded) > 0 && escalationRank(profile, q.Area) >= 99 {
 				skipped = append(skipped, "not a stronger route for this work area")
 			}
 			ids := []string{}
@@ -156,7 +166,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 					callbackErr = err
 					return false, "account unavailable"
 				}
-				if len(excluded) > 0 {
+				if q.Situation == "stuck" && len(excluded) > 0 {
 					ids, err = agentaccounts.EscalationRoomIDs(ctx, tx, ids, now)
 					if err != nil {
 						callbackErr = err
@@ -167,7 +177,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			if len(ids) == 0 && len(skipped) == 0 {
 				skipped = append(skipped, "no qualified account with available capacity")
 			}
-			candidate := Candidate{ProfileID: profile.ID, SkipReasons: skipped}
+			candidate := Candidate{ProfileID: profile.ID, SkipReasons: skipped, Stage: stage}
 			if len(skipped) == 0 {
 				candidate.Selected = true
 				out.Profile = &profile
@@ -183,7 +193,87 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			return false, "no registered effort for this line"
 		}
 		return false, strings.Join(reasons, "; ")
-	})
+	}
+	d := modelprefs.ResolveBoard(s, query, available)
+	// Policy exclusions are traced even when the pure board resolver removes
+	// them before attempting account qualification.
+	for _, held := range d.Cant {
+		d.Held = append(d.Held, held)
+	}
+	for _, line := range d.Not {
+		reason := "not allowed"
+		if lock := d.Locks[line]; lock != nil && lock.Why != "" {
+			reason = lock.Why
+		}
+		d.Held = append(d.Held, modelprefs.HeldLine{Line: line, Reason: reason})
+	}
+	// Exhaust the column, then the default order on the deciding layer, then
+	// the job's role ladder. Policies and cross-family checks precede accounts.
+	if out.Profile == nil {
+		try := func(line string, nextStage string) bool {
+			stage = nextStage
+			if slices.Contains(d.Not, line) {
+				d.Held = append(d.Held, modelprefs.HeldLine{Line: line, Reason: "not allowed"})
+				return false
+			}
+			ok, reason := available(line, initial.EffortLevel)
+			if ok {
+				d.CardIndex = 0
+				d.Lock = d.Locks[line]
+			}
+			if !ok {
+				d.Held = append(d.Held, modelprefs.HeldLine{Line: line, Reason: nextStage + ": " + reason})
+			}
+			return ok
+		}
+		if d.Column != "other" {
+			fallbackState := s
+			if d.PreferenceOf.Source != "person" {
+				fallbackState.Person = nil
+			}
+			if len(d.Top) > 0 {
+				if lock := d.Locks[d.Top[0]]; lock != nil && lock.Scope == "workspace" {
+					fallbackState.Person = nil
+				}
+			}
+			def := rawBoardDecision(fallbackState, "other", d.Situation)
+			for _, line := range def.Not {
+				if !slices.Contains(d.Not, line) {
+					d.Not = append(d.Not, line)
+				}
+				d.Held = append(d.Held, modelprefs.HeldLine{Line: line, Reason: "default: not allowed"})
+			}
+			for _, line := range def.Rank {
+				if slices.Contains(def.Not, line) {
+					continue
+				}
+				if try(line, "default") {
+					break
+				}
+			}
+		}
+		if out.Profile == nil {
+			steps, err := loadLadderLimit(ctx, tx, roleName, 257)
+			if err != nil {
+				return nil, err
+			}
+			if len(steps) > 256 {
+				return nil, modelprefs.ErrBoardBounds
+			}
+			seen := map[string]bool{}
+			for _, step := range steps {
+				family, line, _ := ProfileLine(step.Profile)
+				id := family + ":" + line
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				if try(id, "role") {
+					break
+				}
+			}
+		}
+	}
 	if callbackErr != nil {
 		return nil, callbackErr
 	}
@@ -220,9 +310,6 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		if q.Situation == "stuck" && admissionWait {
 			out.Trace.Blocked = "admission_wait"
 		}
-	}
-	if len(d.Cant) > 0 {
-		out.Trace.Held = append(out.Trace.Held, d.Cant...)
 	}
 	return &out, nil
 }

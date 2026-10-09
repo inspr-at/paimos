@@ -163,6 +163,12 @@ export interface IncidentCaptionInput {
   anchor: number
   /** Drawn at the recovery point when the whole marker fits; otherwise folded into `full`. */
   healthy?: { text: string; anchor: number } | null
+  /**
+   * Ink width of the words, including the outline the screen paints.
+   * CHAR_W is only the fallback: a wider face (Linux UI fonts) plus the
+   * caption stroke overflows a frame that the estimate says fits.
+   */
+  textWidth?: (value: string) => number
 }
 export interface IncidentCaption {
   /** Left edge of the marker dot. */
@@ -174,16 +180,16 @@ export interface IncidentCaption {
   healthyX: number | null
 }
 /** Keep an incident caption inside the plot. The dot, the words and a healthy note all end at or before x1. */
-export function placeIncidentCaption({ text, x0, x1, anchor, healthy = null }: IncidentCaptionInput): IncidentCaption {
+export function placeIncidentCaption({ text, x0, x1, anchor, healthy = null, textWidth }: IncidentCaptionInput): IncidentCaption {
   const inner = Math.max(0, x1 - x0)
-  const advance = (value: string) => value.length * CHAR_W
+  const advance = (value: string) => value ? (textWidth ? textWidth(value) : value.length * CHAR_W) : 0
   const fitText = (max: number): string => {
     if (advance(text) <= max) return text
     const ellipsis = '…'
-    let keep = Math.floor((max - advance(ellipsis)) / CHAR_W)
+    let keep = text.length - 1
     while (keep > 0) {
       const shown = `${text.slice(0, keep).trimEnd()}${ellipsis}`
-      if (advance(shown) <= max) return shown
+      if (shown !== ellipsis && advance(shown) <= max) return shown
       keep--
     }
     return ''

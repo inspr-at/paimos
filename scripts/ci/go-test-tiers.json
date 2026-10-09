@@ -1412,6 +1412,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestGrokManagedUsageSeparatesCostAndCumulativeTokens","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestGrokNativeEffortPassesSelectedProfile","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestGrokNativeUsageUpdate","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestGrokNotificationsRejectToolsAndBoundAnswer","tier":"GATED-FULL"}
@@ -3507,6 +3509,8 @@
     {"kind":"go","package":"internal/authz","name":"TestMemberListPreviewHidesCreatorExceptForWorkspaceAdmins","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestMissingScopeNamesLabelAndCodeOnlyAfterAuthentication","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/authz","name":"TestModelLineAndSimplePreferenceRoutes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestOperatorProjectBindingsUseRLSStoreAndEvents","tier":"GATED-FULL"}
     ,
@@ -6657,6 +6661,26 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsWriteRechecksRevocation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMaximumRoutePriorityCanBeStored","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalAutoAcceptOnlyUsedSuccessors","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalFallbackColumnDefaultRoleAndSkipReasons","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalManualRefreshCooldownBypassesInterval","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalModelEditAtomicVersionAndReferences","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalModelSourceAndNoteOwnership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalNativeEffortRetainedAndNearestTieUp","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalRemovePreviewQualificationAndPrivacy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalScheduledRetirementBoundaryAndUndo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalSimpleReadPreservesFirstAndFallback","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalThinkingWriteKeepsNativeEffort","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelKeyMatchesAliasesAndAPIIDs","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
