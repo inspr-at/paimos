@@ -1,11 +1,45 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import type { Page, Route } from '@playwright/test'
 import { fixtures, mockWork, type Fixtures } from './work-fixtures'
 
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+it('HTTP snapshot scenarios keep a healthy stream while explicit event transports remain in control', async () => {
+  vi.useFakeTimers()
+  const browser = { EventSource: class EventSource extends EventTarget { close() {} } }
+  vi.stubGlobal('window', browser)
+  const page = { addInitScript: async (script: () => void) => script(), route: async () => {} } as unknown as Page
+  await mockWork(page, fixtures())
+  const stream = new browser.EventSource() as EventTarget & { onopen: (() => void) | null; close(): void }, ping = vi.fn(), opened = vi.fn(), ready = vi.fn()
+  stream.onopen = opened
+  stream.addEventListener('stream.ready', ready)
+  await Promise.resolve()
+  expect(opened).toHaveBeenCalledTimes(1)
+  expect(ready).toHaveBeenCalledTimes(1)
+  expect(JSON.parse((ready.mock.calls[0]![0] as MessageEvent).data)).toEqual({ after: 0, resumed: false })
+  stream.addEventListener('stream.ping', ping)
+  vi.advanceTimersByTime(5_000)
+  expect(ping).toHaveBeenCalledTimes(1)
+  stream.close()
+  vi.advanceTimersByTime(10_000)
+  expect(ping).toHaveBeenCalledTimes(1)
+  class ExplicitStream extends EventTarget { close() {} }
+  browser.EventSource = ExplicitStream
+  await mockWork(page, fixtures())
+  expect(browser.EventSource).toBe(ExplicitStream)
+  class EventSource extends EventTarget { close() {} }
+  browser.EventSource = EventSource
+  const init = vi.spyOn(page, 'addInitScript')
+  init.mockClear()
+  await mockWork(page, fixtures(), { nativeEvents: true })
+  expect(init).not.toHaveBeenCalled()
+  expect(browser.EventSource).toBe(EventSource)
+})
+
 async function world(data: Fixtures) {
   let handle!: (route: Route) => Promise<unknown>
-  await mockWork({ route: async (_pattern: string, handler: typeof handle) => { handle = handler } } as unknown as Page, data)
+  await mockWork({ addInitScript: async () => {}, route: async (_pattern: string, handler: typeof handle) => { handle = handler } } as unknown as Page, data)
   return async (path: string, method = 'GET', body: unknown = null) => {
     let answer!: { status?: number; json?: { items?: { id: string }[]; facets?: Record<string, Record<string, number>>; skipped?: { id: string; code?: string }[] } }
     await handle({

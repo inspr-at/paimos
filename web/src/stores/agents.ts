@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef, triggerRef } from 'vue'
 import { APIError, getNode } from '../lib/api'
+import { ensurePermissions } from '../lib/authz'
 import {
   decideApproval, getControl, listAccounts, listApprovals, listMessages, listModels, listTargets, requestManagedControl,
   requestControl, resolveMessage, revokeApproval, sendMessage, setAccountState, archiveAccount,
@@ -268,6 +269,13 @@ export const useAgents = defineStore('agents', () => {
         // Sessions do not wait for optional project or account metadata.
         await Promise.all([projects.load(), refreshApprovals(), sessionRead, refreshRuns(), refreshAccounts(), refreshModels()])
         await Promise.all([refreshMessaging(), resourceNodes()])
+        // The first visible bundle includes the grants used by its controls.
+        // Session ledger admission above remains immediate; a failed permission
+        // read still grants nothing, and later refreshes keep the current frame.
+        if (!loaded.value) {
+          await ensurePermissions()
+          await all([...new Set(sessions.value.map(session => session.project_id).filter(Boolean))], async projectId => { await ensurePermissions(projectId) })
+        }
         loaded.value = true
         needsAt = Date.now()
     })().finally(() => { loadFlight = undefined; loading.value = false; now.value = Math.max(now.value, Date.now()) })

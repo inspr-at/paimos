@@ -17,7 +17,9 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en
   const work = fixtures()
   work.preferences.theme = { choice: options.theme ?? 'light' }
   work.preferences['delivery:numbers'] = { level: options.level ?? 'simple', window: 7 }
-  await mockWork(page, work)
+  // The hint travels on the real flow EventSource. The fixture's quiet stream
+  // never requests that URL, so a routed hint cannot be followed.
+  await mockWork(page, work, { nativeEvents: true })
   if (options.lang === 'de') { const data = settingsData(); data.profile.locale = 'de-AT'; await mockSettings(page, data) }
   await mockDelivery(page, async () => ({ status: 200, body: deliveryMetrics() }), ['delivery.read'])
   return mockFlow(page, { empty: options.empty })
