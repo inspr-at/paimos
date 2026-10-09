@@ -665,7 +665,7 @@ func TestProjectLeadAdoptionNeedsPersonAndExactLease(t *testing.T) {
 			})
 			// Adoption does not enable launch admission or change ordinary reclaims.
 			again := claimLead(t, f, session, lease, bound["revision"])
-			if again["state"] != "waiting_for_room" || again["reason"] != "start_checks_unavailable" || again["generation"] != float64(1) {
+			if again["state"] != "waiting_for_room" || again["reason"] != "admission_unavailable" || again["generation"] != float64(1) || again["automatic_launch_enabled"] != false {
 				t.Fatal("ordinary claim admission was weakened")
 			}
 		})
@@ -866,9 +866,21 @@ func TestProjectLeadUnclaimedAdoptionRejectsPauseAndCancelClearsSelection(t *tes
 		expect(t, w, 200)
 		cleared = decode(t, w)
 		started := startLead(t, f, int(cleared["revision"].(float64)))
-		if started["reason"] != "awaiting_generation" || started["session_id"] != nil || started["state"] != "waiting_for_room" {
+		if started["reason"] != "automatic_launch_disabled" || started["automatic_launch_enabled"] != false || started["session_id"] != nil || started["generation"] != float64(0) || started["state"] != "waiting_for_room" || started["revision"].(float64) <= cleared["revision"].(float64) {
 			t.Fatalf("explicit start after cancel failed: %v", started)
 		}
+		// The read projection reports launch policy; the stored intent remains an
+		// explicit ordinary start, so cancellation does not fence its later claim.
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			var reason string
+			if err := tx.QueryRow(t.Context(), `SELECT reason FROM project_leads WHERE project_id=$1`, f.project).Scan(&reason); err != nil {
+				return err
+			}
+			if reason != "awaiting_generation" {
+				t.Fatal("explicit start retained the cancelled adoption reason")
+			}
+			return nil
+		})
 		if harnessShape(t, f, session, child) != before {
 			t.Fatal("start after cancel touched the original session")
 		}
