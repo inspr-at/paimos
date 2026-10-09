@@ -56,7 +56,7 @@ async function expectClearOfText(page: Page) {
   const controls = (await page.locator('.glimpse-controls').boundingBox())!
   for (const box of await protectedBoxes(page)) {
     const overlap = controls.x < box.x + box.width && controls.x + controls.width > box.x && controls.y < box.y + box.height && controls.y + controls.height > box.y
-    expect(overlap, 'hover controls stay clear of text and toolbar').toBe(false)
+    expect(overlap, `hover controls stay clear of text and toolbar: ${JSON.stringify({ controls, box, viewport: page.viewportSize() })}`).toBe(false)
   }
 }
 

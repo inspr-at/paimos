@@ -197,16 +197,6 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <span class="spacer" />
         <button type="button" class="icon-btn sm flat" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
       </div>
-      <!-- Mirror the identity rows during the initial bundled read. The body
-           starts below these rows in both states, rather than jumping when the
-           ticket, harness, actions and tabs arrive. No loaded frame is padded. -->
-      <div v-if="loading" class="identity-skeleton" aria-hidden="true">
-        <div class="head-sub"><span class="skeleton loading-ticket" /></div>
-        <div class="chat-identity"><span class="skeleton loading-setup" /></div>
-        <div class="head-actions"><span class="skeleton loading-actions" /></div>
-        <div class="loading-tabs"><span class="skeleton" /><span class="skeleton" /></div>
-        <span class="skeleton loading-note" />
-      </div>
       <div v-if="view && !loading" class="head-sub">
         <TicketPeekLink v-if="view.ticket" class="ticket-detail" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title"><span class="ticket-chip">{{ view.ticket.key }}</span><span class="head-ticket">{{ view.ticket.title }}</span></TicketPeekLink>
         <span v-if="ticketState" class="ticket-status">{{ ticketState }}</span>
@@ -379,12 +369,6 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .name { min-width: 0; white-space: normal; overflow-wrap: anywhere; font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
 .state-text { flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
 .state-text.needs { color: var(--warn-ink); }
-.identity-skeleton .loading-ticket { height: 18px; width: 70%; }
-.identity-skeleton .loading-setup { height: 22px; width: 60%; }
-.identity-skeleton .loading-actions { height: 32px; width: 80%; }
-.loading-tabs { display: flex; gap: 8px; margin-top: 10px; padding: 3px; }
-.loading-tabs .skeleton { width: 90px; height: 30px; }
-.loading-note { display: block; height: 17px; width: 75%; margin-top: 2px; }
 .head-sub { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 6px; padding-right: 8px; font-size: 12.5px; color: var(--ink-2); }
 .head-sub .ticket-detail { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 auto; color: var(--ink); text-decoration: none; }
 .head-sub .ticket-detail:hover .head-ticket { color: var(--teal-ink); }

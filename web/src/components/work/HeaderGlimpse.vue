@@ -51,7 +51,13 @@ function measureRegion() {
   controlSpot.value = spot ? { left: `${spot.x}px`, top: `${spot.y}px`, width: `${spot.width}px`, height: `${spot.height}px` } : null
   measured.value = true
 }
-function scheduleMeasure() { cancelAnimationFrame(measureFrame); measureFrame = requestAnimationFrame(measureRegion) }
+function scheduleMeasure() {
+  // Resize/content changes invalidate both the mask and the hit target until
+  // their next shared measurement; stale controls cannot cover new text.
+  measured.value = false
+  cancelAnimationFrame(measureFrame)
+  measureFrame = requestAnimationFrame(measureRegion)
+}
 
 function applyMotion() { canvas.value?.setPaused(userPaused.value || occluded.value || document.hidden) }
 function openGraph() { void router.push({ path: `/p/${encodeURIComponent(props.projectKey)}/tickets`, query: { ...filtersToQuery(filters.value), view: 'graph' } }) }
