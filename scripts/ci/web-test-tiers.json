@@ -9184,6 +9184,8 @@
     ,
     {"kind":"browser","file":"tests/palette.spec.ts","name":"inside a project the search is scoped; Backspace on an empty input widens it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/palette.spec.ts","name":"knowledge keys open visible scoped entries and superseded responses stay discarded","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/palette.spec.ts","name":"no results suggest a key, and a scoped search can widen with one click","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/palette.spec.ts","name":"on a phone the palette fits the screen in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13583,6 +13585,8 @@
     {"kind":"node","file":"tests/palette.test.ts","name":"groups: empty shows Recent and Actions; a bare project key puts Projects first","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/palette.test.ts","name":"key queries recognise a project key with an optional number","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/palette.test.ts","name":"knowledge keys retain their entry identity, project scope and bounded result group","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/palette.test.ts","name":"projects: exact key first, archived projects only on an exact key","tier":"GATED-FULL"}
     ,

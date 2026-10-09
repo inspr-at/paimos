@@ -137,16 +137,16 @@ async function search() {
   const signal = controller.signal
   loading.value = true; failed.value = ''
   const within = scopeProject.value?.id
-  const key = keyQuery(q)
   try {
     if (gen !== searchGen) return
     if (!workKinds.value.size) workKinds.value = await workKindMap()
+    if (signal.aborted || gen !== searchGen) return
     // A key prefix ("PHAROS-29") is a key lookup; words also go to the hybrid search
     // (lib/ticketSearch, shared with the relation picker).
     const [work, knowledge] = await Promise.all([
       searchWork(q, { within, signal }),
-      // Knowledge reads titles, slugs and text; it never holds up the rest.
-      key ? Promise.resolve({ items: [] as KnowledgeItem[] }) : listKnowledge({ q, project_id: within, limit: 8 }, signal).catch(() => ({ items: [] as KnowledgeItem[] })),
+      // Knowledge also matches keys such as GUI-22 and RUN-40.
+      listKnowledge({ q, project_id: within, limit: 8 }, signal).catch(() => ({ items: [] as KnowledgeItem[] })),
     ])
     if (signal.aborted || gen !== searchGen) return
     listed.value = work.listed
@@ -164,6 +164,10 @@ async function search() {
 }
 watch([term, scope], () => {
   clearTimeout(timer)
+  // Invalidate immediately: an old response can finish during the debounce.
+  controller?.abort()
+  searchGen++
+  failed.value = ''
   if (!query.value) { void search(); active.value = 0; return }
   loading.value = true
   timer = setTimeout(() => void search(), 120)
