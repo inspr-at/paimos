@@ -354,7 +354,7 @@ func TestDeliveryCompleteJobMapServesEveryProject(t *testing.T) {
 	}
 	var other string
 	f.tx(t, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'AEON-1016B',id,'Second delivery project' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.person.TenantID).Scan(&other)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'AEON-2',id,'Second delivery project' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.person.TenantID).Scan(&other)
 	})
 	f.call(t, f.person, "PUT", "/api/projects/"+other+"/delivery/metrics/source", map[string]any{"repository": f.m.config.Repository}, 200, nil)
 	f.call(t, f.person, "PUT", "/api/projects/"+other+"/delivery-settings", map[string]any{"required_checks": []string{"lint"}}, 200, nil)

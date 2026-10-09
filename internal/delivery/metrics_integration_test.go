@@ -233,12 +233,10 @@ func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
 		t.Fatalf("resumed step: %+v", step)
 	}
 	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
-	if step.Phase != "jobs" || step.Jobs != 2 {
+	// Both eligible first attempts fit in this step. Nothing is deferred, so
+	// the same call finishes. The call above rejects done before they are read.
+	if step.State != "done" || step.Phase != "done" || step.Jobs != 2 || step.RetryAt != nil {
 		t.Fatalf("jobs step: %+v", step)
-	}
-	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
-	if step.State != "done" || step.Phase != "done" {
-		t.Fatalf("finished backfill: %+v", step)
 	}
 	runs, pulls, _ := metricCounts(t, f)
 	if runs != 4 || pulls != 1 || runsBefore > runs {
