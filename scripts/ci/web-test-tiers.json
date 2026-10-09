@@ -72,6 +72,12 @@
   "postGateCases": [
     "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
     ,
+    "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › keeps sort actions and the other blocks still when a sort key is added or removed (±0.5px)"
+    ,
+    "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › lets a couple dozen saved views flow across columns without the panel scrolling"
+    ,
+    "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › moves a split column row into the slot its new order reserves"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -4581,6 +4587,90 @@
     {"kind":"browser","file":"tests/add-account.spec.ts","name":"the steps name the machine, the known sign-in, and a path-proof add-harness","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/add-account.spec.ts","name":"without account.manage the action is gone and the hint stays","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 400px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 400px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › stays beside New in the Graph view, where New is absent","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › stays on the toolbar at tablet width, where the header bar has no Display","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › flows into columns at 1024×800 and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › flows into columns at 1100×1000 and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › flows into columns at 1280×800 and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › flows into columns at 1440×900 and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › is a full-height sheet on a phone, with its title and Done pinned","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › keeps sort actions and the other blocks still when a sort key is added or removed (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › lets a couple dozen saved views flow across columns without the panel scrolling","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › lets the long column list break between rows only when the window is too short for whole blocks","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › moves a split column row into the slot its new order reserves","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › phone targets are 44px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › recounts its columns when the window changes height while open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › stays one column when the window is tall enough, and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › Hide closed switches in place, and the gear opens its choices where Display is","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › Needs attention opens this project's list of suggestions","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › a display choice keeps the menu open and shows on the button","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › choosing a header size from the menu unfolds the header","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › choosing a saved view opens it and says so the next time the menu opens","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › choosing a section goes there and closes the menu","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › lists the sections, then the saved views with Hide closed and its gear, then the usual options","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › opens focused on the current section, and Escape closes it back onto the button","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › saving the list as a view works from the menu","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › unfolding the header closes the menu instead of leaving it on a hidden button","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"folding and unfolding the header › keeps the collapsed toolbar still while the menu opens, closes and takes choices (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"folding and unfolding the header › keeps the header switch and the bar below it where they are (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"folding and unfolding the header › keeps the menu's own controls still through every choice at 1440px (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"folding and unfolding the header › keeps the menu's own controls still through every choice at 400px (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"folding and unfolding the header › moves nothing in the toolbar at 1024px (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"folding and unfolding the header › moves nothing in the toolbar at 1440px (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"folding and unfolding the header › moves nothing in the toolbar at 390px (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the All tickets pill › ends with the same room as it starts with at 1440px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the All tickets pill › ends with the same room as it starts with at 400px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the other two header views › comfortable: Display keeps its place in the header bar and its menu is the one it was","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the other two header views › compact: Display keeps its place in the header bar and its menu is the one it was","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the ticket count › is gone from the Outline and Graph toolbars too","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the ticket count › is gone from the toolbar in every header view at 1440px; the footer still says it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the ticket count › is gone from the toolbar in every header view at 400px; the footer still says it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -15283,6 +15373,24 @@
     {"kind":"vitest","file":"tests/live-views.unit.test.ts","name":"the list, the live list and the panel over any delivery order > show only what the tab may trust, and end at the server's state (300 seeds)","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/live-views.unit.test.ts","name":"the live Outline over delayed pages, gaps and child moves > admits trusted pages, patches live, and holds placement until Show (300 seeds)","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > asks the layout only as often as needed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > counts the columns a window can hold beside each other, with its margin","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > does not trust an unbreakable block: a column count that still overflows is skipped","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > lets the long list break across columns only when whole blocks cannot fit at any count","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > sizes the body and the panel from one column width and gap","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > splits into the fewest columns that fit, never more","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > stays at one column while the content fits the room, however much room there is","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > still gives up gracefully when even a broken list does not fit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > takes the most columns the window holds when none fits, and at least one","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/model-display.unit.test.ts","name":"per-person Display preference persistence > defaults to On/Short/Show, merges other preferences, and reloads from the server","tier":"GATED-FULL"}
     ,
