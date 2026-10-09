@@ -100,6 +100,13 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 			out, err = view(ctx, tx, rec, false)
 			return err
 		}
+		ledgerMode, err := LedgerMode(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if ledgerMode && !slices.Contains(rec.Details.Capabilities, LedgerCapability) {
+			return fail(409, "ledger_enrollment_required", "ledger-v1 capable helper required for approval")
+		}
 		if in.Verification == "one_per_harness" {
 			for _, a := range chosen {
 				if capability := verificationCapabilities(rec.Details.Platform, rec.Details.Arch)[a.Harness]; !capability.Supported {
@@ -132,6 +139,13 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 			}
 			if state != "connected" {
 				return fail(409, "pairing_revoked", "computer is disconnecting or revoked; pair afresh")
+			}
+			// A changed local installation must re-import before any new dispatch.
+			// Approval/retry is fenced; identical completed approvals never clear it.
+			if ledgerMode {
+				if _, err = tx.Exec(ctx, `UPDATE agent_pairing_computers SET ledger_generation=NULL,ledger_enrolled_at=NULL WHERE id=$1`, computer); err != nil {
+					return err
+				}
 			}
 			if err = validateAdditionalAccounts(ctx, tx, computer, chosen); err != nil {
 				return err
@@ -430,6 +444,12 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	}
 	v.VerificationCapabilities = verificationCapabilities(rec.Details.Platform, rec.Details.Arch)
 	v.VerificationHelperVersion = version.Version
+	v.ServerCapabilities = []string{LedgerCapability}
+	var err error
+	v.LedgerMode, err = LedgerMode(ctx, tx)
+	if err != nil {
+		return v, err
+	}
 	v.ExistingComputerID = rec.Details.ExistingComputerID
 	v.SetupState = "not_started"
 	v.Connectivity = "unknown"
@@ -447,8 +467,8 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 		v.HookCapabilities[i] = hookcap.Project(c)
 	}
 	var keyPrefix string
-	err := tx.QueryRow(ctx, `SELECT c.state,c.principal_id::text,c.daemon_id,c.local_cleanup,c.local_processes,c.revision,k.prefix,c.setup_state,c.setup_error,c.harness_statuses,c.harness_details,c.last_seen_at,
- CASE WHEN EXISTS(SELECT 1 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id WHERE e.computer_id=c.id AND e.state='connected' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes') THEN 'online' WHEN c.last_seen_at IS NULL THEN 'unknown' ELSE 'offline' END,c.archived_at,c.agent_protocol,c.agent_version,c.agent_version_scheme,c.local_auth_public_key<>'',coalesce(nullif(c.display_name,''),$2) FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.id=$1`, *rec.ComputerID, rec.Details.ComputerName).Scan(&v.ComputerState, &v.PrincipalID, &v.DaemonID, &v.Cleanup, &v.Processes, &v.Revision, &keyPrefix, &v.SetupState, &v.SetupError, &v.HarnessStatuses, &v.HarnessDetails, &v.LastSeenAt, &v.Connectivity, &v.ArchivedAt, &v.AgentRelease.Protocol, &v.AgentRelease.Version, &v.AgentRelease.VersionScheme, &v.LocalAuthPinned, &v.ComputerName)
+	err = tx.QueryRow(ctx, `SELECT c.state,c.principal_id::text,c.daemon_id,c.local_cleanup,c.local_processes,c.revision,k.prefix,c.setup_state,c.setup_error,c.harness_statuses,c.harness_details,c.last_seen_at,
+ CASE WHEN EXISTS(SELECT 1 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id WHERE e.computer_id=c.id AND e.state='connected' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes') THEN 'online' WHEN c.last_seen_at IS NULL THEN 'unknown' ELSE 'offline' END,c.archived_at,c.agent_protocol,c.agent_version,c.agent_version_scheme,c.local_auth_public_key<>'',coalesce(nullif(c.display_name,''),$2),c.ledger_generation,c.ledger_enrolled_at FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.id=$1`, *rec.ComputerID, rec.Details.ComputerName).Scan(&v.ComputerState, &v.PrincipalID, &v.DaemonID, &v.Cleanup, &v.Processes, &v.Revision, &keyPrefix, &v.SetupState, &v.SetupError, &v.HarnessStatuses, &v.HarnessDetails, &v.LastSeenAt, &v.Connectivity, &v.ArchivedAt, &v.AgentRelease.Protocol, &v.AgentRelease.Version, &v.AgentRelease.VersionScheme, &v.LocalAuthPinned, &v.ComputerName, &v.LedgerGeneration, &v.LedgerEnrolledAt)
 	if err != nil {
 		return v, err
 	}

@@ -659,7 +659,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/attach" {
 			return "harness.worker", true
 		}
-		if r.Method == "GET" && r.URL.Path == "/api/agent-pairing/self" || r.Method == "POST" && (r.URL.Path == "/api/agent-pairing/self/disconnect" || r.URL.Path == "/api/agent-pairing/self/capacity") {
+		if r.Method == "GET" && r.URL.Path == "/api/agent-pairing/self" || r.Method == "POST" && (r.URL.Path == "/api/agent-pairing/self/disconnect" || r.URL.Path == "/api/agent-pairing/self/capacity" || r.URL.Path == "/api/agent-pairing/self/ledger") {
 			return "run.claim", true
 		}
 	case "agent-accounts":

@@ -133,6 +133,10 @@ type Enrollment struct {
 	ActiveRunIDs             []string   `json:"active_run_ids"`
 }
 type View struct {
+	ServerCapabilities        []string                            `json:"server_capabilities"`
+	LedgerMode                bool                                `json:"ledger_mode"`
+	LedgerGeneration          *string                             `json:"ledger_generation"`
+	LedgerEnrolledAt          *time.Time                          `json:"ledger_enrolled_at"`
 	HookCapabilities          []hookcap.Capability                `json:"hook_capabilities,omitempty"`
 	HostCapacity              *hostcapacity.View                  `json:"host_capacity,omitempty"`
 	LocalAuthPinned           *bool                               `json:"local_auth_pinned,omitempty"`
@@ -241,7 +245,7 @@ func validateDevice(in deviceRequest) error {
 	if !uuidRE.MatchString(in.RequestID) || (in.TenantID == "") == (in.TenantSlug == "") || in.TenantID != "" && !uuidRE.MatchString(in.TenantID) || !hashRE.MatchString(in.DeviceHash) || !hashRE.MatchString(in.RuntimeHash) || !hashRE.MatchString(in.LifecycleHash) || in.DeviceHash == in.RuntimeHash || in.DeviceHash == in.LifecycleHash || in.RuntimeHash == in.LifecycleHash {
 		return fail(400, "invalid_request", "distinct commitments, request UUID and exactly one tenant selector required")
 	}
-	if !safeText(in.ComputerName, 128) || !safeText(in.Workspace, 1024) || !path.IsAbs(in.Workspace) || path.Clean(in.Workspace) != in.Workspace || in.Workspace == "/" || (in.Platform != "darwin" && in.Platform != "linux") || (in.Arch != "arm64" && in.Arch != "amd64") || len(in.Capabilities) != 1 || in.Capabilities[0] != "managed_runs" || len(in.Accounts) < 1 || len(in.Accounts) > maxComputerAccounts {
+	if !safeText(in.ComputerName, 128) || !safeText(in.Workspace, 1024) || !path.IsAbs(in.Workspace) || path.Clean(in.Workspace) != in.Workspace || in.Workspace == "/" || (in.Platform != "darwin" && in.Platform != "linux") || (in.Arch != "arm64" && in.Arch != "amd64") || !validDeviceCapabilities(in.Capabilities) || len(in.Accounts) < 1 || len(in.Accounts) > maxComputerAccounts {
 		return fail(400, "invalid_request", "invalid computer, folder, capabilities or account selection")
 	}
 	if err := validateAccountChoices(in.Accounts); err != nil {
@@ -283,4 +287,15 @@ func validateAccountChoices(accounts []Choice) error {
 		seenAccounts[a.AccountKey] = true
 	}
 	return nil
+}
+
+// The old one-capability request remains valid outside ledger-mode tenants.
+func validDeviceCapabilities(capabilities []string) bool {
+	if len(capabilities) < 1 || len(capabilities) > 2 || !slices.Contains(capabilities, "managed_runs") {
+		return false
+	}
+	if len(capabilities) == 1 {
+		return true
+	}
+	return slices.Contains(capabilities, LedgerCapability)
 }
