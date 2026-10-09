@@ -18,14 +18,19 @@ const Permission = "recurrences.manage"
 const Job = "recurring-work"
 
 type Template struct {
-	Name          string   `json:"name,omitempty"`
-	Title         string   `json:"title"`
-	Description   string   `json:"description"`
-	Criteria      []string `json:"acceptance_criteria"`
-	EstimateHours float64  `json:"estimate_hours"`
-	Priority      string   `json:"priority"`
-	Tags          []string `json:"tags"`
-	Type          string   `json:"type"`
+	Name                 string   `json:"name,omitempty"`
+	Title                string   `json:"title"`
+	Description          string   `json:"description"`
+	Criteria             []string `json:"acceptance_criteria"`
+	EstimateHours        float64  `json:"estimate_hours"`
+	Priority             string   `json:"priority"`
+	Tags                 []string `json:"tags"`
+	Type                 string   `json:"type"`
+	PillEN               string   `json:"pill_en,omitempty"`
+	PillDE               string   `json:"pill_de,omitempty"`
+	BenefitEN            string   `json:"benefit_en,omitempty"`
+	BenefitDE            string   `json:"benefit_de,omitempty"`
+	HideFromReleaseNotes *bool    `json:"hide_from_release_notes,omitempty"`
 }
 type Input struct {
 	ProjectID     string   `json:"project_id"`
@@ -92,6 +97,10 @@ func (in *Input) normalize(now time.Time) error {
 	in.ProjectID = strings.ToLower(in.ProjectID)
 	in.ParentID = strings.ToLower(in.ParentID)
 	t := &in.Template
+	if t.HideFromReleaseNotes == nil {
+		hidden := true
+		t.HideFromReleaseNotes = &hidden
+	}
 	t.Name = strings.TrimSpace(t.Name)
 	if len(t.Name) > 80 {
 		return fmt.Errorf("name must be at most 80 bytes")
@@ -122,7 +131,10 @@ func (in *Input) normalize(now time.Time) error {
 	if strings.TrimSpace(t.Title) == "" || len(t.Title) > 512 || len(t.Description) > 65536 || math.IsNaN(t.EstimateHours) || math.IsInf(t.EstimateHours, 0) || t.EstimateHours < 0 || t.EstimateHours > 200 || len(t.Criteria) > 100 || len(t.Tags) > 50 {
 		return fmt.Errorf("template exceeds its limits")
 	}
-	values := append([]string{t.Title, t.Description}, t.Criteria...)
+	if len(t.PillEN) > 512 || len(t.PillDE) > 512 || len(t.BenefitEN) > 4096 || len(t.BenefitDE) > 4096 {
+		return fmt.Errorf("release copy exceeds its limits")
+	}
+	values := append([]string{t.Title, t.Description, t.PillEN, t.PillDE, t.BenefitEN, t.BenefitDE}, t.Criteria...)
 	for _, value := range values {
 		if err := validateVariables(value); err != nil {
 			return err
