@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -31,14 +33,33 @@ import (
 // TSYNC applies the filter to every Go runtime thread, not just this goroutine.
 func denyInternetSockets(t *testing.T) {
 	t.Helper()
-	var arch uint32
+	if err := installDenyFilter(denyFilterArch(t), true, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func denyFilterArch(t *testing.T) uint32 {
+	t.Helper()
 	switch runtime.GOARCH {
 	case "amd64":
-		arch = unix.AUDIT_ARCH_X86_64
+		return unix.AUDIT_ARCH_X86_64
 	case "arm64":
-		arch = unix.AUDIT_ARCH_AARCH64
-	default:
-		t.Skip("network-denial fixture supports Linux amd64 and arm64")
+		return unix.AUDIT_ARCH_AARCH64
+	}
+	t.Skip("network-denial fixture supports Linux amd64 and arm64")
+	return 0
+}
+
+// installDenyFilter sets no_new_privs and installs the seccomp filter on every
+// thread. no_new_privs belongs to one OS thread and seccomp(2) refuses a caller
+// thread without it (EACCES), so both calls must run on the same thread: a
+// goroutine the scheduler moved in between failed the whole fixture at random.
+// pin=false exists only for the migration test's negative control; afterNoNewPrivs
+// is its seam between the two calls and receives the thread that set the flag.
+func installDenyFilter(arch uint32, pin bool, afterNoNewPrivs func(setBy int)) error {
+	if pin {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
 	}
 	filter := []unix.SockFilter{
 		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 4},
@@ -52,20 +73,114 @@ func denyInternetSockets(t *testing.T) {
 		{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_TRAP},
 		{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_ALLOW},
 	}
+	setBy := unix.Gettid()
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
-		t.Fatal(err)
+		return err
+	}
+	if afterNoNewPrivs != nil {
+		afterNoNewPrivs(setBy)
 	}
 	program := unix.SockFprog{Len: uint16(len(filter)), Filter: &filter[0]}
 	result, _, errno := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_SET_MODE_FILTER, unix.SECCOMP_FILTER_FLAG_TSYNC, uintptr(unsafe.Pointer(&program)))
 	runtime.KeepAlive(filter)
 	if errno != 0 || result != 0 {
-		t.Fatalf("seccomp TSYNC failed: result=%d errno=%d", result, errno)
+		return fmt.Errorf("seccomp TSYNC failed: result=%d errno=%d", result, errno)
 	}
+	return nil
+}
+
+// noNewPrivsOf reads one thread's own no_new_privs flag from procfs.
+func noNewPrivsOf(t *testing.T, tid int) string {
+	t.Helper()
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/self/task/%d/status", tid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if value, ok := strings.CutPrefix(line, "NoNewPrivs:"); ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	t.Fatalf("thread %d status has no NoNewPrivs line", tid)
+	return ""
+}
+
+// migrationProbe installs the filter after forcing the scheduler to take the
+// goroutine off its thread between the two kernel calls. With GOMAXPROCS=1 the
+// hop is deterministic: a goroutine locked to the thread parks it, and the
+// only runnable goroutine, this one, is handed to another thread unless it is
+// itself locked. The unpinned probe must therefore fail on the thread that
+// never got no_new_privs; the pinned probe must stay on its thread and succeed.
+func migrationProbe(t *testing.T, pin bool) {
+	arch := denyFilterArch(t)
+	// Start the runtime's template thread and a few idle threads while no
+	// thread has no_new_privs yet, so a hop can land on one that lacks it.
+	runtime.LockOSThread()
+	runtime.UnlockOSThread()
+	var parked, gate = new(sync.WaitGroup), make(chan struct{})
+	for range 4 {
+		parked.Add(1)
+		go func() {
+			runtime.LockOSThread()
+			parked.Done()
+			<-gate
+			runtime.UnlockOSThread()
+		}()
+	}
+	parked.Wait()
+	close(gate)
+
+	var releases []chan struct{}
+	defer func() {
+		for _, release := range releases {
+			close(release)
+		}
+	}()
+	hop := func() {
+		ready, release := make(chan struct{}), make(chan struct{})
+		releases = append(releases, release)
+		go func() {
+			runtime.LockOSThread()
+			close(ready)
+			<-release
+		}()
+		<-ready
+	}
+	between := func(setBy int) {
+		if got := noNewPrivsOf(t, setBy); got != "1" {
+			t.Fatalf("thread %d did not get no_new_privs: %s", setBy, got)
+		}
+		if pin {
+			hop()
+			if got := unix.Gettid(); got != setBy {
+				t.Fatalf("pinned goroutine moved from thread %d to %d", setBy, got)
+			}
+			return
+		}
+		for range 16 {
+			hop()
+			// Hold the new thread so the filter call runs where we measured.
+			runtime.LockOSThread()
+			if got := unix.Gettid(); got != setBy && noNewPrivsOf(t, got) == "0" {
+				return
+			}
+			runtime.UnlockOSThread()
+		}
+		t.Fatal("could not move the goroutine to a thread without no_new_privs")
+	}
+	if err := installDenyFilter(arch, pin, between); err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("probe: filter installed after a forced scheduling round")
 }
 
 func TestNoOutboundServerHelper(t *testing.T) {
 	mode := os.Getenv("AEON_NO_OUTBOUND_TEST")
 	if mode == "" {
+		return
+	}
+	if strings.HasPrefix(mode, "migrate-") {
+		migrationProbe(t, mode == "migrate-pinned")
 		return
 	}
 	denyInternetSockets(t)
@@ -100,6 +215,43 @@ func TestNoOutboundServerHelper(t *testing.T) {
 		}
 	default:
 		t.Fatal("unknown helper mode")
+	}
+}
+
+// Risk: seccomp(2) needs no_new_privs on the calling thread and that flag is
+// per thread, so a goroutine that migrated between the prctl and the filter
+// call made the whole fixture fail with EACCES, depending on scheduling.
+func TestDenyFilterSurvivesGoroutineMigration(t *testing.T) {
+	denyFilterArch(t)
+	var header = unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	var caps [2]unix.CapUserData
+	if err := unix.Capget(&header, &caps[0]); err != nil {
+		t.Fatal(err)
+	}
+	if caps[0].Effective&(1<<unix.CAP_SYS_ADMIN) != 0 {
+		t.Skip("CAP_SYS_ADMIN lets seccomp(2) run without no_new_privs, so the control cannot fail")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(mode string) (string, error) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+		probe := exec.CommandContext(ctx, executable, "-test.run=^TestNoOutboundServerHelper$")
+		probe.Env = []string{"AEON_NO_OUTBOUND_TEST=" + mode, "GODEBUG=netdns=go", "GOMAXPROCS=1"}
+		out, err := probe.CombinedOutput()
+		return string(out), err
+	}
+	// The negative control proves the forced hop reaches a thread without the
+	// flag, so a pass below cannot come from a goroutine that never moved.
+	out, err := run("migrate-unpinned")
+	if err == nil || !strings.Contains(out, "errno=13") || strings.Contains(out, "filter installed") {
+		t.Fatalf("unpinned control did not fail with EACCES: %v\n%s", err, out)
+	}
+	out, err = run("migrate-pinned")
+	if err != nil || !strings.Contains(out, "filter installed") {
+		t.Fatalf("pinned filter install failed after a forced scheduling round: %v\n%s", err, out)
 	}
 }
 

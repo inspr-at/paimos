@@ -57,11 +57,7 @@ its coverage. Merge rounds count the scripted share (target 80 %, the server's "
 by a model" turned around). **Learn** keeps the proper terms (p50, p90, wall time,
 flake) and the Expert name: hover or keyboard focus shows it, a click or Enter pins it,
 Esc closes it and leaves focus on the button. Below the sections the technical words
-are explained simply. A failed preference save shows as one plain sentence with an
-inline **Save again** inside the fixed "Updated …" line under the page head (the same
-line in Numbers and Flow, same height and place); the chosen window or level stays
-applied for the session, and on recovery the line says "Updated …" again. A failed
-numbers read keeps its own alert and Retry on the status row; both can stand together.
+are explained simply.
 
 **Flow** (A Lanes) shows who worked and who waited, one lane per actor (you, LEAD,
 OPS, Reviewer, Builder, Checks). A wait sits in the lane of whoever is awaited, repeats
@@ -91,9 +87,7 @@ by reading again; Live also reads every minute. New data for the same view keeps
 person's window, time and selected step; a failed read shows an error with **Retry**,
 never an old answer. Steps carry facts only, so their labels are built from the step
 key, kind, round, outcome and wait reason. Without any recorded run, Flow says so and
-shows release 126 of 8 Oct 2026 as a labelled example in all three modes. A failed
-preference save shows in the fixed line under the page head, so neither that example
-line nor the mode buttons move or are covered.
+shows release 126 of 8 Oct 2026 as a labelled example in all three modes.
 
 - **Live** shows the runs active in the last hours (and those that ended in the last
   45 minutes): releases first, then the soonest estimate. An open step runs on to its
@@ -122,3 +116,11 @@ second, took, usual, target, outcome, round, waits for, source) or the incident.
 avatar, the PAIMOS Orbit agent cube carrying the run's parcel, stands at the playhead on
 the main run's current step, with a clock badge while waiting and a red one during an
 incident.
+
+**Phone, dark and keyboard.** On a phone the project sections show only the selected
+section's word; the others keep their icon, with the name read aloud and shown as a
+tooltip. Every Delivery control is at least 44 px there, including the time handle and
+the overview's brush edges and playhead. Every text reaches 4.5:1 against what is painted
+behind it in light and dark. Each switch group is one tab stop with arrows, Home and End
+inside; Learn opens on focus, Enter pins it and Esc closes it. In Flow a refused save of
+the window or level takes the headline's place, so the mode switch and the card stay put.

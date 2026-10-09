@@ -209,7 +209,9 @@ const emptyText = computed(() => {
       </div>
     </div>
     <div class="fl-head" data-testid="flow-head">
-      <template v-if="head && data">
+      <!-- A notice from the page (a refused save) replaces the headline in its fixed slot. -->
+      <slot v-if="$slots.notice" name="notice" />
+      <template v-else-if="head && data">
         <p class="big" :title="head.big.map(p => p.text).join('')"><template v-for="(part, i) in head.big" :key="i"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template></p>
         <p v-if="head.small" class="small" :title="head.small">{{ head.small }}</p>
       </template>
@@ -366,7 +368,7 @@ const emptyText = computed(() => {
   .fl-card { padding: 6px 10px 10px; }
   .fl-bar { flex-wrap: wrap; height: auto; gap: 8px; padding: 8px 0; }
   .fl-bar .grow { display: none; }
-  .fl-bar .seg button { height: 44px; }
+  .fl-bar .seg button { height: 44px; min-width: 44px; }
   .fl-pick { flex: 1 1 100%; width: auto; height: 44px; }
   .play { width: 44px; height: 44px; }
   .fl-rm { flex: 1 1 140px; width: auto; white-space: normal; }

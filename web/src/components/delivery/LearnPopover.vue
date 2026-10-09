@@ -3,7 +3,8 @@
 // Learn (AEON-994 draft 5): plain words first, the proper term (p50, p90, wall,
 // flake …) and the Expert name kept next to them. Hover or focus shows it, a click
 // or Enter pins it, Esc closes it and leaves focus on the button. The popover is
-// fixed on the body, so it never moves the page (AEON-541). One open at a time.
+// fixed on the body, so it never moves the page (AEON-541) and closes when a scroll
+// moves its button away. One open at a time.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 
@@ -14,6 +15,8 @@ const open = ref(false)
 const pinned = ref(false)
 const placed = ref(false)
 const at = ref({ x: 0, y: 0 })
+// Where the button sat when the words were placed: a scroll only matters once it has moved the button.
+let anchoredAt: { x: number; y: number } | null = null
 const tipId = computed(() => `dl-learn-${props.id}`)
 
 // Opening one Learn closes the others; while one is pinned, pointing at another does not open it.
@@ -25,11 +28,13 @@ function show(pin: boolean) {
   pinned.value = pin
   pinnedAnywhere.value = pin
   placed.value = false
+  anchoredAt = null
   void nextTick(place)
 }
 function close() {
   open.value = false
   pinned.value = false
+  anchoredAt = null
   if (openLearn.value === close) { openLearn.value = null; pinnedAnywhere.value = false }
 }
 function place() {
@@ -39,6 +44,7 @@ function place() {
   let y = rect.bottom + 8
   if (y + height > window.innerHeight - 12) y = Math.max(12, rect.top - height - 8)
   at.value = { x: Math.max(12, Math.min(window.innerWidth - width - 12, rect.right - width)), y }
+  anchoredAt = { x: rect.left, y: rect.top }
   placed.value = true
 }
 function onClick() { if (open.value && pinned.value) close(); else show(true) }
@@ -52,7 +58,16 @@ function onKey(event: KeyboardEvent) {
 function onPointer(event: PointerEvent) {
   if (open.value && pinned.value && !tip.value?.contains(event.target as Node) && !button.value?.contains(event.target as Node)) close()
 }
-function onScroll() { if (open.value) close() }
+// The words are fixed on the body, so they close when a scroll carries their button away. A scroll
+// event is also reported late (the browser bringing the tapped button into view, a layout settling)
+// after the words were placed against the button's final spot; that one moved nothing.
+function onScroll() {
+  const anchor = button.value
+  if (!open.value || !anchor || !anchoredAt) return
+  const rect = anchor.getBoundingClientRect()
+  if (Math.abs(rect.left - anchoredAt.x) < 1 && Math.abs(rect.top - anchoredAt.y) < 1) return
+  close()
+}
 onMounted(() => {
   document.addEventListener('keydown', onKey)
   document.addEventListener('pointerdown', onPointer, true)

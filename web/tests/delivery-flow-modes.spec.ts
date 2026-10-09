@@ -163,16 +163,17 @@ for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'],
   })
 }
 
-// Risk (AEON-1003 round 7): a refused preference save covers or moves the Flow mode buttons. The failure is text with an
-// inline Retry inside the fixed "Now …" line: with recorded runs, the labelled example and while loading, the page head,
-// the line and the Flow mode controls keep their boxes (±0.5 px), stay clickable, and the line returns after the retry.
+// Risk (AEON-1003 round 7, kept with the reviewed AEON-1007 placement): a refused preference save covers or moves the
+// Flow mode buttons. The failure takes the headline's fixed slot: with recorded runs, the labelled example and while
+// loading, the page head, the Updated line, the headline slot and the Flow mode controls keep their boxes (±0.5 px),
+// stay clickable, and the headline returns after the retry.
 for (const lang of ['en', 'de'] as const) {
-  test(`a refused preference save stays inside the fixed line and leaves the Flow controls in place and clickable (${lang})`, async ({ page }) => {
+  test(`a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (${lang})`, async ({ page }) => {
     test.setTimeout(120_000)
     const de = lang === 'de'
     const copy = de
-      ? { level: 'Detailgrad', expert: 'Experte', warning: 'Nicht gespeichert. Gilt nur hier.', retry: 'Erneut speichern', now: 'Jetzt 20:25 · live' }
-      : { level: 'Level of detail', expert: 'Expert', warning: 'Not saved. The choice stays on this page.', retry: 'Save again', now: 'Now 20:25 · live' }
+      ? { level: 'Detailgrad', expert: 'Experte', warning: 'Zeitraum und Detailgrad konnten nicht gespeichert werden. Die Auswahl bleibt auf dieser Seite.', retry: 'Erneut speichern', now: 'Jetzt 20:25 · live' }
+      : { level: 'Level of detail', expert: 'Expert', warning: 'The window and level could not be saved. This choice stays on this page.', retry: 'Save again', now: 'Now 20:25 · live' }
     let reject = true
     for (const width of [1440, 400]) for (const scenario of ['recorded', 'example', 'loading'] as const) {
       await page.setViewportSize({ width, height: width === 400 ? 2000 : 1300 })
@@ -187,33 +188,44 @@ for (const lang of ['en', 'de'] as const) {
       await page.goto('/p/AEON/delivery?view=flow')
       const where = `${scenario} ${width} ${lang}`
       const line = page.getByTestId('delivery-updated')
-      const failure = line.getByTestId('delivery-pref-error')
+      const headline = page.getByTestId('flow-head')
+      const failure = headline.getByTestId('delivery-pref-error')
       const levels = page.locator('.dl-head').getByRole('radiogroup', { name: copy.level })
       const expert = levels.getByRole('radio', { name: copy.expert, exact: true })
       if (scenario === 'recorded') await expect(line, where).toHaveText(copy.now)
       else if (scenario === 'example') await expect(page.locator('.flow-empty'), where).toBeVisible()
       else await expect(page.getByTestId('flow-loading').first(), where).toBeVisible()
       const baseline = (await line.textContent())!.trim()
-      const guard = await controlStability(page, {
-        head: page.locator('.dl-head'), line, levels, views: page.locator('.dl-views'), modes: modes(page), top: page.locator('.fl-top'),
-      })
+      // The Updated line names Live's moment and clears in Replay and Compare, so its box is held only while the mode stays Live.
+      const held = {
+        head: page.locator('.dl-head'), headline, levels, views: page.locator('.dl-views'), modes: modes(page), top: page.locator('.fl-top'),
+      }
+      const guard = await controlStability(page, { ...held, line })
       // The save is refused. Wherever it shows, the mode buttons still take a real click (a cover would intercept it).
       const anywhere = page.getByTestId('delivery-pref-error')
       await guard.check(async () => { await expert.click(); await expect(anywhere, where).toBeVisible() })
-      await guard.check(async () => { await modes(page).locator('[data-mode="replay"]').click({ timeout: 5000 }); await expect(page, where).toHaveURL(/mode=replay/) })
-      await guard.check(async () => { await modes(page).locator('[data-mode="live"]').click({ timeout: 5000 }); await expect(page, where).not.toHaveURL(/mode=/) })
-      // The failure is text with the retry inside the fixed line, and nowhere else.
+      guard.done()
+      const moving = await controlStability(page, held)
+      await moving.check(async () => { await modes(page).locator('[data-mode="replay"]').click({ timeout: 5000 }); await expect(page, where).toHaveURL(/mode=replay/) })
+      await moving.check(async () => { await modes(page).locator('[data-mode="live"]').click({ timeout: 5000 }); await expect(page, where).not.toHaveURL(/mode=/) })
+      moving.done()
+      // The failure takes the headline's slot. Back on Live, the Updated line says what it said, and the example stays shown.
       await expect(failure, where).toBeVisible()
       await expect(failure, where).toContainText(copy.warning)
-      await expect(anywhere, `${where}: the failure is only in the line`).toHaveCount(1)
+      await expect(anywhere, `${where}: one failure`).toHaveCount(1)
+      await expect(line.getByTestId('delivery-pref-error'), `${where}: not in the Updated line`).toHaveCount(0)
+      await expect(line, where).toHaveText(baseline)
+      if (scenario === 'recorded') await expect(headline.locator('.big'), `${where}: the headline yields its slot`).toHaveCount(0)
+      if (scenario === 'example') await expect(page.locator('.flow-empty'), `${where}: the example stays shown`).toBeVisible()
       await expect(expert, where).toHaveAttribute('aria-checked', 'true')
-      // The retry works and the line returns.
+      // The retry works and the headline returns. Live's line is back, so its box is held again.
       reject = false
-      await guard.check(async () => { await failure.getByRole('button', { name: copy.retry, exact: true }).click(); await expect(failure, where).toHaveCount(0) })
-      guard.done()
+      const restored = await controlStability(page, { ...held, line })
+      await restored.check(async () => { await failure.getByRole('button', { name: copy.retry, exact: true }).click(); await expect(failure, where).toHaveCount(0) })
+      restored.done()
       await expect(expert, where).toHaveAttribute('aria-checked', 'true')
-      if (scenario === 'recorded') await expect(line, where).toHaveText(copy.now)
-      else await expect(line, where).toHaveText(baseline)
+      await expect(line, where).toHaveText(baseline)
+      if (scenario === 'recorded') await expect(headline.locator('.big'), where).toBeVisible()
       open()
       await page.unroute('**/api/preferences/delivery*', refuse)
       if (gate) await page.unroute(/\/api\/projects\/[^/]+\/delivery\/flow(\?|$)/, hold)

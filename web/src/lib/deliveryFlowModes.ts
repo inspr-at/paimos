@@ -113,19 +113,31 @@ export function momentOf(ctx: Ctx & { sets: LaneSet[]; T: number; selected: Lane
     const s = sel.step, f = s.facts, norm = f?.norm, dur = s.end - s.start, t = text.terms
     const at = (m: number) => rel ? timeLabel(data, m) : timeLabelSeconds(data, m)
     const range = `${at(s.start)} ${TO} ${at(s.end)}`
+    // An open step's end is the expected one (facts.open). Elapsed time stops at now;
+    // the expected completion is its own row, never a recorded "took".
+    const open = f?.open === true, clockNow = data.now
+    const projected = open && clockNow != null && s.end > clockNow + 0.01
+    const elapsed = open ? Math.max(0, Math.min(T, clockNow ?? T) - s.start) : dur
+    const running = open && (clockNow == null || clockNow + 1e-6 >= s.start)
+    const startText = open ? `${at(s.start)}${running ? ` · ${text.ongoing}` : ''}` : range
+    const usual = `${norm?.p50 != null ? ` · ${text.usually} ${fmtMin(norm.p50, lang)} min` : ''}${norm?.arion != null ? ` · ${text.arion} ${fmtMin(norm.arion, lang)} min` : ''}`
+    const expertNorm = `${norm?.p50 != null ? ` · p50 ${fmtMin(norm.p50, lang)}` : ''}${norm?.p90 != null ? ` · p90 ${fmtMin(norm.p90, lang)}` : ''}${norm?.arion != null ? ` · Arion ${fmtMin(norm.arion, lang)}` : ''}`
+    const expectedRow: [string, string] | null = projected ? [t.expectedEnd, at(s.end)] : null
     const round = f?.round && (f.round > 1 || ['review', 'copy_gate', 'pin_gate', 'h', 'ci', 'queue'].includes(s.stepKey ?? '')) ? f.round : null
     const waitsFor = s.kind === 'wait' ? f?.waitsFor ?? (f?.waitReason ? pick(pair(WAIT_OBJECT[f.waitReason]), lang) : null) : null
     const rows: ([string, string] | null)[] = level === 'simple' ? [
-      [t.started, range],
-      [t.took, `${minutesText(dur)}${norm?.p50 != null ? ` · ${text.usually} ${fmtMin(norm.p50, lang)} min` : ''}${norm?.arion != null ? ` · ${text.arion} ${fmtMin(norm.arion, lang)} min` : ''}`],
+      [t.started, startText],
+      [open ? t.elapsed : t.took, open ? `${fmtMin(elapsed, lang)} min${usual}` : `${minutesText(dur)}${usual}`],
+      expectedRow,
       f?.outcome ? [t.outcome, pick(pair(OUTCOME_PLAIN[f.outcome]), lang)] : null,
       round ? [t.round, String(round)] : null,
       waitsFor ? [t.waitsFor, waitsFor] : null,
     ] : [
       [t.step, `${s.stepKey ?? '–'}${s.side ? ` · ${text.sideWord}` : ''} · ${text.kindWords[s.kind]}${s.incident ? ` · ${text.incidentWord}` : ''}`],
       [t.actor, `${text.actors.expert[s.lane]}${f?.model ? ` · ${f.model}` : ''}`],
-      [t.startEnd, range],
-      [t.duration, `${fmtMin(dur, lang)} min${norm?.p50 != null ? ` · p50 ${fmtMin(norm.p50, lang)}` : ''}${norm?.p90 != null ? ` · p90 ${fmtMin(norm.p90, lang)}` : ''}${norm?.arion != null ? ` · Arion ${fmtMin(norm.arion, lang)}` : ''}`],
+      [open ? t.started : t.startEnd, open ? startText : range],
+      [open ? t.elapsed : t.duration, `${fmtMin(open ? elapsed : dur, lang)} min${expertNorm}`],
+      expectedRow,
       f?.outcome ? [t.outcome, f.outcome] : null,
       round ? [t.round, `r${round}`] : null,
       waitsFor ? [t.waitsFor, waitsFor] : null,

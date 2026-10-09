@@ -258,6 +258,18 @@
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 390"
     ,
+    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 dark"
+    ,
+    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 light"
+    ,
+    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1440 dark"
+    ,
+    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1440 light"
+    ,
+    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 390 dark"
+    ,
+    "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 390 light"
+    ,
     "browser:tests/dialog-full-text.spec.ts:1024 dark › keyboard full text: business"
     ,
     "browser:tests/dialog-full-text.spec.ts:1024 dark › keyboard full text: facet"
@@ -6582,6 +6594,10 @@
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 400 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"a 15 min window at a phone overview edge keeps both handles draggable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"at Fit all a phone overview keeps each 44 px handle inside and a drag at either edge resizes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"lanes zoom, pan and move the time without moving a control, and a click never moves the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"panning an incident to the right edge keeps its caption inside the lane frame","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -6604,9 +6620,9 @@
     ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Replay under reduced motion shows the run still; the handle and Shift+arrows move the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"a refused preference save stays inside the fixed line and leaves the Flow controls in place and clickable (de)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (de)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"a refused preference save stays inside the fixed line and leaves the Flow controls in place and clickable (en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"with motion › Replay opens at the start of the latest release and auto-plays once per session","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -6654,6 +6670,42 @@
     ,
     {"kind":"browser","file":"tests/delivery-numbers.spec.ts","name":"window, level and view switches keep every control still and are the person’s own","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"Delivery screenshots at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"every text on Delivery reaches 4.5:1 in dark at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"every text on Delivery reaches 4.5:1 in dark at 400","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"every text on Delivery reaches 4.5:1 in light at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"every text on Delivery reaches 4.5:1 in light at 400","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"on a phone every Delivery control and the section tabs are at least 44 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"on a phone only the selected project section shows its word; the others keep icon, name and tooltip","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"pinned Learn words survive a scroll that leaves the button in place and close when the button moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"window and level switches keep every control still at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"window and level switches keep every control still at 400","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"zoom and playhead keep every control still at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"zoom and playhead keep every control still at 400","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-rating.spec.ts","name":"a person marks rework with a reason and can undo it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/delivery-rating.spec.ts","name":"a working session on the ticket shows no mark and a stopped one does","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -6678,9 +6730,9 @@
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"Simple explains each number in plain words, and its controls stay still through every window","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows it with a retry inside the English Updated line","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows a English warning with retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows it with a retry inside the German Updated line","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows a German warning with retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed refresh keeps Learn still through the error and the retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -14634,6 +14686,8 @@
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"Shift+←/→ move the time a minute, plain arrows pan, and Home/End jump within the run","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"a 15 min window at the phone overview edge keeps the three resize targets apart","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"a label falls back from tag and text, to the text, to the duration, to an ellipsis that keeps \"since\"","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"a wider face than the 5.9 px estimate still ends the incident caption inside the frame","tier":"ESSENTIAL"}
@@ -14667,6 +14721,8 @@
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a live refresh keeps 02:00 when removing an older run moves the axis origin","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a live update keeps the person viewing the past, and moves the playhead with now while following","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"an open step shows elapsed time and a separate expected end at both levels","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"auto-play is granted once per session","tier":"ESSENTIAL"}
     ,
@@ -14710,10 +14766,6 @@
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"a partial window with full calendar coverage names the missing facts beside the source","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"a refused save sits with its retry inside the Updated line, in Numbers and in Flow, beside a failed read (de)","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"a refused save sits with its retry inside the Updated line, in Numbers and in Flow, beside a failed read (en)","tier":"ESSENTIAL"}
-    ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"a verdict is on target up to 1×, close up to 1.5×, far off beyond, with a word and its own shape for each","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"each tile shows its verdict as shape and word: the icon follows the level","tier":"ESSENTIAL"}
@@ -14721,6 +14773,10 @@
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"the small chart shades the good side of the target and hatches only what no source covers","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"the summary counts numbers on target and names the closest and the biggest gap from this window’s numbers","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"with a refused save and a failed read together, both alerts and both retries stay reachable (de)","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"with a refused save and a failed read together, both alerts and both retries stay reachable (en)","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a denied or failed review-policy read selects no saved mode","tier":"ESSENTIAL"}
     ,

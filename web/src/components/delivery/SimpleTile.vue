@@ -97,6 +97,9 @@ watch(() => props.state, (next, prev) => {
 @keyframes dl-sk { to { background-position: -200% 0; } }
 @container delivery (max-width: 640px) {
   .s-tile { padding: 12px 12px 10px 14px; }
+  /* Phones: the source line wraps into two reserved lines (plus padding and hairline) instead of hiding its end behind a 17 px tip target (AEON-1007). */
+  .s-foot { align-items: flex-start; height: auto; min-height: calc(16px * 2 + 8px + 1px); line-height: 16px; white-space: normal; }
+  .s-foot > span:last-child { overflow: visible; }
   .s-val { font-size: 28px; }
 }
 </style>

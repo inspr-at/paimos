@@ -782,13 +782,15 @@
         ,
         {"file":"tests/decision-text.spec.ts","listedTests":36,"weightSeconds":79.902439,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/delivery-flow-lanes.spec.ts","listedTests":9,"weightSeconds":12,"weightSource":"aeon-1005-estimate"}
+        {"file":"tests/delivery-flow-lanes.spec.ts","listedTests":11,"weightSeconds":12,"weightSource":"aeon-1005-estimate"}
         ,
         {"file":"tests/delivery-flow-modes.spec.ts","listedTests":11,"weightSeconds":20,"weightSource":"aeon-1006-estimate"}
         ,
         {"file":"tests/delivery-guarantee.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/delivery-numbers.spec.ts","listedTests":14,"weightSeconds":30,"weightSource":"aeon-1002-estimate"}
+        ,
+        {"file":"tests/delivery-polish.spec.ts","listedTests":18,"weightSeconds":45,"weightSource":"aeon-1007-estimate"}
         ,
         {"file":"tests/delivery-rating.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
         ,

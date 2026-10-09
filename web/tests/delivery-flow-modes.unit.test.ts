@@ -117,6 +117,47 @@ it('the moment panel names the active lanes, one idle line, the incident and the
   expect(momentOf({ data, sets, T: EXAMPLE_NOW - 5, selected: null, level: 'simple', lang: 'en', text: en }).sentence).toMatch(/^Release 126 was live but not working properly/)
 })
 
+it('an open step shows elapsed time and a separate expected end at both levels', () => {
+  // Release 126's check started at 20:24 and is still open at 20:25. 20:32 is the expected end.
+  const data = exampleLive(), sets = laneModel(data)
+  const step = sets.flatMap(set => set.items).find(item => item.step.expert.en.startsWith('#937 CI'))!
+  expect(step.step.facts?.open).toBe(true)
+  expect(step.step.end - step.step.start).toBe(8)
+  const rows = (level: 'simple' | 'expert', lang: 'en' | 'de') => momentOf({ data, sets, T: EXAMPLE_NOW, selected: step, level, lang, text: flowText(lang) }).detail!.rows
+  expect(rows('simple', 'en')).toEqual([
+    ['Start', '20:24 · still going'],
+    ['So far', '1 min · usually 16 min · Arion 8 min'],
+    ['Expected end', '20:32'],
+  ])
+  expect(rows('expert', 'en')).toEqual([
+    ['Step', '– · work · incident'],
+    ['Actor', 'CI & queue'],
+    ['Start', '20:24 · still going'],
+    ['So far', '1 min · p50 16 · Arion 8'],
+    ['Expected end', '20:32'],
+    ['Source', 'GitHub App'],
+  ])
+  expect(rows('simple', 'de')).toEqual([
+    ['Start', '20:24 · läuft noch'],
+    ['Bisher', '1 min · üblich 16 min · Arion 8 min'],
+    ['Erwartetes Ende', '20:32'],
+  ])
+  expect(rows('expert', 'de')).toEqual([
+    ['Schritt', '– · Arbeit · Störung'],
+    ['Akteur', 'CI & Queue'],
+    ['Start', '20:24 · läuft noch'],
+    ['Bisher', '1 min · p50 16 · Arion 8'],
+    ['Erwartetes Ende', '20:32'],
+    ['Quelle', 'GitHub-App'],
+  ])
+  for (const level of ['simple', 'expert'] as const) {
+    const joined = rows(level, 'en').map(row => row.join(' ')).join('\n')
+    expect(joined).not.toContain('→')
+    expect(joined).not.toContain('Took')
+    expect(joined).not.toContain('8 min ·')
+  }
+})
+
 it('the in-flight table gives each run its step, wait, estimate and a verdict with shape and word', () => {
   const rows = flightRows({ data: exampleLive(), lang: 'en', text: en })
   expect(rows.map(r => r.tag)).toEqual(['126', '991', '983–986', '993'])

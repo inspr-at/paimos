@@ -418,8 +418,9 @@ defineExpose({ setTime: (m: number) => setTime(props.timeline, m) })
 .fl-seg.tgt { fill: color-mix(in srgb, var(--ok) 20%, transparent); stroke: color-mix(in srgb, var(--ok) 60%, transparent); }
 .fl-seg.incseg { stroke: color-mix(in srgb, var(--danger) 60%, transparent); }
 .fl-hit { fill: transparent; }
-.fl-t { font: 600 11px var(--font); fill: var(--teal-ink); pointer-events: none; }
-.fl-t.rework { fill: var(--danger); }
+/* Labels sit on their segment's tint, often under an incident band: the inks lean toward --ink to keep 4.5:1 (AEON-1007). */
+.fl-t { font: 600 11px var(--font); fill: color-mix(in srgb, var(--teal-ink) 75%, var(--ink)); pointer-events: none; }
+.fl-t.rework { fill: color-mix(in srgb, var(--danger) 70%, var(--ink)); }
 .fl-t.wait { fill: var(--queue-wait-ink); }
 .fl-t.fut { font-weight: 500; fill: var(--ink-2); }
 .fl-clk { color: var(--queue-wait-ink); pointer-events: none; }

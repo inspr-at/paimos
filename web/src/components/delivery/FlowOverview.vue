@@ -4,7 +4,7 @@
 // with a brush for the visible window. Drag the brush to pan, its edges to resize,
 // click beside it to centre it there; the overview playhead moves the time.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { panBy, setWindow, tickStep, timeLabel, type FlowData, type LaneSet, type Timeline } from '../../lib/deliveryFlow'
+import { panBy, placeOverviewTargets, setWindow, tickStep, timeLabel, type FlowData, type LaneSet, type Timeline } from '../../lib/deliveryFlow'
 import type { FlowText } from '../../lib/deliveryFlowText'
 
 const props = defineProps<{ data: FlowData; sets: LaneSet[]; timeline: Timeline; text: FlowText }>()
@@ -50,7 +50,13 @@ const map = computed(() => {
   return { lines, segs, bands, targets, ticks, nowX: live ? g.X(now) : null }
 })
 const brush = computed(() => { const g = geo.value, t = props.timeline; return { x0: g.X(t.v0), x1: g.X(t.v1) } })
+// Touch and phone (AEON-1007): 44 px hits stay inside the strip and off each other.
+const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
+const hit = computed(() => coarse || geo.value.W < 640 ? 44 : 0)
 const playX = computed(() => geo.value.X(props.timeline.T))
+const hits = computed(() => placeOverviewTargets({
+  width: geo.value.W, left: brush.value.x0, right: brush.value.x1, play: playX.value, hit: hit.value, height: OV_H,
+}))
 const valueText = computed(() => `${timeLabel(props.data, props.timeline.v0)} – ${timeLabel(props.data, props.timeline.v1)}`)
 
 type Drag = { kind: 'ovph' | 'hl' | 'hr' | 'brush' | 'bg'; x: number; v0: number; v1: number; moved: boolean; id: number }
@@ -111,13 +117,14 @@ function onKey(event: KeyboardEvent) {
       <text v-for="tick in map.ticks" :key="tick.x" class="ln-ovax" :x="tick.x" :y="OV_H - 3" text-anchor="middle">{{ tick.label }}</text>
       <line v-if="map.nowX != null" class="ov-now" :x1="map.nowX" :x2="map.nowX" y1="4" :y2="OV_H - 14" />
       <rect class="ln-brush" data-part="brush" :x="brush.x0" y="1" :width="Math.max(6, brush.x1 - brush.x0)" :height="OV_H - 15" rx="4" />
-      <g v-for="[x, side] in ([[brush.x0, 'hl'], [brush.x1, 'hr']] as const)" :key="side">
-        <rect class="ln-handle" :data-part="side" :x="x - 4" y="10" width="8" :height="OV_H - 33" rx="3" />
-        <path class="ln-grip" :d="`M${x - 1},${(OV_H - 14) / 2 - 4}v8M${x + 1},${(OV_H - 14) / 2 - 4}v8`" />
+      <g v-for="h in hits.handles" :key="h.side">
+        <rect class="ln-handle" :data-part="h.side" :x="h.gx - 4" y="10" width="8" :height="OV_H - 33" rx="3" />
+        <path class="ln-grip" :d="`M${h.gx - 1},${(OV_H - 14) / 2 - 4}v8M${h.gx + 1},${(OV_H - 14) / 2 - 4}v8`" />
+        <rect class="ln-hhit" :data-part="h.side" :data-testid="`flow-overview-${h.side}`" :x="h.hx" :y="h.hy" :width="h.hw" :height="h.hh" />
       </g>
       <line class="ln-ph" :x1="playX" :x2="playX" y1="1" :y2="OV_H - 14" />
       <path class="ln-phtri" :d="`M${playX - 5},1h10l-5,6z`" />
-      <rect class="ln-phhit" data-part="ovph" :x="playX - 7" y="0" width="14" :height="OV_H - 14" />
+      <rect class="ln-phhit" data-part="ovph" data-testid="flow-overview-playhead" :x="hits.play.hx" :y="hits.play.hy" :width="hits.play.hw" :height="hits.play.hh" />
     </svg>
   </div>
 </template>
@@ -143,5 +150,5 @@ function onKey(event: KeyboardEvent) {
 .ln-grip { stroke: var(--teal-ink); stroke-width: 1; pointer-events: none; }
 .ln-ph { stroke: var(--teal); stroke-width: 2; pointer-events: none; }
 .ln-phtri { fill: var(--teal); pointer-events: none; }
-.ln-phhit { fill: transparent; cursor: ew-resize; }
+.ln-phhit, .ln-hhit { fill: transparent; cursor: ew-resize; pointer-events: all; }
 </style>
