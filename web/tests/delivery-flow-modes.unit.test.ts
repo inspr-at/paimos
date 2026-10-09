@@ -15,7 +15,7 @@ vi.mock('../src/lib/api.ts', () => ({
   APIError: class APIError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; this.name = 'APIError' } },
 }))
 import * as flow from '../src/lib/deliveryFlow'
-import { createTimeline, criticalPath, laneModel, refreshTimeline, resetTimeline, runEnd, timeLabel, type FlowData } from '../src/lib/deliveryFlow'
+import { createTimeline, criticalPath, laneModel, minutesText, refreshTimeline, resetTimeline, runEnd, timeLabel, type FlowData } from '../src/lib/deliveryFlow'
 import { arionTarget, ARION_MINUTES, ARION_PATH, compareData, liveData, recordedRuns, replayData, type ApiFlow, type ApiItem, type ApiRun, type ApiStep } from '../src/lib/deliveryFlowData'
 import { EXAMPLE_NOW, exampleCompare, exampleLive, exampleReplay } from '../src/lib/deliveryFlowExample'
 import * as modes from '../src/lib/deliveryFlowModes'
@@ -882,4 +882,65 @@ it('the flow view hands the first run\'s release record to the panel, in every m
   const change = mount({ data: exampleReplay('c991'), dataKey: 'replay|c991', mode: 'replay' })
   await Vue.nextTick()
   expect(change.stubNode('record')).toBeUndefined()
+})
+
+// Release 127 as the OPS record emits it: step a 0–16, the rehearsal alongside, the catalogue
+// the pole at 1–23, then b–l with the person's five-minute wait. The catalogue stays a critical
+// step (drawn, and its attempt still 22 min); the breakdown must not add that overlap twice.
+function release127Full(): ApiRun {
+  const step = (id: string, key: string, who: ReturnType<typeof actor>, kind: 'work' | 'wait', from: number, to: number): ApiStep => ({
+    id, item_id: 'r127', step_key: key, round: 1, kind, actor: who, started_at: at(from), ended_at: at(to),
+    outcome: null, wait_reason: kind === 'wait' ? 'human_gate' : null, waits_for: null, side: false, source: 'ops_rollout', norm: norm(),
+  })
+  return releaseRun({}, [
+    step('s-c', 'c', actor('ci', 'Checks'), 'work', 24, 36),
+    step('s-d', 'd', actor('agent', 'OPS'), 'work', 36, 37),
+    step('s-e', 'e', actor('agent', 'OPS'), 'work', 37, 47),
+    step('s-ew', 'e', actor('person', 'You'), 'wait', 47, 52),
+    step('s-f', 'f', actor('ci', 'Checks'), 'work', 52, 54),
+    step('s-g', 'g', actor('agent', 'OPS'), 'work', 54, 55),
+    step('s-h', 'h', actor('agent', 'Reviewer'), 'work', 55, 60),
+    step('s-i', 'i', actor('ci', 'Checks'), 'work', 60, 61),
+    step('s-j', 'j', actor('agent', 'OPS'), 'work', 61, 64),
+    step('s-k', 'k', actor('agent', 'OPS'), 'work', 64, 70),
+    step('s-l', 'l', actor('agent', 'OPS'), 'work', 70, 75),
+  ])
+}
+
+it('release 127 counts the overlapping catalogue once: 70 minutes working and 5 waiting', async () => {
+  const rec = recordedRuns(asList(release127Full()), { extendOpen: false })
+  const main = rec.runs[0]!
+  const catalogue = main.steps.find(s => s.stepKey === 'catalogue')!
+  const path = criticalPath(main)
+  expect(path.some(s => s.stepKey === 'catalogue')).toBe(true)
+  expect([catalogue.side, catalogue.end - catalogue.start, main.facts!.record!.catalogue!.minutes]).toEqual([undefined, 22, 22])
+  // Absolute axis is minutes after local midnight; the release itself is 75 minutes, queue to live.
+  expect(runEnd(main) - path[0]!.start).toBe(75)
+
+  const expectBreakdown = (runs: modes.Went[]) => {
+    const went = runs[0]!
+    const label = (kind: string) => went.parts.find(p => p.kind === kind)!.label
+    expect(went.parts.map(p => p.kind)).toEqual(['work', 'wait'])
+    expect(label('work')).toBe(`Working ${minutesText(70)}`)
+    expect(label('wait')).toBe(`Waiting ${minutesText(5)}`)
+    expect(went.parts.find(p => p.kind === 'work')!.share).toBeCloseTo(70 / 75)
+    expect(went.parts.find(p => p.kind === 'wait')!.share).toBeCloseTo(5 / 75)
+  }
+  const replay = replayData(main, rec.origin, null)!
+  const replayView = mount({ data: replay, dataKey: 'replay|r127|timing', mode: 'replay', autoplay: () => false })
+  await Vue.nextTick()
+  expect(textOf(replayView.byTest('flow-head')!)).toContain(minutesText(75))
+  expect((replayView.stubNode('record').props.record as modes.ReleaseRecord).rows[0]!.value).toBe('22 min · green · usually 21 min')
+  const drawn = laneModel(replay)[0]!.items.find(i => i.step.stepKey === 'catalogue')!
+  expect([drawn.step.side, drawn.step.end - drawn.step.start]).toEqual([undefined, 22])
+  expectBreakdown(replayView.stubNode('went').props.runs as modes.Went[])
+
+  const compared = compareData(main, arionTarget('en'))!
+  expect(runEnd(compared.sets[0]!.main)).toBe(75)
+  expect(compared.sets[0]!.main.steps.find(s => s.stepKey === 'catalogue')!.end).toBe(23)
+  const compareView = mount({ data: compared, dataKey: 'compare|r127|timing', mode: 'compare' })
+  await Vue.nextTick()
+  expect(textOf(compareView.byTest('flow-head')!)).toContain(minutesText(75))
+  expect((compareView.stubNode('record').props.record as modes.ReleaseRecord).rows[0]!.value).toBe('22 min · green · usually 21 min')
+  expectBreakdown(compareView.stubNode('went').props.runs as modes.Went[])
 })

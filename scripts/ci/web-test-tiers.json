@@ -14794,6 +14794,8 @@
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"recorded steps become lanes and words from their facts; open steps run on to their expected end in Live","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"release 127 counts the overlapping catalogue once: 70 minutes working and 5 waiting","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"selecting another run shows loading and keeps the run choices","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the example replays release 126 final and the changes so far","tier":"ESSENTIAL"}

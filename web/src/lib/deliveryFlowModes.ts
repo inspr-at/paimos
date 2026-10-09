@@ -226,10 +226,56 @@ export interface Went {
   parts: { kind: WentKind; label: string; share: number }[]
   items: { key: string; kind: WentKind; minutes: string; label: string; note: string }[]
 }
+type Span = { start: number; end: number }
+/** Join overlaps and touches. The copy keeps the caller's spans intact. */
+function mergeSpans(spans: readonly Span[]): Span[] {
+  const sorted = spans.filter(s => s.end > s.start).map(s => ({ start: s.start, end: s.end })).sort((a, b) => a.start - b.start || a.end - b.end)
+  const out: Span[] = []
+  for (const s of sorted) {
+    const last = out.at(-1)
+    if (last && s.start <= last.end) last.end = Math.max(last.end, s.end)
+    else out.push(s)
+  }
+  return out
+}
+/** base with every cut removed. Cuts may overlap; each is applied to what remains. */
+function subtractSpans(base: readonly Span[], cuts: readonly Span[]): Span[] {
+  let out = base.map(s => ({ start: s.start, end: s.end }))
+  for (const c of cuts) {
+    const next: Span[] = []
+    for (const s of out) {
+      if (c.end <= s.start || c.start >= s.end) { next.push(s); continue }
+      if (c.start > s.start) next.push({ start: s.start, end: c.start })
+      if (c.end < s.end) next.push({ start: c.end, end: s.end })
+    }
+    out = next
+  }
+  return out
+}
+const spanMinutes = (spans: readonly Span[]) => spans.reduce((n, s) => n + s.end - s.start, 0)
+/**
+ * Minutes of the critical path, each moment once. The catalogue is critical and can run inside step a
+ * (and outlast it); summing those durations counts the overlap twice. Same-kind overlaps merge. When two
+ * kinds share a moment the more specific one keeps it (incident, then doing it again, then waiting, then
+ * working), so the parts are a partition of the covered time. The steps stay whole for the lanes and the record.
+ */
+function criticalMinutes(path: readonly FlowStep[]): Record<WentKind, number> {
+  const buckets: Record<WentKind, Span[]> = { inc: [], rework: [], wait: [], work: [] }
+  for (const s of path) {
+    const kind: WentKind = s.incident ? 'inc' : s.kind === 'wait' || s.kind === 'rework' ? s.kind : 'work'
+    buckets[kind].push({ start: s.start, end: s.end })
+  }
+  const inc = mergeSpans(buckets.inc)
+  const reworkMerged = mergeSpans(buckets.rework)
+  const waitMerged = mergeSpans(buckets.wait)
+  const rework = subtractSpans(reworkMerged, inc)
+  const wait = subtractSpans(waitMerged, [...inc, ...reworkMerged])
+  const work = subtractSpans(mergeSpans(buckets.work), [...inc, ...reworkMerged, ...waitMerged])
+  return { inc: spanMinutes(inc), rework: spanMinutes(rework), wait: spanMinutes(wait), work: spanMinutes(work) }
+}
 export function wentOf(run: FlowRun, ctx: Omit<Ctx, 'data'>): Went {
   const { level, lang, text } = ctx
-  const path = criticalPath(run), sums: Record<WentKind, number> = { work: 0, wait: 0, rework: 0, inc: 0 }
-  for (const s of path) sums[s.incident ? 'inc' : s.kind] += Math.max(0, s.end - s.start)
+  const path = criticalPath(run), sums = criticalMinutes(path)
   const total = sums.work + sums.wait + sums.rework + sums.inc || 1
   const label: Record<WentKind, string> = { work: text.working, wait: text.waiting, rework: text.again, inc: text.incidentW }
   const parts = (['work', 'wait', 'rework', 'inc'] as const).filter(k => sums[k] > 0).map(kind => ({
