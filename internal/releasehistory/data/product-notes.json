@@ -5513,8 +5513,8 @@
     "261009063244.0.0": {
       "release_channel": "stable",
       "release_sequence": 127,
-      "snapshot_sha256": "0b28ff084b1b0efb3277564854bc7de1f4af922d59777ebffa1f184657e4f474",
-      "captured_at": "2026-10-09T06:43:21Z",
+      "snapshot_sha256": "0314c2da8b5d116c61364a8b8ccd41e2b0e4c719127d4955f8a4f492755c7ba2",
+      "captured_at": "2026-10-09T06:48:46Z",
       "release_revision": 1,
       "items": [
         {
@@ -5601,8 +5601,8 @@
           "key": "AEON-1012",
           "pill_en": "Model registry in Settings",
           "pill_de": "Modellregister in Einstellungen",
-          "benefit_en": "See every registered model, with its levels and notes; people with model-management permission can add their own.",
-          "benefit_de": "Alle registrierten Modelle mit Stufen und Notizen sehen; eigene Modelle lassen sich mit Berechtigung zur Modellverwaltung hinzufügen.",
+          "benefit_en": "See non-retired registered models, with their levels and notes; people with model-management permission can add their own.",
+          "benefit_de": "Alle registrierten, nicht stillgelegten Modelle mit Stufen und Notizen sehen; eigene Modelle lassen sich mit Berechtigung zur Modellverwaltung hinzufügen.",
           "group": "features"
         },
         {
