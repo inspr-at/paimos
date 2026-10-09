@@ -35,6 +35,7 @@ type Remote struct {
 	daemonID, generation string
 	accountLinkProof     string
 	ledgerGeneration     string
+	ledgerPeerTelemetry  bool
 	// Host capacity is negotiated from the server's own computer view; see
 	// hostCapacitySupported. now is injectable for tests.
 	hostCapacitySupport   int8

@@ -78,7 +78,9 @@
         "internal/db/full_access_migration_test.go",
         "internal/accountuse/**",
         "internal/agentpairing/ledger.go",
-        "internal/agentpairing/ledger_test.go"
+        "internal/agentpairing/ledger_test.go",
+        "cmd/aeon-agentd/ledger.go",
+        "cmd/aeon-agentd/ledger_test.go"
       ]
     },
     {
@@ -126,7 +128,10 @@
         "internal/agentsetup/instances.go",
         "internal/agentsetup/instances_test.go",
         "internal/agentd/shared_ledger.go",
-        "internal/agentd/shared_ledger_test.go"
+        "internal/agentd/shared_ledger_test.go",
+        "internal/agentd/ledger_exit_unix.go",
+        "internal/agentd/ledger_exit_other.go",
+        "internal/agentdwire/ledger_test.go"
       ]
     },
     {

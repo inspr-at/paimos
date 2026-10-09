@@ -216,3 +216,12 @@ func RecordedServiceLabel(root string) (string, error) {
 	}
 	return label, nil
 }
+
+func ReadServiceReceipt(root string) (*ServiceReceipt, error) {
+	store, err := OpenStoreReadOnly(root)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+	return savedReceipt(store)
+}

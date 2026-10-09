@@ -245,3 +245,53 @@ func TestSharedLedgerPermanentLockSurvivesDataReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Risk: two owners prune overlapping offers against different snapshots and
+// both acquire the same login. The barrier holds the real admission lock after
+// pruning but before its durable write, so the competing offer must fail closed.
+func TestSharedLedgerOverlappingOffersSerializeBeforePublishingHolds(t *testing.T) {
+	l, a, b, generation := ledgerFixture(t)
+	peer, err := OpenSharedLedger(l.root.Path(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	ca := LedgerCandidate{AccountID: "A", Login: fixtureLogin(generation, "A")}
+	cb := LedgerCandidate{AccountID: "B", Login: fixtureLogin(generation, "B")}
+	first, _ := LedgerID()
+	second, _ := LedgerID()
+	pruned, publish := make(chan struct{}), make(chan struct{})
+	l.acquireBarrier = func() { close(pruned); <-publish }
+	result := make(chan error, 1)
+	go func() {
+		subset, err := l.Acquire(a.ID, generation, first, []LedgerCandidate{ca, cb})
+		if err == nil && !slices.Equal(subset, []LedgerCandidate{ca, cb}) {
+			err = errors.New("first offer changed")
+		}
+		result <- err
+	}()
+	<-pruned
+	_, blocked := peer.Acquire(b.ID, generation, second, []LedgerCandidate{ca, cb})
+	close(publish)
+	if err = <-result; err != nil {
+		t.Fatal(err)
+	}
+	l.acquireBarrier = nil
+	if !errors.Is(blocked, ErrBusy) {
+		t.Fatal("competing owner bypassed the admission lock", blocked)
+	}
+	if _, err = peer.Acquire(b.ID, generation, second, []LedgerCandidate{ca, cb}); !errors.Is(err, ErrLedgerOccupied) {
+		t.Fatal("pending holds did not exclude overlapping offer", err)
+	}
+	if err = l.Claimed(a.ID, generation, first, ca.Login); err != nil {
+		t.Fatal(err)
+	}
+	subset, err := peer.Acquire(b.ID, generation, second, []LedgerCandidate{ca, cb})
+	if err != nil || !slices.Equal(subset, []LedgerCandidate{cb}) {
+		t.Fatal("selected A was not pruned from the peer offer", subset, err)
+	}
+	d, _, err := peer.Snapshot()
+	if err != nil || len(d.Groups) != 2 || len(d.Groups[first].Holds) != 1 || len(d.Groups[second].Holds) != 1 {
+		t.Fatal("overlap admitted duplicate holds or slots", d, err)
+	}
+}

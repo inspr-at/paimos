@@ -940,6 +940,12 @@ are available to branch/PR workers. Before a signed candidate exists, the safe
 development route is the synthetic local tests below; these do not use an
 operator pairing, Keychain, harness login or production server:
 
+Do not run agentd by hand; use the installed services. Classic key-file daemons
+get no work in ledger-mode tenants. Manual `psql` needs the capability flag
+(`SET aeon.account_use_capable = 'on'`). A daemon on a different server or tenant
+without ledger mode can still book the same vendor login twice; the local ledger
+does not federate servers. See [shared daemon ledger](features/agentd-shared-ledger.md).
+
 ```sh
 GOMAXPROCS=2 go test -p 2 ./internal/agentsetup -run 'Test(StartupFileErrors|MigratedPairing|ServiceExecutableLayout)'
 GOMAXPROCS=2 go test -p 2 ./cmd/aeon-agentd -run TestServeStartupLogsExactMissingFile

@@ -70,6 +70,7 @@ type Record struct {
 	LedgerGroup           string                       `json:"ledger_group,omitempty"`
 	LedgerGeneration      string                       `json:"ledger_generation,omitempty"`
 	RouteCandidates       []agentsetup.LedgerCandidate `json:"route_candidates,omitempty"`
+	ProcessGroupID        int                          `json:"process_group_id,omitempty"`
 	ProcessStartedAt      time.Time                    `json:"process_started_at,omitzero"`
 	WorkerPickup          *WorkerPickup                `json:"worker_pickup,omitempty"`
 	RecoveryReports       []RecoveryReport             `json:"recovery_reports,omitempty"`
@@ -157,7 +158,8 @@ type Supervisor struct {
 	ledger                 *agentsetup.SharedLedger
 	ledgerBinding          ledgerBinding
 	ledgerRequired         bool
-	ledgerBarrier          func(string) // deterministic fixture barriers; never server input
+	ledgerExitProof        func(Record) bool // fixture injection; defaults to read-only kernel absence
+	ledgerBarrier          func(string)      // deterministic fixture barriers; never server input
 	usageProbes            usageprobe.Probe
 	recoveryMu             sync.Mutex
 	attachedHooks          map[string]*attachedHookBinding
@@ -403,6 +405,11 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	s := &Supervisor{usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic, verificationDiagnostic: c.VerificationDiagnostic}
+	if _, err := state.Read("ledger-member.json", 8192); err == nil {
+		s.ledgerRequired = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
 	s.capacityNow = c.Now
 	s.capacityWake = make(chan struct{}, 1)
 	if err := s.loadCapacityChecks(); err != nil {
@@ -1439,12 +1446,18 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	entry.process = proc
 	entry.record.PID = proc.PID()
 	entry.record.ProcessStartedAt = launchedAt
+	if recovery, ok := proc.(RecoveryProcess); ok {
+		if identity, e := recovery.Ownership(); e == nil && identity.RootPID == proc.PID() && identity.GroupID == proc.PID() {
+			entry.record.ProcessGroupID = identity.GroupID
+			entry.record.ProcessStartedAt = identity.StartedAt
+		}
+	}
 	entry.record.State = "running"
 	saveErr := s.journal.Put(entry.record)
 	runningRecord := entry.record
 	entry.mu.Unlock()
 	if s.ledger != nil {
-		saveErr = errors.Join(saveErr, s.ledger.Running(s.ledgerBinding.Member.ID, runningRecord.LedgerGeneration, runningRecord.LedgerGroup, proc.PID(), launchedAt))
+		saveErr = errors.Join(saveErr, s.ledger.Running(s.ledgerBinding.Member.ID, runningRecord.LedgerGeneration, runningRecord.LedgerGroup, proc.PID(), runningRecord.ProcessStartedAt))
 	}
 	entry.mu.Lock()
 	entry.monitorDone = make(chan struct{})

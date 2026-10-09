@@ -44,6 +44,9 @@ func (r *Remote) LedgerView(ctx context.Context) (agentsetup.View, int, error) {
 		} `json:"host_capacity"`
 	}
 	err := r.Client.Do(ctx, "GET", "/api/agent-pairing/self", nil, &view)
+	r.mu.Lock()
+	r.ledgerPeerTelemetry = err == nil && slices.Contains(view.ServerCapabilities, "peer-running-v1")
+	r.mu.Unlock()
 	return view.View, view.HostCapacity.Policy.MaximumAgents, err
 }
 func (r *Remote) EnrollLedger(ctx context.Context, generation string) error {
@@ -120,6 +123,9 @@ func (s *Supervisor) enableLedgerLocked(ctx context.Context, c LedgerConfig) err
 	if err = agentsetup.RequireLedgerServer(view); err != nil {
 		return err
 	}
+	if c.Root != filepath.Dir(s.state.Path()) {
+		return ErrScope
+	}
 	origin, err := agentsetup.CanonicalLedgerOrigin(c.Origin)
 	if err != nil {
 		return err
@@ -129,6 +135,7 @@ func (s *Supervisor) enableLedgerLocked(ctx context.Context, c LedgerConfig) err
 		return ErrScope
 	}
 	var binding ledgerBinding
+	s.ledgerRequired = true
 	raw, err := s.state.Read("ledger-member.json", 8192)
 	if err == nil {
 		if json.Unmarshal(raw, &binding) != nil || binding.Config != c || binding.Member.Root != c.Root || binding.Member.Label != c.Label {
@@ -283,7 +290,7 @@ func (s *Supervisor) RefreshLedger(ctx context.Context, c LedgerConfig) error {
 	if !ok {
 		return nil
 	}
-	view, _, err := api.LedgerView(ctx)
+	view, maximum, err := api.LedgerView(ctx)
 	if err != nil {
 		return err
 	}
@@ -307,6 +314,22 @@ func (s *Supervisor) RefreshLedger(ctx context.Context, c LedgerConfig) error {
 	if view.LedgerGeneration == nil || *view.LedgerGeneration != data.Generation {
 		return s.enableLedgerLocked(ctx, c)
 	}
+	if err = s.ledger.Maximum(s.ledgerBinding.Member.ID, data.Generation, maximum); err != nil {
+		return err
+	}
+	if reporter, ok := s.api.(interface {
+		PeerRunning(context.Context, int) error
+	}); ok {
+		peer := 0
+		for _, group := range data.Groups {
+			if group.Instance != s.ledgerBinding.Member.ID {
+				peer++
+			}
+		}
+		if err = reporter.PeerRunning(ctx, peer); err != nil {
+			return err
+		}
+	}
 	return s.reconcileLedgerLocked(ctx)
 }
 func (s *Supervisor) releaseLedger(record Record) error {
@@ -326,7 +349,33 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, r := range s.journal.Snapshot() {
+	records := s.journal.Snapshot()
+	if len(records) > 4096 {
+		return agentsetup.ErrLedgerUnavailable
+	}
+	for _, r := range records {
+		if !noLocalProcess(r) {
+			proof := s.ledgerExitProof
+			if proof == nil {
+				proof = confirmedLedgerExit
+			}
+			s.mu.Lock()
+			entry := s.runs[r.RunID]
+			s.mu.Unlock()
+			if entry != nil {
+				entry.mu.Lock()
+				r = entry.record
+				if entry.process == nil && !noLocalProcess(r) && proof(r) {
+					r.ExitObserved = true
+					if err = s.journal.Put(r); err != nil {
+						entry.mu.Unlock()
+						return err
+					}
+					entry.record = r
+				}
+				entry.mu.Unlock()
+			}
+		}
 		if r.LedgerGroup == "" {
 			continue
 		}
@@ -365,7 +414,14 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 			}
 			s.setLedgerRecord(r)
 		} else if r.ExitObserved || noLocalProcess(r) && r.State != "claim_pending" {
-			if err = s.releaseLedger(r); err != nil {
+			// A rebuild imports only occupancy. Proven-exited records need no new
+			// group, so their old coordinates are cleared without a stale mutation.
+			if _, exists := data.Groups[r.LedgerGroup]; exists {
+				if err = s.releaseLedger(r); err != nil {
+					return err
+				}
+			}
+			if err = s.clearLedgerCoordinates(r.RunID); err != nil {
 				return err
 			}
 		}
@@ -435,5 +491,59 @@ func (s *Supervisor) LeaveLedger(ctx context.Context) error {
 			return err
 		}
 	}
-	return s.ledger.Leave(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, true)
+	if err = s.ledger.Leave(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, true); err != nil {
+		return err
+	}
+	ledger := s.ledger
+	s.ledger = nil
+	return ledger.Close()
+}
+
+// PeerRunning is advisory and negotiated independently. Servers that strictly
+// decode capacity signals never receive a field they have not advertised.
+func (r *Remote) PeerRunning(ctx context.Context, count int) error {
+	r.mu.RLock()
+	supported := r.ledgerPeerTelemetry
+	r.mu.RUnlock()
+	if !supported {
+		return nil
+	}
+	if count < 0 || count > 4096 {
+		return ErrScope
+	}
+	raw, err := json.Marshal(sampleHost(ctx, false))
+	if err != nil {
+		return err
+	}
+	var body map[string]any
+	if json.Unmarshal(raw, &body) != nil {
+		return ErrScope
+	}
+	body["peer_running"] = count
+	return r.Client.Do(ctx, "POST", "/api/agent-pairing/self/capacity", body, nil)
+}
+
+func (s *Supervisor) clearLedgerCoordinates(run string) error {
+	s.mu.Lock()
+	entry := s.runs[run]
+	s.mu.Unlock()
+	if entry == nil {
+		return ErrNotOwned
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	r := entry.record
+	if r.LedgerGroup == "" {
+		return nil
+	}
+	if !noLocalProcess(r) || r.State == "claim_pending" || r.State == "route_pending" {
+		return ErrProcessesUnconfirmed
+	}
+	r.LedgerGroup, r.LedgerGeneration = "", ""
+	r.RouteCandidates = nil
+	if err := s.journal.Put(r); err != nil {
+		return err
+	}
+	entry.record = r
+	return nil
 }

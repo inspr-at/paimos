@@ -75,8 +75,9 @@ type ledgerMembership struct {
 }
 
 type SharedLedger struct {
-	root    *Store
-	members *Store
+	root           *Store
+	members        *Store
+	acquireBarrier func() // deterministic fixture barrier inside the admission lock
 }
 
 func LedgerID() (string, error) {
@@ -241,9 +242,14 @@ func (l *SharedLedger) read() (LedgerData, error) {
 	if err != nil {
 		return d, err
 	}
-	for id := range d.Instances {
-		if catalog.Members[id] == "" {
+	for id, v := range d.Instances {
+		if catalog.Members[id] == "" || len(v.Fingerprint) != 64 || !isHex(v.Fingerprint) || v.PID < 1 || v.StartedAt.IsZero() || v.MaximumAgents < 0 || v.MaximumAgents > 64 || len(v.Logins) > 64 {
 			return d, ErrLedgerUnavailable
+		}
+		for _, login := range v.Logins {
+			if !validLogin(login) {
+				return d, ErrLedgerUnavailable
+			}
 		}
 	}
 	for id, g := range d.Groups {
@@ -294,6 +300,23 @@ func (l *SharedLedger) Register(m LedgerMember) error {
 		return ErrLedgerOwner
 	}
 	return l.locked(func() error {
+		var repair ledgerMembership
+		catalogRaw, err := l.root.Read("membership.json", 64<<10)
+		if err != nil || decodeLedgerJSON(catalogRaw, &repair) != nil || repair.Schema != ledgerSchema || repair.Members == nil {
+			return ErrLedgerUnavailable
+		}
+		expected, _ := json.Marshal(m)
+		recordRaw, recordErr := l.members.Read(m.ID+".json", 4096)
+		if repair.Members[m.ID] == "" && recordErr == nil && bytes.Equal(recordRaw, expected) {
+			if len(repair.Members) >= maxLedgerMembers {
+				return ErrLedgerUnavailable
+			}
+			repair.Members[m.ID] = Hash(expected)
+			if err = writeLedgerJSON(l.root, "membership.json", repair, false); err != nil {
+				return err
+			}
+		}
+
 		catalog, members, err := l.membership()
 		if err != nil {
 			return err
@@ -335,7 +358,7 @@ func (l *SharedLedger) Import(member string, instance LedgerInstance, groups []L
 		if err != nil || catalog.Members[member] == "" {
 			return ErrLedgerOwner
 		}
-		if instance.PID < 1 || instance.StartedAt.IsZero() || instance.MaximumAgents < 0 || len(instance.Logins) > 64 {
+		if instance.PID < 1 || instance.StartedAt.IsZero() || (instance.MaximumAgents < 0 || instance.MaximumAgents > 64) || len(instance.Logins) > 64 {
 			return ErrLedgerUnavailable
 		}
 		for _, login := range instance.Logins {
@@ -482,6 +505,9 @@ func (l *SharedLedger) Acquire(member, generation, gid string, candidates []Ledg
 		if len(subset) == 0 {
 			return ErrLedgerOccupied
 		}
+		if l.acquireBarrier != nil {
+			l.acquireBarrier()
+		}
 		d.Groups[gid] = LedgerGroup{ID: gid, Instance: member, Generation: generation, State: "pending", Holds: holds}
 		return nil
 	})
@@ -596,6 +622,16 @@ func (l *SharedLedger) Leave(member, generation string, confirmed bool) error {
 			}
 		}
 		delete(d.Instances, member)
+		ready := true
+		for id := range catalog.Members {
+			if id != member {
+				v := d.Instances[id]
+				ready = ready && v.Imported && v.Enrolled
+			}
+		}
+		if ready {
+			d.Rebuilding = false
+		}
 		if err = writeLedgerJSON(l.root, "ledger.json", d, false); err != nil {
 			return err
 		}
@@ -611,5 +647,17 @@ func (l *SharedLedger) Leave(member, generation string, confirmed bool) error {
 			}
 		}
 		return ErrLedgerOwner
+	})
+}
+
+func (l *SharedLedger) Maximum(member, generation string, maximum int) error {
+	if maximum < 0 || maximum > 64 {
+		return ErrLedgerUnavailable
+	}
+	return l.mutate(member, generation, false, func(d *LedgerData) error {
+		v := d.Instances[member]
+		v.MaximumAgents = maximum
+		d.Instances[member] = v
+		return nil
 	})
 }

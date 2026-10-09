@@ -508,6 +508,10 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestSetupPromptOffersAccountsAndRequiresAffirmativeChoice","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestSharedLedgerCLIAdvertisesCapabilityAndRejectsInvalidInstances","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestSharedLedgerCLIStatusAndRebuildKeepRemovedServiceMember","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestStatusCommandDuringPairLockIsReadOnly","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestStatusListsEveryAccountIncludingReady","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -1790,11 +1794,25 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerEnrollmentCrashAndOldServerFailClosed","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerEnrollmentResponseLossRequiresRestartImport","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerGenericConflictKeepsAttempt","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerHandoverWaitsAcrossLaunchWindows","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerJournalV3MigrationPreservesEvidenceAndRejectsDowngrade","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerLostRouteResponseSameOwnerKeepsGroup","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerOfflineOwnerLeaveNeedsExitAndKeepsUnpublishedFork","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerRebuildClearsExitedOldGenerationCoordinates","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerRebuildRefusesOldDispatchBeforeLaunching","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerRemoteHeadersAndNegotiatedTelemetry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerRemovedServiceRebuildRequiresOwnerExitProof","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerRouteCommitCrashOwnerOnlyReplay","tier":"ESSENTIAL"}
     ,
@@ -1995,6 +2013,8 @@
     {"kind":"go","package":"internal/agentdwire","name":"TestOpenClientReportsFallbackHomeMismatch","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentdwire","name":"TestOpenClientUsesSharedSocketResolver","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentdwire","name":"TestSharedLedgerWireImportAndLeaveRequireOwnerReceipts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentdwire","name":"TestStepUpWireChecksOriginAndSendsOnlyID","tier":"ESSENTIAL"}
     ,
@@ -2911,6 +2931,8 @@
     {"kind":"go","package":"internal/agentsetup","name":"TestSharedLedgerInstanceRootsLabelsLogsAndCanonicalOrigins","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestSharedLedgerMissingOrUnreadableMemberFailsClosed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestSharedLedgerOverlappingOffersSerializeBeforePublishingHolds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestSharedLedgerPermanentLockSurvivesDataReplacement","tier":"ESSENTIAL"}
     ,

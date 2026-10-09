@@ -4,7 +4,9 @@ package agentd
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -22,6 +24,38 @@ func noLocalProcess(r Record) bool {
 }
 
 func validateLaunchRecord(r Record) error {
+	if r.LedgerGroup != "" {
+		if len(r.LedgerGroup) != 32 || !uuidPattern.MatchString(r.LedgerGeneration) {
+			return errors.New("invalid durable ledger coordinates")
+		}
+		if _, err := hex.DecodeString(r.LedgerGroup); err != nil {
+			return errors.New("invalid durable ledger coordinates")
+		}
+	} else if r.LedgerGeneration != "" {
+		return errors.New("invalid durable ledger coordinates")
+	}
+	if len(r.RouteCandidates) > 64 {
+		return errors.New("invalid durable ledger subset")
+	}
+	seen := map[string]bool{}
+	for _, c := range r.RouteCandidates {
+		if c.AccountID == "" || seen[c.AccountID] || len(c.Login.Harness) == 0 || len(c.Login.Harness) > 32 || strings.ContainsAny(c.Login.Harness, "\x00\r\n") {
+			return errors.New("invalid durable ledger subset")
+		}
+		seen[c.AccountID] = true
+		if c.Login.Identity != "unknown" {
+			if len(c.Login.Identity) != 64 {
+				return errors.New("invalid durable ledger subset")
+			}
+			if _, err := hex.DecodeString(c.Login.Identity); err != nil {
+				return errors.New("invalid durable ledger subset")
+			}
+		}
+	}
+	if r.ProcessGroupID != 0 && (r.ProcessGroupID != r.PID || r.PID < 1 || r.ProcessStartedAt.IsZero()) {
+		return errors.New("invalid durable process group")
+	}
+
 	switch r.LaunchState {
 	case launchRoutePending:
 		if r.PID == 0 && r.ClaimRoute == nil && r.Sequence == 0 && len(r.Pending) == 0 && ((r.State == "route_pending" && len(r.RouteCandidates) > 0 && len(r.RouteCandidates) <= 64 && r.LedgerGroup != "" && r.LedgerGeneration != "") || ((r.State == "completed" || r.State == "failed" || r.State == "cancelled") && len(r.RouteCandidates) == 0 && r.LedgerGroup == "")) {

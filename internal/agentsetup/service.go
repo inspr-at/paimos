@@ -31,7 +31,8 @@ type ServiceReceipt struct {
 }
 
 type ServiceManager struct {
-	Instance string
+	Instance       string
+	LedgerPeerPIDs map[int]bool // fresh owner-imported ledger processes; local orchestration only
 	// FixtureLabel is available to isolated platform fixtures, never CLI/server input.
 	// Production always leaves it empty. Only the reserved fixture namespace is accepted.
 	FixtureLabel string
@@ -183,7 +184,7 @@ func (m ServiceManager) Preflight(ctx context.Context, root string, receipt *Ser
 			}
 			pid, parseErr := strconv.Atoi(fields[0])
 			executable := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), fields[0]))
-			if m.Instance == "" && parseErr == nil && pid != os.Getpid() && (executable == m.Executable || executable == physical) {
+			if !m.LedgerPeerPIDs[pid] && parseErr == nil && pid != os.Getpid() && (executable == m.Executable || executable == physical) {
 				return ErrServiceConflict
 			}
 		}

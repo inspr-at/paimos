@@ -326,7 +326,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	}
 	engine.API = agentsetup.HTTPClient{Origin: origin}
 	if instance != "" && command == "setup" {
-		if err := checkSharedPairing(context.Background(), *manager, root, origin, tenantID); err != nil {
+		if err := checkSharedPairing(context.Background(), manager, root, origin, tenantID); err != nil {
 			return err
 		}
 	}

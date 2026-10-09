@@ -72,16 +72,9 @@ func serverLedgerView(ctx context.Context, root string) (agentsetup.RuntimeConfi
 	}
 	return c, view, err
 }
-func checkSharedPairing(ctx context.Context, manager agentsetup.ServiceManager, root, origin, tenant string) error {
+func checkSharedPairing(ctx context.Context, manager *agentsetup.ServiceManager, root, origin, tenant string) error {
 	op, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	if err := manager.Preflight(op, root, nil); err != nil {
-		// A resumed service has a receipt checked again by Engine.Install. The
-		// read-only ledger service inventory still must cover all existing labels.
-		if !errors.Is(err, agentsetup.ErrServiceConflict) {
-			return err
-		}
-	}
 	services, err := manager.InstalledLedgerServices(op)
 	if err != nil {
 		return err
@@ -110,10 +103,59 @@ func checkSharedPairing(ctx context.Context, manager agentsetup.ServiceManager, 
 			return errors.New("this origin and tenant already have a pairing")
 		}
 	}
-	return nil
+	// Every running peer proves its own PID by a fenced import. This preserves
+	// the existing unrecorded-process refusal while allowing verified peers.
+	path, err := agentsetup.DefaultLedgerRoot(manager.Platform.OS, manager.Home, os.Getenv("XDG_STATE_HOME"))
+	if err != nil {
+		return err
+	}
+	manager.LedgerPeerPIDs = map[int]bool{}
+	importedRoots := map[string]bool{}
+	for _, service := range services {
+		if service.Root == root {
+			continue
+		}
+		peer, err := agentdwire.OpenClient(filepath.Join(service.Root, "daemon"))
+		if err != nil {
+			return errors.New("installed member must run its own ledger handover before shared pairing")
+		}
+		peerConfig, _, err := serverLedgerView(op, service.Root)
+		if err != nil {
+			return err
+		}
+		if err = peer.ImportLedger(op, agentd.LedgerConfig{Path: path, Label: service.Label, Root: service.Root, Origin: peerConfig.Origin}); err != nil {
+			return err
+		}
+		importedRoots[service.Root] = true
+	}
+	if len(services) > 0 {
+		ledger, err := agentsetup.OpenSharedLedger(path, false)
+		if err != nil {
+			return err
+		}
+		data, members, err := ledger.Snapshot()
+		ledger.Close()
+		if err != nil {
+			return err
+		}
+		for _, member := range members {
+			if importedRoots[member.Root] {
+				instance := data.Instances[member.ID]
+				if !instance.Imported || !instance.Enrolled || instance.PID < 1 {
+					return agentsetup.ErrLedgerUnavailable
+				}
+				manager.LedgerPeerPIDs[instance.PID] = true
+			}
+		}
+	}
+	receipt, err := agentsetup.ReadServiceReceipt(root)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return manager.Preflight(op, root, receipt)
 }
 func prepareSharedPairing(ctx context.Context, manager agentsetup.ServiceManager, root string, c agentsetup.RuntimeConfig) error {
-	if err := checkSharedPairing(ctx, manager, root, c.Origin, c.TenantID); err != nil {
+	if err := checkSharedPairing(ctx, &manager, root, c.Origin, c.TenantID); err != nil {
 		return err
 	}
 	services, err := manager.InstalledLedgerServices(ctx)
@@ -143,6 +185,13 @@ func prepareSharedPairing(ctx context.Context, manager agentsetup.ServiceManager
 			return err
 		}
 	}
+	label, err := agentsetup.InstanceLabel(manager.Instance)
+	if err != nil {
+		return err
+	}
+	if current, err := agentdwire.OpenClient(filepath.Join(root, "daemon")); err == nil {
+		return current.ImportLedger(ctx, agentd.LedgerConfig{Path: ledgerPath, Label: label, Root: root, Origin: c.Origin})
+	}
 	accounts, adapters, err := pairedAdapters(c)
 	if err != nil {
 		return err
@@ -159,10 +208,6 @@ func prepareSharedPairing(ctx context.Context, manager agentsetup.ServiceManager
 		return err
 	}
 	defer owner.Close(context.Background())
-	label, err := agentsetup.InstanceLabel(manager.Instance)
-	if err != nil {
-		return err
-	}
 	return owner.EnableLedger(ctx, agentd.LedgerConfig{Path: ledgerPath, Label: label, Root: root, Origin: c.Origin})
 }
 func leaveSharedPairing(ctx context.Context, root string) error {
@@ -186,29 +231,13 @@ func leaveSharedPairing(ctx context.Context, root string) error {
 	if err == nil {
 		return client.LeaveLedger(ctx)
 	}
-	// Offline cleanup uses this owner's root and authority, never another
-	// member's journal. Unknown fork evidence remains occupied and refuses leave.
-	c, key, err := agentsetup.ReadRuntime(root)
+	// The independent lifecycle response already confirmed revocation before
+	// this hook. Offline owner reconciliation needs no revoked runtime key.
+	c, err := agentsetup.ReadRuntimeConfig(root)
 	if err != nil {
 		return err
 	}
-	accounts, adapters, err := pairedAdapters(c)
-	if err != nil {
-		return err
-	}
-	owner, err := agentd.NewSupervisor(ctx, agentd.Config{API: agentd.NewRemote(c.Origin, string(key)), StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1}})
-	if err != nil {
-		return err
-	}
-	defer owner.Close(context.Background())
-	config, err := ledgerConfig(root, c)
-	if err != nil {
-		return err
-	}
-	if err = owner.EnableLedger(ctx, config); err != nil {
-		return err
-	}
-	return owner.LeaveLedger(ctx)
+	return agentd.OfflineLeaveLedger(state, c.DaemonID, c.TenantID, c.PrincipalID)
 }
 func ledgerCommand(args []string, out io.Writer) error {
 	if len(args) < 1 || (args[0] != "status" && args[0] != "rebuild") {
