@@ -382,9 +382,14 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 	unconfirmed := false
 	defer func() {
 		s.mu.Lock()
+		previous := s.ledgerRouteUnconfirmed
 		s.ledgerRouteUnconfirmed = unconfirmed
 		s.mu.Unlock()
-		s.reportPollDiagnostic("")
+		// Emit the first hold immediately. Later polls retain their complete
+		// reason set, including queue failures, for unchanged-cause rate limiting.
+		if unconfirmed && !previous {
+			s.reportPollDiagnostic("")
+		}
 	}()
 	for _, r := range records {
 		if !noLocalProcess(r) {

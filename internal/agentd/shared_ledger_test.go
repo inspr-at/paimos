@@ -31,6 +31,7 @@ type ledgerFixtureAPI struct {
 	routeErr            error
 	routeErrByRun       map[string]error
 	runsByID            map[string]Run
+	queueErr            error
 	routeCommitted      bool
 	routeCalls          int
 	offered             [][]string
@@ -55,6 +56,12 @@ func (a *ledgerFixtureAPI) EnrollLedger(_ context.Context, generation string) er
 	return nil
 }
 func (a *ledgerFixtureAPI) SetLedgerGeneration(generation string) { a.ledgerGeneration = generation }
+func (a *ledgerFixtureAPI) Queued(ctx context.Context) ([]Run, error) {
+	if a.queueErr != nil {
+		return nil, a.queueErr
+	}
+	return a.fakeAPI.Queued(ctx)
+}
 func (a *ledgerFixtureAPI) GetRun(ctx context.Context, id string) (Run, error) {
 	if run, ok := a.runsByID[id]; ok {
 		return run, nil
@@ -124,6 +131,24 @@ func TestSharedLedgerUnconfirmedIntentAllowsOtherLoginDispatch(t *testing.T) {
 			other.mu.Unlock()
 			if !launched || !s.probedAccounts["B"] || !slices.Equal(api.offered[len(api.offered)-1], []string{"B"}) || !slices.Equal(reasons, []string{"ledger_route_unconfirmed"}) {
 				t.Fatal("independent login did not dispatch with one bounded diagnostic", launched, api.offered, reasons)
+			}
+			// A persistent queue outage must not alternate the diagnostic set
+			// between refresh and poll, flooding unchanged causes every iteration.
+			api.queueErr = errors.New("fixture queue unavailable")
+			if err := s.PollOnce(t.Context()); !errors.Is(err, api.queueErr) {
+				t.Fatal("queue outage was not reported honestly", err)
+			}
+			diagnosticCount := len(reasons)
+			for range 2 {
+				if err := s.RefreshLedger(t.Context(), config); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.PollOnce(t.Context()); !errors.Is(err, api.queueErr) {
+					t.Fatal("queue outage was lost", err)
+				}
+			}
+			if len(reasons) != diagnosticCount {
+				t.Fatal("unchanged ledger and queue failures flooded diagnostics", reasons)
 			}
 		})
 	}
