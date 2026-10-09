@@ -8,7 +8,8 @@
       "account": "agent accounts"
     },
     "special": {
-      "account.overview.read": "See all enrolled account capacity"
+      "account.overview.read": "See all enrolled account capacity",
+      "account.use.manage": "Manage account use contexts and rules"
     }
   }
 }

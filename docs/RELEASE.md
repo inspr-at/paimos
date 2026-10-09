@@ -1912,7 +1912,7 @@ Release 122's server boots on that migrated database despite not knowing the
 `work` kind. Boot success therefore does not prove rollback correctness.
 **Rollback requires restoring the matching verified pre-switch database and
 file/blob dump plus the exact old artifact; merely repinning release 122 is
-unsupported.** A partial later migration failure can leave 1215 committed;
+unsupported.** After a restore, re-check the account matrix and revoked keys/roles. A partial later migration failure can leave 1215 committed;
 never delete ledger rows or modify published migration bytes to retry.
 
 Integration retains ledger-owned 1237 for release-leaf lifecycle and renumbers
@@ -2361,3 +2361,16 @@ OPS can upload the generated `api/openapi.yaml`; this is separate from current
 release behavior. Update worker contract-edit guidance to the area sources
 when integrating. Rollback is a revert of this mechanical commit plus OPS's
 preparation step; it restores the original tracked bundle and old readers.
+
+
+Account-matrix rollback floor (AEON-1051): before any tenant activates, rollback
+below the account-use release is `digest_safe`. The first matrix denial or ledger
+enrolment activates a monotonic tenant floor. Thereafter rollback below that
+release is `restore_required`: old binaries receive SQLSTATE `0A000` at every
+principal transaction entry, including empty account pools, and cannot resolve,
+hand out, reserve or claim an account. Roll forward, or restore the verified
+pre-release database and exact artifact. The release record must state this
+conditional rollback class. New binaries refuse startup when the database
+requires a capability they do not support. Manual SQL against an activated
+tenant must declare `SET LOCAL aeon.account_use_capable = 'on'` inside its
+transaction; this is a version capability, not authorization or a credential.

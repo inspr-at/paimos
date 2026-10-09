@@ -76,6 +76,7 @@
     "engine.manage": "Manage shadow admission settings",
     "engine.read": "Read shadow admission settings",
     "events.subscribe": "Subscribe to authorized changes",
-    "harness.watch": "View live conversations"
+    "harness.watch": "View live conversations",
+    "account.use.manage": "Manage account use contexts and rules"
   }
 }

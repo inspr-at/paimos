@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1310_account_use_entry_guard.sql",
+      "sha256": "8c186b422df21eda4b61555791c7f2c0b49daf20e88c97eea76ba38ebb6094ec",
+      "ticket": "AEON-1051",
+      "reason": "Retains the complete released 0821 principal visibility and creator ceiling contract, adding only the unconditional account_use_v1 capability guard immediately after tenant entry. Unactivated tenants keep their previous behavior. Activated tenants explicitly refuse every principal transaction from older binaries, including empty account pools. CREATE OR REPLACE is outside the expand-safe allowlist; this exact-byte draft requires coordinator acceptance and previous published image compatibility before merge or release. No data, credentials, scopes or release authority are changed."
+    }
+  ]
+}

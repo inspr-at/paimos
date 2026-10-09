@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import unittest
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('migration_compat_probe', Path(__file__).with_name('migration-compat-probe.py'))
 module = importlib.util.module_from_spec(spec)
@@ -146,6 +147,34 @@ class ProbeTest(unittest.TestCase):
         self.responses['/api/ready'] = {'status': 'ready', 'reason': 'not_accepting'}
         with self.assertRaisesRegex(AssertionError, 'previous release is not ready'):
             self.check()
+
+    def test_activated_refusal_rejects_success_and_executable_errors(self):
+        path = '/api/models/resolve?role=build&harness=codex'
+        self.responses[path] = {'command_template': 'unsafe launch'}
+        with self.assertRaisesRegex(AssertionError, 'activated previous binary returned HTTP 200'):
+            self.probe.refused(path)
+        self.responses[path] = (500, 'application/json', b'{"command_template":"unsafe launch"}')
+        with self.assertRaisesRegex(AssertionError, 'unsafe activated response'):
+            self.probe.refused(path)
+
+    def test_unrelated_refusal_cannot_pass_the_capability_gate(self):
+        path = '/api/models/resolve?role=build&harness=codex'
+        self.responses[path] = (403, 'application/json', b'{"error":"forbidden"}')
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
+        boundary.errors = Mock(side_effect=[(0, 0), (0, 0)])
+        with self.assertRaisesRegex(AssertionError, 'lacks exact capability entry evidence'):
+            boundary.request(self.probe, path)
+        boundary.errors = Mock(side_effect=[(0, 0), (1, 1)])
+        with contextlib.redirect_stdout(io.StringIO()):
+            boundary.request(self.probe, path)
+
+    def test_error_evidence_requires_exact_sqlstate_and_entry_function(self):
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
+        result = Mock(returncode=0, stdout='', stderr='ERROR: 42501: '+module.CAPABILITY_ERROR)
+        with patch.object(module.subprocess, 'run', return_value=result):
+            self.assertEqual(boundary.errors(), (0, 0))
+            result.stderr = 'ERROR: 0A000: '+module.CAPABILITY_ERROR+'\nCONTEXT: aeon_enter_principal(uuid,uuid,boolean)'
+            self.assertEqual(boundary.errors(), (1, 1))
 
 
 if __name__ == '__main__':

@@ -9,7 +9,8 @@
       "account.overview.read",
       "account.probe",
       "account.read",
-      "account.route"
+      "account.route",
+      "account.use.manage"
     ],
     "member": [
       "account.overview.read"
@@ -19,7 +20,8 @@
       "account.overview.read",
       "account.probe",
       "account.read",
-      "account.route"
+      "account.route",
+      "account.use.manage"
     ]
   },
   "registry": [
@@ -81,6 +83,17 @@
       "key": "account.route",
       "owner_workstation_grantable": true,
       "risk": "medium"
+    },
+    {
+      "key": "account.use.manage",
+      "group": "Account",
+      "description": "Manage account use contexts and rules",
+      "risk": "high",
+      "grantable_at": [
+        "workspace"
+      ],
+      "agent_grantable": false,
+      "owner_workstation_grantable": false
     }
   ],
   "words": {
@@ -88,7 +101,8 @@
       "account": "agent accounts"
     },
     "special": {
-      "account.overview.read": "See all enrolled account capacity"
+      "account.overview.read": "See all enrolled account capacity",
+      "account.use.manage": "Manage account use contexts and rules"
     }
   }
 }
