@@ -28,8 +28,8 @@ func TestEngineAccountContextCapsContract(t *testing.T) {
 			f := newFixture(t)
 			f.enable(t)
 			var sibling string
-			must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,owner_person_id,label,capacity_owner,linked_at,last_probe_at,last_probe_ok)
-VALUES($1,'context-sibling','codex','sibling',$2,$3,'Denied sibling',$3,$4,$4,true) RETURNING id::text`, f.person.TenantID, f.agent.ID, f.person.ID, f.at).Scan(&sibling))
+			must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,owner_person_id,label,capacity_owner,linked_at,last_probe_at,last_probe_ok,last_daemon_generation)
+VALUES($1,'context-sibling','codex','sibling',$2,$3,'Denied sibling',$3,$4,$4,true,'generation') RETURNING id::text`, f.person.TenantID, f.agent.ID, f.person.ID, f.at).Scan(&sibling))
 			if !tc.unknownDenied {
 				f.exec(t, `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','context',10080,1,$3,$4,'harness')`, f.person.TenantID, sibling, f.at.Add(7*24*time.Hour), f.at)
 			} else {
@@ -62,7 +62,7 @@ VALUES($1,'context-sibling','codex','sibling',$2,$3,'Denied sibling',$3,$4,$4,tr
 			d := agentplan.DefaultDaily()
 			d.AtLimit = "ladder"
 			d.BoostToday = &agentplan.DailyBoost{LimitUsedPct: 20, EnteredAs: "used", Until: end}
-			raw, err := json.Marshal(agentplan.Plan{Total: 5, Daily: map[string]agentplan.DailySettings{"codex": d}})
+			raw, err := json.Marshal(agentplan.Plan{Total: 5, Limits: map[string]agentplan.Limit{}, Daily: map[string]agentplan.DailySettings{"codex": d}})
 			must(t, err)
 			f.exec(t, `INSERT INTO user_preferences(tenant_id,principal_id,key,value) VALUES($1,$2,'agents.working',$3)`, f.person.TenantID, f.person.ID, raw)
 			if tc.unknownAllowed {

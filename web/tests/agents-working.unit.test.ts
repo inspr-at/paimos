@@ -195,6 +195,17 @@ describe('honest account room (AEON-720)', () => {
     expect(accountRoomCopy(absent)).toBe('No linked accounts.')
     expect(accountRoomDetail(absent, 'codex')).toBe('Codex no linked accounts')
   })
+  // Risk: context denial loses its reason in the working dial and queued work
+  // because the shared wait-code map omits the new server reason.
+  it('explains project context denial in account room and waiting work', () => {
+    const room = workingAccountRoom(buildRows([input('codex')], [cap('codex', { ...ready(0), rank: 0, wait: { code: 'context', run_now_allowed: false } })]), now, true)
+    expect(room.room.codex).toBe(0)
+    expect(room.full).toBe(false)
+    expect(room.reasons.codex).toBe('no account is allowed for this project’s context')
+    expect(accountRoomDetail(room, 'codex')).toBe('Codex no account is allowed for this project’s context')
+    const idle = { ...snapshot, total: 5, limits: {}, running: {}, running_total: 0 }
+    expect(waitingCopy(idle, idle, room.room, [{ harness: 'codex' }], room.reasons)).toBe('1 waiting: Codex: no account is allowed for this project’s context')
+  })
   it('rejects stale projections and never doubles shared quota aliases across groups', () => {
     const rows = buildRows([input('codex', 'a'), input('codex', 'b')], [
       { ...cap('a', ready(3)), quota_fingerprint: 'shared', group_id: 'one' },

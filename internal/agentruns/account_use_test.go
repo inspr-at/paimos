@@ -104,7 +104,7 @@ func TestQueueAccountContextDiscoveryAndPickup(t *testing.T) {
 		t.Fatal("pickup spilled past context", picked)
 	}
 	var current agentruns.Run
-	f.call(t, f.agent, "GET", "/api/runs/"+entry.Run.ID, nil, 200, &current)
+	f.call(t, f.person, "GET", "/api/runs/"+entry.Run.ID, nil, 200, &current)
 	if current.Status != "queued" || current.AccountID != nil {
 		t.Fatal(current)
 	}
