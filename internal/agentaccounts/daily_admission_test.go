@@ -195,7 +195,7 @@ func TestDailyAdmissionCurrentFactSurvivesPreLinkWindow(t *testing.T) {
 	}
 	ctx := context.WithValue(tenant.WithPrincipal(dbtest.Seed(t.Context()), f.runner), clockKey{}, now)
 	if err := db.InTenant(ctx, appPool, f.admin.TenantID, func(tx pgx.Tx) error {
-		return ingestReadings(ctx, tx, f.runner, f.account.ID, []capacity.Reading{{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: 10, ResetsAt: now.Add(7 * 24 * time.Hour), ReadAt: linked.Add(-time.Minute), Source: "harness"}})
+		return ingestReadings(ctx, tx, f.runner, f.account.ID, []capacity.Reading{{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: 10, ResetsAt: now.Add(6 * 24 * time.Hour), ReadAt: linked.Add(-time.Minute), Source: "harness"}})
 	}); err != nil {
 		t.Fatal(err)
 	}
