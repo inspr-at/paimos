@@ -452,6 +452,10 @@ test('a list still on its way when the person changes is never shown to the next
   })
   await page.goto('/agents')
   await expect.poll(() => anyAsked).toBeGreaterThanOrEqual(1)
+  // The page asks for this list before its sessions and per-project permissions. Hold the
+  // switch until its first load has settled, or those reads would land on Ola's slow
+  // permissions route and the page would never get as far as a row to click.
+  await expect(page.locator('[data-row^="s:"] .c-state').first()).toBeVisible()
   // Ola signs in to another workspace; the next navigation refreshes the session. Her
   // permissions are slow, so the old answer lands while nobody is allowed yet, and the
   // new list is slow too: the old rows must not show in between.
