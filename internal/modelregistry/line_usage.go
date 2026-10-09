@@ -18,10 +18,11 @@ type lineUse struct {
 	project     string
 }
 type lineUsageDocument struct {
-	UsedBy      []lineUse  `json:"used_by"`
-	Replacement simplePick `json:"replacement"`
-	Revision    string     `json:"revision"`
-	Incomplete  bool       `json:"incomplete"`
+	UsedBy       []lineUse  `json:"used_by"`
+	Replacement  simplePick `json:"replacement"`
+	Revision     string     `json:"revision"`
+	Incomplete   bool       `json:"incomplete"`
+	LineProfiles []Profile  `json:"line_profiles"`
 }
 
 func (m *Module) lineUsage(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +119,10 @@ func (m *Module) lineUsage(w http.ResponseWriter, r *http.Request) {
 			}
 			out.UsedBy = append(out.UsedBy, u)
 		}
+		// The profiles and the revision are one snapshot. A later list must not
+		// be paired with this revision, and this revision must not be paired
+		// with the list the page already held.
+		out.LineProfiles = ps
 		out.Revision, err = registryRevision(ctx, tx)
 		return err
 	})
