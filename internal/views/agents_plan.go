@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -51,9 +52,11 @@ func (m *Module) getAgentsPlan(w http.ResponseWriter, r *http.Request) {
 	// authorized by person ownership, not project visibility. Keep explicit
 	// tenant and owner predicates; return no project/session identities.
 	ctx := db.AllProjects(r.Context(), "agents plan: authorized person's running count only")
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
-		out, err = agentplan.ReadTx(ctx, tx, p)
+		out, err = agentaccounts.ReadPlanTx(ctx, tx, p)
 		return err
 	})
 	if errors.Is(err, authz.ErrForbidden) {
