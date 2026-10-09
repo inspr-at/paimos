@@ -130,7 +130,7 @@ test('an unmanaged inbox session offers durable Pause/Stop, with one quiet line'
   await row(page, live.id).hover()
   await row(page, live.id).getByRole('button', { name: 'Actions for codex-outside' }).click()
   const menu = page.getByRole('menu', { name: 'Actions for codex-outside' })
-  await expect(menu.getByRole('menuitem')).toHaveText(['Pause…', /^Open PHAROS-12/, 'Copy session id', 'Remove…', 'Stop now…'])
+  await expect(menu.getByRole('menuitem')).toHaveText(['Pause…', /^Open PHAROS-12/, 'Copy session id', 'Stop now…', 'Remove…'])
   await expect(menu).toContainText(/Runs outside aeon — stop it in its terminal/i)
   await expect(menu.getByRole('menuitem', { name: /Interrupt|Name, model, effort/ })).toHaveCount(0)
   await expect(page.locator('[role="menuitem"][aria-disabled="true"], [role="menuitem"]:disabled')).toHaveCount(0)
@@ -144,7 +144,7 @@ test('a managed session menu offers Interrupt, Stop, settings and Remove', async
   await row(page, lead.id).hover()
   await row(page, lead.id).getByRole('button', { name: 'Actions for claude-lead' }).click()
   const menu = page.getByRole('menu', { name: 'Actions for claude-lead' })
-  await expect(menu.getByRole('menuitem')).toHaveText(['Pause…', /^Interrupt this step/, 'Name, model, effort', /^Open PHAROS-11/, 'Copy session id', 'Remove…', 'Stop now…'])
+  await expect(menu.getByRole('menuitem')).toHaveText(['Pause…', /^Interrupt this step/, 'Name, model, effort', /^Open PHAROS-11/, 'Copy session id', 'Stop now…', 'Remove…'])
   await expect(menu).not.toContainText('Runs outside')
   // managed_control_v1: Interrupt goes through the ownership-aware route, bound to the process generation.
   await menu.getByRole('menuitem', { name: /^Interrupt/ }).click()

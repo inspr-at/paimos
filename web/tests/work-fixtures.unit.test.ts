@@ -22,6 +22,13 @@ it('HTTP snapshot scenarios keep a healthy stream while explicit event transport
   browser.EventSource = ExplicitStream
   await mockWork(page, fixtures())
   expect(browser.EventSource).toBe(ExplicitStream)
+  class EventSource extends EventTarget { close() {} }
+  browser.EventSource = EventSource
+  const init = vi.spyOn(page, 'addInitScript')
+  init.mockClear()
+  await mockWork(page, fixtures(), { nativeEvents: true })
+  expect(init).not.toHaveBeenCalled()
+  expect(browser.EventSource).toBe(EventSource)
 })
 
 async function world(data: Fixtures) {
