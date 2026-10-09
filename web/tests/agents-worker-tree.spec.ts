@@ -214,19 +214,19 @@ test('a live-line count and the menu History open a folded Sessions section with
   const sessions = page.getByRole('region', { name: 'Sessions' })
   const toggle = sessions.locator('.fs-head > .fs-tog')
   await expect(toggle).toHaveAttribute('aria-expanded', 'false')
-  await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ Working\./ }).click()
+  await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ working\./ }).click()
   // State counts now filter; the cursor selects the first match while focus
   // stays on the control. ArrowUp reaches that row without another pointer.
   await page.keyboard.press('ArrowUp')
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')
   await expect(sessions.locator('.row[data-state="working"]').first()).toBeFocused()
-  await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ Working\./ }).click()
+  await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ working\./ }).click()
   await toggle.click()
   await expect(toggle).toHaveAttribute('aria-expanded', 'false')
 
   // History moved into the Sessions head. Reveal the section for this visit
   // through its state count, then enter History without a fold preference write.
-  await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ Working\./ }).click()
+  await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ working\./ }).click()
   await sessions.getByRole('button', { name: 'Show history: every ended or removed session', exact: true }).click()
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')
   await expect(sessions.locator('#sessions-title')).toHaveText('History')
@@ -256,7 +256,7 @@ test('a live-line count keeps Sessions open when the section preference lands af
   const target = sessions.locator('.row[data-state="working"]').first()
   // Before the read, Sessions shows open, so the jump needs no fold change to reach the row.
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')
-  await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ Working\./ }).click()
+  await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ working\./ }).click()
   // State counts now filter; the cursor selects the first match while focus
   // stays on the control. ArrowUp reaches that row without another pointer.
   await page.keyboard.press('ArrowUp')
