@@ -739,6 +739,20 @@
     {
       "classification": "metadata",
       "columns": {
+        "tenant_id": "metadata",
+        "subject_kind": "metadata",
+        "slug": "metadata",
+        "words_en": "metadata",
+        "words_de": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "work_display_words"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
         "archived_at": "metadata",
         "created_at": "metadata",
         "created_by": "personal",
@@ -752,7 +766,8 @@
         "project_id": "metadata",
         "slug": "metadata",
         "system": "metadata",
-        "tenant_id": "metadata"
+        "tenant_id": "metadata",
+        "words_de": "review"
       },
       "locator": {
         "person_column": "created_by",

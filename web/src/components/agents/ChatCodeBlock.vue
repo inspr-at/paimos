@@ -1,13 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { displayLanguage } from '../../lib/displayLanguage'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useProfile } from '../../stores/profile'
 import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
 
 const props = defineProps<{ code: string; language: string; state: { expanded: boolean; top: number; left: number; follow: boolean } }>()
-const profile = useProfile()
-const german = computed(() => profile.profile?.locale.startsWith('de'))
+const german = computed(() => displayLanguage() === 'de')
 const lines = computed(() => props.code.replace(/\n$/, '').split('\n').length)
 const long = computed(() => lines.value > 12)
 const tail = computed(() => /^(sh|bash|zsh|shell|console|terminal|output|log)$/i.test(props.language))

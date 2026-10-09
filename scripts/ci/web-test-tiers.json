@@ -1236,7 +1236,7 @@
     ,
     "vitest:tests/recurrence-marker.unit.test.ts:recurring marker copy > covers daily, quarterly, negative monthly days, events and incomplete legacy triggers honestly"
     ,
-    "vitest:tests/recurrence-marker.unit.test.ts:recurring marker copy > describes the actual schedule and receipt number in English and German"
+    "vitest:tests/recurrence-marker.unit.test.ts:recurring marker copy > describes the actual schedule and receipt number in the app language for English and German profiles"
     ,
     "vitest:tests/recurrence-source.unit.test.ts:a moved ticket edits the receipt source project and ignores conflicting metadata"
     ,
@@ -5686,8 +5686,6 @@
     ,
     {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"with motion › fold probe rejects a premature removal timer (existing history)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"German pairing guidance still only prefills the approval code","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"New menu preserves authorized attach and header controls dark 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"New menu preserves authorized attach and header controls dark 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -5699,6 +5697,8 @@
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"New menu preserves authorized attach and header controls light 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"New menu preserves authorized attach and header controls light 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"a de-AT browser still shows English pairing guidance and only prefills the approval code","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"a decision refreshes the list instead of waiting for the next poll","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -6730,9 +6730,9 @@
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"Simple explains each number in plain words, and its controls stay still through every window","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows a English warning with retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows an English warning with retry for the de profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows a German warning with retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows an English warning with retry for the en profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed refresh keeps Learn still through the error and the retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -6927,6 +6927,16 @@
     {"kind":"browser","file":"tests/dialog-widths.spec.ts","name":"dialogs fit and keep their controls at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/dialog-widths.spec.ts","name":"shared sheet variants and Start agent follow window resizing within their limits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/display-language.spec.ts","name":"German profile: Kinds of work and its Settings navigation use English together","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/display-language.spec.ts","name":"German profile: Models remains English in its Settings frame","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/display-language.spec.ts","name":"German profile: Needs attention uses English through filters, group choices and table actions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/display-language.spec.ts","name":"German profile: session tabs, composer and code controls use the app language","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/display-language.spec.ts","name":"German profile: ticket table controls and recurring markers stay English","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"agent proposals wait in the doctrine inbox with a diff, a dot and one toast each","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10834,27 +10844,27 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1024 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1024 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1440 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1440 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 390 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 390 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1024 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1024 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1440 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1440 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 390 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 390 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"own posts show quiet delivery ticks from the sender status","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12778,7 +12788,7 @@
     ,
     {"kind":"node","file":"tests/api.test.ts","name":"rejects malformed identities and server errors","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/attach-copy.test.ts","name":"pairing and a session link are separate in English and German","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/attach-copy.test.ts","name":"pairing and a session link stay separate in the app language for English and German profiles","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/attach-flow-scope.test.ts","name":"AttachApproval.vue continues only through synchronous identity callbacks","tier":"GATED-FULL"}
     ,
@@ -13900,7 +13910,7 @@
     ,
     {"kind":"node","file":"tests/status-definitions.test.ts","name":"people, agents and menus share all approved states, definitions, rule defaults and exits","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/tenant-brand.test.ts","name":"SVG removal notice names attributes and uses the profile language","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/tenant-brand.test.ts","name":"SVG removal notice names attributes and follows the app language for German profiles","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/tenant-brand.test.ts","name":"logos are fitted into the header slot at their own proportions","tier":"GATED-FULL"}
     ,
@@ -14829,6 +14839,12 @@
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"family eligibility comes from the server; empty allowlists never save and failed writes keep the draft","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"the paused step and configured check progress are shown without inventing a completed step","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"has no app locale switches outside the shared helper","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"keeps the incomplete app in English and preserves the independent release-note choice","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"rejects direct and aliased locale detectors while allowing language selection and region formatting","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"adoption confirmation is bound to the acting person and key","tier":"ESSENTIAL"}
     ,
@@ -15958,7 +15974,7 @@
     ,
     {"kind":"vitest","file":"tests/recurrence-marker.unit.test.ts","name":"recurring marker copy > covers daily, quarterly, negative monthly days, events and incomplete legacy triggers honestly","tier":"NIGHTLY"}
     ,
-    {"kind":"vitest","file":"tests/recurrence-marker.unit.test.ts","name":"recurring marker copy > describes the actual schedule and receipt number in English and German","tier":"NIGHTLY"}
+    {"kind":"vitest","file":"tests/recurrence-marker.unit.test.ts","name":"recurring marker copy > describes the actual schedule and receipt number in the app language for English and German profiles","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/recurrence-source.unit.test.ts","name":"Repeat creates children of a canonical parent and siblings of a canonical leaf","tier":"GATED-FULL"}
     ,
@@ -19511,6 +19527,10 @@
     {"kind":"vitest","file":"tests/work-history-visibility.unit.test.ts","name":"TicketReviews preserves ticket access","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/work-history-visibility.unit.test.ts","name":"TicketReviews preserves work access","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"Kinds of work follows the app policy for a de-AT profile and preserves both languages through save and Undo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"Kinds of work follows the app policy for a en-GB profile and preserves both languages through save and Undo","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"Undo cannot send an inverse write after identity changes during its freshness read","tier":"ESSENTIAL"}
     ,

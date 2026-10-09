@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { displayLanguage } from '../../lib/displayLanguage'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import SettingsCard from './SettingsCard.vue'
@@ -15,8 +16,7 @@ import { dismiss, toast } from '../../lib/toast'
 import { textForKinds } from '../../lib/workKindsCopy'
 import { activeKinds, archiveKind, createKind, getSituationLimits, kindWords, listWorkKinds, movedKinds, orderKinds, putSituationLimits, restoreKind, updateKind, validLimit, type KindWords, type SituationLimits, type WorkKind } from '../../lib/workKinds'
 const session = useSession()
-// English only until AEON-998 gives the app one display language; then this reads that source.
-const german = computed(() => false)
+const german = computed(() => displayLanguage() === 'de')
 const t = computed(() => textForKinds(german.value))
 const editable = computed(() => session.identity?.principal.kind === 'person' && can('models.read') && can('model_prefs.manage'))
 const readScope = useIdentityScope(() => can('models.read')), writeScope = useIdentityScope(() => editable.value)
@@ -102,6 +102,8 @@ function save(words: KindWords) {
   if (target.kind && (!current || fingerprint(current) !== target.stamp)) { editorError.value = t.value('stale'); return }
   const position = Math.max(-1, ...kinds.value.filter(kind => !kind.archived_at && kind.system !== 'other').map(kind => kind.position)) + 1
   const before = target.kind
+  // The English editor changes only English words; keep the separately stored translation.
+  if (before?.words_de && !words.words_de) words = { ...words, words_de: kindWords(before).words_de }
   const message = before
     ? german.value ? `${words.label} gespeichert. Die Spalte unter Modelle zeigt die neuen Worte.` : `${words.label} saved. Its column on Models shows the new words.`
     : german.value ? `${words.label} ist jetzt eine Art von Arbeit und eine Spalte unter Modelle.` : `${words.label} is a kind of work now, and a column on Models.`

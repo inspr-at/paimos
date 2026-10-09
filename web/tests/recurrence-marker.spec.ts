@@ -149,7 +149,8 @@ test.describe('touch permission changes', () => {
           } }],
         })
         expect((await pill.boundingBox())!.height).toBeGreaterThanOrEqual(44)
-        await expect(pill).toContainText('Wiederkehrend')
+        await expect(pill).toContainText('Recurring')
+        await expect(pill).not.toContainText('Wiederkehrend')
         await screenshot('after')
         expect(errors).toEqual([])
       } finally { releasePermissions() }
@@ -163,7 +164,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.emulateMedia({ colorScheme: theme })
     const locale = width === 390 ? 'de-AT' : 'en-GB'
     const { data, errors, recurrenceReads } = await setup(page, true, locale)
-    const label = width === 390 ? 'Wiederkehrend · jeden Montag · Nr. 4' : 'Recurring · every Monday · #4'
+    const label = 'Recurring · every Monday · #4'
     await page.goto('/p/PHAROS?sort=key&group=none')
     await expect(row(page).getByRole('img', { name: label, exact: true })).toBeVisible()
     await expect(page.locator('#row-n-4 .recurrence-dot')).toHaveCount(0)

@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { displayLanguage } from '../lib/displayLanguage'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ATTENTION_KINDS, actOnAttention, attentionIdentity, refreshAttentionRelease, listAttention, listAttentionGroups, attentionGrouping, attentionFolds, orderAttentionGroups, collectAttentionGroups, finishAttentionGroups, mergeAttentionRows, previewAttentionBulk, runAttentionBulk, undoAttentionBulk, attentionMoveId, attentionResolution, type AttentionBulkPreview as BulkPreview, type AttentionBulkResult, type AttentionBulkAction, type AttentionGroup, type AttentionFilters, type AttentionItem, type AttentionPage } from '../lib/attention'
@@ -43,7 +44,7 @@ const toolbar = ref<InstanceType<typeof ListToolbar>>(), table = ref<InstanceTyp
 const cursor = ref<string | null>(null), collapsed = ref(new Set<string>())
 const foldPrefs = usePreference<{ project?: Record<string, boolean>; kind?: Record<string, boolean> }>('needs-attention:folds')
 const columnPrefs = usePreference<ListPrefs>('needs-attention:columns')
-const locale = document.documentElement.lang.toLowerCase().startsWith('de') ? 'de' : 'en'
+const locale = displayLanguage()
 const words = (en: string, de: string) => locale === 'de' ? de : en
 let pendingGroups: { group: Group; query: AttentionFilters; after?: string }[] = [], activeGroupReads = 0
 let generation = 0, selectionResize: ResizeObserver | undefined, rangeAnchor: number | undefined, groupsFromList = false

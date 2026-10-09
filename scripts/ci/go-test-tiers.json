@@ -4992,6 +4992,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestDataMigrationsAsAppOwner","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestDisplayWordsMigrationPreservesExistingEditsAndTenantIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestEnsureTenant","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestEnsureTenantSeedsBuiltinRolesUnderForcedRLS","tier":"GATED-FULL"}
@@ -6599,6 +6601,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestDefaultRefreshNoNetworkAndOneAuditPerRun","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestDiscoveryVaultIsAccountBoundAndOutageKeepsPolicy","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestDisplayLanguageWordsPreserveLegacyFieldsAndEdits","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestEditorArchiveWaitsBehindFencedRowUndo","tier":"GATED-FULL"}
     ,

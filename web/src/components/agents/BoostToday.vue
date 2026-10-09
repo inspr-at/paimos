@@ -1,15 +1,15 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { displayLanguage } from '../../lib/displayLanguage'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
 import { can, onAccessChange } from '../../lib/authz'
 import { getUsageOverview, putAccountBoost, type AccountUsagePolicy } from '../../lib/accountUsage'
 import { createScope, scopeOwner } from '../../lib/identityScope'
 import { usePoller } from '../../lib/usePolledData'
 import { useSession } from '../../stores/session'
 const emit = defineEmits<{ changed: [] }>()
-const session = useSession(), route = useRoute()
-const german = computed(() => route.query.lang === 'de' || document.documentElement.lang.startsWith('de'))
+const session = useSession()
+const german = computed(() => displayLanguage() === 'de')
 const text = (en: string, de: string) => german.value ? de : en
 const allowed = () => session.authenticationCurrent() && session.identity?.principal.kind === 'person' && can('account.read') && can('account.manage')
 const owner = () => allowed() ? scopeOwner(session.identity) : ''

@@ -250,7 +250,8 @@
         "web/e2e/**",
         "web/*",
         "web/.vscode/**",
-        "web/public/**"
+        "web/public/**",
+        "web/src/lib/displayLanguage.ts"
       ],
       "exclude": [
         "web/src/views/**",

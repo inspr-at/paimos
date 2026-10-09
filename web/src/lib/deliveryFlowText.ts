@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Words of Delivery › Flow (AEON-994 draft 5, section 7: flow.* and lanes.*), packages 5
-// and 6. English and German, impersonal; the person's profile locale picks one.
+// and 6. English and German, impersonal; the shared app display language picks one.
 import type { DeliveryLanguage } from './delivery'
 import type { Lane } from './deliveryFlow'
 

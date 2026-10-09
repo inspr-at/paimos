@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Words of the Delivery page (AEON-994 draft 5, section 7). English and German,
-// impersonal; the page picks one from the person's profile locale.
+// impersonal; the page reads the shared app display language.
 import type { DeliveryLanguage } from './delivery'
 
 // The approved copy reads "start → end" and "PR opened → merged": the arrow is the word "to" in text, never an icon.

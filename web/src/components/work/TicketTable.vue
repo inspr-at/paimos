@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { displayLanguage } from '../../lib/displayLanguage'
 import { vClipTip } from '../../directives/clipTip'
 import { formatEstimate, estimateDisplay } from '../../lib/estimates'
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -129,7 +130,7 @@ const emit = defineEmits<{
 }>()
 
 const instance = getCurrentInstance()
-const german = computed(() => props.locale?.toLowerCase().startsWith('de') ?? false)
+const german = computed(() => displayLanguage(props.locale) === 'de')
 const groupName = (group: RowGroup) => group.project?.key ?? group.epic?.key ?? group.label
 const moreLabel = (group: RowGroup) => german.value ? `50 weitere zeigen in ${groupName(group)}` : `Show 50 more in ${groupName(group)}`
 const shownLabel = (group: RowGroup) => german.value ? `${group.loaded ?? group.rows.length} von ${group.total} gezeigt` : `${group.loaded ?? group.rows.length} of ${group.total} shown`
