@@ -3,7 +3,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { can } from '../../lib/authz'
-import { canPause, canResume, LEAD_WORDS } from '../../lib/lead'
+import { canLaunchLead, canPause, canResume, leadLaunchReason, LEAD_WORDS } from '../../lib/lead'
 import { useLeadCardFold } from '../../lib/leadCardFold'
 import { openLeadPanel, openLeadPause, openStartLead } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
@@ -60,10 +60,10 @@ const nowLine = computed(() => {
 const action = computed(() => {
   const b = band.value, l = lead.value
   switch (b.action) {
-    case 'start': return { label: b.actionLabel, icon: 'play' as const, primary: true, disabled: !mayStart.value, tip: mayStart.value ? `One per project. Starts nothing until the ${w.l} picks up queued work.` : `Starting a ${w.l} needs permission to run agents in this project` }
+    case 'start': return { label: b.actionLabel, icon: 'play' as const, primary: true, disabled: !mayStart.value || !canLaunchLead(l), tip: !canLaunchLead(l) ? leadLaunchReason(l) : mayStart.value ? `One per project. Starts nothing until the ${w.l} picks up queued work.` : `Starting a ${w.l} needs permission to run agents in this project` }
     case 'cancel': return { label: b.actionLabel, icon: null, primary: false, disabled: !mayControl.value || !canPause(l), tip: 'Nothing has started yet. Queued work stays queued.' }
     case 'pause': return { label: b.actionLabel, icon: b.state === 'starting' ? null : 'pause' as const, primary: false, disabled: !mayControl.value || !canPause(l), tip: mayControl.value ? 'Stops new work now; running workers finish their step' : 'Only its owner can pause it' }
-    case 'resume': return { label: b.actionLabel, icon: 'play' as const, primary: true, disabled: !mayStart.value || !canResume(l), tip: canResume(l) ? `Restarts the ${w.l} through the usual start checks` : `Waits until the ${w.l}’s session has stopped` }
+    case 'resume': return { label: b.actionLabel, icon: 'play' as const, primary: true, disabled: !mayStart.value || !canResume(l) || !canLaunchLead(l), tip: !canLaunchLead(l) ? leadLaunchReason(l) : canResume(l) ? `Restarts the ${w.l} through the usual start checks` : `Waits until the ${w.l}’s session has stopped` }
     case 'dial': return { label: b.actionLabel, icon: 'gauge' as const, primary: false, disabled: false, tip: 'The dial and its limits on the Agents page' }
     case 'computers': return { label: b.actionLabel, icon: 'monitor' as const, primary: true, disabled: false, tip: 'Accounts and computers on the Agents page' }
     default: return null
@@ -71,7 +71,7 @@ const action = computed(() => {
 })
 async function act(event: MouseEvent) {
   const from = event.currentTarget as HTMLElement, a = band.value.action
-  if (action.value?.disabled) return
+  if (action.value?.disabled || busy.value) return
   if (a === 'start') openStartLead([props.projectId], from)
   else if (a === 'pause' && band.value.state !== 'starting') openLeadPause(props.projectId, from)
   else if (a === 'pause' || a === 'cancel') await control('cancel')
@@ -117,13 +117,15 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
         </p>
       </div>
       <div class="lead-acts">
-        <button v-if="action && action.label" type="button" class="btn act-main" :class="{ primary: action.primary }" :aria-disabled="action.disabled || busy" :data-tip="action.tip" data-act="main" @click="act">
+        <button v-if="action && action.label" type="button" class="btn act-main" :class="{ primary: action.primary }" :aria-disabled="action.disabled || busy" :aria-describedby="['start', 'resume'].includes(band.action) && !canLaunchLead(lead) ? 'lead-launch-reason-band' : undefined" :data-tip="action.tip" data-act="main" @click="act">
           <AppIcon v-if="action.icon" :name="action.icon" :size="15" />{{ action.label }}
         </button>
         <button v-if="band.state !== 'none' && lead?.session_id" type="button" class="icon-btn" :aria-label="`More ${w.l} actions`" aria-haspopup="menu" :aria-expanded="!!menu" @click="menu = menu ? null : $event.currentTarget as HTMLElement"><AppIcon name="more" /></button>
         <button v-if="band.state === 'none'" type="button" class="icon-btn flat fold-btn" aria-controls="lead-fold" :aria-expanded="!folded" :aria-label="`What the ${w.l} does`" :data-tip="foldTip" data-act="fold" @click="toggleFold"><AppIcon name="chevron-right" :size="16" /></button>
       </div>
     </div>
+
+    <p v-if="['start', 'resume'].includes(band.action) && !canLaunchLead(lead)" id="lead-launch-reason-band" class="lead-now" data-launch-reason>{{ leadLaunchReason(lead) }}</p>
 
     <!-- The fold hides only the details; the head and Start lead stay where they are. -->
     <div v-if="band.state === 'none'" id="lead-fold" class="lead-fold" :inert="folded || undefined" @transitionend="settleFold" @transitioncancel="settleFold">

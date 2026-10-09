@@ -8310,6 +8310,20 @@
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"working lead: the line opens the docked panel, questions go to the Decision Desk, Pause is revision-bound","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: old waiting starts remain cancellable; actual failures and pickup timeout are distinct","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: automatic fitting, saved widths and resize controls preserve host columns","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: grouped host remains stable at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13280,6 +13294,8 @@
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"the docking width leaves the list 560px beside a 560px pane","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"AEON-1038: unclaimed starts and launch-off policy never invent admission failures","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/lead.test.ts","name":"AEON-791: the saved agent names reach every screen that reads LEAD_WORDS, and clearing restores Lead","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"Resume is only a restart after a confirmed stop; Pause needs an existing intent","tier":"ESSENTIAL"}
@@ -15072,6 +15088,10 @@
     ,
     {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > unfolding removes only that project from the stored list","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/lead-start.unit.test.ts","name":"AEON-1038: a sheet with launch off rejects pointer and keyboard submissions before any settings write","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-start.unit.test.ts","name":"AEON-1038: the card disables Start and Resume with a reason, preserves Cancel, and names actual check failures","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/ledger.unit.test.ts","name":"a row with no version never replaces one that has it; the other way round it does","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/ledger.unit.test.ts","name":"a write result older than a read at the position its watermark would have named does not replace the read","tier":"ESSENTIAL"}
@@ -15857,6 +15877,8 @@
     {"kind":"vitest","file":"tests/profile-form.unit.test.ts","name":"the preview > loads the preview’s fonts under a new name whenever the faces change","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/profile-permissions.unit.test.ts","name":"profile permissions describe the caller’s personal profile","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1038: launch-off or unreadable policy refuses Start without a POST","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a newer read never yields to an older revision answered later","tier":"ESSENTIAL"}
     ,

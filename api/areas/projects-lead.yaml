@@ -4,7 +4,7 @@ paths:
   /projects/{projectId}/lead:
     get:
       summary: Read the project's explicitly owned lead
-      description: Requires harness.read. Returns none until a person explicitly requests a lead; existing coordinator registrations are never automatically adopted. Project members see only generation, state and redacted reason codes.
+      description: 'Requires harness.read. Returns none until a person explicitly requests a lead; existing coordinator registrations are never automatically adopted. Reports automatic_launch_enabled as false pending AEON-603. Unclaimed requests wait for a runtime, not for unattempted admission checks. A future enabled launch that remains unclaimed for five minutes reports runtime_pickup_timeout. Project members see only generation, state and redacted reason codes.'
       parameters:
         - $ref: '#/components/parameters/projectId'
       responses:
@@ -191,5 +191,6 @@ components:
         generation: {type: integer, minimum: 0}
         session_id: {type: [string, 'null'], format: uuid}
         state: {type: string, enum: [none, starting, working, waiting_for_room, paused, cannot_start]}
-        reason: {type: string, description: Redacted machine-readable reason; contains no account or credential details}
+        reason: {type: string, description: 'Redacted machine-readable reason; contains no account or credential details. awaiting_generation means no claim yet; automatic_launch_disabled explains an unclaimed intent while launch is off; runtime_pickup_timeout means no runtime claimed an enabled start within five minutes. Admission failures name dial, harness, account or host; admission_unavailable means the admission adapter failed or is absent.'}
         process_active: {type: boolean, description: True until the bound harness generation has confirmed stopped; heartbeat loss and archive do not prove exit}
+        automatic_launch_enabled: {type: boolean, const: false, description: 'Server launch policy, independent of admission availability. Always false pending AEON-603; no setting or launch path is introduced. Older servers may omit this field; clients must treat omission as unavailable.'}

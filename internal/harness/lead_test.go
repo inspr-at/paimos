@@ -147,7 +147,7 @@ func TestProjectLeadLifecycleAndExplicitMigration(t *testing.T) {
 }
 
 func TestProjectLeadAdmissionIsFreshAndFailClosed(t *testing.T) {
-	for _, mode := range []string{"missing", "error", "dial_full", "harness_full", "account_unknown", "host_stale", "future", "ready"} {
+	for _, mode := range []string{"missing", "error", "host_error", "dial_full", "harness_full", "account_unknown", "host_stale", "future", "ready"} {
 		t.Run(mode, func(t *testing.T) {
 			var calls int
 			var admission harness.LeadAdmission
@@ -161,6 +161,8 @@ func TestProjectLeadAdmissionIsFreshAndFailClosed(t *testing.T) {
 					switch mode {
 					case "error":
 						return checks, errors.New("unreadable adapter")
+					case "host_error":
+						return checks, &harness.LeadAdmissionError{Gate: "host", Err: errors.New("private diagnostic")}
 					case "dial_full":
 						checks.Dial.State = "full"
 					case "harness_full":
@@ -178,7 +180,14 @@ func TestProjectLeadAdmissionIsFreshAndFailClosed(t *testing.T) {
 			f := projectLeadFixture(t, admission)
 			session, lease, _ := leadCandidate(t, f)
 			l := startLead(t, f, 0)
+			if calls != 0 || l["reason"] != "automatic_launch_disabled" || l["automatic_launch_enabled"] != false || l["session_id"] != nil {
+				t.Fatalf("fresh intent invented admission or launch: %v, calls=%d", l, calls)
+			}
 			l = claimLead(t, f, session, lease, l["revision"])
+			wantReason := map[string]string{"missing": "admission_unavailable", "error": "admission_unavailable", "host_error": "host_unavailable", "dial_full": "dial_full", "harness_full": "harness_full", "account_unknown": "account_unavailable", "host_stale": "host_unavailable", "future": "host_unavailable", "ready": ""}[mode]
+			if l["reason"] != wantReason || l["automatic_launch_enabled"] != false {
+				t.Fatalf("incorrect admission reason or launch policy: %v; want reason %q", l, wantReason)
+			}
 			if mode == "ready" {
 				if l["generation"] != float64(1) {
 					t.Fatal("ready claim failed")
@@ -193,6 +202,27 @@ func TestProjectLeadAdmissionIsFreshAndFailClosed(t *testing.T) {
 				t.Fatal("claim reused cached admission")
 			}
 		})
+	}
+}
+
+func TestProjectLeadLegacyUnclaimedStartStaysCancellable(t *testing.T) {
+	f := projectLeadFixture(t, nil)
+	startLead(t, f, 0)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE project_leads SET reason='start_checks_unavailable',updated_at=clock_timestamp()-interval '1 day' WHERE project_id=$1`, f.project)
+		return err
+	})
+	base := "/api/projects/" + f.project + "/lead"
+	w := f.call(f.person, "GET", base, nil, "")
+	expect(t, w, 200)
+	l := decode(t, w)
+	if l["reason"] != "automatic_launch_disabled" || l["state"] != "waiting_for_room" || l["revision"] != float64(1) || l["automatic_launch_enabled"] != false {
+		t.Fatalf("legacy wait remains misleading: %v", l)
+	}
+	w = f.call(f.person, "POST", base+"/pause", map[string]any{"expected_revision": 1, "generation": 0}, "")
+	expect(t, w, 200)
+	if got := decode(t, w); got["state"] != "paused" || got["process_active"] != false {
+		t.Fatalf("cancel fabricated a process: %v", got)
 	}
 }
 

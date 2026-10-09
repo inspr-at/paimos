@@ -20,6 +20,10 @@ export interface LeadFlowOptions {
   aeon?: LeadState | 'none'
   queue?: string[]; expert?: boolean; question?: boolean; decisions?: boolean; owner?: boolean
   longText?: boolean
+  /** Simulates a future qualified workspace for the existing start-flow tests.
+   * Production availability tests explicitly pass false; servers still ship false. */
+  launchEnabled?: boolean
+  leadName?: string
 }
 export async function mockLeadFlow(page: Page, options: LeadFlowOptions = {}) {
   const data = fixtures()
@@ -34,13 +38,13 @@ export async function mockLeadFlow(page: Page, options: LeadFlowOptions = {}) {
   if (options.longText) n4.title = 'Agenten-Dial zeigt „Konten: gerade voll“, obwohl nichts läuft, und verschweigt die nicht gemessene Reserve'
   if (options.expert) data.preferences['developer-ui'] = { show_expert_start: true }
   const pharos = (state: LeadState | 'none'): ProjectLead => state === 'none'
-    ? { project_id: 'p-pharos', revision: 0, generation: 0, session_id: null, state: 'none', reason: '', process_active: false }
-    : { project_id: 'p-pharos', revision: 4, generation: 2, session_id: LEAD_SESSION, state, reason: options.reason ?? '', process_active: options.processActive ?? state !== 'paused' }
+    ? { project_id: 'p-pharos', revision: 0, generation: 0, session_id: null, state: 'none', reason: '', process_active: false, automatic_launch_enabled: options.launchEnabled ?? true }
+    : { project_id: 'p-pharos', revision: 4, generation: 2, session_id: LEAD_SESSION, state, reason: options.reason ?? '', process_active: options.processActive ?? state !== 'paused', automatic_launch_enabled: options.launchEnabled ?? true }
   const state = {
-    leads: { 'p-pharos': pharos(options.lead ?? 'working'), 'p-aeon': { project_id: 'p-aeon', revision: options.aeon && options.aeon !== 'none' ? 1 : 0, generation: 0, session_id: null, state: options.aeon ?? 'none', reason: options.aeon === 'paused' ? 'idle_yield' : '', process_active: false } as ProjectLead } as Record<string, ProjectLead>,
+    leads: { 'p-pharos': pharos(options.lead ?? 'working'), 'p-aeon': { project_id: 'p-aeon', revision: options.aeon && options.aeon !== 'none' ? 1 : 0, generation: 0, session_id: null, state: options.aeon ?? 'none', reason: options.aeon === 'paused' ? 'idle_yield' : '', process_active: false, automatic_launch_enabled: options.launchEnabled ?? true } as ProjectLead } as Record<string, ProjectLead>,
     queue: options.queue ?? ['n-4'],
     calls: [] as { method: string; path: string; body: unknown }[],
-    settings: { revision: 2, workspace_revision: 1, owner_person_id: me.id, overrides: {}, effective: {}, model_revisions: [1], automatic_launch_enabled: false, details_redacted: options.owner === false, dial_path: '/api/agents/plan',
+    settings: { revision: 2, workspace_revision: 1, owner_person_id: me.id, overrides: {}, effective: {}, model_revisions: [1], automatic_launch_enabled: options.launchEnabled ?? true, details_redacted: options.owner === false, dial_path: '/api/agents/plan',
       model_selector: { cell: { mode: 'pick', family: 'anthropic', line: 'Claude Opus 5.5', effort: 'high' }, set_by: 'workspace', kind_fallback: false, prefs_revision: 1 }, required_start_gates: ['dial', 'harness', 'account_room', 'host_load'] } as Record<string, unknown>,
   }
   if (options.lead !== 'none' && options.lead !== 'paused') {
@@ -77,6 +81,7 @@ export async function mockLeadFlow(page: Page, options: LeadFlowOptions = {}) {
     const req = route.request(), url = new URL(req.url()), path = url.pathname, method = req.method()
     const body = req.postData() ? req.postDataJSON() as Record<string, unknown> : null
     const json = (value: unknown, status = 200) => route.fulfill({ status, json: value })
+    if (path === '/api/settings/work-vocabulary' && options.leadName) return json({ revision: 1, leaf: { name: '', icon: '' }, levels: [], lead: { singular: options.leadName, plural: `${options.leadName}n` } })
     if (path === '/api/me/permissions') {
       const permissions = mockEffectivePermissions('admin', url.searchParams.get('project_id') ?? undefined)
       permissions.workspace.permissions.push('run.create', 'harness.read', 'harness.control', 'work_orders.read')

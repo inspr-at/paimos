@@ -59,6 +59,16 @@ function summary() {
 beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW)); setActivePinia(createPinia()); http.paths.length = 0; http.admitted.length = 0; http.handler = routes(); vi.spyOn(console, 'warn').mockImplementation(() => {}) })
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
+it('AEON-1038: launch-off or unreadable policy refuses Start without a POST', async () => {
+  const leads = useProjectLeads()
+  for (const automatic_launch_enabled of [false, undefined]) {
+    http.handler = routes({ lead: () => lead({ state: 'none', session_id: null, automatic_launch_enabled }) })
+    await leads.loadLead(P)
+    await expect(leads.start(P)).rejects.toThrow(automatic_launch_enabled === false ? /not enabled/ : /could not be read/)
+  }
+  expect(http.paths.filter(path => path.startsWith('POST '))).toEqual([])
+})
+
 it('a read that began before Pause cannot put the older lead back, and a fresh read follows', async () => {
   const leads = useProjectLeads()
   await leads.loadLead(P)

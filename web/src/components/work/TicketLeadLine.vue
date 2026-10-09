@@ -3,7 +3,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { can } from '../../lib/authz'
-import { LEAD_WORDS, ticketSteps, type TicketStepInput } from '../../lib/lead'
+import { canLaunchLead, leadLaunchReason, LEAD_WORDS, ticketSteps, type TicketStepInput } from '../../lib/lead'
 import { openStartLead } from '../../lib/leadOverlay'
 import { listReviews } from '../../lib/reviews'
 import { queueable } from '../../lib/workQueue'
@@ -63,7 +63,7 @@ const ICON = { queued: 'queue', sized: 'check', working: 'agent', gate: 'shield'
   <div v-if="mode !== 'hidden'" class="tline" :data-mode="mode" aria-live="polite">
     <p v-if="mode === 'notq'" class="tl-msg"><AppIcon name="info" :size="14" /><span><b>Not queued.</b> Queue it and the {{ projectKey }} {{ w.l }} picks it up: it sizes it, chooses who works on it and brings it through the gate.</span></p>
     <p v-else-if="mode === 'parent'" class="tl-msg"><AppIcon name="tree" :size="14" /><span><b>{{ openLeaves }} open work {{ openLeaves === 1 ? 'item' : 'items' }} below.</b> Queue queues them in their order. Agents work on leaves; {{ item.key }} follows its children.</span></p>
-    <p v-else-if="mode === 'nolead'" class="tl-msg"><AppIcon name="clock" :size="14" /><span><b>Queued, waiting for a {{ w.l }}.</b> No {{ w.l }} runs {{ projectKey }}, so nothing picks it up yet. <button v-if="mayStart" type="button" class="link-btn" @click="openStartLead([projectId], $event.currentTarget as HTMLElement)">Start {{ w.l }}</button></span></p>
+    <p v-else-if="mode === 'nolead'" class="tl-msg"><AppIcon name="clock" :size="14" /><span><b>Queued, waiting for a {{ w.l }}.</b> No {{ w.l }} runs {{ projectKey }}, so nothing picks it up yet. <button v-if="mayStart" type="button" class="link-btn" :aria-disabled="!canLaunchLead(lead)" :data-tip="!canLaunchLead(lead) ? leadLaunchReason(lead) : undefined" @click="canLaunchLead(lead) && openStartLead([projectId], $event.currentTarget as HTMLElement)">Start {{ w.l }}</button><template v-if="!canLaunchLead(lead)"> {{ leadLaunchReason(lead) }}</template></span></p>
     <template v-else>
       <div v-for="s in steps" :key="s.id" class="tl-step" :class="s.state" :data-step="s.id">
         <span class="tl-dot"><AppIcon v-if="s.state === 'done'" name="check" :size="11" /><AppIcon v-else-if="s.state === 'now'" :name="ICON[s.id]" :size="11" /></span>
@@ -90,6 +90,7 @@ const ICON = { queued: 'queue', sized: 'check', working: 'agent', gate: 'shield'
 .tl-msg b { color: var(--ink); }
 .link-btn { display: inline; padding: 0; border: 0; background: none; color: var(--teal-ink); font: inherit; font-weight: 600; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--teal) 35%, transparent); text-underline-offset: 3px; cursor: pointer; }
 .link-btn:hover { text-decoration-color: currentColor; }
+.link-btn[aria-disabled="true"] { color: var(--ink-3); cursor: default; }
 @media (max-width: 720px) {
   .tline { grid-template-columns: minmax(0, 1fr); gap: 0; min-height: 0; }
   .tl-step { grid-template-columns: 18px minmax(0, 1fr); column-gap: 12px; padding: 0 0 12px; }

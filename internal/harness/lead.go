@@ -22,14 +22,16 @@ import (
 // Lead is a redacted project projection. Generation changes only on an explicit
 // claim; revision changes on every intent/control write. Neither grants roles.
 type Lead struct {
-	ProjectID     string  `json:"project_id"`
-	SessionID     *string `json:"session_id"`
-	Generation    int64   `json:"generation"`
-	Revision      int64   `json:"revision"`
-	State         string  `json:"state"`
-	Reason        string  `json:"reason"`
-	ProcessActive bool    `json:"process_active"`
-	owner         string
+	ProjectID              string  `json:"project_id"`
+	SessionID              *string `json:"session_id"`
+	Generation             int64   `json:"generation"`
+	Revision               int64   `json:"revision"`
+	State                  string  `json:"state"`
+	Reason                 string  `json:"reason"`
+	ProcessActive          bool    `json:"process_active"`
+	AutomaticLaunchEnabled bool    `json:"automatic_launch_enabled"`
+	updatedAt              time.Time
+	owner                  string
 	// dispatchKey is the agent key row bound at claim or last proven pickup.
 	// Fair turns qualify exactly this credential; it is never projected.
 	dispatchKey string
@@ -42,6 +44,28 @@ type LeadGate struct {
 	CheckedAt time.Time
 }
 type LeadChecks struct{ Dial, Harness, Account, Host LeadGate }
+
+// LeadAdmissionError identifies a failed check without projecting its private
+// error text. Gate must be dial, harness, account or host; other errors identify
+// only the admission adapter, never an invented failing gate.
+type LeadAdmissionError struct {
+	Gate string
+	Err  error
+}
+
+func (e *LeadAdmissionError) Error() string { return "lead admission check failed" }
+func (e *LeadAdmissionError) Unwrap() error { return e.Err }
+
+func leadAdmissionFailure(err error) string {
+	var failure *LeadAdmissionError
+	if errors.As(err, &failure) && failure != nil {
+		switch failure.Gate {
+		case "dial", "harness", "account", "host":
+			return failure.Gate + "_unavailable"
+		}
+	}
+	return "admission_unavailable"
+}
 
 // LeadAdmission must re-read the existing person agentplan, harness allowance,
 // account reservation and host-load policy inside tx at every claim/dispatch.
@@ -90,11 +114,11 @@ func leadWait(checks LeadChecks, now time.Time) string {
 // for claim, projection, dispatch and assigned-worker eligibility.
 const leadReportingFreshSQL = `coalesce(heartbeat_at,created_at) BETWEEN clock_timestamp()-interval '2 minutes' AND clock_timestamp()`
 
-const leadColumns = `project_id::text,session_id::text,generation,revision,state,reason,owner_principal_id::text,coalesce(dispatch_key_id::text,'')`
+const leadColumns = `project_id::text,session_id::text,generation,revision,state,reason,owner_principal_id::text,coalesce(dispatch_key_id::text,''),updated_at`
 
 func scanLead(row pgx.Row) (Lead, error) {
 	var l Lead
-	err := row.Scan(&l.ProjectID, &l.SessionID, &l.Generation, &l.Revision, &l.State, &l.Reason, &l.owner, &l.dispatchKey)
+	err := row.Scan(&l.ProjectID, &l.SessionID, &l.Generation, &l.Revision, &l.State, &l.Reason, &l.owner, &l.dispatchKey, &l.updatedAt)
 	return l, err
 }
 func loadLead(ctx context.Context, tx pgx.Tx, projectID string, lock bool) (Lead, error) {
@@ -140,7 +164,34 @@ func leadOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, ow
 	}
 	return nil
 }
+
+const leadPickupWait = 5 * time.Minute
+
+// Correct the old first-insert reason on reads without rewriting audit history.
+// Revision one with no generation/session cannot have run a claim: every claim
+// result increments revision. Actual failed claims keep their admission reason.
+func projectLeadWait(l Lead, now time.Time) Lead {
+	if l.State != "waiting_for_room" || l.ProcessActive {
+		return l
+	}
+	if l.Reason == "start_checks_unavailable" && l.Revision == 1 && l.Generation == 0 && l.SessionID == nil {
+		l.Reason = "awaiting_generation"
+	}
+	if l.Reason != "awaiting_generation" {
+		return l
+	}
+	if !l.AutomaticLaunchEnabled {
+		l.Reason = "automatic_launch_disabled"
+	} else if !l.updatedAt.IsZero() && !l.updatedAt.After(now) && now.Sub(l.updatedAt) >= leadPickupWait {
+		l.Reason = "runtime_pickup_timeout"
+	}
+	return l
+}
+
 func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead) (Lead, error) {
+	// AEON-734: the production launch policy remains OFF until AEON-603 proof.
+	// Admission injection supplies checks only; it must never enable launch.
+	l.AutomaticLaunchEnabled = false
 	active, err := leadProject(ctx, tx, l.ProjectID)
 	if err != nil {
 		return l, err
@@ -182,7 +233,13 @@ func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead) (Le
 			l.State = "starting"
 		}
 	}
-	return l, nil
+	var now time.Time
+	if l.State == "waiting_for_room" {
+		if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+			return l, err
+		}
+	}
+	return projectLeadWait(l, now), nil
 }
 func (m *Module) readLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	if !workorders.UUID(r.PathValue("projectId")) {
@@ -248,7 +305,7 @@ func (m *Module) startLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			return nil, workorders.Fail(409, "lead process exit is unconfirmed")
 		}
 	}
-	l, err = scanLead(tx.QueryRow(ctx, `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state,reason) VALUES($1,$2,$3,'waiting_for_room','start_checks_unavailable') ON CONFLICT(tenant_id,project_id) DO UPDATE SET owner_principal_id=excluded.owner_principal_id,state='waiting_for_room',reason='awaiting_generation',revision=project_leads.revision+1,updated_at=clock_timestamp() RETURNING `+leadColumns, p.TenantID, id, owner))
+	l, err = scanLead(tx.QueryRow(ctx, `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state,reason) VALUES($1,$2,$3,'waiting_for_room','awaiting_generation') ON CONFLICT(tenant_id,project_id) DO UPDATE SET owner_principal_id=excluded.owner_principal_id,state='waiting_for_room',reason='awaiting_generation',revision=project_leads.revision+1,updated_at=clock_timestamp() RETURNING `+leadColumns, p.TenantID, id, owner))
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +316,7 @@ func (m *Module) startLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 }
 func (m *Module) checkLeadAdmission(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner string, s Session) (string, error) {
 	if m.leadAdmission == nil {
-		return "start_checks_unavailable", nil
+		return "admission_unavailable", nil
 	}
 	attempt, err := tx.Begin(ctx)
 	if err != nil {
@@ -270,7 +327,7 @@ func (m *Module) checkLeadAdmission(ctx context.Context, tx pgx.Tx, p tenant.Pri
 		if rollbackErr := attempt.Rollback(ctx); rollbackErr != nil {
 			return "", rollbackErr
 		}
-		return "start_checks_unavailable", nil
+		return leadAdmissionFailure(err), nil
 	}
 	if err = attempt.Commit(ctx); err != nil {
 		return "", err

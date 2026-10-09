@@ -6,7 +6,7 @@ import { onAccessChange } from '../lib/authz'
 import { APIError, getNode } from '../lib/api'
 import { getSession } from '../lib/agentRows'
 import type { Question } from '../lib/decisionDeskApi'
-import { emptyFold, foldDecisions, pauseLead, readLead, readLeadDecisions, readLeadSettings, readOpenQuestions, startLead, type DecisionFold, type LeadDecision, type LeadSettings, type ProjectLead } from '../lib/lead'
+import { canLaunchLead, emptyFold, foldDecisions, leadLaunchReason, pauseLead, readLead, readLeadDecisions, readLeadSettings, readOpenQuestions, startLead, type DecisionFold, type LeadDecision, type LeadSettings, type ProjectLead } from '../lib/lead'
 import { useAgents } from './agents'
 
 // AEON-741: read projections of each project's lead. The server decides state;
@@ -160,7 +160,10 @@ export const useProjectLeads = defineStore('projectLeads', () => {
       if (started === epoch) { busy[id] = false; invalidate(); void load(id) }
     }
   }
-  const start = (id: string) => write(id, lead => startLead(id, lead.revision))
+  const start = (id: string) => write(id, lead => {
+    if (!canLaunchLead(lead)) throw new Error(leadLaunchReason(lead))
+    return startLead(id, lead.revision)
+  })
   const pause = (id: string) => write(id, lead => pauseLead(id, lead.revision, lead.generation))
   return { views, keys, busy, truncated, view, load, loadLead, loadMany, start, pause, keyOf, resolveKeys }
 })

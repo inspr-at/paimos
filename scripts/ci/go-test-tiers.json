@@ -5638,6 +5638,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestLateSettingCompletionUnderSkewStillReleasesTheNextControl","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestLeadAdmissionFailureRedactsAndNamesCheck","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestLeadDecisionClosedVocabulary","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestLeadDecisionFrozenGateEvidence","tier":"GATED-FULL"}
@@ -5800,6 +5802,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadCompetingStartsClaimsAndRevocation","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadLegacyUnclaimedStartStaysCancellable","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadLifecycleAndExplicitMigration","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadLostContactDoesNotPermitSuccession","tier":"ESSENTIAL"}
@@ -5807,6 +5811,8 @@
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadOpenAPIContract","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadReportingCadenceAndBoundaries","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadWaitProjection","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProvenanceReportsReplaceOnlyTheKindsTheyCarry","tier":"GATED-FULL"}
     ,

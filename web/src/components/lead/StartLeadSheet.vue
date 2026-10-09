@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../../lib/api'
 import { listPairingComputers, type PairingView } from '../../lib/agentPairing'
-import { LEAD_WORDS, modelByRole, readLeadSettings, writeLeadSettings, type LeadSettings } from '../../lib/lead'
+import { canLaunchLead, leadLaunchReason, LEAD_LAUNCH_OFF, LEAD_WORDS, modelByRole, readLeadSettings, writeLeadSettings, type LeadSettings } from '../../lib/lead'
 import { closeLeadSheet, leadOverlay } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
 import { useProjectLeads } from '../../stores/projectLeads'
@@ -38,6 +38,9 @@ const savedHost = computed(() => settings.value?.overrides?.allowed_host_ids?.le
 const choices = computed(() => (computers.value ?? []).filter(c => c.computer_id && c.computer_state && c.computer_state !== 'revoked'))
 const hostName = (id: string) => choices.value.find(c => c.computer_id === id)?.computer_name ?? 'the chosen computer'
 const model = computed(() => modelByRole(settings.value))
+const selectedLead = computed(() => leads.views[chosen.value]?.lead)
+const launchAvailable = computed(() => canLaunchLead(selectedLead.value) && settings.value?.automatic_launch_enabled === true)
+const launchReason = computed(() => settings.value?.automatic_launch_enabled === false ? LEAD_LAUNCH_OFF : leadLaunchReason(selectedLead.value))
 
 async function load() {
   const turn = ++generation, who = identity(), id = chosen.value
@@ -61,7 +64,7 @@ function pickHost(id: string, disabled: boolean) {
 function choose(id: string) { if (!busy.value) chosen.value = id }
 // Submission state is its own: switching what loads never strands the sheet busy.
 async function start() {
-  if (busy.value) return
+  if (busy.value || !launchAvailable.value) return
   const turn = generation, mine = ++submission, who = identity(), id = chosen.value, lead = leads.views[id]?.lead
   if (!lead) { error.value = `The ${w.l} could not be read. Try again.`; return }
   if (lead.state !== 'none' && !(lead.state === 'cannot_start' && lead.reason === 'owner_revoked')) { error.value = `${key.value} already has a ${w.l}. Open it from the project.`; return }
@@ -98,10 +101,11 @@ watch(() => leadOverlay.start, value => { if (!value) generation++ })
   <dialog ref="dialog" class="lead-sheet" aria-labelledby="start-lead-title" @cancel.prevent="close()" @keydown="keydown">
     <header class="sheet-head"><h2 id="start-lead-title">Start {{ w.l }} for {{ key }}</h2><button type="button" class="icon-btn" aria-label="Close" @click="close()"><AppIcon name="close" /></button></header>
     <div class="sheet-acts">
-      <button ref="startButton" type="button" class="btn primary" data-act="start" :aria-disabled="busy || !leads.views[chosen]?.lead" @click="start"><AppIcon name="play" :size="15" /><span>Start {{ w.l }}</span><KeyCap k="mod" class="hint" /><KeyCap k="enter" class="hint" /></button>
+      <button ref="startButton" type="button" class="btn primary" data-act="start" :aria-disabled="busy || !launchAvailable" :aria-describedby="!launchAvailable ? 'lead-launch-reason' : undefined" @click="start"><AppIcon name="play" :size="15" /><span>Start {{ w.l }}</span><KeyCap k="mod" class="hint" /><KeyCap k="enter" class="hint" /></button>
       <button type="button" class="btn ghost" data-act="cancel" @click="close()">Cancel<KeyCap k="Esc" class="hint" /></button>
     </div>
     <div class="sheet-body">
+      <p v-if="!launchAvailable" id="lead-launch-reason" class="intro" data-launch-reason>{{ launchReason }}</p>
       <p v-if="error" class="sheet-error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>
       <p class="intro">The {{ w.l }} picks up queued work in {{ key }}, sizes it and starts workers within your limits. You only see its questions, on the Decision Desk.</p>
       <div class="facts-list">
@@ -117,7 +121,8 @@ watch(() => leadOverlay.start, value => { if (!value) generation++ })
         <div v-else-if="showProject" class="fl-row" data-row="project"><span class="fl-label">Project</span><p class="fl-value">{{ key }}<small>The only project without a {{ w.l }}.</small></p></div>
         <div class="fl-row" data-row="host">
           <span class="fl-label">Runs on</span>
-          <p class="fl-value" v-if="host === 'auto'">Automatic<small>Wherever there is room when work starts.</small></p>
+          <p class="fl-value" v-if="hostOpen">Choose a computer or Automatic<small>Workers still go wherever the checks pass.</small></p>
+          <p class="fl-value" v-else-if="host === 'auto'">Automatic<small>Wherever there is room when work starts.</small></p>
           <p class="fl-value" v-else>{{ hostName(host) }}<small>Always this computer. Workers still go wherever the checks pass.</small></p>
           <button v-if="owner && choices.length" type="button" class="btn sm ghost" :aria-expanded="hostOpen" aria-controls="lead-host-choices" data-act="host" @click="hostOpen = !hostOpen"><span class="stack"><span>{{ hostOpen ? 'Done' : 'Change' }}</span><span aria-hidden="true">Change</span></span></button>
           <div v-if="hostOpen" id="lead-host-choices" class="choices">

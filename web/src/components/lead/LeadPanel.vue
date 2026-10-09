@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } fro
 import { useRouter } from 'vue-router'
 import { api } from '../../lib/api'
 import { can } from '../../lib/authz'
-import { canPause, canResume, checksSummary, decisionLine, LEAD_WORDS, startChecks } from '../../lib/lead'
+import { canLaunchLead, canPause, canResume, checksSummary, decisionLine, leadLaunchReason, LEAD_WORDS, startChecks } from '../../lib/lead'
 import { closeLeadPanel, leadOverlay, openLeadPause } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
 import { usePoller } from '../../lib/usePolledData'
@@ -73,6 +73,7 @@ const href = (key: string) => `/p/${encodeURIComponent(props.routeKey)}/${encode
 const harnessName = (h: string) => ({ codex: 'Codex', claude: 'Claude', cursor: 'Cursor', grok: 'Grok', pi: 'Pi', gemini: 'Gemini', opencode: 'OpenCode' } as Record<string, string>)[h] ?? h
 
 async function resume() {
+  if (!canLaunchLead(lead.value)) return
   const project = props.projectId, who = session.identity?.principal.id
   try {
     const result = await leads.start(project)
@@ -156,8 +157,8 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
     </div>
     <footer class="pane-foot">
       <template v-if="lead?.state === 'paused'">
-        <p>{{ canResume(lead) ? 'Restarts through the usual start checks.' : 'Resume waits until its session has stopped.' }}</p>
-        <button type="button" class="btn primary" data-act="resume" :aria-disabled="!mayStart || !canResume(lead) || leads.busy[projectId]" @click="mayStart && canResume(lead) && resume()"><AppIcon name="play" :size="15" />Resume</button>
+        <p>{{ !canLaunchLead(lead) ? leadLaunchReason(lead) : canResume(lead) ? 'Restarts through the usual start checks.' : 'Resume waits until its session has stopped.' }}</p>
+        <button type="button" class="btn primary" data-act="resume" :data-tip="!canLaunchLead(lead) ? leadLaunchReason(lead) : undefined" :aria-disabled="!mayStart || !canResume(lead) || !canLaunchLead(lead) || leads.busy[projectId]" @click="mayStart && canResume(lead) && resume()"><AppIcon name="play" :size="15" />Resume</button>
       </template>
       <template v-else>
         <p>Workers finish their step; nothing new starts.</p>

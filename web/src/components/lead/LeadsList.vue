@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { can } from '../../lib/authz'
-import { leadBand, LEAD_WORDS, type ProjectLead } from '../../lib/lead'
+import { canLaunchLead, leadBand, leadLaunchReason, LEAD_WORDS, type ProjectLead } from '../../lib/lead'
 import { openLeadPanel, openStartLead } from '../../lib/leadOverlay'
 import { usePoller } from '../../lib/usePolledData'
 import { queueRequest, type QueueWireSnapshot } from '../../lib/workQueue'
@@ -42,7 +42,7 @@ const rows = computed<Row[]>(() => active.value.flatMap((p): Row[] => {
   const view = leads.views[p.id], lead = view?.lead ?? null, q = queued.value ? queued.value[p.id] ?? 0 : null
   if (!lead) return []
   const band = leadBand(lead, p.routeKey, q, w)
-  if (lead.state === 'none') return q ? [{ id: p.id, key: p.routeKey, lead, queued: q, name: band.title, sub: `${q} queued work ${q === 1 ? 'item waits' : 'items wait'}`, status: `Start ${w.l}…`, tone: 'act', busy: false }] : []
+  if (lead.state === 'none') return q ? [{ id: p.id, key: p.routeKey, lead, queued: q, name: band.title, sub: canLaunchLead(lead) ? `${q} queued work ${q === 1 ? 'item waits' : 'items wait'}` : leadLaunchReason(lead), status: `Start ${w.l}…`, tone: 'act', busy: false }] : []
   const s = leadSession(lead), n = workersOf(lead)
   const activity = lead.state === 'working' ? s?.session.current_activity?.text || s?.session.activity_note || '' : band.status
   const sub = [activity, lead.state === 'working' ? `${n} ${n === 1 ? 'worker' : 'workers'}` : '', q === null ? '' : `${q} queued`].filter(Boolean).join(' · ')
@@ -53,12 +53,13 @@ const count = computed(() => rows.value.filter(r => r.lead && r.lead.state !== '
 const mayStart = computed(() => session.identity?.principal.kind === 'person' && can('harness.control') && can('run.create'))
 /** Projects a person could start a lead for: the + menu offers Start lead only while one exists. */
 const withoutLead = computed(() => active.value.filter(p => leads.views[p.id]?.lead?.state === 'none').map(p => p.id))
+const launchAvailable = computed(() => withoutLead.value.some(id => canLaunchLead(leads.views[id]?.lead)))
 function open(row: Row, event: MouseEvent) {
   const from = event.currentTarget as HTMLElement
-  if (row.lead?.state === 'none') { if (mayStart.value) openStartLead([row.id], from, true) }
+  if (row.lead?.state === 'none') { if (mayStart.value && canLaunchLead(row.lead)) openStartLead([row.id], from, true) }
   else openLeadPanel(row.id, from)
 }
-defineExpose({ withoutLead, mayStart })
+defineExpose({ withoutLead, mayStart, launchAvailable })
 </script>
 
 <template>
@@ -66,7 +67,7 @@ defineExpose({ withoutLead, mayStart })
     <div class="zone-head"><h2 id="leads-title">{{ w.P }}<span class="count mono">{{ count }}</span></h2><p class="small faint">One per project · each starts its workers within the dial</p></div>
     <ul class="list">
       <li v-for="row in rows" :key="row.id">
-        <button type="button" class="lead-row" :data-project="row.key" :aria-disabled="row.lead?.state === 'none' && !mayStart" @click="open(row, $event)">
+        <button type="button" class="lead-row" :data-project="row.key" :aria-disabled="row.lead?.state === 'none' && (!mayStart || !canLaunchLead(row.lead))" @click="open(row, $event)">
           <span class="lead-bot"><LeadBot :busy="row.busy" /></span>
           <span class="lr-who"><span class="lr-name" :class="{ faint: row.lead?.state === 'none' }">{{ row.name }}</span><span class="lr-sub">{{ row.sub }}</span></span>
           <span class="st" :class="row.tone">

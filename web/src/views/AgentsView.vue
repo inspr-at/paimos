@@ -34,7 +34,7 @@ import AgentsWorking from '../components/agents/AgentsWorking.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import LeadsList from '../components/lead/LeadsList.vue'
 import { openStartLead } from '../lib/leadOverlay'
-import { LEAD_WORDS } from '../lib/lead'
+import { LEAD_LAUNCH_OFF, LEAD_WORDS } from '../lib/lead'
 import { useDeveloperSettings } from '../lib/developerSettings'
 import RunQueue from '../components/agents/RunQueue.vue'
 import AttachApproval from '../components/agents/AttachApproval.vue'
@@ -118,7 +118,8 @@ const leadsList = ref<InstanceType<typeof LeadsList>>()
 const manualStart = computed(() => canStart.value && showExpertStart.value)
 const leadless = computed(() => leadsList.value?.withoutLead ?? [])
 const canStartLead = computed(() => !!leadsList.value?.mayStart && leadless.value.length > 0)
-const leadlessNote = computed(() => leadless.value.length === 1 ? `${projects.byId(leadless.value[0]!)?.routeKey ?? 'One project'} has none. One per project.` : `${leadless.value.length} projects have none. One per project.`)
+const leadLaunchAvailable = computed(() => !!leadsList.value?.launchAvailable)
+const leadlessNote = computed(() => !leadLaunchAvailable.value ? LEAD_LAUNCH_OFF : leadless.value.length === 1 ? `${projects.byId(leadless.value[0]!)?.routeKey ?? 'One project'} has none. One per project.` : `${leadless.value.length} projects have none. One per project.`)
 const showNew = computed(() => manualStart.value || canStartLead.value || canAttach.value || showConnect.value)
 watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => { headerMenu.value = null; filter.value = null })
 
@@ -459,7 +460,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       <FloatingPanel v-if="headerMenu" :anchor="headerMenu.anchor" align="end" :width="300" :label="headerMenu.type === 'add' ? 'Add agent or computer' : 'More agent actions'" @close="restore => { if (restore) headerMenu?.anchor.focus(); headerMenu = null }">
         <div role="menu" class="header-menu" @keydown="menuKeys">
           <template v-if="headerMenu.type === 'add'">
-            <button v-if="canStartLead" type="button" role="menuitem" class="menu-item" @click="menuAction(() => openStartLead(leadless, headerMenu?.anchor ?? null, true))"><AppIcon name="play" /><span>Start {{ LEAD_WORDS.l }}…<small>{{ leadlessNote }}</small></span></button>
+            <button v-if="canStartLead" type="button" role="menuitem" class="menu-item" :aria-disabled="!leadLaunchAvailable" @click="leadLaunchAvailable && menuAction(() => openStartLead(leadless, headerMenu?.anchor ?? null, true))"><AppIcon name="play" /><span>Start {{ LEAD_WORDS.l }}…<small>{{ leadlessNote }}</small></span></button>
             <button v-if="canAttach" type="button" role="menuitem" class="menu-item" @click="menuAction(() => attachDialog?.open())"><AppIcon name="link" /><span>Attach a running session…<small>Bring in a session started in a terminal.</small></span></button>
             <RouterLink v-if="showConnect" role="menuitem" class="menu-item" to="/agents/register-agent" @click="headerMenu = null"><AppIcon name="monitor" /><span>Connect your machine…<small>Install agentd so it can run agents.</small></span></RouterLink>
             <template v-if="manualStart">
