@@ -5662,6 +5662,55 @@
           "group": "fixes"
         }
       ]
+    },
+    "261009095632.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 128,
+      "snapshot_sha256": "770503ef9451a0750a2fe119c550712378d8bf2aff505fce8d2c234189571e01",
+      "captured_at": "2026-10-09T10:04:34Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-1008",
+          "pill_en": "Ticket status stays true",
+          "pill_de": "Ticketstatus bleibt korrekt",
+          "benefit_en": "Tickets move to Done when their change merges, so the board and release notes stay correct.",
+          "benefit_de": "Tickets wechseln auf Erledigt, sobald ihre Änderung gemergt ist, damit Board und Release-Notes stimmen.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1027",
+          "pill_en": "Collapsible lead card",
+          "pill_de": "Einklappbare Lead-Karte",
+          "benefit_en": "The “No lead” card can be collapsed, freeing space above the ticket list.",
+          "benefit_de": "Die Karte „Kein Lead“ lässt sich einklappen, damit mehr Platz über der Ticketliste bleibt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1031",
+          "pill_en": "Safe database upgrade",
+          "pill_de": "Sicheres Datenbank-Update",
+          "benefit_en": "Fixes the database migration error that prevented server startup.",
+          "benefit_de": "Ein Fehler bei der Datenbankmigration, der den Serverstart verhinderte, wird behoben.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-632",
+          "pill_en": "Read long names",
+          "pill_de": "Lange Namen lesen",
+          "benefit_en": "Updated lists and pickers reveal clipped names on hover, keyboard focus or a long press. Pickers with a full-name button also support tapping that button.",
+          "benefit_de": "In den überarbeiteten Listen und Auswahlfeldern lassen sich abgeschnittene Namen beim Zeigen, per Tastaturfokus oder durch langes Drücken lesen. Auswahlfelder mit einer Taste für den vollständigen Namen zeigen ihn auch beim Antippen dieser Taste.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-998",
+          "pill_en": "One app language",
+          "pill_de": "Eine App-Sprache",
+          "benefit_en": "Updated app controls consistently use English; release notes and authored content retain their language choices.",
+          "benefit_de": "Überarbeitete App-Bedienelemente verwenden durchgehend Englisch; Release-Notes und verfasste Inhalte behalten ihre Sprachwahl.",
+          "group": "fixes"
+        }
+      ]
     }
   }
 }
