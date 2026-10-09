@@ -90,7 +90,7 @@ BEGIN
     IF current_setting('aeon.test_account_use_defaults',true)='production' THEN RETURN NEW; END IF;
     PERFORM set_config('aeon.tenant_id',NEW.id::text,true);
     UPDATE account_use_rules SET new_accounts='allow',new_contexts='allow',
-        enforced_at=CASE WHEN `+activate+` THEN clock_timestamp() ELSE enforced_at END;
+        enforced_at=CASE WHEN `+activate+` THEN coalesce(enforced_at,clock_timestamp()) ELSE enforced_at END;
     PERFORM set_config('aeon.tenant_id',coalesce(prior,''),true);
     RETURN NEW;
 EXCEPTION WHEN OTHERS THEN
