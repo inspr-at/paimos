@@ -24,22 +24,22 @@
     {
       "classification": "personal",
       "columns": {
-        "tenant_id": "metadata",
-        "id": "metadata",
         "account_id": "metadata",
-        "person_id": "personal",
         "binding_revision": "metadata",
-        "policy_revision": "metadata",
-        "state": "metadata",
         "by_kind": "metadata",
+        "completed_at": "personal",
         "expected_count": "personal",
         "expired_at": "personal",
-        "requested_at": "personal",
-        "completed_at": "personal",
-        "undo_until": "personal",
+        "id": "metadata",
+        "person_id": "personal",
+        "policy_revision": "metadata",
         "raised_pace_points": "personal",
         "raised_pace_until": "personal",
-        "result": "personal"
+        "requested_at": "personal",
+        "result": "personal",
+        "state": "metadata",
+        "tenant_id": "metadata",
+        "undo_until": "personal"
       },
       "locator": {
         "person_column": "person_id",
@@ -55,6 +55,9 @@
         "boost_person_id": "personal",
         "boost_until": "personal",
         "daily_reset_policy": "personal",
+        "reset_policy_link_revision": "metadata",
+        "reset_policy_person_id": "personal",
+        "reset_report": "personal",
         "usage_budget": "personal",
         "usage_floor_percent": "metadata",
         "usage_posture": "personal",
@@ -62,10 +65,7 @@
         "usage_posture_person_id": "personal",
         "usage_probe_enabled": "personal",
         "usage_probe_revision": "metadata",
-        "usage_revision": "metadata",
-        "reset_report": "personal",
-        "reset_policy_person_id": "personal",
-        "reset_policy_link_revision": "metadata"
+        "usage_revision": "metadata"
       },
       "locator": {
         "person_column": "owner_person_id",
@@ -218,7 +218,9 @@
         "ops_eta_p90_at": "metadata",
         "project_id": "metadata",
         "prs": "metadata",
+        "qualification_evidence": "metadata",
         "ref": "metadata",
+        "rollback_class": "metadata",
         "started_at": "metadata",
         "target_from_step": "metadata",
         "target_minutes": "metadata",
@@ -800,11 +802,11 @@
     {
       "classification": "metadata",
       "columns": {
-        "tenant_id": "metadata",
-        "subject_kind": "metadata",
         "slug": "metadata",
-        "words_en": "metadata",
-        "words_de": "metadata"
+        "subject_kind": "metadata",
+        "tenant_id": "metadata",
+        "words_de": "metadata",
+        "words_en": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"

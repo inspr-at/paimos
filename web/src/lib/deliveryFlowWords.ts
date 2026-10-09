@@ -7,6 +7,7 @@ import type { StepOutcome, WaitReason, Words } from './deliveryFlow'
 
 export type StepKey = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l'
   | 'copy_gate' | 'pin_gate' | 'build' | 'review' | 'ci' | 'queue' | 'merge_round' | 'hold' | 'mitigation' | 'switch' | 'live_check'
+  | 'rehearsal' | 'catalogue'
 type Pair = readonly [en: string, de: string]
 interface KeyWords { expert: Pair; simple: Pair }
 
@@ -34,6 +35,9 @@ const KEYS: Record<StepKey, KeyWords> = {
   mitigation: { expert: ['Mitigation', 'Gegenmaßnahme'], simple: ['Fix written', 'Fix geschrieben'] },
   switch: { expert: ['Switch', 'Switch'], simple: ['Server switched', 'Server umgestellt'] },
   live_check: { expert: ['Live check', 'Live-Check'], simple: ['Checked live', 'Live geprüft'] },
+  // Inside the queue run and the rehearsal wait of a release (Arion v5 §4b): the exact-SHA image check and the whole test catalogue.
+  rehearsal: { expert: ['Rehearsal', 'Probelauf'], simple: ['Release rehearsal', 'Probelauf des Releases'] },
+  catalogue: { expert: ['Catalogue', 'Katalog'], simple: ['Full test run', 'Vollständiger Testlauf'] },
 }
 export const isStepKey = (key: string): key is StepKey => key in KEYS
 
@@ -105,6 +109,12 @@ export function stepWords(input: StepWordsInput): { expert: Words; simple: Words
         if (outcome === 'flaky') return de ? 'Checks an wackeligem Test gescheitert' : 'Checks failed on a flaky test'
         if (outcome === 'red') return de ? `${base}: rot` : `${base}: failed`
         if (outcome === 'green' || outcome === 'ok') return input.key === 'ci' ? (de ? 'Checks: grün' : 'Checks: green') : base
+      }
+      if (input.key === 'catalogue' || input.key === 'rehearsal') {
+        if (input.open) return de ? `${base} läuft` : `${base} running`
+        if (outcome === 'flaky') return de ? `${base}: an wackeligem Test gescheitert` : `${base}: failed on a flaky test`
+        if (outcome === 'red') return de ? `${base}: gescheitert` : `${base}: failed`
+        if (outcome === 'green' || outcome === 'ok') return de ? `${base}: grün` : `${base}: green`
       }
       if (input.key === 'review' || input.key === 'copy_gate' || input.key === 'pin_gate' || input.key === 'h') {
         if (outcome === 'changes') return `${base}: ${de ? 'Änderungen verlangt' : 'changes asked'}`
