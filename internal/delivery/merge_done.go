@@ -251,7 +251,19 @@ func mergeGateTx(ctx context.Context, tx pgx.Tx, e mergeEntry) (string, error) {
 	return "", nil
 }
 
-func mergeOwnerTx(ctx context.Context, tx pgx.Tx, tid string, project *string) (*tenant.Principal, error) {
+// mergeOwnerLimit bounds each responsible-person class. A configured lead is
+// not a class: that person is the only candidate, and a missing grant refuses.
+const mergeOwnerLimit = 16
+
+// mergeOwnerTx authorizes the state change as a person who already holds
+// nodes.write. A configured lead owner (project lead settings, else the lead
+// principal) is authoritative: if that person lacks the grant, completion
+// refuses and does not substitute anyone else. Only a project with neither
+// setting falls back, in order, to an existing project role binding (admin,
+// then member, then any other project role), a workspace owner, admin, or
+// member, then the person who created the ticket. No role, key, or scope is
+// created, and an agent is never the fallback.
+func mergeOwnerTx(ctx context.Context, tx pgx.Tx, tid string, project *string, ticket string) (*tenant.Principal, error) {
 	var id *string
 	err := tx.QueryRow(ctx, `SELECT coalesce((SELECT owner_person_id FROM project_lead_settings WHERE project_id=$1),
  (SELECT owner_principal_id FROM project_leads WHERE project_id=$1))::text`, project).Scan(&id)
@@ -261,15 +273,84 @@ func mergeOwnerTx(ctx context.Context, tx pgx.Tx, tid string, project *string) (
 	if err != nil {
 		return nil, err
 	}
-	if id == nil {
-		return nil, nil
+	if id != nil {
+		return mergeOwnerAllowed(ctx, tx, tid, project, *id)
 	}
-	p := tenant.Principal{ID: *id, TenantID: tid, Kind: tenant.Person}
-	err = authz.RequireTx(ctx, tx, p, "nodes.write", scope(project))
+	p, err := mergeOwnerCandidate(ctx, tx, tid, project, `SELECT p.id::text FROM role_bindings b
+ JOIN principals p ON p.tenant_id=b.tenant_id AND p.id=b.principal_id
+ JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+ WHERE p.kind='person' AND p.status='active' AND p.linked_to IS NULL
+ AND b.scope_type='project' AND b.scope_id=$1::uuid
+ GROUP BY p.id
+ ORDER BY min(CASE r.key WHEN 'admin' THEN 0 WHEN 'member' THEN 1 ELSE 2 END), min(b.created_at), p.id
+ LIMIT $2`, project, mergeOwnerLimit)
+	if p != nil || err != nil {
+		return p, err
+	}
+	p, err = mergeOwnerCandidate(ctx, tx, tid, project, `SELECT p.id::text FROM role_bindings b
+ JOIN principals p ON p.tenant_id=b.tenant_id AND p.id=b.principal_id
+ JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+ WHERE p.kind='person' AND p.status='active' AND p.linked_to IS NULL
+ AND b.scope_type='workspace' AND r.key IN ('owner','admin','member')
+ GROUP BY p.id
+ ORDER BY min(CASE r.key WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END), min(b.created_at), p.id
+ LIMIT $1`, mergeOwnerLimit)
+	if p != nil || err != nil {
+		return p, err
+	}
+	return mergeOwnerCandidate(ctx, tx, tid, project, `SELECT canonical.id::text FROM events e
+ JOIN principals actor ON actor.tenant_id=e.tenant_id AND actor.id=e.actor_principal_id
+ JOIN principals canonical ON canonical.tenant_id=actor.tenant_id AND canonical.id=coalesce(actor.linked_to,actor.id)
+ WHERE e.node_id=$1::uuid AND e.type='node.created' AND canonical.kind='person' AND canonical.status='active' AND canonical.linked_to IS NULL
+ ORDER BY e.id LIMIT 1`, ticket)
+}
+
+func mergeOwnerAllowed(ctx context.Context, tx pgx.Tx, tid string, project *string, id string) (*tenant.Principal, error) {
+	p := tenant.Principal{ID: id, TenantID: tid, Kind: tenant.Person}
+	err := authz.RequireTx(ctx, tx, p, "nodes.write", scope(project))
 	if errors.Is(err, authz.ErrForbidden) {
 		return nil, nil
 	}
-	return &p, err
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func mergeOwnerCandidate(ctx context.Context, tx pgx.Tx, tid string, project *string, query string, args ...any) (*tenant.Principal, error) {
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) > mergeOwnerLimit {
+		return nil, errRead
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		p, err := mergeOwnerAllowed(ctx, tx, tid, project, id)
+		if p != nil || err != nil {
+			return p, err
+		}
+	}
+	return nil, nil
 }
 
 // prepareMergeTx mutates only leaf state, retaining all fields and human checks.
@@ -362,7 +443,7 @@ func (m *Module) completeMerges(ctx context.Context, facts []MergeFact) error {
 		changes := []events.Change{}
 		for i := range entries {
 			e := &entries[i]
-			p, err := mergeOwnerTx(ctx, tx, actor.TenantID, e.Project)
+			p, err := mergeOwnerTx(ctx, tx, actor.TenantID, e.Project, e.Ticket)
 			if err != nil {
 				return err
 			}
