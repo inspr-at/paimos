@@ -8,7 +8,7 @@ import type { MetricTextKey } from './deliveryNumbersText'
 const TO = '→'
 
 export interface SimpleMetricText {
-  name: string; say: string; sayAlt?: string; sayNone?: string; wants: string; learn: string; learnPart?: string; src: string; part?: string
+  name: string; say: string; sayAlt?: string; sayFacts?: string; sayNone?: string; wants: string; learn: string; learnFacts?: string; learnPart?: string; src: string; part?: string
 }
 
 const EN = {
@@ -51,8 +51,10 @@ const EN = {
     queue_run_wall: { name: 'One merge-queue run', say: 'One pass through the merge queue takes about {v}.', wants: 'Arion wants 10 min, later 7.',
       learn: 'Merge-queue run duration (wall), p50 {p50} · p90 {p90}. One run of the full checks in the merge queue; the wait in the queue before it starts is not counted.', src: 'Measured from GitHub' },
     first_attempt_green: { name: 'Checks green on the first try', say: '{v} of changes pass every check on the first try; counted the way the merge rule counts, {v2} of {n2} do.', sayAlt: '{v} of changes pass every check on the first try.',
+      sayFacts: '{v} of changes pass every check on the first try. The result for the required checks alone is unavailable: job facts cover {f} of {n} runs.',
       wants: 'Arion wants at least 70 %, later 80 %.',
-      learn: 'First-attempt green rate: {v} of {n} first attempts ended green. Counted by the merge rule, only the required checks decide, so a run that is red only outside them is green ({v2} of {n2}). Arion target: green on the first try ≥ {t} (D4″).', src: 'Measured from GitHub' },
+      learn: 'First-attempt green rate: {v} of {n} first attempts ended green. Counted by the merge rule, only the required checks decide, so a run that is red only outside them is green ({v2} of {n2}). Arion target: green on the first try ≥ {t} (D4″).',
+      learnFacts: 'First-attempt green rate: {v} of {n} first attempts ended green. The result for the required checks alone is unavailable: job facts cover {f} of {n} runs, so the count by the merge rule cannot be made yet. Arion target: green on the first try ≥ {t} (D4″).', src: 'Measured from GitHub' },
     time_to_first_green: { name: 'Time until checks are green', say: 'Until its checks are green, a branch needs about {v}, re-runs and fixes included.', wants: 'Arion wants 30 min, later 20.',
       learn: 'Time to first green per branch, p50 {p50} · p90 {p90}. Counted from the first CI run of a PR branch to the first green one, with every re-run and fix in between. {never} of {total} branches never went green and are not in this time; {first} were green on their very first run.', src: 'Measured from GitHub' },
     pr_open_to_merged: { name: 'From PR opened to merged', say: 'From opening a PR to merging it takes about {v}.', wants: 'Arion wants 80 min, later 60.',
@@ -130,8 +132,10 @@ const DE: SimpleText = {
     queue_run_wall: { name: 'Ein Merge-Queue-Durchlauf', say: 'Ein Durchlauf der Merge-Queue dauert etwa {v}.', wants: 'Arion will 10 min, später 7.',
       learn: 'Merge-Queue-Laufdauer (Wall), p50 {p50} · p90 {p90}. Ein Lauf der vollen Checks in der Merge-Queue; die Wartezeit davor zählt nicht.', src: 'Gemessen über GitHub' },
     first_attempt_green: { name: 'Checks beim ersten Versuch grün', say: '{v} der Änderungen bestehen alle Checks beim ersten Versuch; so gezählt, wie die Merge-Regel zählt, sind es {v2} von {n2}.', sayAlt: '{v} der Änderungen bestehen alle Checks beim ersten Versuch.',
+      sayFacts: '{v} der Änderungen bestehen alle Checks beim ersten Versuch. Das Ergebnis allein für die Pflichtprüfungen ist nicht verfügbar: Jobdaten decken {f} von {n} Läufen ab.',
       wants: 'Arion will mindestens 70 %, später 80 %.',
-      learn: 'Grün-Quote beim ersten Versuch: {v} von {n} ersten Versuchen endeten grün. Nach der Merge-Regel entscheiden nur die Pflichtprüfungen; ein Lauf, der nur außerhalb davon rot ist, gilt als grün ({v2} von {n2}). Arion-Ziel: grün beim ersten Versuch ≥ {t} (D4″).', src: 'Gemessen über GitHub' },
+      learn: 'Grün-Quote beim ersten Versuch: {v} von {n} ersten Versuchen endeten grün. Nach der Merge-Regel entscheiden nur die Pflichtprüfungen; ein Lauf, der nur außerhalb davon rot ist, gilt als grün ({v2} von {n2}). Arion-Ziel: grün beim ersten Versuch ≥ {t} (D4″).',
+      learnFacts: 'Grün-Quote beim ersten Versuch: {v} von {n} ersten Versuchen endeten grün. Das Ergebnis allein für die Pflichtprüfungen ist nicht verfügbar: Jobdaten decken {f} von {n} Läufen ab, daher lässt sich die Zählung nach der Merge-Regel noch nicht bilden. Arion-Ziel: grün beim ersten Versuch ≥ {t} (D4″).', src: 'Gemessen über GitHub' },
     time_to_first_green: { name: 'Zeit, bis die Checks grün sind', say: 'Bis ihre Checks grün sind, braucht ein Branch etwa {v}, Wiederholungen und Fixes inklusive.', wants: 'Arion will 30 min, später 20.',
       learn: 'Zeit bis zum ersten Grün pro Branch, p50 {p50} · p90 {p90}. Gezählt vom ersten CI-Lauf eines PR-Branches bis zum ersten grünen, mit allen Wiederholungen und Fixes dazwischen. {never} von {total} Branches wurden nie grün und stehen nicht in dieser Zeit; {first} waren schon beim ersten Lauf grün.', src: 'Gemessen über GitHub' },
     pr_open_to_merged: { name: 'Vom PR bis zum Merge', say: 'Vom Öffnen eines PR bis zum Merge vergehen etwa {v}.', wants: 'Arion will 80 min, später 60.',

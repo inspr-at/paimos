@@ -346,12 +346,13 @@ it('the v5 readings get a verdict, a sentence and a direction from this window�
   expect(de.map(item => item.say + item.learn.body).join(' ')).not.toMatch(/\b(du|dein|deine|wir|unser|unsere)\b/i)
 })
 
-it('missing job facts stay in the sentence as 0 of N and say why', () => {
-  const data = deliveryMetrics() as {
-    metrics: { key: string; status: string; reason: string | null; windows: { days: number; status: string; n: number; value: number | null; coverage: { full: boolean } }[]; daily: { status: string; n: number; value: number | null }[] }[]
-  }
-  const required = data.metrics.find(item => item.key === 'required_checks_green')!
-  const n = data.metrics.find(item => item.key === 'first_attempt_green')!.windows.find(item => item.days === 7)!.n
+it('missing job facts read as unavailable, never as a measured 0 of N, in the sentence and in Learn', () => {
+  // Risk: runs without job facts have no required-check result; saying "0 of N do" reports a failed result where none exists.
+  type Fixture = { metrics: { key: string; status: string; reason: string | null; windows: { days: number; status: string; n: number; value: number | null; coverage: { full: boolean } }[]; daily: { status: string; n: number; value: number | null }[] }[] }
+  const tile = (data: Fixture, lang: 'en' | 'de') => simpleNumbersOf(data as never, 7, 'ready', false, lang).sections.flatMap(section => section.tiles).find(item => item.key === 'first_attempt_green')!
+  const unavailable = deliveryMetrics() as Fixture
+  const required = unavailable.metrics.find(item => item.key === 'required_checks_green')!
+  const n = unavailable.metrics.find(item => item.key === 'first_attempt_green')!.windows.find(item => item.days === 7)!.n
   required.status = 'no_data'
   required.reason = '6 runs without job facts yet, so their required checks and runner waits are not counted.'
   for (const window of required.windows) {
@@ -365,10 +366,41 @@ it('missing job facts stay in the sentence as 0 of N and say why', () => {
     point.n = 0
     point.value = null
   }
-  const tile = simpleNumbersOf(data as never, 7, 'ready', false, 'en').sections.flatMap(section => section.tiles).find(item => item.key === 'first_attempt_green')!
-  expect(tile.say).toContain(`0 of ${numbers.num(n, 'en')}`)
-  expect(tile.foot).toContain('without job facts')
-  expect(tile.learn.body).toContain('without job facts')
-  const german = simpleNumbersOf(data as never, 7, 'ready', false, 'de').sections.flatMap(section => section.tiles).find(item => item.key === 'first_attempt_green')!
-  expect(german.say).toContain(`0 von ${numbers.num(n, 'de')}`)
+  const english = tile(unavailable, 'en')
+  expect(english.say).toContain('unavailable')
+  expect(english.say).toContain(`job facts cover 0 of ${numbers.num(n, 'en')} runs`)
+  expect(english.learn.body).toContain('unavailable')
+  expect(english.learn.body).toContain(`job facts cover 0 of ${numbers.num(n, 'en')} runs`)
+  expect(english.foot).toContain('without job facts')
+  expect(english.learn.body).toContain('without job facts')
+  // Neither text may read as the merge-rule count: no "the way the merge rule counts", no "0 of N do", no "(0 of N)".
+  for (const text of [english.say, english.learn.body]) {
+    expect(text).not.toMatch(/the way the merge rule counts/)
+    expect(text).not.toMatch(/\b0 of [\d.,]+ do\b/)
+    expect(text).not.toMatch(/\(0 of [\d.,]+\)/)
+    expect(text).not.toContain('{')
+  }
+  const german = tile(unavailable, 'de')
+  expect(german.say).toContain('nicht verfügbar')
+  expect(german.say).toContain(`Jobdaten decken 0 von ${numbers.num(n, 'de')} Läufen ab`)
+  expect(german.learn.body).toContain('nicht verfügbar')
+  expect(german.learn.body).toContain(`Jobdaten decken 0 von ${numbers.num(n, 'de')} Läufen ab`)
+  for (const text of [german.say, german.learn.body]) {
+    expect(text).not.toMatch(/so gezählt, wie die Merge-Regel zählt/)
+    expect(text).not.toMatch(/\bsind es 0 von/)
+    expect(text).not.toMatch(/\(0 von [\d.,]+\)/)
+    expect(text).not.toContain('{')
+  }
+  // A measured zero is a different statement: five required-check runs, none green. It keeps the count wording and is not "unavailable".
+  const measured = deliveryMetrics() as Fixture
+  for (const window of measured.metrics.find(item => item.key === 'required_checks_green')!.windows) {
+    window.status = 'ok'
+    window.n = 5
+    window.value = 0
+  }
+  const zero = tile(measured, 'en')
+  expect(zero.say).toMatch(/the way the merge rule counts, 0\s?% of 5 do/)
+  expect(zero.say).not.toContain('unavailable')
+  expect(zero.learn.body).not.toContain('unavailable')
+  expect(tile(measured, 'de').say).toMatch(/so gezählt, wie die Merge-Regel zählt, sind es 0\s?% von 5/)
 })

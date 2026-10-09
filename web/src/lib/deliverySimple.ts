@@ -177,8 +177,9 @@ export function simpleTile(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
         values.v = pct(value, lang)
         values.t = target ? pct(target.value, lang) : '–'
         if (factsMissing) {
-          values.v2 = '0'
-          values.n2 = num(n, lang)
+          // Unavailable, not a measured zero: the sentence says the result is missing and how many runs have job facts.
+          values.f = num(also?.n ?? 0, lang)
+          sentence = words.sayFacts ?? words.sayAlt ?? sentence
         } else {
           values.v2 = also?.value != null && also.n > 0 ? pct(also.value, lang) : '–'
           values.n2 = also && also.n > 0 ? num(also.n, lang) : '–'
@@ -220,7 +221,7 @@ export function simpleTile(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
       }
     }
     say = `${fill(sentence, values)} ${words.wants}`
-    learn = fill(words.learn, { ...values, n: def.kind === 'release' ? (n === 1 ? text.releaseOne : fill(text.releaseMany, { n: num(n, lang) })) : def.kind === 'review' ? values.n : num(n, lang) })
+    learn = fill(factsMissing && words.learnFacts ? words.learnFacts : words.learn, { ...values, n: def.kind === 'release' ? (n === 1 ? text.releaseOne : fill(text.releaseMany, { n: num(n, lang) })) : def.kind === 'review' ? values.n : num(n, lang) })
       + (partial && words.learnPart && from ? fill(words.learnPart, { d: from }) : '')
   } else if (def.key === 'flaked_failures' && ready && window && n > 0 && window.value == null && words.sayNone) {
     const values = { n: num(n, lang), v: text.noDataYet, ...countValues(window, lang) }

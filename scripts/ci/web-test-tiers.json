@@ -14860,7 +14860,7 @@
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"each tile shows its verdict as shape and word: the icon follows the level","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"missing job facts stay in the sentence as 0 of N and say why","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"missing job facts read as unavailable, never as a measured 0 of N, in the sentence and in Learn","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"the small chart shades the good side of the target and hatches only what no source covers","tier":"ESSENTIAL"}
     ,
