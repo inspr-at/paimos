@@ -3168,6 +3168,8 @@
     ,
     {"kind":"go","package":"internal/attachments","name":"TestGCWaitsForReusedBlobReferenceCommit","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/attachments","name":"TestGzipAttachmentUploadAndIsolatedDownload","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/attachments","name":"TestHTMLPreviewCapabilities","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestHTMLPreviewDisabledAndSessionRevoked","tier":"GATED-FULL"}
@@ -3185,6 +3187,8 @@
     {"kind":"go","package":"internal/attachments","name":"TestSandboxHostBoundary","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestSandboxOrigin","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/attachments","name":"TestStorageGzipPreservesBytesAndLimit","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestUploadDedupeVariantsETagIsolationUndoAndOps","tier":"ESSENTIAL"}
     ,
