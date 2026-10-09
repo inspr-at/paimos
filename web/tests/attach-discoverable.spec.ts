@@ -452,6 +452,11 @@ test('a list still on its way when the person changes is never shown to the next
   })
   await page.goto('/agents')
   await expect.poll(() => anyAsked).toBeGreaterThanOrEqual(1)
+  // The first paint's permission reads finish before the next person's are held.
+  // Session rows appear only after those reads. Arming the hold earlier swallows
+  // them, the page stays on Loading, and the click below never finds a row.
+  const sessionState = page.locator('[data-row^="s:"] .c-state').first()
+  await expect(sessionState).toBeVisible()
   // Ola signs in to another workspace; the next navigation refreshes the session. Her
   // permissions are slow, so the old answer lands while nobody is allowed yet, and the
   // new list is slow too: the old rows must not show in between.
@@ -464,7 +469,7 @@ test('a list still on its way when the person changes is never shown to the next
     value.workspace.permissions = [...value.workspace.permissions, 'account.manage']
     await route.fulfill({ json: value })
   })
-  await page.locator('[data-row^="s:"] .c-state').first().click()
+  await sessionState.click()
   await expect(page).toHaveURL(/\/agents\/.+/)
   await expect.poll(() => permissionsAsked).toBe(true)
   previous.open()
