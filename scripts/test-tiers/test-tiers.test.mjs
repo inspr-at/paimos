@@ -12,7 +12,7 @@ import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
 import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain, effectiveLane, sourceTree, promotionsBetween } from './diff.mjs'
-import { runnerDecision, runnerSelection } from './cli.mjs'
+import { runnerDecision, runnerSelection, browserRunnerIdentity, run } from './cli.mjs'
 import { treeStamp, reuse, webStampEntries } from './collect.mjs'
 import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs'
 import { buildBrowserMap } from './browser-impact.mjs'
@@ -32,6 +32,115 @@ const mapTree='a'.repeat(40)
 const completeMap=(source,specs)=>({baseTree:mapTree,browserMap:{version:1,tree:mapTree,complete:true,specs,modules:{[source]:specs}}})
 const fixture=()=>({version:1,tests:structuredClone(cases)})
 const noFlaky={version:1,entries:[]}
+
+const poolBrowserEnv=(event='pull_request',eventClass='mbp2606-pr')=>({
+  GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:event,RUNNER_ENVIRONMENT:'self-hosted',
+  runner_class:'mbp2606',RUNNER_NAME:'mbp2606-fixture',RUNNER_OS:'Linux',RUNNER_ARCH:'ARM64',
+  runs_on:JSON.stringify(['self-hosted','Linux','ARM64','mbp2606',eventClass]),
+})
+
+// R13 release integrity: arbitrary self-hosted/local runners must never produce
+// browser gate evidence, and the approved pool must keep exact case accounting.
+test('AEON-1015 browser guard accepts hosted and event-matched pool runners and refuses other identities before execution',async t=>{
+  for(const env of [{RUNNER_ENVIRONMENT:'github-hosted'},
+    {RUNNER_ENVIRONMENT:'github-hosted',runner_class:'hosted',runs_on:'["ubuntu-latest"]'}]) {
+    assert.equal(browserRunnerIdentity(env).class,'hosted','hosted fallback requires no pool labels')
+  }
+  const base=poolBrowserEnv(),labels=JSON.parse(base.runs_on)
+  for(const [event,eventClass] of [['pull_request','mbp2606-pr'],['merge_group','mbp2606-mq'],
+    ['push','mbp2606-push'],['workflow_dispatch','mbp2606-dispatch']]) {
+    assert.equal(browserRunnerIdentity(poolBrowserEnv(event,eventClass)).class,'mbp2606',event)
+  }
+  assert.deepEqual(browserRunnerIdentity({...base,runs_on:JSON.stringify([...labels].reverse())}).labels,labels,'label order is immaterial')
+  const refused=[
+    ['local',{}],['class alone',{runner_class:'mbp2606'}],
+    ['unknown runner environment',{...base,RUNNER_ENVIRONMENT:'unknown'}],
+    ['missing runner environment',{...base,RUNNER_ENVIRONMENT:undefined}],
+    ['outside Actions',{...base,GITHUB_ACTIONS:undefined}],
+    ['false Actions flag',{...base,GITHUB_ACTIONS:'false'}],
+    ['missing class',{...base,runner_class:undefined}],['unknown class',{...base,runner_class:'other'}],
+    ['hosted class on self-hosted runner',{...base,runner_class:'hosted'}],
+    ['wrong OS',{...base,RUNNER_OS:'macOS'}],['missing OS',{...base,RUNNER_OS:undefined}],
+    ['wrong architecture',{...base,RUNNER_ARCH:'X64'}],['missing architecture',{...base,RUNNER_ARCH:undefined}],
+    ['unsupported event',{...base,GITHUB_EVENT_NAME:'schedule'}],['missing event',{...base,GITHUB_EVENT_NAME:undefined}],
+    ['missing labels',{...base,runs_on:undefined}],['malformed JSON',{...base,runs_on:'['}],
+    ['labels are null',{...base,runs_on:'null'}],['labels are an object',{...base,runs_on:'{}'}],
+    ['labels are a string',{...base,runs_on:'"mbp2606"'}],['labels are not serialized',{...base,runs_on:labels}],
+    ['empty labels',{...base,runs_on:'[]'}],['oversized label input',{...base,runs_on:' '.repeat(1025)}],
+    ['wrong pool label',{...base,runs_on:JSON.stringify(labels.map(label=>label==='mbp2606'?'other':label))}],
+    ['wrong event label',{...base,runs_on:JSON.stringify([...labels.slice(0,-1),'mbp2606-mq'])}],
+    ['duplicate label',{...base,runs_on:JSON.stringify([...labels.slice(0,-1),'mbp2606'])}],
+    ['extra event label',{...base,runs_on:JSON.stringify([...labels,'mbp2606-mq'])}],
+    ['unknown extra label',{...base,runs_on:JSON.stringify([...labels,'other'])}],
+    ...labels.map(label=>[`missing ${label} label`,{...base,runs_on:JSON.stringify(labels.filter(value=>value!==label))}]),
+  ]
+  const row={kind:'browser',file:'tests/pool.spec.ts',name:'guarded case',tier:'GATED-FULL',active:true}
+  for(const [name,env] of refused) await t.test(name,async()=>{
+    const reached=[]
+    const touch=stage=>()=>{reached.push(stage);throw new Error(`Unexpected ${stage}`)}
+    await assert.rejects(run('web',{tests:[row],all:[row]},{env,job:'aeon1015-refused'}, {
+      loadBrowserPolicy:touch('policy'),command:touch('collection'),runPlaywright:touch('browser'),
+      execute:touch('unit'),saveJSON:touch('measurement'),knownFlaky:noFlaky,
+    }),/Tier browser execution requires GitHub-hosted CI or the approved mbp2606 runner identity/)
+    assert.deepEqual(reached,[],'refusal precedes all execution and successful evidence')
+  })
+})
+
+test('AEON-1015 browser measurements persist actual runner identity and preserve supervised execution',async t=>{
+  const row={kind:'browser',file:'tests/pool.spec.ts',name:'selected case',tier:'GATED-FULL',
+    id:'pool-case',project:'chromium',line:10,active:true}
+  const native={errors:[],suites:[{specs:[{id:row.id,title:row.name,
+    tests:[{projectName:row.project,results:[{status:'passed'}]}]}]}]}
+  const policy={groups:[{id:'pool',config:'playwright.ui.config.ts',flags:[],env:{},specs:[{file:row.file}]}]}
+  const environments=[
+    {RUNNER_ENVIRONMENT:'github-hosted',runner_class:'hosted',runs_on:'["ubuntu-latest"]',RUNNER_NAME:'hosted-fixture',RUNNER_OS:'Linux',RUNNER_ARCH:'X64'},
+    ...[['pull_request','mbp2606-pr'],['merge_group','mbp2606-mq'],['push','mbp2606-push'],
+      ['workflow_dispatch','mbp2606-dispatch']].map(([event,eventClass])=>poolBrowserEnv(event,eventClass)),
+  ]
+  for(const identity of environments) await t.test(identity.GITHUB_EVENT_NAME??'hosted fallback',async()=>{
+    const job=`aeon1015-${identity.GITHUB_EVENT_NAME??'hosted'}`
+    const directory=resolve(fileURLToPath(new URL('../../tmp/test-tiers/',import.meta.url)))
+    mkdirSync(directory,{recursive:true})
+    const summary=resolve(directory,`${job}-summary.txt`)
+    writeFileSync(summary,'')
+    const env={...identity,GITHUB_RUN_ID:'1015',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'a'.repeat(40),GITHUB_STEP_SUMMARY:summary}
+    const calls=[],logs=[]
+    const code=await run('web',{tests:[row],all:[row],full:true,scope:'gated-full',reason:'fixture'},{env,job},{
+      knownFlaky:noFlaky,loadBrowserPolicy:()=>policy,log:line=>logs.push(line),
+      command:(_bin,args,{env:received})=>{
+        calls.push('collect')
+        assert.ok(args.includes('--list'))
+        assert.equal(received.runs_on,env.runs_on)
+        return JSON.stringify(native)
+      },
+      runPlaywright:async(args,{env:received})=>{
+        calls.push('browser')
+        assert.equal(received.runner_class,env.runner_class)
+        assert.equal(received.PW_RETRIES,'0')
+        assert.ok(args.includes('--workers=1'))
+        assert.ok(args.includes('--retries=0'))
+        assert.ok(args.includes('--forbid-only'))
+        assert.equal(readFileSync(args[args.indexOf('--test-list')+1],'utf8'),`[chromium] › pool.spec.ts\n`)
+        writeFileSync(received.PLAYWRIGHT_JSON_OUTPUT_FILE,JSON.stringify(native))
+        return {code:0}
+      },
+    })
+    assert.equal(code,0)
+    assert.deepEqual(calls,['collect','browser'])
+    const report=JSON.parse(readFileSync(resolve(directory,`${job}-measurement.json`),'utf8'))
+    assert.equal(report.runner_class,identity.RUNNER_ENVIRONMENT==='github-hosted'?'hosted':'mbp2606')
+    assert.deepEqual(report.runner,{class:report.runner_class,environment:identity.RUNNER_ENVIRONMENT,
+      name:identity.RUNNER_NAME,os:identity.RUNNER_OS,arch:identity.RUNNER_ARCH,
+      labels:identity.RUNNER_ENVIRONMENT==='github-hosted'?[]:JSON.parse(identity.runs_on)})
+    assert.deepEqual([report.runId,report.attempt,report.sha],['1015','1',env.GITHUB_SHA])
+    assert.deepEqual([report.classes['GATED-FULL'].selected,report.classes['GATED-FULL'].run,report.classes['GATED-FULL'].passed],[1,1,1])
+    assert.deepEqual(report.flakeLedger,[])
+    assert.deepEqual(JSON.parse(logs.at(-1)).runner,report.runner)
+    const summaryReport=JSON.parse(readFileSync(summary,'utf8').match(/```json\n([\s\S]*?)\n```/)[1])
+    assert.deepEqual(summaryReport.runner,report.runner)
+    assert.deepEqual(aggregate([report],[]).reports[0].runner,report.runner,'aggregate retains identity for runner-class analysis')
+  })
+})
 
 test('AEON-707 work safety regressions remain classified and selected by every full gate',()=>{
   const manifest=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
