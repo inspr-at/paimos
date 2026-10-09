@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { displayLanguage } from '../../lib/displayLanguage'
 import { computed } from 'vue'
 import type { ProjectMessage } from '../../lib/agents'
 import { useSession } from '../../stores/session'
-import { useProfile } from '../../stores/profile'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import { collapseMessages, historicalSender } from './sessionMessages'
 import type { MessageStatus } from '../../lib/agents'
@@ -19,8 +19,7 @@ import MarkdownBody from '../MarkdownBody.vue'
 const props = defineProps<{ messages: ProjectMessage[]; principalId: string; sessionId?: string; now: number; canReply: boolean; newFrom?: string; newCount?: number; queuedIds?: Set<string>; statuses?: Record<string, MessageStatus> }>()
 const emit = defineEmits<{ reply: [message: ProjectMessage]; retry: [message: ProjectMessage] }>()
 const identity = useSession()
-const profile = useProfile()
-const german = computed(() => profile.profile?.locale.startsWith('de'))
+const german = computed(() => displayLanguage() === 'de')
 const words = computed(() => chatWords[german.value ? 'de' : 'en'])
 const label = (status: MessageStatus) => ({ sent: words.value.sending, delivered: words.value.delivered, read: words.value.read, not_delivered: words.value.failed })[status.status]
 const me = computed(() => identity.identity?.principal.id ?? '')

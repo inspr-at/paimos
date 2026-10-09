@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { displayLanguage } from './displayLanguage.ts'
 // Access: people, invites, roles, project access, agents and the access audit
 // (ADR-003, the authz contract). Wire types mirror the contract exactly; the
 // helpers below are free of Vue so they can be unit-tested.
@@ -393,6 +394,6 @@ export function auditSentence(event: AuditEvent, names: Names): { actor: string;
   }
 }
 
-export const fullAccessLabel = (locale = typeof document === 'undefined' ? 'en' : new URLSearchParams(location.search).get('lang') ?? document.documentElement.lang) => locale.toLowerCase().startsWith('de')
+export const fullAccessLabel = (locale?: string) => displayLanguage(locale) === 'de'
   ? 'Vollzugriff (immer alle Agentenberechtigungen)'
   : 'Full access (always all agent permissions)'

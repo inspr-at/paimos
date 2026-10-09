@@ -105,15 +105,17 @@ func WithChainCache(ctx context.Context) context.Context {
 }
 
 type Kind struct {
-	ID        string   `json:"id"`
-	Slug      string   `json:"slug"`
-	Label     string   `json:"label"`
-	Hint      string   `json:"hint"`
-	ProjectID *string  `json:"project_id,omitempty"`
-	System    *string  `json:"system,omitempty"`
-	Position  int      `json:"position"`
-	Examples  []string `json:"examples"`
-	Labels    []string `json:"labels"`
+	WordsDe      *KindText `json:"words_de,omitempty"`
+	DisplayWords *KindText `json:"display_words,omitempty"`
+	ID           string    `json:"id"`
+	Slug         string    `json:"slug"`
+	Label        string    `json:"label"`
+	Hint         string    `json:"hint"`
+	ProjectID    *string   `json:"project_id,omitempty"`
+	System       *string   `json:"system,omitempty"`
+	Position     int       `json:"position"`
+	Examples     []string  `json:"examples"`
+	Labels       []string  `json:"labels"`
 }
 
 func LookupKind(ctx context.Context, tx pgx.Tx, area, projectID string) (Kind, bool, error) {

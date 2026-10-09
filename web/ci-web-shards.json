@@ -800,6 +800,8 @@
         ,
         {"file":"tests/deploy-target.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/display-language.spec.ts","listedTests":5,"weightSeconds":35,"weightSource":"AEON-998 targeted spot checks, five views with six sizes/themes each"}
+        ,
         {"file":"tests/doctrine-inbox.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/done-gate.spec.ts","listedTests":20,"weightSeconds":44.390244,"weightSource":"unmeasured-test-rate"}

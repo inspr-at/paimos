@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { displayLanguage } from '../../lib/displayLanguage'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { APIError } from '../../lib/api'
 import { cancelSessionMessage, messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
 import { readSessionMarker, writeSessionMarker } from '../../lib/agentRows'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
-import { useProfile } from '../../stores/profile'
 import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
@@ -21,8 +21,7 @@ const props = defineProps<{ view: SessionView; now: number; canWrite: boolean; a
 const emit = defineEmits<{ unread: [count: number]; interrupt: [] }>()
 const agents = useAgents()
 const identity = useSession()
-const profile = useProfile()
-const words = computed(() => chatWords[profile.profile?.locale.startsWith('de') ? 'de' : 'en'])
+const words = computed(() => chatWords[displayLanguage()])
 const me = computed(() => identity.identity?.principal.id ?? '')
 const person = computed(() => identity.identity?.principal.kind === 'person')
 const s = computed(() => props.view.session)

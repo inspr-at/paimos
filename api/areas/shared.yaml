@@ -2189,10 +2189,20 @@ components:
         complexity_by: {type: [string, 'null'], format: uuid, readOnly: true}
         complexity_at: {type: [string, 'null'], format: date-time, readOnly: true}
         complexity_confirmed: {type: boolean, readOnly: true}
+    WorkDisplayWords:
+      type: object
+      additionalProperties: false
+      required: [label, hint, examples]
+      properties:
+        label: {type: string, minLength: 1, maxLength: 40}
+        hint: {type: string, minLength: 1, maxLength: 120}
+        examples: {type: array, maxItems: 3, items: {type: string, minLength: 1, maxLength: 120}}
     WorkKind:
       type: object
       required: [id, slug, label, hint, position]
       properties:
+        words_de: {$ref: '#/components/schemas/WorkDisplayWords', description: "German wording, stored separately from English; omitted for untranslated custom kinds."}
+        display_words: {$ref: '#/components/schemas/WorkDisplayWords', description: "Complete wording for the requested display language, falling back to English as a whole."}
         examples: {type: array, maxItems: 3, items: {type: string, maxLength: 120}}
         labels: {type: array, maxItems: 32, items: {type: string, maxLength: 48}}
         ticket_count: {type: integer, minimum: 0}

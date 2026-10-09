@@ -1,14 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { displayLanguage } from '../../lib/displayLanguage'
 import { computed } from 'vue'
-import { useProfile } from '../../stores/profile'
 import { chatWords, type SessionTab } from './sessionChat'
 
 // Overview and Messages for one session; Messages carries the unread count.
 const props = defineProps<{ selected: SessionTab; unread: number }>()
 const emit = defineEmits<{ select: [tab: SessionTab] }>()
-const profile = useProfile()
-const words = computed(() => chatWords[profile.profile?.locale.startsWith('de') ? 'de' : 'en'])
+const words = computed(() => chatWords[displayLanguage()])
 const tabs = computed<{ id: SessionTab; label: string }[]>(() => [{ id: 'overview', label: words.value.overview }, { id: 'messages', label: words.value.chat }])
 function move(event: KeyboardEvent) {
   if (event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
