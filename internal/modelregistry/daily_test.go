@@ -41,15 +41,10 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		claude, err := insert("daily-opus-next", "claude", "anthropic", "claude-opus-5")
-		if err != nil {
-			return err
-		}
-		// Retire pre-seeded aliases so the same model/version cannot turn
-		// selection into a UUID tie. Profile rows remain immutable.
-		if _, err := tx.Exec(ctx, `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by)
- SELECT tenant_id,id,'daily fixture alias',$2 FROM model_profiles
- WHERE harness IN ('codex','claude') AND id<>ALL($1::uuid[])`, []string{pin.ID, next.ID, claudePin.ID, claude.ID}, p.ID); err != nil {
+		// The board prefers the CLI's registered newest-version alias. Reuse
+		// that catalog pin so qualification and selection assert the same row.
+		var claude Profile
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh' AND version='1'`).Scan(&claude.ID); err != nil {
 			return err
 		}
 
