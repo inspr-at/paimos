@@ -96,6 +96,23 @@ not retrospective claims about the historical 49 red PR runs or 22 queue runs.
 Its post-execution checks and exit codes remain; OPS owns promoting a repaired
 aggregate to a required check with the nixcfg pin.
 
+The saved Arion W2 attempt-1 inventory (2026-10-05 00:00 UTC through
+2026-10-09 04:00 UTC) reproduces this mutually exclusive breakdown:
+
+| Observed cofailure | PR runs | Queue runs |
+| --- | ---: | ---: |
+| Setup or planner also red | 8 | 3 |
+| Tier execution also red, with no setup/planner red | 22 | 3 |
+| No setup or tier-execution red in inventory | 19 | 16 |
+| Total tier-measurement red | 49 | 22 |
+
+Reproduce with `node scripts/test-tiers/measurement-causes.mjs RECORDS_JSON W2`
+against the coordinator's saved `measure-v2-records.json`. This inventory only
+contains failed job names: the cofailures are evidence, but artifact/API/log
+causes for the 19 PR and 16 queue cases remain unclassified. The new cause
+codes make those failures distinguishable on future attempts without inventing
+a historical explanation.
+
 Coordinator PR copy: W2 baseline `first_attempt_green` **62.3% per commit**;
 instrumentation is the separate preflight attempt rate plus measurement cause
 codes. Correctness evidence covers SHA/tree mutation, missing/red/stale results,

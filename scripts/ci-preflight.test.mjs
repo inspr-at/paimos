@@ -9,7 +9,7 @@ import { preflight, boundCheckout, goPackages, testEnvironment } from './ci-pref
 import { browserPreflight } from './ci-preflight-browser.mjs';
 import { combine, browserGroups, validLocal } from './ci-preflight-result.mjs';
 import { preflightMetrics } from './ci-preflight-report.mjs';
-import { measurementCauses, measurementErrorCause } from './test-tiers/measurement-causes.mjs';
+import { measurementCauses, measurementErrorCause, measurementCofailures } from './test-tiers/measurement-causes.mjs';
 
 const sha = 'b'.repeat(40), base = 'a'.repeat(40);
 const greenLocal = () => ({ schema: 1, kind: 'local', sha, base_sha: base, runner_class: 'mbp2606',
@@ -64,6 +64,13 @@ test('preflight red rate stays separate from CI and measurement causes never inv
     ['upstream_setup_or_planner', 'required_tier_jobs_skipped', 'missing_case_artifact', 'artifact_run_attempt_or_sha_mismatch']);
   assert.equal(measurementErrorCause(new Error('Invalid job timestamps: web')), 'invalid_runner_timestamps');
   assert.equal(measurementErrorCause(new Error('unrecognized')), 'unclassified_measurement_error');
+  const record = { event: 'pull_request', created_at: '2026-10-05T01:00:00Z', a1_completed: '2026-10-05T02:00:00Z',
+    a1_conclusion: 'failure', failed_jobs: ['tier-measurements'] };
+  const causes = measurementCofailures([record, { ...record, failed_jobs: ['tier-measurements', 'web-setup'] },
+    { ...record, failed_jobs: ['tier-measurements', 'web-shard (1)'] }, { ...record, a1_conclusion: 'cancelled' }],
+    '2026-10-05T00:00:00Z', '2026-10-09T04:00:00Z');
+  assert.deepEqual(causes.groups.pull_request, { tier_red: 3, setup_or_planner_cofailure: 1,
+    test_execution_cofailure: 1, no_setup_or_tier_execution_red_in_inventory: 1 });
 });
 
 test('bound checkout rejects a real dirty tree and a different commit', () => {
