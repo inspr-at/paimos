@@ -406,7 +406,7 @@
         ,
         {"file":"tests/decision-desk-project.spec.ts","listedTests":9,"weightSeconds":30,"weightSource":"AEON-1057 new spec; 11 s locally, conservative initial estimate"}
         ,
-        {"file":"tests/decision-desk.spec.ts","listedTests":52,"tierTiming":{"caseSeconds":{"max":13.265,"median":1.782,"min":1.257},"seconds":133.356542,"selectedTests":35},"weightSeconds":128,"weightSource":"web-14"}
+        {"file":"tests/decision-desk.spec.ts","listedTests":60,"tierTiming":{"caseSeconds":{"max":13.265,"median":1.782,"min":1.257},"seconds":133.356542,"selectedTests":35},"weightSeconds":128,"weightSource":"web-14"}
       ]
     }
     ,
@@ -436,7 +436,7 @@
       "specs": [
         {"file":"tests/account-link.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":3.299,"median":1.7945,"min":0.733},"seconds":20.685759,"selectedTests":10},"weightSeconds":19.833333,"weightSource":"web-15"}
         ,
-        {"file":"tests/attach-discoverable.spec.ts","listedTests":41,"tierTiming":{"caseSeconds":{"max":9.262,"median":2.303,"min":1.11},"seconds":119.445446,"selectedTests":41},"weightSeconds":81.316667,"weightSource":"web-15"}
+        {"file":"tests/attach-discoverable.spec.ts","listedTests":47,"tierTiming":{"caseSeconds":{"max":9.262,"median":2.303,"min":1.11},"seconds":119.445446,"selectedTests":41},"weightSeconds":81.316667,"weightSource":"web-15"}
         ,
         {"file":"tests/attach-security.spec.ts","listedTests":50,"tierTiming":{"caseSeconds":{"max":6.215,"median":1.3445,"min":0.84},"seconds":86.253166,"selectedTests":50},"weightSeconds":99.166667,"weightSource":"web-15"}
         ,
@@ -1039,6 +1039,8 @@
         {"file":"tests/state-colours.spec.ts","listedTests":12,"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/status-buckets.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/stepup-desk.spec.ts","listedTests":9,"weightSeconds":12,"weightSource":"local-single-worker-AEON-1048-9.1s-plus-margin"}
         ,
         {"file":"tests/tap-targets.spec.ts","listedTests":28,"weightSeconds":62.146341,"weightSource":"unmeasured-test-rate"}
         ,

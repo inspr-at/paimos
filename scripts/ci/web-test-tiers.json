@@ -872,6 +872,28 @@
     ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 390 light"
     ,
+    "browser:tests/stepup-desk.spec.ts:Approve on a request someone else settled first shows their outcome, not the pending memo"
+    ,
+    "browser:tests/stepup-desk.spec.ts:Decline needs no step-up; the Decided view names who and how, and a first decision elsewhere stays theirs"
+    ,
+    "browser:tests/stepup-desk.spec.ts:an approval memo is pixel-identical with and without step-up requests at 1440 dark"
+    ,
+    "browser:tests/stepup-desk.spec.ts:an approval memo is pixel-identical with and without step-up requests at 1440 light"
+    ,
+    "browser:tests/stepup-desk.spec.ts:an approval memo is pixel-identical with and without step-up requests at 390 light"
+    ,
+    "browser:tests/stepup-desk.spec.ts:closing the memo while Approve waits cancels the step-up, so a late answer starts no sign-in"
+    ,
+    "browser:tests/stepup-desk.spec.ts:step-up Approve uses the passkey with the desk controls still at 1440"
+    ,
+    "browser:tests/stepup-desk.spec.ts:step-up Approve uses the passkey with the desk controls still at 390"
+    ,
+    "browser:tests/stepup-desk.spec.ts:the step-up memo uses the desk tokens in dark"
+    ,
+    "browser:tests/stepup-desk.spec.ts:the step-up memo uses the desk tokens in light"
+    ,
+    "browser:tests/stepup-desk.spec.ts:without a passkey Approve leaves for a fresh sign-in and the return opens the decided memo"
+    ,
     "browser:tests/theme-agents.spec.ts:1024 dark: nine avatars, stable controls, isolated state previews and saved appearance"
     ,
     "browser:tests/theme-agents.spec.ts:1024 light: nine avatars, stable controls, isolated state previews and saved appearance"
@@ -5794,8 +5816,6 @@
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"approved, expired and cancelled requests say so, and ended ones can be dismissed","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"attach approvals share the queue count and expiry ordering, never a code or inline Allow","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"attach controls never move from code to memo or settled state dark 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"attach controls never move from code to memo or settled state dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -5807,6 +5827,8 @@
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"attach keyboard keeps browser shortcuts native and requires explicit lookup on MacIntel","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"attach keyboard keeps browser shortcuts native and requires explicit lookup on Win32","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"connections retain expiry ordering and stay separate from canonical permission decisions, never a code or inline Allow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"names still loading for the previous person never enable approval for the next one","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -6594,6 +6616,14 @@
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"approval project names and doctrine PR context stay visible","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"connection facts and review stay bound to the original request 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"connection facts and review stay bound to the original request 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"connection facts and review stay bound to the original request 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"connection facts and review stay bound to the original request 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover header preserves ticket and Business access 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover header preserves ticket and Business access 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -6617,6 +6647,14 @@
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover overview and agents 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover overview and agents 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover shell fits root and ticket controls 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover shell fits root and ticket controls 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover shell fits root and ticket controls 320 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover shell fits root and ticket controls 320 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"denied reads keep the memo blocked and inaccessible context explicit","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -11778,6 +11816,28 @@
     ,
     {"kind":"browser","file":"tests/status-help.spec.ts","name":"human-check filter is linked and removes tickets that do not need a check","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"Approve on a request someone else settled first shows their outcome, not the pending memo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"Decline needs no step-up; the Decided view names who and how, and a first decision elsewhere stays theirs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"an approval memo is pixel-identical with and without step-up requests at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"an approval memo is pixel-identical with and without step-up requests at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"an approval memo is pixel-identical with and without step-up requests at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"closing the memo while Approve waits cancels the step-up, so a late answer starts no sign-in","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"step-up Approve uses the passkey with the desk controls still at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"step-up Approve uses the passkey with the desk controls still at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"the step-up memo uses the desk tokens in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"the step-up memo uses the desk tokens in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"without a passkey Approve leaves for a fresh sign-in and the return opens the decided memo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/tap-targets.spec.ts","name":"1024px coarse dark comfortable › ticket and tier controls keep their visuals, reach and position","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/tap-targets.spec.ts","name":"1024px coarse dark compact › ticket and tier controls keep their visuals, reach and position","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14938,6 +14998,8 @@
     ,
     {"kind":"vitest","file":"tests/crm-undo-receipt.unit.test.ts","name":"S9-002: missing receipts and receipts from a previous sign-in refuse Undo","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"connection chores preserve consent scope, exact expiry and readable history","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"drops a previous person read even if transport ignores abort, and resets the count synchronously","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"reports an unknown count on failed refresh and retries without claiming an empty desk","tier":"ESSENTIAL"}
@@ -16977,6 +17039,20 @@
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > reuses a ready order without resetting its status or budgets","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/stepup-readiness.unit.test.ts","name":"Touch ID pairing readiness > requires a server pin and keeps unknown distinct from missing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"a late response after the memo closed starts no sign-in, passkey prompt or approval","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"a request settled elsewhere before /options shows the winning outcome and decider","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"approves with a bound passkey assertion and names the method in the Decided answer","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"declines without a step-up and keeps another decider’s first outcome honest","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"refuses unsafe sign-in addresses, cancelled passkeys and changed sources without approving","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"shows the feature change as Before → After and reads both states bounded","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"starts the fresh sign-in by navigation and never reports a decision","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/stream-health.unit.test.ts","name":"a silent stream recovers at 45 seconds; events and pings extend that deadline","tier":"ESSENTIAL"}
     ,

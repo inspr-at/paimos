@@ -399,11 +399,11 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 
     <!-- The first load swaps the loading layout for the real one in one step, so the
          page does not jump as each read lands. -->
-    <div :key="agents.loaded ? 'ready' : 'loading'" class="layout">
+    <div class="layout">
       <div class="main-col">
         <DecisionDeskPanel v-if="session.identity?.principal.kind === 'person'" />
         <AttachPending ref="attachPending" :now="agents.now" @rows="rows => attachRows = rows" @history="rows => attachHistory = rows" @updated="requests => attachDialog?.sync(requests)" v-slot="{ rows }">
-          <AgentChores v-if="agents.loaded && (capacity.signins.length || rows.length || attachHistory.length)" :signins="capacity.signins" :attaches="rows" :history="attachHistory" @review="request => { attachRows = rows; reviewAttach(request) }" @dismiss="id => attachPending?.dismiss(id)" />
+          <AgentChores v-if="capacity.signins.length || rows.length || attachHistory.length" :signins="capacity.signins" :attaches="rows" :history="attachHistory" @review="request => { attachRows = rows; reviewAttach(request) }" @dismiss="id => attachPending?.dismiss(id)" />
         </AttachPending>
         <AgentsWorking v-if="showSetup && session.identity?.principal.kind === 'person'" />
         <LeadsList v-if="agents.loaded" ref="leadsList" />

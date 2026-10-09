@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { expectStableControls } from './helpers/stable'
 import { mockDecisionDesk, sampleQuestion } from './decision-desk-fixtures'
 import { mockRules } from './rules-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 import { defaultSchedule } from './capacity-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
@@ -325,12 +326,13 @@ for (const width of [1440, 390]) test(`newest answered questions and fresh corre
   })
   world.questions.unshift(...history)
   await openFirst(page)
+  await expect(page.getByTestId('desk-pager')).toContainText('2 of 5')
   await expectStableControls({ controls: {
     actions: page.getByTestId('desk-actions').locator('.action-buttons'), decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'), pager: page.getByTestId('desk-pager'),
     stamps: page.getByTestId('desk-stamps'), selectors: page.getByTestId('desk-choices'), clickedRow: page.getByTestId('choice-row-0'), frame: page.getByTestId('desk-frame'),
   }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
-    { name: 'record the old question as a new decision', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1); await expect(page.getByTestId('desk-pager')).toContainText('2 of') } },
-    { name: 'return to the fresh answer', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('1 of') } },
+    { name: 'record the old question as a new decision', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1); await expect(page.getByTestId('desk-pager')).toContainText('3 of 5') } },
+    { name: 'return to the fresh answer', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('2 of 5') } },
     { name: 'refresh the fresh answer among more than 100 decisions', run: async () => {
       await page.evaluate(() => window.dispatchEvent(new Event('focus')))
       await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled()
@@ -338,7 +340,7 @@ for (const width of [1440, 390]) test(`newest answered questions and fresh corre
       await expect(page.getByTestId('desk-decide')).toBeEnabled()
     } },
     { name: 'choose a correction', run: async () => { await page.getByTestId('choice-1').click(); await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true') } },
-    { name: 'record the correction without moving controls', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(2); await expect(page.getByTestId('desk-pager')).toContainText('2 of') } },
+    { name: 'record the correction without moving controls', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(2); await expect(page.getByTestId('desk-pager')).toContainText('3 of 5') } },
   ] })
   expect(world.calls.map(call => call.body.expected_revision)).toEqual([1, 2])
   expect(world.calls[1]!.body.option_id).toBe('full')
@@ -587,15 +589,17 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     expect(world.calls).toHaveLength(0)
     await page.screenshot({ path: join(dir, `session-tier-${width}-${theme}.png`) })
 
-    await page.route('**/api/preferences/morning-briefing', async route => route.fulfill({ json: { key: 'morning-briefing', value: route.request().method() === 'PUT' ? route.request().postDataJSON().value : { time: '08:00' } } }))
-    await page.route('**/api/events?**', route => route.fulfill({ json: { items: [], next_after: null, next_cursor: null, window: { from: '2026-10-03T08:00:00Z', to: '2026-10-03T08:00:00Z', first: false, capped: false } } }))
-    await page.route('**/api/journey/next-actions?**', route => route.fulfill({ json: { items: [] } }))
+    // The retired briefing link continues to the canonical Agents panel.
     await page.goto('/briefing')
+    await expect(page).toHaveURL('/agents')
     const briefingDesk = page.getByRole('region', { name: 'Decision Desk', exact: true })
     await expect(briefingDesk).toContainText(world.questions[0]!.input.question)
-    await expect(briefingDesk.locator('.count-badge')).toHaveText('6')
-    await expectStableControls({ controls: { refresh: page.locator('.briefing-tools').getByRole('button', { name: 'Refresh' }), reminder: page.getByLabel('Daily reminder at'), header: page.locator('.places') }, interactions: [{ name: 'refresh canonical briefing', run: async () => {
-      await page.locator('.briefing-tools').getByRole('button', { name: 'Refresh' }).click(); await expect(briefingDesk).toContainText(world.questions[0]!.input.question); await expect(page.locator('.briefing-tools').getByRole('button', { name: 'Refresh' })).toBeEnabled()
+    await expect(briefingDesk.getByLabel('Open decisions')).toHaveText('6')
+    await expect(page.getByRole('button', { name: 'Wind down', exact: true })).toBeVisible()
+    await expectStableControls({ controls: { review: page.getByTestId('agents-desk-review'), history: page.getByTestId('agents-desk-history'), header: page.locator('.places') }, interactions: [{ name: 'refresh canonical panel', run: async () => {
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+      await expect(briefingDesk).toContainText(world.questions[0]!.input.question)
+      await expect(briefingDesk.getByLabel('Open decisions')).toHaveText('6')
     } }] })
     await page.screenshot({ path: join(dir, `briefing-${width}-${theme}.png`) })
 
@@ -610,5 +614,84 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
       await doctrine.getByRole('button', { name: 'Link repository', exact: true }).click(); await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click()
     } }] })
     await page.screenshot({ path: join(dir, `doctrine-${width}-${theme}.png`) })
+  })
+}
+
+// AEON-569 fix2: the added place must fit root pages as well as ticket trails.
+for (const width of [320, 1024]) for (const theme of ['light', 'dark'] as const) {
+  test(`cutover shell fits root and ticket controls ${width} ${theme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await mockDecisionDesk(page, { theme })
+    await mockBusiness(page, businessData())
+    for (const path of ['/', '/tickets', '/p/PHAROS', '/p/PHAROS/PHAROS-11?view=full']) {
+      await page.goto(path)
+      const places = page.getByRole('navigation', { name: 'Places' })
+      const gear = page.getByRole('button', { name: /^App and workspace/ })
+      await expect(places.getByRole('link', { name: /Decision Desk/ })).toBeVisible()
+      await page.evaluate(() => document.fonts.ready)
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
+      await expect.poll(() => page.locator('.app-header').evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
+      for (const control of await places.getByRole('link').all()) {
+        if (!await control.isVisible()) continue
+        const box = await control.boundingBox()
+        expect(box).toBeTruthy()
+        expect(box!.width).toBeGreaterThan(0)
+        expect(box!.x).toBeGreaterThanOrEqual(0)
+        expect(box!.x + box!.width).toBeLessThanOrEqual(width)
+        if (width === 320) expect(box!.width).toBeGreaterThanOrEqual(44)
+      }
+      const fold = page.getByRole('button', { name: 'PHAROS: project header, expanded', exact: true })
+      if (await fold.isVisible()) {
+        const box = await fold.boundingBox(), search = await page.getByRole('button', { name: 'Search everything', exact: true }).boundingBox()
+        expect(box && search).toBeTruthy()
+        expect(box!.width).toBeGreaterThanOrEqual(44)
+        expect(box!.x + box!.width, 'project fold must not overlap Search').toBeLessThanOrEqual(search!.x)
+      }
+      await expectStableControls({ controls: { places, gear }, interactions: [
+        { name: 'open and close app menu', run: async () => { await gear.click(); await expect(page.getByRole('menu', { name: 'App and workspace' })).toBeVisible(); await page.keyboard.press('Escape'); await expect(gear).toBeFocused() } },
+      ] })
+      await page.screenshot({ path: testInfo.outputPath(`${path === '/' ? 'projects' : path.includes('view=full') ? 'ticket' : path.includes('/p/') ? 'project' : 'tickets'}-${width}-${theme}.png`) })
+    }
+  })
+}
+
+// Risk: moving attachments to chores must retain expiry, consent scope and receipts.
+for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`connection facts and review stay bound to the original request ${width} ${theme}`, async ({ page }, testInfo) => {
+    const now = Date.parse('2026-10-09T12:00:00Z')
+    await page.clock.install({ time: now })
+    await page.setViewportSize({ width, height: 1000 })
+    // The connection read succeeds while unrelated session/account APIs fail.
+    await mockDecisionDesk(page, { theme })
+    await page.route('**/api/me/permissions*', route => {
+      const permissions = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+      permissions.workspace.permissions.push('account.manage', 'approvals.read', 'questions.read', 'questions.decide', 'rules.write')
+      return route.fulfill({ json: permissions })
+    })
+    const review = { request_id: 'connection-original', request_digest: 'a'.repeat(64), consent_digest: 'b'.repeat(64), consent_mode: 'aeon', state: 'pending', expires_at: new Date(now + 120_000).toISOString(), snapshot: { platform: 'darwin', computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: 'Arbeitsrechner für mandantenspezifische Qualitätsprüfungen', harness: 'codex', transcript: '/fixture/session.jsonl', file_id: '1:234', process: { pid: 1234, uid: 501, started: new Date(now).toISOString(), executable: '/fixture/codex', cwd: '/fixture/project' } } }
+    await page.route('**/api/agent-pairing/attach/pending', route => route.fulfill({ json: { requests: [review] } }))
+    const writes: string[] = []
+    await page.route('**/api/agent-pairing/attach/*/approve', route => { writes.push(new URL(route.request().url()).pathname); return route.fulfill({ json: { ...review, state: 'approved' } }) })
+    await page.goto('/agents')
+    const chores = page.getByRole('region', { name: 'Sign-ins and connections', exact: true })
+    const row = chores.locator('li').filter({ hasText: review.snapshot.host })
+    const button = row.getByRole('button', { name: 'Review connection', exact: true })
+    await expect(row).toContainText('and share its conversation')
+    await expect(row).toContainText('PHAROS-12')
+    await expect(row).toContainText('Your terminal on')
+    await expect(row.locator('time')).toHaveAttribute('datetime', review.expires_at)
+    await expect(row).toContainText('Expires in 2m')
+    await expectStableControls({ controls: { review: button, row }, interactions: [
+      { name: 'open native request and cancel', run: async () => { await button.click(); const dialog = page.getByRole('dialog'); await expect(dialog).toContainText(review.snapshot.host); expect(writes).toEqual([]); await page.getByRole('button', { name: 'Close attach review' }).click() } },
+    ] })
+    await page.screenshot({ path: testInfo.outputPath(`connection-${width}-${theme}.png`) })
+    await button.click()
+    const dialog = page.getByRole('dialog')
+    await dialog.getByRole('radio', { name: 'Allow', exact: true }).check()
+    await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeEnabled()
+    await page.clock.fastForward(120_001)
+    await expect(dialog).toContainText('Request expired. Run aeon-agentd attach again.')
+    await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeDisabled()
+    expect(writes).toEqual([])
   })
 }

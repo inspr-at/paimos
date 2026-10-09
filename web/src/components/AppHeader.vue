@@ -197,7 +197,8 @@ function fitMoon() {
   const el = header.value
   if (!el || !narrow.matches) { moonAway.value = false; return }
   const crumb = el.querySelector<HTMLElement>('.crumbs > .crumb.current')
-  const overflow = crumb ? crumb.scrollWidth - crumb.clientWidth : 0
+  const trail = el.querySelector<HTMLElement>('.crumbs')
+  const overflow = Math.max(el.scrollWidth - el.clientWidth, trail ? trail.scrollWidth - trail.clientWidth : 0, crumb ? crumb.scrollWidth - crumb.clientWidth : 0)
   const width = el.clientWidth
   if (!moonAway.value) {
     if (overflow > 0.5) { moonAway.value = true; if (returnedAt === width) heldAt = width }
@@ -403,7 +404,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .pill-keys { display: inline-flex; gap: 3px; }
 /* Narrower desktops: the wordmark steps back on inner pages, then the place labels. */
 @media (max-width: 1180px) { .lockup.compact .wordmark, .lockup.compact.has-logo .tenant-name { display: none; } }
-@media (max-width: 980px) {
+@media (max-width: 1180px) {
   .place { width: 36px; padding: 0; justify-content: center; }
   .place-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .place .needs-badge { position: absolute; top: -4px; right: -6px; margin: 0; }
@@ -458,6 +459,14 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 /* The narrowest phones: round buttons sit close, as the places do, so a ticket
    key keeps its room. The moon steps aside only when measured room runs out. */
 @media (max-width: 430px) { .app-header { gap: 2px; padding: 0 8px; } }
+/* At the narrowest width the project fold keeps its full touch target; the
+   project name remains in its accessible label and the page header. */
+@media (max-width: 360px) {
+  .app-header { gap: 0; padding: 0 6px; }
+  .places { gap: 0; }
+  .app-header .crumbs > .phone-header-fold { min-inline-size: 44px; }
+  .phone-header-fold .key-badge { display: none; }
+}
 @media (max-width: 600px) { .theme-btn.away { display: none; } }
 /* A square workspace logo leads the places at a place's root; wide logos and inner pages leave the room to them. */
 @media (min-width: 380px) and (max-width: 600px) {

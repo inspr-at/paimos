@@ -4,9 +4,10 @@ import type { KeyTrimProposal } from './keyTrim'
 import type { Approval } from './agents'
 import type { DoctrineInboxItem } from './doctrine'
 import { sha256FirstByte } from './avatar.ts'
+import type { StepupRequest } from './stepup'
 // P6 presentation model. Wire contracts live in decisionDeskApi.ts.
 export type DeskOutcome = 'once' | 'always' | 'requirement' | 'doctrine'
-export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' | 'tier' | 'key_trim'
+export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' | 'tier' | 'key_trim' | 'stepup'
 // Outside the server option-ID alphabet, so an agent option cannot collide.
 export const CUSTOM_ANSWER = '@custom'
 export interface DeskChoice { id: string; title: string; description: string; answer: string; field?: boolean; unavailable?: string }
@@ -25,13 +26,13 @@ export interface DeskItem {
   revision: number; createdAt: string; expiresAt?: string; held: boolean; decided: boolean
   answer?: string; optionId?: string; reason?: string; delivery?: string; fromRecord?: string
   outcomes?: DeskOutcomeAvailability[]; doctrine?: DeskDoctrineTarget; outcomeEffects?: DeskOutcomeEffect[]
-  unavailable?: string; prUrl?: string; source?: string; keyTrim?: KeyTrimProposal; approval?: Approval; rule?: DoctrineInboxItem
+  unavailable?: string; prUrl?: string; source?: string; keyTrim?: KeyTrimProposal; approval?: Approval; rule?: DoctrineInboxItem; stepup?: StepupRequest
 }
 export interface DeskDraft { optionId: string; answer: string; reason: string; outcome: DeskOutcome; dirty: boolean }
 export const outcomeLabels: Record<DeskOutcome, string> = { once: 'Once', always: 'Always', requirement: 'Requirement', doctrine: 'Doctrine' }
-export const kindLabels: Record<DeskKind, string> = { question: 'Question', handover: 'Handover question', approval: 'Approval', action: 'Action request', rule: 'Rule change', tier: 'Tier request', key_trim: 'Key trim approval' }
+export const kindLabels: Record<DeskKind, string> = { question: 'Question', handover: 'Handover question', approval: 'Approval', action: 'Action request', rule: 'Rule change', tier: 'Tier request', key_trim: 'Key trim approval', stepup: 'Step-up approval' }
 export function draftFor(item: DeskItem): DeskDraft {
-  const protectedChoice = item.kind === 'approval' || item.kind === 'tier' || item.kind === 'key_trim'
+  const protectedChoice = item.kind === 'approval' || item.kind === 'tier' || item.kind === 'key_trim' || item.kind === 'stepup'
   return { optionId: item.optionId ?? (protectedChoice ? '' : item.recommended ?? item.choices[0]?.id ?? ''), answer: item.answer ?? '', reason: item.reason ?? '', outcome: item.outcome, dirty: false }
 }
 export function answerFor(item: DeskItem, draft: DeskDraft): string {
