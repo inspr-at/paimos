@@ -4600,6 +4600,18 @@
     ,
     {"kind":"browser","file":"tests/account-link.spec.ts","name":"the reviewed account can be confirmed once from the keyboard","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 400 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 400 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/accounts-card-fit.spec.ts","name":"accounts and computers fit every width, panel open and closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 1020 to 950px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -12044,22 +12056,6 @@
     ,
     {"kind":"browser","file":"tests/usage-dashboard.spec.ts","name":"without account access the capacity band is hidden and the rest works","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1280 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1280 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/vendor-signals.spec.ts","name":"a computer approver loses the statusline toggle when account.manage is revoked","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/vendor-signals.spec.ts","name":"vendor throttling and explicit statusline consent 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -12609,6 +12605,12 @@
     {"kind":"node","file":"tests/account-limits.test.ts","name":"the unit menu offers what the account can count, likeliest first","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/account-link.test.ts","name":"account code accepts the one-line format without URL or command parsing","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/account-resets.test.ts","name":"the plan line is honest about off, nothing planned and the planned moment","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-resets.test.ts","name":"the reserved plan slot is at least as wide as every line the card can show","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-resets.test.ts","name":"the summary counts credits per expiry day and never hides later ones","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/accounts-overview.test.ts","name":"accounts overview merges only a canonical shared quota identity within one harness","tier":"ESSENTIAL"}
     ,
@@ -15826,7 +15828,7 @@
     ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"preserves project, kind and ticket context when entry points navigate to Models","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"the account posture discards a held save after switching records and keeps failures honest","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"the account reset switch discards a held save after switching records and keeps failures honest","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"orders and locks > keeps a locked line and a fallback the resolved list omitted","tier":"ESSENTIAL"}
     ,

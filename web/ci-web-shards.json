@@ -518,6 +518,8 @@
       ]
       ,
       "specs": [
+        {"file":"tests/account-resets.spec.ts","listedTests":6,"weightSeconds":12,"weightSource":"local-single-worker-AEON-1037-6.2s-plus-margin"}
+        ,
         {"file":"tests/model-provider.spec.ts","listedTests":3,"tierTiming":{"caseSeconds":{"max":3.347,"median":1.572,"min":0.533},"seconds":7.45261,"selectedTests":3},"weightSeconds":10.5,"weightSource":"e2e-4"}
         ,
         {"file":"tests/model-refresh.spec.ts","listedTests":1,"tierTiming":{"caseSeconds":{"max":4.248,"median":4.248,"min":4.248},"seconds":7.561739,"selectedTests":1},"weightSeconds":3.5,"weightSource":"e2e-4"}
@@ -529,8 +531,6 @@
         {"file":"tests/models-simple.spec.ts","listedTests":21,"weightSeconds":12,"weightSource":"AEON-1011 local-single-worker-7.1s-plus-margin"}
         ,
         {"file":"tests/policy-editors.spec.ts","listedTests":32,"weightSeconds":73,"weightSource":"local-single-worker-AEON-879-60.8s-plus-margin"}
-        ,
-        {"file":"tests/usage-posture.spec.ts","listedTests":8,"weightSeconds":14,"weightSource":"local-single-worker-AEON-880-15.8s-plus-margin"}
       ]
     }
     ,
