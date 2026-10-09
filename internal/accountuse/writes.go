@@ -56,9 +56,20 @@ func WriteCells(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CellWrite
 		if !(b.Scope == "all" && b.AccountID == "" && b.ContextID == "" || b.Scope == "account" && uuid(b.AccountID) && b.ContextID == "" || b.Scope == "context" && uuid(b.ContextID) && b.AccountID == "") {
 			return CellResult{}, fail(400, "invalid bulk scope")
 		}
+		var target string
+		if b.Scope == "account" {
+			if err := tx.QueryRow(ctx, `SELECT id::text FROM agent_accounts WHERE id=$1 AND archived_at IS NULL`, b.AccountID).Scan(&target); err != nil {
+				return CellResult{}, missing(err)
+			}
+		}
+		if b.Scope == "context" {
+			if err := tx.QueryRow(ctx, `SELECT id::text FROM work_contexts WHERE id=$1 AND archived_at IS NULL AND kind<>'holding'`, b.ContextID).Scan(&target); err != nil {
+				return CellResult{}, missing(err)
+			}
+		}
 		rows, err := tx.Query(ctx, `SELECT a.id::text,c.id::text FROM agent_accounts a CROSS JOIN work_contexts c
             WHERE a.archived_at IS NULL AND c.archived_at IS NULL AND c.kind<>'holding'
-            AND ($1='' OR a.id::text=$1) AND ($2='' OR c.id::text=$2) ORDER BY a.id,c.id LIMIT 1001`, b.AccountID, b.ContextID)
+            AND ($1='' OR a.id=NULLIF($1,'')::uuid) AND ($2='' OR c.id=NULLIF($2,'')::uuid) ORDER BY a.id,c.id LIMIT 1001`, b.AccountID, b.ContextID)
 		if err != nil {
 			return CellResult{}, err
 		}
@@ -82,9 +93,14 @@ func WriteCells(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CellWrite
 	undo := make([]Cell, 0, len(changes))
 	seen := map[string]bool{}
 	// Validate the entire target set before writes and the final event counter.
-	for _, c := range changes {
+	for i := range changes {
+		c := &changes[i]
+		if !uuid(c.AccountID) || !uuid(c.ContextID) {
+			return CellResult{}, fail(400, "invalid or duplicate cell")
+		}
+		c.AccountID, c.ContextID = strings.ToLower(c.AccountID), strings.ToLower(c.ContextID)
 		key := c.AccountID + ":" + c.ContextID
-		if !uuid(c.AccountID) || !uuid(c.ContextID) || seen[key] {
+		if seen[key] {
 			return CellResult{}, fail(400, "invalid or duplicate cell")
 		}
 		seen[key] = true

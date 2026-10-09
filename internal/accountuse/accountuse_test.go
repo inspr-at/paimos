@@ -354,6 +354,17 @@ func TestAccountUseBulkAndStaleUndo(t *testing.T) {
 	first := f.save(t, undo, 200)
 	f.save(t, undo, 409)
 	f.save(t, accountuse.CellWrite{ExpectedRevision: first.Revision, Changes: []accountuse.Cell{{AccountID: second, ContextID: f.holding, Allowed: true}}}, 404)
+	f.save(t, accountuse.CellWrite{ExpectedRevision: first.Revision, Bulk: &accountuse.Bulk{Scope: "account", AccountID: "00000000-0000-4000-8000-000000000000", Allowed: true}}, 404)
+	f.save(t, accountuse.CellWrite{ExpectedRevision: first.Revision, Bulk: &accountuse.Bulk{Scope: "context", ContextID: f.holding, Allowed: true}}, 404)
+	f.save(t, accountuse.CellWrite{ExpectedRevision: first.Revision, Changes: []accountuse.Cell{
+		{AccountID: f.account, ContextID: f.defaultContext, Allowed: false},
+		{AccountID: strings.ToUpper(f.account), ContextID: strings.ToUpper(f.defaultContext), Allowed: true},
+	}}, 400)
+	upper := f.save(t, accountuse.CellWrite{ExpectedRevision: first.Revision, Bulk: &accountuse.Bulk{Scope: "account", AccountID: strings.ToUpper(f.account), Allowed: false}}, 200)
+	if len(upper.Changes) != 1 || len(upper.Undo) != 1 || upper.Changes[0].AccountID != f.account || !upper.Undo[0].Allowed {
+		t.Fatal("case-insensitive bulk failed or a rejected target changed the matrix")
+	}
+	f.save(t, accountuse.CellWrite{ExpectedRevision: upper.Revision, Changes: upper.Undo}, 200)
 	var before int
 	f.in(t, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM account_use_cells`).Scan(&before)
