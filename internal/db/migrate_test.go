@@ -20,6 +20,15 @@ import (
 
 func TestEveryTenantTableHasForcedRLS(t *testing.T) {
 	database := dbtest.Open(t)
+	// This explicitly global capability catalog must contain only deployment
+	// metadata. Pin its shape before exempting it from tenant-row isolation.
+	var capabilityColumns []string
+	if err := database.Admin.QueryRow(t.Context(), `SELECT array_agg(column_name::text ORDER BY column_name) FROM information_schema.columns WHERE table_schema='public' AND table_name='aeon_required_capabilities'`).Scan(&capabilityColumns); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(capabilityColumns, ",") != "capability,since" {
+		t.Fatalf("unexpected global capability columns: %v", capabilityColumns)
+	}
 	rows, err := database.Admin.Query(t.Context(), `
 		SELECT c.relname,
 		       EXISTS(SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attname='tenant_id' AND NOT a.attisdropped),
@@ -40,7 +49,7 @@ func TestEveryTenantTableHasForcedRLS(t *testing.T) {
 		if err := rows.Scan(&name, &hasTenant, &enabled, &forced, &policies); err != nil {
 			t.Fatal(err)
 		}
-		if name == "tenants" || name == "identities" || name == "schema_migrations" {
+		if name == "tenants" || name == "identities" || name == "schema_migrations" || name == "aeon_required_capabilities" {
 			continue
 		}
 		count++

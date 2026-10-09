@@ -50,6 +50,53 @@
     {
       "classification": "personal",
       "columns": {
+        "account_id": "metadata",
+        "context_id": "metadata",
+        "set_at": "personal",
+        "set_by": "personal",
+        "source": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "set_by",
+        "tenant_column": "tenant_id"
+      },
+      "table": "account_use_cells"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "confirmation_required": "metadata",
+        "confirmed_at": "personal",
+        "confirmed_by": "personal",
+        "enforced_at": "metadata",
+        "new_accounts": "metadata",
+        "new_contexts": "metadata",
+        "new_models": "metadata",
+        "new_projects": "metadata",
+        "revision": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "confirmed_by",
+        "tenant_column": "tenant_id"
+      },
+      "table": "account_use_rules"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "capability": "metadata",
+        "since": "metadata"
+      },
+      "locator": {
+        "tenant_column": ""
+      },
+      "table": "aeon_required_capabilities"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "boost_link_revision": "metadata",
         "boost_percent": "personal",
         "boost_person_id": "personal",
@@ -824,6 +871,18 @@
       "table": "personal_profiles"
     },
     {
+      "classification": "metadata",
+      "columns": {
+        "context_id": "metadata",
+        "project_id": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "project_work_contexts"
+    },
+    {
       "classification": "personal",
       "columns": {
         "after_hash": "metadata",
@@ -854,6 +913,22 @@
         "tenant_column": "tenant_id"
       },
       "table": "stepup_requests"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "archived_at": "metadata",
+        "id": "metadata",
+        "kind": "metadata",
+        "name": "personal",
+        "new_accounts_override": "metadata",
+        "revision": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "work_contexts"
     },
     {
       "classification": "metadata",
