@@ -554,6 +554,16 @@
     ,
     {"kind":"go","package":"internal/accountprivacy","name":"TestResetPrivacyMasksCreditsPlanAndAudit","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/accountuse","name":"TestAccountUseBulkAndStaleUndo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/accountuse","name":"TestAccountUseCanonicalModelRuleWriterBeforeActivation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/accountuse","name":"TestAccountUseCreationRulesAndDatabaseFences","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/accountuse","name":"TestAccountUseFenceOrderAndRevocationDuringBlockedWrite","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/accountuse","name":"TestAccountUseLegacyEntryGuardEmptyAndPopulatedPools","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/activity","name":"TestAuthorsSayWhetherTheyHaveAPicture","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/activity","name":"TestCommentLifecycleAuthorizationIsolationAndConcurrency","tier":"ESSENTIAL"}
@@ -5019,6 +5029,8 @@
     {"kind":"go","package":"internal/crossreview","name":"TestWebhookAuthenticationReplayAndFailedRevocation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestAccountSuccessorMigrationAuditIsolationAndRollback","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestAccountUseMigrationBackfillIdempotentAndPreservesBehavior","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestAgentKeyPersonOwnerExpansionPreservesLegacyWriters","tier":"ESSENTIAL"}
     ,
