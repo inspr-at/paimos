@@ -180,6 +180,13 @@ func writeLedgerJSON(s *Store, name string, v any, exclusive bool) error {
 	if err != nil {
 		return err
 	}
+	limit := 1 << 20
+	if name == "membership.json" {
+		limit = 64 << 10
+	}
+	if len(raw) > limit {
+		return ErrLedgerUnavailable
+	}
 	return s.Write(name, raw, exclusive)
 }
 func decodeLedgerJSON(raw []byte, out any) error {
@@ -306,6 +313,9 @@ func (l *SharedLedger) Register(m LedgerMember) error {
 			return ErrLedgerUnavailable
 		}
 		expected, _ := json.Marshal(m)
+		if len(expected) > 4096 {
+			return ErrLedgerOwner
+		}
 		recordRaw, recordErr := l.members.Read(m.ID+".json", 4096)
 		if repair.Members[m.ID] == "" && recordErr == nil && bytes.Equal(recordRaw, expected) {
 			if len(repair.Members) >= maxLedgerMembers {
@@ -366,7 +376,7 @@ func (l *SharedLedger) Import(member string, instance LedgerInstance, groups []L
 				return ErrLedgerUnavailable
 			}
 		}
-		if instance.Fingerprint == "unknown" {
+		if len(instance.Fingerprint) != 64 || !isHex(instance.Fingerprint) {
 			return ErrLedgerUnavailable
 		}
 		for id, g := range d.Groups {

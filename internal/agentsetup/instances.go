@@ -36,7 +36,8 @@ func validInstanceLabel(label string) bool {
 	if label == serviceLabel {
 		return true
 	}
-	return strings.HasPrefix(label, serviceLabel+".") && ValidateInstance(strings.TrimPrefix(label, serviceLabel+".")) == nil
+	name := strings.TrimPrefix(label, serviceLabel+".")
+	return strings.HasPrefix(label, serviceLabel+".") && name != "" && ValidateInstance(name) == nil
 }
 func InstanceStateRoot(goos, home, xdg, name string) (string, error) {
 	if err := ValidateInstance(name); err != nil {

@@ -103,6 +103,9 @@ func TestSharedLedgerInstanceRootsLabelsLogsAndCanonicalOrigins(t *testing.T) {
 	if ValidateInstance("") != nil {
 		t.Fatal("default instance refused")
 	}
+	if validInstanceLabel(serviceLabel + ".") {
+		t.Fatal("empty named service suffix accepted")
+	}
 	if _, err = InstanceStateRoot("darwin", home, "", "../pma"); err == nil || errors.Is(err, os.ErrNotExist) {
 		t.Fatal("bad name failed for wrong reason", err)
 	}
