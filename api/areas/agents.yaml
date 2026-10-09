@@ -127,9 +127,9 @@ components:
         no_daily_limit: {type: boolean, description: 'True only for a privacy-visible API-billed door; absence means false.'}
         read_at: {type: [string, 'null'], format: date-time}
         freshness: {type: string, enum: [fresh, stale, expired, unknown]}
-        resets: {type: [object, 'null'], description: 'Vendor reset credits; null until the resets package supplies them.'}
+        resets: {$ref: '#/components/schemas/AccountResetCreditsOrNull'}
         reset_policy: {type: string, enum: [suggest, auto_before_expiry]}
-        reset_plan: {type: [object, 'null'], description: 'Null until the resets package supplies a plan.'}
+        reset_plan: {$ref: '#/components/schemas/AccountResetPlanOrNull'}
         routable: {type: boolean}
         details_redacted: {type: boolean}
         can_edit: {type: boolean, description: 'The canonical owner has live account.manage permission and privacy-visible usage.'}

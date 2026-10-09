@@ -24,11 +24,40 @@
     {
       "classification": "personal",
       "columns": {
+        "account_id": "metadata",
+        "binding_revision": "metadata",
+        "by_kind": "metadata",
+        "completed_at": "personal",
+        "expected_count": "personal",
+        "expired_at": "personal",
+        "id": "metadata",
+        "person_id": "personal",
+        "policy_revision": "metadata",
+        "raised_pace_points": "personal",
+        "raised_pace_until": "personal",
+        "requested_at": "personal",
+        "result": "personal",
+        "state": "metadata",
+        "tenant_id": "metadata",
+        "undo_until": "personal"
+      },
+      "locator": {
+        "person_column": "person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "account_reset_actions"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "boost_link_revision": "metadata",
         "boost_percent": "personal",
         "boost_person_id": "personal",
         "boost_until": "personal",
         "daily_reset_policy": "personal",
+        "reset_policy_link_revision": "metadata",
+        "reset_policy_person_id": "personal",
+        "reset_report": "personal",
         "usage_budget": "personal",
         "usage_floor_percent": "metadata",
         "usage_posture": "personal",

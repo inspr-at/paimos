@@ -160,16 +160,17 @@ func dailyAccountTx(ctx context.Context, tx pgx.Tx, a Account, item agentplan.Da
 	if !explicit {
 		d = legacyDaily(u)
 	}
-	var policy *string
-	if err := tx.QueryRow(ctx, `SELECT daily_reset_policy FROM agent_accounts WHERE id=$1`, a.ID).Scan(&policy); err != nil {
+	reset, err := loadResetState(ctx, tx, a, now)
+	if err != nil {
 		return item, d, err
 	}
-	if policy != nil {
-		if *policy != "suggest" && *policy != "auto_before_expiry" {
-			return item, d, errors.New("invalid reset policy")
-		}
-		item.ResetPolicy = *policy
+	if reset.Credits != nil {
+		item.Resets = reset.Credits
 	}
+	if reset.Plan != nil {
+		item.ResetPlan = reset.Plan
+	}
+	item.ResetPolicy = reset.Policy
 	item.FloorPct = agentplan.Number(float64(u.Floor))
 	item.NoDailyLimit = a.BillingMode == "api"
 	if item.NoDailyLimit {
@@ -218,6 +219,11 @@ func dailyAccountTx(ctx context.Context, tx pgx.Tx, a Account, item agentplan.Da
 		}
 		d.BoostToday = &agentplan.DailyBoost{LimitUsedPct: limit, EnteredAs: "used", Until: end}
 	}
+	raised, err := activeResetPace(ctx, tx, a, now)
+	if err != nil {
+		return item, d, err
+	}
+	item.ResetPacePoints = raised
 	err = agentplan.ApplyDaily(&item, d, points, now)
 	return item, d, err
 }
@@ -299,6 +305,16 @@ func dailyBaselineTx(ctx context.Context, tx pgx.Tx, a Account, w overviewWindow
 	bound := start
 	if a.LinkedAt != nil && a.LinkedAt.After(bound) {
 		bound = *a.LinkedAt
+	}
+	// A spend can refresh usage without changing the vendor's natural reset.
+	// Its confirmed reading starts the new daily baseline too.
+	var resetAt *time.Time
+	if err := tx.QueryRow(ctx, `SELECT max((result->'window'->>'read_at')::timestamptz) FROM account_reset_actions
+ WHERE account_id=$1 AND binding_revision=$2 AND state IN ('succeeded','undone') AND completed_at<=$3`, a.ID, a.LinkRevision, now).Scan(&resetAt); err != nil {
+		return nil, err
+	}
+	if resetAt != nil && resetAt.After(bound) {
+		bound = *resetAt
 	}
 	var value float64
 	var err error
