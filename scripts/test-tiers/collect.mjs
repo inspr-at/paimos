@@ -55,8 +55,8 @@ export function flattenBrowser(report, config) {
 // several times (AEON-724 fix 6: the aeon-681 planning regression exceeded the
 // static self-check budget). The inventory is reused while the stamp of the web
 // tree is unchanged, so an edited test, source or config file re-collects.
-export const collections = { web: 0 }
-const webMemo = {}
+export const collections = { web: 0, browser: 0 }
+const webMemo = {}, browserMemo = {}
 // Top-level web files plus the trees that registration code can import.
 export const webStampEntries = ['.', 'src', 'tests']
 export function treeStamp(base, entries) {
@@ -90,8 +90,20 @@ export function reuse(memo, stamp, compute, { fresh = false } = {}) {
   }
   return structuredClone(memo.value)
 }
-export function collectWeb({ fresh = false } = {}) {
+export function collectWeb({ fresh = false, browserOnly = false } = {}) {
+  if (browserOnly) return reuse(browserMemo, treeStamp(web, webStampEntries), () => {
+    collections.browser += 1
+    return { ...registrations(collectBrowserNow()), scope: 'browser' }
+  }, { fresh })
   return reuse(webMemo, treeStamp(web, webStampEntries), () => { collections.web += 1; return collectWebNow() }, { fresh })
+}
+// Browser shards must not pay for Vitest or native Node registration. Full
+// collection remains the strict setup/classification authority for every kind.
+export function collectBrowserNow({ run = command } = {}) {
+  const list = config => flattenBrowser(JSON.parse(run(process.execPath,
+    ['node_modules/@playwright/test/cli.js','test','-c',config,'--list','--reporter=json'], { cwd: web })), config)
+  return [...list('playwright.ui.config.ts').filter(row => row.file !== 'tests/performance.spec.ts'),
+    ...list('playwright.perf.config.ts')]
 }
 function collectWebNow() {
   mkdirSync(evidence,{recursive:true})
@@ -120,9 +132,9 @@ function collectWebNow() {
     if (node[index]?.file !== resolve(web,file) || !Array.isArray(node[index]?.tests)) throw new Error(`Node registration batch mismatch: ${file}`)
     unit.push(...node[index].tests.map(row=>({...row,kind:'node',file})))
   }
-  const browser = flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','-c','playwright.ui.config.ts','--list','--reporter=json'],{cwd:web})), 'playwright.ui.config.ts')
-  const performance = flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','-c','playwright.perf.config.ts','--list','--reporter=json'],{cwd:web})), 'playwright.perf.config.ts')
-  const tests=[...unit,...browser.filter(row=>row.file !== 'tests/performance.spec.ts'),...performance]
+  return registrations([...unit,...collectBrowserNow()])
+}
+function registrations(tests) {
   const totals=new Map(),seen=new Map()
   const id=row=>`${row.kind}:${row.file}:${row.name}`
   for(const row of tests) totals.set(id(row),(totals.get(id(row))??0)+1)
