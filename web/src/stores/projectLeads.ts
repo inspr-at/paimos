@@ -6,7 +6,7 @@ import { onAccessChange } from '../lib/authz'
 import { APIError, getNode } from '../lib/api'
 import { getSession } from '../lib/agentRows'
 import type { Question } from '../lib/decisionDeskApi'
-import { emptyFold, foldDecisions, pauseLead, readLead, readLeadDecisions, readLeadSettings, readOpenQuestions, startLead, type DecisionFold, type LeadDecision, type LeadSettings, type ProjectLead } from '../lib/lead'
+import { adoptLead, emptyFold, foldDecisions, pauseLead, readLead, readLeadDecisions, readLeadSettings, readOpenQuestions, startLead, type DecisionFold, type LeadDecision, type LeadSettings, type ProjectLead } from '../lib/lead'
 import { useAgents } from './agents'
 
 // AEON-741: read projections of each project's lead. The server decides state;
@@ -19,7 +19,7 @@ export interface LeadView {
   // trimming the retained decisions never changes them.
   decisions: LeadDecision[]; fold: DecisionFold; after: number; caughtUp: boolean; decisionsError: string
   // The lead's agent, kept after its session stops so its questions stay visible.
-  principal: { session: string; id: string } | null
+  principal: { session: string; id: string; management?: string } | null
   questions: Question[] | null; questionsMore: boolean
 }
 const RETAIN = 2000
@@ -119,7 +119,7 @@ export const useProjectLeads = defineStore('projectLeads', () => {
       if (started !== epoch || view(id).lead?.session_id !== session) return
       // The session read passes the session ledger like every other copy (AEON-449).
       const [row] = useAgents().admitSessions([read])
-      if (row) view(id).principal = { session, id: row.agent_principal_id }
+      if (row) view(id).principal = { session, id: row.agent_principal_id, management: row.management_mode }
     } catch { /* read again with the next load; the previous lead's asker stays */ }
   }
   async function loadQuestions(id: string, started: number) {
@@ -161,6 +161,10 @@ export const useProjectLeads = defineStore('projectLeads', () => {
     }
   }
   const start = (id: string) => write(id, lead => startLead(id, lead.revision))
+  const adopt = (id: string, revision: number, sessionId: string) => write(id, lead => {
+    if (lead.revision !== revision) throw new Error('The lead changed. Reopen adoption and confirm again.')
+    return adoptLead(id, revision, sessionId)
+  })
   const pause = (id: string) => write(id, lead => pauseLead(id, lead.revision, lead.generation))
-  return { views, keys, busy, truncated, view, load, loadLead, loadMany, start, pause, keyOf, resolveKeys }
+  return { views, keys, busy, truncated, view, load, loadLead, loadMany, start, adopt, pause, keyOf, resolveKeys }
 })

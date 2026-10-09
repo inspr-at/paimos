@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } fro
 import { useRouter } from 'vue-router'
 import { api } from '../../lib/api'
 import { can } from '../../lib/authz'
-import { canPause, canResume, checksSummary, decisionLine, LEAD_WORDS, startChecks } from '../../lib/lead'
+import { canPause, canResume, checksSummary, decisionLine, LEAD_WORDS, unmanagedLeadCopy, startChecks } from '../../lib/lead'
 import { closeLeadPanel, leadOverlay, openLeadPause } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
 import { usePoller } from '../../lib/usePolledData'
@@ -66,6 +66,7 @@ const reported = computed(() => {
   const seconds = Math.max(0, Math.round((now.value - new Date(s.heartbeat_at).getTime()) / 1000))
   return seconds < 90 ? `Reported ${seconds} seconds ago` : `Reported ${Math.round(seconds / 60)} minutes ago`
 })
+const unmanaged = computed(() => (leadSession.value?.management_mode ?? view.value?.principal?.management) === 'unmanaged')
 const checks = computed(() => startChecks(lead.value, decisions.value, dial.value))
 const recent = computed(() => [...decisions.value].reverse().slice(0, 6).map(d => ({ id: d.event_id, at: time(d.recorded_at), text: decisionLine(d, id => keyOf(id) ?? 'a ticket') })))
 const next = computed(() => (queued.value ?? []).filter(item => !item.target_agent_id).slice(0, 3))
@@ -108,6 +109,7 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
           <span v-if="band.tone === 'live'" class="live-mark" aria-hidden="true" /><span v-else-if="band.tone === 'wait'" class="dot wait" aria-hidden="true" /><span v-else-if="band.tone === 'warn'" class="dot warn" aria-hidden="true" /><AppIcon v-else name="pause" :size="13" />{{ band.status }}
         </p>
         <p class="now-copy">{{ nowCopy }}</p>
+        <p v-if="unmanaged" class="small" data-unmanaged>{{ unmanagedLeadCopy }}</p>
         <dl class="facts">
           <div><dt>Workers</dt><dd>{{ workers.length }}</dd><dd class="sub">this project</dd></div>
           <div><dt>Queued</dt><dd>{{ queued ? queued.length : '—' }}</dd><dd class="sub">{{ next[0] ? `next ${next[0].key}` : queued ? 'nothing waits' : 'can’t be read' }}</dd></div>
@@ -155,7 +157,8 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
       </section>
     </div>
     <footer class="pane-foot">
-      <template v-if="lead?.state === 'paused'">
+      <p v-if="unmanaged && lead?.state === 'paused'">{{ unmanagedLeadCopy }}. Continue from the running session.</p>
+      <template v-else-if="lead?.state === 'paused'">
         <p>{{ canResume(lead) ? 'Restarts through the usual start checks.' : 'Resume waits until its session has stopped.' }}</p>
         <button type="button" class="btn primary" data-act="resume" :aria-disabled="!mayStart || !canResume(lead) || leads.busy[projectId]" @click="mayStart && canResume(lead) && resume()"><AppIcon name="play" :size="15" />Resume</button>
       </template>

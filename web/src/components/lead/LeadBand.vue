@@ -3,7 +3,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { can } from '../../lib/authz'
-import { canPause, canResume, LEAD_WORDS } from '../../lib/lead'
+import { canPause, canResume, unmanagedLeadCopy, LEAD_WORDS } from '../../lib/lead'
 import { useLeadCardFold } from '../../lib/leadCardFold'
 import { openLeadPanel, openLeadPause, openStartLead } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
@@ -15,6 +15,7 @@ import { useWorkQueue } from '../../stores/workQueue'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import LeadBot from './LeadBot.vue'
+import LeadAdoption from './LeadAdoption.vue'
 import LeadLine from './LeadLine.vue'
 
 // AEON-741: the lead is the centre of a project. One sentence says whether it
@@ -53,12 +54,16 @@ const stateDetail = computed(() => {
   return parts.join(' · ')
 })
 const nowLine = computed(() => {
+  if (unmanaged.value && lead.value?.state === 'paused') return 'Continue from the session itself; PAIMOS cannot restart an unmanaged process.'
   if (lead.value?.state === 'working') return leadSession.value?.current_activity?.text || leadSession.value?.activity_note || ''
   return band.value.now
 })
+const unmanaged = computed(() => (leadSession.value?.management_mode ?? leads.views[props.projectId]?.principal?.management) === 'unmanaged')
 // Primary action: disabled with its reason rather than hidden, so the slot never moves.
 const action = computed(() => {
   const b = band.value, l = lead.value
+  if (unmanaged.value && ['start', 'resume', 'cancel'].includes(b.action)) return null
+  if (unmanaged.value && b.action === 'pause') return { label: 'Pause…', icon: 'pause' as const, primary: false, disabled: !mayControl.value || !canPause(l), tip: 'Request a cooperative pause; the session keeps its slot until confirmed exit' }
   switch (b.action) {
     case 'start': return { label: b.actionLabel, icon: 'play' as const, primary: true, disabled: !mayStart.value, tip: mayStart.value ? `One per project. Starts nothing until the ${w.l} picks up queued work.` : `Starting a ${w.l} needs permission to run agents in this project` }
     case 'cancel': return { label: b.actionLabel, icon: null, primary: false, disabled: !mayControl.value || !canPause(l), tip: 'Nothing has started yet. Queued work stays queued.' }
@@ -73,7 +78,7 @@ async function act(event: MouseEvent) {
   const from = event.currentTarget as HTMLElement, a = band.value.action
   if (action.value?.disabled) return
   if (a === 'start') openStartLead([props.projectId], from)
-  else if (a === 'pause' && band.value.state !== 'starting') openLeadPause(props.projectId, from)
+  else if (a === 'pause' && (unmanaged.value || band.value.state !== 'starting')) openLeadPause(props.projectId, from)
   else if (a === 'pause' || a === 'cancel') await control('cancel')
   else if (a === 'resume') await control('resume')
   else if (a === 'dial') void router.push('/agents')
@@ -125,6 +130,8 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
       </div>
     </div>
 
+    <LeadAdoption v-if="mayStart && lead && !lead.session_id && lead.state !== 'paused'" :key="`${viewer}:${projectId}`" :project-id="projectId" :revision="lead.revision" />
+    <p v-if="unmanaged" class="lead-now small" data-unmanaged>{{ unmanagedLeadCopy }}</p>
     <!-- The fold hides only the details; the head and Start lead stay where they are. -->
     <div v-if="band.state === 'none'" id="lead-fold" class="lead-fold" :inert="folded || undefined" @transitionend="settleFold" @transitioncancel="settleFold">
       <div class="lead-fold-inner">
@@ -150,7 +157,7 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
         <p v-else-if="questionsPartial" class="asks-more" data-partial><RouterLink to="/decision-desk">Not every open question could be read here; see the Decision Desk</RouterLink></p>
       </div>
     </template>
-    <p v-if="band.state !== 'none'" class="lead-foot"><AppIcon name="shield" :size="14" /><span>{{ band.foot }}</span></p>
+    <p v-if="band.state !== 'none'" class="lead-foot"><AppIcon name="shield" :size="14" /><span>{{ unmanaged ? unmanagedLeadCopy : band.foot }}</span></p>
 
     <FloatingPanel v-if="menu" :anchor="menu" align="end" :width="300" :label="`More ${w.l} actions`" @close="restore => { if (restore) menu?.focus(); menu = null }">
       <div role="menu" class="lead-menu">

@@ -8238,6 +8238,24 @@
     ,
     {"kind":"browser","file":"tests/knowledge.spec.ts","name":"the palette finds knowledge by its words and leads to the tab and the search","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"candidate errors and rejected confirmations remain visible with no false adoption","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 400 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 400 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"keyboard: Tab reaches Start lead and the fold, folded details leave the tab order","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"motion › folding animates the card’s height and nothing else","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -15053,6 +15071,14 @@
     {"kind":"vitest","file":"tests/key-trim.unit.test.ts","name":"routes approve, decline and restore through protected native CAS endpoints","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/key-trim.unit.test.ts","name":"shows source evidence without assuming unknown scopes are unused and requires manage rights","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"a candidate read cannot restore another person’s choices and reopening after a cancelled read works","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"an unmanaged lead card offers cooperative pause and hides restart controls after exit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"candidate errors and empty lists are explicit and a changed lead cannot be confirmed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"the inline card confirms the selected running session with the revision displayed when opened","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"stored shape > keeps ids only, once each, and at most MAX_FOLDED (the oldest fold goes first)","tier":"GATED-FULL"}
     ,

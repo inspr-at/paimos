@@ -555,3 +555,154 @@ func TestProjectLeadReportingCadenceAndBoundaries(t *testing.T) {
 		})
 	}
 }
+
+// Risk: adoption must retain the live process while requiring both person
+// confirmation and the exact generation lease, including on a server whose
+// automatic launch admission is deliberately absent.
+func TestProjectLeadAdoptionNeedsPersonAndExactLease(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "without_record", true: "existing_intent"}[existing], func(t *testing.T) {
+			f := projectLeadFixture(t, nil)
+			base := "/api/projects/" + f.project
+			session, lease, registration := leadCandidate(t, f)
+			other, otherLease, _ := leadCandidate(t, f)
+			expect(t, f.call(f.agent, "POST", base+"/harness-sessions/"+session+"/heartbeat", map[string]any{"activity_sequence": 1, "phase": "working", "activity": "busy"}, lease), 200)
+			revision := any(0)
+			if existing {
+				revision = startLead(t, f, 0)["revision"]
+			}
+			w := f.call(f.person, "GET", base+"/lead/candidates?limit=1", nil, "")
+			expect(t, w, 200)
+			page := decode(t, w)
+			if len(page["items"].([]any)) != 1 || page["next_cursor"] == nil {
+				t.Fatal("eligible coordinators were not paged")
+			}
+			w = f.call(f.person, "GET", base+"/lead/candidates?limit=1&cursor="+page["next_cursor"].(string), nil, "")
+			expect(t, w, 200)
+			if len(decode(t, w)["items"].([]any)) != 1 || decode(t, w)["next_cursor"] != nil {
+				t.Fatal("exclusive candidate cursor lost or repeated rows")
+			}
+			expect(t, f.call(f.agent, "POST", base+"/lead/adopt", map[string]any{"expected_revision": revision, "session_id": session}, lease), 403)
+			w = f.call(f.person, "POST", base+"/lead/adopt", map[string]any{"expected_revision": revision, "session_id": session}, "")
+			expect(t, w, 200)
+			pending := decode(t, w)
+			if pending["reason"] != "adoption_pending" || pending["generation"] != float64(0) || pending["session_id"] != session {
+				t.Fatalf("selection granted a generation: %v", pending)
+			}
+			expect(t, f.call(f.agent, "POST", base+"/lead/claim", map[string]any{"expected_revision": pending["revision"], "session_id": other}, otherLease), 409)
+			expect(t, f.call(f.agent, "POST", base+"/lead/claim", map[string]any{"expected_revision": pending["revision"], "session_id": session}, "incorrect-private-lease-at-least-32-chars"), 403)
+			w = f.call(f.agent, "POST", base+"/lead/claim", map[string]any{"expected_revision": pending["revision"], "harness_session_ref": registration["harness_session_ref"]}, lease)
+			expect(t, w, 200)
+			bound := decode(t, w)
+			if bound["session_id"] != session || bound["generation"] != float64(1) || bound["state"] != "working" || bound["process_active"] != true {
+				t.Fatalf("adoption restarted or failed: %v", bound)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var owner, dispatch string
+				var generations, controls int
+				var stopped bool
+				if err := tx.QueryRow(t.Context(), `SELECT owner_principal_id::text,dispatch_key_id::text FROM project_leads WHERE project_id=$1`, f.project).Scan(&owner, &dispatch); err != nil {
+					return err
+				}
+				if owner != f.person.ID || dispatch != f.agent.AuthKeyID {
+					t.Fatal("wrong owner or unproven dispatch key")
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM project_lead_generations WHERE project_id=$1 AND session_id=$2`, f.project, session).Scan(&generations); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM harness_controls WHERE session_id=$1`, session).Scan(&controls); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT stopped_at IS NOT NULL FROM harness_sessions WHERE id=$1`, session).Scan(&stopped); err != nil {
+					return err
+				}
+				if generations != 1 || controls != 0 || stopped {
+					t.Fatal("adoption changed the process or lost generation history")
+				}
+				var audit string
+				if err := tx.QueryRow(t.Context(), `SELECT jsonb_agg(jsonb_build_object('type',type,'before',before,'after',after))::text FROM events WHERE type IN ('lead.adoption_requested','lead.claim_checked')`).Scan(&audit); err != nil {
+					return err
+				}
+				if !strings.Contains(audit, "lead.adoption_requested") || !strings.Contains(audit, "lead.claim_checked") || strings.Contains(audit, lease) || strings.Contains(audit, registration["harness_session_ref"].(string)) {
+					t.Fatal("adoption audit missing or private proof exposed")
+				}
+				return nil
+			})
+			// Adoption does not enable launch admission or change ordinary reclaims.
+			again := claimLead(t, f, session, lease, bound["revision"])
+			if again["state"] != "waiting_for_room" || again["reason"] != "start_checks_unavailable" || again["generation"] != float64(1) {
+				t.Fatal("ordinary claim admission was weakened")
+			}
+		})
+	}
+}
+
+func TestProjectLeadAdoptionRejectsChangedEligibility(t *testing.T) {
+	for _, mode := range []string{"worker", "child", "unowned", "other_owner", "stale", "future", "archived", "stopped", "pausing", "revoked", "stale_after_confirmation", "pausing_after_confirmation", "revoked_after_confirmation"} {
+		t.Run(mode, func(t *testing.T) {
+			f := projectLeadFixture(t, nil)
+			session, lease, _ := leadCandidate(t, f)
+			base := "/api/projects/" + f.project
+			confirmed := strings.HasSuffix(mode, "_after_confirmation")
+			if confirmed {
+				expect(t, f.call(f.person, "POST", base+"/lead/adopt", map[string]any{"expected_revision": 0, "session_id": session}, ""), 200)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				q := ""
+				switch strings.TrimSuffix(mode, "_after_confirmation") {
+				case "worker":
+					q = "UPDATE harness_sessions SET role='worker' WHERE id=$1"
+				case "child":
+					parent, _, _ := leadCandidate(t, f)
+					_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET parent_id=$2 WHERE id=$1`, session, parent)
+					return err
+				case "unowned":
+					q = "UPDATE harness_sessions SET owner_principal_id=NULL WHERE id=$1"
+				case "other_owner":
+					_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','other')`, f.person.TenantID, f.foreign.ID)
+					if err != nil {
+						return err
+					}
+					_, err = tx.Exec(t.Context(), `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, session, f.foreign.ID)
+					return err
+				case "stale":
+					q = "UPDATE harness_sessions SET heartbeat_at=clock_timestamp()-interval '3 minutes' WHERE id=$1"
+				case "future":
+					q = "UPDATE harness_sessions SET heartbeat_at=clock_timestamp()+interval '1 minute' WHERE id=$1"
+				case "archived":
+					q = "UPDATE harness_sessions SET archived_at=clock_timestamp() WHERE id=$1"
+				case "stopped":
+					q = "UPDATE harness_sessions SET stopped_at=clock_timestamp(),stop_reason='stopped' WHERE id=$1"
+				case "pausing":
+					q = `UPDATE harness_sessions SET pause_record='{"state":"requested"}' WHERE id=$1`
+				case "revoked":
+					_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.person.ID)
+					return err
+				}
+				_, err := tx.Exec(t.Context(), q, session)
+				return err
+			})
+			w := f.call(f.person, "POST", base+"/lead/adopt", map[string]any{"expected_revision": 0, "session_id": session}, "")
+			if confirmed {
+				w = f.call(f.agent, "POST", base+"/lead/claim", map[string]any{"expected_revision": 1, "session_id": session}, lease)
+			}
+			if strings.HasPrefix(mode, "revoked") {
+				expect(t, w, 403)
+			} else {
+				expect(t, w, 409)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var count int
+				err := tx.QueryRow(t.Context(), `SELECT count(*) FROM project_leads WHERE project_id=$1`, f.project).Scan(&count)
+				want := 0
+				if confirmed {
+					want = 1
+				}
+				if count != want {
+					t.Fatal("rejected adoption changed lead intent storage")
+				}
+				return err
+			})
+		})
+	}
+}

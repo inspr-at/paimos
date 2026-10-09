@@ -1331,6 +1331,8 @@
       ]
       ,
       "specs": [
+        {"file":"tests/lead-adoption.spec.ts","listedTests":9,"weightSeconds":24,"weightSource":"local-targeted-run"}
+        ,
         {"file":"tests/lead-card.spec.ts","listedTests":18,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
         ,
         {"file":"tests/lead-flow.spec.ts","listedTests":14,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
