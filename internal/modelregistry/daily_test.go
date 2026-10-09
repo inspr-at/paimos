@@ -178,3 +178,121 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 		return nil
 	})
 }
+
+// Risk: the daily ceiling re-qualifies accounts with the ordinary rules, so
+// headroom on a sibling that review would never use (no approved principal)
+// keeps an exhausted review route selected.
+func TestDailyReviewKeepsReviewQualifiedAccounts(t *testing.T) {
+	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+		ctx := t.Context()
+		now, err := dbNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		start, end, err := agentplan.LocalDay(now, "UTC")
+		if err != nil {
+			return err
+		}
+		reviewer, err := insertProfile(ctx, tx, p.TenantID, profileWrite{Slug: "daily-review-claude", Version: "1", Harness: "claude", Family: "anthropic", Model: "claude-daily-review", Effort: "xhigh", Tier: "strong"})
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes WHERE role='review-gate'`); err != nil {
+			return err
+		}
+		if err := insertRoute(ctx, tx, p.TenantID, Route{Role: "review-gate", Priority: 1, ProfileID: reviewer.ID, State: "available"}); err != nil {
+			return err
+		}
+		runner := func(name string, approved bool) (string, error) {
+			var id string
+			if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent',$2) RETURNING id::text`, p.TenantID, name).Scan(&id); err != nil {
+				return "", err
+			}
+			if approved {
+				_, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE key='admin'`, p.TenantID, id)
+				return id, err
+			}
+			return id, nil
+		}
+		approved, err := runner("Daily review approved runner", true)
+		if err != nil {
+			return err
+		}
+		unapproved, err := runner("Daily review unapproved runner", false)
+		if err != nil {
+			return err
+		}
+		addAccount := func(label, registeredBy string, used float64) (string, error) {
+			var id string
+			if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,owner_person_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,linked_at,allowed_model_profile_ids)
+ VALUES($1,$2,'claude','daily-review-runner',$3,$4,$2,$5,true,'daily-review-generation',$4,$6,ARRAY[$7::uuid]) RETURNING id::text`, p.TenantID, label, registeredBy, p.ID, now, start.Add(-time.Hour), reviewer.ID).Scan(&id); err != nil {
+				return "", err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source)
+ VALUES($1,$2,$3,$4,'percent',100,$5,'unrestricted',$6,true,'weekly','daily','harness')`, p.TenantID, id, start, end.Add(5*24*time.Hour), int(used), now); err != nil {
+				return "", err
+			}
+			for _, reading := range []struct {
+				at   time.Time
+				used float64
+			}{{start.Add(time.Minute), 40}, {now, used}} {
+				if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','daily',10080,$3,$4,$5,'harness')`, p.TenantID, id, reading.used, end.Add(5*24*time.Hour), reading.at); err != nil {
+					return "", err
+				}
+			}
+			schedule := capacity.DefaultSchedule()
+			for i := range schedule.Week {
+				schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+			}
+			schedule.Override = "sprint"
+			schedule.Reserve = capacity.ReserveOff
+			raw, _ := json.Marshal(schedule)
+			_, err := tx.Exec(ctx, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, id, raw)
+			return id, err
+		}
+		// 50 % used with 40 % at the start of the day reaches the ten-point pace.
+		exhausted, err := addAccount("review-exhausted", approved, 50)
+		if err != nil {
+			return err
+		}
+		sibling, err := addAccount("review-unapproved-room", unapproved, 41)
+		if err != nil {
+			return err
+		}
+		resolve := func(atLimit string) (WorkResolution, error) {
+			settings := agentplan.DefaultDaily()
+			settings.AtLimit = atLimit
+			raw, err := json.Marshal(agentplan.Plan{Total: 5, Limits: map[string]agentplan.Limit{}, Daily: map[string]agentplan.DailySettings{"claude": settings}})
+			if err != nil {
+				return WorkResolution{}, err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO user_preferences(tenant_id,principal_id,key,value) VALUES($1,$2,'agents.working',$3) ON CONFLICT(tenant_id,principal_id,key) DO UPDATE SET value=EXCLUDED.value`, p.TenantID, p.ID, raw); err != nil {
+				return WorkResolution{}, err
+			}
+			return ResolveWork(ctx, tx, p, WorkQuery{Role: "review-gate", AuthorFamily: "openai"}, now)
+		}
+		// The only review-qualified account is exhausted; room on the unapproved sibling must not count.
+		for _, atLimit := range []string{"ladder", "wait"} {
+			got, err := resolve(atLimit)
+			if err != nil {
+				return err
+			}
+			if got.Profile != nil || got.Trace.Blocked != "daily_limit" || len(got.Trace.QualifyingAccountIDs) != 0 {
+				t.Fatalf("%s: headroom on an account review does not qualify kept the route: %+v", atLimit, got)
+			}
+		}
+		// A review-qualified account with headroom is the one that keeps the route.
+		room, err := addAccount("review-approved-room", approved, 41)
+		if err != nil {
+			return err
+		}
+		got, err := resolve("wait")
+		if err != nil {
+			return err
+		}
+		if got.Profile == nil || got.Profile.ID != reviewer.ID || !slices.Equal(got.Trace.QualifyingAccountIDs, []string{room}) {
+			t.Fatalf("review route is not limited to its qualified account with room: %+v (exhausted %s, sibling %s, room %s)", got, exhausted, sibling, room)
+		}
+		return nil
+	})
+}
