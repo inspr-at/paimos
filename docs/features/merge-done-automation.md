@@ -7,11 +7,26 @@ the canonical PR document. Queue constituents survive deleted queue refs in the
 authenticated event ledger. Main pushes provide a second observation path.
 
 The final transaction takes the tenant, pairing and tree fences, locks the
-ticket batch in UUID order, and checks the current project owner's `nodes.write`
-permission. The configured lead owner is used; no service role, key or scope is
-created. Parent statuses remain derived. Running or queued workers, pending
-handover, human checks, cancellation, archival and missing benefit text refuse
-completion. Existing Done, Delivered and Accepted work does not regress.
+ticket batch in UUID order, and checks `nodes.write` again inside that
+transaction. The delivery installation remains the actor of record. Authorization
+uses an existing person and creates no role, key or scope:
+
+1. The configured lead owner (`project_lead_settings.owner_person_id`, otherwise
+   `project_leads.owner_principal_id`). If that person is set and no longer has
+   `nodes.write`, completion is refused. Nobody else is substituted.
+2. Otherwise the responsible person who already holds `nodes.write`: at most 16
+   active unlinked people with a project role binding (admin, then member, then
+   any other project role), then at most 16 workspace owners, admins and members
+   in that order. Ties break by binding creation time, then principal id.
+3. Otherwise the active unlinked person who created the ticket (`node.created`),
+   if they still have `nodes.write`.
+
+Agents are never the fallback. If nobody qualifies, the merge adds one
+non-applicable **Needs You** proposal ("no active project owner with
+nodes.write") and leaves the ticket unchanged. Parent statuses remain derived.
+Running or queued workers, pending handover, human checks, cancellation,
+archival and missing benefit text refuse completion. Existing Done, Delivered
+and Accepted work does not regress.
 
 A refusal adds a deduplicated informational proposal to **Settings → Status
 Autopilot → Needs You**, naming the ticket, PR and gate. It can be dismissed;
@@ -78,3 +93,13 @@ You item and the ticket state stays unchanged. Remote `./internal/delivery`
 passed on mbp2606. The remote merge-main static gate returned 0 (40 checks
 passed, no optional skips). Tier, shard and audit units passed 210/32/33.
 No origin push.
+
+Owner fallback, `d3ced0ca5`: a project with no lead settings and no lead
+principal completes through an existing person who already holds `nodes.write`
+(project role binding, then workspace owner, admin or member, then the ticket's
+creating person). A configured owner who lost that grant still refuses, with no
+substitute. No person with the grant, including while an agent still has it,
+writes one non-applicable Needs You proposal and leaves the state unchanged.
+No role, key or scope is created. Local and remote `./internal/delivery` passed
+on mbp2606 (`TestMergeDone` included). The merge-main static gate returned 0
+(41 checks passed, no optional skips). No origin push and no live backfill.

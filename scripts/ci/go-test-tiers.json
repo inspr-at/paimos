@@ -694,6 +694,12 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCostLimitRequiresPricedRunAccounting","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestDailyAdmissionCurrentFactSurvivesPreLinkWindow","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestDailyAdmissionIncompleteFactsFailClosed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestDailyAdmissionRechecksCurrentPlanAtReservationAndClaim","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestDailyPlanReadKeepsDecliningWeeklyPercent","tier":"ESSENTIAL"}
@@ -2377,6 +2383,8 @@
     {"kind":"go","package":"internal/agentplan","name":"TestDailyHarnessSummaryAndUnknownUsage","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentplan","name":"TestDailySettingsValidationLocalDayAndLimitMath","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentplan","name":"TestDailyStartDecisionsFailClosedAndRespectLadderOrWait","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentplan","name":"TestDecodePlanAndLegacyMapping","tier":"GATED-FULL"}
     ,
@@ -5364,6 +5372,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeBackfillPreviewApplyAndSafety","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeDoneOwnerFallbackWithoutLeadSettings","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeDoneProtectsOwnershipParentsAndHumanChecks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeDoneQueueConstituentsRequireActualMerge","tier":"ESSENTIAL"}
@@ -5447,6 +5457,8 @@
     {"kind":"go","package":"internal/embedding","name":"TestWorkerKeepsStaleVectorOffTheRow","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/embedding","name":"TestWorkerStoresRewritesAndIsolates","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionDailyLimitUnknownAndMidnightWait","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionExplicitAuthorityFinalWriteAndIdempotentReplay","tier":"ESSENTIAL"}
     ,
@@ -6649,6 +6661,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestClosedBoardAnswersExplicitPlacementButNotReviewDispatch","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCommandTemplates","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestDefaultRefreshNoNetworkAndOneAuditPerRun","tier":"GATED-FULL"}
     ,

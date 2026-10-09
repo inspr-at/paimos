@@ -109,7 +109,7 @@ func loadResetState(ctx context.Context, tx pgx.Tx, a Account, now time.Time) (r
 	if err != nil {
 		return out, err
 	}
-	w := dailyWindow(windows)
+	w := dailyWindow(windows, a.LinkedAt)
 	if w == nil || w.ReadAt == nil || w.UsedPercent == nil || w.Source != "vendor_reported" {
 		return out, nil
 	}

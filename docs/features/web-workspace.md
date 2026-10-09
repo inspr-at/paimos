@@ -64,6 +64,22 @@ On phones, List and Outline share a bottom-centred updates chip above the safe
 area, footer and selection sheet, with scroll clearance for the last row; the
 desktop action stays in the table header. Lazy pages retain the server's order.
 
+The project page's toolbar no longer repeats the ticket count; the footer says
+it. With the project header collapsed, **Display** sits beside **New** in the
+toolbar, on every window width, and its menu carries what the collapsed header
+hides. At the top it lists the project's sections and **Needs attention**; then
+the saved views (the open one has its options and, for an unsaved list, **Save
+view**) and **Hide closed** with the gear for what Hide hides; then the usual
+display options. Anything that needs a popover of its own opens under the
+Display button once the menu has closed. The menu never scrolls: when it is
+taller than the room under the button it flows into two or three columns,
+counted when it opens and when the window resizes, and in windows up to 900 px
+it is a full-height sheet with its title and **Done** pinned. List, Outline and
+Graph switch and the filters stay where they are. Comfortable and Compact
+headers keep Display in the header bar with its menu as it was; the toolbar
+holds that place with an inert twin of the button, so folding or unfolding the
+header moves nothing in the toolbar.
+
 At widths up to 900 px, Filters includes Display controls for sorting, row
 height, columns and model display. Saved column visibility and order also apply
 to phone cards: optional values appear below Key and Title; Automatic restores
