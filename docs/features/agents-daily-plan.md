@@ -53,3 +53,11 @@ is unchanged. `next_on_ladder` is null until Models resolves the work-specific
 ladder; reset credits and reset plans are null until the resets package supplies
 vendor-backed values. `daily_reset_policy` is suggest when unset. This package
 adds no vendor reset action, settings controls, or dial UI.
+
+Validation of source commit `4f05c307d`: the daily behavior tests in agentplan,
+agentaccounts, views and db passed on the approved remote runner, including
+local-day/DST maths, account privacy/delegation, writes/409 and migration
+rollback/RLS. The full reportercontract package passed after generating the
+OpenAPI bundle. The final remote `ci-static --merge-main` exited 0 with all
+40 checks passed and no skips. The wider Go run also passed DSAR, engine
+admission and delivery. Coordinator review and release gates remain separate.
