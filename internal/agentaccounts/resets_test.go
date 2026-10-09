@@ -50,7 +50,8 @@ func newResetsFixture(t *testing.T) resetsFixture {
 	reset(t)
 	f := resetsFixture{now: time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)}
 	f.owner = makePrincipal(t, "resets", "person", "Owner", []string{"admin"})
-	f.runner = addPrincipal(t, f.owner.TenantID, "agent", "Daemon", nil)
+	f.runner = addPrincipal(t, f.owner.TenantID, "agent", "Daemon", []string{"admin"})
+	dbtest.BindRole(t, testDB, f.runner.TenantID, f.runner.ID, "admin")
 	codexProfile(t, f.owner)
 	f.token = issueKey(t, f.runner, []string{"account.manage", "account.probe"})
 	f.vendor = &resetVendorFixture{}
@@ -257,7 +258,7 @@ func TestResetUnknownOutcomeAndFinalAuthorization(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.seed(t, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=NULL WHERE id=$1`, f.account.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=NULL,linked_at=NULL WHERE id=$1`, f.account.ID)
 		return err
 	})
 	_, err = f.module.executeReset(ctx, f.owner, action, false)
