@@ -194,6 +194,8 @@
     ,
     "browser:tests/agents-dial-daily.spec.ts:phone › AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list"
     ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › At the limit works from the keyboard: the arrow keys pick the other option and take focus with them"
+    ,
     "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › At the limit: follow the model ladder or wait, and nothing else"
     ,
     "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › Boost today is read-only for accounts the person may not change; the server refuses that write too"
@@ -5215,6 +5217,8 @@
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: without the right to manage accounts the Accounts tile names the problem and offers no Verify","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"phone › AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › At the limit works from the keyboard: the arrow keys pick the other option and take focus with them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › At the limit: follow the model ladder or wait, and nothing else","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14246,9 +14250,13 @@
     ,
     {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"the numbers on the right > shows vendor-reported resets only","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > does not turn a stale, expired or unknown reading above the ceiling into the red limit","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > is on pace only with a fresh reading under today’s limit, and says nothing of a harness with no account","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > is over pace in gold with the points above today’s share, and at the limit in red","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > keeps the ceiling of an active Boost under use everything, since the server enforces it","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > keeps the usage line to the limit, and says no daily limit for a billed-by-use harness and for everything","tier":"ESSENTIAL"}
     ,
