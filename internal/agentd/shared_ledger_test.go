@@ -500,7 +500,11 @@ func TestSharedLedgerRemoteHeadersAndNegotiatedTelemetry(t *testing.T) {
 	advertised := false
 	capacityReports := 0
 	routes := map[string]int{}
+	var fixtureMu sync.Mutex
+	reports := func() int { fixtureMu.Lock(); defer fixtureMu.Unlock(); return capacityReports }
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fixtureMu.Lock()
+		defer fixtureMu.Unlock()
 		if r.Header.Get("Authorization") != "Bearer fixture-runtime" {
 			t.Error("wrong owner authority")
 		}
@@ -562,16 +566,20 @@ func TestSharedLedgerRemoteHeadersAndNegotiatedTelemetry(t *testing.T) {
 	if err := remote.Claim(t.Context(), "run", "daemon", "claim-generation", []string{"reservation"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := remote.PeerRunning(t.Context(), 1); err != nil || capacityReports != 0 {
+	if err := remote.PeerRunning(t.Context(), 1); err != nil || reports() != 0 {
 		t.Fatal("strict old server received unknown field", err)
 	}
+	fixtureMu.Lock()
 	advertised = true
+	fixtureMu.Unlock()
 	if _, _, err := remote.LedgerView(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := remote.PeerRunning(t.Context(), 1); err != nil || capacityReports != 1 {
-		t.Fatal("negotiated telemetry missing", err, capacityReports)
+	if err := remote.PeerRunning(t.Context(), 1); err != nil || reports() != 1 {
+		t.Fatal("negotiated telemetry missing", err, reports())
 	}
+	fixtureMu.Lock()
+	defer fixtureMu.Unlock()
 	for _, path := range []string{"/api/agent-pairing/self/ledger", "/api/runs/queued", "/api/agent-accounts/route", "/api/runs/run/claim"} {
 		if routes[path] != 1 {
 			t.Fatal("route not exercised", path)
