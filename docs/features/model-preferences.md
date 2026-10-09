@@ -72,8 +72,17 @@ RecurringPill; lib/access, lib/attachCopy, lib/delivery, lib/recurrenceMarker,
 lib/releases and lib/tenantBrand. ModelsSection is already English;
 ModelBoardRoute no longer exists in this checkout. Components that use delivery,
 recurrence and brand wrappers inherit the shared policy through those helpers.
-Public release/roadmap selectors and authored quote/document languages are
-content choices. `RulesBudgetSection` has an explicit tip-content selector.
+Additional switches consume that decided language: AttentionBulkPreview,
+AttentionGroupMenu, DisplayPanel and ListToolbar inherit NeedsAttentionView;
+DeliveryRow, DeliveryTrack and FlowView inherit deliveryLanguage. The delivery
+copy/formatting modules deliveryFlowModes, deliveryFlowWords, deliveryFlowText,
+deliveryFlowData, deliveryNumbers, deliveryNumbersText, deliverySimple and
+deliverySimpleText consume that same language. ReleaseDetail and ReleasesSheet
+consume the independent releaseLang choice.
+PublicReleasesView and PublicRoadmapView have explicit content-language choices.
+PublicQuoteView, QuoteDocument, InspectorDocument, lib/quotes/profile and
+lib/quotes/publicCopy use authored document languages. These content choices
+remain independent; RulesBudgetSection has an explicit tip-content selector.
 
 The static source guard checks future app locale detectors, with a regression
 case that introduces a new component switch. Component tests cover German and
@@ -84,3 +93,11 @@ Playwright spot checks cover Kinds of work, Models, session chat, Tickets and
 Needs attention with an actually loaded German profile and stable controls;
 evidence uses `testInfo.outputPath()` under `web/test-results/aeon-998-onelang/`.
 No layout was added; the existing components are retained (needs Opus design).
+
+AEON-998 validation: all 40 static checks passed with no skips (`--merge-main`,
+exit 0). Remote modelregistry, modelprefs, db, dsar and reportercontract tests
+passed; the database check includes migration 1295 and tenant isolation.
+Targeted helper/guard and DE/EN editor tests passed, as did the five browser
+scenarios at 1440, 1024 and 390 pixels in light and dark themes (30 screenshots).
+The screenshot paths are indexed in
+`web/test-results/aeon-998-onelang/evidence.json`.
