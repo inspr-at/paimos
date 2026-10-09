@@ -196,15 +196,20 @@ for (const lang of ['en', 'de'] as const) {
       else if (scenario === 'example') await expect(page.locator('.flow-empty'), where).toBeVisible()
       else await expect(page.getByTestId('flow-loading').first(), where).toBeVisible()
       const baseline = (await line.textContent())!.trim()
-      const guard = await controlStability(page, {
-        head: page.locator('.dl-head'), line, headline, levels, views: page.locator('.dl-views'), modes: modes(page), top: page.locator('.fl-top'),
-      })
+      // The Updated line names Live's moment and clears in Replay and Compare, so its box is held only while the mode stays Live.
+      const held = {
+        head: page.locator('.dl-head'), headline, levels, views: page.locator('.dl-views'), modes: modes(page), top: page.locator('.fl-top'),
+      }
+      const guard = await controlStability(page, { ...held, line })
       // The save is refused. Wherever it shows, the mode buttons still take a real click (a cover would intercept it).
       const anywhere = page.getByTestId('delivery-pref-error')
       await guard.check(async () => { await expert.click(); await expect(anywhere, where).toBeVisible() })
-      await guard.check(async () => { await modes(page).locator('[data-mode="replay"]').click({ timeout: 5000 }); await expect(page, where).toHaveURL(/mode=replay/) })
-      await guard.check(async () => { await modes(page).locator('[data-mode="live"]').click({ timeout: 5000 }); await expect(page, where).not.toHaveURL(/mode=/) })
-      // The failure takes the headline's slot. The Updated line keeps its text, and the example stays shown.
+      guard.done()
+      const moving = await controlStability(page, held)
+      await moving.check(async () => { await modes(page).locator('[data-mode="replay"]').click({ timeout: 5000 }); await expect(page, where).toHaveURL(/mode=replay/) })
+      await moving.check(async () => { await modes(page).locator('[data-mode="live"]').click({ timeout: 5000 }); await expect(page, where).not.toHaveURL(/mode=/) })
+      moving.done()
+      // The failure takes the headline's slot. Back on Live, the Updated line says what it said, and the example stays shown.
       await expect(failure, where).toBeVisible()
       await expect(failure, where).toContainText(copy.warning)
       await expect(anywhere, `${where}: one failure`).toHaveCount(1)
@@ -213,10 +218,11 @@ for (const lang of ['en', 'de'] as const) {
       if (scenario === 'recorded') await expect(headline.locator('.big'), `${where}: the headline yields its slot`).toHaveCount(0)
       if (scenario === 'example') await expect(page.locator('.flow-empty'), `${where}: the example stays shown`).toBeVisible()
       await expect(expert, where).toHaveAttribute('aria-checked', 'true')
-      // The retry works and the headline returns.
+      // The retry works and the headline returns. Live's line is back, so its box is held again.
       reject = false
-      await guard.check(async () => { await failure.getByRole('button', { name: copy.retry, exact: true }).click(); await expect(failure, where).toHaveCount(0) })
-      guard.done()
+      const restored = await controlStability(page, { ...held, line })
+      await restored.check(async () => { await failure.getByRole('button', { name: copy.retry, exact: true }).click(); await expect(failure, where).toHaveCount(0) })
+      restored.done()
       await expect(expert, where).toHaveAttribute('aria-checked', 'true')
       await expect(line, where).toHaveText(baseline)
       if (scenario === 'recorded') await expect(headline.locator('.big'), where).toBeVisible()
