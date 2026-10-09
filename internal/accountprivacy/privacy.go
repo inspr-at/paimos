@@ -242,8 +242,16 @@ func mask(obj map[string]any) {
 			obj[key] = ""
 		}
 	}
-	for _, key := range []string{"usage_policy", "usage_budget", "budget", "openrouter_credits", "probe_failure", "limiting_reset", "limit", "spend_month_usd", "learning", "same_quota_as", "resets_at", "until", "read_at", "next_attempt_at", "reading_error", "check_result", "reading_age_seconds", "credit_state", "remaining", "used_percent", "remaining_percent", "threshold_percent", "window_key", "severity", "denial_reason", "stop_kind", "backoff_step", "wait_id", "early_recovery_used", "pending_check", "result", "cap_percent", "reserve_percent", "reserve_effective_percent", "reserve_until", "awaiting_reading"} {
+	for _, key := range []string{"usage_policy", "usage_budget", "expired_at", "undo_until", "raised_pace_points", "raised_pace_until", "reset_revision", "reset_undo_supported", "undo_supported", "ordinary_usage_allowed", "budget", "openrouter_credits", "probe_failure", "limiting_reset", "limit", "spend_month_usd", "learning", "same_quota_as", "resets_at", "until", "read_at", "next_attempt_at", "reading_error", "check_result", "reading_age_seconds", "credit_state", "remaining", "used_percent", "remaining_percent", "threshold_percent", "window_key", "severity", "denial_reason", "stop_kind", "backoff_step", "wait_id", "early_recovery_used", "pending_check", "result", "cap_percent", "reserve_percent", "reserve_effective_percent", "reserve_until", "awaiting_reading"} {
 		delete(obj, key)
+	}
+	for _, key := range []string{"resets", "reset_plan"} {
+		if _, ok := obj[key]; ok {
+			obj[key] = nil
+		}
+	}
+	if _, ok := obj["reset_policy"]; ok {
+		obj["reset_policy"] = "suggest"
 	}
 	// Old account timestamps are nullable in the published contract.
 	if _, ok := obj["remaining_fraction"]; ok {

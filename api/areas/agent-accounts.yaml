@@ -467,6 +467,82 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/reset-policy:
+    parameters:
+      - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: setAccountResetPolicy
+      summary: Set the owning person's reset policy
+      description: "Owner plus live account.manage only. Uses the floor's revision and binding_revision, under the access fence. Defaults to suggest. Auto consent is bound to the owner and enrollment; relinking never inherits it. Does not spend a credit."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reset_policy, revision, binding_revision]
+              properties:
+                reset_policy: {type: string, enum: [suggest, auto_before_expiry]}
+                revision: {type: integer, minimum: 0}
+                binding_revision: {type: integer, minimum: 0}
+      responses:
+        '200': {description: "Current policy and reset advice", content: {application/json: {schema: {$ref: '#/components/schemas/AccountResetState'}}}}
+        '400': {description: "Invalid policy"}
+        '403': {description: "Owner account management required"}
+        '409': {description: "Policy or binding changed"}
+  /agent-accounts/{accountId}/resets/use:
+    parameters:
+      - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: useAccountReset
+      summary: Spend one vendor-reported reset credit
+      description: "Owner plus live account.manage. Fresh vendor count, consent, binding and window are checked under the final write fence. confirmed is required when the vendor cannot undo. A configured adapter must deduplicate the durable action ID. No adapter returns 422. A 502 outcome may have spent the credit and blocks retries until reconciliation. Success writes account.reset_used last and returns the fresh window."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_count, binding_revision]
+              properties:
+                expected_count: {type: integer, minimum: 1, maximum: 32}
+                binding_revision: {type: integer, minimum: 0}
+                confirmed: {type: boolean, default: false}
+      responses:
+        '200': {description: "Vendor-confirmed fresh window", content: {application/json: {schema: {$ref: '#/components/schemas/AccountResetResult'}}}}
+        '400': {description: "Invalid action"}
+        '403': {description: "Owner account management required"}
+        '409': {description: "Stale count, binding, pending action, or inline confirmation required"}
+        '422': {description: "Vendor reset execution unavailable"}
+        '502': {description: "Vendor outcome unknown; reconciliation required before retry"}
+  /agent-accounts/{accountId}/resets/{actionId}/undo:
+    parameters:
+      - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: actionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: undoAccountReset
+      summary: Undo a reset while the vendor allows it
+      description: "Owner plus live account.manage, same binding, succeeded action and vendor undo_until required. The vendor must actually restore the credit and return its fresh window; local quota is never fabricated. Uncertain Undo blocks further spending."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [binding_revision]
+              properties:
+                binding_revision: {type: integer, minimum: 0}
+      responses:
+        '200': {description: "Vendor-confirmed Undo", content: {application/json: {schema: {$ref: '#/components/schemas/AccountResetResult'}}}}
+        '400': {description: "Invalid action"}
+        '403': {description: "Owner account management required"}
+        '404': {description: "Reset action not found"}
+        '409': {description: "Action, binding or Undo deadline changed"}
+        '422': {description: "Vendor reset execution unavailable"}
+        '502': {description: "Vendor outcome unknown; reconciliation required before retry"}
   /agent-accounts/{accountId}/posture:
     put:
       operationId: putAccountPosture
@@ -530,9 +606,10 @@ paths:
               additionalProperties: false
               required: [readings]
               properties:
-                readings: {description: "Full normalized snapshot per source; missing buckets retire previous windows without deleting history. An empty array requires a dollar budget.", type: array, minItems: 0, maxItems: 32, items: {$ref: '#/components/schemas/CapacityReading'}}
+                readings: {description: "Full normalized snapshot per source; missing buckets retire previous windows without deleting history. An empty array requires a dollar budget or explicit vendor reset report.", type: array, minItems: 0, maxItems: 32, items: {$ref: '#/components/schemas/CapacityReading'}}
                 usage_probe: {type: boolean, description: "Host usage probe; requires current owner consent and binding_revision."}
                 binding_revision: {type: integer, minimum: 0}
+                resets: {$ref: '#/components/schemas/AccountResetReport'}
                 budget: {$ref: '#/components/schemas/CapacityBudget'}
       responses:
         '204': {description: Observations recorded}
@@ -865,6 +942,71 @@ components:
         wait: {$ref: '#/components/schemas/CapacityWait'}
         details_redacted: {type: boolean, description: "Windows, schedule, limit, pool membership and routing withheld by current owner-sharing policy. A redacted row also reports routable false and a wait whose code is state."}
         boost_withheld: {type: boolean, description: "Canonical-owned account whose usage policy is withheld. Boost today updates it from the stored revision and the client must not send its id."}
+        resets: {$ref: '#/components/schemas/AccountResetCreditsOrNull'}
+        reset_policy: {type: string, enum: [suggest, auto_before_expiry]}
+        reset_plan: {$ref: '#/components/schemas/AccountResetPlanOrNull'}
+        reset_revision: {type: integer, minimum: 0}
+        binding_revision: {type: integer, minimum: 0}
+        reset_undo_supported: {type: boolean}
+    AccountResetCredits:
+      type: object
+      additionalProperties: false
+      required: [count, expires_at, source]
+      properties:
+        count: {type: integer, minimum: 0, maximum: 32}
+        expires_at: {type: array, maxItems: 32, items: {type: string, format: date-time}, description: "One expiry per spendable credit, in ascending order; equal expiries are separate credits."}
+        source: {type: string, const: vendor}
+    AccountResetCreditsOrNull:
+      oneOf:
+        - {$ref: '#/components/schemas/AccountResetCredits'}
+        - {type: 'null'}
+    AccountResetReport:
+      type: object
+      additionalProperties: false
+      required: [count, expires_at, source, read_at, binding_revision, undo_supported]
+      properties:
+        count: {type: integer, minimum: 0, maximum: 32}
+        expires_at: {type: array, maxItems: 32, items: {type: string, format: date-time}}
+        source: {type: string, const: vendor}
+        read_at: {type: string, format: date-time}
+        binding_revision: {type: integer, minimum: 0}
+        undo_supported: {type: boolean}
+      description: "Explicit vendor data reported by the bound daemon through the existing account.probe scope, with current usage-probe consent. Max 32 credits, each expiring within 367 days. Older/equal reports cannot replace current data. Stale or rebound reports read as null."
+    AccountResetPlan:
+      type: object
+      additionalProperties: false
+      required: [planned_at, raised_pace_points, raised_pace_until]
+      properties:
+        planned_at: {type: string, format: date-time}
+        raised_pace_points: {type: number, minimum: 0, maximum: 50}
+        raised_pace_until: {type: string, format: date-time}
+      description: "Advice from the current window's learned burn. The plan waits for near-exhaustion and leaves five minutes before credit expiry. Natural window resets before expiry give no plan. Only fresh daemon captures with owner opt-in can spend automatically; reads never spend. Raised pace is active only after vendor success and remains bounded by floors and explicit Boost today."
+    AccountResetPlanOrNull:
+      oneOf:
+        - {$ref: '#/components/schemas/AccountResetPlan'}
+        - {type: 'null'}
+    AccountResetState:
+      type: object
+      additionalProperties: false
+      required: [account_id, reset_policy, revision, binding_revision, resets, reset_plan, undo_supported]
+      properties:
+        account_id: {type: string, format: uuid}
+        reset_policy: {type: string, enum: [suggest, auto_before_expiry]}
+        revision: {type: integer, minimum: 0}
+        binding_revision: {type: integer, minimum: 0}
+        resets: {$ref: '#/components/schemas/AccountResetCreditsOrNull'}
+        reset_plan: {$ref: '#/components/schemas/AccountResetPlanOrNull'}
+        undo_supported: {type: boolean}
+    AccountResetResult:
+      type: object
+      additionalProperties: false
+      required: [action_id, account_id, window, resets, undo_until]
+      properties:
+        action_id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        window: {$ref: '#/components/schemas/CapacityReading'}
+        resets: {$ref: '#/components/schemas/AccountResetReport'}
+        undo_until: {type: [string, 'null'], format: date-time}
     AccountOverviewLearning:
       type: object
       additionalProperties: false

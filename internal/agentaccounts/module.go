@@ -20,9 +20,10 @@ import (
 
 // Module serves /api/agent-accounts.
 type Module struct {
-	pool       *pgxpool.Pool
-	preview    *previewGuard
-	openRouter openrouter.Catalog
+	pool        *pgxpool.Pool
+	preview     *previewGuard
+	openRouter  openrouter.Catalog
+	resetVendor ResetVendor
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -58,6 +59,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	handle("PUT /api/agent-accounts/boost", m.writeBoost)
 	handle("PUT /api/agent-accounts/{accountId}/posture", m.writeUsagePolicy)
 	handle("PUT /api/agent-accounts/{accountId}/floor", m.writeUsagePolicy)
+	handle("PUT /api/agent-accounts/{accountId}/reset-policy", m.resetPolicy)
+	handle("POST /api/agent-accounts/{accountId}/resets/use", m.useReset)
+	handle("POST /api/agent-accounts/{accountId}/resets/{actionId}/undo", m.undoReset)
 	handle("GET /api/agent-accounts/groups", m.groups)
 	handle("POST /api/agent-accounts/groups", m.groups)
 	handle("PATCH /api/agent-accounts/groups/{id}", m.group)

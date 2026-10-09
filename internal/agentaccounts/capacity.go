@@ -27,9 +27,10 @@ type readingsWrite struct {
 
 type usageReadingsWrite struct {
 	readingsWrite
-	Budget     *capacity.Budget `json:"budget"`
-	UsageProbe bool             `json:"usage_probe"`
-	Revision   *int64           `json:"binding_revision"`
+	Budget     *capacity.Budget      `json:"budget"`
+	UsageProbe bool                  `json:"usage_probe"`
+	Revision   *int64                `json:"binding_revision"`
+	Resets     *capacity.ResetReport `json:"resets,omitempty"`
 }
 
 func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +42,7 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
 	var in usageReadingsWrite
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeErr(w, err)
@@ -54,10 +56,10 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 		if !uuidRE.MatchString(id) {
 			return fail(404, "account not found")
 		}
-		if len(in.Readings) > 32 || len(in.Readings) == 0 && in.Budget == nil {
+		if len(in.Readings) > 32 || len(in.Readings) == 0 && in.Budget == nil && in.Resets == nil {
 			return fail(400, "readings or budget required")
 		}
-		if in.UsageProbe || in.Budget != nil {
+		if in.UsageProbe || in.Budget != nil || in.Resets != nil {
 			reader := p
 			var err error
 			reader.Scopes, err = readKeyScopes(r.Context(), tx, r, p, true)
@@ -87,6 +89,11 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 			for _, v := range in.Readings {
 				if v.Source != "agentd" || v.RunID != "" || v.Phase != "" {
 					return fail(400, "invalid usage probe reading")
+				}
+			}
+			if in.Resets != nil {
+				if err := storeResetReport(r.Context(), tx, a, *in.Resets, now); err != nil {
+					return err
 				}
 			}
 			if in.Budget != nil {
@@ -124,6 +131,9 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	if err := m.automaticReset(r.Context(), p.TenantID, r.PathValue("accountId")); err != nil {
+		w.Header().Set("X-Aeon-Reset-Status", "unavailable")
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -165,6 +175,12 @@ func ingestReadings(ctx context.Context, tx pgx.Tx, p tenant.Principal, id strin
 	if a.RegisteredBy != p.ID {
 		return fail(403, "only the registering agent can report capacity")
 	}
+	return ingestLockedReadings(ctx, tx, p.TenantID, a, readings, true)
+}
+
+// The caller already holds tenant/tree/pairing and this account's row fence.
+func ingestLockedReadings(ctx context.Context, tx pgx.Tx, tenantID string, a Account, readings []capacity.Reading, fullSnapshot bool) error {
+	id := a.ID
 	now, err := dbNow(ctx, tx)
 	if err != nil {
 		return err
@@ -196,7 +212,7 @@ func ingestReadings(ctx context.Context, tx pgx.Tx, p tenant.Principal, id strin
 			}
 			run = v.RunID
 		}
-		tag, err := tx.Exec(ctx, `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source,plan,ordinary_usage_allowed,run_id,phase,plus_minus,evidence) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT DO NOTHING`, p.TenantID, id, v.WindowKind, v.Bucket, v.WindowMinutes, v.UsedPercent, v.ResetsAt, v.ReadAt, v.Source, v.Plan, v.OrdinaryUsageAllowed, run, v.Phase, v.PlusMinus, v.Evidence)
+		tag, err := tx.Exec(ctx, `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source,plan,ordinary_usage_allowed,run_id,phase,plus_minus,evidence) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT DO NOTHING`, tenantID, id, v.WindowKind, v.Bucket, v.WindowMinutes, v.UsedPercent, v.ResetsAt, v.ReadAt, v.Source, v.Plan, v.OrdinaryUsageAllowed, run, v.Phase, v.PlusMinus, v.Evidence)
 		if err != nil {
 			return err
 		}
@@ -245,10 +261,13 @@ func ingestReadings(ctx context.Context, tx pgx.Tx, p tenant.Principal, id strin
 		_, err = tx.Exec(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_bucket,capacity_read_at,capacity_allowed,capacity_source)
    VALUES($1,$2,$3,$4,'percent',100,$5,'unrestricted',0,$6,$7,$8,$9,$10)
    ON CONFLICT(tenant_id,account_id,capacity_kind,capacity_bucket,ends_at) WHERE capacity_kind IS NOT NULL
-   DO UPDATE SET starts_at=EXCLUDED.starts_at,used=EXCLUDED.used,capacity_read_at=EXCLUDED.capacity_read_at,capacity_allowed=EXCLUDED.capacity_allowed,capacity_source=EXCLUDED.capacity_source,capacity_retired=false,capacity_refresh_run=CASE WHEN EXCLUDED.capacity_read_at>account_allowance_windows.capacity_read_at THEN NULL ELSE account_allowance_windows.capacity_refresh_run END`, p.TenantID, id, v.StartsAt(), v.ResetsAt, int64(math.Ceil(v.UsedPercent)), v.WindowKind, v.Bucket, v.ReadAt, allowed, v.Source)
+   DO UPDATE SET starts_at=EXCLUDED.starts_at,used=EXCLUDED.used,capacity_read_at=EXCLUDED.capacity_read_at,capacity_allowed=EXCLUDED.capacity_allowed,capacity_source=EXCLUDED.capacity_source,capacity_retired=false,capacity_refresh_run=CASE WHEN EXCLUDED.capacity_read_at>account_allowance_windows.capacity_read_at THEN NULL ELSE account_allowance_windows.capacity_refresh_run END`, tenantID, id, v.StartsAt(), v.ResetsAt, int64(math.Ceil(v.UsedPercent)), v.WindowKind, v.Bucket, v.ReadAt, allowed, v.Source)
 		if err != nil {
 			return err
 		}
+	}
+	if !fullSnapshot {
+		return nil
 	}
 	for _, source := range []string{"harness", "agentd"} {
 		var at time.Time

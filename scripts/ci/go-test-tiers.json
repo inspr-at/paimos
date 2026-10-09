@@ -552,6 +552,8 @@
     ,
     {"kind":"go","package":"internal/accountprivacy","name":"TestRedactionNormalizesRevokedOverview","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/accountprivacy","name":"TestResetPrivacyMasksCreditsPlanAndAudit","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/activity","name":"TestAuthorsSayWhetherTheyHaveAPicture","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/activity","name":"TestCommentLifecycleAuthorizationIsolationAndConcurrency","tier":"ESSENTIAL"}
@@ -871,6 +873,20 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestRequestedAccountNarrowsEnrollmentWithoutFallback","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestReservedRunRechecksFence","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetAutomaticCaptureTimingAuditAndPace","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetFinalFenceRejectsConcurrentRevocation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetPolicyReportingOwnershipRevisionAndPrivacy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetProbeBetweenPrepareAndExecuteCancelsAndRetries","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetUndoPreVendorFailureRestoresSucceeded","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetUnknownOutcomeAndFinalAuthorization","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetUseAuditCountConfirmationAndVendorUndo","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestResidencyEvidenceDefaultsAndExpires","tier":"GATED-FULL"}
     ,
@@ -3826,6 +3842,8 @@
     ,
     {"kind":"go","package":"internal/capacity","name":"TestReserveValidationAndJSON","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/capacity","name":"TestResetPlanVendorFreshnessTimingAndRaisedPace","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/capacity","name":"TestRunwayReserveDST","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/capacity","name":"TestRunwayReserveDesignCases","tier":"GATED-FULL"}
@@ -5073,6 +5091,8 @@
     {"kind":"go","package":"internal/db","name":"TestRLSIsolatesPrincipals","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestReadinessMigrationPreservesOldAccountAndAllowanceWrites","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestResetMigrationExpansionRollbackOldWriterAndRLS","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestRoadmapPublicationMigrationPreservesCustomSchema","tier":"GATED-FULL"}
     ,
