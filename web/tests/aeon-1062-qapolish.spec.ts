@@ -44,12 +44,61 @@ async function expectNoOverlap(row: Locator) {
   }
 }
 
-const rgb = (value: string) => (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number)
-const luminance = (value: string) => {
-  const [r, g, b] = rgb(value).map(channel => { const c = channel / 255; return c <= .03928 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4 })
+const luminance = (value: number[]) => {
+  const [r, g, b] = value.map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4)
   return .2126 * r! + .7152 * g! + .0722 * b!
 }
-const contrast = (a: string, b: string) => { const [x, y] = [luminance(a), luminance(b)].sort((m, n) => n - m); return (x! + .05) / (y! + .05) }
+const contrast = (a: number[], b: number[]) => { const [x, y] = [luminance(a), luminance(b)].sort((m, n) => n - m); return (x! + .05) / (y! + .05) }
+
+async function stopContrast(stop: Locator) {
+  return stop.evaluate(button => {
+    // Chromium may serialize color-mix as color(srgb ... / alpha), rather than rgba.
+    const context = document.createElement('canvas').getContext('2d')!
+    const rgba = (value: string) => {
+      context.clearRect(0, 0, 1, 1)
+      context.fillStyle = value
+      context.fillRect(0, 0, 1, 1)
+      return Array.from(context.getImageData(0, 0, 1, 1).data, channel => channel / 255)
+    }
+    const over = (front: number[], back: number[]) => {
+      const alpha = front[3]! + back[3]! * (1 - front[3]!)
+      return [...front.slice(0, 3).map((channel, i) => alpha ? (channel * front[3]! + back[i]! * back[3]! * (1 - front[3]!)) / alpha : 0), alpha]
+    }
+    const backgrounds = (element: Element): number[][] => {
+      const style = getComputedStyle(element)
+      const color = rgba(style.backgroundColor)
+      let layers = [color]
+      if (style.backgroundImage !== 'none') {
+        // Bound the panel's linear gradient and the canvas's radial washes by
+        // their composited endpoints; every intermediate shade must also pass.
+        const images: string[] = []
+        let depth = 0, start = 0
+        for (const [i, character] of Array.from(style.backgroundImage).entries()) {
+          if (character === '(') depth++
+          if (character === ')') depth--
+          if (character === ',' && depth === 0) { images.push(style.backgroundImage.slice(start, i).trim()); start = i + 1 }
+        }
+        images.push(style.backgroundImage.slice(start).trim())
+        for (const image of images.reverse()) {
+          const stops = image.match(/(?:rgba?|color)\([^()]+\)/g)
+          if (!/^(linear|radial)-gradient\(/.test(image) || !stops || stops.length !== 2) throw new Error(`Unsupported background: ${image}`)
+          layers = layers.flatMap(back => stops.map(stop => over(rgba(stop), back)))
+        }
+      }
+      if (layers.every(layer => layer[3] === 1)) return layers
+      if (!element.parentElement) throw new Error('No opaque background behind Stop')
+      return backgrounds(element.parentElement).flatMap(back => layers.map(front => over(front, back)))
+    }
+    const keycap = button.querySelector('.keycap')!
+    return {
+      hovered: button.matches(':hover'),
+      ink: rgba(getComputedStyle(button).color).slice(0, 3),
+      keycapInk: rgba(getComputedStyle(keycap).color).slice(0, 3),
+      backgrounds: backgrounds(button).map(color => color.slice(0, 3)),
+      keycapBackgrounds: backgrounds(keycap).map(color => color.slice(0, 3)),
+    }
+  })
+}
 
 // 1600 px is QA's case: the docked panel's default width there is about 620 px.
 const cases = [{ width: 390 }, { width: 620 }, { width: 1024 }, { width: 1600, panel: 620 }]
@@ -65,22 +114,25 @@ for (const { width, panel } of cases) for (const theme of themes) {
     if (panel) expect(Math.abs(await frame.evaluate(el => el.getBoundingClientRect().width) - panel)).toBeLessThanOrEqual(10)
     const pause = frame.getByRole('button', { name: 'Pause…', exact: true }), stopNow = frame.getByRole('button', { name: 'Stop now…', exact: true })
     const stop = frame.locator('.chat-stop')
+    await expect(stop).toBeEnabled()
     await expectNoOverlap(frame.locator(width <= 720 ? '.pause-controls' : '.head-actions'))
     // Pointing at and focusing the header actions never moves them or the composer's controls.
     const guard = await controlStability(page, { pause, stopNow, stop, send: frame.locator('.send') })
     await guard.check(() => pause.hover())
     await guard.check(() => stopNow.hover())
-    await guard.check(() => stop.hover())
+    for (const state of ['normal', 'hovered'] as const) {
+      await guard.check(() => state === 'normal' ? pause.hover() : stop.hover())
+      const look = await stopContrast(stop)
+      expect(look.hovered).toBe(state === 'hovered')
+      expect(look.keycapInk).toEqual(look.ink)
+      const stopRatio = Math.min(...look.backgrounds.map(background => contrast(look.ink, background)))
+      const escRatio = Math.min(...look.keycapBackgrounds.map(background => contrast(look.keycapInk, background)))
+      await testInfo.attach(`contrast-${state}`, { body: JSON.stringify({ theme, width, state, stopRatio, escRatio }), contentType: 'application/json' })
+      expect.soft(stopRatio, `${theme} ${state} Stop on its composited button background`).toBeGreaterThanOrEqual(4.5)
+      expect.soft(escRatio, `${theme} ${state} Esc on its composited keycap background`).toBeGreaterThanOrEqual(4.5)
+      if (theme === 'dark') expect(Math.max(...look.backgrounds.map(luminance)), 'dark Stop is not a light slab').toBeLessThan(.2)
+    }
     guard.done()
-
-    const look = await stop.evaluate(button => {
-      const keycap = button.querySelector('.keycap')!, composerBg = getComputedStyle(button.closest('.composer')!).backgroundColor
-      return { ink: getComputedStyle(button).color, keycap: getComputedStyle(keycap).color, background: getComputedStyle(button).backgroundColor, composerBg, danger: getComputedStyle(button).getPropertyValue('--danger').trim() }
-    })
-    // Stop takes the theme's danger ink on a tint of it; its Esc keycap follows the same ink.
-    expect(look.keycap).toBe(look.ink)
-    expect(contrast(look.ink, look.composerBg), `Stop ink on the composer (${look.ink} / ${look.composerBg})`).toBeGreaterThanOrEqual(4.5)
-    if (theme === 'dark') expect(luminance(look.background), 'dark Stop is not a light slab').toBeLessThan(.2)
     await page.screenshot({ path: testInfo.outputPath(`chat-header-${theme}-${label.replaceAll(' ', '-')}.png`) })
   })
 }
