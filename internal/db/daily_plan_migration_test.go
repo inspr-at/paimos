@@ -74,14 +74,17 @@ func TestDailyPlanMigrationExpansionRollbackAndRLS(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
-			var person, account string
+			var person, agent, account string
 			if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Owner') RETURNING id::text`, tid).Scan(&person); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(ctx, `INSERT INTO personal_profiles(tenant_id,principal_id) VALUES($1,$2)`, tid, person); err != nil {
 				return err
 			}
-			if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id) VALUES($1,'old-writer','codex','old-daemon',$2,'Old writer',$2) RETURNING id::text`, tid, person).Scan(&account); err != nil {
+			if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Old reporter') RETURNING id::text`, tid).Scan(&agent); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id) VALUES($1,'old-writer','codex','old-daemon',$2,'Old writer',$3) RETURNING id::text`, tid, agent, person).Scan(&account); err != nil {
 				return err
 			}
 			var resource string
