@@ -382,6 +382,9 @@ func TestDeploymentDoctrineRepositoryBoundary(t *testing.T) {
 			agent := f.principal(tid, "agent", "builder", "admin", []string{"rules.read", "rules.write"}, owner.ID)
 			allowCredential(t, m.credentials.Dir, "app-key", tid, pair.Private())
 			private := seedPrivateGuard(t, f, m, owner)
+			if !private.ProposalsEnabled {
+				t.Fatal("configured private proposal controls were disabled")
+			}
 			file, rule := ruleWith(t, &private, guardRule)
 			in := ProposalInput{RequestID: "10430000-0000-4000-8000-000000000001", SourceID: private.ID, Path: file.Path, RuleKey: rule.Key, RuleSHA: rule.SHA256, Source: strings.Replace(rule.Source, "keeps seven", "keeps eight", 1), Explanation: "Private operator@example.test context."}
 			in.TLDR.EN = "Retain private planning notebooks."
@@ -413,7 +416,7 @@ func TestDeploymentDoctrineRepositoryBoundary(t *testing.T) {
 			// draft or PR authority even if an operator grants the App access.
 			f.fake.commit(publicRepository, fixtureCommit, fixtureFiles(), "main")
 			readOnly := find(f.layer(owner, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: publicRepository, Visibility: "public", Ref: "main"}), publicRepository)
-			if readOnly == nil || readOnly.State != "ready" {
+			if readOnly == nil || readOnly.State != "ready" || readOnly.ProposalsEnabled {
 				t.Fatal("read-only public packs were not indexed")
 			}
 			publicFile, publicRule := ruleWith(t, readOnly, "Small commits.")
@@ -429,6 +432,9 @@ func TestDeploymentDoctrineRepositoryBoundary(t *testing.T) {
 			allowCredential(t, m.credentials.Dir, "app-key", tid, pair.Private())
 			if public != "" {
 				pub := find(f.layer(owner, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: public, Visibility: "public", Ref: "main"}), public)
+				if !pub.ProposalsEnabled {
+					t.Fatal("configured public proposal controls were disabled")
+				}
 				pubFile, pubRule := ruleWith(t, pub, "Small commits.")
 				publicInput := readOnlyInput
 				publicInput.SourceID, publicInput.Path, publicInput.RuleKey, publicInput.RuleSHA = pub.ID, pubFile.Path, pubRule.Key, pubRule.SHA256

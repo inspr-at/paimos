@@ -5016,6 +5016,8 @@
     ,
     {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"an agent can propose but never sees the person-only proposal list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"configured private doctrine can be proposed while public packs stay read-only","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"external merges show repository release guidance and contextual controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"missing proposal guard gives administrators a reason while doctrine remains readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

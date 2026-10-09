@@ -38,8 +38,8 @@ can read and index:
 
 Use GitHub's canonical owner/repository spelling. Malformed names and the same
 repository on both sides (even with different case) fail startup before
-credential files are read. The configured source visibility and the App installation's reported visibility must match
-the public/private boundary; visibility changes are refused before writes.
+credential files are read. The configured source visibility and the App
+installation's reported visibility must match the public/private boundary; visibility changes are refused before writes.
 
 For an Augmentoring private-only deployment, set the public variable to an
 empty string and the private variable to `augmentoring-team/agm-doctrine`.

@@ -206,21 +206,22 @@ type Layer struct {
 // pinned commit), not_indexed (never fetched at this pin) or failed (the last
 // fetch at this pin failed or its credential grant is unavailable; Error says why).
 type SourceView struct {
-	ID            string     `json:"id"`
-	Repository    string     `json:"repository"`
-	Visibility    string     `json:"visibility"`
-	Ref           string     `json:"ref,omitempty"`
-	Commit        string     `json:"commit"`
-	CommittedAt   *time.Time `json:"committed_at,omitempty"`
-	PinnedAt      time.Time  `json:"pinned_at"`
-	Paths         []string   `json:"paths"`
-	CredentialRef string     `json:"credential_ref,omitempty"`
-	URL           string     `json:"url"`
-	State         string     `json:"state"`
-	Error         string     `json:"error,omitempty"`
-	IndexedAt     *time.Time `json:"indexed_at,omitempty"`
-	Files         []FileView `json:"files"`
-	Skipped       []Skip     `json:"skipped"`
+	ProposalsEnabled bool       `json:"proposals_enabled"`
+	ID               string     `json:"id"`
+	Repository       string     `json:"repository"`
+	Visibility       string     `json:"visibility"`
+	Ref              string     `json:"ref,omitempty"`
+	Commit           string     `json:"commit"`
+	CommittedAt      *time.Time `json:"committed_at,omitempty"`
+	PinnedAt         time.Time  `json:"pinned_at"`
+	Paths            []string   `json:"paths"`
+	CredentialRef    string     `json:"credential_ref,omitempty"`
+	URL              string     `json:"url"`
+	State            string     `json:"state"`
+	Error            string     `json:"error,omitempty"`
+	IndexedAt        *time.Time `json:"indexed_at,omitempty"`
+	Files            []FileView `json:"files"`
+	Skipped          []Skip     `json:"skipped"`
 }
 
 func view(s Source, files []File) SourceView {
@@ -318,7 +319,9 @@ func (m *Module) load(ctx context.Context, p tenant.Principal, permission string
 		}
 	}
 	for _, item := range all {
-		out.Sources = append(out.Sources, view(item.source, item.files))
+		v := view(item.source, item.files)
+		v.ProposalsEnabled = out.ProposalsEnabled && m.writableSource(item.source)
+		out.Sources = append(out.Sources, v)
 	}
 	return out, nil
 }
