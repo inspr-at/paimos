@@ -6568,6 +6568,24 @@
     ,
     {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 390 coarse light › approval and held controls fit both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 light de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 400 dark de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 400 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 400 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"lanes zoom, pan and move the time without moving a control, and a click never moves the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"panning an incident to the right edge keeps its caption inside the lane frame","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"the overview brush pans and resizes the window, and its playhead moves the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-guarantee.spec.ts","name":"dark 1600: listening status in the list and the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/delivery-guarantee.spec.ts","name":"dark 1600: own posts read Sent, Delivered, Read or Not delivered, live","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14539,6 +14557,26 @@
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > retains choice navigation outside the summary and Escape inside it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"retired Release Walker > is not opened by this scrolling suite","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"Live opens at 45 min with now at 65 % (20 on a phone) and presets zoom around now while following","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"Shift+←/→ move the time a minute, plain arrows pan, and Home/End jump within the run","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"a label falls back from tag and text, to the text, to the duration, to an ellipsis that keeps \"since\"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"a wider face than the 5.9 px estimate still ends the incident caption inside the frame","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"following: Live keeps now at 65 % until the playhead leaves now; a run keeps its playhead in view","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"panning an incident onto the right edge keeps its caption inside a 320 px frame","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"rows are reserved once per data set: overlaps take the next free row, at most four","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"slivers in a row merge into one \"+N\" cluster; a lone sliver stays a step","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"the hint draws its keys instead of typing arrow symbols, in both languages","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"the wheel pans or zooms the window and never moves the time; a plain vertical wheel is left to the page","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"German numbers use the German decimal comma and impersonal words","tier":"ESSENTIAL"}
     ,
