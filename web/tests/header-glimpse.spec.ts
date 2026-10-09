@@ -43,6 +43,9 @@ async function protectedBoxes(page: Page) {
   }).filter(box => box.width > 0 && box.height > 0))
 }
 async function expectClearOfText(page: Page) {
+  // setViewportSize resolves before the browser dispatches resize. Require a
+  // measurement of this viewport, rather than accepting the previous frame.
+  await expect(page.locator('.glimpse-col')).toHaveAttribute('data-measured-viewport', String(page.viewportSize()!.width))
   await expect(page.locator('.glimpse-col')).toHaveAttribute('data-measured', 'true')
   await expect(page.locator('.glimpse-canvas')).toBeVisible()
   const region = (await page.locator('.glimpse-canvas').boundingBox())!

@@ -934,7 +934,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
   .c-state :deep(.state-word) { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
   /* The actions sit on the title line, so the ticket and its estimate may use their column below. */
   .c-ticket { grid-column: 4 / -1; grid-row: 3; justify-self: start; min-width: 0; overflow: hidden; margin-top: 4px; min-height: 22px; }
-  .row > .c-ticket { padding-block: 0; }
+  .row > .c-ticket { padding-block: 0; align-items: flex-start; align-content: flex-start; }
   .c-beat { display: none; }
   /* AEON-280 x AEON-304: no beat cell on phones, so the listening cue joins the state line as
      its icon; the words stay in its accessible name and tooltip. */

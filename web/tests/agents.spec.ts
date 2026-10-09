@@ -309,7 +309,9 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
     const sent = data.sent.find(message => ids.includes(message.id))
     if (!sent) return route.fallback()
     receiptStarted(); await receiptHeld
-    return route.fulfill({ json: { items: ids.map(id => ({ message_id: id, status: id === sent.id ? 'delivered' : 'sent', delivered_at: id === sent.id ? new Date().toISOString() : null, read_at: null, deliver_by: null })) } })
+    // Historical posts already reached this thread. A new receipt must not
+    // reclassify them as queued while it confirms the current send.
+    return route.fulfill({ json: { items: ids.map(id => ({ message_id: id, status: 'delivered', delivered_at: id === sent.id ? new Date().toISOString() : data.messages.find(message => message.id === id)!.created_at, read_at: null, deliver_by: null })) } })
   })
   await openAgents(page, `/agents/${camy}`)
   const details = panel(page)
