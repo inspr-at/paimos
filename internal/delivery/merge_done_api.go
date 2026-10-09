@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/ticketbenefits"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -156,7 +157,7 @@ func (m *Module) mergeBackfill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if already != nil {
-		respond(w, *already, nil)
+		httpapi.WriteJSON(w, 200, *already)
 		return
 	}
 	facts := []MergeFact{}
@@ -271,7 +272,11 @@ func (m *Module) mergeBackfill(w http.ResponseWriter, r *http.Request) {
 		_, err = events.Append(ctx, tx, p, events.Change{Type: "delivery.merge_backfill_applied", NodeID: &project, After: out, Metadata: meta})
 		return err
 	})
-	respond(w, out, err)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, 200, out)
 }
 
 func digestJSON(v any) string   { raw, _ := json.Marshal(v); return digest(raw) }
