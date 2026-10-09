@@ -4,6 +4,7 @@ package modelregistry
 import (
 	"context"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
@@ -68,7 +69,7 @@ func resolveDailyWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		harness := out.Profile.Harness
 		daily := agentplan.DailyStart(snapshot, harness, now)
 		if daily.Reason == "" {
-			qualified, err := agentaccounts.QualifyingAccountIDs(ctx, tx, out.Profile.ID, harness, q.ProjectID, out.Residency, now)
+			qualified, err := dailyQualified(ctx, tx, out, q.ProjectID, now)
 			if err != nil {
 				return out, err
 			}
@@ -114,6 +115,22 @@ func resolveDailyWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		return blockDaily(out, "daily_limit"), nil
 	}
 	return out, nil
+}
+
+// dailyQualified is the set of accounts the resolved role admits for the
+// selected profile. The daily ceiling only narrows it: headroom on a sibling
+// that the role would not use never keeps an exhausted route selected.
+func dailyQualified(ctx context.Context, tx pgx.Tx, out WorkResolution, projectID string, now time.Time) ([]string, error) {
+	profile := out.Profile
+	if strings.HasPrefix(out.Role, "review-gate") {
+		return reviewQualifiedAccountIDs(ctx, tx, *profile, projectID, out.Residency, now)
+	}
+	// The resolver already qualified accounts for this profile, including any
+	// narrowing of its own such as escalation room.
+	if len(out.Trace.QualifyingAccountIDs) > 0 {
+		return out.Trace.QualifyingAccountIDs, nil
+	}
+	return agentaccounts.QualifyingAccountIDs(ctx, tx, profile.ID, profile.Harness, projectID, out.Residency, now)
 }
 
 func blockDaily(out WorkResolution, reason string) WorkResolution {

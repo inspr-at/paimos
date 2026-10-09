@@ -67,7 +67,7 @@ test('AEON-720: idle dial reports real account room and explains unknown reading
   })
   await page.clock.install({ time: NOW })
   await page.goto('/agents')
-  const card = dial(page), detail = card.locator('.f-info')
+  const card = dial(page), detail = card.locator('.wh')
   const capture = async () => {
     mkdirSync(shots, { recursive: true })
     for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
@@ -81,7 +81,8 @@ test('AEON-720: idle dial reports real account room and explains unknown reading
   await expect(card.locator('.f-now')).toContainText('0 are running; 5 more can start as work comes in.')
   await expect(detail).toContainText(`Room for ${data.accounts.length * 2} more right now.`)
   await expect(detail).toContainText('quota not measured yet')
-  await expect(card.locator('.f-wait')).toHaveText('No work queued.')
+  await expect(detail).toContainText('Nothing waiting')
+  await expect(card.locator('.f-wait')).toHaveCount(0)
   await expect(card.locator('.f-now')).not.toContainText('wait')
   await expect(detail).not.toContainText('Full right now')
   await capture()
@@ -96,7 +97,7 @@ test('AEON-720: idle dial reports real account room and explains unknown reading
         await expect.poll(() => capacityReads).toBeGreaterThan(before)
         await expect(detail).toContainText('Account room is not measured yet; see the reasons below.')
         await expect(detail).toContainText('a current reading is missing')
-        await expect(card.locator('.f-live')).toHaveText('0 running · account room not measured yet · your agents')
+        await expect(card.locator('.f-status')).toHaveText('0 running · account room not measured yet · your agents')
         await capture()
       } },
       { name: 'scheduled hours block new starts', run: async () => {
@@ -119,11 +120,11 @@ test('AEON-720: accounts owned by another person never become dial room or a fal
   await page.route('**/api/agents/plan', route => route.fulfill({ json: { total: 5, limits: {}, principal_id: me.id, running: {}, running_total: 0, source: 'plan', updated_at: null } }))
   await page.goto('/agents')
   const card = dial(page)
-  await expect(card.locator('.f-info')).toContainText('No linked accounts.')
-  await expect(card.locator('.f-info')).toContainText('Codex no linked accounts')
-  await expect(card.locator('.f-live')).toHaveText('0 running · account room not measured yet · your agents')
+  await expect(card.locator('.wh')).toContainText('No linked accounts.')
+  await expect(card.locator('.wh [data-info-harness="codex"]')).toContainText('no linked accounts')
+  await expect(card.locator('.f-status')).toHaveText('0 running · account room not measured yet · your agents')
   await expect(card.locator('.f-now')).not.toContainText('wait')
-  await expect(card.locator('.f-info')).not.toContainText('Full right now')
+  await expect(card.locator('.wh')).not.toContainText('Full right now')
 })
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
@@ -143,7 +144,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     expect(await card.locator('.f-dial').evaluate(el => el.firstElementChild?.classList.contains('f-bot'))).toBe(true)
     expect(await card.locator('.f-bot').evaluate(el => el.getAnimations({ subtree: true }).length)).toBe(0)
     const expected = { wind: '16 running · winding down to 5', room: '3 running · room for 5 more', zero: '2 running · nothing new starts', off: '4 running · room for 4 more', full: '3 running · accounts full' }
-    await expect(card.locator('.f-live')).toContainText(expected[state])
+    await expect(card.locator('.f-status')).toContainText(expected[state])
     if (shots) {
       mkdirSync(shots, { recursive: true })
       const bounds = (await card.boundingBox())!
@@ -183,22 +184,33 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       ],
     })
     await fold.click()
+    const phone = width < 600
     const chip = card.locator('[data-harness="codex"]'), cycle = chip.locator('.f-mode'), dec = chip.locator('.pm').first(), inc = chip.locator('.pm').last()
-    await expectStableControls({
-      controls: { more, fewer, fold, chips: card.locator('.f-chips'), chip, cycle, dec, inc, claude: card.locator('[data-harness="claude"]'), cursor: card.locator('[data-harness="cursor"]'), value: chip.locator('.f-n') }, scrollAreas: { card, chips: card.locator('.f-chips') },
-      interactions: [
-        { name: 'compact plus', run: () => inc.click() }, { name: 'compact minus', run: () => dec.click() },
-        ...[1, 2, 3].map(n => ({ name: `cycle harness ${n}`, run: () => cycle.click() })),
-        { name: 'folded draft starts in its value slot', run: () => chip.locator('.value').click() },
-        { name: 'typed zero gives off on blur', run: async () => { await chip.locator('input').fill('0'); await more.focus(); await expect(chip.locator('.f-n')).toHaveText('off') } },
-        { name: 'off plus gives one', run: async () => { await inc.click(); await expect(chip.locator('.f-n')).toHaveText('1') } },
-        { name: 'one minus gives off', run: async () => { await dec.click(); await expect(chip.locator('.f-n')).toHaveText('off') } },
-        { name: 'empty value starts in its slot', run: () => chip.locator('.value').click() },
-        { name: 'empty value gives no own limit', run: async () => { await chip.locator('input').fill(''); await chip.locator('input').press('Enter'); await expect(chip.locator('.value svg')).toBeVisible() } },
-        { name: 'cancel a draft', run: async () => { await chip.locator('.value').click(); await chip.locator('input').fill('6'); await chip.locator('input').press('Escape'); await expect(chip.locator('.value svg')).toBeVisible(); await expect(chip.locator('.value')).toBeFocused() } },
-      ],
-    })
-    expect((await inc.boundingBox())!.width).toBe(22)
+    if (phone) {
+      // Phones show each harness as its icon with the count; the steppers live in the open dial.
+      const ph = chip.locator('.f-ph')
+      expect((await ph.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+      await expectStableControls({
+        controls: { more, fewer, fold, chips: card.locator('.f-chips'), chip, ph, claude: card.locator('[data-harness="claude"]'), live: card.locator('.f-live') }, scrollAreas: { card, chips: card.locator('.f-chips') },
+        interactions: [{ name: 'phone total up', run: () => more.click() }, { name: 'phone total down', run: () => fewer.click() }],
+      })
+    } else {
+      await expectStableControls({
+        controls: { more, fewer, fold, chips: card.locator('.f-chips'), chip, cycle, dec, inc, claude: card.locator('[data-harness="claude"]'), cursor: card.locator('[data-harness="cursor"]'), value: chip.locator('.f-n') }, scrollAreas: { card, chips: card.locator('.f-chips') },
+        interactions: [
+          { name: 'compact plus', run: () => inc.click() }, { name: 'compact minus', run: () => dec.click() },
+          ...[1, 2, 3].map(n => ({ name: `cycle harness ${n}`, run: () => cycle.click() })),
+          { name: 'folded draft starts in its value slot', run: () => chip.locator('.value').click() },
+          { name: 'typed zero gives off on blur', run: async () => { await chip.locator('input').fill('0'); await more.focus(); await expect(chip.locator('.f-n')).toHaveText('off') } },
+          { name: 'off plus gives one', run: async () => { await inc.click(); await expect(chip.locator('.f-n')).toHaveText('1') } },
+          { name: 'one minus gives off', run: async () => { await dec.click(); await expect(chip.locator('.f-n')).toHaveText('off') } },
+          { name: 'empty value starts in its slot', run: () => chip.locator('.value').click() },
+          { name: 'empty value gives no own limit', run: async () => { await chip.locator('input').fill(''); await chip.locator('input').press('Enter'); await expect(chip.locator('.value svg')).toBeVisible() } },
+          { name: 'cancel a draft', run: async () => { await chip.locator('.value').click(); await chip.locator('input').fill('6'); await chip.locator('input').press('Escape'); await expect(chip.locator('.value svg')).toBeVisible(); await expect(chip.locator('.value')).toBeFocused() } },
+        ],
+      })
+    }
+    if (!phone) expect((await inc.boundingBox())!.width).toBe(22)
     await expect.poll(() => work.preferences['ui.agents.sections']).toMatchObject({ dial: false })
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
     expect(calls.filter(c => c.method !== 'GET' && /harness-sessions|\/controls|\/stop|\/interrupt/.test(c.path))).toEqual([])
@@ -233,7 +245,7 @@ test('a failed ceiling write restores the confirmed value and keeps the live fee
   await page.goto('/agents')
   const card = dial(page), more = totalMore(page)
   await expect(card.locator('.f-num')).toHaveText('5')
-  await expectStableControls({ controls: { more, fewer: totalFewer(page), fold: card.locator('.fs-tog'), live: card.locator('.f-live') }, interactions: [{ name: 'write failure', run: async () => { await more.click(); await expect(card.locator('.f-live')).toContainText('Couldn’t save'); await expect(card.locator('.f-num')).toHaveText('5') } }] })
+  await expectStableControls({ controls: { more, fewer: totalFewer(page), fold: card.locator('.fs-tog'), live: card.locator('.f-live > svg') }, interactions: [{ name: 'write failure', run: async () => { await more.click(); await expect(card.locator('.f-live')).toContainText('Couldn’t save'); await expect(card.locator('.f-num')).toHaveText('5') } }] })
   await expect(card.locator('.f-now')).toContainText('16 are running')
 })
 
@@ -290,7 +302,7 @@ test('stored numeric zero stays visible and boundaries do not save unchanged val
   await minus.click()
   await expect(row.locator('.f-n')).toHaveText('off')
   await expect(minus).toBeDisabled()
-  await expect(card.locator('.f-live')).toHaveAttribute('role', 'status')
+  await expect(card.locator('.f-status')).toHaveAttribute('role', 'status')
 })
 
 test('save failure remains visible after a successful scheduled poll', async ({ page }) => {
@@ -377,9 +389,9 @@ test('linked viewer keeps room on alias-owned accounts while counts use the cano
   data.accounts = data.accounts.map(a => ({ ...a, owner_person_id: me.id }))
   await page.route('**/api/agents/plan', route => route.fulfill({ json: { ...work.preferences['agents.working'], principal_id: 'canonical-person', running: { codex: 2, claude: 1 }, running_total: 3, source: 'plan', updated_at: null } }))
   await page.goto('/agents')
-  await expect(dial(page).locator('.f-right')).toContainText('Room for 9 more right now.')
-  await expect(dial(page).locator('.f-right')).toContainText('Codex room for 4 more')
-  await expect(dial(page).locator('.f-live')).toContainText('3 running · room for 5 more')
+  await expect(dial(page).locator('.wh')).toContainText('Room for 9 more right now.')
+  await expect(dial(page).locator('.wh [data-info-harness="codex"]')).toContainText('room for 4 more')
+  await expect(dial(page).locator('.f-status')).toContainText('3 running · room for 5 more')
 })
 
 test('typed totals clamp, invalid drafts do not write, and field shortcuts remain native', async ({ page }) => {
@@ -419,7 +431,7 @@ test('a typed write failure restores the confirmed harness value', async ({ page
   const card = dial(page), chip = card.locator('[data-harness="codex"]')
   await expect(chip.locator('.f-n')).toHaveText('4')
   await expectStableControls({
-    controls: { value: chip.locator('.f-n'), minus: chip.locator('.pm').first(), plus: chip.locator('.pm').last(), fold: card.locator('.fs-tog'), live: card.locator('.f-live') },
+    controls: { value: chip.locator('.f-n'), minus: chip.locator('.pm').first(), plus: chip.locator('.pm').last(), fold: card.locator('.fs-tog'), live: card.locator('.f-live > svg') },
     interactions: [{ name: 'failed typed limit', run: async () => {
       await chip.locator('.value').click(); await chip.locator('input').fill('30'); await chip.locator('input').press('Enter')
       await expect(card.locator('.f-live')).toContainText('Couldn’t save')
@@ -468,18 +480,17 @@ test.describe('phone touch targets', () => {
       for (const size of sizes) { expect(size.width).toBeGreaterThanOrEqual(44); expect(size.height).toBeGreaterThanOrEqual(44) }
     }
     await targets()
-    // Folded on a phone, the mark sits between − and the value, and still cycles.
-    const xs = await Promise.all(['.pm.dec', '.f-mode', '.value-slot', '.pm.inc'].map(async s => (await chip.locator(s).boundingBox())!.x))
-    expect(xs).toEqual([...xs].sort((a, b) => a - b))
+    // Folded on a phone, each harness is its icon with the count; a tap opens the dial at that harness.
+    await expect(card.locator('.f-ph')).toHaveCount(7)
     await expectStableControls({
-      controls: { fold, more: totalMore(page), fewer: totalFewer(page), chip, cycle: chip.locator('.f-mode'), minus: chip.locator('.pm').first(), plus: chip.locator('.pm').last(), value: chip.locator('.f-n') },
+      controls: { fold, more: totalMore(page), fewer: totalFewer(page), chips: card.locator('.f-chips'), chip, ph: chip.locator('.f-ph'), live: card.locator('.f-live') },
       scrollAreas: { card, chips: card.locator('.f-chips') },
-      interactions: [
-        { name: 'touch step', run: () => chip.locator('.pm').last().tap() },
-        ...[1, 2, 3].map(n => ({ name: `touch cycle ${n}`, run: () => chip.locator('.f-mode').tap() })),
-      ],
+      interactions: [{ name: 'touch step', run: () => totalMore(page).tap() }, { name: 'touch step back', run: () => totalFewer(page).tap() }],
     })
-    await fold.tap(); await expect(card.locator('.rows > li')).toHaveCount(7)
+    await chip.locator('.f-ph').tap()
+    await expect(fold).toHaveAttribute('aria-expanded', 'true')
+    await expect(card.locator('[data-key="codex"]')).toHaveClass(/sel/)
+    await expect(card.locator('.rows > li')).toHaveCount(7)
     await targets()
     await expectStableControls({
       controls: { fold, more: totalMore(page), selectors: card.locator('[data-key="codex"] .seg'), plus: card.locator('[data-key="codex"] .pm').last(), row: card.locator('[data-key="codex"]') },

@@ -3,6 +3,7 @@ package agentaccounts
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -11,6 +12,18 @@ import (
 // ReviewAccount uses the ordinary admission policy without reserving. Actual
 // reservation and claim recheck capacity and approval on the existing paths.
 func ReviewAccount(ctx context.Context, tx pgx.Tx, profileID, harness, projectID string, now time.Time, residency ...string) (*Account, error) {
+	accounts, err := ReviewAccounts(ctx, tx, profileID, harness, projectID, now, residency...)
+	if err != nil || len(accounts) == 0 {
+		return nil, err
+	}
+	return &accounts[0], nil
+}
+
+// ReviewAccounts is every account ReviewAccount may choose, best routing rank
+// first (equal ranks keep their listed order). Callers that narrow the set
+// further, such as the daily ceiling, start from this set and never from the
+// broader ordinary qualification.
+func ReviewAccounts(ctx context.Context, tx pgx.Tx, profileID, harness, projectID string, now time.Time, residency ...string) ([]Account, error) {
 	accounts, err := listAccounts(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -31,10 +44,12 @@ func ReviewAccount(ctx context.Context, tx pgx.Tx, profileID, harness, projectID
 	if err != nil {
 		return nil, err
 	}
-	best := 0
-	var selected *Account
-	for i := range kept {
-		a := &kept[i]
+	type ranked struct {
+		account Account
+		rank    int
+	}
+	found := []ranked{}
+	for _, a := range kept {
 		r := advice[a.ID]
 		if r.Wait != nil || r.AvailableSlots < 1 || r.Rank < 1 {
 			continue
@@ -50,13 +65,16 @@ func ReviewAccount(ctx context.Context, tx pgx.Tx, profileID, harness, projectID
 		if err != nil {
 			return nil, err
 		}
-		if allowed && (selected == nil || r.Rank < best) {
-			copy := *a
-			selected = &copy
-			best = r.Rank
+		if allowed {
+			found = append(found, ranked{a, r.Rank})
 		}
 	}
-	return selected, nil
+	sort.SliceStable(found, func(i, j int) bool { return found[i].rank < found[j].rank })
+	out := make([]Account, len(found))
+	for i, f := range found {
+		out[i] = f.account
+	}
+	return out, nil
 }
 func optionalReviewProject(id string) any {
 	if id == "" {
