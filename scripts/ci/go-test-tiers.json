@@ -4164,6 +4164,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessInvokePinsArgumentsAndBudget","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestHarnessLeadClaimUsesExistingFilesAndRedactsProof","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessLeadUsageReadAndFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessLegacyDecoderIgnoresFinished","tier":"GATED-FULL"}
@@ -5800,6 +5802,10 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadAdmissionIsFreshAndFailClosed","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadAdoptionNeedsPersonAndExactLease","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadAdoptionRejectsChangedEligibility","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadAssignmentFenceAndArchive","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadCompetingStartsClaimsAndRevocation","tier":"ESSENTIAL"}
@@ -5811,6 +5817,8 @@
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadOpenAPIContract","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadReportingCadenceAndBoundaries","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadUnclaimedAdoptionRejectsPauseAndCancelClearsSelection","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProvenanceReportsReplaceOnlyTheKindsTheyCarry","tier":"GATED-FULL"}
     ,
