@@ -32,10 +32,71 @@ paths:
         '200': {description: 'Explicit lead intent, with unavailable gates shown as waiting_for_room'}
         '403': {description: Person or live owner permission required}
         '409': {description: Revision conflict or predecessor exit is unconfirmed}
+  /projects/{projectId}/lead/candidates:
+    get:
+      summary: List the person's eligible running root coordinators
+      description: 'Person-only harness.read, harness.control and run.create. Returns only same-project canonical-person-owned root coordinators with reporting no more than two minutes old, no archive, stop or pending pause. Keyset pages are bounded at 200. No private session reference or worker lease is returned.'
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {in: query, name: cursor, schema: {type: string, maxLength: 2048}}
+      responses:
+        '200':
+          description: 'Eligible sessions; eligibility is checked again at confirmation and claim'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/LeadCandidate'}}
+                  next_cursor: {type: [string, 'null']}
+        '403': {description: 'Person and current project authority required'}
+  /projects/{projectId}/lead/adopt:
+    post:
+      summary: Confirm a running coordinator for adoption without restarting it
+      description: 'Person-only harness.control and run.create, checked inside the final fenced write. expected_revision is zero without a record. Creates the lead intent with the confirming canonical person as owner, or selects a candidate for an existing unbound intent of that owner. A live or historical bound lead requires ordinary succession instead; paused intents require explicit restart. The exact selected session must then claim with its existing worker lease. Until then the state is waiting_for_room with reason adoption_pending and no generation or dispatch authority is granted. Emits lead.adoption_requested. No process or worker is launched, stopped or reparented.'
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, session_id]
+              properties:
+                expected_revision: {type: integer, minimum: 0}
+                session_id: {type: string, format: uuid}
+      responses:
+        '200': {description: 'Confirmed selection awaiting the exact session lease proof'}
+        '403': {description: 'Person, owner or eligible owned root coordinator required'}
+        '409': {description: 'Stale revision, ineligible session or ordinary succession required'}
+  /projects/{projectId}/lead/adopt/cancel:
+    post:
+      summary: Clear an unclaimed adoption without touching the running session
+      description: 'Person-only harness.control and run.create inside the final fenced write. expected_revision must match. Only an unclaimed adoption_pending selection is cleared. session_id becomes null, generation stays 0 and reason becomes selection_cleared. The harness session is not paused, stopped or reparented and no cooperative control is written. Another adoption or an explicit start can proceed. A claimed generation is rejected. Emits lead.adoption_cancelled.'
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision]
+              properties:
+                expected_revision: {type: integer, minimum: 0}
+      responses:
+        '200': {description: 'Selection cleared and the running session left untouched'}
+        '403': {description: 'Person and current project authority required'}
+        '409': {description: 'Stale revision or no unclaimed adoption'}
   /projects/{projectId}/lead/claim:
     post:
       summary: Bind a proven coordinator generation to the project lead intent
-      description: Agent-only harness.worker. X-Aeon-Worker-Lease proves the named session; its canonical person owner must match the explicit intent. The session heartbeat (or creation before its first heartbeat) must be no more than two minutes old and not future-dated, allowing the default 50-second CLI reporting cadence plus a missed beat. Every claim rechecks server-side dial, harness, account room and host-load evidence, each at most 30 seconds old. Missing, stale or unreadable evidence waits. Competing claims serialize. Existing coordinator registrations migrate only through this explicit ID and proof, without adopting or reparenting workers. Succession requires confirmed predecessor stop, fresh session reference and lease, and the same owner. The authenticating agent key becomes the generation's dispatch credential, so fair-turn scheduling qualifies exactly that key and never another key of the same principal; a proven pickup through a different live key rebinds it. No process is launched.
+      description: "Agent-only harness.worker. X-Aeon-Worker-Lease proves the named session; its canonical person owner must match the explicit intent. The session heartbeat (or creation before its first heartbeat) must be no more than two minutes old and not future-dated, allowing the default 50-second CLI reporting cadence plus a missed beat. Every claim rechecks server-side dial, harness, account room and host-load evidence, each at most 30 seconds old. Missing, stale or unreadable evidence waits. Competing claims serialize. Existing coordinator registrations migrate only through this explicit ID and proof, without adopting or reparenting workers. Succession requires confirmed predecessor stop, fresh session reference and lease, and the same owner. The authenticating agent key becomes the generation's dispatch credential, so fair-turn scheduling qualifies exactly that key and never another key of the same principal; a proven pickup through a different live key rebinds it. No process is launched. A person-confirmed adoption_pending selection binds only that exact session after its lease proof; adoption counts the already running process and does not run launch admission. All future launches and dispatch still require their ordinary live gates. The private harness_session_ref may replace session_id for CLI resolution; it is never returned. A selection_cleared lead is not claimable until an explicit start or a new person-confirmed adoption."
       parameters:
         - $ref: '#/components/parameters/projectId'
         - {in: header, name: X-Aeon-Worker-Lease, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
@@ -45,11 +106,15 @@ paths:
           application/json:
             schema:
               type: object
-              required: [expected_revision, session_id]
+              required: [expected_revision]
               additionalProperties: false
+              oneOf:
+                - required: [session_id]
+                - required: [harness_session_ref]
               properties:
                 expected_revision: {type: integer, minimum: 1}
                 session_id: {type: string, format: uuid}
+                harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
       responses:
         '200': {description: Bound generation or truthful admission wait}
         '403': {description: 'Lease, live authority or owned intent rejected'}
@@ -57,7 +122,7 @@ paths:
   /projects/{projectId}/lead/pause:
     post:
       summary: Checkpoint and cooperatively pause the current lead
-      description: Person owner with harness.control, or the current lead with harness.worker and X-Aeon-Worker-Lease. Requires expected_revision and generation. Stops new dispatch immediately and reuses the harness wrap-up/handover controls. A live process keeps its slot until confirmed stopped. A worker may request idle pause only for its own generation; no workers are reassigned.
+      description: Person owner with harness.control, or the current lead with harness.worker and X-Aeon-Worker-Lease. Requires expected_revision and generation. Stops new dispatch immediately and reuses the harness wrap-up/handover controls. A live process keeps its slot until confirmed stopped. A worker may request idle pause only for its own generation; no workers are reassigned. An unclaimed adoption_pending selection is rejected before any session control and the running session is left untouched.
       parameters:
         - $ref: '#/components/parameters/projectId'
       requestBody:
@@ -131,6 +196,16 @@ paths:
         '409': {description: 'Stale identity, useful current turn, unavailable scheduling evidence or unavailable handover delivery'}
 components:
   schemas:
+    LeadCandidate:
+      type: object
+      required: [id, display_label, harness, host, management_mode, reported_at]
+      properties:
+        id: {type: string, format: uuid}
+        display_label: {type: [string, 'null']}
+        harness: {type: string}
+        host: {type: string}
+        management_mode: {type: string, enum: [managed, unmanaged]}
+        reported_at: {type: string, format: date-time}
     LeadUsage:
       type: object
       required: [project_id, generation, from, to, basis, partial, truncated, gaps, total, lead, worker, review, fix, held, finish_forecast]

@@ -4,8 +4,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } fro
 import { useRouter } from 'vue-router'
 import { api } from '../../lib/api'
 import { can } from '../../lib/authz'
-import { canLaunchLead, canPause, canResume, checksSummary, decisionLine, leadLaunchReason, LEAD_WORDS, startChecks } from '../../lib/lead'
-import { closeLeadPanel, leadOverlay, openLeadPause } from '../../lib/leadOverlay'
+import { canLaunchLead, canPause, canResume, checksSummary, decisionLine, leadLaunchReason, LEAD_WORDS, unmanagedLeadCopy, startChecks } from '../../lib/lead'
+import { closeLeadPanel, leadOverlay, openLeadPause, openStartLead } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
 import { usePoller } from '../../lib/usePolledData'
 import { useLeadSummary } from '../../lib/useLeadSummary'
@@ -19,7 +19,7 @@ import LeadBot from './LeadBot.vue'
 
 // The one detailed home of a lead (the ticket panel pattern): Right now,
 // Workers, Next up, Before every start and Recent. Long content scrolls in the
-// body; Pause or Resume stays in the pinned footer.
+// body; Cancel, Start, Pause or Resume stays in the pinned footer.
 const props = defineProps<{ projectId: string; projectKey: string; routeKey: string }>()
 const w = LEAD_WORDS
 const leads = useProjectLeads(), queue = useWorkQueue(), session = useSession(), router = useRouter()
@@ -53,6 +53,7 @@ const subtitle = computed(() => {
   return [band.value.status, s && lead.value?.state === 'working' ? `since ${time(s.since)}` : '', s?.model].filter(Boolean).join(' · ')
 })
 const nowCopy = computed(() => {
+  if (unmanaged.value && lead.value?.state === 'paused') return 'Continue from the session itself; PAIMOS cannot restart an unmanaged process.'
   if (lead.value?.state === 'working') {
     const room = dial.value ? Math.max(0, dial.value.total - dial.value.running) : null
     const activity = leadSession.value?.current_activity?.text || leadSession.value?.activity_note
@@ -66,12 +67,23 @@ const reported = computed(() => {
   const seconds = Math.max(0, Math.round((now.value - new Date(s.heartbeat_at).getTime()) / 1000))
   return seconds < 90 ? `Reported ${seconds} seconds ago` : `Reported ${Math.round(seconds / 60)} minutes ago`
 })
+const unmanaged = computed(() => {
+  const principal = view.value?.principal
+  return (leadSession.value?.management_mode ?? (principal?.session === lead.value?.session_id ? principal?.management : undefined)) === 'unmanaged'
+})
 const checks = computed(() => startChecks(lead.value, decisions.value, dial.value))
 const recent = computed(() => [...decisions.value].reverse().slice(0, 6).map(d => ({ id: d.event_id, at: time(d.recorded_at), text: decisionLine(d, id => keyOf(id) ?? 'a ticket') })))
 const next = computed(() => (queued.value ?? []).filter(item => !item.target_agent_id).slice(0, 3))
 const href = (key: string) => `/p/${encodeURIComponent(props.routeKey)}/${encodeURIComponent(key)}`
 const harnessName = (h: string) => ({ codex: 'Codex', claude: 'Claude', cursor: 'Cursor', grok: 'Grok', pi: 'Pi', gemini: 'Gemini', opencode: 'OpenCode' } as Record<string, string>)[h] ?? h
 
+async function cancelAdoption() {
+  const project = props.projectId, who = session.identity?.principal.id
+  try {
+    const result = await leads.cancelAdoption(project)
+    if (result && project === props.projectId && who === session.identity?.principal.id) toast('Adoption cancelled', { timeout: 5200 })
+  } catch (e) { if (project === props.projectId) toast(e instanceof Error ? e.message : 'The adoption was not cancelled.', { tone: 'error' }) }
+}
 async function resume() {
   if (!canLaunchLead(lead.value)) return
   const project = props.projectId, who = session.identity?.principal.id
@@ -109,6 +121,7 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
           <span v-if="band.tone === 'live'" class="live-mark" aria-hidden="true" /><span v-else-if="band.tone === 'wait'" class="dot wait" aria-hidden="true" /><span v-else-if="band.tone === 'warn'" class="dot warn" aria-hidden="true" /><AppIcon v-else name="pause" :size="13" />{{ band.status }}
         </p>
         <p class="now-copy">{{ nowCopy }}</p>
+        <p v-if="unmanaged" class="small" data-unmanaged>{{ unmanagedLeadCopy }}</p>
         <dl class="facts">
           <div><dt>Workers</dt><dd>{{ workers.length }}</dd><dd class="sub">this project</dd></div>
           <div><dt>Queued</dt><dd>{{ queued ? queued.length : '—' }}</dd><dd class="sub">{{ next[0] ? `next ${next[0].key}` : queued ? 'nothing waits' : 'can’t be read' }}</dd></div>
@@ -156,7 +169,16 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
       </section>
     </div>
     <footer class="pane-foot">
-      <template v-if="lead?.state === 'paused'">
+      <template v-if="lead?.reason === 'adoption_pending'">
+        <p>Clears this choice. The session keeps running.</p>
+        <button type="button" class="btn" data-act="cancel-adoption" :aria-disabled="!mayStart || leads.busy[projectId]" @click="mayStart && !leads.busy[projectId] && cancelAdoption()">Cancel</button>
+      </template>
+      <template v-else-if="lead?.reason === 'selection_cleared' && !lead.session_id">
+        <p>{{ !canLaunchLead(lead) ? leadLaunchReason(lead) : 'The previous choice was cleared. Start a lead or adopt another running session.' }}</p>
+        <button type="button" class="btn primary" data-act="start" :data-tip="!canLaunchLead(lead) ? leadLaunchReason(lead) : undefined" :aria-disabled="!mayStart || !canLaunchLead(lead) || leads.busy[projectId]" @click="mayStart && canLaunchLead(lead) && !leads.busy[projectId] && openStartLead([projectId], $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="15" />Start {{ w.l }}</button>
+      </template>
+      <p v-else-if="unmanaged && lead?.state === 'paused'">{{ unmanagedLeadCopy }}. Continue from the session itself.</p>
+      <template v-else-if="lead?.state === 'paused'">
         <p>{{ !canLaunchLead(lead) ? leadLaunchReason(lead) : canResume(lead) ? 'Restarts through the usual start checks.' : 'Resume waits until its session has stopped.' }}</p>
         <button type="button" class="btn primary" data-act="resume" :data-tip="!canLaunchLead(lead) ? leadLaunchReason(lead) : undefined" :aria-disabled="!mayStart || !canResume(lead) || !canLaunchLead(lead) || leads.busy[projectId]" @click="mayStart && canResume(lead) && resume()"><AppIcon name="play" :size="15" />Resume</button>
       </template>

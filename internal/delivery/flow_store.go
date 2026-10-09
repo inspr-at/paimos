@@ -33,6 +33,11 @@ type flowItemInput struct {
 	Gate           *FlowGate
 	SetETA         bool
 	OpsP50, OpsP90 *time.Time
+	// QualificationEvidence and RollbackClass are facts of the release record.
+	// Unlike the gate and the estimate they keep the stored value when a report
+	// carries none, so a partial re-report never erases recorded evidence; a
+	// report that carries a value corrects it.
+	QualificationEvidence, RollbackClass *string
 	// NoCreate records nothing for a run never seen open: a close, end or
 	// merge of work that started before the Flow observed it.
 	NoCreate bool
@@ -180,6 +185,14 @@ func applyFlowTx(ctx context.Context, tx pgx.Tx, tid string, batches []flowBatch
 		if in.SetETA {
 			after.OpsP50, after.OpsP90 = flowTimePtr(in.OpsP50), flowTimePtr(in.OpsP90)
 		}
+		if in.QualificationEvidence != nil {
+			v := *in.QualificationEvidence
+			after.QualificationEvidence = &v
+		}
+		if in.RollbackClass != nil {
+			v := *in.RollbackClass
+			after.RollbackClass = &v
+		}
 		// A merge projected before this row existed is still the linked
 		// delivery's current state. Late creation must not leave it open.
 		if before == nil && in.Kind == "change" && after.Ended == nil {
@@ -252,22 +265,22 @@ func saveFlowItemTx(ctx context.Context, tx pgx.Tx, tid string, i flowItemRow, n
 	if i.Gate != nil {
 		gatePrincipal, gateWhat = i.Gate.PrincipalID, &i.Gate.What
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO delivery_flow_items(tenant_id,project_id,id,kind,ref,ticket_node_id,title,prs,started_at,ended_at,target_minutes,target_from_step,target_source,gate_principal_id,gate_what,ops_eta_p50_at,ops_eta_p90_at,updated_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+	_, err := tx.Exec(ctx, `INSERT INTO delivery_flow_items(tenant_id,project_id,id,kind,ref,ticket_node_id,title,prs,started_at,ended_at,target_minutes,target_from_step,target_source,gate_principal_id,gate_what,ops_eta_p50_at,ops_eta_p90_at,qualification_evidence,rollback_class,updated_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 		ON CONFLICT(tenant_id,id) DO UPDATE SET ticket_node_id=EXCLUDED.ticket_node_id,title=EXCLUDED.title,prs=EXCLUDED.prs,started_at=EXCLUDED.started_at,ended_at=EXCLUDED.ended_at,
 		target_minutes=EXCLUDED.target_minutes,target_from_step=EXCLUDED.target_from_step,target_source=EXCLUDED.target_source,gate_principal_id=EXCLUDED.gate_principal_id,gate_what=EXCLUDED.gate_what,
-		ops_eta_p50_at=EXCLUDED.ops_eta_p50_at,ops_eta_p90_at=EXCLUDED.ops_eta_p90_at,updated_at=EXCLUDED.updated_at`,
-		tid, i.Project, i.ID, i.Kind, i.Ref, i.Ticket, i.Title, i.PRs, i.Started, i.Ended, minutes, from, source, gatePrincipal, gateWhat, i.OpsP50, i.OpsP90, now)
+		ops_eta_p50_at=EXCLUDED.ops_eta_p50_at,ops_eta_p90_at=EXCLUDED.ops_eta_p90_at,qualification_evidence=EXCLUDED.qualification_evidence,rollback_class=EXCLUDED.rollback_class,updated_at=EXCLUDED.updated_at`,
+		tid, i.Project, i.ID, i.Kind, i.Ref, i.Ticket, i.Title, i.PRs, i.Started, i.Ended, minutes, from, source, gatePrincipal, gateWhat, i.OpsP50, i.OpsP90, i.QualificationEvidence, i.RollbackClass, now)
 	return err
 }
 
-const flowItemColumns = `id::text,project_id::text,kind,ref,ticket_node_id::text,title,prs,started_at,ended_at,target_minutes,target_from_step,target_source,gate_principal_id::text,gate_what,ops_eta_p50_at,ops_eta_p90_at`
+const flowItemColumns = `id::text,project_id::text,kind,ref,ticket_node_id::text,title,prs,started_at,ended_at,target_minutes,target_from_step,target_source,gate_principal_id::text,gate_what,ops_eta_p50_at,ops_eta_p90_at,qualification_evidence,rollback_class`
 
 func scanFlowItem(row pgx.Row) (flowItemRow, error) {
 	var i flowItemRow
 	var minutes *int
 	var from, source, gatePrincipal, gateWhat *string
-	err := row.Scan(&i.ID, &i.Project, &i.Kind, &i.Ref, &i.Ticket, &i.Title, &i.PRs, &i.Started, &i.Ended, &minutes, &from, &source, &gatePrincipal, &gateWhat, &i.OpsP50, &i.OpsP90)
+	err := row.Scan(&i.ID, &i.Project, &i.Kind, &i.Ref, &i.Ticket, &i.Title, &i.PRs, &i.Started, &i.Ended, &minutes, &from, &source, &gatePrincipal, &gateWhat, &i.OpsP50, &i.OpsP90, &i.QualificationEvidence, &i.RollbackClass)
 	if err != nil {
 		return i, err
 	}

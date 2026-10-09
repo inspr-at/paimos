@@ -440,8 +440,11 @@ const gate = () => { let open!: () => void; const passed = new Promise<void>(res
 
 test('a list still on its way when the person changes is never shown to the next person', async ({ page }) => {
   await setup(page)
-  const previous = gate(), next = gate(), permissions = gate()
+  const previous = gate(), next = gate(), permissions = gate(), sessions = gate()
   let switched = false, olaAsked = 0, anyAsked = 0, permissionsAsked = false
+  // The page asks for the waiting list while its first load is still reading sessions. Holding
+  // the sessions here makes that order certain on any machine, instead of a matter of speed.
+  await page.route('**/api/harness-sessions*', async route => { await sessions.passed; await route.fallback() })
   // Whoever asks before Ola signs in gets the previous person's list, held until released.
   await page.route(PENDING, async route => {
     anyAsked++
@@ -455,6 +458,7 @@ test('a list still on its way when the person changes is never shown to the next
   // The first paint's permission reads finish before the next person's are held.
   // Session rows appear only after those reads. Arming the hold earlier swallows
   // them, the page stays on Loading, and the click below never finds a row.
+  sessions.open()
   const sessionState = page.locator('[data-row^="s:"] .c-state').first()
   await expect(sessionState).toBeVisible()
   // Ola signs in to another workspace; the next navigation refreshes the session. Her

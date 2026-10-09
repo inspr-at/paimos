@@ -7,7 +7,7 @@ import { reactive } from 'vue'
 import type { DeliveryLanguage } from './delivery'
 import {
   criticalPath, followTick, minutesText, pick, runEnd, stepAt, timeLabel, timeLabelSeconds,
-  type FlowData, type FlowLevel, type FlowRun, type FlowStep, type Lane, type LaneItem, type LaneSet, type Timeline, type Words,
+  type FlowData, type FlowLevel, type FlowRun, type FlowStep, type Lane, type LaneItem, type LaneSet, type RecordedAttempt, type Timeline, type Words,
 } from './deliveryFlow'
 import { put, TIMES, TO, type FlowText } from './deliveryFlowText'
 import { OUTCOME_PLAIN, WAIT_OBJECT } from './deliveryFlowWords'
@@ -15,7 +15,7 @@ import { OUTCOME_PLAIN, WAIT_OBJECT } from './deliveryFlowWords'
 export type FlowMode = 'live' | 'replay' | 'compare'
 export const FLOW_MODES: readonly FlowMode[] = ['live', 'replay', 'compare']
 export interface Part { text: string; strong?: boolean }
-interface Ctx { data: FlowData; level: FlowLevel; lang: DeliveryLanguage; text: FlowText }
+interface Ctx { data: FlowData; level: FlowLevel; lang: DeliveryLanguage; text: FlowText; timeZone?: string }
 
 const dec = (value: number, lang: DeliveryLanguage) => lang === 'de' ? String(value).replace('.', ',') : String(value)
 /** Minutes as a number: one decimal below 10, whole above. */
@@ -226,10 +226,56 @@ export interface Went {
   parts: { kind: WentKind; label: string; share: number }[]
   items: { key: string; kind: WentKind; minutes: string; label: string; note: string }[]
 }
+type Span = { start: number; end: number }
+/** Join overlaps and touches. The copy keeps the caller's spans intact. */
+function mergeSpans(spans: readonly Span[]): Span[] {
+  const sorted = spans.filter(s => s.end > s.start).map(s => ({ start: s.start, end: s.end })).sort((a, b) => a.start - b.start || a.end - b.end)
+  const out: Span[] = []
+  for (const s of sorted) {
+    const last = out.at(-1)
+    if (last && s.start <= last.end) last.end = Math.max(last.end, s.end)
+    else out.push(s)
+  }
+  return out
+}
+/** base with every cut removed. Cuts may overlap; each is applied to what remains. */
+function subtractSpans(base: readonly Span[], cuts: readonly Span[]): Span[] {
+  let out = base.map(s => ({ start: s.start, end: s.end }))
+  for (const c of cuts) {
+    const next: Span[] = []
+    for (const s of out) {
+      if (c.end <= s.start || c.start >= s.end) { next.push(s); continue }
+      if (c.start > s.start) next.push({ start: s.start, end: c.start })
+      if (c.end < s.end) next.push({ start: c.end, end: s.end })
+    }
+    out = next
+  }
+  return out
+}
+const spanMinutes = (spans: readonly Span[]) => spans.reduce((n, s) => n + s.end - s.start, 0)
+/**
+ * Minutes of the critical path, each moment once. The catalogue is critical and can run inside step a
+ * (and outlast it); summing those durations counts the overlap twice. Same-kind overlaps merge. When two
+ * kinds share a moment the more specific one keeps it (incident, then doing it again, then waiting, then
+ * working), so the parts are a partition of the covered time. The steps stay whole for the lanes and the record.
+ */
+function criticalMinutes(path: readonly FlowStep[]): Record<WentKind, number> {
+  const buckets: Record<WentKind, Span[]> = { inc: [], rework: [], wait: [], work: [] }
+  for (const s of path) {
+    const kind: WentKind = s.incident ? 'inc' : s.kind === 'wait' || s.kind === 'rework' ? s.kind : 'work'
+    buckets[kind].push({ start: s.start, end: s.end })
+  }
+  const inc = mergeSpans(buckets.inc)
+  const reworkMerged = mergeSpans(buckets.rework)
+  const waitMerged = mergeSpans(buckets.wait)
+  const rework = subtractSpans(reworkMerged, inc)
+  const wait = subtractSpans(waitMerged, [...inc, ...reworkMerged])
+  const work = subtractSpans(mergeSpans(buckets.work), [...inc, ...reworkMerged, ...waitMerged])
+  return { inc: spanMinutes(inc), rework: spanMinutes(rework), wait: spanMinutes(wait), work: spanMinutes(work) }
+}
 export function wentOf(run: FlowRun, ctx: Omit<Ctx, 'data'>): Went {
   const { level, lang, text } = ctx
-  const path = criticalPath(run), sums: Record<WentKind, number> = { work: 0, wait: 0, rework: 0, inc: 0 }
-  for (const s of path) sums[s.incident ? 'inc' : s.kind] += Math.max(0, s.end - s.start)
+  const path = criticalPath(run), sums = criticalMinutes(path)
   const total = sums.work + sums.wait + sums.rework + sums.inc || 1
   const label: Record<WentKind, string> = { work: text.working, wait: text.waiting, rework: text.again, inc: text.incidentW }
   const parts = (['work', 'wait', 'rework', 'inc'] as const).filter(k => sums[k] > 0).map(kind => ({
@@ -248,6 +294,62 @@ export function wentOf(run: FlowRun, ctx: Omit<Ctx, 'data'>): Went {
   })
   const note = [open ? text.soFar : '', `${handovers} ${text.handovers}`].filter(Boolean).join(' · ')
   return { key: run.id, title: pick(run.title, lang), note, parts, items }
+}
+
+// ---------- The release record (AEON-1022) ----------
+/** The ticket a qualification evidence reference starts with (AEON-487/comment/…), when it names one. */
+export const evidenceTicket = (evidence: string): { key: string; rest: string } | null => {
+  const m = /^([A-Za-z][A-Za-z0-9]*-\d+)(\/.*)?$/.exec(evidence)
+  return m ? { key: m[1]!, rest: m[2] ?? '' } : null
+}
+export interface RecordRow {
+  key: 'catalogue' | 'rehearsal' | 'evidence' | 'rollback'; term: string; value: string
+  /** Nothing was reported: the row says so instead of leaving a gap or a default. */
+  missing: boolean
+  /** The evidence reference split into the ticket it starts with and the rest of the path. */
+  ticket?: { key: string; rest: string }
+}
+export interface ReleaseRecord { title: string; rows: RecordRow[] }
+
+/** The latest attempt of the rehearsal or the catalogue in words: how long it took (or has taken so far), its outcome, the usual length, how many runs. */
+function attemptWords(attempt: RecordedAttempt, ctx: Ctx): string {
+  const { level, lang, text } = ctx, expert = level === 'expert'
+  const parts: string[] = []
+  if (attempt.open) parts.push(put(text.rec.running, { t: timeLabel({ origin: attempt.startAt }, 0, ctx.timeZone) }), put(text.rec.soFar, { m: fmtMin(attempt.minutes, lang) }))
+  else {
+    parts.push(minutesText(attempt.minutes))
+    if (attempt.outcome) parts.push(expert ? attempt.outcome : pick(pair(OUTCOME_PLAIN[attempt.outcome]), lang))
+  }
+  if (attempt.p50 != null) parts.push(expert ? `p50 ${fmtMin(attempt.p50, lang)}${attempt.p90 != null ? ` · p90 ${fmtMin(attempt.p90, lang)}` : ''}` : put(text.rec.usually, { m: fmtMin(attempt.p50, lang) }))
+  if (attempt.runs > 1) parts.push(put(text.rec.runs, { n: attempt.runs }))
+  return parts.join(' · ')
+}
+
+/**
+ * What a rollout record reported about a release besides its steps: the full test run (catalogue), the
+ * rehearsal, the qualification evidence and the rollback class. Always the same four rows, so the panel does
+ * not change shape as facts arrive; a fact nobody reported reads "not recorded", and one the answer may have
+ * left out (a window that starts after the release did) says so instead. The timing comes from the run's own
+ * facts, not from the lanes, so Compare's slice from step a never hides it. Null for a change, for the Arion
+ * target and for example data, which have no record to report.
+ */
+export function recordOf(run: FlowRun, ctx: Ctx): ReleaseRecord | null {
+  const record = run.facts?.record
+  if (run.isTarget || run.facts?.kind !== 'release' || !record) return null
+  const { level, text } = ctx, terms = text.rec.terms[level]
+  const timed = (key: 'catalogue' | 'rehearsal'): RecordRow => {
+    const attempt = record[key]
+    return { key, term: terms[key], value: attempt ? attemptWords(attempt, ctx) : record.partial ? text.rec.partial : text.rec.none, missing: attempt == null }
+  }
+  const ticket = record.evidence ? evidenceTicket(record.evidence) : null
+  return {
+    title: text.rec.title,
+    rows: [
+      timed('catalogue'), timed('rehearsal'),
+      { key: 'evidence', term: terms.evidence, value: record.evidence ?? text.rec.none, missing: record.evidence == null, ...(ticket ? { ticket } : {}) },
+      { key: 'rollback', term: terms.rollback, value: record.rollback ? text.rec.rollback[level][record.rollback] : text.rec.none, missing: record.rollback == null },
+    ],
+  }
 }
 
 // ---------- The headline above the card ----------

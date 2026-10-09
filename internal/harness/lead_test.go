@@ -585,3 +585,341 @@ func TestProjectLeadReportingCadenceAndBoundaries(t *testing.T) {
 		})
 	}
 }
+
+// Risk: adoption must retain the live process while requiring both person
+// confirmation and the exact generation lease, including on a server whose
+// automatic launch admission is deliberately absent.
+func TestProjectLeadAdoptionNeedsPersonAndExactLease(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "without_record", true: "existing_intent"}[existing], func(t *testing.T) {
+			f := projectLeadFixture(t, nil)
+			base := "/api/projects/" + f.project
+			session, lease, registration := leadCandidate(t, f)
+			other, otherLease, _ := leadCandidate(t, f)
+			expect(t, f.call(f.agent, "POST", base+"/harness-sessions/"+session+"/heartbeat", map[string]any{"activity_sequence": 1, "phase": "working", "activity": "busy"}, lease), 200)
+			revision := any(0)
+			if existing {
+				revision = startLead(t, f, 0)["revision"]
+			}
+			w := f.call(f.person, "GET", base+"/lead/candidates?limit=1", nil, "")
+			expect(t, w, 200)
+			page := decode(t, w)
+			if len(page["items"].([]any)) != 1 || page["next_cursor"] == nil {
+				t.Fatal("eligible coordinators were not paged")
+			}
+			w = f.call(f.person, "GET", base+"/lead/candidates?limit=1&cursor="+page["next_cursor"].(string), nil, "")
+			expect(t, w, 200)
+			if len(decode(t, w)["items"].([]any)) != 1 || decode(t, w)["next_cursor"] != nil {
+				t.Fatal("exclusive candidate cursor lost or repeated rows")
+			}
+			expect(t, f.call(f.agent, "POST", base+"/lead/adopt", map[string]any{"expected_revision": revision, "session_id": session}, lease), 403)
+			w = f.call(f.person, "POST", base+"/lead/adopt", map[string]any{"expected_revision": revision, "session_id": session}, "")
+			expect(t, w, 200)
+			pending := decode(t, w)
+			if pending["reason"] != "adoption_pending" || pending["generation"] != float64(0) || pending["session_id"] != session {
+				t.Fatalf("selection granted a generation: %v", pending)
+			}
+			expect(t, f.call(f.agent, "POST", base+"/lead/claim", map[string]any{"expected_revision": pending["revision"], "session_id": other}, otherLease), 409)
+			expect(t, f.call(f.agent, "POST", base+"/lead/claim", map[string]any{"expected_revision": pending["revision"], "session_id": session}, "incorrect-private-lease-at-least-32-chars"), 403)
+			w = f.call(f.agent, "POST", base+"/lead/claim", map[string]any{"expected_revision": pending["revision"], "harness_session_ref": registration["harness_session_ref"]}, lease)
+			expect(t, w, 200)
+			bound := decode(t, w)
+			if bound["session_id"] != session || bound["generation"] != float64(1) || bound["state"] != "working" || bound["process_active"] != true {
+				t.Fatalf("adoption restarted or failed: %v", bound)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var owner, dispatch string
+				var generations, controls int
+				var stopped bool
+				if err := tx.QueryRow(t.Context(), `SELECT owner_principal_id::text,dispatch_key_id::text FROM project_leads WHERE project_id=$1`, f.project).Scan(&owner, &dispatch); err != nil {
+					return err
+				}
+				if owner != f.person.ID || dispatch != f.agent.AuthKeyID {
+					t.Fatal("wrong owner or unproven dispatch key")
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM project_lead_generations WHERE project_id=$1 AND session_id=$2`, f.project, session).Scan(&generations); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM harness_controls WHERE session_id=$1`, session).Scan(&controls); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT stopped_at IS NOT NULL FROM harness_sessions WHERE id=$1`, session).Scan(&stopped); err != nil {
+					return err
+				}
+				if generations != 1 || controls != 0 || stopped {
+					t.Fatal("adoption changed the process or lost generation history")
+				}
+				var audit string
+				if err := tx.QueryRow(t.Context(), `SELECT jsonb_agg(jsonb_build_object('type',type,'before',before,'after',after))::text FROM events WHERE type IN ('lead.adoption_requested','lead.claim_checked')`).Scan(&audit); err != nil {
+					return err
+				}
+				if !strings.Contains(audit, "lead.adoption_requested") || !strings.Contains(audit, "lead.claim_checked") || strings.Contains(audit, lease) || strings.Contains(audit, registration["harness_session_ref"].(string)) {
+					t.Fatal("adoption audit missing or private proof exposed")
+				}
+				return nil
+			})
+			// Adoption does not enable launch admission or change ordinary reclaims.
+			again := claimLead(t, f, session, lease, bound["revision"])
+			if again["state"] != "waiting_for_room" || again["reason"] != "admission_unavailable" || again["generation"] != float64(1) || again["automatic_launch_enabled"] != false {
+				t.Fatal("ordinary claim admission was weakened")
+			}
+		})
+	}
+}
+
+func TestProjectLeadAdoptionRejectsChangedEligibility(t *testing.T) {
+	for _, mode := range []string{"worker", "child", "unowned", "other_owner", "stale", "future", "archived", "stopped", "pausing", "revoked", "stale_after_confirmation", "pausing_after_confirmation", "revoked_after_confirmation"} {
+		t.Run(mode, func(t *testing.T) {
+			f := projectLeadFixture(t, nil)
+			session, lease, _ := leadCandidate(t, f)
+			base := "/api/projects/" + f.project
+			confirmed := strings.HasSuffix(mode, "_after_confirmation")
+			if confirmed {
+				expect(t, f.call(f.person, "POST", base+"/lead/adopt", map[string]any{"expected_revision": 0, "session_id": session}, ""), 200)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				q := ""
+				switch strings.TrimSuffix(mode, "_after_confirmation") {
+				case "worker":
+					q = "UPDATE harness_sessions SET role='worker' WHERE id=$1"
+				case "child":
+					parent, _, _ := leadCandidate(t, f)
+					_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET parent_id=$2 WHERE id=$1`, session, parent)
+					return err
+				case "unowned":
+					q = "UPDATE harness_sessions SET owner_principal_id=NULL WHERE id=$1"
+				case "other_owner":
+					otherOwner := uid()
+					_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','other')`, f.person.TenantID, otherOwner)
+					if err != nil {
+						return err
+					}
+					_, err = tx.Exec(t.Context(), `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, session, otherOwner)
+					return err
+				case "stale":
+					q = "UPDATE harness_sessions SET heartbeat_at=clock_timestamp()-interval '3 minutes' WHERE id=$1"
+				case "future":
+					q = "UPDATE harness_sessions SET heartbeat_at=clock_timestamp()+interval '1 minute' WHERE id=$1"
+				case "archived":
+					q = `UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp(),archived_at=clock_timestamp(),
+						recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest='fixture'::bytea,
+						recovery_actor_id=agent_principal_id,recovery_reason='fixture' WHERE id=$1`
+				case "stopped":
+					q = "UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp(),stop_reason='stopped' WHERE id=$1"
+				case "pausing":
+					q = `UPDATE harness_sessions SET pause_record='{"state":"requested"}' WHERE id=$1`
+				case "revoked":
+					_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.person.ID)
+					return err
+				}
+				_, err := tx.Exec(t.Context(), q, session)
+				return err
+			})
+			var w *httptest.ResponseRecorder
+			if confirmed {
+				w = f.call(f.agent, "POST", base+"/lead/claim", map[string]any{"expected_revision": 1, "session_id": session}, lease)
+			} else {
+				w = f.call(f.person, "POST", base+"/lead/adopt", map[string]any{"expected_revision": 0, "session_id": session}, "")
+			}
+			if strings.HasPrefix(mode, "revoked") {
+				expect(t, w, 403)
+			} else {
+				expect(t, w, 409)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var count int
+				err := tx.QueryRow(t.Context(), `SELECT count(*) FROM project_leads WHERE project_id=$1`, f.project).Scan(&count)
+				want := 0
+				if confirmed {
+					want = 1
+				}
+				if count != want {
+					t.Fatal("rejected adoption changed lead intent storage")
+				}
+				return err
+			})
+		})
+	}
+}
+
+func harnessShape(t *testing.T, f *harnessFixture, session, child string) string {
+	t.Helper()
+	var shape string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT concat_ws('|',
+			coalesce(parent_id::text,'root'),
+			coalesce(handed_over_to_id::text,'none'),
+			coalesce(adopted_from_id::text,'none'),
+			(stopped_at IS NOT NULL)::text,
+			coalesce(pause_record->>'state',''),
+			phase,
+			(SELECT count(*)::text FROM harness_controls WHERE session_id=$1),
+			(SELECT coalesce(parent_id::text,'missing') FROM harness_sessions WHERE id=$2)
+		) FROM harness_sessions WHERE id=$1`, session, child).Scan(&shape)
+	})
+	return shape
+}
+
+func leadStatus(t *testing.T, w *httptest.ResponseRecorder, status int, message string) {
+	t.Helper()
+	expect(t, w, status)
+	if decode(t, w)["error"] != message {
+		t.Fatalf("error %v want %s", decode(t, w)["error"], message)
+	}
+}
+
+// Risk: confirming an adoption stores the session immediately. Pause must not
+// run against that still-live process, and Cancel must drop only the selection.
+func TestProjectLeadUnclaimedAdoptionRejectsPauseAndCancelClearsSelection(t *testing.T) {
+	t.Run("pause_rejected_and_cancel_clears", func(t *testing.T) {
+		f := projectLeadFixture(t, nil)
+		base := "/api/projects/" + f.project
+		session, lease, registration := leadCandidate(t, f)
+		other, otherLease, _ := leadCandidate(t, f)
+		expect(t, f.call(f.agent, "POST", base+"/harness-sessions/"+session+"/heartbeat", map[string]any{"activity_sequence": 1, "phase": "working", "activity": "busy"}, lease), 200)
+		expect(t, f.call(f.agent, "POST", base+"/harness-sessions/"+other+"/heartbeat", map[string]any{"activity_sequence": 1, "phase": "working", "activity": "busy"}, otherLease), 200)
+		childBody := map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "local", "management_mode": "unmanaged", "role": "worker", "parent_harness_session_id": session, "harness_session_ref": "child-ref-" + uid(), "worker_lease": "child-lease-" + uid()}
+		childW := f.call(f.person, "POST", base+"/harness-sessions", childBody, "")
+		expect(t, childW, 201)
+		child := decode(t, childW)["id"].(string)
+		w := f.call(f.person, "POST", base+"/lead/adopt", map[string]any{"expected_revision": 0, "session_id": session}, "")
+		expect(t, w, 200)
+		pending := decode(t, w)
+		before := harnessShape(t, f, session, child)
+		w = f.call(f.person, "POST", base+"/lead/pause", map[string]any{"expected_revision": pending["revision"], "generation": 0}, "")
+		leadStatus(t, w, 409, "unclaimed adoption cannot be paused")
+		w = f.call(f.agent, "POST", base+"/lead/pause", map[string]any{"expected_revision": pending["revision"], "generation": 0}, "incorrect-private-lease-at-least-32-chars")
+		leadStatus(t, w, 403, "current lead worker proof required")
+		w = f.call(f.agent, "POST", base+"/lead/pause", map[string]any{"expected_revision": pending["revision"], "generation": 0}, lease)
+		leadStatus(t, w, 409, "unclaimed adoption cannot be paused")
+		if harnessShape(t, f, session, child) != before {
+			t.Fatal("rejected pause changed the live session")
+		}
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			var reason string
+			var generation int
+			var selected *string
+			var generations, paused int
+			if err := tx.QueryRow(t.Context(), `SELECT reason,generation,session_id::text FROM project_leads WHERE project_id=$1`, f.project).Scan(&reason, &generation, &selected); err != nil {
+				return err
+			}
+			if reason != "adoption_pending" || generation != 0 || selected == nil || *selected != session {
+				t.Fatal("rejected pause changed the unclaimed selection")
+			}
+			if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM project_lead_generations WHERE project_id=$1`, f.project).Scan(&generations); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type IN ('lead_paused','harness.lead_paused')`).Scan(&paused); err != nil {
+				return err
+			}
+			if generations != 0 || paused != 0 {
+				t.Fatal("rejected pause wrote a generation or a pause event")
+			}
+			return nil
+		})
+		w = f.call(f.person, "POST", base+"/lead/adopt/cancel", map[string]any{"expected_revision": 0}, "")
+		leadStatus(t, w, 409, "lead revision conflict")
+		w = f.call(f.agent, "POST", base+"/lead/adopt/cancel", map[string]any{"expected_revision": pending["revision"]}, lease)
+		leadStatus(t, w, 403, "person required to adopt lead")
+		w = f.call(f.person, "POST", base+"/lead/adopt/cancel", map[string]any{"expected_revision": pending["revision"]}, "")
+		expect(t, w, 200)
+		cleared := decode(t, w)
+		if cleared["session_id"] != nil || cleared["reason"] != "selection_cleared" || cleared["generation"] != float64(0) || cleared["state"] != "waiting_for_room" || cleared["revision"].(float64) <= pending["revision"].(float64) {
+			t.Fatalf("cancel did not clear only the selection: %v", cleared)
+		}
+		if harnessShape(t, f, session, child) != before {
+			t.Fatal("cancel paused, stopped or reparented the session")
+		}
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			var reason string
+			var generation int
+			var sessionID, dispatch *string
+			if err := tx.QueryRow(t.Context(), `SELECT reason,generation,session_id::text,dispatch_key_id::text FROM project_leads WHERE project_id=$1`, f.project).Scan(&reason, &generation, &sessionID, &dispatch); err != nil {
+				return err
+			}
+			if reason != "selection_cleared" || generation != 0 || sessionID != nil || dispatch != nil {
+				t.Fatal("cleared selection kept a session or a dispatch key")
+			}
+			var audit string
+			if err := tx.QueryRow(t.Context(), `SELECT coalesce(jsonb_agg(jsonb_build_object('type',type,'before',before,'after',after))::text,'') FROM events WHERE type='lead.adoption_cancelled'`).Scan(&audit); err != nil {
+				return err
+			}
+			if !strings.Contains(audit, "lead.adoption_cancelled") || strings.Contains(audit, lease) || strings.Contains(audit, registration["harness_session_ref"].(string)) {
+				t.Fatal("cancel audit missing or private proof exposed")
+			}
+			return nil
+		})
+		w = f.call(f.agent, "POST", base+"/lead/claim", map[string]any{"expected_revision": cleared["revision"], "session_id": session}, lease)
+		leadStatus(t, w, 409, "explicit start request required after cancelled adoption")
+		w = f.call(f.person, "POST", base+"/lead/adopt", map[string]any{"expected_revision": cleared["revision"], "session_id": other}, "")
+		expect(t, w, 200)
+		again := decode(t, w)
+		if again["session_id"] != other || again["reason"] != "adoption_pending" || again["generation"] != float64(0) {
+			t.Fatalf("another adoption did not proceed: %v", again)
+		}
+		w = f.call(f.person, "POST", base+"/lead/adopt/cancel", map[string]any{"expected_revision": again["revision"]}, "")
+		expect(t, w, 200)
+		cleared = decode(t, w)
+		started := startLead(t, f, int(cleared["revision"].(float64)))
+		if started["reason"] != "automatic_launch_disabled" || started["automatic_launch_enabled"] != false || started["session_id"] != nil || started["state"] != "waiting_for_room" {
+			t.Fatalf("explicit start after cancel failed: %v", started)
+		}
+		if harnessShape(t, f, session, child) != before {
+			t.Fatal("start after cancel touched the original session")
+		}
+	})
+	t.Run("existing_intent", func(t *testing.T) {
+		f := projectLeadFixture(t, nil)
+		base := "/api/projects/" + f.project
+		session, lease, _ := leadCandidate(t, f)
+		expect(t, f.call(f.agent, "POST", base+"/harness-sessions/"+session+"/heartbeat", map[string]any{"activity_sequence": 1, "phase": "working", "activity": "busy"}, lease), 200)
+		childW := f.call(f.person, "POST", base+"/harness-sessions", map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "local", "management_mode": "unmanaged", "role": "worker", "parent_harness_session_id": session, "harness_session_ref": "child-ref-" + uid(), "worker_lease": "child-lease-" + uid()}, "")
+		expect(t, childW, 201)
+		child := decode(t, childW)["id"].(string)
+		revision := startLead(t, f, 0)["revision"]
+		w := f.call(f.person, "POST", base+"/lead/adopt", map[string]any{"expected_revision": revision, "session_id": session}, "")
+		expect(t, w, 200)
+		pending := decode(t, w)
+		before := harnessShape(t, f, session, child)
+		w = f.call(f.person, "POST", base+"/lead/pause", map[string]any{"expected_revision": pending["revision"], "generation": 0}, "")
+		leadStatus(t, w, 409, "unclaimed adoption cannot be paused")
+		w = f.call(f.person, "POST", base+"/lead/adopt/cancel", map[string]any{"expected_revision": pending["revision"]}, "")
+		expect(t, w, 200)
+		cleared := decode(t, w)
+		if cleared["session_id"] != nil || cleared["reason"] != "selection_cleared" || harnessShape(t, f, session, child) != before {
+			t.Fatal("cancel of an existing intent changed the session")
+		}
+	})
+	t.Run("claimed_adoption_can_pause_and_cancel_refuses", func(t *testing.T) {
+		f := projectLeadFixture(t, nil)
+		base := "/api/projects/" + f.project
+		session, lease, _ := leadCandidate(t, f)
+		expect(t, f.call(f.agent, "POST", base+"/harness-sessions/"+session+"/heartbeat", map[string]any{"activity_sequence": 1, "phase": "working", "activity": "busy"}, lease), 200)
+		w := f.call(f.person, "POST", base+"/lead/adopt", map[string]any{"expected_revision": 0, "session_id": session}, "")
+		expect(t, w, 200)
+		pending := decode(t, w)
+		w = f.call(f.agent, "POST", base+"/lead/claim", map[string]any{"expected_revision": pending["revision"], "session_id": session}, lease)
+		expect(t, w, 200)
+		bound := decode(t, w)
+		if bound["state"] != "working" || bound["generation"] != float64(1) || bound["session_id"] != session {
+			t.Fatalf("claim did not bind the adoption: %v", bound)
+		}
+		w = f.call(f.person, "POST", base+"/lead/adopt/cancel", map[string]any{"expected_revision": bound["revision"]}, "")
+		leadStatus(t, w, 409, "unclaimed adoption required")
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			var selected string
+			if err := tx.QueryRow(t.Context(), `SELECT session_id::text FROM project_leads WHERE project_id=$1`, f.project).Scan(&selected); err != nil {
+				return err
+			}
+			if selected != session {
+				t.Fatal("cancel of a claimed generation cleared its session")
+			}
+			return nil
+		})
+		w = f.call(f.person, "POST", base+"/lead/pause", map[string]any{"expected_revision": bound["revision"], "generation": bound["generation"]}, "")
+		expect(t, w, 200)
+		if decode(t, w)["state"] != "paused" {
+			t.Fatal("a claimed generation could not pause")
+		}
+	})
+}

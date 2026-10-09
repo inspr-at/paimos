@@ -6396,6 +6396,20 @@
     ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"a release no record has reported on says \"not recorded\" in the same four rows","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1024 dark en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1024 light en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 dark en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 light en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 dark en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 light de)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"with motion › Replay opens at the start of the latest release and auto-plays once per session","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-guarantee.spec.ts","name":"dark 1600: listening status in the list and the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -8009,6 +8023,26 @@
     {"kind":"browser","file":"tests/knowledge.spec.ts","name":"the Knowledge tab groups by kind, filters, searches the text and moves with keys","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/knowledge.spec.ts","name":"the palette finds knowledge by its words and leads to the tab and the search","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"cancelling an unclaimed adoption clears only the selection","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"candidate errors and rejected confirmations remain visible with no false adoption","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 400 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 400 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"keyboard: Tab reaches Start lead and the fold, folded details leave the tab order","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -13074,6 +13108,8 @@
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"a ticket has exactly one current step on its way to Merged","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"an unclaimed adoption offers Cancel and neither Pause nor Resume","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/lead.test.ts","name":"every lifecycle state has one fitting action","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"model by role shows the configured line and effort, or nothing","tier":"ESSENTIAL"}
@@ -14550,27 +14586,43 @@
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Replay auto-plays once per session and never with reduced motion","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a catalogue still running reads as elapsed time, and a second run names the latest","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a failed run read settles until Retry and does not reload from a cleared list","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a list read that starts after the release began says the time read, not \"not recorded\"","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a live refresh keeps 02:00 when removing an older run moves the axis origin","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a live update keeps the person viewing the past, and moves the playhead with now while following","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"an ingested release record shows the catalogue timing, the rehearsal, the qualification link and the rollback class","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"an open step shows elapsed time and a separate expected end at both levels","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"auto-play is granted once per session","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"only a release with a reported record has one","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"recorded steps become lanes and words from their facts; open steps run on to their expected end in Live","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"release 127 counts the overlapping catalogue once: 70 minutes working and 5 waiting","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"selecting another run shows loading and keeps the run choices","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the example replays release 126 final and the changes so far","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the flow view hands the first run's release record to the panel, in every mode, and none for a change or an example","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the in-flight table gives each run its step, wait, estimate and a verdict with shape and word","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the moment panel names the active lanes, one idle line, the incident and the selected step","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the player walks the whole run in 60 s at 1x and 30 s at 2x, and stops at the end","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the record always has its four rows: a fact nobody reported says so, and nothing is filled in","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the release record panel shows the timing and the evidence as a ticket link, and keeps four rows when facts are missing","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the run picker stays mounted through loading and errors","tier":"ESSENTIAL"}
     ,
@@ -14845,6 +14897,14 @@
     {"kind":"vitest","file":"tests/key-trim.unit.test.ts","name":"routes approve, decline and restore through protected native CAS endpoints","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/key-trim.unit.test.ts","name":"shows source evidence without assuming unknown scopes are unused and requires manage rights","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"a candidate read cannot restore another person’s choices and reopening after a cancelled read works","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"an unmanaged lead card offers cooperative pause and hides restart controls after exit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"candidate errors and empty lists are explicit and a changed lead cannot be confirmed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"the inline card confirms the selected running session with the revision displayed when opened","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"stored shape > keeps ids only, once each, and at most MAX_FOLDED (the oldest fold goes first)","tier":"GATED-FULL"}
     ,

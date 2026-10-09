@@ -240,11 +240,66 @@ func TestDeliveryFlowRolloutValidation(t *testing.T) {
 			inc, _ := json.Marshal(map[string]any{"key": "i1", "started_at": now.Add(-time.Hour), "severity": "degraded", "summary": "Live check degraded", "recovery_steps": []string{"k-9"}})
 			in.Incidents = []json.RawMessage{inc}
 		},
+		"evidence url": func(in *rolloutInput) {
+			in.Qualification = &rolloutQualification{Evidence: ptr("https://example.com/evidence")}
+		},
+		"evidence script": func(in *rolloutInput) { in.Qualification = &rolloutQualification{Evidence: ptr("javascript:alert(1)")} },
+		"evidence empty":  func(in *rolloutInput) { in.Qualification = &rolloutQualification{Evidence: ptr("")} },
+		"evidence too long": func(in *rolloutInput) {
+			in.Qualification = &rolloutQualification{Evidence: ptr(strings.Repeat("a", 201))}
+		},
+		"evidence credential": func(in *rolloutInput) {
+			in.Qualification = &rolloutQualification{Evidence: ptr("AEON-487/ghp_" + strings.Repeat("A", 36))}
+		},
+		"rollback hyphen":  func(in *rolloutInput) { in.RollbackClass = ptr("restore-required") },
+		"rollback unknown": func(in *rolloutInput) { in.RollbackClass = ptr("safe") },
+		"rollback empty":   func(in *rolloutInput) { in.RollbackClass = ptr("") },
 	} {
 		in := base()
 		mutate(&in)
 		if _, err := parseRollout(in, "p", now); err == nil {
 			t.Fatalf("%s: accepted", name)
 		}
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestDeliveryFlowRolloutAcceptsCatalogueRehearsalAndReleaseFacts(t *testing.T) {
+	// Risk: the contract names the new steps and facts but the parser refuses
+	// them, keeps more of the qualification object than the reference, or maps a
+	// fact onto the wrong field.
+	now := time.Date(2026, 10, 9, 20, 0, 0, 0, time.UTC)
+	step := func(key, step string, side bool) json.RawMessage {
+		raw, _ := json.Marshal(map[string]any{"key": key, "step": step, "kind": "work", "side": side, "actor": map[string]any{"type": "ci", "principal_id": nil, "label": "Checks", "model": nil}, "started_at": now.Add(-time.Hour), "ended_at": now.Add(-30 * time.Minute)})
+		return raw
+	}
+	var in rolloutInput
+	raw := `{"schema":"aeon.rollout.v1","release":"127","qualification":{"version":"261009063244.0.0","asset":"paimos-agentd-darwin-arm64","touch_id":true,"evidence":"AEON-487/comment/native-qualification"},"rollback_class":"restore_required"}`
+	if err := json.Unmarshal([]byte(raw), &in); err != nil {
+		t.Fatal(err)
+	}
+	in.Steps = []json.RawMessage{step("rehearsal", "rehearsal", true), step("catalogue", "catalogue", false)}
+	batch, err := parseRollout(in, "p", now)
+	if err != nil {
+		t.Fatalf("record refused: %v", err)
+	}
+	if got := []string{batch.Steps[0].StepKey, batch.Steps[1].StepKey}; got[0] != "rehearsal" || got[1] != "catalogue" || !batch.Steps[0].Side || batch.Steps[1].Side {
+		t.Fatalf("steps: %+v", batch.Steps)
+	}
+	if batch.Item.QualificationEvidence == nil || *batch.Item.QualificationEvidence != "AEON-487/comment/native-qualification" || batch.Item.RollbackClass == nil || *batch.Item.RollbackClass != "restore_required" {
+		t.Fatalf("facts: %+v %+v", batch.Item.QualificationEvidence, batch.Item.RollbackClass)
+	}
+	for _, class := range flowRollbackClasses {
+		in.RollbackClass = &class
+		if _, err := parseRollout(in, "p", now); err != nil {
+			t.Fatalf("class %s: %v", class, err)
+		}
+	}
+	// Nothing reported, nothing recorded: no default is invented.
+	in.Qualification, in.RollbackClass = nil, nil
+	batch, err = parseRollout(in, "p", now)
+	if err != nil || batch.Item.QualificationEvidence != nil || batch.Item.RollbackClass != nil {
+		t.Fatalf("empty record: %+v %v", batch.Item, err)
 	}
 }

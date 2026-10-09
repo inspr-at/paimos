@@ -3,7 +3,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { can } from '../../lib/authz'
-import { canLaunchLead, canPause, canResume, leadLaunchReason, LEAD_WORDS } from '../../lib/lead'
+import { canLaunchLead, canPause, canResume, leadLaunchReason, unmanagedLeadCopy, LEAD_WORDS } from '../../lib/lead'
 import { useLeadCardFold } from '../../lib/leadCardFold'
 import { openLeadPanel, openLeadPause, openStartLead } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
@@ -15,6 +15,7 @@ import { useWorkQueue } from '../../stores/workQueue'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import LeadBot from './LeadBot.vue'
+import LeadAdoption from './LeadAdoption.vue'
 import LeadLine from './LeadLine.vue'
 
 // AEON-741: the lead is the centre of a project. One sentence says whether it
@@ -53,15 +54,23 @@ const stateDetail = computed(() => {
   return parts.join(' · ')
 })
 const nowLine = computed(() => {
+  if (unmanaged.value && lead.value?.state === 'paused') return 'Continue from the session itself; PAIMOS cannot restart an unmanaged process.'
   if (lead.value?.state === 'working') return leadSession.value?.current_activity?.text || leadSession.value?.activity_note || ''
   return band.value.now
+})
+const unmanaged = computed(() => {
+  const principal = leads.views[props.projectId]?.principal
+  return (leadSession.value?.management_mode ?? (principal?.session === lead.value?.session_id ? principal?.management : undefined)) === 'unmanaged'
 })
 // Primary action: disabled with its reason rather than hidden, so the slot never moves.
 const action = computed(() => {
   const b = band.value, l = lead.value
+  if (unmanaged.value && ['start', 'resume', 'cancel'].includes(b.action)) return null
+  if (unmanaged.value && b.action === 'pause') return { label: 'Pause…', icon: 'pause' as const, primary: false, disabled: !mayControl.value || !canPause(l), tip: 'Request a cooperative pause; the session keeps its slot until confirmed exit' }
   switch (b.action) {
     case 'start': return { label: b.actionLabel, icon: 'play' as const, primary: true, disabled: !mayStart.value || !canLaunchLead(l), tip: !canLaunchLead(l) ? leadLaunchReason(l) : mayStart.value ? `One per project. Starts nothing until the ${w.l} picks up queued work.` : `Starting a ${w.l} needs permission to run agents in this project` }
     case 'cancel': return { label: b.actionLabel, icon: null, primary: false, disabled: !mayControl.value || !canPause(l), tip: 'Nothing has started yet. Queued work stays queued.' }
+    case 'cancel_adoption': return { label: b.actionLabel, icon: null, primary: false, disabled: !mayStart.value, tip: 'Clears this choice. The session keeps running.' }
     case 'pause': return { label: b.actionLabel, icon: b.state === 'starting' ? null : 'pause' as const, primary: false, disabled: !mayControl.value || !canPause(l), tip: mayControl.value ? 'Stops new work now; running workers finish their step' : 'Only its owner can pause it' }
     case 'resume': return { label: b.actionLabel, icon: 'play' as const, primary: true, disabled: !mayStart.value || !canResume(l) || !canLaunchLead(l), tip: !canLaunchLead(l) ? leadLaunchReason(l) : canResume(l) ? `Restarts the ${w.l} through the usual start checks` : `Waits until the ${w.l}’s session has stopped` }
     case 'dial': return { label: b.actionLabel, icon: 'gauge' as const, primary: false, disabled: false, tip: 'The dial and its limits on the Agents page' }
@@ -73,18 +82,19 @@ async function act(event: MouseEvent) {
   const from = event.currentTarget as HTMLElement, a = band.value.action
   if (action.value?.disabled || busy.value) return
   if (a === 'start') openStartLead([props.projectId], from)
-  else if (a === 'pause' && band.value.state !== 'starting') openLeadPause(props.projectId, from)
+  else if (a === 'cancel_adoption') await control('cancel-adoption')
+  else if (a === 'pause' && (unmanaged.value || band.value.state !== 'starting')) openLeadPause(props.projectId, from)
   else if (a === 'pause' || a === 'cancel') await control('cancel')
   else if (a === 'resume') await control('resume')
   else if (a === 'dial') void router.push('/agents')
   else if (a === 'computers') void router.push({ path: '/agents', hash: '#ac-title' })
 }
-async function control(kind: 'cancel' | 'resume') {
+async function control(kind: 'cancel' | 'resume' | 'cancel-adoption') {
   const project = props.projectId, who = session.identity?.principal.id
   try {
-    const next = kind === 'resume' ? await leads.start(project) : await leads.pause(project)
+    const next = kind === 'resume' ? await leads.start(project) : kind === 'cancel-adoption' ? await leads.cancelAdoption(project) : await leads.pause(project)
     if (!next || project !== props.projectId || who !== session.identity?.principal.id) return
-    toast(kind === 'resume' ? `${props.projectKey} ${w.l} restarting` : 'Start cancelled', { timeout: 5200 })
+    toast(kind === 'resume' ? `${props.projectKey} ${w.l} restarting` : kind === 'cancel-adoption' ? 'Adoption cancelled' : 'Start cancelled', { timeout: 5200 })
   } catch (e) {
     if (project === props.projectId) toast(e instanceof Error ? e.message : 'The lead did not change.', { tone: 'error' })
   }
@@ -127,9 +137,12 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
 
     <p v-if="['start', 'resume'].includes(band.action) && !canLaunchLead(lead)" id="lead-launch-reason-band" class="lead-now" data-launch-reason>{{ leadLaunchReason(lead) }}</p>
 
+    <LeadAdoption v-if="band.state !== 'none' && mayStart && lead && !lead.session_id && lead.state !== 'paused'" :key="`${viewer}:${projectId}`" :project-id="projectId" :revision="lead.revision" />
+    <p v-if="unmanaged" class="lead-now small" data-unmanaged>{{ unmanagedLeadCopy }}</p>
     <!-- The fold hides only the details; the head and Start lead stay where they are. -->
     <div v-if="band.state === 'none'" id="lead-fold" class="lead-fold" :inert="folded || undefined" @transitionend="settleFold" @transitioncancel="settleFold">
       <div class="lead-fold-inner">
+        <LeadAdoption v-if="mayStart && lead" :key="`${viewer}:${projectId}`" :project-id="projectId" :revision="lead.revision" />
         <ul class="empty-lead">
           <li><AppIcon name="queue" :size="14" /><span>Picks up what people queue, in their order, and sizes each item.</span></li>
           <li><AppIcon name="agent" :size="14" /><span>Chooses harness, model and thinking by role, and starts workers within your dial.</span></li>
@@ -152,7 +165,7 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
         <p v-else-if="questionsPartial" class="asks-more" data-partial><RouterLink to="/decision-desk">Not every open question could be read here; see the Decision Desk</RouterLink></p>
       </div>
     </template>
-    <p v-if="band.state !== 'none'" class="lead-foot"><AppIcon name="shield" :size="14" /><span>{{ band.foot }}</span></p>
+    <p v-if="band.state !== 'none'" class="lead-foot"><AppIcon name="shield" :size="14" /><span>{{ unmanaged ? unmanagedLeadCopy : band.foot }}</span></p>
 
     <FloatingPanel v-if="menu" :anchor="menu" align="end" :width="300" :label="`More ${w.l} actions`" @close="restore => { if (restore) menu?.focus(); menu = null }">
       <div role="menu" class="lead-menu">
