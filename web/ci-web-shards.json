@@ -632,7 +632,7 @@
         ,
         {"file":"tests/key-trim.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":3.607,"median":2.179,"min":1.115},"seconds":17.02266,"selectedTests":7},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/model-prefs.spec.ts","listedTests":3,"weightSeconds":29,"weightSource":"local-single-worker-AEON-879-23.8s-plus-margin"}
+        {"file":"tests/model-prefs.spec.ts","listedTests":3,"tierTiming":{"caseSeconds":{"max":2.069,"median":1.71,"min":1.443},"seconds":5.565677,"selectedTests":3},"weightSeconds":7,"weightSource":"hosted-CI-37948687065-with-20-percent-margin","weightEvidence":{"attempt":1,"collectionPlanningSeconds":0.231546,"launchOverheadSeconds":0.112131,"marginFactor":1.2,"nativeSeconds":5.222,"runId":"37948687065","sha":"63841419452e1bfb206e6505b8051b8083527654"}}
       ]
     }
     ,
@@ -1404,6 +1404,8 @@
     "AEON-903: Phone approvals has seven native cases. The local one-worker run passed all seven in 7.480 seconds including browser/server startup; aeon-903-local-serial-wall records that observation as a scheduling estimate, not a hosted-runtime promise."
     ,
     "AEON-1024: split clip-tip into lifecycle, disclosure, overflow and touch owners; split aeon-632b planning from restricted-group touch; split no-shift agents from dialogs and guard checks. Native before/after catalogues preserve all 224 executable cases, original policies and tiers. Tier scheduling costs derive from run 37377299349 per-case duration; historical exact-spec weight budgets are redistributed in proportion to these costs; each new file retains its full original owner residual. Cases added since that run retain an explicit owner-average estimate. The baseline and executable equality/weight proof live in scripts/ci/slow-owner-baseline.json and scripts/test-tiers/slow-owners.mjs. No shard count or worker count changes."
+    ,
+    "AEON-1040 fix2: replace model-prefs' stale 29-second local estimate with the complete three-case hosted measurement from PR #445 run 37948687065 attempt 1 (merge SHA 63841419452e1bfb206e6505b8051b8083527654, head d9287d401d5faee2223a04d7d805f84509c46c8b). All three cases passed once in web-shard-9-stable-controls-combined.json. Native durations total 5.222 seconds; apportioned launch overhead adds 0.112131 seconds (3 of 80 launch cases), and remaining shard collection/planning overhead adds 0.231546 seconds (3 of 142 shard cases). tierTiming retains their 5.565677-second total; weightSeconds rounds that total with a 20% margin up to 7 seconds. This restores the merged twelve-shard prior estimate budget using runtime evidence; coverage, tiers, launch policies, shard/worker counts and budget assertions remain unchanged."
   ]
   ,
   "originalNpmScripts": {
