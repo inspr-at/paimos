@@ -27,6 +27,8 @@ const ALLOW: { file: string; includes: string; why: string }[] = [
   { file: 'lib/deliveryNumbersText.ts', includes: "const TO = '→'", why: 'approved AEON-994 Delivery copy uses the arrow as the word "to" (run start → run end, PR opened → merged); text, not an icon' },
   { file: 'lib/deliverySimple.ts', includes: '1 : 0)}× ${text.theTarget}', why: 'a multiple in text, "about 5× the target" (AEON-1003 verdict gap)' },
   { file: 'lib/deliverySimpleText.ts', includes: "const TO = '→'", why: 'approved AEON-994 Simple copy uses the arrow as the word "to" (start → end, PR opened → merged); text, not an icon' },
+  { file: 'lib/deliveryFlowExample.ts', includes: "'Build ×4', 'Build ×4'", why: 'approved AEON-994 run copy: four changes built together, a multiplicity in text, not an icon' },
+  { file: 'lib/deliveryFlowExample.ts', includes: "'Review ×4 · ok', 'Review ×4 · ok'", why: 'approved AEON-994 run copy: four reviews, a multiplicity in text, not an icon' },
   { file: 'lib/workKindsCopy.ts', includes: 'Settings › Models', why: 'approved AEON-854 breadcrumb in the kinds lead; it names the Models board in a sentence and is not an icon' },
 ]
 

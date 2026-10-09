@@ -57,7 +57,29 @@ its coverage. Merge rounds count the scripted share (target 80 %, the server's "
 by a model" turned around). **Learn** keeps the proper terms (p50, p90, wall time,
 flake) and the Expert name: hover or keyboard focus shows it, a click or Enter pins it,
 Esc closes it and leaves focus on the button. Below the sections the technical words
-are explained simply.
+are explained simply. A failed preference save and a failed numbers read can stand
+together: each alert owns one half of the status row, and Retry stays put.
 
-Flow (Live, Replay, Compare) follows in a later package of AEON-994; until then Flow
-says that no flow data is recorded yet.
+**Flow** (A Lanes) shows who worked and who waited, one lane per actor (you, LEAD,
+OPS, Reviewer, Builder, Checks). A wait sits in the lane of whoever is awaited, repeats
+are rose, an incident is its own red band, and dotted connectors mark hand-overs. Rows
+inside a lane are reserved once for the whole run, so zooming and panning never move a
+lane. A step's label shortens from "run · text" to the text, then (waits and repeats)
+to its duration, then to an ellipsis; a step cut by the window's start keeps
+"· since HH:MM". Steps too narrow to see merge into a "+N" pill that zooms in on click.
+
+The card keeps fixed heights: a control bar (zoom presets **Fit all · 15 · 30 · 1 h**
+and **Follow**), a hint line that shows the selected step, a 64 px overview map of the
+whole run with a brush (drag it to pan, drag its edges to resize, click beside it to
+centre it), and 330 px of lanes. Only the playhead moves the time: drag its pill (or the
+overview playhead), or press Shift+←/→ (a minute), Home or End. A click selects a step
+(outline plus the hint line) or clears; it never moves the time. Dragging empty lane
+space or a sideways wheel pans, ⌘/Ctrl+wheel zooms around the pointer, and a plain
+vertical wheel scrolls the page. With the lanes focused, ←/→ pan by 10 %, ↑/↓ choose
+a lane, Enter selects the step under the playhead, Esc clears and +/− zoom. Live opens
+at 45 minutes (20 on a phone) with now at 65 % and follows now; moving the playhead
+away shows "Viewing HH:MM" and **Back to now** returns.
+
+Until the flow data package records runs, Flow says that no flow data is recorded yet
+and shows release 126 of 8 Oct 2026 as an example. The moment panel and the Live,
+Replay and Compare modes follow in a later package of AEON-994.
