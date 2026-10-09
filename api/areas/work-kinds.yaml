@@ -110,7 +110,7 @@ components:
       additionalProperties: false
       minProperties: 1
       properties:
-        words_de: {$ref: '#/components/schemas/WorkDisplayWords'}
+        words_de: {allOf: [{$ref: '#/components/schemas/WorkDisplayWords'}, {properties: {hint: {minLength: 1}}}]}
         examples: {type: array, maxItems: 3, items: {type: string, maxLength: 120}}
         labels: {type: array, maxItems: 32, items: {type: string, maxLength: 48}}
         label: {type: string, minLength: 1, maxLength: 60}
@@ -121,7 +121,7 @@ components:
       additionalProperties: false
       required: [label]
       properties:
-        words_de: {$ref: '#/components/schemas/WorkDisplayWords'}
+        words_de: {allOf: [{$ref: '#/components/schemas/WorkDisplayWords'}, {properties: {hint: {minLength: 1}}}]}
         examples: {type: array, maxItems: 3, items: {type: string, maxLength: 120}}
         labels: {type: array, maxItems: 32, items: {type: string, maxLength: 48}}
         position: {type: integer, minimum: -1000000, maximum: 1000000}

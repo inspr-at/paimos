@@ -2194,8 +2194,8 @@ components:
       additionalProperties: false
       required: [label, hint, examples]
       properties:
-        label: {type: string, minLength: 1, maxLength: 40}
-        hint: {type: string, minLength: 1, maxLength: 120}
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
         examples: {type: array, maxItems: 3, items: {type: string, minLength: 1, maxLength: 120}}
     WorkKind:
       type: object

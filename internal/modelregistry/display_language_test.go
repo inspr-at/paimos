@@ -2,6 +2,7 @@
 package modelregistry
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -37,7 +38,14 @@ func TestDisplayLanguageWordsPreserveLegacyFieldsAndEdits(t *testing.T) {
 	if saved.Label != "Custom design" || legacy.Hint != "Updated by an older client." || !reflect.DeepEqual(legacy.WordsDe, &de) {
 		t.Fatal("patch lost independent wording", saved, legacy)
 	}
-	custom := editorDecode[workKind](t, h.call(t, p, "POST", "/api/work-kinds", `{"label":"Data analysis","hint":"User-authored work.","examples":["A chart"]}`, nil))
+	created := h.call(t, p, "POST", "/api/work-kinds", `{"label":"Data analysis","hint":"","examples":["A chart"]}`, nil)
+	if created.Code != 201 {
+		t.Fatal("create kind", created.Code, created.Body.String())
+	}
+	var custom workKind
+	if err := json.Unmarshal(created.Body.Bytes(), &custom); err != nil {
+		t.Fatal(err)
+	}
 	page := editorDecode[workKindPage](t, h.call(t, p, "GET", "/api/work-kinds?lang=de", "", nil))
 	for _, kind := range page.Items {
 		if kind.ID == design.ID && !reflect.DeepEqual(kind.DisplayWords, &de) {

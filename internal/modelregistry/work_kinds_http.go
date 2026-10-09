@@ -355,7 +355,7 @@ func validateKindLists(examples, labels []string) error {
 
 func validateKindTranslation(words *modelprefs.KindText) error {
 	words.Label = strings.TrimSpace(words.Label)
-	if words.Label == "" || !boundedText(words.Label, 40) || strings.TrimSpace(words.Hint) == "" || !boundedText(words.Hint, 120) || words.Examples == nil {
+	if words.Label == "" || !boundedText(words.Label, 60) || strings.TrimSpace(words.Hint) == "" || !boundedText(words.Hint, 120) || words.Examples == nil {
 		return prefFail(422, "invalid_kind_translation")
 	}
 	if err := validateKindLists(words.Examples, nil); err != nil {

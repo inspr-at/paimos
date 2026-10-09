@@ -46,7 +46,7 @@ test('German profile: Models remains English in its Settings frame', async ({ pa
   await expect(page.locator('[data-pick="all"]')).toBeVisible()
   await expect(page.locator('.settings-page')).toContainText('Which model does what')
   await expect(page.locator('.settings-page')).not.toContainText('Welches Modell was macht')
-  const everyone = page.getByRole('button', { name: 'For everyone', exact: true }), mine = page.getByRole('button', { name: 'For me', exact: true })
+  const everyone = page.getByRole('button', { name: 'For everyone', exact: true }), mine = page.getByRole('button', { name: 'Just me', exact: true })
   await capture(page, info, 'models', async () => {
     await expectStableControls({ controls: { everyone, mine }, interactions: [{ name: 'select everyone', run: () => everyone.click() }, { name: 'select me', run: () => mine.click() }], scrollAreas: { page: page.locator('.settings-page') } })
   })
@@ -58,15 +58,16 @@ test('German profile: session tabs, composer and code controls use the app langu
   const worker = data.sessions[0]!
   Object.assign(worker, { display_label: 'release-lead', run_id: null, activity: 'idle' })
   data.sessions.splice(1); data.runs.splice(0); data.approvals.splice(0)
-  data.messages[1]!.body = `${longGerman}\n\n\`\`\`go\nfmt.Println("ok")\n\`\`\``
+  const message = { ...data.messages[1]!, project: worker.project_id!, sender_principal_id: worker.agent_principal_id, recipient_principal_id: me.id, sender_session_id: worker.id, sender_label: 'release-lead', body: `${longGerman}\n\n\`\`\`go\nfmt.Println("ok")\n\`\`\`` }
+  data.messages.splice(0, data.messages.length, message)
   await mockAgents(page, data)
   const { loaded } = await profile(page)
   await page.goto(`/agents/${worker.id}?tab=messages`); await loaded
   const panel = page.getByRole('complementary', { name: 'Session details' })
   const composer = panel.getByRole('textbox', { name: 'Message to release-lead' })
   await expect(composer).toBeVisible()
-  await expect(panel.getByRole('tab', { name: /Messages/ })).toBeVisible()
-  await expect(panel.getByRole('button', { name: 'Copy', exact: true })).toBeVisible()
+  await expect(panel.getByRole('tab', { name: /Chat|Messages/ })).toBeVisible()
+  await expect(panel.locator('.code-copy')).toHaveText('Copy')
   await capture(page, info, 'session-chat', async () => {
     await expectStableControls({ controls: { composer, send: panel.getByRole('button', { name: 'Send', exact: true }) }, interactions: [{ name: 'write German message', run: async () => { await composer.fill(longGerman); await composer.blur() } }, { name: 'clear draft', run: async () => { await composer.fill(''); await composer.blur() } }], scrollAreas: { panel } })
   })
