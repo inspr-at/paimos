@@ -29,6 +29,8 @@ interface UseWorld {
   conflict: boolean
   writes: { method: string; path: string; body: Record<string, unknown> }[]
   project: { context_id: string } | null
+  /** Matrix reads fail (the server is unreachable after a write). */
+  failReads: boolean
 }
 const key = (a: string, c: string) => `${a}:${c}`
 function useWorld(over: Partial<UseWorld> = {}): UseWorld {
@@ -46,15 +48,24 @@ function useWorld(over: Partial<UseWorld> = {}): UseWorld {
       { id: C.hold, name: 'Unassigned', kind: 'holding', new_accounts_override: null, archived_at: null, revision: 1 },
     ],
     cells: new Set([key(ACCOUNTS.main, C.def), key(ACCOUNTS.main, C.acme), key(ACCOUNTS.main, C.beta), key(ACCOUNTS.spare, C.def)]),
-    running: [], truncated: false, conflict: false, writes: [], project: null, ...over,
+    running: [], truncated: false, conflict: false, writes: [], project: null, failReads: false, ...over,
   }
 }
 const tickableIds = (w: UseWorld) => w.contexts.filter(c => c.kind !== 'holding' && !c.archived_at).map(c => c.id)
-function matrixJSON(w: UseWorld) {
+/** One page like the server: independent exclusive id cursors, cells of the rectangle only. Rows keep the fixture's
+ *  order (the server sorts by id); paged fixtures list their ids in ascending order wherever a cursor reaches. */
+function matrixJSON(w: UseWorld, query: URLSearchParams) {
+  const limit = Number(query.get('limit') ?? 100), afterA = query.get('after_account') ?? '', afterC = query.get('after_context') ?? ''
+  const slice = <T extends { id: string }>(items: T[], after: string) => {
+    const rest = items.filter(i => !after || i.id > after)
+    return { items: rest.slice(0, limit), next: rest.length > limit ? rest[limit - 1]!.id : null }
+  }
+  const accounts = slice(w.accounts, afterA), contexts = slice(w.contexts.filter(c => !c.archived_at), afterC)
+  const inPage = new Set([...accounts.items.map(a => a.id), ...contexts.items.map(c => c.id)])
   return {
-    rules: w.rules, accounts: w.accounts, contexts: w.contexts.filter(c => !c.archived_at),
-    cells: [...w.cells].map(k => { const [account_id, context_id] = k.split(':'); return { account_id, context_id, allowed: true } }),
-    next_account: null, next_context: w.truncated ? C.hold : null, running_outside: w.running, running_outside_truncated: w.truncated,
+    rules: w.rules, accounts: accounts.items, contexts: contexts.items,
+    cells: [...w.cells].map(k => { const [account_id, context_id] = k.split(':'); return { account_id, context_id, allowed: true } }).filter(c => inPage.has(c.account_id!) && inPage.has(c.context_id!)),
+    next_account: accounts.next, next_context: w.truncated ? C.hold : contexts.next, running_outside: w.running, running_outside_truncated: w.truncated,
   }
 }
 async function mockUse(page: Page, w: UseWorld) {
@@ -64,7 +75,7 @@ async function mockUse(page: Page, w: UseWorld) {
   }
   await page.route('**/api/account-use**', async route => {
     const request = route.request(), url = new URL(request.url()), method = request.method()
-    if (method === 'GET') return route.fulfill({ json: matrixJSON(w) })
+    if (method === 'GET') return w.failReads ? route.fulfill({ status: 503, json: { error: 'unavailable' } }) : route.fulfill({ json: matrixJSON(w, url.searchParams) })
     const body = request.postDataJSON() as Record<string, unknown>
     w.writes.push({ method, path: url.pathname, body })
     if (conflictCheck(body.expected_revision)) return route.fulfill({ status: 409, json: { error: 'account_use_revision_conflict' } })
@@ -221,6 +232,68 @@ test('a competing change answers 409: nothing is claimed as saved and the server
   await expect(cell(page, ACCOUNTS.claude, C.beta)).toBeChecked()
 })
 
+test('a refused write takes its tick back at once, even when the matrix cannot be read again', async ({ page }) => {
+  const w = await setup(page)
+  await open(page)
+  w.conflict = true; w.failReads = true
+  await cell(page, ACCOUNTS.claude, C.beta).click()
+  await expect(page.locator('.toast').filter({ hasText: 'Someone changed the matrix meanwhile' })).toContainText('was not saved')
+  // Nothing was stored, so the tick is gone although the server state could not be read.
+  await expect(cell(page, ACCOUNTS.claude, C.beta)).not.toBeChecked()
+  await expect(page.locator('.toast').filter({ hasText: 'The matrix could not be read again' })).toContainText('may be out of date')
+  expect(w.cells.has(key(ACCOUNTS.claude, C.beta))).toBe(false)
+})
+
+test('archive sends the revision the menu opened on: a rename meanwhile is refused, never overwritten', async ({ page }) => {
+  const w = await setup(page)
+  await open(page)
+  await zone(page).getByRole('button', { name: 'More for Acme client work' }).click()
+  await page.getByRole('menuitem', { name: 'Archive…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Archive Acme client work?' })
+  await expect(dialog).toBeVisible()
+  // Someone else renames the context and sets "never"; the matrix is read again behind the dialog.
+  Object.assign(w.contexts.find(c => c.id === C.acme)!, { name: 'Acme renamed', new_accounts_override: 'deny', revision: 2 }); w.rules.revision++
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(zone(page).locator(`[data-use-col="${C.acme}"] b`)).toHaveText('Acme renamed')
+  await dialog.getByRole('button', { name: 'Archive' }).click()
+  await expect.poll(() => lastWrite(w)).toEqual({ method: 'PATCH', path: `/api/work-contexts/${C.acme}`, body: { expected_revision: 5, name: 'Acme client work', new_accounts_override: null, archived: true } })
+  await expect(page.locator('.toast').filter({ hasText: 'Someone changed the matrix meanwhile' })).toBeVisible()
+  expect(w.contexts.find(c => c.id === C.acme)).toMatchObject({ name: 'Acme renamed', new_accounts_override: 'deny', archived_at: null })
+})
+
+test('leaving the migrated model value keeps the switch and everything after it in place (desktop and phone)', async ({ page }) => {
+  const w = await setup(page)
+  for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+    w.rules.new_models = 'shipped_only'
+    await page.setViewportSize(size)
+    await open(page)
+    const models = sw(page, 'New model versions'), retired = models.getByRole('radio', { name: 'Only with PAIMOS updates' })
+    const controls = {
+      models, allow: models.getByRole('radio', { name: 'Allow automatically' }), ask: models.getByRole('radio', { name: 'Ask first' }), retired,
+      allowAll: zone(page).getByRole('button', { name: 'Allow all' }), add: zone(page).getByRole('button', { name: 'Add context' }), cell: cell(page, ACCOUNTS.main, C.def),
+    }
+    for (const control of Object.values(controls)) await control.scrollIntoViewIfNeeded()
+    const guard = await controlStability(page, controls)
+    await guard.check(async () => {
+      await controls.ask.click()
+      await expect(page.locator('.toast').filter({ hasText: 'New model versions: Ask first. Saved' })).toBeVisible()
+    })
+    // Kept in place, but no longer a choice: a click saves nothing and the arrows skip it.
+    await expect(retired).toBeDisabled()
+    await expect(retired).toHaveAttribute('aria-checked', 'false')
+    const writes = w.writes.length
+    await retired.click({ force: true })
+    expect(w.writes.length).toBe(writes)
+    await guard.check(async () => {
+      await controls.ask.focus(); await page.keyboard.press('ArrowRight')
+      await expect(controls.allow).toHaveAttribute('aria-checked', 'true')
+      await expect(controls.allow).toBeFocused()
+    })
+    expect(lastWrite(w)?.body.new_models).toBe('allow')
+    guard.done()
+  }
+})
+
 test('switch changes save all four persisted rules with the revision; keyboard moves within a switch', async ({ page }) => {
   const w = await setup(page, { rules: { ...useWorld().rules, new_models: 'shipped_only' } })
   await open(page)
@@ -350,6 +423,30 @@ test('project settings choose the context; an unmapped project says no account w
   await select.selectOption(C.hold)
   await expect(page.locator('.toast').filter({ hasText: 'Someone changed the matrix meanwhile' })).toBeVisible()
   await expect(select).toHaveValue(C.acme)
+  expect(errors).toEqual([])
+})
+
+test('project settings find a context past the first page and count its accounts on every page', async ({ page }) => {
+  const errors = watchErrors(page)
+  const id = (prefix: string, i: number) => `${prefix}-0000-4000-8000-${String(i).padStart(12, '0')}`
+  const extra = Array.from({ length: 246 }, (_, i) => ({ id: id('e1000000', i), name: `Client ${String(i).padStart(3, '0')}`, kind: 'regular', new_accounts_override: null, archived_at: null, revision: 1 }))
+  const many = Array.from({ length: 230 }, (_, i) => ({ id: id('c1000000', i), label: `Extra ${i}`, harness: 'codex', plan: null, billing_mode: 'api', owner_id: null }))
+  const late = extra[240]!.id
+  const base = useWorld()
+  const w = await setup(page, {
+    contexts: [...base.contexts, ...extra], accounts: [...base.accounts, ...many],
+    cells: new Set([...base.cells, key(ACCOUNTS.main, late), key(many[225]!.id, late)]), project: { context_id: late },
+  })
+  await page.route('**/api/recurrences**', route => route.fulfill({ json: { items: [], next_cursor: null } }))
+  await page.goto('/p/PRJ-17/settings')
+  const card = page.locator('#project-work-context'), select = card.getByLabel('Context')
+  // Context 245 of 250 sits on the second page; Extra 225 on the second account page.
+  await expect(card.getByText('2 accounts may work here: Main, Extra 225.')).toBeVisible()
+  await expect(select).toHaveValue(late)
+  await expect(select.locator('option:checked')).toHaveText('Client 240')
+  await expect(select.locator('option')).toHaveCount(250)
+  await expect(card.getByText('Only the first')).toHaveCount(0)
+  expect(w.writes).toEqual([])
   expect(errors).toEqual([])
 })
 

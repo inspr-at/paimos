@@ -57,10 +57,62 @@ export function validMatrix(m: unknown): m is Matrix {
     && v.cells.every(c => typeof c?.account_id === 'string' && typeof c.context_id === 'string')
 }
 
-export async function readMatrix(signal?: AbortSignal, limit = PAGE): Promise<Matrix> {
-  const page = await call<unknown>(`/account-use?limit=${limit}`, 'GET', undefined, signal)
+export interface MatrixPage { limit?: number; after_account?: string; after_context?: string }
+export async function readMatrix(signal?: AbortSignal, at: MatrixPage = {}): Promise<Matrix> {
+  const query = new URLSearchParams({ limit: String(at.limit ?? PAGE) })
+  if (at.after_account) query.set('after_account', at.after_account)
+  if (at.after_context) query.set('after_context', at.after_context)
+  const page = await call<unknown>(`/account-use?${query}`, 'GET', undefined, signal)
   if (!validMatrix(page)) throw new Error('The matrix answer was not in the expected form. Nothing is shown rather than a partial matrix.')
   return page
+}
+
+/** Pages read at most for one list: 1,000 contexts or accounts. More is reported as truncated, never dropped silently. */
+export const MAX_PAGES = 5
+/** An account cursor past every id: a page with contexts only, no accounts and no cells. */
+const NO_ACCOUNTS = 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+/** The cursor just before an id (cursors are exclusive and ordered like the uuid), so the page starts at that id. */
+export function cursorBefore(id: string): string | undefined {
+  const hex = id.toLowerCase().replace(/-/g, '')
+  if (!/^[0-9a-f]{32}$/.test(hex) || /^0+$/.test(hex)) return undefined
+  const s = (BigInt(`0x${hex}`) - BigInt(1)).toString(16).padStart(32, '0')
+  return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`
+}
+/** Every live context, page by page, up to MAX_PAGES pages. */
+export async function readContexts(signal?: AbortSignal, pages = MAX_PAGES): Promise<{ contexts: WorkContext[]; truncated: boolean; revision: number }> {
+  const contexts: WorkContext[] = []
+  let after_context: string | undefined, revision = 0
+  for (let i = 0; i < pages; i++) {
+    const m = await readMatrix(signal, { after_account: NO_ACCOUNTS, ...(after_context ? { after_context } : {}) })
+    contexts.push(...m.contexts); revision = Math.max(revision, m.rules.revision)
+    if (!m.next_context) return { contexts, truncated: false, revision }
+    after_context = m.next_context
+  }
+  return { contexts, truncated: true, revision }
+}
+/** One context and the accounts allowed in it, wherever it sits in the matrix; context null when it is archived or gone. */
+export async function readColumn(contextId: string, signal?: AbortSignal, pages = MAX_PAGES): Promise<{ context: WorkContext | null; accounts: UseAccount[]; truncated: boolean; revision: number }> {
+  const after_context = cursorBefore(contextId), accounts: UseAccount[] = []
+  let after_account: string | undefined, context: WorkContext | null = null, revision = 0
+  for (let i = 0; i < pages; i++) {
+    const m = await readMatrix(signal, { ...(after_context ? { after_context } : {}), ...(after_account ? { after_account } : {}) })
+    revision = Math.max(revision, m.rules.revision)
+    context = m.contexts.find(c => c.id === contextId) ?? null
+    if (!context) return { context: null, accounts: [], truncated: false, revision }
+    const set = allowedSet(m.cells)
+    accounts.push(...m.accounts.filter(a => set.has(cellKey(a.id, contextId))))
+    if (!m.next_account) return { context, accounts, truncated: false, revision }
+    after_account = m.next_account
+  }
+  return { context, accounts, truncated: true, revision }
+}
+/** The sentence under a project's context. An incomplete count says so; at most a dozen names are spelled out. */
+export function projectContextSummary(mapped: boolean, context: WorkContext | null, names: readonly string[], truncated: boolean): string {
+  if (!mapped) return 'This project has no context yet, so no account may work on it. Choose one.'
+  if (!context || context.kind === 'holding') return 'No account may work on this project until it gets a context.'
+  const n = names.length, listed = names.slice(0, 12).join(', ') + (n > 12 ? ` and ${n - 12} more` : '')
+  if (truncated) return `At least ${n === 1 ? '1 account may' : `${n} accounts may`} work here${n ? `: ${listed}` : ''}. Only the first ${(MAX_PAGES * PAGE).toLocaleString('en')} accounts were counted; see Settings › Accounts for all.`
+  return n ? `${n === 1 ? '1 account may' : `${n} accounts may`} work here: ${listed}.` : 'No account is allowed in this context yet. Tick accounts in Settings › Accounts.'
 }
 export const saveCells = (expected_revision: number, change: { changes: UseCell[] } | { bulk: Bulk }, signal?: AbortSignal) =>
   call<CellResult>('/account-use/cells', 'PATCH', { expected_revision, ...change }, signal)
@@ -115,7 +167,7 @@ export function predictedForNewAccount(rules: Pick<Rules, 'new_accounts'>, conte
   return rules.new_accounts === 'allow' ? tickable(contexts).filter(c => c.new_accounts_override !== 'deny') : []
 }
 
-export interface SwitchChoice<V extends string> { value: V; label: string }
+export interface SwitchChoice<V extends string> { value: V; label: string; retired?: boolean }
 export interface SwitchDef<K extends keyof RuleValues = keyof RuleValues> { key: K; title: string; hint: string; choices: SwitchChoice<RuleValues[K]>[] }
 // D1 (decided 2026-10-09). Two values each; a migrated workspace keeps its third
 // model value visible, but it is never offered as a fresh choice.
@@ -125,9 +177,10 @@ export const SWITCHES: SwitchDef[] = [
   { key: 'new_projects', title: 'New projects', hint: 'Ask first puts them in Unassigned', choices: [{ value: 'default', label: 'Follow automatically' }, { value: 'holding', label: 'Ask first' }] },
   { key: 'new_models', title: 'New model versions', hint: 'New vendor lines always need a person', choices: [{ value: 'allow', label: 'Allow automatically' }, { value: 'deny', label: 'Ask first' }] },
 ]
-export function switchChoices(def: SwitchDef, current: string): SwitchChoice<string>[] {
-  const extra = def.key === 'new_models' && current === 'shipped_only' ? [{ value: 'shipped_only', label: 'Only with PAIMOS updates' }] : []
-  return [...def.choices, ...extra]
+/** keepRetired: the screen opened with the third model value, so it keeps its place (AEON-541) once left, as a retired choice that cannot be picked. */
+export function switchChoices(def: SwitchDef, current: string, keepRetired = false): SwitchChoice<string>[] {
+  const legacy = def.key === 'new_models' && (current === 'shipped_only' || keepRetired)
+  return legacy ? [...def.choices, { value: 'shipped_only', label: 'Only with PAIMOS updates', retired: current !== 'shipped_only' }] : [...def.choices]
 }
 export const ruleValues = (r: RuleValues): RuleValues => ({ new_accounts: r.new_accounts, new_contexts: r.new_contexts, new_projects: r.new_projects, new_models: r.new_models })
 
@@ -137,7 +190,7 @@ export function billingLabel(mode: string): string {
 /** Words for a failed matrix write. A 409 means nothing was saved and the matrix is read again. */
 export function failureText(error: unknown, what = 'The change'): string {
   if (error instanceof APIError) {
-    if (error.status === 409) return `Someone changed the matrix meanwhile. ${what} was not saved; the current state is shown.`
+    if (error.status === 409) return `Someone changed the matrix meanwhile. ${what} was not saved; the current state is read again.`
     if (error.status === 403) return 'You need permission to manage where accounts may work.'
     if (error.status === 413) return 'That change covers more than 1,000 cells. Change rows or columns one at a time.'
     if (error.status === 404) return `${what} was not saved: the account or context no longer exists.`

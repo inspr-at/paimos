@@ -4638,6 +4638,10 @@
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"a competing change answers 409: nothing is claimed as saved and the server state is shown","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"a refused write takes its tick back at once, even when the matrix cannot be read again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"archive sends the revision the menu opened on: a rename meanwhile is refused, never overwritten","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"bulk, tri-state rows and columns, single cells and Undo all save with the matrix revision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"context menu sets \"never\" for new accounts; confirmation and running work outside stay explicit","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -4646,7 +4650,11 @@
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"grid keyboard: arrows move between boxes and Space toggles; U never fires inside a text field","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"leaving the migrated model value keeps the switch and everything after it in place (desktop and phone)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"project settings choose the context; an unmapped project says no account works there","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"project settings find a context past the first page and count its accounts on every page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"screenshots of the matrix, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12686,7 +12694,11 @@
     ,
     {"kind":"node","file":"tests/account-use.test.ts","name":"a conflict says nothing was saved; other failures never claim success","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/account-use.test.ts","name":"a page starts exactly at a context: the cursor is the id just before it","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/account-use.test.ts","name":"a partial or malformed matrix is rejected rather than shown","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-use.test.ts","name":"a project summary says when the account count is incomplete","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/account-use.test.ts","name":"a save and its Undo restore exactly the earlier set","tier":"ESSENTIAL"}
     ,

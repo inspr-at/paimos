@@ -8,7 +8,6 @@
 // matrix is read again. Undo sends the inverse cells of the last save with the
 // revision that save returned. Running work outside the matrix keeps running.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { APIError } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
@@ -37,8 +36,11 @@ const matrix = ref<Matrix | null>(null), set = ref<Set<string>>(new Set()), stat
 const busy = ref(''), said = ref(''), confirmedHere = ref(false)
 /** The last save of this person on this screen: Undo is valid only while nothing changed since. */
 const last = ref<{ owner: string; revision: number; undo: UseCell[]; what: string } | null>(null)
-const menu = ref<{ context: WorkContext; anchor: HTMLElement } | null>(null)
-const form = ref<{ mode: 'add' | 'rename'; context?: WorkContext; anchor: HTMLElement; name: string; error: string } | null>(null)
+/** A context action belongs to the context and matrix revision on screen when the menu or form opened; a later change answers 409. */
+const menu = ref<{ context: WorkContext; revision: number; anchor: HTMLElement } | null>(null)
+const form = ref<{ mode: 'add' | 'rename'; context?: WorkContext; revision: number; anchor: HTMLElement; name: string; error: string } | null>(null)
+/** The screen showed the migrated third model value: it keeps its place after it is left (AEON-541). */
+const retiredModels = ref(false)
 
 const columns = computed(() => matrix.value ? tickable(matrix.value.contexts) : [])
 const rows = computed(() => matrix.value?.accounts ?? [])
@@ -49,7 +51,7 @@ const canUndo = computed(() => !!last.value && last.value.owner === scope.owner.
 const truncated = computed(() => !!matrix.value && (!!matrix.value.next_account || !!matrix.value.next_context))
 const outside = computed(() => (matrix.value?.running_outside ?? []).map(run => ({ ...run, account: rows.value.find(a => a.id === run.account_id) })))
 
-function load(quiet = false) {
+function load(quiet = false, report = !quiet) {
   if (!scope.owner.value) { matrix.value = null; return }
   if (!quiet) state.value = matrix.value ? 'ready' : 'loading'
   const floor = revision.value
@@ -57,7 +59,15 @@ function load(quiet = false) {
     // A read that started before our own save can answer after it; never step back.
     if (page.rules.revision < floor && matrix.value) return
     matrix.value = page; set.value = allowedSet(page.cells); state.value = 'ready'
-  }), { failed: () => { if (!matrix.value) state.value = 'error'; else if (!quiet) toast('The matrix could not be read again. The last state stays visible.', { tone: 'error' }) } })
+    if (page.rules.new_models === 'shipped_only') retiredModels.value = true
+  }), {
+    failed: () => {
+      if (!matrix.value) { state.value = 'error'; return }
+      if (!report) return
+      said.value = 'The matrix could not be read again. The last state read stays visible and may be out of date.'
+      toast(said.value, { tone: 'error' })
+    },
+  })
 }
 function sub(account: Matrix['accounts'][number]) {
   return [account.plan || 'Plan not reported', billingLabel(account.billing_mode), owners.value.get(account.id) ? `Owner ${owners.value.get(account.id)}` : 'No owner linked'].join(' · ')
@@ -65,18 +75,19 @@ function sub(account: Matrix['accounts'][number]) {
 const accountName = (a: { label: string; harness: string }) => a.label || HARNESS_LABEL[a.harness] || a.harness
 
 /** One write at a time. The owner and revision are captured when the person acts; a later answer for another owner is dropped by the scope. */
-function write<T>(what: string, send: (expected: number, signal: AbortSignal) => Promise<T>, done: (result: T) => void) {
+function write<T>(what: string, send: (expected: number, signal: AbortSignal) => Promise<T>, done: (result: T) => void, expected?: number) {
   const current = matrix.value
   if (!current || busy.value) return false
   busy.value = what; reads.cancel()
-  void scope.run(({ after, signal }) => after(send(current.rules.revision, signal), result => { done(result) }), {
+  void scope.run(({ after, signal }) => after(send(expected ?? current.rules.revision, signal), result => { done(result) }), {
     failed: error => {
-      // Honest result: nothing was saved. A conflict shows the server's current state.
+      // Honest result: nothing was saved. What was shown at once goes back to the last
+      // state read at once; the server state is read again, and a failed read says so.
       const text = failureText(error, what)
       said.value = text; toast(text, { tone: 'error' })
       last.value = null
-      if (error instanceof APIError && error.status === 409) load(true)
-      else { set.value = allowedSet(matrix.value?.cells ?? []); load(true) }
+      set.value = allowedSet(matrix.value?.cells ?? [])
+      load(true, true)
     },
     settled: () => { busy.value = '' },
   })
@@ -123,14 +134,16 @@ function bulkColumn(event: Event, context: WorkContext) {
 }
 const bulkAll = (want: boolean) => cells({ bulk: { scope: 'all', allowed: want } }, want ? 'Allow all' : 'Allow none')
 
+const choicesOf = (def: SwitchDef) => switchChoices(def, matrix.value?.rules[def.key] ?? '', retiredModels.value)
 function setRule(def: SwitchDef, value: string) {
   const m = matrix.value
-  if (!m || m.rules[def.key] === value) return
+  if (!m || m.rules[def.key] === value || !choicesOf(def).some(c => c.value === value && !c.retired)) return
   const values: RuleValues = { ...ruleValues(m.rules), [def.key]: value }
   const label = switchChoices(def, value).find(c => c.value === value)?.label ?? value
   write(`${def.title}: ${label}`, (expected, signal) => saveRules(expected, values, signal), rules => {
     // The persisted rules are shown, never the requested ones.
     if (matrix.value) matrix.value = { ...matrix.value, rules }
+    if (rules.new_models === 'shipped_only') retiredModels.value = true
     last.value = null
     said.value = `${def.title}: ${switchChoices(def, rules[def.key]).find(c => c.value === rules[def.key])?.label}. Saved and recorded in the audit log.`
     toast(said.value)
@@ -139,10 +152,12 @@ function setRule(def: SwitchDef, value: string) {
 function switchKeys(event: KeyboardEvent, def: SwitchDef) {
   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key) || event.metaKey || event.ctrlKey || event.altKey || !matrix.value) return
   event.preventDefault()
-  const choices = switchChoices(def, matrix.value.rules[def.key]), at = choices.findIndex(c => c.value === matrix.value!.rules[def.key])
+  // A retired choice is skipped: it keeps its place but cannot be picked.
+  const all = choicesOf(def), choices = all.filter(c => !c.retired), at = choices.findIndex(c => c.value === matrix.value!.rules[def.key])
   const next = event.key === 'Home' ? 0 : event.key === 'End' ? choices.length - 1 : (at + (['ArrowRight', 'ArrowDown'].includes(event.key) ? 1 : choices.length - 1)) % choices.length
-  setRule(def, choices[next]!.value)
-  void nextTick(() => (event.currentTarget as HTMLElement | null)?.querySelectorAll<HTMLButtonElement>('[role=radio]')[next]?.focus())
+  const group = event.currentTarget as HTMLElement | null, value = choices[next]!.value
+  setRule(def, value)
+  void nextTick(() => group?.querySelectorAll<HTMLButtonElement>('[role=radio]')[all.findIndex(c => c.value === value)]?.focus())
 }
 function confirm() {
   write('Confirmation', (expected, signal) => confirmMatrix(expected, signal), rules => {
@@ -151,22 +166,28 @@ function confirm() {
   })
 }
 
-function openMenu(context: WorkContext, event: MouseEvent) { menu.value = { context, anchor: event.currentTarget as HTMLElement } }
+function openMenu(context: WorkContext, event: MouseEvent) { menu.value = { context, revision: revision.value, anchor: event.currentTarget as HTMLElement } }
 function closeMenu(restore = true) { const anchor = menu.value?.anchor; menu.value = null; if (restore) anchor?.focus() }
 function menuKeys(event: KeyboardEvent) {
   if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return
   const items = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role^=menuitem]:not(:disabled)')], at = items.indexOf(event.target as HTMLButtonElement)
   event.preventDefault(); items[(at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
 }
-function toggleNever(context: WorkContext) {
+function toggleNever() {
+  const snap = menu.value
+  if (!snap) return
   closeMenu()
-  const never = context.new_accounts_override !== 'deny'
-  write(`${context.name}: new accounts ${never ? 'never' : 'follow the switch'}`, (expected, signal) => updateContext(context, expected, { new_accounts_override: never ? 'deny' : null }, signal), contextSaved)
+  const { context } = snap, never = context.new_accounts_override !== 'deny'
+  write(`${context.name}: new accounts ${never ? 'never' : 'follow the switch'}`, (expected, signal) => updateContext(context, expected, { new_accounts_override: never ? 'deny' : null }, signal), contextSaved, snap.revision)
 }
-async function archive(context: WorkContext) {
+async function archive() {
+  const snap = menu.value, owner = scope.owner.value
+  if (!snap) return
   closeMenu(false)
+  const { context } = snap
   const ok = await confirmAction({ title: `Archive ${context.name}?`, body: 'Its ticks are kept but no longer count. Projects in this context get no account until they move to another context. Running work continues.', confirmLabel: 'Archive', danger: true })
-  if (ok) write(`Archived ${context.name}`, (expected, signal) => updateContext(context, expected, { archived: true }, signal), contextSaved)
+  // The context as it was when the menu opened: a change meanwhile is refused by the server, never overwritten.
+  if (ok && owner === scope.owner.value) write(`Archived ${context.name}`, (expected, signal) => updateContext(context, expected, { archived: true }, signal), contextSaved, snap.revision)
 }
 function contextSaved(result: { context: WorkContext; revision: number }) {
   const m = matrix.value
@@ -178,8 +199,10 @@ function contextSaved(result: { context: WorkContext; revision: number }) {
   load(true)
 }
 function openForm(mode: 'add' | 'rename', anchor: HTMLElement, context?: WorkContext) {
+  // A rename belongs to the revision the menu opened on.
+  const at = context && menu.value?.context.id === context.id ? menu.value.revision : revision.value
   closeMenu(false)
-  form.value = { mode, context, anchor, name: context?.name ?? '', error: '' }
+  form.value = { mode, context, revision: at, anchor, name: context?.name ?? '', error: '' }
 }
 function submitForm() {
   const f = form.value
@@ -187,7 +210,8 @@ function submitForm() {
   const name = f.name.trim()
   if (!name || name.length > 128) { f.error = 'A name of 1 to 128 characters is needed.'; return }
   const context = f.context
-  write(f.mode === 'add' ? `Added ${name}` : `Renamed to ${name}`, (expected, signal) => f.mode === 'add' || !context ? createContext(expected, name, signal) : updateContext(context, expected, { name }, signal), contextSaved)
+  const adding = f.mode === 'add' || !context
+  write(adding ? `Added ${name}` : `Renamed to ${name}`, (expected, signal) => adding ? createContext(expected, name, signal) : updateContext(context, expected, { name }, signal), contextSaved, adding ? undefined : f.revision)
 }
 function formKeys(event: KeyboardEvent) {
   const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
@@ -225,7 +249,7 @@ const onFocus = () => { if (!busy.value) load(true) }
 onMounted(() => { load(); window.addEventListener('keydown', pageKeys); window.addEventListener('focus', onFocus) })
 onBeforeUnmount(() => { sizes?.disconnect(); window.removeEventListener('keydown', pageKeys); window.removeEventListener('focus', onFocus) })
 // Another person or workspace: drop the matrix, the Undo and any open form.
-watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new Set(); last.value = null; menu.value = null; form.value = null; said.value = ''; busy.value = ''; confirmedHere.value = false; if (owner) load() })
+watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new Set(); last.value = null; menu.value = null; form.value = null; said.value = ''; busy.value = ''; confirmedHere.value = false; retiredModels.value = false; if (owner) load() })
 </script>
 
 <template>
@@ -245,7 +269,7 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
           <dt><b>{{ def.title }}</b><small>{{ def.hint }}</small></dt>
           <dd>
             <div class="seg" role="radiogroup" :aria-label="def.title" :data-use-switch="def.key" @keydown="switchKeys($event, def)">
-              <button v-for="choice in switchChoices(def, matrix.rules[def.key])" :key="choice.value" type="button" role="radio" :aria-checked="matrix.rules[def.key] === choice.value" :tabindex="matrix.rules[def.key] === choice.value ? 0 : -1" :aria-disabled="!!busy" @click="setRule(def, choice.value)">{{ choice.label }}</button>
+              <button v-for="choice in choicesOf(def)" :key="choice.value" type="button" role="radio" :aria-checked="matrix.rules[def.key] === choice.value" :tabindex="matrix.rules[def.key] === choice.value ? 0 : -1" :aria-disabled="!!busy" :disabled="choice.retired" :title="choice.retired ? 'No longer offered. Kept in place from before.' : undefined" @click="setRule(def, choice.value)">{{ choice.label }}</button>
             </div>
           </dd>
         </div>
@@ -305,8 +329,8 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
     <FloatingPanel v-if="menu" :anchor="menu.anchor" :width="260" align="end" :label="`More for ${menu.context.name}`" @close="closeMenu">
       <div class="row-menu" role="menu" @keydown="menuKeys">
         <button type="button" role="menuitem" :disabled="!!busy" @click="openForm('rename', menu.anchor, menu.context)"><AppIcon name="edit" :size="14" />Rename…</button>
-        <button type="button" role="menuitemcheckbox" :aria-checked="menu.context.new_accounts_override === 'deny'" :disabled="!!busy" @click="toggleNever(menu.context)"><AppIcon :name="menu.context.new_accounts_override === 'deny' ? 'check' : 'square'" :size="14" />New accounts: never</button>
-        <template v-if="menu.context.kind === 'regular'"><div class="separator" /><button type="button" role="menuitem" class="danger" :disabled="!!busy" @click="archive(menu.context)"><AppIcon name="archive" :size="14" />Archive…</button></template>
+        <button type="button" role="menuitemcheckbox" :aria-checked="menu.context.new_accounts_override === 'deny'" :disabled="!!busy" @click="toggleNever"><AppIcon :name="menu.context.new_accounts_override === 'deny' ? 'check' : 'square'" :size="14" />New accounts: never</button>
+        <template v-if="menu.context.kind === 'regular'"><div class="separator" /><button type="button" role="menuitem" class="danger" :disabled="!!busy" @click="archive"><AppIcon name="archive" :size="14" />Archive…</button></template>
       </div>
     </FloatingPanel>
     <FloatingPanel v-if="form" :anchor="form.anchor" :width="320" align="end" :label="form.mode === 'add' ? 'Add a context' : `Rename ${form.context?.name}`" cycle field-escape @close="form = null">
@@ -339,6 +363,7 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
 .seg button { height: 30px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 .seg button[aria-checked=true] { background: var(--seg-on); color: var(--teal-ink); }
 .seg button[aria-disabled=true] { cursor: progress; }
+.seg button:disabled { color: var(--ink-3); font-weight: 600; cursor: default; }
 .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .tools .add { margin-left: auto; }
 .tools .btn :deep(.keycap) { margin-left: 2px; }

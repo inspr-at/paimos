@@ -92,7 +92,7 @@ function toggleAuto() {
   // The switch moves at once; a failed save puts it back and says so. The
   // matrix revision is read first, so a competing rule change answers 409.
   status.value = { ...current, settings: next }
-  void scope.run(({ after, signal }) => after(readMatrix(signal, 1), matrix => after(putRefreshSettings(next, matrix.rules.revision), saved => { if (status.value) status.value = { ...status.value, settings: saved } })), {
+  void scope.run(({ after, signal }) => after(readMatrix(signal, { limit: 1 }), matrix => after(putRefreshSettings(next, matrix.rules.revision), saved => { if (status.value) status.value = { ...status.value, settings: saved } })), {
     failed: error => { if (status.value) status.value = { ...status.value, settings: current.settings }; stripError.value = error instanceof RegistryError && error.status === 409 ? 'Someone changed the New model versions rule meanwhile. Nothing was saved; try again.' : 'Auto-update could not be changed. Try again.' },
     settled: () => { autoBusy.value = false },
   })

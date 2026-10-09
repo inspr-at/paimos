@@ -10,7 +10,7 @@ import { toast } from '../../lib/toast'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import { HARNESS_LABEL } from '../../lib/agentState'
 import { useSession } from '../../stores/session'
-import { allowedSet, cellKey, failureText, PERMISSION, readMatrix, readProjectContext, saveProjectContext, tickable, type Matrix, type ProjectContext } from '../../lib/accountUse'
+import { failureText, MAX_PAGES, PAGE, PERMISSION, projectContextSummary, readColumn, readContexts, readProjectContext, saveProjectContext, tickable, type ProjectContext, type UseAccount, type WorkContext } from '../../lib/accountUse'
 import SettingsCard from './SettingsCard.vue'
 
 const props = defineProps<{ project: { id: string; title?: string } }>()
@@ -18,48 +18,57 @@ const session = useSession()
 const allowed = computed(() => session.identity?.principal.kind === 'person' && can(PERMISSION))
 const scope = useIdentityScope(() => allowed.value)
 const reads = scope.lane()
-const matrix = ref<Matrix | null>(null), mapping = ref<ProjectContext | null>(null), state = ref<'loading' | 'ready' | 'error'>('loading'), busy = ref(false), said = ref('')
+// The context list and the project's own context are read separately: the mapped
+// context is found wherever it sits in the matrix, and its accounts are counted
+// across account pages, both bounded and reported when cut short.
+interface Column { id: string; context: WorkContext | null; accounts: UseAccount[]; truncated: boolean }
+const contexts = ref<WorkContext[]>([]), listTruncated = ref(false), revision = ref(0)
+const mapping = ref<ProjectContext | null>(null), column = ref<Column | null>(null)
+const state = ref<'loading' | 'ready' | 'error'>('loading'), busy = ref(false), said = ref('')
 
 const options = computed(() => {
-  const contexts = matrix.value?.contexts ?? []
-  const holding = contexts.find(c => c.kind === 'holding')
-  return [...tickable(contexts).map(c => ({ id: c.id, label: c.kind === 'default' ? `${c.name} (default)` : c.name })), ...(holding ? [{ id: holding.id, label: `${holding.name} · no account works here` }] : [])]
-})
-const current = computed(() => matrix.value?.contexts.find(c => c.id === mapping.value?.context_id))
-const accountsHere = computed(() => {
-  const m = matrix.value, c = current.value
-  if (!m || !c || c.kind === 'holding') return []
-  const set = allowedSet(m.cells)
-  return m.accounts.filter(a => set.has(cellKey(a.id, c.id))).map(a => a.label || HARNESS_LABEL[a.harness] || a.harness)
+  const own = column.value?.context, all = own && !contexts.value.some(c => c.id === own.id) ? [...contexts.value, own] : contexts.value
+  const holding = all.find(c => c.kind === 'holding')
+  return [...tickable(all).map(c => ({ id: c.id, label: c.kind === 'default' ? `${c.name} (default)` : c.name })), ...(holding ? [{ id: holding.id, label: `${holding.name} · no account works here` }] : [])]
 })
 const summary = computed(() => {
-  if (!mapping.value) return 'This project has no context yet, so no account may work on it. Choose one.'
-  if (!current.value || current.value.kind === 'holding') return 'No account may work on this project until it gets a context.'
-  const n = accountsHere.value.length
-  return n ? `${n === 1 ? '1 account may' : `${n} accounts may`} work here: ${accountsHere.value.join(', ')}.` : 'No account is allowed in this context yet. Tick accounts in Settings › Accounts.'
+  const c = column.value
+  if (mapping.value && c?.id !== mapping.value.context_id) return 'Reading which accounts may work here…'
+  return projectContextSummary(!!mapping.value, c?.context ?? null, (c?.accounts ?? []).map(a => a.label || HARNESS_LABEL[a.harness] || a.harness), !!c?.truncated)
 })
 
+async function readAll(projectId: string, signal: AbortSignal) {
+  const [list, p] = await Promise.all([readContexts(signal), readProjectContext(projectId, signal)])
+  const col = p ? await readColumn(p.context_id, signal) : null
+  return { list, p, col }
+}
 function load() {
   if (!scope.owner.value) return
   const projectId = props.project.id
-  void reads.run(({ after, signal }) => after(Promise.all([readMatrix(signal), readProjectContext(projectId, signal)]), ([m, p]) => {
+  void reads.run(({ after, signal }) => after(readAll(projectId, signal), ({ list, p, col }) => {
     if (projectId !== props.project.id) return
-    matrix.value = m; mapping.value = p; state.value = 'ready'
-  }), { failed: () => { state.value = matrix.value ? 'ready' : 'error' } })
+    contexts.value = list.contexts; listTruncated.value = list.truncated; mapping.value = p
+    column.value = col && p ? { id: p.context_id, context: col.context, accounts: col.accounts, truncated: col.truncated } : null
+    revision.value = Math.max(list.revision, p?.revision ?? 0, col?.revision ?? 0); state.value = 'ready'
+  }), {
+    failed: () => {
+      if (state.value !== 'ready') { state.value = 'error'; return }
+      said.value = 'The context could not be read again. The last state read stays visible.'; toast(said.value, { tone: 'error' })
+    },
+  })
 }
-watch([() => props.project.id, () => scope.owner.value], () => { matrix.value = null; mapping.value = null; said.value = ''; busy.value = false; state.value = 'loading'; load() }, { immediate: true })
+watch([() => props.project.id, () => scope.owner.value], () => { contexts.value = []; listTruncated.value = false; revision.value = 0; mapping.value = null; column.value = null; said.value = ''; busy.value = false; state.value = 'loading'; load() }, { immediate: true })
 
 function choose(event: Event) {
-  const select = event.target as HTMLSelectElement, contextId = select.value, m = matrix.value
+  const select = event.target as HTMLSelectElement, contextId = select.value
   // The action belongs to the project and revision on screen when the person chose.
-  // Two reads can answer at different revisions; send the newer one, the server re-checks.
-  const projectId = props.project.id, revision = Math.max(mapping.value?.revision ?? 0, m?.rules.revision ?? 0)
-  if (!m || !revision || busy.value || contextId === mapping.value?.context_id) { select.value = mapping.value?.context_id ?? ''; return }
+  const projectId = props.project.id, expected = revision.value
+  if (!expected || busy.value || contextId === mapping.value?.context_id) { select.value = mapping.value?.context_id ?? ''; return }
   busy.value = true; reads.cancel()
-  const name = m.contexts.find(c => c.id === contextId)?.name ?? 'the context'
-  void scope.run(({ after, signal }) => after(saveProjectContext(projectId, revision, contextId, signal), saved => {
+  const name = [...contexts.value, column.value?.context].find(c => c?.id === contextId)?.name ?? 'the context'
+  void scope.run(({ after, signal }) => after(saveProjectContext(projectId, expected, contextId, signal), saved => {
     if (projectId !== props.project.id) return
-    mapping.value = saved; matrix.value = { ...m, rules: { ...m.rules, revision: saved.revision } }
+    mapping.value = saved; revision.value = saved.revision
     said.value = `Moved to ${name}.`; toast(`${props.project.title ?? 'Project'} moved to ${name}.`)
   }), {
     failed: error => {
@@ -67,7 +76,7 @@ function choose(event: Event) {
       said.value = failureText(error, 'The context'); toast(said.value, { tone: 'error' })
       if (error instanceof APIError && error.status === 409) load()
     },
-    settled: () => { busy.value = false },
+    settled: () => { busy.value = false; if (mapping.value && column.value?.id !== mapping.value.context_id) load() },
   })
 }
 </script>
@@ -86,6 +95,7 @@ function choose(event: Event) {
           </select>
         </label>
         <p id="project-context-summary" class="line">{{ summary }}</p>
+        <p v-if="listTruncated" class="line" role="note">Only the first {{ (MAX_PAGES * PAGE).toLocaleString('en') }} contexts are listed; this project's own context is always included.</p>
         <p class="sr-only" role="status" aria-live="polite">{{ said }}</p>
       </template>
     </SettingsCard>
