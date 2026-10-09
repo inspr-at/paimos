@@ -14594,6 +14594,8 @@
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"the wheel pans or zooms the window and never moves the time; a plain vertical wheel is left to the page","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Compare calls an unfinished release elapsed so far, not live","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Compare races a release from its step a against the Arion target on one relative axis","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Compare shows two lane sets on one relative axis and says when the target was live","tier":"ESSENTIAL"}
@@ -14602,11 +14604,17 @@
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Replay auto-plays once per session and never with reduced motion","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a failed run read settles until Retry and does not reload from a cleared list","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a live refresh keeps 02:00 when removing an older run moves the axis origin","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a live update keeps the person viewing the past, and moves the playhead with now while following","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"auto-play is granted once per session","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"recorded steps become lanes and words from their facts; open steps run on to their expected end in Live","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"selecting another run shows loading and keeps the run choices","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the example replays release 126 final and the changes so far","tier":"ESSENTIAL"}
     ,
@@ -14615,6 +14623,8 @@
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the moment panel names the active lanes, one idle line, the incident and the selected step","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the player walks the whole run in 60 s at 1x and 30 s at 2x, and stops at the end","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the run picker stays mounted through loading and errors","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"where the time went splits the critical path and lists the incident and the biggest waits","tier":"ESSENTIAL"}
     ,

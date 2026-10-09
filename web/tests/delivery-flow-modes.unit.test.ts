@@ -9,12 +9,18 @@ import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as Vue from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+const http = vi.hoisted(() => ({ handle: async (_path: string, _init?: RequestInit): Promise<Response> => new Response('{"error":"unused"}', { status: 500, headers: { 'content-type': 'application/json' } }) }))
+vi.mock('../src/lib/api.ts', () => ({
+  api: (path: string, init?: RequestInit) => http.handle(path, init),
+  APIError: class APIError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; this.name = 'APIError' } },
+}))
 import * as flow from '../src/lib/deliveryFlow'
-import { createTimeline, criticalPath, laneModel, refreshTimeline, resetTimeline, runEnd, type FlowData } from '../src/lib/deliveryFlow'
-import { arionTarget, ARION_MINUTES, compareData, liveData, recordedRuns, replayData, type ApiFlow } from '../src/lib/deliveryFlowData'
+import { createTimeline, criticalPath, laneModel, refreshTimeline, resetTimeline, runEnd, timeLabel, type FlowData } from '../src/lib/deliveryFlow'
+import { arionTarget, ARION_MINUTES, compareData, liveData, recordedRuns, replayData, type ApiFlow, type ApiItem, type ApiRun, type ApiStep } from '../src/lib/deliveryFlowData'
 import { EXAMPLE_NOW, exampleCompare, exampleLive, exampleReplay } from '../src/lib/deliveryFlowExample'
 import * as modes from '../src/lib/deliveryFlowModes'
-import { autoplayOnce, createPlayer, flightRows, momentOf, PLAY_MS, wentOf, type Frames } from '../src/lib/deliveryFlowModes'
+import { autoplayOnce, createPlayer, flightRows, headOf, momentOf, PLAY_MS, wentOf, type Frames } from '../src/lib/deliveryFlowModes'
+import { useDeliveryFlow } from '../src/lib/useDeliveryFlow'
 import * as words from '../src/lib/deliveryFlowText'
 import { flowText } from '../src/lib/deliveryFlowText'
 
@@ -172,6 +178,84 @@ it('a live update keeps the person viewing the past, and moves the playhead with
   expect(t.T).toBe(later.now! - 20)
 })
 
+it('a live refresh keeps 02:00 when removing an older run moves the axis origin', () => {
+  // Yesterday's ended run sets midnight; today's open run is what Live shows. Dropping the
+  // older run moves midnight forward, and the old minute coordinate is outside the new range.
+  const iso = (when: Date) => when.toISOString()
+  const yesterday = new Date(2026, 9, 7, 22, 0, 0)
+  const yesterdayEnd = new Date(2026, 9, 7, 22, 30, 0)
+  const todayStart = new Date(2026, 9, 8, 1, 0, 0)
+  const two = new Date(2026, 9, 8, 2, 0, 0)
+  const now = new Date(2026, 9, 8, 5, 0, 0)
+  const item = (id: string, ref: string, start: Date, ended: Date | null): ApiItem => ({
+    id, kind: 'release', ref, title: '', prs: [], started_at: iso(start), ended_at: ended ? iso(ended) : null, pct_done: ended ? 100 : 40, current_step_id: null,
+    eta: { p50_at: null, p90_at: null, basis: 'none', reason: null }, target: null, next_human_gate: null,
+  })
+  const step = (id: string, itemId: string, start: Date, ended: Date | null): ApiStep => ({
+    id, item_id: itemId, step_key: 'k', round: 1, kind: 'work', actor: actor('agent', 'OPS'), started_at: iso(start), ended_at: ended ? iso(ended) : null,
+    outcome: null, wait_reason: null, waits_for: null, side: false, source: 'ops_rollout', norm: norm(),
+  })
+  const body = (old: boolean): ApiFlow => ({
+    project_id: 'p', now: iso(now), at: iso(now), from: iso(yesterday), to: iso(now), truncated: false,
+    items: [...(old ? [item('old', '125', yesterday, yesterdayEnd)] : []), item('now', '126', todayStart, null)],
+    steps: [...(old ? [step('sold', 'old', yesterday, yesterdayEnd)] : []), step('snow', 'now', todayStart, null)],
+    incidents: [],
+  })
+  const before = liveData(recordedRuns(body(true), { extendOpen: true }))!
+  const after = liveData(recordedRuns(body(false), { extendOpen: true }))!
+  expect(before.origin).not.toBe(after.origin)
+  const t = createTimeline()
+  resetTimeline(t, before, { narrow: false })
+  t.follow = false
+  t.T = (two.getTime() - before.origin!) / 60_000
+  const shift = (before.origin! - after.origin!) / 60_000
+  // The historical minute is still inside the new window; only the unshifted coordinate falls outside it.
+  expect(t.T + shift).toBeGreaterThan(after.range[0])
+  expect(t.T + shift).toBeLessThan(after.range[1])
+  expect(t.T).toBeGreaterThan(after.range[1])
+  expect(timeLabel(before, t.T)).toBe('02:00')
+  refreshTimeline(t, after)
+  expect(timeLabel(after, t.T)).toBe('02:00')
+  expect(Math.abs(after.origin! + Math.round(t.T * 60) * 1000 - two.getTime())).toBeLessThan(1000)
+  // Following still rides the new now when the origin moves with it.
+  const follow = createTimeline()
+  resetTimeline(follow, before, { narrow: false })
+  const moved: FlowData = { ...after, now: after.now! + 1 }
+  refreshTimeline(follow, moved)
+  expect(follow.T).toBe(moved.now)
+})
+
+it('Compare calls an unfinished release elapsed so far, not live', () => {
+  // Ten recorded minutes of step a. ended_at null means the release has not gone live.
+  const release = (ended: number | null): ApiFlow => ({
+    ...answer(),
+    items: [{ ...answer().items[0]!, id: 'open', ended_at: ended == null ? null : at(ended) }],
+    steps: [{ ...answer().steps[0]!, id: 'sa', item_id: 'open', started_at: at(0), ended_at: at(10) }],
+    incidents: [],
+  })
+  const open = compareData(recordedRuns(release(null), { extendOpen: false }).runs[0]!, arionTarget('en'))!
+  const sets = laneModel(open)
+  const ctx = { data: open, sets, level: 'simple' as const, lang: 'en' as const, text: en, reduced: true }
+  const big = headOf('compare', ctx).big.map(part => part.text).join('')
+  expect(big).toBe('Release 126 vs. the Arion target, 10 min so far instead of 24 min')
+  expect(big).not.toContain('queue to live')
+  const de = headOf('compare', { ...ctx, lang: 'de', text: flowText('de') }).big.map(part => part.text).join('')
+  expect(de).toBe('Release 126 gegen das Arion-Ziel, 10 min bisher statt 24 min')
+  expect(headOf('compare', { ...ctx, level: 'expert' }).small).toBe('a → l so far: 10 min.')
+  const end = runEnd(open.sets[0]!.main)
+  expect(end).toBe(10)
+  const panel = momentOf({ ...ctx, T: end, selected: null })
+  expect(panel.lines.map(line => line.label)).toContain('10 min so far')
+  expect(panel.lines.map(line => line.label).join('\n')).not.toContain('live after')
+  expect(panel.lines.some(line => line.kind === 'done')).toBe(false)
+  // A recorded end still says the release went live. Ten minutes is the same length either way.
+  const done = compareData(recordedRuns(release(10), { extendOpen: false }).runs[0]!, arionTarget('en'))!
+  const doneBig = headOf('compare', { data: done, level: 'simple', lang: 'en', text: en, reduced: true }).big.map(part => part.text).join('')
+  expect(doneBig).toContain('queue to live: 10 min instead of 24 min')
+  const donePanel = momentOf({ data: done, sets: laneModel(done), T: 10, selected: null, level: 'simple', lang: 'en', text: en })
+  expect(donePanel.lines.filter(line => line.kind === 'done').map(line => line.label)).toEqual(['live after +10 min'])
+})
+
 // ---------- Component: FlowView with its children stubbed ----------
 type Node = { tag: string; text: string; props: Record<string, unknown>; children: Node[]; parent: Node | null }
 const node = (tag: string, text = ''): Node => ({ tag, text, props: {}, children: [], parent: null })
@@ -313,4 +397,136 @@ it('the example replays release 126 final and the changes so far', () => {
   expect(release.play[1]).toBeCloseTo(20 * 60 + 34 + 1 / 60)
   expect(Math.max(...change.sets[0]!.main.steps.map(s => s.end))).toBe(EXAMPLE_NOW)
   expect(replayData(change.sets[0]!.main, change.origin!, EXAMPLE_NOW)!.play[1]).toBe(EXAMPLE_NOW)
+})
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+function flowItem(id: string, ref: string, start: number): ApiItem {
+  return {
+    id, kind: 'release', ref, title: '', prs: [], started_at: at(start), ended_at: at(start + 20), pct_done: 100, current_step_id: null,
+    eta: { p50_at: null, p90_at: null, basis: 'none', reason: null }, target: { minutes: 24, from_step: 'a', source: 'Arion' }, next_human_gate: null,
+  }
+}
+function flowStep(id: string, itemId: string, start: number): ApiStep {
+  return {
+    id, item_id: itemId, step_key: 'a', round: 1, kind: 'work', actor: actor('ci', 'Checks'), started_at: at(start), ended_at: at(start + 20),
+    outcome: 'ok', wait_reason: null, waits_for: null, side: false, source: 'paimos', norm: norm(),
+  }
+}
+function flowList(): ApiFlow {
+  return {
+    project_id: 'p', now: at(60), at: at(60), from: at(-40000), to: at(60), truncated: false,
+    items: [flowItem('r1', '125', 0), flowItem('r2', '126', 30)],
+    steps: [flowStep('s1', 'r1', 0), flowStep('s2', 'r2', 30)],
+    incidents: [],
+  }
+}
+function flowRun(id: string): ApiRun {
+  const item = flowList().items.find(row => row.id === id)!
+  return { project_id: 'p', now: at(60), at: at(60), item, steps: flowList().steps.filter(step => step.item_id === id), incidents: [], truncated: false }
+}
+async function ticks(turns: number) {
+  for (let i = 0; i < turns; i++) { await Promise.resolve(); await Vue.nextTick() }
+}
+function mountFlow(run: string | null) {
+  const props = Vue.reactive({ mode: 'replay' as const, run })
+  let loaded!: ReturnType<typeof useDeliveryFlow>
+  const app = renderer.createApp({
+    setup() {
+      loaded = useDeliveryFlow({
+        projectId: () => 'p', mode: () => props.mode, run: () => props.run, active: () => true, lang: () => 'en', open: () => null, now: () => T0 + 60 * 60_000,
+      })
+      return () => Vue.h('span')
+    },
+  })
+  const root = node('root'); apps.push(app); app.mount(root)
+  return { props, flow: loaded }
+}
+
+it('a failed run read settles until Retry and does not reload from a cleared list', async () => {
+  const counts = { list: 0, run: 0 }
+  http.handle = async path => {
+    if (path.includes('/runs/')) { counts.run++; return json({ error: 'down' }, 500) }
+    counts.list++; return json(flowList())
+  }
+  const view = mountFlow(null)
+  await ticks(40)
+  expect(view.flow.status.value).toBe('error')
+  expect(view.flow.empty.value).toBeNull()
+  expect(view.flow.choices.value.map(choice => choice.id)).toEqual(['r2', 'r1'])
+  const settled = { ...counts }
+  expect(settled.list).toBeLessThan(3)
+  expect(settled.run).toBeLessThan(3)
+  await ticks(40)
+  expect(counts).toEqual(settled)
+  view.flow.retry()
+  await ticks(40)
+  expect(view.flow.status.value).toBe('error')
+  expect(counts.list).toBe(settled.list + 1)
+  expect(counts.run).toBe(settled.run + 1)
+  const afterRetry = { ...counts }
+  await ticks(40)
+  expect(counts).toEqual(afterRetry)
+})
+
+it('selecting another run shows loading and keeps the run choices', async () => {
+  let release: ((value: Response) => void) | null = null
+  const counts = { list: 0, run: 0 }
+  http.handle = async path => {
+    counts[path.includes('/runs/') ? 'run' : 'list']++
+    if (path.includes('/runs/r1')) return new Promise<Response>(resolve => { release = resolve })
+    const id = path.includes('/runs/r2') ? 'r2' : ''
+    return json(id ? flowRun(id) : flowList())
+  }
+  const view = mountFlow(null)
+  await ticks(20)
+  expect(view.flow.status.value).toBe('ready')
+  expect(view.flow.runId.value).toBe('r2')
+  expect(view.flow.data.value?.sets[0]?.main.id).toBe('r2')
+  expect(counts).toEqual({ list: 1, run: 1 })
+  view.props.run = 'r1'
+  await Vue.nextTick()
+  expect(view.flow.status.value).toBe('loading')
+  expect(view.flow.empty.value).toBeNull()
+  expect(view.flow.data.value).toBeNull()
+  expect(view.flow.choices.value.map(choice => choice.id)).toEqual(['r2', 'r1'])
+  await ticks(20)
+  expect(counts).toEqual({ list: 1, run: 2 })
+  expect(view.flow.status.value).toBe('loading')
+  release!(json(flowRun('r1')))
+  release = null
+  await ticks(20)
+  expect(view.flow.status.value).toBe('ready')
+  expect(view.flow.empty.value).toBeNull()
+  expect(view.flow.runId.value).toBe('r1')
+  expect(view.flow.data.value?.sets[0]?.main.id).toBe('r1')
+  expect(counts).toEqual({ list: 1, run: 2 })
+})
+
+it('the run picker stays mounted through loading and errors', async () => {
+  const view = mount({
+    data: exampleReplay('r126'), dataKey: 'replay|r126', mode: 'replay',
+    choices: [{ id: 'r126', label: 'Release 126 (final)' }, { id: 'c991', label: 'AEON-991 (so far)' }], choice: 'r126',
+  })
+  await Vue.nextTick()
+  const pick = view.byTest('flow-pick')
+  expect(pick).toBeTruthy()
+  view.state.data = null
+  view.state.status = 'loading'
+  view.state.empty = 'runs'
+  await Vue.nextTick()
+  expect(view.byTest('flow-pick')).toBe(pick)
+  expect(view.byTest('flow-loading')).toBeTruthy()
+  expect(view.byTest('flow-empty')).toBeUndefined()
+  view.state.status = 'error'
+  await Vue.nextTick()
+  expect(view.byTest('flow-pick')).toBe(pick)
+  expect(view.byTest('flow-error')).toBeTruthy()
+  expect(view.byTest('flow-empty')).toBeUndefined()
+  // The false empty the pending read used to produce: ready, no data, empty "runs", choices still there.
+  view.state.status = 'ready'
+  view.state.empty = 'runs'
+  await Vue.nextTick()
+  expect(view.byTest('flow-pick')).toBe(pick)
+  expect(textOf(view.byTest('flow-pick')!)).toContain('Release 126')
+  expect(view.byTest('flow-empty')).toBeUndefined()
 })

@@ -49,8 +49,13 @@ export function momentOf(ctx: Ctx & { sets: LaneSet[]; T: number; selected: Lane
   let youIdle = false
   sets.forEach((set, si) => {
     const prefix = rel && set.title ? `${titleOf(set.main, lang)} · ` : ''
+    // "Live after" needs a recorded end. An open run's last minute is elapsed time, not arrival.
+    const complete = set.main.isTarget || set.main.facts?.ended != null
     if (rel && T >= runEnd(set.main)) {
-      lines.push({ key: `${si}:done`, lane: set.lanes[0]!, who: titleOf(set.main, lang), kind: 'done', label: put(text.liveAfter, { d: minutesText(runEnd(set.main)) }), expected: false, tail: '', more: 0 })
+      const end = runEnd(set.main)
+      lines.push(complete
+        ? { key: `${si}:done`, lane: set.lanes[0]!, who: titleOf(set.main, lang), kind: 'done', label: put(text.liveAfter, { d: minutesText(end) }), expected: false, tail: '', more: 0 }
+        : { key: `${si}:open`, lane: set.lanes[0]!, who: titleOf(set.main, lang), kind: 'work', label: put(text.soFarMin, { m: fmtMin(end, lang) }), expected: false, tail: '', more: 0 })
       return
     }
     for (const lane of set.lanes) {
@@ -286,9 +291,15 @@ export function headOf(mode: FlowMode, ctx: Ctx & { reduced: boolean }): Head {
   const target = data.sets[1]?.main
   if (!target) return { big: [], small: '' }
   const a = runEnd(main), b = runEnd(target), k = Math.round(a / b * 10) / 10
-  const big: Part[] = de
-    ? [{ text: titleOf(main, lang), strong: true }, { text: ' gegen das ' }, { text: titleOf(target, lang), strong: true }, { text: ', von der Queue bis live: ' }, { text: minutesText(a), strong: true }, { text: ' statt ' }, { text: minutesText(b), strong: true }, { text: ` · etwa ${dec(k, lang)}${TIMES} so lang` }]
-    : [{ text: titleOf(main, lang), strong: true }, { text: ' vs. the ' }, { text: titleOf(target, lang), strong: true }, { text: ', queue to live: ' }, { text: minutesText(a), strong: true }, { text: ' instead of ' }, { text: minutesText(b), strong: true }, { text: ` · about ${dec(k, lang)}${TIMES} as long` }]
+  // An open release has not gone live; the number is elapsed time, not a finish.
+  const openRelease = !main.isTarget && main.facts?.ended == null
+  const big: Part[] = openRelease
+    ? (de
+      ? [{ text: titleOf(main, lang), strong: true }, { text: ' gegen das ' }, { text: titleOf(target, lang), strong: true }, { text: ', ' }, { text: minutesText(a), strong: true }, { text: ` ${text.soFar} statt ` }, { text: minutesText(b), strong: true }]
+      : [{ text: titleOf(main, lang), strong: true }, { text: ' vs. the ' }, { text: titleOf(target, lang), strong: true }, { text: ', ' }, { text: minutesText(a), strong: true }, { text: ` ${text.soFar} instead of ` }, { text: minutesText(b), strong: true }])
+    : (de
+      ? [{ text: titleOf(main, lang), strong: true }, { text: ' gegen das ' }, { text: titleOf(target, lang), strong: true }, { text: ', von der Queue bis live: ' }, { text: minutesText(a), strong: true }, { text: ' statt ' }, { text: minutesText(b), strong: true }, { text: ` · etwa ${dec(k, lang)}${TIMES} so lang` }]
+      : [{ text: titleOf(main, lang), strong: true }, { text: ' vs. the ' }, { text: titleOf(target, lang), strong: true }, { text: ', queue to live: ' }, { text: minutesText(a), strong: true }, { text: ' instead of ' }, { text: minutesText(b), strong: true }, { text: ` · about ${dec(k, lang)}${TIMES} as long` }])
   const path = criticalPath(main)
   const incMinutes = path.filter(s => s.incident).reduce((n, s) => n + s.end - s.start, 0)
   let small: string
@@ -300,7 +311,9 @@ export function headOf(mode: FlowMode, ctx: Ctx & { reduced: boolean }): Head {
     const biggest = pieces[0]
     small = `${de ? 'Grün ist das Ziel.' : 'Green is the target.'}${biggest && biggest.minutes >= 1 ? de ? ` Der größte einzelne Brocken der Lücke ist ${biggest.what} (${minutesText(biggest.minutes)}).` : ` The biggest single piece of the gap is ${biggest.what} (${minutesText(biggest.minutes)}).` : ''}`
   } else {
-    small = `a ${TO} l ${de ? 'bis live und gesund' : 'until live and healthy'}: ${minutesText(a)}${incMinutes >= 1 ? de ? `; davon ${minutesText(incMinutes)} Störung + Behebung` : `; ${minutesText(incMinutes)} of it incident + recovery` : ''}.`
+    small = openRelease
+      ? `a ${TO} l ${text.soFar}: ${minutesText(a)}.`
+      : `a ${TO} l ${de ? 'bis live und gesund' : 'until live and healthy'}: ${minutesText(a)}${incMinutes >= 1 ? de ? `; davon ${minutesText(incMinutes)} Störung + Behebung` : `; ${minutesText(incMinutes)} of it incident + recovery` : ''}.`
   }
   return { big, small }
 }

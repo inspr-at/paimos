@@ -237,12 +237,15 @@ export interface Timeline {
   /** Playhead, visible window, whole range, play range. */
   T: number; v0: number; v1: number; r0: number; r1: number; p0: number; p1: number
   now: number | null; follow: boolean
+  /** Epoch ms of minute 0. A later read can move midnight without moving the person. */
+  origin: number | null
 }
 export interface TimelineDefaults { narrow: boolean }
 export const LIVE_AT = 0.65
 
 /** Default windows: Live 45 min (20 on phone) with now at 65 %; otherwise 40 min (15) from the start. */
 export function resetTimeline(t: Timeline, data: FlowData, { narrow }: TimelineDefaults) {
+  t.origin = data.origin
   t.r0 = data.range[0]; t.r1 = data.range[1]; t.p0 = data.play[0]; t.p1 = data.play[1]; t.now = data.now; t.follow = true
   if (data.now != null) { t.T = data.now; setWindow(t, narrow ? 20 : 45, data.now, LIVE_AT) }
   else { t.T = t.p0; setWindow(t, narrow ? 15 : 40, t.p0, 0.1) }
@@ -329,10 +332,19 @@ export function keyInput(t: Timeline, key: string, shiftKey: boolean): KeyResult
 
 /**
  * New data for the same view (a live update, a refetched run): ranges and "now" move,
- * the person's window and time stay. Following Live keeps the playhead on the new now.
+ * the person's window and time stay. Minute coordinates belong to an origin, so a read
+ * that moves midnight (an older run dropped out) is translated before the clamp.
+ * Following Live keeps the playhead on the new now.
  */
 export function refreshTimeline(t: Timeline, data: FlowData) {
   const wasNow = atNow(t)
+  if (t.origin != null && data.origin != null && t.origin !== data.origin) {
+    const shift = (t.origin - data.origin) / 60_000
+    t.T += shift
+    t.v0 += shift
+    t.v1 += shift
+  }
+  t.origin = data.origin
   t.r0 = data.range[0]; t.r1 = data.range[1]; t.p0 = data.play[0]; t.p1 = data.play[1]; t.now = data.now
   const w = Math.min(t.v1 - t.v0, t.r1 - t.r0)
   t.v0 = clamp(t.v0, t.r0, t.r1 - w); t.v1 = t.v0 + w
@@ -342,5 +354,5 @@ export function refreshTimeline(t: Timeline, data: FlowData) {
 }
 
 export function createTimeline(): Timeline {
-  return reactive<Timeline>({ T: 0, v0: 0, v1: 1, r0: 0, r1: 1, p0: 0, p1: 1, now: null, follow: true })
+  return reactive<Timeline>({ T: 0, v0: 0, v1: 1, r0: 0, r1: 1, p0: 0, p1: 1, now: null, follow: true, origin: null })
 }

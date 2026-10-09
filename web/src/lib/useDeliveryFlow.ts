@@ -3,7 +3,9 @@
 // hours and follows the server-sent hints (delivery.step, delivery.item, delivery.incident)
 // by reading again; Replay and Compare read one whole run. Every answer belongs to the
 // project, mode and run it was asked for: a stale answer is dropped, a failed read shows
-// an error rather than an old answer. Without any recorded run the labelled example shows.
+// an error rather than an old answer and stays there until Retry or a bounded refresh.
+// The run list is kept, so a failure cannot change the derived run and start another read.
+// Without any recorded run the labelled example shows.
 import { computed, onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue'
 import type { DeliveryLanguage } from './delivery'
 import { pick, type FlowData } from './deliveryFlow'
@@ -30,11 +32,12 @@ export interface FlowLoadOptions {
 export function useDeliveryFlow(options: FlowLoadOptions) {
   const open = options.open ?? ((url: string) => typeof EventSource === 'undefined' ? null : new EventSource(url) as unknown as SourceLike)
   const clock = options.now ?? (() => Date.now())
-  const status = ref<'loading' | 'ready' | 'error'>('loading')
+  const phase = ref<'loading' | 'ready' | 'error'>('loading')
   const list = shallowRef<ApiFlow | null>(null)
   const live = shallowRef<Recorded | null>(null)
   const single = shallowRef<Recorded | null>(null)
-  const loadedFor = ref('')
+  /** project|mode|run|example that `phase === ready` belongs to. Empty after a failure. */
+  const loadedView = ref('')
   let generation = 0
   let reading: AbortController | null = null
 
@@ -66,6 +69,17 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
       : { id: item.id, label: `${pick(runTitle(item), lang)} (${item.ended_at || ended(item.id) ? text.final : text.soFarRun})` })
   })
 
+  /** The answer on screen. A list-derived run change is not itself a loaded answer. */
+  function viewToken() {
+    const mode = options.mode()
+    const run = mode === 'live' ? '' : (runId.value ?? '')
+    return `${options.projectId()}|${mode}|${run}|${example.value ? 'example' : 'recorded'}`
+  }
+  const status = computed<'loading' | 'ready' | 'error'>(() => {
+    if (phase.value === 'error') return 'error'
+    if (phase.value === 'loading' || loadedView.value !== viewToken()) return 'loading'
+    return 'ready'
+  })
   /** What the page shows, built from the answers in the person's language. */
   const data = computed<FlowData | null>(() => {
     const mode = options.mode(), lang = options.lang()
@@ -92,8 +106,8 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
     reading?.abort()
     const controller = reading = new AbortController(), signal = controller.signal
     const now = clock()
-    const want = `${projectId}|${mode}`
-    if (loadedFor.value !== want) status.value = 'loading'
+    // Another project, mode or run is not the answer on screen. The same view refreshes in place.
+    if (loadedView.value !== viewToken() || phase.value !== 'ready') phase.value = 'loading'
     try {
       if (scope === 'all' || !list.value) {
         const answer = await readFlow(projectId, { from: new Date(now - LIST_DAYS * 86_400_000) }, signal)
@@ -115,16 +129,17 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
         }
       }
       if (turn !== generation || options.projectId() !== projectId) return
-      loadedFor.value = want
-      status.value = 'ready'
+      loadedView.value = viewToken()
+      phase.value = 'ready'
     } catch {
       if (turn !== generation || signal.aborted) return
-      loadedFor.value = ''
-      list.value = null; live.value = null; single.value = null
-      status.value = 'error'
+      // The list stays. Dropping it changes the derived run, and that used to start another read.
+      live.value = null; single.value = null
+      loadedView.value = ''
+      phase.value = 'error'
     } finally { if (reading === controller) reading = null }
   }
-  function retry() { status.value = 'loading'; void load('all') }
+  function retry() { phase.value = 'loading'; void load('all') }
 
   // ---------- Live hints: read again shortly after a burst ----------
   let source: SourceLike | null = null
@@ -170,12 +185,12 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
 
   watch(() => [options.active(), options.projectId()] as const, ([active], before) => {
     if (!active) { disconnect(); clearInterval(pollTimer); clearTimeout(hintTimer); generation++; reading?.abort(); return }
-    if (before && before[1] !== options.projectId()) { list.value = null; live.value = null; single.value = null; loadedFor.value = '' }
+    if (before && before[1] !== options.projectId()) { list.value = null; live.value = null; single.value = null; loadedView.value = ''; phase.value = 'loading' }
     void load('all'); connect(); startPoll()
   }, { immediate: true })
-  watch(() => [options.mode(), runId.value] as const, (next, before) => {
+  watch(() => [options.mode(), options.run()] as const, (next, before) => {
     if (!options.active() || !before) return
-    // Another mode reads the run list again (runs may have started meanwhile); another run reads only that run.
+    // Explicit selection only. A list-derived run (the latest, or a list cleared after a failure) is not a new read.
     if (next[0] !== before[0]) void load('all')
     else if (next[1] !== before[1]) void load('view')
   })

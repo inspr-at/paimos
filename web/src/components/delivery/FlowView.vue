@@ -101,6 +101,8 @@ function modeKey(event: KeyboardEvent) {
 
 // ---------- The bar ----------
 const live = computed(() => props.data?.now != null)
+/** Replay and Compare keep the run picker up while the next read is in flight or has failed. */
+const retainBar = computed(() => !props.data && props.mode !== 'live' && props.choices.length > 0)
 const at = (m: number) => props.data ? timeLabel(props.data, m) : ''
 const history = computed(() => live.value && !atNow(timeline))
 const chip = computed(() => history.value ? text.value.viewing.replace('{t}', at(timeline.T)) : text.value.live.replace('{t}', at(props.data?.now ?? 0)))
@@ -213,7 +215,7 @@ const emptyText = computed(() => {
       </template>
     </div>
 
-    <div v-if="data" ref="card" class="fl-card">
+    <div v-if="data || retainBar" ref="card" class="fl-card">
       <div class="fl-bar" data-testid="flow-bar">
         <template v-if="live">
           <span class="fl-livechip" :class="{ hist: history }" data-testid="flow-chip">
@@ -225,26 +227,27 @@ const emptyText = computed(() => {
           <select class="field fl-pick" :aria-label="mode === 'replay' ? text.pickRun : text.pickPair" :value="choice ?? ''" data-testid="flow-pick" @change="choose">
             <option v-for="c in choices" :key="c.id" :value="c.id">{{ c.label }}</option>
           </select>
-          <button type="button" class="play" :aria-label="player.state.playing ? text.pause : text.play" :disabled="reduced" :title="reduced ? text.rmNote : undefined" data-testid="flow-play" @click="toggle">
+          <button type="button" class="play" :aria-label="player.state.playing ? text.pause : text.play" :disabled="reduced || !data" :title="reduced ? text.rmNote : undefined" data-testid="flow-play" @click="toggle">
             <AppIcon :name="player.state.playing ? 'pause' : 'play'" :size="15" />
           </button>
           <span v-if="reduced" class="fl-rm" :title="text.rmNote" data-testid="flow-rm">{{ text.rmNote }}</span>
           <span v-else class="seg" role="radiogroup" :aria-label="text.speed" @keydown="speedKey">
             <button v-for="x in speeds" :key="x" type="button" role="radio" :data-speed="x" :aria-checked="player.state.speed === x" :tabindex="player.state.speed === x ? 0 : -1"
-              @click="player.state.speed = x">{{ x }}{{ TIMES }}</button>
+              :disabled="!data" @click="player.state.speed = x">{{ x }}{{ TIMES }}</button>
           </span>
         </template>
         <span class="fl-clock" :class="{ wide: !live }" :title="clock" data-testid="flow-clock">{{ clock }}</span>
         <span class="grow" />
         <span class="seg" role="radiogroup" :aria-label="text.zoom" @keydown="presetKey">
           <button v-for="p in presets" :key="p.id" type="button" role="radio" :data-zoom="p.id" :aria-checked="preset === p.id"
-            :tabindex="preset === p.id || (preset === null && p.id === 'fit') ? 0 : -1" @click="zoom(p.id)">{{ p.label }}</button>
+            :tabindex="preset === p.id || (preset === null && p.id === 'fit') ? 0 : -1" :disabled="!data" @click="zoom(p.id)">{{ p.label }}</button>
         </span>
-        <button type="button" class="btn sm fl-follow" :disabled="followOn" data-testid="flow-follow" @click="backToFollow(timeline)">
+        <button type="button" class="btn sm fl-follow" :disabled="!data || followOn" data-testid="flow-follow" @click="backToFollow(timeline)">
           <AppIcon :name="live ? 'pulse' : 'refresh'" :size="13" />
           <span class="stack"><span class="shown">{{ followOn ? followLabels[0] : followLabels[1] }}</span><span aria-hidden="true">{{ followLabels[0] }}</span><span aria-hidden="true">{{ followLabels[1] }}</span></span>
         </button>
       </div>
+      <template v-if="data">
       <p class="fl-readout" aria-live="polite" data-testid="flow-readout">
         <template v-if="readout"><b>{{ readout.tag }}</b>{{ readout.rest }}</template>
         <template v-else>
@@ -260,6 +263,16 @@ const emptyText = computed(() => {
       <FlowLanes v-model:focus-lane="focusLane" :data="data" :sets="sets" :timeline="timeline" :selected="selected?.step ?? null" :level="level" :lang="lang" :text="text"
         @select="select" @scrub="player.stop()" @focus="stageFocused = true" @blur="stageFocused = false" />
       <MomentPanel v-if="moment" :moment="moment" :text="text" :focus-key="focusKey" />
+      </template>
+      <div v-else-if="status === 'loading'" class="fl-state loading" aria-busy="true" data-testid="flow-loading">
+        <span class="sr-only">{{ text.loading }}</span>
+        <span class="sk ov-sk" /><span class="sk lanes-sk" /><span class="sk moment-sk" />
+      </div>
+      <div v-else-if="status === 'error'" class="fl-state banner err" role="alert" data-testid="flow-error">
+        <AppIcon name="alert" :size="16" />
+        <span class="grow"><b>{{ text.errT }}</b> {{ text.errB }}</span>
+        <button type="button" class="btn sm" @click="emit('retry')"><AppIcon name="refresh" :size="14" />{{ text.retry }}</button>
+      </div>
     </div>
     <div v-else-if="status === 'loading'" class="fl-card fl-state loading" aria-busy="true" data-testid="flow-loading">
       <span class="sr-only">{{ text.loading }}</span>
