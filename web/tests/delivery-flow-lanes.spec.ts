@@ -178,6 +178,64 @@ test('the overview brush pans and resizes the window, and its playhead moves the
   expect(minuteOf(await clock(page).textContent())).toBeLessThan(20 * 60)
 })
 
+test('at Fit all a phone overview keeps each 44 px handle inside and a drag at either edge resizes', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await setup(page)
+  await page.goto('/p/AEON/delivery?view=flow')
+  await page.getByTestId('flow-bar').getByRole('radio', { name: 'Fit all' }).click()
+  await expect.poll(() => windowText(page)).toBe('18:10 – 21:40')
+  await overview(page).scrollIntoViewIfNeeded()
+  const before = await windowText(page)
+  const geometry = await overview(page).evaluate(host => {
+    const svg = host.querySelector('svg')!
+    const frame = svg.getBoundingClientRect()
+    const box = (id: string) => host.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect()
+    const clip = (r: DOMRect) => ({
+      w: Math.min(r.right, frame.right) - Math.max(r.left, frame.left),
+      h: Math.min(r.bottom, frame.bottom) - Math.max(r.top, frame.top),
+    })
+    const area = (a: DOMRect, b: DOMRect) => {
+      const w = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+      const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+      return Math.max(0, w) * Math.max(0, h)
+    }
+    const hr = box('flow-overview-hr'), hl = box('flow-overview-hl'), ph = box('flow-overview-playhead')
+    const x = frame.right - 30, y = frame.top + frame.height / 2
+    return {
+      frameW: frame.width,
+      hl: clip(hl), hr: clip(hr),
+      playOverlap: area(hr, ph) + area(hl, ph),
+      rightPart: document.elementFromPoint(x, y)?.getAttribute('data-part') ?? '',
+      x, y,
+    }
+  })
+  expect(geometry.frameW).toBeGreaterThan(240)
+  expect(geometry.frameW).toBeLessThan(640)
+  expect(geometry.hl.w).toBeGreaterThanOrEqual(44)
+  expect(geometry.hl.h).toBeGreaterThanOrEqual(44)
+  expect(geometry.hr.w).toBeGreaterThanOrEqual(44)
+  expect(geometry.hr.h).toBeGreaterThanOrEqual(44)
+  expect(geometry.playOverlap).toBe(0)
+  // 30 px in from the right edge is outside the old 12 px sliver, so a miss does not resize.
+  expect(geometry.rightPart).toBe('hr')
+  await page.mouse.move(geometry.x, geometry.y)
+  await page.mouse.down()
+  await page.mouse.move(geometry.x - 36, geometry.y, { steps: 6 })
+  await page.mouse.up()
+  const shrunk = await windowText(page)
+  expect(shrunk?.split('–')[0]?.trim()).toBe(before?.split('–')[0]?.trim())
+  expect(minuteOf(shrunk?.split('–')[1] ?? null)).toBeLessThan(minuteOf(before?.split('–')[1] ?? null))
+  const left = await center(page, '[data-testid="flow-overview-hl"]')
+  const end = await windowText(page)
+  await page.mouse.move(left.x, left.y)
+  await page.mouse.down()
+  await page.mouse.move(left.x + 36, left.y, { steps: 6 })
+  await page.mouse.up()
+  const later = await windowText(page)
+  expect(later?.split('–')[1]?.trim()).toBe(end?.split('–')[1]?.trim())
+  expect(minuteOf(later)).toBeGreaterThan(minuteOf(end))
+})
+
 for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'], [400, 'light', 'en'], [400, 'dark', 'en'], [1440, 'light', 'de'], [400, 'dark', 'de']] as const) {
   test(`Flow lanes at ${width} ${theme} ${lang} keep controls still`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 400 ? 900 : 1100 })

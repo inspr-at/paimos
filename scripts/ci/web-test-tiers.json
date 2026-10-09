@@ -6592,6 +6592,8 @@
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 400 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"at Fit all a phone overview keeps each 44 px handle inside and a drag at either edge resizes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"lanes zoom, pan and move the time without moving a control, and a click never moves the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"panning an incident to the right edge keeps its caption inside the lane frame","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -14681,6 +14683,8 @@
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a live refresh keeps 02:00 when removing an older run moves the axis origin","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"a live update keeps the person viewing the past, and moves the playhead with now while following","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"an open step shows elapsed time and a separate expected end at both levels","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"auto-play is granted once per session","tier":"ESSENTIAL"}
     ,

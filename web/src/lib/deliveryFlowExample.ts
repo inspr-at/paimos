@@ -122,12 +122,20 @@ const r126Open = r126.incident!
 r126.incident = { ...r126Open, open: true }
 
 export const EXAMPLE_ORIGIN = new Date(2026, 9, 8).getTime()
+/** A step that has started and not finished by `now` is still open; its drawn end is expected. */
+function runningAt(run: FlowRun, now: number): FlowRun {
+  return {
+    ...run,
+    steps: run.steps.map(step => step.start < now && step.end > now ? { ...step, facts: { ...step.facts, open: true } } : step),
+  }
+}
 /** The Live example: four runs in one set of six lanes, release 126 the main one. */
 export function exampleLive(): FlowData {
+  const runs = [r126, c991, c983, c993].map(run => runningAt(run, EXAMPLE_NOW))
   return {
     origin: EXAMPLE_ORIGIN, now: EXAMPLE_NOW,
     range: [hm('18:10'), hm('21:40')], play: [hm('18:10'), hm('21:40')],
-    sets: [{ runs: [r126, c991, c983, c993], lanes: LANES, main: r126, multi: true }],
+    sets: [{ runs, lanes: LANES, main: runs[0]!, multi: true }],
   }
 }
 /** Runs Replay offers: release 126 final, the changes so far (cut at now). */

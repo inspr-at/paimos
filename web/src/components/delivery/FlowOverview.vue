@@ -50,17 +50,42 @@ const map = computed(() => {
   return { lines, segs, bands, targets, ticks, nowX: live ? g.X(now) : null }
 })
 const brush = computed(() => { const g = geo.value, t = props.timeline; return { x0: g.X(t.v0), x1: g.X(t.v1) } })
-// Touch and phone (AEON-1007): each handle and the playhead get a 44 px hit area. A handle's
-// area reaches outward, so on a narrow brush the two never cover each other or the brush.
+// Touch and phone (AEON-1007): a 44 px hit stays inside the overview. It reaches outward
+// so a narrow brush's handles do not cover each other, then shifts in only to stay on
+// screen and off the playhead.
 const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
 const hit = computed(() => coarse || geo.value.W < 640 ? 44 : 0)
-const handles = computed(() => {
-  const { x0, x1 } = brush.value, h = hit.value
-  return ([[x0, 'hl'], [x1, 'hr']] as const).map(([x, side]) => ({
-    x, side, hx: h ? (side === 'hl' ? x - h + 6 : x - 6) : x - 4, hw: h || 8, hy: h ? (OV_H - 14 - h) / 2 : 10, hh: h || OV_H - 33,
-  }))
-})
 const playX = computed(() => geo.value.X(props.timeline.T))
+const playHit = computed(() => {
+  const width = hit.value || 14, limit = geo.value.W
+  const hw = Math.min(width, Math.max(0, limit))
+  return { hx: Math.min(Math.max(0, playX.value - width / 2), Math.max(0, limit - hw)), hw, hy: 0, hh: OV_H - 14 }
+})
+const handles = computed(() => {
+  const { x0, x1 } = brush.value, h = hit.value, limit = geo.value.W, play = playHit.value
+  const overlaps = (hx: number, hw: number, other: { hx: number; hw: number } = play) => hx < other.hx + other.hw && other.hx < hx + hw
+  const inside = (preferred: number, width: number) => {
+    const hw = Math.min(width, Math.max(0, limit))
+    return { hx: Math.min(Math.max(0, preferred), Math.max(0, limit - hw)), hw }
+  }
+  const placed = ([[x0, 'hl'], [x1, 'hr']] as const).map(([x, side]) => {
+    if (!h) return { x, side, hx: x - 4, hw: 8, hy: 10, hh: OV_H - 33 }
+    let box = inside(side === 'hl' ? x - h + 6 : x - 6, h)
+    if (overlaps(box.hx, box.hw)) {
+      const outward = inside(side === 'hl' ? play.hx - h : play.hx + play.hw, h)
+      const inward = inside(side === 'hl' ? play.hx + play.hw : play.hx - h, h)
+      box = overlaps(outward.hx, outward.hw) ? inward : outward
+    }
+    return { x, side, hx: box.hx, hw: box.hw, hy: (OV_H - 14 - h) / 2, hh: h }
+  })
+  const [left, right] = placed
+  if (h && left && right && overlaps(left.hx, left.hw, right)) {
+    const rightHx = Math.max(0, limit - right.hw)
+    const leftHx = Math.max(0, Math.min(left.hx, rightHx - left.hw))
+    if (!overlaps(leftHx, left.hw) && !overlaps(rightHx, right.hw)) { left.hx = leftHx; right.hx = rightHx }
+  }
+  return placed
+})
 const valueText = computed(() => `${timeLabel(props.data, props.timeline.v0)} – ${timeLabel(props.data, props.timeline.v1)}`)
 
 type Drag = { kind: 'ovph' | 'hl' | 'hr' | 'brush' | 'bg'; x: number; v0: number; v1: number; moved: boolean; id: number }
@@ -128,7 +153,7 @@ function onKey(event: KeyboardEvent) {
       </g>
       <line class="ln-ph" :x1="playX" :x2="playX" y1="1" :y2="OV_H - 14" />
       <path class="ln-phtri" :d="`M${playX - 5},1h10l-5,6z`" />
-      <rect class="ln-phhit" data-part="ovph" data-testid="flow-overview-playhead" :x="playX - (hit || 14) / 2" y="0" :width="hit || 14" :height="OV_H - 14" />
+      <rect class="ln-phhit" data-part="ovph" data-testid="flow-overview-playhead" :x="playHit.hx" :y="playHit.hy" :width="playHit.hw" :height="playHit.hh" />
     </svg>
   </div>
 </template>
@@ -154,5 +179,5 @@ function onKey(event: KeyboardEvent) {
 .ln-grip { stroke: var(--teal-ink); stroke-width: 1; pointer-events: none; }
 .ln-ph { stroke: var(--teal); stroke-width: 2; pointer-events: none; }
 .ln-phtri { fill: var(--teal); pointer-events: none; }
-.ln-phhit, .ln-hhit { fill: transparent; cursor: ew-resize; }
+.ln-phhit, .ln-hhit { fill: transparent; cursor: ew-resize; pointer-events: all; }
 </style>

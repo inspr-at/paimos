@@ -34,7 +34,8 @@ const EN = {
   soFar: 'so far', alongside: 'alongside', handovers: 'hand-overs', recovered: 'healthy again after {n} recovery steps', recovering: 'recovery running',
   idleHead: 'Idle', idle: 'idle', nothingYou: 'nothing waiting on you', waitsOnYou: 'waiting on you', of: 'of', usually: 'usually', arion: 'Arion',
   clickSeg: 'Click a step for its details.', noInc: 'No incident at this moment.', incOn: 'Incident active', soFarMin: '{m} min so far', ends: 'ends {t}', liveAfter: 'live after +{d}',
-  terms: { started: 'Start', took: 'Took', outcome: 'Outcome', round: 'Round', waitsFor: 'Waits for', step: 'Step', actor: 'Actor', startEnd: `Start ${TO} end`, duration: 'Duration', source: 'Source' },
+  ongoing: 'still going',
+  terms: { started: 'Start', took: 'Took', elapsed: 'So far', expectedEnd: 'Expected end', outcome: 'Outcome', round: 'Round', waitsFor: 'Waits for', step: 'Step', actor: 'Actor', startEnd: `Start ${TO} end`, duration: 'Duration', source: 'Source' },
   sources: { github_app: 'GitHub App', paimos: 'PAIMOS', ops_rollout: 'OPS rollout record', arion: 'Arion target (arion.md § 4)' } as Record<string, string>,
   kindWords: { work: 'work', wait: 'wait', rework: 'rework' } as Record<string, string>, incidentWord: 'incident', sideWord: 'alongside',
   actors: {
@@ -70,7 +71,8 @@ const DE: FlowText = {
   soFar: 'bisher', alongside: 'nebenher', handovers: 'Übergaben', recovered: 'nach {n} Behebungsschritten wieder gesund', recovering: 'Behebung läuft',
   idleHead: 'Frei', idle: 'frei', nothingYou: 'nichts wartet auf dich', waitsOnYou: 'wartet auf dich', of: 'von', usually: 'üblich', arion: 'Arion',
   clickSeg: 'Einen Schritt anklicken für Details.', noInc: 'Gerade keine Störung.', incOn: 'Störung aktiv', soFarMin: '{m} min bisher', ends: 'Ende {t}', liveAfter: 'live nach +{d}',
-  terms: { started: 'Start', took: 'Dauer', outcome: 'Ergebnis', round: 'Runde', waitsFor: 'Wartet auf', step: 'Schritt', actor: 'Akteur', startEnd: `Start ${TO} Ende`, duration: 'Dauer', source: 'Quelle' },
+  ongoing: 'läuft noch',
+  terms: { started: 'Start', took: 'Dauer', elapsed: 'Bisher', expectedEnd: 'Erwartetes Ende', outcome: 'Ergebnis', round: 'Runde', waitsFor: 'Wartet auf', step: 'Schritt', actor: 'Akteur', startEnd: `Start ${TO} Ende`, duration: 'Dauer', source: 'Quelle' },
   sources: { github_app: 'GitHub-App', paimos: 'PAIMOS', ops_rollout: 'OPS-Rollout-Eintrag', arion: 'Arion-Ziel (arion.md § 4)' },
   kindWords: { work: 'Arbeit', wait: 'Warten', rework: 'Nacharbeit' }, incidentWord: 'Störung', sideWord: 'nebenher',
   actors: {
