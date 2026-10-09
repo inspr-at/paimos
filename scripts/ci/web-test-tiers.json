@@ -70,32 +70,6 @@
   "policy": "ESSENTIAL runs on PRs and merge groups plus changed-area cases. GATED-FULL preserves the prior Go/unit/browser gate. NIGHTLY includes never-gated browser cases. Runtime reconciliation warns, defaults new cases to NIGHTLY and drops stale entries. Known-flaky cases and deletion candidates cannot be ESSENTIAL; AEON-679 rule B removes reviewed low-value categories; protected candidates stay available."
   ,
   "postGateCases": [
-    "browser:tests/accounts-computers.spec.ts:AEON-685: approval link expands once and honors folding at 1024"
-    ,
-    "browser:tests/accounts-computers.spec.ts:AEON-685: approval link expands once and honors folding at 1280"
-    ,
-    "browser:tests/accounts-computers.spec.ts:AEON-685: approval link expands once and honors folding at 1440"
-    ,
-    "browser:tests/accounts-computers.spec.ts:AEON-685: approval link expands once and honors folding at 390"
-    ,
-    "browser:tests/accounts-computers.spec.ts:AEON-685: approval link expands once and honors folding at 900"
-    ,
-    "browser:tests/accounts-computers.spec.ts:AEON-685: owner verification stays put at 1024 dark"
-    ,
-    "browser:tests/accounts-computers.spec.ts:AEON-685: owner verification stays put at 1024 light"
-    ,
-    "browser:tests/accounts-computers.spec.ts:AEON-685: owner verification stays put at 1440 dark"
-    ,
-    "browser:tests/accounts-computers.spec.ts:AEON-685: owner verification stays put at 1440 light"
-    ,
-    "browser:tests/accounts-computers.spec.ts:AEON-685: owner verification stays put at 390 dark"
-    ,
-    "browser:tests/accounts-computers.spec.ts:AEON-685: owner verification stays put at 390 light"
-    ,
-    "browser:tests/accounts-computers.spec.ts:AEON-685: queued verification reports a failed pairing refresh"
-    ,
-    "browser:tests/accounts-computers.spec.ts:AEON-685: tablet verification control is independent of the status label width"
-    ,
     "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
@@ -124,23 +98,15 @@
     ,
     "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 390 light"
     ,
-    "browser:tests/agent-pause.spec.ts:1440 dark: scope, preview, levels and report controls stay under the pointer"
-    ,
     "browser:tests/agent-pause.spec.ts:1440 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
     ,
     "browser:tests/agent-pause.spec.ts:1440 dark: the head stays on one line beside the session panel while a stop is requested"
-    ,
-    "browser:tests/agent-pause.spec.ts:1440 light: scope, preview, levels and report controls stay under the pointer"
     ,
     "browser:tests/agent-pause.spec.ts:1440 light: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
     ,
     "browser:tests/agent-pause.spec.ts:1440 light: the head stays on one line beside the session panel while a stop is requested"
     ,
-    "browser:tests/agent-pause.spec.ts:390 dark: scope, preview, levels and report controls stay under the pointer"
-    ,
     "browser:tests/agent-pause.spec.ts:390 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
-    ,
-    "browser:tests/agent-pause.spec.ts:390 light: scope, preview, levels and report controls stay under the pointer"
     ,
     "browser:tests/agent-pause.spec.ts:390 light: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
     ,
@@ -158,8 +124,6 @@
     ,
     "browser:tests/agent-pause.spec.ts:AEON-783: the footer summary of a running wind-down opens the head chip status"
     ,
-    "browser:tests/agent-pause.spec.ts:State groups running agents, idle hosts and offline hosts in that order"
-    ,
     "browser:tests/agent-pause.spec.ts:Where lists computers without running agents and refuses them instead of starting nothing"
     ,
     "browser:tests/agent-pause.spec.ts:a failed status read says so with a Retry instead of hiding the wind-down"
@@ -169,8 +133,6 @@
     "browser:tests/agent-pause.spec.ts:dismissing a completed report before its deadline has no withdrawal toast or Undo"
     ,
     "browser:tests/agent-pause.spec.ts:wind-down previews only owned work and a reloaded all-computer report leaves new agents untouched"
-    ,
-    "browser:tests/agent-pause.spec.ts:wind-down previews only owned work and a reloaded all-host report leaves new agents unticked"
     ,
     "browser:tests/agent-pause.spec.ts:without control permission pause actions and wind-down are hidden"
     ,
@@ -4554,38 +4516,6 @@
     ,
     {"kind":"browser","file":"tests/accounts-card-fit.spec.ts","name":"accounts and computers fit every width, panel open and closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: approval link expands once and honors folding at 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: approval link expands once and honors folding at 1280","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: approval link expands once and honors folding at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: approval link expands once and honors folding at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: approval link expands once and honors folding at 900","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: owner verification stays put at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: owner verification stays put at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: owner verification stays put at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: owner verification stays put at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: owner verification stays put at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: owner verification stays put at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: queued verification reports a failed pairing refresh","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: tablet verification control is independent of the status label width","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-716: stalled verification reports the ownership fence and remains retryable after settlement","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-716: verification warnings preserve offline and account recovery controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Agents at once saves one ceiling and independent harness limits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 1020 to 950px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 1100 to 1030px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -4602,11 +4532,7 @@
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away with an expired verification keeps the head inside the card and its controls put at 640, 720 and 800","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Check now says what came back: a failure as a failure, still nothing, then the reading","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Needs you lists what blocks agents with the fix or its details; a low-quota notice moves here with its urgency","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Touch ID pairing readiness and upgrade guidance keep the computer control in place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"a name, a cell and Details open the right panel in Settings","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -4618,17 +4544,7 @@
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"loading, a failed read with Try again, and an empty workspace each say so in the status place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"no reading yet is said once, with Check now; unsupported limits and offline computers stay honest","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"one card per computer: offline says why and the fix, and never calls an account ready","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"pacing is one summary button; the existing settings and editors open from it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"people without account management see Details, not Verify again","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"phone: stacked rows, no sideways scroll","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"stored ceiling arrives without a made-up total while the snapshot loads","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head and the body keep their controls put through fold, verify and refresh at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -4644,23 +4560,11 @@
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head keeps its height, and the toggle stays put, whether or not Verify again is shown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the row menu carries Sprint, Hold and Remove; the computer menu its own actions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the wide status scan encounters Away beside Verify again","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"warning pills and fixes clear 4.5:1 in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"warning pills and fixes clear 4.5:1 in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"with 0 running the backend's default ceiling stays 15","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"with 2 running the backend's default ceiling stays 15","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/activity-history.spec.ts","name":"automatic history is Aeon, and a person named System stays a person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/activity-history.spec.ts","name":"history screenshots at 390 and 1600, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/add-account.spec.ts","name":"Add an account on the agents card opens the steps; Manage accounts does not","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/add-account.spec.ts","name":"a failed computer list offers Try again and then the steps","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -4932,15 +4836,11 @@
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1024 light: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 dark: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 dark: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 dark: the head stays on one line beside the session panel while a stop is requested","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 light: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 light: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -4948,13 +4848,9 @@
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 light: the head stays on one line beside the session panel while a stop is requested","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 dark: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 dark: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 light: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 light: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -4974,8 +4870,6 @@
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"AEON-783: the footer summary of a running wind-down opens the head chip status","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"State groups running agents, idle hosts and offline hosts in that order","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"Where lists computers without running agents and refuses them instead of starting nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"a failed status read says so with a Retry instead of hiding the wind-down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -4985,8 +4879,6 @@
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"dismissing a completed report before its deadline has no withdrawal toast or Undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"wind-down previews only owned work and a reloaded all-computer report leaves new agents untouched","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"wind-down previews only owned work and a reloaded all-host report leaves new agents unticked","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"without control permission pause actions and wind-down are hidden","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5200,27 +5092,13 @@
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"Queued folds per person, says what waits, and a run link opens it without changing the preference","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a list read that started before Remove does not bring the computer back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a queued run can be cancelled from /agents","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a runs read that started before account Remove does not bring its cancelled run back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a section preference that lands after a run link keeps Queued open until the person folds it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a stored folded choice opens folded, without a flash of the cards","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a stored open choice opens open, without a flash of the folded line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"account and capacity reads that started before computer Remove do not bring its account back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"accounts and computers fold into one calm line, remembered per person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"every account row menu has a person-only Remove that names what goes away","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"revoked computers fold into one disclosure and a person removes them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"without account management, account rows have no menu","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"1024 dark wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5342,57 +5220,13 @@
     ,
     {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"a partial block names the account that needs attention at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"computer compatibility advice at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"computer compatibility advice at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"every shared reason shows its fix beside a ready harness","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"every shared reason shows its fix beside a ready harness at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"every shared reason shows its fix beside a ready harness at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"harness row shows the specific cli_unavailable command at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"harness row shows the specific cli_unavailable command at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"harness row shows the specific cli_unavailable command at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"harness row shows the specific cli_unavailable command at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"harness row shows the specific login_required command at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"harness row shows the specific login_required command at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"harness row shows the specific login_required command at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"harness row shows the specific login_required command at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"harness row shows the specific pin_missing command at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"harness row shows the specific pin_missing command at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"harness row shows the specific pin_missing command at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"harness row shows the specific pin_missing command at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"offline and revoked computers do not present prior harness reports as live readiness","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"pairing blockers and verification refusal are named at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"pairing blockers and verification refusal are named at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"partial block names the account that needs attention at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"partial block names the account that needs attention at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"per-harness readiness and recovery at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"per-harness readiness and recovery at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"per-harness readiness and recovery at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"per-harness readiness and recovery at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"six blocked accounts of seven stay blocked when the list is truncated","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5506,75 +5340,13 @@
     ,
     {"kind":"browser","file":"tests/agents-phone-rows.spec.ts","name":"phone session rows are compact and aligned at 430px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Hold for 2 hours or until tomorrow’s hours, with a pool’s own reserve kept","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Keep for you: I'm away until… is one save and one header chip","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Keep for you: a numeric per-vendor share previews and saves that share","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Keep for you: the popover is keyboard-complete, previews live and saves one choice","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Manage opens Settings / Accounts","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Needs you appears only when something waits, with the sign-in and its command","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Sprint and Hold from the row menu, and back to the plan","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Sprint promises the limiting reset, including the 5-hour window","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"a failed schedule save keeps the editor open and changes nothing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"a save whose answer is lost: committed, answer lost","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"a save whose answer is lost: never arrived","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"a save whose answer is lost: server unreachable","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"a server routing wait is the row’s one state","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"night editor: day and night, three shifts with adjustable pace, custom blocks","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"nothing waits: no Needs you, a compact live line, and Accounts and computers as one status line","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"nothing waits: no Needs you, a compact live line, and one card per computer","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"phone › stacked rows, no sideways scroll, editors as bottom sheets","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"screenshots › shot away","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"screenshots › shot keep-editor","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"screenshots › shot menu","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"screenshots › shot needs-signin","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"screenshots › shot pacing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"screenshots › shot plan-first","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"screenshots › shot quiet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"screenshots › shot sprint-hold","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"screenshots › shot stale","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"screenshots › shot unavailable","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"screenshots › shot week-editor","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"sign-in prompts only for a confirmed sign-out of that account","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"stale readings are dimmed and dated, and Manage opens Settings / Accounts","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"the one-time plan card: Looks right saves Auto; Change opens the pacing settings","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"the plan card on a release 11 schedule offers Turn off","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"without account.manage the pacing controls stay visible but inert","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"work days and nights: presets save the schedule at once","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"work week editor: a custom week with its own hours, live preview, Save","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a deep problem marks every ancestor, folded parents name it, and arrow keys fold and walk the tree","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9675,8 +9447,6 @@
     {"kind":"browser","file":"tests/provenance.spec.ts","name":"instruction versions render at 390px in light, pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/provenance.spec.ts","name":"rule versions show a hash and version without instruction text","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/quota-warnings.spec.ts","name":"/agents names affected sessions and respects availability-only redaction","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/quota-warnings.spec.ts","name":"quota thresholds retain controls through edits, errors and save at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14198,6 +13968,8 @@
     ,
     {"kind":"vitest","file":"tests/agent-indicator.unit.test.ts","name":"keeps Calm and hovering off for missing or malformed data: null","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/agent-indicator.unit.test.ts","name":"keeps Calm and hovering off for missing or malformed data: undefined","occurrence":1,"tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/agent-indicator.unit.test.ts","name":"keeps Calm and hovering off for missing or malformed data: undefined","occurrence":2,"tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agent-indicator.unit.test.ts","name":"keeps Calm and hovering off for missing or malformed data: {\"style\":\"unknown\",\"hovering\":\"true\"}","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -14630,6 +14402,8 @@
     ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"online, no readings yet > is online, seen just now, with the full identities","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"online, no readings yet > shows observed spend when the vendor reports no window","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification reporting failures > explains a rejected report without blaming the vendor protocol or exposing raw errors","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification reporting failures > shows a stalled check as a problem without changing its active ownership","tier":"ESSENTIAL"}
@@ -14983,6 +14757,8 @@
     {"kind":"vitest","file":"tests/graph-motion.unit.test.ts","name":"keeps Default for missing or malformed data: \"slow\"","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/graph-motion.unit.test.ts","name":"keeps Default for missing or malformed data: null","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/graph-motion.unit.test.ts","name":"keeps Default for missing or malformed data: undefined","occurrence":1,"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/graph-motion.unit.test.ts","name":"keeps Default for missing or malformed data: undefined","occurrence":2,"tier":"GATED-FULL"}
     ,
@@ -15642,6 +15418,14 @@
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"rows > tells “yours · reset” from a row only the person has","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > Undo of a pick puts back the stored effort (high), so a later Default effort change leaves the row alone","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > Undo of a pick puts back the stored effort (none), so a later Default effort change still reaches the row","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > Undo of a reset brings a stored effort back","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > Undo of a reset does not turn an inherited effort into a stored one","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > a draft row writes nothing until it is picked, and picking the default for everyone stores nothing at all","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > asks again once when a write lands between the two reads, and gives up in words after that","tier":"ESSENTIAL"}
@@ -15884,15 +15668,35 @@
     ,
     {"kind":"vitest","file":"tests/profile-permissions.unit.test.ts","name":"profile permissions describe the caller’s personal profile","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a failed later question page keeps the questions read and says the rest are unread","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a failed question read keeps the last questions shown and reports them incomplete","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a newer read never yields to an older revision answered later","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a read that began before Pause cannot put the older lead back, and a fresh read follows","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a session read answered after a reset is not admitted for the next person","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"an unanswered question stays with the lead after its session stopped","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"gate and merged totals cover every generation and survive trimming the retained history","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"open questions are paged within a bound and a remainder is reported, never hidden","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a deferred bulk assignee opening cannot replace a later close action","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a deferred bulk assignee opening cannot replace a later direct release action","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a deferred bulk assignee opening cannot replace a later labels action","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a deferred bulk assignee opening cannot replace a later move action","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a deferred bulk assignee opening cannot replace a later priority action","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a deferred bulk assignee opening cannot replace a later release action","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a deferred bulk assignee opening cannot replace a later status action","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a pending related lookup cannot navigate after the person changes","tier":"GATED-FULL"}
     ,
@@ -19534,6 +19338,8 @@
     ,
     {"kind":"vitest","file":"tests/work-creation-vocabulary.unit.test.ts","name":"workspace naming reads are shared and stale identities cannot restore old names","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/work-fixtures.unit.test.ts","name":"HTTP snapshot scenarios keep a healthy stream while explicit event transports remain in control","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/work-fixtures.unit.test.ts","name":"bulk nesting accepts a retired task kind and preserves a separately stale record","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-fixtures.unit.test.ts","name":"explicit canonical shape wins over visible children and non-work children do not create a work parent","tier":"ESSENTIAL"}
@@ -19575,8 +19381,6 @@
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"failed limit writes retain the last server values and stale revisions are explained","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"kinds of work links to the integrated Models board and preserves the legacy redirect","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"kinds of work names the registered Models page and links to no board","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"paginates with explicit bounds and reports truncation instead of a complete list","tier":"ESSENTIAL"}
     ,

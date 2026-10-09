@@ -34,6 +34,7 @@ it('rejects direct and aliased locale detectors while allowing language selectio
 })
 
 // This whole-source guard also catches files that were not in AEON-998's inventory.
+// Reading every source file exceeds the 5s default when the unit suite shares a runner.
 it('has no app locale switches outside the shared helper', () => {
   const violations: unknown[] = []
   function scan(directory: URL, prefix = '') {
@@ -45,4 +46,4 @@ it('has no app locale switches outside the shared helper', () => {
   }
   scan(new URL('../src/', import.meta.url))
   expect(violations).toEqual([])
-})
+}, 20_000)

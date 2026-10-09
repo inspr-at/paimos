@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync } from 'node:fs'
 import { test, expect, type Page, type Locator } from '@playwright/test'
 import { fixtures, mockView, mockWork } from './work-fixtures'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
 import { expectStableControls } from './helpers/stable'
 
 test.use({ launchOptions: { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } })
-const shots = 'test-results/aeon-646'
 const rows = (page: Page) => page.getByRole('grid', { name: 'Tickets' }).locator('tr.ticket-row:not(.ghost)')
 const row = (page: Page, key: string) => rows(page).filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const gear = (page: Page) => page.getByRole('button', { name: 'Choose what Hide hides', exact: true })
 const hide = (page: Page) => page.locator('.closed-switch input')
 const chooser = (page: Page, width: number) => width === 390 ? page.getByRole('dialog', { name: 'Filters', exact: true }) : page.getByRole('dialog', { name: 'What Hide hides', exact: true })
-async function shot(page: Page, name: string) { await page.evaluate(() => document.fonts.ready); mkdirSync(shots, { recursive: true }); await page.screenshot({ path: `${shots}/${name}.png` }) }
+async function shot(page: Page, name: string) { await page.evaluate(() => document.fonts.ready); await page.screenshot({ path: test.info().outputPath(`${name}.png`) }) }
 async function setup(page: Page, width = 1440, theme = 'light') {
   await page.setViewportSize({ width, height: 900 })
   const data = fixtures()
@@ -136,7 +134,7 @@ test.describe('shared view membership', () => {
       await page.goto('/p/PHAROS?view=graph')
       const canvas = page.locator('.ticket-graph-canvas')
       const membership = async () => {
-        await expect(page.locator('.graph-heading [role="status"]')).toHaveText(/50 tickets · 5 epics/)
+        await expect(page.locator('.graph-heading [role="status"]')).toHaveText(/45 leaves · 5 parents ·/)
         await expect(canvas).toHaveAttribute('data-ready', 'true')
         await expect(canvas.locator(`[data-node-id="${accepted.id}"]`)).toHaveCount(1)
         await expect(canvas.locator(`[data-node-id="${qa.id}"]`)).toHaveCount(0)
@@ -155,7 +153,7 @@ test.describe('shared view membership', () => {
       }, scrollAreas: { body: width === 390 ? panel.locator('.sheet-scroll') : panel }, interactions: [
         { name: 'include Done-bucket work', run: async () => {
           await done.uncheck()
-          await expect(page.locator('.graph-heading [role="status"]')).toHaveText(/60 tickets · 5 epics/)
+          await expect(page.locator('.graph-heading [role="status"]')).toHaveText(/55 leaves · 5 parents ·/)
           await expect(canvas.locator(`[data-node-id="${accepted.id}"]`)).toHaveCount(1)
           await expect(canvas.locator(`[data-node-id="${qa.id}"]`)).toHaveCount(1)
         } },
@@ -178,12 +176,12 @@ test.describe('shared view membership', () => {
     for (const node of finished.slice(0, 2)) world.work.nodes.find(item => item.id === node.id)!.state = node.status
     const { calls } = await mockTicketGraph(page, world)
     await page.goto('/p/PHAROS?view=graph&hide_states=accepted')
-    await expect(page.locator('.graph-heading [role="status"]')).toHaveText(/59 tickets · 5 epics/)
+    await expect(page.locator('.graph-heading [role="status"]')).toHaveText(/54 leaves · 5 parents ·/)
     expect(calls.some(query => query.get('include_closed') === 'true')).toBe(true)
     const panel = await open(page, 1440)
     await panel.getByRole('checkbox', { name: 'Archived', exact: true }).check()
     await panel.getByRole('checkbox', { name: 'Done', exact: true }).check()
-    await expect(page.locator('.graph-heading [role="status"]')).toHaveText(/50 tickets/)
+    await expect(page.locator('.graph-heading [role="status"]')).toHaveText(/45 leaves · 5 parents ·/)
     await close(page, 1440)
     await page.getByRole('tab', { name: 'Outline', exact: true }).click()
     await expect(page).toHaveURL(/hide_states=done,accepted,archived/)

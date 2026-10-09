@@ -80,6 +80,8 @@ jobs:
         run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" apt zsh fish
       - name: Test this shard (essential plus changed area, or full on main)
         env:
+          # Backup drills use the clients in the exact PostgreSQL 18 service.
+          AEON_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
           GOFLAGS: -count=1
         run: node scripts/test-tiers/cli.mjs run go --all --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job go-test-${{ matrix.shard }}
       - name: Preserve test tier measurements
@@ -184,7 +186,7 @@ jobs:
       - name: Test tier selector regressions
         run: node --test scripts/test-tiers/test-tiers.test.mjs
       - name: Validate every Go tier against native collection
-        run: node scripts/test-tiers/cli.mjs check go
+        run: node scripts/test-tiers/cli.mjs check go --strict
       - name: Check the shard list covers go test ./...
         run: |
           go run ./scripts/ci-go-shards check -count 7
@@ -250,6 +252,8 @@ jobs:
         run: npm ci
       - name: Check Docker web inputs without Docker
         run: node --test scripts/docker-web-inputs.test.mjs
+      - name: Require every web case to be classified
+        run: node scripts/test-tiers/cli.mjs check web --strict
       - name: Install shells used by command round-trip unit tests
         timeout-minutes: 4
         run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" apt fish zsh
