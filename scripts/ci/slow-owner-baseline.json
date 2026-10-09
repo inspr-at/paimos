@@ -486,5 +486,75 @@
       "hostedOnly": true,
       "gate": true
     }
+  },
+  "validation": {
+    "ticket": "AEON-1024",
+    "implementationCommit": "7e9cb542e",
+    "browser": {
+      "files": 9,
+      "passed": 224,
+      "failed": 0,
+      "flaky": 0,
+      "skipped": 0,
+      "workers": 1,
+      "retries": 0
+    },
+    "goSplits": {
+      "selectedCases": 196,
+      "parts": [
+        {
+          "part": 1,
+          "commit": "eaf6b6326",
+          "passed": 85,
+          "skipped": 0,
+          "seconds": 87.938
+        },
+        {
+          "part": 2,
+          "commit": "7e9cb542e",
+          "passed": 111,
+          "skipped": 0,
+          "seconds": 96.179
+        }
+      ]
+    },
+    "tiersTestsPassed": 213,
+    "shardTestsPassed": 32,
+    "ownershipTestsPassed": 33,
+    "initialGraphCapFailure": "The second split exposed an aggregate deadline in the 1501-node bulk fixture. Explicit fixture ANALYZE restored isolated execution; all original assertions and fixture rows remain.",
+    "followUpOwner": "AEON lead / AEON-1014 coordinator: seven-day CI outcome after deployment, plus unchanged broad-run benchmark failures.",
+    "extraUnsplitGoRun": {
+      "runCommit": "5285adde8",
+      "namesExactlyOnce": true,
+      "nativeCases": 209,
+      "passed": 205,
+      "failed": 4,
+      "skipped": 0,
+      "failures": [
+        {
+          "name": "TestList6000Performance",
+          "lane": "timing"
+        },
+        {
+          "name": "TestList6000PerformanceWithStaleKindStatistics",
+          "lane": "timing"
+        },
+        {
+          "name": "TestPlanningBulkUsagePerformance",
+          "lane": "timing"
+        },
+        {
+          "name": "TestList6000WithProjectVisibility",
+          "lane": "regular"
+        }
+      ]
+    },
+    "static": {
+      "command": "node scripts/ci-static.mjs --merge-main (remote locked wrapper)",
+      "checkedCommit": "7e9cb542e",
+      "exitCode": 0,
+      "passed": 40,
+      "optionalSkipped": 0
+    }
   }
 }
