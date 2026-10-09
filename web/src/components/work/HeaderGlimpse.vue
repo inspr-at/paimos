@@ -24,7 +24,7 @@ const paint = ref(false), userPaused = ref(false), occluded = ref(false)
 const data = shallowRef<GraphData>({ nodes: [], links: [] })
 const column = ref<HTMLElement>()
 const region = ref({ top: '0px', height: '0px' })
-const mask = ref('none'), measured = ref(false)
+const mask = ref('none'), measured = ref(false), measuredViewport = ref(0)
 const controls = ref<HTMLElement>(), controlSpot = ref<{ left: string; top: string; width: string; height: string } | null>(null)
 const shown = ref(0), truncated = ref(false)
 const canvas = ref<{ setPaused: (value: boolean) => void } | null>(null)
@@ -45,12 +45,20 @@ function measureRegion() {
   const boxes = [...page.querySelectorAll<HTMLElement>(GLIMPSE_CLEAR_SELECTOR)]
     .filter(el => el.getClientRects().length)
     .map(el => { const rect = el.getBoundingClientRect(); return { x: rect.left - box.left, y: rect.top - top, width: rect.width, height: rect.height } })
+    .filter(box => box.width > 0 && box.height > 0)
   mask.value = glimpseTextMask(box.width, height, boxes)
   const spot = glimpseControlSpot(box.width, height, boxes, { width: controls.value?.offsetWidth ?? 310, height: controls.value?.offsetHeight ?? 34 })
   controlSpot.value = spot ? { left: `${spot.x}px`, top: `${spot.y}px`, width: `${spot.width}px`, height: `${spot.height}px` } : null
+  measuredViewport.value = window.innerWidth
   measured.value = true
 }
-function scheduleMeasure() { cancelAnimationFrame(measureFrame); measureFrame = requestAnimationFrame(measureRegion) }
+function scheduleMeasure() {
+  // Resize/content changes invalidate both the mask and the hit target until
+  // their next shared measurement; stale controls cannot cover new text.
+  measured.value = false
+  cancelAnimationFrame(measureFrame)
+  measureFrame = requestAnimationFrame(measureRegion)
+}
 
 function applyMotion() { canvas.value?.setPaused(userPaused.value || occluded.value || document.hidden) }
 function openGraph() { void router.push({ path: `/p/${encodeURIComponent(props.projectKey)}/tickets`, query: { ...filtersToQuery(filters.value), view: 'graph' } }) }
@@ -123,7 +131,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="paint" ref="column" class="glimpse-col" :style="region" :data-measured="measured" data-header-glimpse="on" :data-shown="shown">
+  <div v-if="paint" ref="column" class="glimpse-col" :style="region" :data-measured="measured" :data-measured-viewport="measuredViewport" data-header-glimpse="on" :data-shown="shown">
     <div class="glimpse-canvas" :style="{ '--glimpse-text-mask': mask }" aria-hidden="true">
       <GraphCanvas ref="canvas" glimpse layout-bias="elliptic" :data="data" :fps="fps" canvas-class="header-glimpse-canvas" />
     </div>

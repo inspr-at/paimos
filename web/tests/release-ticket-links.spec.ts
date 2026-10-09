@@ -9,7 +9,7 @@ import { mockReleases, releaseHistory } from './releases-fixtures'
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
 const panel = (page: Page) => sheet(page).getByRole('complementary', { name: 'Ticket details' })
-const chips = (page: Page) => sheet(page).locator('.detail .tickets')
+const chips = (page: Page) => sheet(page).locator('.detail .changes')
 const TITLE = 'Connect Hetzner Cloud for managed provisioning'
 
 // The second release names AEON-74 (no such ticket here) and PHAROS-11 (a ticket here).
@@ -74,8 +74,11 @@ test('a modified click keeps the link: the ticket opens in a new tab, not the pa
 test('keys this workspace does not have stay plain text', async ({ page }) => {
   const { history } = await open(page)
   const plain = chips(page).getByText('AEON-74', { exact: true })
-  await expect(plain).toHaveJSProperty('tagName', 'SPAN')
-  await expect(plain).toHaveAttribute('data-tip', 'AEON-74 is not a ticket in this AEON workspace')
+  await expect(plain).toHaveCount(2)
+  for (const key of await plain.all()) {
+    await expect(key).toHaveJSProperty('tagName', 'SPAN')
+    await expect(key).toHaveAttribute('data-tip', 'AEON-74 is not a ticket in this AEON workspace')
+  }
   await expect(sheet(page).locator('.changes').getByText('AEON-74', { exact: true }).first()).toHaveJSProperty('tagName', 'SPAN')
   // Another tracker's key (classic Paimos) likewise.
   await page.goto(`/releases/${history.releases[3].version}`)
@@ -129,7 +132,7 @@ test('a lost project access takes the link and the open ticket away at the next 
   await answerNothing(page)
   // Window focus asks for the same person's access again (as any navigation does).
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  await expect(chips(page).getByRole('link')).toHaveCount(0)
+  await expect(chips(page).locator('a.ticket-link')).toHaveCount(0)
   await expect(chips(page).getByText('PHAROS-11', { exact: true })).toHaveJSProperty('tagName', 'SPAN')
   await expect(panel(page).getByRole('heading', { name: 'This ticket could not be opened' })).toBeVisible()
   await expect(sheet(page).getByText(TITLE)).toHaveCount(0)
@@ -139,7 +142,7 @@ test('a lost project access takes the link and the open ticket away at the next 
 
 test('another person or workspace starts without the earlier answers', async ({ page }) => {
   const { calls, history } = await open(page)
-  await expect(chips(page).getByRole('link')).toHaveCount(1)
+  await expect(chips(page).locator('a.ticket-link')).toHaveCount(1)
   const asked = calls.filter(call => call.path === '/api/nodes/lookup' && call.query.has('keys')).length
   let lookups = 0
   await page.route('**/api/nodes/lookup**', route => { lookups++; return route.fulfill({ json: { items: [] } }) })
@@ -161,11 +164,14 @@ test('a ticket still on its way when the person or workspace changes never shows
   const { history } = await open(page)
   // The panel's request for the ticket is slow; the answer (for the former caller) comes last.
   let held = 0
+  let release!: () => void, completed!: () => void
+  const barrier = new Promise<void>(resolve => { release = resolve })
+  const finished = new Promise<void>(resolve => { completed = resolve })
   await page.route('**/api/nodes?*', async route => {
     if (!new URL(route.request().url()).searchParams.has('q')) return route.fallback()
     held++
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    return route.fallback().catch(() => {})
+    await barrier
+    try { await route.fallback() } finally { completed() }
   })
   // Record the title if it is ever shown in a ticket panel, however briefly.
   await page.evaluate(title => {
@@ -180,12 +186,14 @@ test('a ticket still on its way when the person or workspace changes never shows
   // Now someone else, in another workspace that has no such ticket; a navigation refreshes the session.
   await answerNothing(page)
   await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: '33333333-3333-4333-8333-333333333333', name: 'Ola Nordmann', kind: 'person', roles: ['member'] }, tenant: { id: 't2', name: 'Other Studio' } } }))
-  await sheet(page).getByRole('grid', { name: 'Releases, newest first' }).getByRole('row').nth(2).click()
-  await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
-  await expect(panel(page).getByRole('heading', { name: 'This ticket could not be opened' })).toBeVisible()
-  // The held answer lands after this; it must not show.
-  await page.waitForTimeout(2000)
-  await expect(panel(page).getByRole('heading', { name: 'This ticket could not be opened' })).toBeVisible()
+  try {
+    await sheet(page).getByRole('radio', { name: 'DE', exact: true }).click()
+    await expect(page).toHaveURL(`/releases/${history.releases[1].version}?release_lang=de`)
+    // Identity resets now close private ticket panels altogether. Require that
+    // stronger boundary before releasing the former person's held response.
+    await expect(panel(page)).toHaveCount(0)
+  } finally { release(); await finished }
+  await expect(panel(page)).toHaveCount(0)
   expect(await page.evaluate(() => (window as unknown as { staleShown: boolean }).staleShown)).toBe(false)
 })
 

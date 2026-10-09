@@ -48,11 +48,11 @@ function move(event: KeyboardEvent) {
         <AppIcon v-if="normaliseState(option.value) === current" name="check" :size="14" class="tick" />
         <span v-else-if="index < 9" class="digit keycap" aria-hidden="true">{{ index + 1 }}</span>
       </button>
-      <span :id="`${id}-hint-${index}`" class="sr-only">{{ hint(option.value) }}</span>
       </template>
       <span class="menu-sep" role="separator" />
       <button type="button" role="menuitem" class="menu-item help-item" @click="showHelp"><AppIcon name="help" :size="14" /><span class="label">What do these mean?</span></button>
     </div>
+    <span v-for="(option, index) in options" :id="`${id}-hint-${index}`" :key="option.value" class="sr-only">{{ hint(option.value) }}</span>
     <p v-if="!derived" class="menu-help"><AppIcon name="queue" :size="12" /><span><b>Queued</b> is Open with a place in the work queue. Pickup sets In progress; Blocked keeps the place and waits.</span></p>
   </FloatingPanel>
 </template>
