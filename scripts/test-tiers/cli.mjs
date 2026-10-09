@@ -167,7 +167,7 @@ async function runCases(kind,selection,{unit=false,job='local',env=process.env}=
   const executeOwner=(owner,rows,stem)=>{
     let result,outcomes=[],failures=[],reportError=false
     if(kind==='go') {
-      result=goRunner.execute(owner,rows,stem)
+      result=goRunner.execute(owner,rows,stem,'-count=1')
       outcomes=goOutcomes(result.output)
       failures=goFailures(result.output)
     } else if(rows[0].kind==='node') {

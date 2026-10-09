@@ -13,6 +13,7 @@ import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
 import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain, effectiveLane, sourceTree, promotionsBetween } from './diff.mjs'
 import { runnerDecision, runnerSelection, browserRunnerIdentity, run } from './cli.mjs'
+import { createGoRunner } from './go-runner.mjs'
 import { treeStamp, reuse, webStampEntries } from './collect.mjs'
 import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs'
 import { buildBrowserMap } from './browser-impact.mjs'
@@ -141,6 +142,29 @@ test('AEON-1025 compiled Go owners retain exact execution, blocking failures and
       assert.ok(calls.every(call=>!call.compile&&!call.compiled&&call.options.env.GOFLAGS===goFlags))
       assert.ok(report.goPhases.every(row=>!row.compiled))
     }
+  })
+  await t.test('CI count flag stays off go tool test2json, which rejects GOFLAGS=-count=1',async()=>{
+    const cli=readFileSync(new URL('./cli.mjs',import.meta.url),'utf8')
+    assert.match(cli,/goRunner\.execute\(owner,rows,stem,'-count=1'\)/)
+    const {code,error,calls}=await simulate({failed:[],goFlags:'-count=1'})
+    assert.equal(error,undefined)
+    assert.equal(code,0)
+    const compiled=calls.filter(call=>call.compiled)
+    assert.ok(compiled.length>=1)
+    for(const call of compiled) {
+      assert.equal(call.options.env.GOFLAGS,undefined)
+      assert.ok(call.args.includes('-test.count=1'))
+    }
+    for(const call of calls.filter(call=>!call.compile&&!call.compiled)) {
+      assert.equal(call.options.env.GOFLAGS,'-count=1')
+      assert.ok(call.args.includes('-count=1'))
+    }
+    assert.equal(calls.find(call=>call.compile).options.env.GOFLAGS,'-count=1')
+  })
+  await t.test('a shard count other than -count=1 is refused before execution',()=>{
+    const runner=createGoRunner({env:{},execute:()=>{throw new Error('must not run')},command:()=>{throw new Error('must not list')}})
+    assert.throws(()=>runner.execute('internal/nodes',[{name:'TestA'}],'stem','-count=2'),/reject cached success/)
+    runner.close()
   })
   await t.test('native comparison retains subtest identity and outcomes when fixture UUID values change',async()=>{
     const {goExecutionIdentity}=await import('./go-compile-profile.mjs')
