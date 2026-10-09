@@ -8,8 +8,6 @@
     ,
     {"file":"tests/agents-top.spec.ts","reportedCases":20,"scope":"Retained mixed slice after rule B: real behavior, authority, identity, data safety or control stability assertions remain.","tag":"delete-candidate"}
     ,
-    {"file":"tests/approval-feedback.spec.ts","reportedCases":2,"scope":"Retained mixed slice after rule B: real behavior, authority, identity, data safety or control stability assertions remain.","tag":"delete-candidate"}
-    ,
     {"file":"tests/brand.spec.ts","reportedCases":1,"scope":"Retained mixed slice after rule B: real behavior, authority, identity, data safety or control stability assertions remain.","tag":"delete-candidate"}
     ,
     {"file":"tests/decision-desk.spec.ts","reportedCases":5,"scope":"Retained mixed slice after rule B: real behavior, authority, identity, data safety or control stability assertions remain.","tag":"delete-candidate"}
@@ -5600,9 +5598,9 @@
     ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Manage opens Settings / Accounts","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Needs you appears only when something waits, with the sign-in and its command","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"chores preserve the sign-in and its command while approvals live in the desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"nothing waits: no Needs you, a compact live line, and Accounts and computers as one status line","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"nothing waits: no chores, a compact live line, and Accounts and computers as one status line","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"sign-in prompts only for a confirmed sign-out of that account","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -5648,7 +5646,7 @@
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"a failing sessions read is a real error with a retry, and approvals keep working","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents.spec.ts","name":"a held action request opens the asking agent’s conversation","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"a held action request opens the exact native desk memo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"accounts explain themselves when the person may not see them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5660,17 +5658,29 @@
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"approval controls require the action permission even with an admin legacy role","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents.spec.ts","name":"approvals: j and k move, a opens a reason, Enter records the decision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"closing a session panel goes back instead of adding history, like the ticket panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents.spec.ts","name":"held action requests resolve or dismiss with an optional note, by button or keyboard","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"cutover overview and session retain long German context at 1024 in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"cutover overview and session retain long German context at 1024 in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"cutover overview and session retain long German context at 1440 in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"cutover overview and session retain long German context at 1440 in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"cutover overview and session retain long German context at 390 in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"cutover overview and session retain long German context at 390 in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"held action requests resolve with an optional note through their original endpoint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"interrupt goes straight out, Stop now asks first, and outside sessions have no managed controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"members can decide lower risk requests but not high risk requests","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents.spec.ts","name":"old approvals, runs and pacing addresses land on Agents","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"native approval choices and field shortcuts record the exact source and retain history","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"old approvals land on Decision Desk; runs and pacing land on Agents","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"on a phone the overview fits and a session opens full screen in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5684,37 +5694,47 @@
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"sessions are grouped by what they need, with ticket and heartbeat; details show account and model","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents.spec.ts","name":"the header links to Agents with a count of what needs you","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"the header routes the canonical count to Decision Desk and keeps Agents separate","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"the session panel shows the ticket, runs, telemetry and the thread, and sends messages","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"the ticket panel shows the bound agent’s attention state and links to its session","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"a failed decision returns the card to its actionable state with the error, never a success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1024 no-preference: approved confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"approval feedback screenshots","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1024 no-preference: denied confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"reduced motion: the success state shows, then is replaced without a fold","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1024 reduce: approved confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"with motion › approve shows success only after the server, then folds into Decided and moves focus on","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1024 reduce: denied confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"with motion › deciding the last request folds Needs you away without a jump and focuses Decided (empty history)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1024: a rejected native decision retains its reason and never advances or reports success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"with motion › deciding the last request folds Needs you away without a jump and focuses Decided (empty history, completion fallback)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1440 no-preference: approved confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"with motion › deciding the last request folds Needs you away without a jump and focuses Decided (existing history)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1440 no-preference: denied confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"with motion › deciding the last request folds Needs you away without a jump and focuses Decided (existing history, completion fallback)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1440 reduce: approved confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"with motion › deny shows a neutral outcome with the reason","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1440 reduce: denied confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"with motion › first approve with empty history never shifts content down and keeps scroll and focus","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1440: a rejected native decision retains its reason and never advances or reports success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"with motion › first deny with empty history never shifts content down and keeps scroll and focus","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"390 no-preference: approved confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"with motion › fold probe rejects a premature removal timer (empty history)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"390 no-preference: denied confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"with motion › fold probe rejects a premature removal timer (existing history)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"390 reduce: approved confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"390 reduce: denied confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"390: a rejected native decision retains its reason and never advances or reports success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"a denied native read never enables or sends a protected decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"a failed Revoke retains the native grant and reports the failure","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"a mismatched native response is an unconfirmed decision, not success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"New menu preserves authorized attach and header controls dark 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6498,6 +6518,40 @@
     ,
     {"kind":"browser","file":"tests/dead-sessions.spec.ts","name":"the panel of an outside inbox session offers durable Pause/Stop, one quiet line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"a directly linked canonical tier request beyond 30 sessions and 100 history rows remains actionable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"current server restrictions explain and block publishing without sending a write","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"server outcomes and correction keep selectors and actions stable 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"server outcomes and correction keep selectors and actions stable 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"server outcomes and correction keep selectors and actions stable 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"server outcomes and correction keep selectors and actions stable 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"server outcomes and correction keep selectors and actions stable 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"server outcomes and correction keep selectors and actions stable 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"doctrine draft effect and required review open the exact pending draft 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"doctrine draft effect and required review open the exact pending draft 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"doctrine draft effect and required review open the exact pending draft 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"doctrine draft effect and required review open the exact pending draft 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"doctrine draft effect and required review open the exact pending draft 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"doctrine draft effect and required review open the exact pending draft 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"published doctrine effects keep their proposal review while an earlier pending draft opens in the Desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"revision-zero native tier request can approve with exact ownership","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"revision-zero native tier request can decline with exact ownership","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"Decided rounds count only items arriving after the round starts","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"Enter on focused Deny selects Deny without granting the preselected approval","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -6510,7 +6564,33 @@
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"a source refresh during a blocked response clears Recording without advancing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"an exact question link recovers its canonical row beyond the bulk detail budget","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"approval project names and doctrine PR context stay visible","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover header preserves ticket and Business access 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover header preserves ticket and Business access 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover header preserves ticket and Business access 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover header preserves ticket and Business access 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover header preserves ticket and Business access 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover header preserves ticket and Business access 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover overview and agents 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover overview and agents 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover overview and agents 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover overview and agents 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover overview and agents 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"cutover overview and agents 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"denied reads keep the memo blocked and inaccessible context explicit","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -6522,7 +6602,11 @@
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"focused Skip, pager, attachment and Close retain their native Enter actions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"history remains reachable without a live session and revokes through the native API","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"keyboard editing, pager, IME and browser shortcuts stay separate","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"legacy links select the canonical merged question and one server count","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"loaded open and answered pages survive focus refresh with their memo still actionable","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -6546,6 +6630,8 @@
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"narrow desktop approvals use the native API when server verification is unavailable","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"native approval facts preserve requester, risk, target and expiry without a session","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"native approvals, action replies and rule changes use only their own endpoints","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"newest answered questions and fresh corrections survive refresh 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -6555,6 +6641,8 @@
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"open questions remain visible behind 100 older answered questions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"permissions revoked while a memo is open block its write and retain its draft","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"projection access errors show an unknown count and an actionable Retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk.spec.ts","name":"protected requests require an explicit choice before Decide or memo Enter","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -7010,9 +7098,19 @@
     ,
     {"kind":"browser","file":"tests/display-language.spec.ts","name":"German profile: ticket table controls and recurring markers stay English","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"agent proposals wait in the doctrine inbox with a diff, a dot and one toast each","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"native Edit then propose and outdated protection 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"edit then propose replaces the agent text; an outdated proposal needs an edit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"native Edit then propose and outdated protection 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"native Edit then propose and outdated protection 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"native Edit then propose and outdated protection 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"native Edit then propose and outdated protection 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"native Edit then propose and outdated protection 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"native doctrine proposals retain diff, notices, source links and protected settlement in one desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/done-gate.spec.ts","name":"a conflict keeps the typed benefit and asks again (1600)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -7494,7 +7592,7 @@
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon stays in the header at 1600 with three places","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon stays in the header at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon stays in the header at 440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon stays in the header at 440 with three places","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9029,6 +9127,30 @@
     {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"short recovery states keep actions above content at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"short recovery states keep actions above content at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk Agents panel keeps review and history controls still 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk Agents panel keeps review and history controls still 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk Agents panel keeps review and history controls still 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk Agents panel keeps review and history controls still 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk Agents panel keeps review and history controls still 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk Agents panel keeps review and history controls still 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk native choices, reason and failure stay still 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk native choices, reason and failure stay still 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk native choices, reason and failure stay still 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk native choices, reason and failure stay still 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk native choices, reason and failure stay still 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk native choices, reason and failure stay still 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"confirmation content grows away from its controls at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -10792,7 +10914,7 @@
     ,
     {"kind":"browser","file":"tests/service-tier.spec.ts","name":"1440: panel-open session table fits and keeps Host and overflow controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/service-tier.spec.ts","name":"1440: the panel request retains its actions after approval","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/service-tier.spec.ts","name":"1440: the panel request points to stable desk actions for approval","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/service-tier.spec.ts","name":"320: agent request labels keep phone footer controls still","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -10814,7 +10936,7 @@
     ,
     {"kind":"browser","file":"tests/service-tier.spec.ts","name":"390: phone Change tier menu opens and restores its actual trigger","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/service-tier.spec.ts","name":"390: the panel request retains its actions after approval","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/service-tier.spec.ts","name":"390: the panel request points to stable desk actions for approval","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/service-tier.spec.ts","name":"Enter opens and confirms, Escape cancels and restores the glyph","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -10854,7 +10976,7 @@
     ,
     {"kind":"browser","file":"tests/service-tier.spec.ts","name":"starting the next change retires the previous panel rejection","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/service-tier.spec.ts","name":"the panel request can be declined without a tier change","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/service-tier.spec.ts","name":"the panel request can be declined in the desk without a tier change","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/service-tier.spec.ts","name":"unmanaged sessions remain read-only","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -13556,7 +13678,7 @@
     ,
     {"kind":"node","file":"tests/places.test.ts","name":"g then a place key goes there within the window; anything else disarms","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/places.test.ts","name":"places are Projects, Agents, Business in that order; pages belong to one or none","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/places.test.ts","name":"places are Projects, Decision Desk, Agents, Business in that order; pages belong to one or none","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/planning.test.ts","name":"canonical work aggregates disclose excluded uncalibrated leaves in token and cost tips","tier":"NIGHTLY"}
     ,
@@ -14784,6 +14906,36 @@
     ,
     {"kind":"vitest","file":"tests/crm-undo-receipt.unit.test.ts","name":"S9-002: missing receipts and receipts from a previous sign-in refuse Undo","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"drops a previous person read even if transport ignores abort, and resets the count synchronously","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"reports an unknown count on failed refresh and retries without claiming an empty desk","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"bounds streamed tier response bytes before decode and leaves the source explicitly unavailable","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"hydrates a canonical direct-linked tier session beyond the bulk session cap through the admitted detail read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"hydrates pending tier requests independently of two full sessions of history and can decide their exact native request","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"integrates the server default and each publishing outcome, then corrects the exact revision with its doctrine mapping","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"retains outcome failure, retryability, exact effect references and required review independently of a handed-off answer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"uses server permission reasons and refuses doctrine without a confirmed mapping","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"hydrates and approves a first tier request with native revision zero","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"hydrates and declines a first tier request with native revision zero","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"keeps invalid native tier revision -1 unavailable","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"keeps invalid native tier revision 0.5 unavailable","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"keeps invalid native tier revision 9007199254740992 unavailable","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"keeps invalid native tier revision null unavailable","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"accepts source-only links and rejects arrays, destinations and injected selectors","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"appends one answered page, dedupes corrections and refreshes from newest","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"caps answered continuation at ten pages and rejects oversized pages before merging","tier":"GATED-FULL"}
@@ -14804,11 +14956,17 @@
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"freezes round IDs while arrivals and decided/skipped counts remain distinct","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"hydrates a canonical approval beyond the history page and retains native read-only authority","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"keeps Open offsets and answered cursors in separate request shapes","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"keeps canonical membership and order when native history and Open pages continue","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"keeps continued questions and handovers before all protected items","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"leaves publishing and every protected action outside ordinary Always answers","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"keeps native approval and rule facts frozen while the source objects change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"keeps server-denied outcomes and protected actions outside ordinary Always answers","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"merges continuation into the latest read after an in-flight decision","tier":"GATED-FULL"}
     ,
@@ -14817,6 +14975,8 @@
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"preserves custom answers on correction and separates the P.S. from the answer","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"reads newest answered pages with bounded cursors while Open keeps its offset","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"rechecks current outdated doctrine before publication and sends no request","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"rejects any cursor cycle and leaves the previous page available for retry","tier":"GATED-FULL"}
     ,
@@ -14829,6 +14989,8 @@
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"sends a held reply to the principal UUID even without a sender session or target","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"skips tier reads for sessions that do not advertise service_tier_v1","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"uses canonical membership and order while retaining decided approval history","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"uses only the platform submission modifier and leaves mixed/native combinations alone","tier":"GATED-FULL"}
     ,

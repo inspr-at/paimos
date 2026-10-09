@@ -2,17 +2,21 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { answerFor, draftFor, fieldTarget, kindLabels, macPlatform, outcomeLabels, outcomeUnavailable, roundCounts, submitModifier, type DeskDraft, type DeskItem, type DeskOutcome } from '../../lib/decisionDesk'
-import { loadDeskContext, type DeskContext } from '../../lib/decisionDeskApi'
+import { deliveryTime, loadDeskContext, type DeskContext } from '../../lib/decisionDeskApi'
+import { RISK_LABEL, riskFor, scopeLabel } from '../../lib/agentState'
 import { contentUrl, fileKind, hasThumbnail } from '../../lib/attachments'
 import AttachmentLightbox from '../work/AttachmentLightbox.vue'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
+import TargetSummary from '../deploy/TargetSummary.vue'
 import { outcomeLine } from '../../lib/ticketOutcomes'
 import { vClipTip } from '../../lib/clipTip'
 
 const props = defineProps<{
-  items: DeskItem[]; round: string[]; start: string; arrivalsCount: number; allowed: (item: DeskItem) => boolean
+  items: DeskItem[]; round: string[]; start: string; arrivalsCount: number; pendingRuleIds?: readonly string[]; allowed: (item: DeskItem) => boolean
   decide: (item: DeskItem, draft: DeskDraft, requestId: string) => Promise<DeskItem>
+  canRevoke?: (item: DeskItem) => boolean; revoke?: (item: DeskItem) => Promise<DeskItem>
+  editRule?: (item: DeskItem) => Promise<void>
 }>()
 const emit = defineEmits<{ close: []; recorded: [item: DeskItem] }>()
 const dialog = ref<HTMLDialogElement>(), memo = ref<HTMLElement>(), decideButton = ref<HTMLButtonElement>(), pagerButton = ref<HTMLButtonElement>()
@@ -46,15 +50,40 @@ watch(frame, element => {
 })
 const blocked = computed(() => !item.value || !props.allowed(item.value) || !!item.value.unavailable || expired.value || busy.value)
 const trimDeclinable = computed(() => item.value?.kind === 'key_trim' && !item.value.decided && props.allowed(item.value) && !expired.value && !busy.value && (!item.value.unavailable || item.value.unavailable === item.value.keyTrim?.blocked_reason))
+const primaryDisabled = computed(() => busy.value || ((!item.value?.decided || trimRestorable.value) && (blocked.value || (item.value?.kind !== 'key_trim' && (!draft.value?.optionId || !!item.value?.choices.find(choice => choice.id === draft.value?.optionId)?.unavailable)))))
 const canEdit = computed(() => !!item.value && (!item.value.decided || item.value.kind === 'question' || item.value.kind === 'handover'))
 const trimRestorable = computed(() => item.value?.keyTrim?.state === 'applied' && !!item.value.keyTrim.restore_until && Date.parse(item.value.keyTrim.restore_until) > Date.now())
 const primary = computed(() => item.value?.kind === 'key_trim' ? (!item.value.decided ? 'Approve' : trimRestorable.value ? 'Restore' : 'Next') : item.value?.decided && !draft.value?.dirty ? 'Next' : item.value?.decided ? 'Replace & next' : 'Decide & next')
 const announcement = ref('')
 const trimRequests = new Map<string, string>()
 const plainText = (value: unknown) => typeof value === 'string' ? value : 'Not supplied'
-watch(item, async current => {
+function doctrineReviewPath(id: string, state?: string) {
+  return state === 'pending' || (!state && props.pendingRuleIds?.includes(id))
+    ? `/decision-desk?item=r:${encodeURIComponent(id)}` : '/settings/agent-rules'
+}
+let pendingDecisionFocus: { id: string; revision: number } | undefined
+watch([() => item.value?.id, () => item.value?.revision, primaryDisabled], ([id, revision, disabled]) => {
+  const pending = pendingDecisionFocus
+  if (!pending) return
+  if (id !== pending.id || revision !== pending.revision) { pendingDecisionFocus = undefined; return }
+  if (!disabled) {
+    pendingDecisionFocus = undefined
+    // A permission read may finish after the next memo renders. Restore the
+    // action only if the person has not already moved to another control.
+    if (live && document.activeElement === memo.value) decideButton.value?.focus({ preventScroll: true })
+  }
+}, { flush: 'post' })
+function focusDecision() {
+  pendingDecisionFocus = undefined
+  if (!decideButton.value || !item.value) return
+  if (decideButton.value.disabled) {
+    pendingDecisionFocus = { id: item.value.id, revision: item.value.revision }
+    memo.value?.focus({ preventScroll: true })
+  } else decideButton.value.focus({ preventScroll: true })
+}
+watch(item, async (current, previous) => {
   const turn = ++contextGeneration
-  if (current && !drafts.value[current.id]) drafts.value[current.id] = draftFor(current)
+  if (current && (!drafts.value[current.id] || current.decided && current.id === previous?.id && !previous.decided && current.kind !== 'question' && current.kind !== 'handover')) drafts.value[current.id] = draftFor(current)
   error.value = ''; status.value = ''; editing.value = ''; pager.value = false; brokenThumbs.value = new Set()
   context.value = { attachments: [], related: [], outcomes: [], warnings: [] }; contextLoading.value = false
   clearTimeout(expiryTimer)
@@ -80,6 +109,7 @@ function finishEditing() {
 }
 function choose(id: string) {
   if (blocked.value || !canEdit.value || !draft.value) return
+  if (item.value?.choices.find(choice => choice.id === id)?.unavailable) return
   draft.value.optionId = id; touch()
   if (item.value?.choices.find(choice => choice.id === id)?.field) void focusField('answer')
 }
@@ -106,6 +136,8 @@ async function submit(trimAction?: 'approve' | 'decline' | 'restore') {
   if (!current || !sentDraft || busy.value) return
   if (!trim && current.decided && !sentDraft.dirty) { navigate(1); return }
   if (blocked.value && !(trimAction === 'decline' && trimDeclinable.value)) { error.value = expired.value ? 'This request expired.' : current.unavailable || 'You do not have permission to decide this item.'; return }
+  const choiceUnavailable = current.choices.find(choice => choice.id === sentDraft.optionId)?.unavailable
+  if (choiceUnavailable) { error.value = choiceUnavailable; return }
   const unavailable = (current.kind === 'question' || current.kind === 'handover') && outcomeUnavailable(current, sentDraft.outcome)
   if (unavailable) { error.value = unavailable; return }
   if (!trim && !answerFor(current, sentDraft)) {
@@ -133,10 +165,35 @@ async function submit(trimAction?: 'approve' | 'decline' | 'restore') {
     emit('recorded', result); slam.value = false; announcement.value = `Decision recorded for ${current.title}. ${result.delivery || ''}`
     status.value = ''
     await nextTick()
-    if (live) { busy.value = false; navigate(1, `Decision recorded for ${current.title}. ${result.delivery || ''}`); await nextTick(); decideButton.value?.focus({ preventScroll: true }) }
+    if (live) { busy.value = false; navigate(1, `Decision recorded for ${current.title}. ${result.delivery || ''}`); await nextTick(); focusDecision() }
   } catch (cause) {
     if (live && item.value?.id === capturedId) { error.value = cause instanceof Error ? cause.message : 'The decision failed. Your answer is kept.'; status.value = 'The decision was not confirmed.'; announcement.value = `Decision not confirmed. ${error.value}` }
   } finally { if (live) { busy.value = false; slam.value = false } }
+}
+async function editRuleProposal() {
+  const current = item.value
+  if (!current || current.kind !== 'rule' || current.decided || blocked.value || !props.editRule) return
+  const id = current.id, revision = current.revision
+  busy.value = true; error.value = ''
+  try { await props.editRule({ ...current }) }
+  catch (cause) { if (live && item.value?.id === id && item.value.revision === revision) error.value = cause instanceof Error ? cause.message : 'The native proposal editor could not be opened.' }
+  finally { if (live) busy.value = false }
+}
+async function revokeGrant() {
+  const current = item.value
+  if (!current || busy.value || !props.revoke || !props.canRevoke?.(current)) return
+  const id = current.id, revision = current.revision
+  busy.value = true; error.value = ''; status.value = 'Revoking the grant…'
+  try {
+    const result = await props.revoke({ ...current })
+    if (!live || item.value?.id !== id || item.value.revision !== revision) return
+    emit('recorded', result)
+    await nextTick()
+    if (!live || item.value?.id !== id || item.value.revision !== revision) return
+    status.value = result.delivery ?? 'Grant revoked.'; announcement.value = status.value
+  } catch (cause) {
+    if (live && item.value?.id === id) { error.value = cause instanceof Error ? cause.message : 'Revocation was not confirmed.'; announcement.value = error.value }
+  } finally { if (live) busy.value = false }
 }
 function openPager() { if (busy.value) return; pager.value = !pager.value; jumpIndex.value = index.value; if (pager.value) void nextTick(() => dialog.value?.querySelector<HTMLElement>('[role="listbox"]')?.focus()) }
 function pickJump(at: number) { if (busy.value) return; index.value = at; pager.value = false; announcement.value = `Memo ${at + 1} of ${props.round.length}. ${props.items.find(item => item.id === props.round[at])?.title ?? 'Unavailable item'}`; void nextTick(() => pagerButton.value?.focus({ preventScroll: true })) }
@@ -191,8 +248,12 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
         </button>
         <span class="toolbar-space"><span v-if="arrivalsCount" class="arrival-hint" role="status">{{ arrivalsCount }} new for the next round</span></span>
         <div class="action-buttons">
+          <span v-if="revoke || editRule" class="native-action">
+            <button v-if="revoke" type="button" :style="{ visibility: item?.kind === 'approval' && item.decided && item.optionId === 'approved' ? 'visible' : 'hidden' }" :disabled="busy || !item || !canRevoke?.(item)" data-testid="desk-revoke" @click="revokeGrant">Revoke</button>
+            <button v-if="editRule" type="button" :style="{ visibility: item?.kind === 'rule' && !item.decided ? 'visible' : 'hidden' }" :disabled="blocked || !canEdit" data-testid="desk-edit-rule" @click="editRuleProposal">Edit</button>
+          </span>
           <button type="button" :disabled="busy || (item?.kind === 'key_trim' && !item.decided && !trimDeclinable)" data-testid="desk-skip" @click="declineOrSkip">{{ item?.kind === 'key_trim' && !item.decided ? 'Decline' : 'Skip' }} <kbd v-if="item?.kind !== 'key_trim' || item.decided">S</kbd></button>
-          <button ref="decideButton" class="desk-primary" type="button" :disabled="busy || ((!item?.decided || trimRestorable) && (blocked || (item?.kind !== 'key_trim' && !draft?.optionId)))" data-testid="desk-decide" @click="submit()">{{ primary }} <KeyCap v-if="editing" k="mod" /><KeyCap k="enter" /></button>
+          <button ref="decideButton" class="desk-primary" type="button" :disabled="primaryDisabled" data-testid="desk-decide" @click="submit()"><span class="primary-label" data-size-label="Replace & next"><span>{{ primary }}</span></span> <KeyCap :style="{ visibility: editing ? 'visible' : 'hidden' }" :aria-hidden="!editing" k="mod" /><KeyCap k="enter" /></button>
           <button class="close-desk" type="button" aria-label="Close memo" data-testid="desk-close" @click="close"><AppIcon name="close" :size="18" /></button>
         </div>
         <div v-if="pager" class="jump-popover">
@@ -213,7 +274,7 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
           </header>
           <div class="stamp-line" data-testid="desk-stamps" role="group" aria-label="Stamp it as">
             <span class="stamp-label">Stamp it as</span>
-            <button v-for="(outcome, at) in outcomes" :key="outcome" class="stamp" :class="[`stamp-${outcome}`, { selected: draft.outcome === outcome, unavailable: !!outcomeUnavailable(item, outcome) }]" type="button" :aria-pressed="draft.outcome === outcome" :disabled="blocked || !canEdit || !!outcomeUnavailable(item, outcome)" :title="outcomeUnavailable(item, outcome) || ({ once: 'For this question only.', always: 'Answer the same question from the record.', requirement: 'Add an acceptance criterion.', doctrine: 'Propose a rule change.' }[outcome])" :data-testid="`stamp-${outcome}`" @click="stamp(outcome)">{{ outcomeLabels[outcome] }}<kbd v-if="!outcomeUnavailable(item, outcome)">{{ outcomeKeys[at] }}</kbd></button>
+            <button v-for="(outcome, at) in outcomes" :key="outcome" class="stamp" :class="[`stamp-${outcome}`, { selected: draft.outcome === outcome, unavailable: !!outcomeUnavailable(item, outcome) }]" type="button" :aria-pressed="draft.outcome === outcome" :disabled="blocked || !canEdit || !!outcomeUnavailable(item, outcome)" :title="outcomeUnavailable(item, outcome) || ({ once: 'For this question only.', always: 'Answer the same question from the record.', requirement: 'Add an acceptance criterion.', doctrine: 'Propose a rule change.' }[outcome])" :data-testid="`stamp-${outcome}`" @click="stamp(outcome)">{{ outcomeLabels[outcome] }}<kbd :style="{ visibility: outcomeUnavailable(item, outcome) ? 'hidden' : 'visible' }" :aria-hidden="!!outcomeUnavailable(item, outcome)">{{ outcomeKeys[at] }}</kbd></button>
           </div>
           <div class="memo-status" data-testid="desk-status">{{ error || status || item.unavailable || (expired ? 'This request expired.' : !allowed(item) ? 'You do not have permission to decide.' : outcomeUnavailable(item, draft.outcome) || item.delivery || item.suggestion) }}</div>
           <div ref="body" class="memo-body" data-testid="desk-body">
@@ -232,7 +293,7 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
               <h3>Your answer</h3>
               <div class="choices" role="radiogroup" aria-label="Answer choices" data-testid="desk-choices">
                 <div v-for="(choice, at) in item.choices" :key="choice.id" class="choice-row" :class="{ selected: draft.optionId === choice.id }" :data-testid="`choice-row-${at}`">
-                  <button type="button" role="radio" :aria-checked="draft.optionId === choice.id" :disabled="blocked || !canEdit" :title="choice.description" :data-testid="`choice-${at}`" @click="choose(choice.id)"><kbd v-if="at < 9">{{ at + 1 }}</kbd><span><strong>{{ choice.title }}</strong><small>{{ choice.description }}</small></span><span v-if="item.recommended === choice.id" class="recommend">Suggested</span></button>
+                  <button type="button" role="radio" :aria-checked="draft.optionId === choice.id" :disabled="blocked || !canEdit || !!choice.unavailable" :title="choice.unavailable || choice.description" :data-testid="`choice-${at}`" @click="choose(choice.id)"><kbd v-if="at < 9">{{ at + 1 }}</kbd><span><strong>{{ choice.title }}</strong><small>{{ choice.description }}</small></span><span v-if="item.recommended === choice.id" class="recommend">Suggested</span></button>
                   <input v-if="choice.field" v-model="draft.answer" data-field="answer" class="answer-field" :class="{ editing: editing === 'answer', set: editing !== 'answer' && !!draft.answer }" :aria-label="choice.title" maxlength="8000" :disabled="blocked || !canEdit || draft.optionId !== choice.id" placeholder="The answer in your own words" @input="touch" @focus="editing = 'answer'" />
                 </div>
               </div>
@@ -244,16 +305,38 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
               <label class="ps-line"><span>{{ item.kind === 'approval' || item.kind === 'rule' ? 'Reason' : 'P.S.' }}</span><input v-model="draft.reason" data-field="reason" :aria-label="item.kind === 'approval' || item.kind === 'rule' ? 'Reason' : 'P.S. for the agent'" maxlength="2000" :disabled="blocked || !canEdit" :class="{ editing: editing === 'reason' }" placeholder="A note for the agent" @input="touch" @focus="editing = 'reason'" /></label>
               <p class="editing-slot">{{ editing === 'reason' ? `Enter finishes · ${submitKey} decides` : item.fromRecord || (item.decided ? 'Changing an answer records a replacement through its native workflow.' : 'A decision is recorded only when Decide is pressed.') }}</p>
               <p v-if="item.why" class="recommend-why"><strong>Why this recommendation</strong>{{ item.why }}</p>
-              <p v-if="item.decided && !canEdit" class="native-restriction">This protected decision keeps its native restrictions. <RouterLink v-if="item.kind === 'approval'" to="/agents">Open approvals to revoke an active grant</RouterLink></p>
+              <p v-if="item.decided && !canEdit" class="native-restriction">This protected decision keeps its native restrictions. <span v-if="item.kind === 'approval'">Active grants can be revoked with Revoke above.</span></p>
             </section>
             <aside class="context-column" aria-label="Background and destination">
               <section v-if="titleClipped" data-testid="desk-full-title"><h3>Question in full</h3><p>{{ item.title }}</p></section>
+              <section v-if="item.rule" aria-label="Rule proposal details"><h3>Rule proposal</h3><p>Proposed by {{ item.rule.proposer || 'an agent' }}</p><p v-if="item.rule.outdated">The rule changed since this was proposed. Edit against the current rule first.</p><h3>Current rule</h3><p>{{ item.rule.base }}</p><h3>Proposed rule</h3><pre v-if="item.rule.diff?.length" class="rule-diff"><template v-for="(part, at) in item.rule.diff" :key="at"><del v-if="part.op === 'del'">{{ part.text }}</del><ins v-else-if="part.op === 'ins'">{{ part.text }}</ins><template v-else>{{ part.text }}</template></template></pre><p v-else>{{ item.rule.proposed }}</p></section>
+              <section v-if="item.approval" aria-label="Permission request">
+                <h3>Permission request</h3>
+                <p>Asked by {{ item.approval.agent_name?.trim() || `Agent ${item.approval.agent_principal_id.slice(0, 8)}` }}</p>
+                <p>{{ scopeLabel(item.approval.scope) }} · {{ RISK_LABEL[riskFor(item.approval)] }}</p>
+                <p>{{ item.approval.resource_kind === 'tenant' ? 'The whole workspace' : `${item.approval.resource_kind === 'node' ? 'Ticket' : 'Run'} ${item.approval.resource_id || 'not named'}` }}</p>
+                <p>Expires <time :datetime="item.approval.expires_at">{{ deliveryTime(item.approval.expires_at) }}</time></p>
+                <TargetSummary :approval="item.approval" />
+              </section>
               <section><h3>Meanwhile</h3><p>{{ item.meanwhile }}</p></section>
               <section v-if="item.prUrl"><h3>Rule proposal</h3><a :href="item.prUrl" target="_blank" rel="noopener noreferrer">Open the doctrine pull request<AppIcon name="external" :size="12" /></a></section>
               <section><h3>Background</h3><p>{{ item.context || 'No background supplied by the source.' }}</p></section>
               <section aria-label="Unavailable stamps"><h3>Stamp availability</h3><template v-for="outcome in outcomes" :key="outcome"><p v-if="outcomeUnavailable(item, outcome)">{{ outcomeLabels[outcome] }}: {{ outcomeUnavailable(item, outcome) }}</p></template></section>
               <section v-if="item.findings"><h3>Findings</h3><p>{{ item.findings }}</p></section>
               <section><h3>Where the answer goes</h3><p>{{ item.destination }}</p><p v-if="item.delivery">{{ item.delivery }}</p></section>
+              <section v-if="item.outcomeEffects?.length" aria-label="Outcome effects" data-testid="desk-outcome-effects"><h3>{{ outcomeLabels[item.outcome] }} outcome</h3>
+                <div v-for="effect in item.outcomeEffects" :key="effect.id">
+                  <p>{{ effect.state === 'failed' ? 'Outcome failed; the answer remains recorded.' : effect.state === 'pending' ? `Outcome scheduled for ${deliveryTime(effect.deliver_after)}.` : effect.state === 'replaced' ? 'Outcome replaced by a correction.' : 'Outcome applied.' }}</p>
+                  <p v-if="effect.error_message || effect.error_code">{{ effect.error_message || 'The source did not supply a failure reason.' }}<small v-if="effect.error_code"> ({{ effect.error_code }})</small></p>
+                  <p v-if="effect.state === 'failed'">{{ effect.effect_data?.retryable === false ? 'Automatic retry is blocked. Review the source and replace the answer to try again.' : effect.effect_data?.retryable === true ? 'Automatic retry is scheduled.' : 'Retry availability has not been supplied.' }}</p>
+                  <p v-if="effect.effect_ref">Effect reference: {{ effect.effect_ref }}</p>
+                  <p v-if="effect.effect_data?.ticket_id"><RouterLink :to="`/work/${encodeURIComponent(effect.effect_data.ticket_id)}`">Open affected ticket</RouterLink></p>
+                  <p v-if="effect.effect_data?.knowledge_id"><a :href="`/api/nodes/${encodeURIComponent(effect.effect_data.knowledge_id)}`" target="_blank" rel="noopener noreferrer">Open decision knowledge</a></p>
+                  <p v-if="effect.effect_data?.doctrine_id"><RouterLink :to="doctrineReviewPath(effect.effect_data.doctrine_id, effect.doctrine_state ?? 'pending')">Review doctrine draft {{ effect.effect_data.doctrine_id }}</RouterLink><span v-if="effect.doctrine_state"> · {{ effect.doctrine_state }}</span></p>
+                  <p v-for="review in effect.effect_data?.review_required" :key="`${review.kind}:${review.ref}`"><strong>Person review required.</strong> {{ review.why }} <RouterLink :to="review.kind === 'criterion' ? `/work/${encodeURIComponent(review.ref)}` : doctrineReviewPath(review.ref, review.ref === effect.effect_data?.doctrine_id ? effect.doctrine_state : undefined)">Review {{ review.kind }} ({{ review.ref }})</RouterLink></p>
+                </div>
+              </section>
+              <section v-if="item.source"><h3>Original source</h3><a v-if="item.source.startsWith('/api/')" :href="item.source" target="_blank" rel="noopener noreferrer">Open source record<AppIcon name="external" :size="12" /></a><RouterLink v-else :to="item.source">Open source record<AppIcon name="external" :size="12" /></RouterLink></section>
               <section v-if="item.ticketId || item.ticketKey"><h3>From the ticket</h3><p v-if="contextLoading" role="status">Reading ticket context…</p><template v-if="context.ticket"><RouterLink :to="`/work/${context.ticket.id}`">{{ context.ticket.key }} · {{ context.ticket.title }} <AppIcon name="external" :size="12" /></RouterLink><dl><div><dt>Status</dt><dd>{{ context.ticket.state }}</dd></div><div><dt>Priority</dt><dd>{{ plainText(context.ticket.fields.priority) }}</dd></div><div><dt>Acceptance</dt><dd>{{ plainText(context.ticket.fields.acceptance_criteria) }}</dd></div><div><dt>PR / checks</dt><dd>{{ plainText(context.ticket.fields.pr_url) }} · {{ context.outcomes.filter(outcome => outcome.kind === 'ci_result').slice(0, 3).map(outcome => outcomeLine(outcome).full).join(' · ') || 'No check evidence supplied' }}</dd></div></dl></template><p v-for="warning in context.warnings" :key="warning" class="context-warning">{{ warning }}</p></section>
               <section v-if="context.related.length"><h3>Related records</h3><RouterLink v-for="related in context.related" :key="related.id" class="related-link" :to="`/work/${related.id}`">{{ related.key }} · {{ related.title }}</RouterLink></section>
               <section v-if="context.attachments.length"><h3>Attachments</h3><div class="attachments"><button v-for="(attachment, at) in context.attachments" :key="attachment.id" type="button" class="attachment" :aria-label="`Open ${attachment.caption || attachment.name}`" @click="showAttachment(at)"><img v-if="hasThumbnail(attachment) && !brokenThumbs.has(attachment.id)" :src="contentUrl(attachment.id, 'thumb')" alt="" @error="brokenThumbs.add(attachment.id)" /><span v-else>{{ fileKind(attachment) }}</span><small>{{ attachment.caption || attachment.name }}</small></button></div></section>
@@ -283,8 +366,14 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
 .key-trim-evidence th, .key-trim-evidence td { text-align: left; vertical-align: top; padding: 10px 8px 10px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .key-trim-evidence p { font-size: 12px; color: var(--ink-2); line-height: 1.5; }
 .scope-list { overflow-wrap: anywhere; font-family: var(--font-mono, monospace); }
+.native-action { display: grid; }.native-action button { grid-area: 1 / 1; }
+.rule-diff { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.65 var(--mono); }.rule-diff ins { background: var(--row-selected); }
 .action-buttons button { height: 42px; border: 0; padding: 0 14px; background: transparent; color: var(--ink-2); border-radius: 8px; font-size: 13px; white-space: nowrap; }
-.action-buttons .desk-primary { width: 184px; background: var(--primary); color: var(--primary-on); font-weight: 600; }
+.action-buttons .desk-primary { display: flex; align-items: center; justify-content: center; background: var(--primary); color: var(--primary-on); font-weight: 600; }
+/* Labels and field shortcuts reserve their intrinsic width for the whole round. */
+.primary-label { display: grid; }
+.primary-label::before { content: attr(data-size-label); visibility: hidden; grid-area: 1 / 1; }
+.primary-label > span { grid-area: 1 / 1; }
 .action-buttons .close-desk { width: 42px; padding: 0; display: grid; place-items: center; }
 button { cursor: pointer; } button:disabled { cursor: default; } button:focus-visible, input:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; } kbd { font: 11px var(--mono); opacity: .65; margin-left: 7px; }
 .desk-paper { flex: 1 1 auto; min-height: 0; position: relative; display: flex; flex-direction: column; padding: 24px 30px 28px; background: var(--surface); border-radius: 0 12px 12px 12px; border: 1px solid var(--line-2); border-top: 0; outline: 0; }
@@ -313,6 +402,10 @@ h3 { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacin
 .jump-popover { position: absolute; z-index: 5; left: 0; top: 46px; width: min(480px, calc(100vw - 48px)); padding: 14px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: var(--shadow-pop); }.jump-popover p { margin: 0 0 10px; font-size: 12px; color: var(--ink-3); }.jump-popover ol { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow: auto; }.jump-popover li { display: grid; grid-template-columns: 20px minmax(0, 1fr) 55px; align-items: center; gap: 8px; height: 40px; padding: 0 8px; font-size: 12px; cursor: pointer; }.jump-popover li[aria-selected=true] { background: var(--row-selected); }.jump-popover li>span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.jump-popover small { font-size: 10px; color: var(--ink-3); }
 @media (prefers-reduced-motion: no-preference) { .slam { animation: stamp-slam .28s ease-out; } @keyframes stamp-slam { from { transform: scale(1.18); } to { transform: scale(1); } } }
 @media (max-width: 720px) {
-  .desk-dialog { top: 0; width: 100vw; height: 100dvh; max-height: none; padding: 0; border-radius: 0; border: 0; }.desk-frame { height: 100%; max-height: none; }.desk-toolbar { display: contents; }.desk-pager { order: 0; flex: none; height: 46px; margin-top: 12px; margin-left: 14px; }.toolbar-space { display: none; }.action-buttons { order: 2; display: grid; grid-template-columns: 64px minmax(0,1fr) 42px; flex: none; padding: 10px 14px max(10px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--glass); }.action-buttons .desk-primary { width: 100%; }.action-buttons button[data-testid="desk-skip"] { width: 64px; font-size: 12px; }.action-buttons button { padding: 0 10px; }.desk-paper { order: 1; border: 0; border-radius: 0; padding: 22px 18px 0; overflow: hidden; }.desk-paper::before { display: none; }.memo-heading { height: 92px; grid-template-columns: minmax(0,1fr) 100px; gap: 12px; }h2 { font-size: 20px; }.large-stamp { font-size: 13px; }.stamp-line { gap: 14px; height: 44px; }.stamp-label { display: none; }.stamp { font-size: 10px; }.memo-status { font-size: 11px; height: 48px; }.memo-body { display: flex; flex-direction: column; gap: 24px; padding-bottom: 20px; }.context-column { border-left: 0; padding-left: 0; }.jump-popover { position: fixed; top: 58px; left: 14px; width: calc(100vw - 28px); }kbd { display: none; }.choice-row button { gap: 6px; }.answer-field { margin-left: 8px; width: calc(100% - 16px); }
+  .action-buttons .native-action { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
+  .action-buttons button[data-testid="desk-skip"] { grid-column: 1; grid-row: 1; }
+  .action-buttons .desk-primary { grid-column: 2; grid-row: 1; }
+  .action-buttons .close-desk { grid-column: 3; grid-row: 1; }
+  .desk-dialog { top: 0; width: 100vw; height: 100dvh; max-height: none; padding: 0; border-radius: 0; border: 0; }.desk-frame { height: 100%; max-height: none; }.desk-toolbar { display: contents; }.desk-pager { order: 0; flex: none; height: 46px; margin-top: 12px; margin-left: 14px; }.toolbar-space { display: none; }.action-buttons { order: 2; display: grid; grid-template-columns: max-content minmax(0,1fr) 42px; flex: none; padding: 10px 14px max(10px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--glass); }.action-buttons .desk-primary { width: 100%; }.action-buttons button { padding: 0 8px; min-height: 44px; }.desk-paper { order: 1; border: 0; border-radius: 0; padding: 22px 18px 0; overflow: hidden; }.desk-paper::before { display: none; }.memo-heading { height: 92px; grid-template-columns: minmax(0,1fr) 100px; gap: 12px; }h2 { font-size: 20px; }.large-stamp { font-size: 13px; }.stamp-line { gap: 14px; height: 44px; }.stamp-label { display: none; }.stamp { font-size: 10px; }.memo-status { font-size: 11px; height: 48px; }.memo-body { display: flex; flex-direction: column; gap: 24px; padding-bottom: 20px; }.context-column { border-left: 0; padding-left: 0; }.jump-popover { position: fixed; top: 58px; left: 14px; width: calc(100vw - 28px); }kbd { display: none; }.choice-row button { gap: 6px; }.answer-field { margin-left: 8px; width: calc(100% - 16px); }
 }
 </style>

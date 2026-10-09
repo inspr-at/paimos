@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -94,6 +95,17 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) A
  WHERE s.tenant_id=$1 AND s.state='pending' AND s.expires_at>(SELECT at FROM clock)
  AND (s.project_id IS NULL OR project.id IS NOT NULL AND project.deleted_at IS NULL)
  AND ($2='' OR $2='stepup' AND s.id=$3::uuid)
+), tier_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT r.id,'tier_request'::text,s.project_id,s.service_tier_revision,
+ 'Tier request · '||r.tier,r.created_at,NULL::timestamptz,false,
+ '/api/projects/'||s.project_id||'/harness-sessions/'||s.id||'/tier'
+ FROM harness_tier_requests r
+ JOIN harness_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id
+ JOIN nodes project ON project.tenant_id=s.tenant_id AND project.id=s.project_id
+ WHERE r.tenant_id=$1 AND r.state='pending' AND project.deleted_at IS NULL
+ AND s.stopped_at IS NULL AND s.archived_at IS NULL AND s.phase<>'stopping'
+ AND s.management='managed' AND 'service_tier_v1'=ANY(s.capabilities)
+ AND ($2='' OR $2='tier_request' AND r.id=$3::uuid)
 )`
 
 const visibleSQL = sourceSQL + `, visible AS MATERIALIZED (
@@ -108,6 +120,7 @@ const visibleSQL = sourceSQL + `, visible AS MATERIALIZED (
  UNION ALL SELECT * FROM doctrine WHERE $9
  UNION ALL SELECT * FROM key_trims WHERE $21
  UNION ALL SELECT * FROM stepups WHERE EXISTS(SELECT 1 FROM stepup_requests s WHERE s.tenant_id=$1 AND s.id=stepups.id AND coalesce($22::jsonb->s.permission,'[]'::jsonb) @> jsonb_build_array(coalesce(s.project_id::text,'')))
+ UNION ALL SELECT * FROM tier_requests WHERE project_id=ANY($23::uuid[]) AND project_id=ANY($24::uuid[])
  ) items
 ), totals AS (
  SELECT count(*)::int AS open,count(*) FILTER (WHERE held)::int AS held,
@@ -144,7 +157,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "inbox.manage": {}}
+	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "inbox.manage": {}, "harness.control": {}, "harness.read": {}}
 	stepupPermissions := map[string][]string{}
 	for _, permission := range stepup.TargetPermissions() {
 		stepupPermissions[permission] = []string{}
@@ -191,7 +204,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
+	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"]).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
 	if err != nil {
 		return page, err
 	}
@@ -214,17 +227,29 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		if err = json.Unmarshal(record.OrderAt, &i.OrderAt); err != nil {
 			return page, err
 		}
-		if i.Kind == "doctrine" {
-			i.Href = "/settings/agent-rules#doctrine-inbox"
-		} else {
-			prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:", "key_trim": "k:"}[i.Kind]
-			i.Href = "/agents?needs=" + prefix + i.ID
-			if i.Kind == "key_trim" {
-				i.Href = "/decision-desk?needs=k:" + i.ID
+		prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:", "doctrine": "r:", "tier_request": "t:", "key_trim": "k:", "stepup": "s:"}[i.Kind]
+		i.Href = "/decision-desk?item=" + prefix + i.ID
+		if i.Kind == "key_trim" || i.Kind == "stepup" {
+			i.Href = "/decision-desk?needs=" + prefix + i.ID
+		}
+		switch i.Kind {
+		case "question":
+			i.CanDecide = check("questions.decide", i.ProjectID)
+		case "approval":
+			i.CanDecide, err = approvals.CanNotify(ctx, tx, p, i.ID)
+			if err != nil {
+				return page, err
 			}
-			if i.Kind == "stepup" {
-				i.Href = "/decision-desk?needs=s:" + i.ID
-			}
+		case "action_request":
+			i.CanDecide = check("inbox.manage", i.ProjectID)
+		case "doctrine":
+			i.CanDecide = check("rules.write", "")
+		case "tier_request":
+			i.CanDecide = check("harness.control", i.ProjectID)
+		case "stepup":
+			i.CanDecide = true // Membership already checked each native target permission.
+		case "key_trim":
+			i.CanDecide = check("keys.manage", "")
 		}
 		page.Items = append(page.Items, i)
 	}

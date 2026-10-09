@@ -192,7 +192,9 @@
         "internal/statusautopilot/**",
         "internal/recurrences/**",
         "internal/usagedashboard/**",
-        "internal/activity/**"
+        "internal/activity/**",
+        "internal/decisiondesk/cutover_test.go",
+        "internal/questions/lock_order_test.go"
       ]
     },
     {
@@ -243,7 +245,9 @@
         "web/src/components/work/AttentionGroupMenu.vue",
         "web/src/components/work/AttentionBulkPreview.vue",
         "web/src/components/agents/ChatCodeBlock.vue",
-        "web/src/components/lead/LeadAdoption.vue"
+        "web/src/components/lead/LeadAdoption.vue",
+        "web/src/components/agents/AgentChores.vue",
+        "web/src/components/agents/DecisionDeskPanel.vue"
       ]
     },
     {
@@ -259,7 +263,8 @@
         "web/public/**",
         "web/src/lib/displayLanguage.ts",
         "web/tests/lead-adoption.unit.test.ts",
-        "web/tests/lead-adoption.spec.ts"
+        "web/tests/lead-adoption.spec.ts",
+        "web/src/stores/decisionDesk.ts"
       ],
       "exclude": [
         "web/src/views/**",

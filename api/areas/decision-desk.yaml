@@ -48,13 +48,14 @@ components:
       required: [id, kind, revision, title, created_at, held, href, source]
       properties:
         id: {type: string, format: uuid}
-        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim, stepup]}
+        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim, stepup, tier_request]}
         project_id: {type: string, format: uuid}
-        revision: {type: integer, minimum: 1}
+        revision: {type: integer, minimum: 0, description: "Native tier revisions can begin at zero; other source revisions begin at one."}
         title: {type: string}
         created_at: {type: string, format: date-time}
         expires_at: {type: string, format: date-time}
         held: {type: boolean}
+        can_decide: {type: boolean, description: "Current source authority; native mutation APIs remain authoritative."}
         href: {type: string, description: App review link to the exact source}
         source: {type: string, description: Authorized app route or API link to the exact source}
     DecisionDeskProjection:

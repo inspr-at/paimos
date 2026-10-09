@@ -48,7 +48,7 @@ export function attentionReasonText(reason: AttentionReason): StateReason {
     run_waiting: 'The bound run reports waiting; who must act is not specified.',
     session_yielded: 'This session yielded; who must act is not specified.',
   }
-  const locations = { approvals: 'Review permission requests in Needs you.', messages: 'Review the shared principal inbox in Messages below.', session: 'Check the bound run and session activity below.' }
+  const locations = { approvals: 'Review permission requests in Decision Desk.', messages: 'Review the shared principal inbox in Messages below.', session: 'Check the bound run and session activity below.' }
   return { code: `${reason.scope}-${reason.kind}-${reason.actor}`, detail: `${reason.scope === 'shared' ? 'Shared inbox · ' : ''}${details[reason.kind]}`, next: `${reason.scope === 'shared' ? 'No session ownership is recorded. ' : ''}${!reason.blocking && reason.scope !== 'shared' ? 'This does not block ongoing work. ' : ''}${locations[reason.location]}` }
 }
 export function waitingLabel(evidence: Pick<StateEvidence, 'attention_reasons' | 'eta_stale'>) {

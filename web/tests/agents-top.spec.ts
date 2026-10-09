@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-299, reduced by AEON-782: the top of /agents. The compact live line and
-// Needs you (only when something waits) stay here. Accounts and computers is a
+// Decision Desk and chores (only when something waits) stay here. Accounts and computers is a
 // status line since AEON-782 (accounts-computers.spec.ts); its pacing, plan
 // card, account menu and editors live in Settings (settings-account-pacing.spec.ts).
 import { test, expect, type Page } from '@playwright/test'
@@ -48,11 +48,11 @@ async function open(page: Page) {
 }
 const noScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)
 
-test('nothing waits: no Needs you, a compact live line, and Accounts and computers as one status line', async ({ page }) => {
+test('nothing waits: no chores, a compact live line, and Accounts and computers as one status line', async ({ page }) => {
   const errors = watchErrors(page)
   await setup(page)
   await open(page)
-  await expect(page.getByRole('region', { name: 'Needs you' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Sign-ins and connections' })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Live now' })).toHaveCount(0)
   const line = page.getByRole('group', { name: 'Show sessions by state' })
   await expect(line.getByRole('button', { name: /^\d+ working/ })).toBeVisible()
@@ -65,16 +65,18 @@ test('nothing waits: no Needs you, a compact live line, and Accounts and compute
   expect(errors).toEqual([])
 })
 
-test('Needs you appears only when something waits, with the sign-in and its command', async ({ page, context }) => {
+test('chores preserve the sign-in and its command while approvals live in the desk', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await setup(page, { needs: true, signin: true })
   await open(page)
-  const needs = page.getByRole('region', { name: 'Needs you' })
+  const needs = page.getByRole('region', { name: 'Sign-ins and connections' })
   await expect(needs).toBeVisible()
-  const signin = needs.getByRole('listitem', { name: 'Cursor needs a new sign-in on mbp2607' })
-  await expect(signin).toContainText('Run cursor-agent login there · agents skip this account until then')
+  const signin = needs.getByRole('listitem').filter({ hasText: 'Cursor needs a new sign-in on mbp2607' })
+  await expect(signin).toContainText('cursor-agent login · agents skip this account until then')
   await signin.getByRole('button', { name: 'Copy command' }).click()
-  await expect(page.getByText('Copied: cursor-agent login — run it on mbp2607.')).toBeVisible()
+  await expect(needs.getByRole('status')).toHaveText('Sign-in command copied.')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('cursor-agent login')
+  await expect(page.getByRole('region', { name: 'Needs you' })).toHaveCount(0)
 })
 
 // AEON-299 review 2: a computer-wide login flag or a check that could not run
@@ -82,7 +84,7 @@ test('Needs you appears only when something waits, with the sign-in and its comm
 test('sign-in prompts only for a confirmed sign-out of that account', async ({ page }) => {
   await setup(page, { computerLogin: true, unavailable: true })
   await open(page)
-  await expect(page.getByRole('region', { name: 'Needs you' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Sign-ins and connections' })).toHaveCount(0)
 })
 
 test('Manage opens Settings / Accounts', async ({ page }) => {
