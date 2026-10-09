@@ -315,7 +315,13 @@ test('under the production CSP the fonts and the mark load from this origin', as
   await page.route('**/*', async route => {
     if (route.request().resourceType() !== 'document') return route.fallback()
     const response = await route.fetch()
-    await route.fulfill({ response, headers: { ...response.headers(), 'content-security-policy': "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'" } })
+    // Match writeHTML's per-document nonce policy. Vite's CSS loader reads the
+    // same nonce from this test-only meta tag; the built application uses bundles.
+    const nonce = 'YWVvbi1uaWdodGx5LWZpeHR1cmUtb25seQ'
+    const body = (await response.text()).replaceAll('__AEON_THEME_NONCE__', nonce)
+      .replace('<head>', `<head><meta property="csp-nonce" nonce="${nonce}">`)
+    const policy = `default-src 'self'; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'`
+    await route.fulfill({ response, body, headers: { ...response.headers(), 'content-security-policy': policy } })
   })
   await setup(page, { font: true })
   await editor(page, PROFILE.steel)

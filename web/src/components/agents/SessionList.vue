@@ -879,7 +879,10 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
   .group-row { display: flex; align-items: center; height: 26px; margin: 12px 8px 2px; padding: 0 8px; }
   .row { --tree-joint: 25px; display: grid; grid-template-columns: 44px 30px auto minmax(0, 1fr) 44px; grid-template-rows: auto auto auto auto; grid-template-areas: ". . . . actions" ". . . . actions" ". . . . actions" ". . . . actions"; column-gap: 8px; row-gap: 0; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span, .execution-host > span { padding: 0; }
-  .row > .c-agent { grid-column: 1 / 5; grid-row: 1 / 5; display: grid; grid-template-columns: subgrid; grid-template-rows: subgrid; align-items: start; padding-block: 0; }
+  .row > .c-agent { grid-column: 1 / 5; grid-row: 1 / 5; display: grid; grid-template-columns: subgrid; grid-template-rows: subgrid; align-items: start; padding-block: 0; pointer-events: none; }
+  /* This spanning identity grid has empty tracks over Execution and State.
+     Its actual controls stay interactive; empty tracks must not catch taps. */
+  .row > .c-agent > * { pointer-events: auto; }
   .row.worker .c-agent { padding-left: 0; }
   /* The 44 px fold button is centred on the glyph's centre line. */
   .tree-fold, .tree-fold-space { grid-column: 1; grid-row: 1; width: 44px; height: 44px; margin-top: calc(var(--tree-joint) - 10px - 22px); }
@@ -927,11 +930,11 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
   .exec-model { flex: 0 1 auto; min-width: 0; font-size: 12px; }
   .exec-harness ~ .exec-model::before, .exec-copy:has(.exec-harness) .exec-model::before { content: '·'; margin: 0 .4em; color: var(--ink-3); }
   .c-state { grid-column: 2 / 4; grid-row: 3; min-width: 0; margin-top: 4px; min-height: 22px; }
-  .c-state :deep(.agent-state-label) { min-width: 0; max-width: 100%; align-items: flex-start; }
+  .c-state :deep(.agent-state-label) { min-width: 0; max-width: 100%; min-height: 22px; align-items: center; }
   .c-state :deep(.state-word) { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
   /* The actions sit on the title line, so the ticket and its estimate may use their column below. */
   .c-ticket { grid-column: 4 / -1; grid-row: 3; justify-self: start; min-width: 0; overflow: hidden; margin-top: 4px; min-height: 22px; }
-  .row > .c-ticket { padding-block: 0; }
+  .row > .c-ticket { padding-block: 0; align-items: flex-start; align-content: flex-start; }
   .c-beat { display: none; }
   /* AEON-280 x AEON-304: no beat cell on phones, so the listening cue joins the state line as
      its icon; the words stay in its accessible name and tooltip. */
