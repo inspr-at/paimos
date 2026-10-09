@@ -196,6 +196,41 @@ for (const theme of ['light', 'dark'] as const) {
   }
 }
 
+// ---------- Learn stays open when the page only reports a scroll ----------
+// Risk: a scroll event that arrives after the click (the browser scrolling the tapped Learn
+// into view, a late layout) closes the pinned words although the button never moved under
+// them; only a scroll that moves the button may close them.
+const frames = (page: Page) => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+test('pinned Learn words survive a scroll that leaves the button in place and close when the button moves', async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 520 })
+  await setup(page)
+  await page.goto('/p/AEON/delivery')
+  await numbersReady(page, 'simple')
+  const main = page.locator('main')
+  const learn = page.locator('.learn').last()
+  const tip = page.locator('.dl-learn')
+  const scrolled = () => main.evaluate(el => el.scrollTop)
+  expect(await scrolled(), 'the page starts at the top').toBe(0)
+  // The last tile's Learn starts below the fold: the click scrolls it into view and the scroll event lands after the click.
+  await learn.click()
+  await frames(page)
+  expect(await scrolled(), 'the click scrolled the page').toBeGreaterThan(0)
+  await expect(tip).toBeVisible()
+  await expect(learn).toHaveAttribute('aria-expanded', 'true')
+  // A scroll report that moved nothing is no reason to close.
+  await main.evaluate(el => el.dispatchEvent(new Event('scroll')))
+  await frames(page)
+  await expect(tip).toBeVisible()
+  await expect(learn).toHaveAttribute('aria-expanded', 'true')
+  // A scroll that does move the button closes the words (they are fixed on the body).
+  const before = (await learn.boundingBox())!.y
+  await main.evaluate(el => { el.scrollTop -= 60 })
+  await frames(page)
+  expect(Math.abs((await learn.boundingBox())!.y - before), 'the scroll moved the button').toBeGreaterThan(20)
+  await expect(tip).toHaveCount(0)
+  await expect(learn).toHaveAttribute('aria-expanded', 'false')
+})
+
 // ---------- 44 px: every control on a phone ----------
 async function smallTargets(page: Page) {
   return page.evaluate(() => {

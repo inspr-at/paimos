@@ -6690,6 +6690,8 @@
     ,
     {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"on a phone only the selected project section shows its word; the others keep icon, name and tooltip","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"pinned Learn words survive a scroll that leaves the button in place and close when the button moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"the keyboard reaches every control group of Numbers and Flow, and arrows move inside a group","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-polish.spec.ts","name":"window and level switches keep every control still at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
