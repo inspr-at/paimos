@@ -14,6 +14,7 @@ import { boundedText } from './inputs.mjs'
 import { manifestsMain, classifyManifest } from './manifests.mjs'
 import { generateOpenAPI } from '../../api/generate.mjs'
 import { nightlyBrowserMap, gitTree, coverageSummary } from './browser-impact.mjs'
+import { createGoRunner } from './go-runner.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
@@ -129,9 +130,16 @@ export function browserRunnerIdentity(env=process.env) {
 
 // Inject native runners for policy tests; production retains the supervised
 // browser runner and the same bounded native commands/evidence paths.
-export async function run(kind,selection,{unit=false,job='local',env=process.env}={},
+export async function run(kind,selection,options={},dependencies={}) {
+  const goRunner=kind==='go'?createGoRunner({execute:dependencies.execute??execute,command:dependencies.command??command,
+    env:options.env??process.env,compileOwners:dependencies.compileOwners,now:dependencies.now}):undefined
+  try { return await runCases(kind,selection,options,{...dependencies,goRunner}) }
+  finally { goRunner?.close() }
+}
+
+async function runCases(kind,selection,{unit=false,job='local',env=process.env}={},
   {execute:executeCases=execute,command:nativeCommand=command,runPlaywright:browserRunner=runPlaywright,
-    loadBrowserPolicy:browserPolicy=loadBrowserPolicy,knownFlaky,saveJSON:save=saveJSON,log=console.log}={}) {
+    loadBrowserPolicy:browserPolicy=loadBrowserPolicy,knownFlaky,saveJSON:save=saveJSON,log=console.log,goRunner}={}) {
   const begin=performance.now(),batches=[],ledger=[],coverageReports=[]
   const runner=kind==='web'&&!unit?browserRunnerIdentity(env):undefined
   if(kind==='go') generateOpenAPI()
@@ -159,7 +167,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   const executeOwner=(owner,rows,stem)=>{
     let result,outcomes=[],failures=[],reportError=false
     if(kind==='go') {
-      result=executeCases('go',['test','-p','2','-count=1','-timeout=25m','-json','-run',exactPattern(rows.map(row=>row.name)),`./${owner}`],`${stem}.jsonl`,{env:{...env,GOMAXPROCS:'2'}})
+      result=goRunner.execute(owner,rows,stem,'-count=1')
       outcomes=goOutcomes(result.output)
       failures=goFailures(result.output)
     } else if(rows[0].kind==='node') {
@@ -209,7 +217,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
     const stem=resolve(evidence,`${job}-${owner.replaceAll('/','-')}`)
     if(kind==='go') {
       // Native enumeration proves the AST/current-platform inventory is exact.
-      const listed=nativeCommand('go',['test','-p','2','-list','^(Test|Fuzz)',`./${owner}`],{env:{...env,GOMAXPROCS:'2'}})
+      const listed=goRunner.prepare(owner,stem)
         .split('\n').filter(name=>/^(?:Test|Fuzz)\w+$/.test(name)).sort()
       const wanted=selection.all.filter(row=>row.package===owner&&row.active).map(row=>row.name).sort()
       if(JSON.stringify(listed)!==JSON.stringify(wanted)) throw new Error(`Native Go inventory mismatch: ${owner}`)
@@ -279,6 +287,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   let retryAllowed=mergeGroup&&failedCount>0&&failedCount<=3&&!batches.some(batch=>batch.result.signal||batch.result.metrics?.signal||[129,130,143].includes(batch.result.code))
   const outcomes=[]
   let code=0
+  let runnerFailure=false
   for(const batch of batches) {
     const final=new Map(batch.outcomes.map(outcome=>[outcome.key,outcome]))
     const failed=batch.rows.filter(row=>final.get(key(row))?.status==='failed')
@@ -296,7 +305,10 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
         }
       }
     }
-    if(batch.runnerFailure||retry?.runnerFailure) code ||= batch.result.code||retry?.result.code||1
+    if(batch.runnerFailure||retry?.runnerFailure) {
+      runnerFailure=true
+      code ||= batch.result.code||retry?.result.code||1
+    }
     for(const row of failed) {
       const id=key(row),outcome=final.get(id)
       if(mergeGroup&&outcome.status==='failed'&&quarantines.has(id)) {
@@ -326,8 +338,14 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   report.scope=selection.scope??'changed-area'
   report.deferredBrowserCases=selection.deferredBrowserCases??0
   report.flakeLedger=ledger
+  if(goRunner) report.goPhases=goRunner.measurements
   report.exitCode=code
   if(Object.values(report.classes).some(c=>c.notRun||c.failed)) report.exitCode ||= 1
+  save(resolve(evidence,`${job}-failures.json`), {
+    version: 1, job, runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT, sha: env.GITHUB_SHA,
+    cases: outcomes.filter(outcome => outcome.status === 'failed').map(outcome => outcome.key),
+    runnerFailure,
+  })
   save(resolve(evidence,`${job}-measurement.json`),report)
   log(JSON.stringify(report))
   if(env.GITHUB_STEP_SUMMARY) writeFileSync(env.GITHUB_STEP_SUMMARY,`\nTest tier measurement (${job}):\n\n\`\`\`json\n${JSON.stringify(report,null,2)}\n\`\`\`\n`,{flag:'a'})
