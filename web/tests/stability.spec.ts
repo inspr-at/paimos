@@ -28,9 +28,12 @@ const world = {
 // Sums every layout shift without recent input from the first paint on.
 async function watchShifts(page: Page) {
   await page.addInitScript(() => {
-    const w = window as unknown as { __cls: number; __shifts: string[] }
+    const w = window as unknown as { __cls: number; __shifts: string[]; __clsObserver?: PerformanceObserver }
+    // Repeated viewport/theme navigations retain init scripts. Install one
+    // observer per document so each shift contributes exactly once.
+    if (w.__clsObserver) return
     w.__cls = 0; w.__shifts = []
-    new PerformanceObserver(list => {
+    w.__clsObserver = new PerformanceObserver(list => {
       for (const entry of list.getEntries() as unknown as { value: number; hadRecentInput: boolean; sources?: { node: Node | null; previousRect: DOMRectReadOnly; currentRect: DOMRectReadOnly }[] }[]) {
         if (entry.hadRecentInput) continue
         w.__cls += entry.value
@@ -39,7 +42,8 @@ async function watchShifts(page: Page) {
           return `${(s.node as Element | null)?.className ?? '?'} ${JSON.stringify(rect(s.previousRect))}→${JSON.stringify(rect(s.currentRect))}`
         }).join(', ')}`)
       }
-    }).observe({ type: 'layout-shift', buffered: true })
+    })
+    w.__clsObserver.observe({ type: 'layout-shift', buffered: true })
   })
 }
 async function settledShift(page: Page) {
