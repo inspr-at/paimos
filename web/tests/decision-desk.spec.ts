@@ -595,6 +595,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     const briefingDesk = page.getByRole('region', { name: 'Decision Desk', exact: true })
     await expect(briefingDesk).toContainText(world.questions[0]!.input.question)
     await expect(briefingDesk.getByLabel('Open decisions')).toHaveText('6')
+    await expect(page.getByRole('button', { name: 'Wind down', exact: true })).toBeVisible()
     await expectStableControls({ controls: { review: page.getByTestId('agents-desk-review'), history: page.getByTestId('agents-desk-history'), header: page.locator('.places') }, interactions: [{ name: 'refresh canonical panel', run: async () => {
       await page.evaluate(() => window.dispatchEvent(new Event('focus')))
       await expect(briefingDesk).toContainText(world.questions[0]!.input.question)
