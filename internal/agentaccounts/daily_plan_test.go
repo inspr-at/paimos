@@ -34,6 +34,7 @@ func TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	weeklyReset := end.Add(5 * 24 * time.Hour)
 	if _, err := adminPool.Exec(ctx, `INSERT INTO personal_profiles(tenant_id,principal_id,timezone) VALUES($1,$2,'Europe/Vienna') ON CONFLICT(tenant_id,principal_id) DO UPDATE SET timezone=EXCLUDED.timezone`, owner.TenantID, owner.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -62,9 +63,9 @@ func TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy(t *testing.T) {
 				}
 			}
 			readings := []capacity.Reading{
-				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: spec.baseline - 1, ResetsAt: end.Add(5 * 24 * time.Hour), ReadAt: start.Add(-time.Minute), Source: "harness"},
-				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: spec.baseline, ResetsAt: end.Add(5 * 24 * time.Hour), ReadAt: start.Add(time.Minute), Source: "harness"},
-				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: spec.used, ResetsAt: end.Add(5 * 24 * time.Hour), ReadAt: now, Source: "harness"},
+				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: spec.baseline - 1, ResetsAt: weeklyReset, ReadAt: start.Add(-time.Minute), Source: "harness"},
+				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: spec.baseline, ResetsAt: weeklyReset, ReadAt: start.Add(time.Minute), Source: "harness"},
+				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: spec.used, ResetsAt: weeklyReset, ReadAt: now, Source: "harness"},
 				{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 99, ResetsAt: now.Add(time.Hour), ReadAt: now, Source: "harness"},
 			}
 			return ingestReadings(ctx, tx, runner, a.ID, readings)
@@ -101,8 +102,8 @@ func TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy(t *testing.T) {
 		}
 	}
 	first := byID[accounts[0].ID]
-	if first.UsedPct == nil || *first.UsedPct != 52 || *first.LeftPct != 48 || *first.StartOfDayUsedPct != 40 || *first.LimitUsedPct != 50 || !first.ResetsAt.Equal(end.Add(6*24*time.Hour)) {
-		t.Fatalf("wrong weekly daily reading %+v", first)
+	if first.UsedPct == nil || first.LeftPct == nil || first.StartOfDayUsedPct == nil || first.LimitUsedPct == nil || first.ResetsAt == nil || *first.UsedPct != 52 || *first.LeftPct != 48 || *first.StartOfDayUsedPct != 40 || *first.LimitUsedPct != 50 || !first.ResetsAt.Equal(weeklyReset) {
+		t.Fatalf("wrong weekly daily reading %s", encoded(t, first))
 	}
 	if private := byID[accounts[2].ID]; !private.DetailsRedacted || private.UsedPct != nil || private.FloorPct != nil || private.CanEdit || private.Routable {
 		t.Fatalf("private quota exposed %+v", private)
