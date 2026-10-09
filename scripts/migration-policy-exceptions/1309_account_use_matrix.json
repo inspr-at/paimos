@@ -3,9 +3,9 @@
   "exceptions": [
     {
       "file": "1309_account_use_matrix.sql",
-      "sha256": "194f4dc6099f4fbe9d826a0348c8ff77f88b047600444b205a5da8f77659915b",
+      "sha256": "6fda89001c416dbf6c840f47d35bb1dd033b29b0028e0dc3107c2232fddd8e14",
       "ticket": "AEON-1051",
-      "reason": "Additive account/context tables and invoker triggers retain pre-matrix behavior until lazy activation. The checker does not allow CREATE CONSTRAINT TRIGGER; the two new deferred audit triggers deliberately append events only at transaction end, after legacy resource locks. No existing constraints, policies, functions or data are dropped or renamed. This exact-byte draft is a coordinator review artifact, not merge or release approval; the previous-binary compatibility gate remains required."
+      "reason": "Additive account/context tables and invoker triggers retain pre-matrix behavior until lazy activation. The checker does not allow CREATE CONSTRAINT TRIGGER; the three new deferred audit triggers deliberately append events only at transaction end, after legacy resource locks. No existing constraints, policies, functions or data are dropped or renamed. This exact-byte draft is a coordinator review artifact, not merge or release approval; the previous-binary compatibility gate remains required."
     }
   ]
 }

@@ -407,6 +407,34 @@ func (m *Module) putSettings(w http.ResponseWriter, r *http.Request) {
 		if err := db.LockTree(r.Context(), tx, p.TenantID); err != nil {
 			return err
 		}
+		if err := catalogLock(r.Context(), tx); err != nil {
+			return err
+		}
+		if err := accountuse.LockExclusive(r.Context(), tx); err != nil {
+			return err
+		}
+		if err := authz.RequireTx(r.Context(), tx, p, "models.manage", authz.Scope{}); err != nil {
+			return fail(403, "permission denied")
+		}
+		currentRules, err := accountuse.ReadRules(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		if in.AutoAddProfiles != (currentRules.NewModels == "allow") {
+			// Catalog preparation can write profile/settings rows. Complete
+			// the person and revision checks before that work, under matrix.
+			var revision int64
+			if in.AccountUseRevision != nil {
+				revision = *in.AccountUseRevision
+			}
+			if _, err := accountuse.FenceWrite(r.Context(), tx, p, revision); err != nil {
+				var conflict *accountuse.Error
+				if errors.As(err, &conflict) {
+					return fail(conflict.Status, conflict.Message)
+				}
+				return err
+			}
+		}
 		pending, err := prepareCatalogDeferred(r.Context(), tx, p)
 		if err != nil {
 			return err
@@ -416,12 +444,6 @@ func (m *Module) putSettings(w http.ResponseWriter, r *http.Request) {
 				err = flushCatalogChanges(r.Context(), tx, p, pending)
 			}
 		}()
-		if err := catalogLock(r.Context(), tx); err != nil {
-			return err
-		}
-		if err := authz.RequireTx(r.Context(), tx, p, "models.manage", authz.Scope{}); err != nil {
-			return fail(403, "permission denied")
-		}
 		before, err := settings(r.Context(), tx)
 		if err != nil {
 			return err

@@ -25,7 +25,7 @@ CREATE TABLE project_work_contexts (
     project_id uuid NOT NULL,
     context_id uuid NOT NULL,
     PRIMARY KEY (tenant_id,project_id),
-    FOREIGN KEY (tenant_id,project_id) REFERENCES nodes(tenant_id,id),
+    FOREIGN KEY (tenant_id,project_id) REFERENCES nodes(tenant_id,id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id,context_id) REFERENCES work_contexts(tenant_id,id)
 );
 ALTER TABLE project_work_contexts ENABLE ROW LEVEL SECURITY;
@@ -45,7 +45,7 @@ CREATE TABLE account_use_cells (
     set_by uuid NOT NULL,
     set_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id,account_id,context_id),
-    FOREIGN KEY (tenant_id,account_id) REFERENCES agent_accounts(tenant_id,id),
+    FOREIGN KEY (tenant_id,account_id) REFERENCES agent_accounts(tenant_id,id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id,context_id) REFERENCES work_contexts(tenant_id,id),
     FOREIGN KEY (tenant_id,set_by) REFERENCES principals(tenant_id,id)
 );
@@ -331,6 +331,28 @@ BEGIN
 END $$;
 CREATE TRIGGER model_refresh_settings_use_guard BEFORE INSERT OR UPDATE ON model_refresh_settings
     FOR EACH ROW EXECUTE FUNCTION aeon_account_use_refresh_guard();
+
+-- Preserve the System creation audit without taking the event counter before
+-- tenant seeding has finished acquiring its resource locks. WHEN captures the
+-- seeding cause at insertion, rather than inspecting a flag at deferred time.
+CREATE FUNCTION aeon_account_use_system_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE prior text := current_setting('aeon.tenant_id',true);
+BEGIN
+    PERFORM set_config('aeon.tenant_id',NEW.tenant_id::text,true);
+    INSERT INTO events(tenant_id,actor_principal_id,type,after)
+        VALUES(NEW.tenant_id,NEW.id,'principal.created',
+               jsonb_build_object('id',NEW.id,'kind','agent','name','System','roles',ARRAY['system']));
+    PERFORM set_config('aeon.tenant_id',coalesce(prior,''),true);
+    RETURN NULL;
+EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('aeon.tenant_id',coalesce(prior,''),true);
+    RAISE;
+END $$;
+CREATE CONSTRAINT TRIGGER principals_use_system_audit AFTER INSERT ON principals
+    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
+    WHEN (NEW.kind='agent' AND NEW.name='System' AND NEW.roles @> ARRAY['system']::text[]
+          AND current_setting('aeon.account_use_seeding',true)='on')
+    EXECUTE FUNCTION aeon_account_use_system_audit();
 
 CREATE FUNCTION aeon_seed_account_use(p_tenant uuid,p_migrated boolean) RETURNS boolean
 LANGUAGE plpgsql AS $$

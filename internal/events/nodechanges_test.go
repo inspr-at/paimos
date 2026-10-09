@@ -114,6 +114,7 @@ func TestImportParentChangeSummarizesMembershipWithoutRevisionChange(t *testing.
 
 func TestImportParentChangeHintInHistoryAndStream(t *testing.T) {
 	d, reader, foreign := fixture(t)
+	foreignBase := logPosition(t, d, foreign)
 	dbtest.BindRole(t, d, reader.TenantID, reader.ID, "admin")
 	var project, child string
 	var recorded Event
@@ -126,6 +127,13 @@ func TestImportParentChangeHintInHistoryAndStream(t *testing.T) {
  SELECT $1,id,'Work','IM-2',$2,'{}' FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, reader.TenantID, project).Scan(&child); err != nil {
 			return err
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Project-creation audits are committed fixture data, before this replay.
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, reader.TenantID, func(tx pgx.Tx) error {
 		var after []byte
 		if err := tx.QueryRow(t.Context(), `SELECT to_jsonb(n) FROM nodes n WHERE id=$1`, child).Scan(&after); err != nil {
 			return err
@@ -161,7 +169,7 @@ func TestImportParentChangeHintInHistoryAndStream(t *testing.T) {
 	if got.ID != recorded.ID || !reflect.DeepEqual(got.NodeChanges, want) {
 		t.Fatalf("import SSE hint: %+v; want %+v", got, want)
 	}
-	other, err := New(d.App).(*module).read(t.Context(), foreign, "", 0, 50)
+	other, err := New(d.App).(*module).read(t.Context(), foreign, "", foreignBase, 50)
 	if err != nil || len(other.Items) != 0 {
 		t.Fatalf("import event crossed tenant RLS: %+v %v", other, err)
 	}

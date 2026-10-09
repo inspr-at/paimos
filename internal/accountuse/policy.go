@@ -57,6 +57,13 @@ func LockShared(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
+// LockExclusive precedes catalog preparation and its resource rows in
+// compatibility settings writes. The caller owns tenant/tree/catalog fences.
+func LockExclusive(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, matrixLock)
+	return err
+}
+
 // FenceWrite rechecks live person authority and the revision under the matrix
 // lock. Call after any tree/pairing/catalog fences and before resource locks.
 func FenceWrite(ctx context.Context, tx pgx.Tx, p tenant.Principal, expected int64) (Rules, error) {
