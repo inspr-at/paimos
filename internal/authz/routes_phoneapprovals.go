@@ -8,7 +8,7 @@ func init() {
 		"DELETE /api/me/phone-approvals/passkeys/{credentialId}":        "profile.write",
 		"DELETE /api/me/phone-approvals/subscriptions/{subscriptionId}": "profile.write",
 		"GET /api/me/phone-approvals":                                   "profile.read",
-		"GET /api/phone-approvals/{kind}/{requestId}":                   "profile.read",
+		"GET /api/phone-approvals/{kind}/{requestId}":                   "profile.read|settings.manage",
 		"POST /api/me/phone-approvals/passkeys":                         "profile.write",
 		"POST /api/me/phone-approvals/passkeys/options":                 "profile.write",
 		"POST /api/me/phone-approvals/subscriptions":                    "profile.write",
