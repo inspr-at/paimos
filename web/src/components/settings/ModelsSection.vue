@@ -111,6 +111,12 @@ watch(() => [route.hash, shown.value], async () => {
 </script>
 <template>
   <div v-if="readable" class="models-section" data-models-section :data-models-ready="shown ? 'true' : 'false'">
+    <!-- Until the model registry card (AEON-1012) replaces it, the catalog settings stay one fold away. The toggle sits above the
+         card, where nothing grows above it: a refusal, a new row or a skeleton below never moves it (AEON-541). -->
+    <div class="m-fold">
+      <button type="button" class="fold" data-catalog-fold :aria-expanded="catalog" aria-controls="catalog-body" @click="catalog = !catalog"><AppIcon name="chevron-right" :size="14" :class="{ open: catalog }" /><b>Model catalog</b><span>How new models are found</span></button>
+      <div v-if="catalog" id="catalog-body"><ModelRefreshSettings :key="owner" /></div>
+    </div>
     <section class="glass-card m-card" aria-labelledby="m-title" :aria-busy="busy || undefined">
       <div class="m-head">
         <div class="titles"><h2 id="m-title">Models</h2><p class="lead">One default for all work, overrides only where you care.</p></div>
@@ -142,11 +148,6 @@ watch(() => [route.hash, shown.value], async () => {
         <div v-if="error" class="m-note" role="alert" data-models-error><AppIcon name="alert" :size="14" /><span>{{ error }}</span></div>
       </template>
     </section>
-    <!-- Until the model registry card (AEON-1012) replaces it, the catalog settings stay one fold away. -->
-    <div class="m-fold">
-      <button type="button" class="fold" data-catalog-fold :aria-expanded="catalog" aria-controls="catalog-body" @click="catalog = !catalog"><AppIcon name="chevron-right" :size="14" :class="{ open: catalog }" /><b>Model catalog</b><span>How new models are found</span></button>
-      <div v-if="catalog" id="catalog-body"><ModelRefreshSettings :key="owner" /></div>
-    </div>
     <p class="sr-only" role="status" aria-live="polite">{{ announcement }}</p>
     <ModelsPopover v-if="pickRow && picker" :open="true" :anchor="picker.anchor" :label="`Model for ${pickRow.isDefault ? 'the default' : pickRow.label}`" role="presentation" :width="Math.max(picker.anchor.offsetWidth, 520)" @close="pickerClosed">
       <ModelPicker :entries="entries" :row="pickRow" :name="pickRow.isDefault ? 'the default' : pickRow.label" :cant="line => model.cantReason(pickRow!.column, line)" :fresh="fresh" :lock="scope === 'default' && admin && !pickRow.draft" :locked="!!pickRow.lock" @choose="choose" @lock="lockRow" />

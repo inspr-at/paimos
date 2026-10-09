@@ -9,7 +9,7 @@ One default model for all work, a different one only where it matters, reviews t
 - **For everyone · Just me** (admins; they open on Just me). Members only have their own choices. A person's own row reads "yours · reset"; a row only that person has shows ×.
 - **Lock.** In For everyone, the picker's "Members can't change this" switch pins the pick to the top of its column as a workspace rule with the generated reason "Locked in Settings › Models by {name}". Members and admins on Just me see a locked pick as plain text with a lock; hover or focus says who, when, and the reason where a person wrote one. Changing a locked pick for everyone moves the pin with it.
 - **Reviews** read "Automatic · always another family" with a link to Policies. A new model shows as one line, "X is new · Use it for…", with Not now. The last line says what runs next for the first queued ticket; **Why?** opens a numbered trace with every skip and its reason (`?why=1` opens it).
-- **Saved · Undo** for ten seconds. A refused or half-finished write says so and is never shown as saved.
+- **Saved · Undo** for ten seconds. A refused or half-finished write says so and is never shown as saved. Undo puts back what was stored, not what was on screen: a row that only followed Default's level follows it again, and a later change to Default's level still reaches it.
 
 ## Data
 
@@ -25,8 +25,8 @@ Stored ranked orders beyond the first pick, situations, templates, usage, provid
 
 The AEON-878/879 board UI (view switch, templates, Thinking and Usage switches, setup assistant and welcome banner, next-run menus, side panel, Show/Project/Providers menus, situations, drag and move, other rule kinds, hide column, new tray, coverage, proof and run evidence, the full-screen board route). `/settings/models/board` redirects to the page; the query layer, situation, project, mode, kind and ticket are ignored. Endpoints and stored data are unchanged.
 
-The catalog freshness settings stay one fold away (**Model catalog**, opened by `#model-refresh`) until the model registry card (package 3) replaces them.
+The catalog freshness settings stay one fold away (**Model catalog**, opened by `#model-refresh`) until the model registry card (package 3) replaces them. The toggle sits above the card, so a refusal, a new row or a loading card below it never moves it; its settings open under it.
 
 ## Verification
 
-`web/tests/models-simple.unit.test.ts` (entries, native levels, rows, locks, next and Why?, the writes with Undo and refusals), `web/tests/models-simple.spec.ts` (default and exceptions, picker by harness, keyboard, For everyone and Just me, lock, member, can't run, new model, failures, accessibility, and the AEON-541 stability guard at ±0.5 px on desktop and phone) and `web/tests/models-simple-shots.spec.ts` (1440 and 400 px, light and dark).
+`web/tests/models-simple.unit.test.ts` (entries, native levels, rows, locks, next and Why?, the writes with Undo and refusals), `web/tests/models-simple.spec.ts` (default and exceptions, picker by harness, keyboard, For everyone and Just me, lock, member, can't run, new model, failures, accessibility, and the AEON-541 stability guard at ±0.5 px on desktop and phone, the Model catalog toggle included) and `web/tests/models-simple-shots.spec.ts` (1440 and 400 px, light and dark).

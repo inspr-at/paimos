@@ -152,6 +152,8 @@ export function useModelsSimple() {
   const storedOrder = (column: TailColumn) => column.source === 'own'
   /** An order's existence is not a stored native effort. Skip the write only when that effort is the one on screen. */
   const carriesStoredEffort = (column: TailColumn, wanted: string | null) => !!wanted && column.stored_effort === wanted
+  /** The native effort the column's own order stored; null (or absent) means the order inherits one. Undo restores this, never the effort on screen: that one may only be inherited from Default. */
+  const storedEffort = (column: TailColumn) => column.stored_effort ?? null
 
   /** Pick a model (and optionally its level) for a row; a draft row or a row without an order of its own gets one. */
   async function pick(row: RowView, entry: ModelEntry, effort: string | null = null): Promise<boolean> {
@@ -164,7 +166,7 @@ export function useModelsSimple() {
     if (row.draft && target === 'default' && entry.line === state.all.line && wanted === state.all.effort) { draft.value = null; return true }
     const before = orderBody(column)
     const forward: Step[] = []
-    const backward: Step[] = had ? [order(target, who, row.column, before), ...(row.effort ? [effortStep(target, who, row.column, row.effort)] : [])] : [reset(target, who, row.column)]
+    const backward: Step[] = had ? [order(target, who, row.column, before), effortStep(target, who, row.column, storedEffort(column))] : [reset(target, who, row.column)]
     let rules = false
     if (target === 'default' && row.lock && row.line && row.line !== entry.line) {
       try {
@@ -195,7 +197,9 @@ export function useModelsSimple() {
     const seen = seenNow()
     const target = scope.value, who = person()
     const before = orderBody(column), forward: Step[] = [reset(target, who, row.column)]
-    const backward: Step[] = [order(target, who, row.column, before), ...(row.effort ? [effortStep(target, who, row.column, row.effort)] : [])]
+    // A reset deletes the order and its effort with it; a stored effort comes back, an inherited one stays inherited.
+    const stored = storedEffort(column)
+    const backward: Step[] = [order(target, who, row.column, before), ...(stored ? [effortStep(target, who, row.column, stored)] : [])]
     let rules = false
     if (target === 'default' && row.lock && row.line) {
       try {

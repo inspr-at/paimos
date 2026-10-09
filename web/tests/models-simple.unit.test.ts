@@ -153,6 +153,25 @@ describe('what runs next', () => {
   })
 })
 
+/** A stand-in for the server's effort rule: an order with no stored effort runs Default's, a stored one wins; JSON null is the only clear. */
+function inheritanceServer(stored: string | null) {
+  const server = { revision: 3, defaultEffort: 'xhigh', concept: { rank: ['anthropic:opus', 'openai:sol'], not: ['unknown:x'], effort: stored } as { rank: string[]; not: string[]; effort: string | null } | null }
+  const guard = (revision: number) => { if (revision !== server.revision) throw new APIError(409, 'stale_revision') }
+  const write = () => ({ revision: ++server.revision, person_id: simplePerson })
+  vi.mocked(getSimple).mockImplementation(async () => {
+    const base = simpleDoc()
+    return { ...base, revision: server.revision, all: { ...base.all, effort: server.defaultEffort }, exceptions: base.exceptions.flatMap(row => row.column !== 'concept' ? [row] : server.concept ? [{ ...row, line: server.concept.rank[0]!, effort: server.concept.effort ?? server.defaultEffort }] : []) }
+  })
+  vi.mocked(getTail).mockImplementation(async () => {
+    const base = tailBoard()
+    return { ...base, revision: server.revision, columns: base.columns.map(column => column.column !== 'concept' ? column : server.concept ? { ...column, source: 'own' as const, stored: { rank: [...server.concept.rank], not: [...server.concept.not] }, stored_effort: server.concept.effort } : column) }
+  })
+  vi.mocked(putOrder).mockImplementation(async (_scope, _column, body, revision) => { guard(revision); server.concept = { rank: body.rank, not: body.not, effort: server.concept?.effort ?? null }; return write() })
+  vi.mocked(putEffort).mockImplementation(async (_scope, _column, effort, revision) => { guard(revision); if (!server.concept) throw new APIError(404, 'no_order'); server.concept.effort = effort; return write() })
+  vi.mocked(resetOrder).mockImplementation(async (_scope, _column, revision) => { guard(revision); server.concept = null; return write() })
+  return server
+}
+
 describe('the card’s writes', () => {
   beforeEach(() => {
     state.cleanups.forEach(cleanup => cleanup()); state.cleanups = []; vi.resetAllMocks(); resetToasts()
@@ -229,6 +248,35 @@ describe('the card’s writes', () => {
     expect(resetOrder).not.toHaveBeenCalled()
     expect(putOrder).toHaveBeenLastCalledWith('default', 'concept', saved, 5, simplePerson)
     expect(putEffort).toHaveBeenCalledWith('default', 'concept', 'high', 6, simplePerson)
+  })
+  for (const stored of [null, 'high']) it(`Undo of a pick puts back the stored effort (${stored ?? 'none'}), so a later Default effort change ${stored ? 'leaves the row alone' : 'still reaches the row'}`, async () => {
+    const server = inheritanceServer(stored), model = await page()
+    expect(model.rows.value.find(row => row.key === 'concept')!.effort).toBe(stored ?? 'xhigh')
+    expect(await model.pick(model.rows.value.find(row => row.key === 'concept')!, model.entries.value.find(entry => entry.line === 'anthropic:sonnet')!, 'max')).toBe(true)
+    expect(server.concept).toMatchObject({ rank: ['anthropic:sonnet', 'anthropic:opus', 'openai:sol'], effort: 'max' })
+    toasts.at(-1)!.actions[0]!.run(); await settle()
+    // The effort on screen was Default's xhigh; writing it back would turn inheritance into an override.
+    expect(server.concept).toMatchObject({ rank: ['anthropic:opus', 'openai:sol'], not: ['unknown:x'], effort: stored })
+    expect(putEffort).toHaveBeenLastCalledWith('me', 'concept', stored, 6, simplePerson)
+    server.defaultEffort = 'max'; await model.load()
+    expect(model.rows.value.find(row => row.key === 'concept')!.effort).toBe(stored ?? 'max')
+  })
+  it('Undo of a reset does not turn an inherited effort into a stored one', async () => {
+    const server = inheritanceServer(null), model = await page()
+    expect(await model.clear(model.rows.value.find(row => row.key === 'concept')!)).toBe(true)
+    expect(server.concept).toBeNull()
+    toasts.at(-1)!.actions[0]!.run(); await settle()
+    expect(server.concept).toMatchObject({ rank: ['anthropic:opus', 'openai:sol'], not: ['unknown:x'], effort: null })
+    expect(putEffort).not.toHaveBeenCalled()
+    server.defaultEffort = 'high'; await model.load()
+    expect(model.rows.value.find(row => row.key === 'concept')!.effort).toBe('high')
+  })
+  it('Undo of a reset brings a stored effort back', async () => {
+    const server = inheritanceServer('high'), model = await page()
+    expect(await model.clear(model.rows.value.find(row => row.key === 'concept')!)).toBe(true)
+    toasts.at(-1)!.actions[0]!.run(); await settle()
+    expect(server.concept).toMatchObject({ rank: ['anthropic:opus', 'openai:sol'], effort: 'high' })
+    expect(putEffort).toHaveBeenCalledWith('me', 'concept', 'high', 5, simplePerson)
   })
   it('undoes with the inverse writes against the revisions the change ended on, and refuses once the page moved on', async () => {
     const model = await page(), concept = model.rows.value.find(row => row.key === 'concept')!
@@ -353,13 +401,16 @@ describe('the wire', () => {
     vi.mocked(api).mockImplementation(async () => new Response('{"revision":1}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
     await wire.putOrder('me', 'design', { rank: ['a'], not: [] }, 3, simplePerson); await wire.resetOrder('me', 'design', 4, simplePerson); await wire.putEffort('me', 'design', 'max', 5, simplePerson)
     await wire.dismissLine('me', 'xai:x', 6, simplePerson); await wire.putDismissed('me', [], 7, simplePerson); await wire.putOrder('default', 'design', { rank: ['a'], not: [] }, 3, simplePerson)
+    await wire.putEffort('me', 'design', null, 8, simplePerson)
     const calls = vi.mocked(api).mock.calls
     expect(calls.map(([path, init]) => [new Headers(init!.headers).get('If-Prefs-Person'), init!.method, path])).toEqual([
       [simplePerson, 'PUT', '/model-preferences/orders/design/first?for=me'], [simplePerson, 'DELETE', '/model-preferences/orders/design/first?for=me&revision=4'],
       [simplePerson, 'PUT', '/model-preferences/orders/design/first/thinking?for=me'], [simplePerson, 'POST', '/model-preferences/tray/xai%3Ax/dismiss?for=me'],
-      [simplePerson, 'PUT', '/model-preferences/profile?for=me'], [null, 'PUT', '/model-preferences/orders/design/first?for=default'],
+      [simplePerson, 'PUT', '/model-preferences/profile?for=me'], [null, 'PUT', '/model-preferences/orders/design/first?for=default'], [simplePerson, 'PUT', '/model-preferences/orders/design/first/thinking?for=me'],
     ])
     expect(JSON.parse(calls[0]![1]!.body as string)).toEqual({ rank: ['a'], not: [], revision: 3 }); expect(JSON.parse(calls[2]![1]!.body as string)).toEqual({ effort: 'max', revision: 5 })
+    // JSON null is the only way to clear a stored effort; an omitted key keeps it.
+    expect(calls[6]![1]!.body).toBe('{"effort":null,"revision":8}')
   })
   it('turns a refusal into the status and the server’s words, and an answer that is not a list into an error', async () => {
     const wire = await vi.importActual<typeof import('../src/lib/modelsSimpleApi')>('../src/lib/modelsSimpleApi')

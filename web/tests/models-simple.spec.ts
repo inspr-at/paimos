@@ -225,7 +225,7 @@ for (const status of [409, 403]) test(`a ${status} refusal says so, keeps what w
 
 test('a save refusal and its recovery leave every model control where it was', async ({ page }) => {
   const state = await open(page)
-  const controls = { scope: page.locator('[data-scope-group]'), defaultPick: pick(page, 'all'), designPick: pick(page, 'design'), conceptPick: pick(page, 'concept'), why: page.getByRole('button', { name: 'Why?' }) }
+  const controls = { scope: page.locator('[data-scope-group]'), catalog: page.locator('[data-catalog-fold]'), defaultPick: pick(page, 'all'), designPick: pick(page, 'design'), conceptPick: pick(page, 'concept'), why: page.getByRole('button', { name: 'Why?' }) }
   const guard = await controlStability(page, controls)
   await guard.check(async () => {
     state.setFail(409)
@@ -262,7 +262,7 @@ test('old links still land on the page: ?why=1 opens the trace, the full-screen 
 
 test('controls stay still while menus open, picks change, rows come and go and the scope switches (AEON-541)', async ({ page }) => {
   await open(page)
-  const controls = { scope: page.locator('[data-scope-group]'), forEveryone: page.locator('[data-scope="default"]'), defaultPick: pick(page, 'all'), designPick: pick(page, 'design'), conceptPick: pick(page, 'concept') }
+  const controls = { scope: page.locator('[data-scope-group]'), catalog: page.locator('[data-catalog-fold]'), forEveryone: page.locator('[data-scope="default"]'), defaultPick: pick(page, 'all'), designPick: pick(page, 'design'), conceptPick: pick(page, 'concept') }
   const guard = await controlStability(page, controls)
   await guard.check(async () => { await pick(page, 'all').click(); await expect(page.locator('.mdl-pop')).toBeVisible(); await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowLeft'); await page.keyboard.press('Escape'); await expect(page.locator('.mdl-pop')).toHaveCount(0) })
   await guard.check(async () => { await pick(page, 'concept').click(); await option(page, 'anthropic:fable').locator('.lvc[data-eff="max"]').click(); await expect(pick(page, 'concept')).toContainText('Fable 5.1 · max') })
@@ -270,6 +270,10 @@ test('controls stay still while menus open, picks change, rows come and go and t
   await guard.check(async () => { await page.getByRole('button', { name: 'Different model for…' }).click(); await page.getByRole('option', { name: 'Backend build' }).click(); await expect(page.getByRole('combobox')).toBeFocused(); await page.keyboard.press('Escape'); await expect(row(page, 'backend')).toHaveCount(0) })
   await guard.check(async () => { await page.getByRole('button', { name: 'For everyone' }).click(); await expect(row(page, 'design').locator('[data-lock]')).toBeVisible() })
   await guard.check(async () => { await page.getByRole('button', { name: 'Just me' }).click(); await expect(row(page, 'all').locator('.mine')).toHaveCount(0) }); guard.done()
+  // The catalog toggle stays put while it opens and closes; its settings grow below it.
+  const catalog = await controlStability(page, { catalog: page.locator('[data-catalog-fold]') })
+  await catalog.check(async () => { await page.locator('[data-catalog-fold]').click(); await expect(page.locator('#catalog-body')).toBeVisible() })
+  await catalog.check(async () => { await page.locator('[data-catalog-fold]').click(); await expect(page.locator('#catalog-body')).toHaveCount(0) }); catalog.done()
   // The options of the picker keep their height and place while one is active, selected or has its level stepped.
   await pick(page, 'all').click()
   const options = await controlStability(page, { first: option(page, 'openai:sol'), second: option(page, 'openai:astra'), third: option(page, 'anthropic:opus'), filter: page.getByRole('combobox') })
@@ -280,7 +284,7 @@ test('controls stay still while menus open, picks change, rows come and go and t
 test('the card holds its layout on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 900 })
   await open(page, { down: true })
-  const controls = { scope: page.locator('[data-scope-group]'), defaultPick: pick(page, 'all'), conceptPick: pick(page, 'concept') }
+  const controls = { scope: page.locator('[data-scope-group]'), catalog: page.locator('[data-catalog-fold]'), defaultPick: pick(page, 'all'), conceptPick: pick(page, 'concept') }
   const guard = await controlStability(page, controls)
   await guard.check(async () => { await pick(page, 'all').click(); await expect(page.locator('.mdl-pop')).toBeVisible(); await page.keyboard.press('Escape') })
   await guard.check(async () => { await pick(page, 'concept').click(); await option(page, 'anthropic:sonnet').locator('.lvc[data-eff="max"]').click(); await expect(row(page, 'concept').locator('.mine')).toContainText('yours · reset') })
