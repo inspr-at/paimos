@@ -66,7 +66,8 @@ VALUES($1,'context-sibling','codex','sibling',$2,$3,'Denied sibling',$3,$4,$4,tr
 			must(t, err)
 			f.exec(t, `INSERT INTO user_preferences(tenant_id,principal_id,key,value) VALUES($1,$2,'agents.working',$3)`, f.person.TenantID, f.person.ID, raw)
 			if tc.unknownAllowed {
-				f.exec(t, `UPDATE account_capacity_readings SET read_at=$2 WHERE account_id=$1`, f.account, f.at.Add(-3*time.Minute))
+				// Age the retained append-only measurement with the injected clock.
+				f.at = f.at.Add(3 * time.Minute)
 			}
 			out := f.decide(t, f.request("context-caps", "fix"), tc.reason)
 			if tc.reason == "daily_limit" && (out.RetryAfter == nil || *out.RetryAfter != int64(end.Sub(f.at)/time.Second)) {

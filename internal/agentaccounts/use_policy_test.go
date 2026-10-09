@@ -21,6 +21,13 @@ func TestAccountContextSelectionPaths(t *testing.T) {
 	allowed := groupAccount(t, mod, person, runner, token, "allowed", "daemon-a", "Allowed", "test")
 	project, ticket, runID := insertTicketRun(t, person, runner, profile)
 	seed(t, person, func(tx pgx.Tx) error {
+		// Review admission also requires the registering runner to see the project.
+		if _, err := tx.Exec(t.Context(), `
+			INSERT INTO role_bindings (tenant_id, principal_id, role_id, scope_type, scope_id)
+			SELECT $1::uuid, $2::uuid, id, 'project', $3::uuid
+			FROM roles WHERE tenant_id=$1::uuid AND key='viewer'`, person.TenantID, runner.ID, project); err != nil {
+			return err
+		}
 		return putPin(t.Context(), tx, person, pinWrite{TicketID: ticket, Harness: "codex", AccountID: denied.ID})
 	})
 	seed(t, person, func(tx pgx.Tx) error {

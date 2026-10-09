@@ -20,6 +20,8 @@ func TestPairingVerificationAccountContextExceptionIsBound(t *testing.T) {
 	v := f.redeem(p)
 	e := v.Enrollments[0]
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	f.probe(v, e, key, 200)
+	fixtureWorkHours(t, f, e.AccountID)
 	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `DELETE FROM account_use_cells WHERE account_id=$1`, e.AccountID)
 		return err
