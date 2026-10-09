@@ -52,3 +52,12 @@ No automatic reconciliation endpoint is included in this package.
 Migration 1303 only adds nullable account fields and a tenant-scoped action
 table. Rollback retains reports, actions and audit history and runs the older
 binary. A down migration must never restore a credit already spent at a vendor.
+
+Validation covers owner and live-role revocation under an observed tenant lock
+wait, stale counts and bindings, explicit confirmation, vendor audit and Undo,
+refreshed reports before Undo, unknown-outcome retry prevention, automatic
+capture timing, raised-pace expiry and Boost precedence, independent windows,
+privacy/SSE masking, and migration expansion/transactional rollback/old writers/
+RLS. The reset behavior cases are registered as ESSENTIAL Go tests. Reporter
+contract validation runs after generating OpenAPI; static validation uses
+`ci-static --merge-main` on the approved remote runner.
