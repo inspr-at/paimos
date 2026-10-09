@@ -198,7 +198,8 @@ it('Learn opens on focus, pins with Enter or a click, and Esc closes it and keep
 })
 
 // Risk: a refused save and a failed read stand together, and the save warning's veil hides the
-// read error and its Retry. Both alerts and both retries must stay reachable, in either order.
+// read error and its Retry. Both alerts and both retries must stay reachable, in either order, and
+// neither alert nor its retry may take another place or size when the other failure comes or goes.
 for (const lang of ['en', 'de'] as const) {
   it(`with a refused save and a failed read together, both alerts and both retries stay reachable (${lang})`, async () => {
     const labels = lang === 'de'
@@ -234,6 +235,12 @@ for (const lang of ['en', 'de'] as const) {
     const alert = (id: string) => all(root).find(node => node.props['data-testid'] === id)
     const veiled = (node: El | null): boolean => node ? /\bveiled\b/.test(String(node.props.class ?? '')) || veiled(node.parent) : false
     const retryOf = (id: string) => all(alert(id)!).find(node => node.tag === 'button')!
+    // What decides an alert's place and size: its own classes and every container's (a veil only hides),
+    // its retry's classes and tip. The browser spec measures the boxes; this keeps their inputs from depending on the other failure.
+    const layoutOf = (id: string) => {
+      const classes = (node: El | null): string[] => node ? [String(node.props.class ?? '').replace(/\bveiled\b/g, '').trim(), ...classes(node.parent)] : []
+      return JSON.stringify({ alert: classes(alert(id)!), retry: [classes(retryOf(id))[0], retryOf(id).props['data-tip'] ?? null] })
+    }
     const hiddenStatus = () => all(root).find(node => /\bdl-status\b/.test(String(node.props.class ?? '')))!
     hiddenStatus().getBoundingClientRect = () => ({ height: 40 })
     const refuseSave = async () => { for (const listener of failures) listener(numbers.DELIVERY_PREFS_KEY); await settle() }
@@ -251,20 +258,31 @@ for (const lang of ['en', 'de'] as const) {
     expect(alert('delivery-load-error')).toBeUndefined()
     await refuseSave()
     expect(alert('delivery-pref-error')).toBeDefined()
+    const saveAlone = layoutOf('delivery-pref-error')
     await failRead()
     bothReachable()
-    // The read retry works alone: the save warning stays and stays reachable.
+    expect(layoutOf('delivery-pref-error'), 'the save alert and retry keep their place when the read fails').toBe(saveAlone)
+    const readWithSave = layoutOf('delivery-load-error')
+    // The read retry works alone: the save warning stays, reachable and in place.
     read = async () => deliveryMetrics()
     ;(retryOf('delivery-load-error').props.onClick as () => void)(); await settle()
     expect(alert('delivery-load-error')).toBeUndefined()
     expect(veiled(alert('delivery-pref-error')!)).toBe(false)
+    expect(layoutOf('delivery-pref-error'), 'the save alert and retry keep their place when the read recovers').toBe(saveAlone)
+    // The save retry works alone: the read error stays, reachable and in place.
+    await failRead()
+    ;(retryOf('delivery-pref-error').props.onClick as () => void)(); await settle()
+    expect(alert('delivery-pref-error')).toBeUndefined()
+    expect(veiled(alert('delivery-load-error')!)).toBe(false)
+    expect(layoutOf('delivery-load-error'), 'the read alert and retry keep their place when the save recovers').toBe(readWithSave)
 
     // The read fails first, then the save is refused; the save retry works alone.
-    await failRead()
     expect(veiled(alert('delivery-load-error')!)).toBe(false)
     preferenceSaves.failed.add('me/delivery:numbers')
     await refuseSave()
     bothReachable()
+    expect(layoutOf('delivery-load-error'), 'the read alert and retry keep their place when the save is refused').toBe(readWithSave)
+    expect(layoutOf('delivery-pref-error'), 'the save alert and retry take the same place whichever failure came first').toBe(saveAlone)
     preferenceSaves.failed.clear()
     ;(retryOf('delivery-pref-error').props.onClick as () => void)(); await settle()
     expect(alert('delivery-pref-error')).toBeUndefined()

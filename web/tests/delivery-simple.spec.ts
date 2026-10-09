@@ -2,7 +2,7 @@
 // AEON-1003 (AEON-994 package 3): Numbers · Simple. Risks: switching the window or
 // level moves a control or a tile's Learn button; Learn cannot be opened, pinned
 // and closed from the keyboard; the verdicts or the summary disagree with the numbers.
-import { expect, test, type Page, type Route } from '@playwright/test'
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
@@ -140,9 +140,10 @@ test('a failed refresh keeps Learn still through the error and the retry', async
   }
 })
 
-// Risk: a refused save and a failed read stand together, and the save warning's veil hides the
-// read error with its Retry. Each alert and each retry must stay visible and work on its own,
-// in either order, without moving the controls or a Learn button (AEON-541).
+// Risk: a refused save and a failed read stand together. The save warning's veil must not hide the
+// read error with its Retry, and neither retry may move or resize when the other failure appears or
+// recovers (each owns a fixed slot). Each alert and each retry must work on its own, in either order,
+// without moving the controls or a Learn button (AEON-541).
 test('a refused save and a failed read together keep both alerts and both retries, and Learn still', async ({ page }) => {
   test.setTimeout(240_000)
   let reject = false
@@ -174,6 +175,25 @@ test('a refused save and a failed read together keep both alerts and both retrie
     })
     const refresh = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
     const choose = (days: number) => windows.getByRole('radio', { name: text.days(days) }).click()
+    // A retry's slot: its box and its alert's box, in document coordinates. The first sighting of each
+    // is the reference; every later sighting, alone or together with the other failure, must match it.
+    const boxOf = (item: Locator) => item.evaluate(el => {
+      const rect = el.getBoundingClientRect()
+      return { x: rect.x + window.scrollX, y: rect.y + window.scrollY, width: rect.width, height: rect.height }
+    })
+    const slots: Record<string, Awaited<ReturnType<typeof boxOf>>> = {}
+    const inSlot = async (name: 'save' | 'read', alert: Locator, retry: Locator, when: string) => {
+      const now = { alert: await boxOf(alert), retry: await boxOf(retry) }
+      for (const part of ['retry', 'alert'] as const) {
+        const key = `${name} ${part}`
+        const first = slots[key] ??= now[part]
+        for (const side of ['x', 'y', 'width', 'height'] as const) {
+          expect(Math.abs(now[part][side] - first[side]), `${width} ${lang} ${key} ${side} ${when}`).toBeLessThanOrEqual(.5)
+        }
+      }
+    }
+    const saveSlot = (when: string) => inSlot('save', saveAlert, saveRetry, when)
+    const readSlot = (when: string) => inSlot('read', loadAlert, loadRetry, when)
     // Two alerts on one row, side by side, each holding its own retry, both above Learn.
     const bothShown = async () => {
       await expect(saveAlert).toBeVisible(); await expect(loadAlert).toBeVisible()
@@ -191,28 +211,29 @@ test('a refused save and a failed read together keep both alerts and both retrie
         if (phone) { expect(button!.width, `${name} retry touch width`).toBeGreaterThanOrEqual(44); expect(button!.height, `${name} retry touch height`).toBeGreaterThanOrEqual(44) }
       }
     }
+    const bothSlots = async (when: string) => { await bothShown(); await saveSlot(when); await readSlot(when) }
 
-    // The save fails first, then the read.
+    // The save fails first, then the read: the save retry is measured alone, then with the read failure.
     reject = true
-    await guard.check(async () => { await choose(30); await expect(saveAlert).toBeVisible() })
+    await guard.check(async () => { await choose(30); await expect(saveAlert).toBeVisible(); await saveSlot('alone, before the read fails') })
     world.answer(500, { error: 'boom' })
-    await guard.check(async () => { await refresh(); await bothShown() })
-    // The save retry works alone: the read error stays.
+    await guard.check(async () => { await refresh(); await bothSlots('with both failures (save first)') })
+    // The save retry works alone: the read error stays, and its retry keeps the slot it had beside the save warning.
     reject = false
-    await guard.check(async () => { await saveRetry.click(); await expect(saveAlert).toHaveCount(0); await expect(loadAlert).toBeVisible() })
+    await guard.check(async () => { await saveRetry.click(); await expect(saveAlert).toHaveCount(0); await expect(loadAlert).toBeVisible(); await readSlot('alone, after the save recovers') })
     // The read retry works alone.
     world.metrics({})
     await guard.check(async () => { await loadRetry.click(); await expect(loadAlert).toHaveCount(0); await expect(summary).not.toContainText(text.failed) })
 
     // The read fails first, then the save; a read retry that fails again keeps both.
     world.answer(500, { error: 'boom' })
-    await guard.check(async () => { await refresh(); await expect(loadAlert).toBeVisible() })
+    await guard.check(async () => { await refresh(); await expect(loadAlert).toBeVisible(); await readSlot('alone, before the save fails') })
     reject = true
-    await guard.check(async () => { await choose(90); await bothShown() })
-    await guard.check(async () => { await loadRetry.click(); await bothShown() })
-    // The read retry works while the save warning stays.
+    await guard.check(async () => { await choose(90); await bothSlots('with both failures (read first)') })
+    await guard.check(async () => { await loadRetry.click(); await bothSlots('after a read retry that fails again') })
+    // The read retry works while the save warning stays; the save retry keeps its slot.
     world.metrics({})
-    await guard.check(async () => { await loadRetry.click(); await expect(loadAlert).toHaveCount(0); await expect(saveAlert).toBeVisible() })
+    await guard.check(async () => { await loadRetry.click(); await expect(loadAlert).toHaveCount(0); await expect(saveAlert).toBeVisible(); await saveSlot('alone, after the read recovers') })
     reject = false
     await guard.check(async () => { await saveRetry.click(); await expect(saveAlert).toHaveCount(0) })
     guard.done()
