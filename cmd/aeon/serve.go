@@ -86,6 +86,7 @@ import (
 	"github.com/inspr-at/paimos/internal/search"
 	"github.com/inspr-at/paimos/internal/stagehandoff"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
+	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbrand"
 	"github.com/inspr-at/paimos/internal/themes"
@@ -352,6 +353,9 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		vapid = &webpush.Options{VAPIDPublicKey: cfg.PhonePush.PublicKey, VAPIDPrivateKey: cfg.PhonePush.PrivateKey, Subscriber: cfg.PhonePush.Subject}
 	}
 	phoneMod := phoneapprovals.New(pool, pairingMod, cfg.PublicURL, cfg.LinkKey, vapid)
+	stepupMod := stepup.New(pool, phoneMod, cfg.PublicURL)
+	stepupMod.Reauthenticate = authMod.BeginStepUp
+	authMod.StepUp = stepupMod
 	startWorker(func() { phoneMod.Run(workerCtx) })
 	pairingMod.SetAttachedMessages(attachedMessages)
 	doctrineMod := doctrine.New(pool, doctrine.Options{
@@ -437,6 +441,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun, reviewMod.PrepareForRun),
 			approvals.New(pool),
 			phoneMod,
+			stepupMod,
 			questionsMod,
 			decisiondesk.New(pool),
 			modelMod,

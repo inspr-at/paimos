@@ -23,11 +23,13 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reportercontract"
+	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Module serves /api/auth, /api/me and /api/agent-keys, and resolves the caller.
 type Module struct {
+	StepUp   *stepup.Module   // native requests, using the existing OIDC callback
 	trimNow  func() time.Time // injected only by deterministic key-trim tests
 	cfg      Config
 	pool     *pgxpool.Pool
@@ -340,6 +342,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "stepup-requests":
+		if len(parts) == 1 && (read || r.Method == http.MethodPost) || len(parts) == 2 && validRouteUUID(parts[1]) && read || len(parts) == 3 && validRouteUUID(parts[1]) && parts[2] == "withdraw" && r.Method == http.MethodPost {
+			return "approvals.request", true
+		}
 	case "status":
 		// Definitions and live limits are read-only tenant metadata. Project
 		// overrides remain confined by the handler's project visibility.
