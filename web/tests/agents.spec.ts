@@ -301,6 +301,16 @@ test('read-only people see requests but cannot decide or control', async ({ page
 test('the session panel shows the ticket, runs, telemetry and the thread, and sends messages', async ({ page }) => {
   const { calls, data } = await setup(page)
   for (const m of data.messages.filter(m => m.project === 'p-pharos')) Object.assign(m, m.sender_principal_id === data.me ? { recipient_session_id: camy } : { sender_session_id: camy, sender_label: 'camy' })
+  let releaseReceipt!: () => void, receiptStarted!: () => void
+  const receiptHeld = new Promise<void>(resolve => { releaseReceipt = resolve })
+  const receiptRequested = new Promise<void>(resolve => { receiptStarted = resolve })
+  await page.route('**/api/inbox/message-status?*', async route => {
+    const ids = new URL(route.request().url()).searchParams.get('ids')!.split(',')
+    const sent = data.sent.find(message => ids.includes(message.id))
+    if (!sent) return route.fallback()
+    receiptStarted(); await receiptHeld
+    return route.fulfill({ json: { items: ids.map(id => ({ message_id: id, status: id === sent.id ? 'delivered' : 'sent', delivered_at: id === sent.id ? new Date().toISOString() : null, read_at: null, deliver_by: null })) } })
+  })
   await openAgents(page, `/agents/${camy}`)
   const details = panel(page)
   await expect(details.getByRole('heading', { name: /camy/ })).toBeVisible()
@@ -326,7 +336,13 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   await expect(details.locator('.steer-send')).toBeEnabled()
   const mac = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform))
   await field.press(mac ? 'Meta+Enter' : 'Control+Enter')
+  await receiptRequested
+  await expect(details.getByRole('list', { name: 'Queued messages', exact: true })).toContainText('Sort stale hosts last.')
+  await expect(details.locator('.msg')).toHaveCount(4)
+  releaseReceipt()
   await expect(details.locator('.msg')).toHaveCount(5)
+  await expect(details.locator('.msg').last()).toContainText('Sort stale hosts last.')
+  await expect(details.getByRole('list', { name: 'Queued messages', exact: true })).toHaveCount(0)
   const sent = calls.find(c => c.method === 'POST' && c.path.endsWith('/messages'))?.body as Record<string, unknown>
   expect(sent).toMatchObject({ to: 'claude:camy', recipient_session_id: camy, body: 'Sort stale hosts last.', delivery_level: 'steer', expects_reply: false, is_action_request: false, reply_to: '3e000000-0000-4000-8000-000000000004' })
   expect(typeof sent.idempotency_key).toBe('string')
