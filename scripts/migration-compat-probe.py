@@ -9,6 +9,11 @@ import urllib.error
 import urllib.request
 
 
+def is_ready(payload):
+    """Readiness is the status field. Release 128 added pool statistics beside it."""
+    return isinstance(payload, dict) and payload.get('status') == 'ready'
+
+
 class Probe:
     def __init__(self, base):
         self.base = base
@@ -52,7 +57,7 @@ class Probe:
     def check(self, state, version):
         if self.call('/api/health') != {'status': 'ok', 'db': 'ok'}:
             raise AssertionError('previous release health is not OK')
-        if self.call('/api/ready') != {'status': 'ready'}:
+        if not is_ready(self.call('/api/ready')):
             raise AssertionError('previous release is not ready')
         if self.call('/api/version')['version'] != version:
             raise AssertionError('tested binary does not match the previous release')
