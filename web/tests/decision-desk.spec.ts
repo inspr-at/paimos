@@ -660,7 +660,7 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
   test(`connection facts and review stay bound to the original request ${width} ${theme}`, async ({ page }, testInfo) => {
     const now = Date.parse('2026-10-09T12:00:00Z')
     await page.clock.install({ time: now - 60_000 })
-    // Freeze before navigation: slow CI loading must not cross a minute boundary.
+    // Freeze before navigation so the facts read at exactly `now`.
     await page.clock.pauseAt(now)
     await page.setViewportSize({ width, height: 1000 })
     // The connection read succeeds while unrelated session/account APIs fail.
@@ -670,7 +670,7 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
       permissions.workspace.permissions.push('account.manage', 'approvals.read', 'questions.read', 'questions.decide', 'rules.write')
       return route.fulfill({ json: permissions })
     })
-    const review = { request_id: 'connection-original', request_digest: 'a'.repeat(64), consent_digest: 'b'.repeat(64), consent_mode: 'aeon', state: 'pending', expires_at: new Date(now + 120_000).toISOString(), snapshot: { platform: 'darwin', computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: 'Arbeitsrechner für mandantenspezifische Qualitätsprüfungen', harness: 'codex', transcript: '/fixture/session.jsonl', file_id: '1:234', process: { pid: 1234, uid: 501, started: new Date(now).toISOString(), executable: '/fixture/codex', cwd: '/fixture/project' } } }
+    const review = { request_id: 'connection-original', request_digest: 'a'.repeat(64), consent_digest: 'b'.repeat(64), consent_mode: 'aeon', state: 'pending', expires_at: new Date(now + 179_000).toISOString(), snapshot: { platform: 'darwin', computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: 'Arbeitsrechner für mandantenspezifische Qualitätsprüfungen', harness: 'codex', transcript: '/fixture/session.jsonl', file_id: '1:234', process: { pid: 1234, uid: 501, started: new Date(now).toISOString(), executable: '/fixture/codex', cwd: '/fixture/project' } } }
     await page.route('**/api/agent-pairing/attach/pending', route => route.fulfill({ json: { requests: [review] } }))
     const writes: string[] = []
     await page.route('**/api/agent-pairing/attach/*/approve', route => { writes.push(new URL(route.request().url()).pathname); return route.fulfill({ json: { ...review, state: 'approved' } }) })
@@ -683,6 +683,10 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
     await expect(row).toContainText('Your terminal on')
     await expect(row.locator('time')).toHaveAttribute('datetime', review.expires_at)
     await expect(row).toContainText('Expires in 2m')
+    // The stability guard waits for animation frames, which a paused clock never
+    // delivers. Minutes are floored, so the label stays 2m for 59 s once resumed,
+    // longer than the test timeout.
+    await page.clock.resume()
     await expectStableControls({ controls: { review: button, row }, interactions: [
       { name: 'open native request and cancel', run: async () => { await button.click(); const dialog = page.getByRole('dialog'); await expect(dialog).toContainText(review.snapshot.host); expect(writes).toEqual([]); await page.getByRole('button', { name: 'Close attach review' }).click() } },
     ] })
@@ -691,7 +695,7 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
     const dialog = page.getByRole('dialog')
     await dialog.getByRole('radio', { name: 'Allow', exact: true }).check()
     await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeEnabled()
-    await page.clock.fastForward(120_001)
+    await page.clock.fastForward(179_001)
     await expect(dialog).toContainText('Request expired. Run aeon-agentd attach again.')
     await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeDisabled()
     expect(writes).toEqual([])
