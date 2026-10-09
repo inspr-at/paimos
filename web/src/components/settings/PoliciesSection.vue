@@ -72,7 +72,7 @@ function tabKey(event: KeyboardEvent, index: number) {
       <div v-if="permitted" class="policy-controls">
         <p class="source-note">{{ tab === 'ladders' ? 'Saved job order and model preferences · owned by their model sources.' : tab === 'keys' ? 'Permission registry · owned by Access. These permissions cannot be carried by agent keys.' : 'Existing owners · this page holds no policy values of its own.' }}</p>
         <button ref="detailsButton" class="detail-link" data-testid="policies-row-link" @click="openDetails">About these rules <AppIcon name="chevron-right" :size="14" /></button>
-        <nav v-if="tab === 'ladders'" class="owner-links"><RouterLink to="/settings/models?layer=rules">Model rules moved · Open Models <AppIcon name="chevron-right" :size="12" /></RouterLink></nav>
+        <nav v-if="tab === 'ladders'" class="owner-links"><RouterLink to="/settings/models?layer=rules">Model choices are on the Models page · Open Models <AppIcon name="chevron-right" :size="12" /></RouterLink></nav>
         <div v-if="tab === 'ladders'" class="role-block">
           <div class="policy-roles" role="group" aria-label="Model role" data-testid="policies-role-group">
             <button v-for="item in POLICY_ROLES" :key="item.id" data-testid="policies-role" :aria-pressed="role === item.id" @click="role = item.id">{{ item.label }}</button>

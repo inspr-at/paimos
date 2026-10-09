@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The approved A4 retirement replaces dialog-only cases with page entry-point
-// regressions; orders, locks, Undo and identity safety live in models-board specs.
+// regressions; picks, locks, Undo and identity safety live in models-simple specs.
 import { expect, test } from '@playwright/test'
 import { fixtures, liveAgent, mockWork } from './work-fixtures'
 import { mockModelsSettings } from './models-settings-page'
@@ -24,7 +24,7 @@ test('Agents model preferences navigates to the page without opening the old dia
   await expect(page.locator('[data-models-ready="true"]')).toBeVisible()
   await expect(page.locator('dialog[open]')).toHaveCount(0)
 })
-test('LiveAgents preferences keeps the project rules scope in the Models URL', async ({ page }) => {
+test('LiveAgents preferences keeps the project scope in the Models URL', async ({ page }) => {
   await setup(page); await page.goto('/')
   await page.locator('[data-project-id="p-aeon"] .live-chip').click()
   await page.getByRole('button', { name: 'Model preferences for Aeon', exact: true }).click()
@@ -32,7 +32,7 @@ test('LiveAgents preferences keeps the project rules scope in the Models URL', a
   await expect(page.locator('[data-models-ready="true"]')).toBeVisible()
   await expect(page.locator('dialog[open]')).toHaveCount(0)
 })
-test('PlanningCell opens the server explanation with the captured ticket, kind and project', async ({ page }) => {
+test('PlanningCell opens the Models page with the captured context and the Why? trace for the next queued ticket', async ({ page }) => {
   await setup(page); await page.goto('/p/PHAROS/tickets')
   const planning = page.getByRole('button', { name: /Codex Sol.*Why this model/ }).first()
   await planning.click()
@@ -43,6 +43,7 @@ test('PlanningCell opens the server explanation with the captured ticket, kind a
   expect(url.searchParams.get('ticket')).toBeTruthy()
   expect(url.searchParams.get('project_id')).toBe('p-pharos')
   expect(url.searchParams.get('why')).toBe('1')
-  await expect(page.getByRole('dialog', { name: 'Why this model?' })).toBeVisible()
+  // The page ignores the ticket, kind and project it was opened for (AEON-1011); ?why=1 opens the trace for what runs next.
+  await expect(page.getByRole('dialog', { name: /^Why / })).toBeVisible()
   await expect(page.locator('dialog[open]')).toHaveCount(0)
 })
