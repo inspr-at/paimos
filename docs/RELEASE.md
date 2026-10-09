@@ -240,6 +240,14 @@ Machine labels and host paths below are neutral examples (`build-6`,
 installed controller and deployment configuration; these examples do not
 change the live routing or deployment target.
 
+The `public-names` static check scans product source, web fixtures, API and
+documentation for operator host and business names. It runs in CI and the
+existing pre-push static bundle. Replace a new match with a neutral fictional
+example or tenant-reported data. Only published release-note history may be
+allowlisted in `scripts/ci/public-names-allowlist.json`, pinned to its content
+digest; review a history update before refreshing that digest. Other paths
+cannot be exempted.
+
 CI's hosted `runner-route` job calls `test-runner-route.yml`, requests four idle
 slots, and selects the entire Go batch behind independent event, ref and
 rerun-attempt guards. The manual smoke workflow calls its own router for one
