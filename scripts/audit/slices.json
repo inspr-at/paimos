@@ -120,7 +120,13 @@
         "internal/delivery/**",
         "internal/engineadmission/**",
         "internal/agentsetup/ledger.go",
-        "internal/agentsetup/ledger_test.go"
+        "internal/agentsetup/ledger_test.go",
+        "internal/agentsetup/shared_ledger.go",
+        "internal/agentsetup/shared_ledger_test.go",
+        "internal/agentsetup/instances.go",
+        "internal/agentsetup/instances_test.go",
+        "internal/agentd/shared_ledger.go",
+        "internal/agentd/shared_ledger_test.go"
       ]
     },
     {

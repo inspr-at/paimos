@@ -34,6 +34,7 @@ type Remote struct {
 	mu                   sync.RWMutex
 	daemonID, generation string
 	accountLinkProof     string
+	ledgerGeneration     string
 	// Host capacity is negotiated from the server's own computer view; see
 	// hostCapacitySupported. now is injectable for tests.
 	hostCapacitySupport   int8
@@ -173,7 +174,7 @@ func (r *Remote) Identity(ctx context.Context) (string, string, error) {
 
 func (r *Remote) Queued(ctx context.Context) ([]Run, error) {
 	var runs []Run
-	err := r.Client.DoWithHeaders(ctx, "GET", "/api/runs/queued?limit=100", nil, &runs, map[string]string{reviewgate.PolicyHeader: reviewgate.Policy})
+	err := r.Client.DoWithHeaders(ctx, "GET", "/api/runs/queued?limit=100", nil, &runs, r.ledgerHeaders(map[string]string{reviewgate.PolicyHeader: reviewgate.Policy}))
 	return runs, err
 }
 
@@ -399,9 +400,9 @@ func (r *Remote) WorkOrder(ctx context.Context, id string) (WorkOrder, error) {
 
 func (r *Remote) Route(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64) (Route, error) {
 	var route Route
-	err := r.Client.Do(ctx, "POST", "/api/agent-accounts/route", map[string]any{
+	err := r.Client.DoWithHeaders(ctx, "POST", "/api/agent-accounts/route", map[string]any{
 		"run_id": runID, "daemon_id": daemonID, "account_ids": accountIDs, "estimated_units": estimates,
-	}, &route)
+	}, &route, r.ledgerHeaders(nil))
 	return route, err
 }
 
@@ -423,7 +424,7 @@ func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, 
 	if pickup != nil {
 		body["handoff"] = pickup
 	}
-	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", body, nil, map[string]string{reviewgate.PolicyHeader: reviewgate.Policy})
+	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", body, nil, r.ledgerHeaders(map[string]string{reviewgate.PolicyHeader: reviewgate.Policy}))
 	return err
 }
 

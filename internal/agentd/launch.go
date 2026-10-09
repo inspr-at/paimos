@@ -9,19 +9,24 @@ import (
 )
 
 const (
-	launchPrepared  = "not_attempted"
-	launchAttempted = "attempted"
-	launchRefused   = "verification_unavailable"
+	launchRoutePending = "route_pending"
+	launchPrepared     = "not_attempted"
+	launchAttempted    = "attempted"
+	launchRefused      = "verification_unavailable"
 )
 
 var errClaimUnconfirmed = errors.New("claim settlement unconfirmed; no local launch attempted")
 
 func noLocalProcess(r Record) bool {
-	return r.ExitObserved || r.LaunchState == launchPrepared || r.LaunchState == launchRefused
+	return r.ExitObserved || r.LaunchState == launchRoutePending || r.LaunchState == launchPrepared || r.LaunchState == launchRefused
 }
 
 func validateLaunchRecord(r Record) error {
 	switch r.LaunchState {
+	case launchRoutePending:
+		if r.PID == 0 && r.ClaimRoute == nil && r.Sequence == 0 && len(r.Pending) == 0 && ((r.State == "route_pending" && len(r.RouteCandidates) > 0 && len(r.RouteCandidates) <= 64 && r.LedgerGroup != "" && r.LedgerGeneration != "") || ((r.State == "completed" || r.State == "failed" || r.State == "cancelled") && len(r.RouteCandidates) == 0 && r.LedgerGroup == "")) {
+			return nil
+		}
 	case "", launchAttempted:
 		return nil
 	case launchRefused:
@@ -106,7 +111,7 @@ func (s *Supervisor) reconcileUnlaunched(ctx context.Context, entry *owned) erro
 		// generation is never silently replaced across a restart: an earlier
 		// HTTP request may still commit. Server expiry can cancel unclaimed
 		// verification; until then its accounting remains explicitly pending.
-		if record.Generation != s.generation {
+		if record.Generation != s.generation && s.ledger == nil {
 			return errClaimUnconfirmed
 		}
 		return nil

@@ -31,6 +31,7 @@ type ServiceReceipt struct {
 }
 
 type ServiceManager struct {
+	Instance string
 	// FixtureLabel is available to isolated platform fixtures, never CLI/server input.
 	// Production always leaves it empty. Only the reserved fixture namespace is accepted.
 	FixtureLabel string
@@ -45,7 +46,7 @@ type ServiceManager struct {
 
 func (m ServiceManager) label() (string, error) {
 	if m.FixtureLabel == "" {
-		return serviceLabel, nil
+		return InstanceLabel(m.Instance)
 	}
 	if !regexp.MustCompile(`^cm\.aeon\.fixture\.[a-z0-9][a-z0-9-]{7,63}$`).MatchString(m.FixtureLabel) {
 		return "", ErrServiceConflict
@@ -104,6 +105,9 @@ func (m ServiceManager) definitionLogs(root string, logs bool) ([]byte, error) {
 		b.WriteString("</array>")
 		if logs {
 			logDir := filepath.Join(m.Home, "Library", "Logs", "aeon-agentd")
+			if m.Instance != "" {
+				logDir = filepath.Join(logDir, m.Instance)
+			}
 			b.WriteString("<key>StandardOutPath</key><string>" + xmlText(filepath.Join(logDir, "stdout.log")) + "</string><key>StandardErrorPath</key><string>" + xmlText(filepath.Join(logDir, "stderr.log")) + "</string>")
 		}
 		// Successful intentional shutdown is not an invitation to restart.
@@ -179,7 +183,7 @@ func (m ServiceManager) Preflight(ctx context.Context, root string, receipt *Ser
 			}
 			pid, parseErr := strconv.Atoi(fields[0])
 			executable := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), fields[0]))
-			if parseErr == nil && pid != os.Getpid() && (executable == m.Executable || executable == physical) {
+			if m.Instance == "" && parseErr == nil && pid != os.Getpid() && (executable == m.Executable || executable == physical) {
 				return ErrServiceConflict
 			}
 		}
@@ -296,7 +300,7 @@ func (m ServiceManager) Install(ctx context.Context, s *Store, computerID string
 		return nil, ErrServiceConflict
 	}
 	if m.Platform.OS == "darwin" {
-		logs, err := OpenStore(filepath.Join(m.Home, "Library", "Logs", "aeon-agentd"), true)
+		logs, err := OpenStore(m.logDirectory(), true)
 		if err != nil {
 			return nil, err
 		}
@@ -401,4 +405,12 @@ func (m ServiceManager) Remove(ctx context.Context, s *Store, receipt *ServiceRe
 		}
 	}
 	return nil
+}
+
+func (m ServiceManager) logDirectory() string {
+	dir := filepath.Join(m.Home, "Library", "Logs", "aeon-agentd")
+	if m.Instance != "" {
+		dir = filepath.Join(dir, m.Instance)
+	}
+	return dir
 }

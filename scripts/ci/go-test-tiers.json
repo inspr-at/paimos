@@ -1784,6 +1784,20 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSettlementReadTimeoutDoesNotAbortLivePoll","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerCrashBeforeIntentAndUnreachableRecovery","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerDispatchPrunesRouteOfferAndKeepsPin","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerEnrollmentCrashAndOldServerFailClosed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerGenericConflictKeepsAttempt","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerHandoverWaitsAcrossLaunchWindows","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerRebuildRefusesOldDispatchBeforeLaunching","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerRouteCommitCrashOwnerOnlyReplay","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestSlowManagedControlCannotRestartBudgetAfterLock","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStatuslineOffWithoutExecutable","tier":"GATED-FULL"}
@@ -2889,6 +2903,20 @@
     {"kind":"go","package":"internal/agentsetup","name":"TestSetupResponseLossResumesSamePrivateIdentity","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestSetupUsesServicePathForShellWrappers","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestSharedLedgerAtomicPruningPinsUnknownAndMachineCap","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestSharedLedgerInstalledServicesIncludeStoppedAndLoadedDefinitions","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestSharedLedgerInstanceRootsLabelsLogsAndCanonicalOrigins","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestSharedLedgerMissingOrUnreadableMemberFailsClosed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestSharedLedgerPermanentLockSurvivesDataReplacement","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestSharedLedgerProvisioningGatePreservesServiceReceipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestSharedLedgerTombstonesBlockRebuildAndOwnerLeave","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestSocketArtifactsRejectAnotherUID","tier":"GATED-FULL"}
     ,

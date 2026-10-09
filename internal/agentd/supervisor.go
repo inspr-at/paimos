@@ -67,12 +67,16 @@ type replay struct {
 // Record contains only local process provenance and bounded control digests.
 // RecordSchemaVersion pins its persisted schema; classic is never opened implicitly.
 type Record struct {
-	WorkerPickup          *WorkerPickup    `json:"worker_pickup,omitempty"`
-	RecoveryReports       []RecoveryReport `json:"recovery_reports,omitempty"`
-	AutomaticReview       bool             `json:"automatic_review,omitempty"`
-	VerificationReason    string           `json:"verification_reason,omitempty"`
-	BudgetStopReason      string           `json:"budget_stop_reason,omitempty"`
-	BudgetStopUnconfirmed bool             `json:"budget_stop_unconfirmed,omitempty"`
+	LedgerGroup           string                       `json:"ledger_group,omitempty"`
+	LedgerGeneration      string                       `json:"ledger_generation,omitempty"`
+	RouteCandidates       []agentsetup.LedgerCandidate `json:"route_candidates,omitempty"`
+	ProcessStartedAt      time.Time                    `json:"process_started_at,omitzero"`
+	WorkerPickup          *WorkerPickup                `json:"worker_pickup,omitempty"`
+	RecoveryReports       []RecoveryReport             `json:"recovery_reports,omitempty"`
+	AutomaticReview       bool                         `json:"automatic_review,omitempty"`
+	VerificationReason    string                       `json:"verification_reason,omitempty"`
+	BudgetStopReason      string                       `json:"budget_stop_reason,omitempty"`
+	BudgetStopUnconfirmed bool                         `json:"budget_stop_unconfirmed,omitempty"`
 	// Only launchPrepared proves that adapter.Start has never been called.
 	// Empty is a legacy record, never evidence that no child was forked.
 	LaunchState   string `json:"launch_state,omitempty"`
@@ -150,6 +154,10 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	ledger                 *agentsetup.SharedLedger
+	ledgerBinding          ledgerBinding
+	ledgerRequired         bool
+	ledgerBarrier          func(string) // deterministic fixture barriers; never server input
 	usageProbes            usageprobe.Probe
 	recoveryMu             sync.Mutex
 	attachedHooks          map[string]*attachedHookBinding
@@ -836,6 +844,14 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	defer s.dispatchMu.Unlock()
+	if s.ledgerRequired && s.ledger == nil {
+		return agentsetup.ErrLedgerUnavailable
+	}
+	if s.ledger != nil {
+		if err := s.reconcileLedgerLocked(ctx); err != nil {
+			return err
+		}
+	}
 	s.mu.Lock()
 	capturing := s.capacityCapturing
 	s.mu.Unlock()
@@ -853,7 +869,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	s.mu.Unlock()
 	if entry != nil {
 		entry.mu.Lock()
-		retry := entry.record.LaunchState == launchPrepared && entry.record.State == "claim_pending" && entry.record.Generation == s.generation
+		retry := entry.record.LaunchState == launchPrepared && entry.record.State == "claim_pending" && (entry.record.Generation == s.generation || s.ledger != nil)
 		entry.mu.Unlock()
 		if !retry {
 			entry.mu.Lock()
@@ -1055,13 +1071,64 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if entry != nil {
 		entry.mu.Lock()
 		if !entry.record.RouteReleased {
-			route = *entry.record.ClaimRoute
+			if entry.record.ClaimRoute != nil {
+				route = *entry.record.ClaimRoute
+			}
 		}
 		entry.mu.Unlock()
+	}
+	var attempt *Record
+	if s.ledger != nil {
+		if entry != nil {
+			entry.mu.Lock()
+			saved := entry.record
+			entry.mu.Unlock()
+			if saved.LedgerGroup != "" && !saved.RouteReleased {
+				attempt = &saved
+			}
+		}
+		if attempt == nil {
+			if route.AccountID != "" {
+				accountIDs = []string{route.AccountID}
+			}
+			gid, e := agentsetup.LedgerID()
+			if e != nil {
+				return e
+			}
+			subset, e := s.ledger.Acquire(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, gid, s.ledgerCandidates(accountIDs, s.ledgerBinding.Generation))
+			if e != nil {
+				return e
+			}
+			if s.ledgerBarrier != nil {
+				s.ledgerBarrier("group")
+			}
+			rec := Record{WorkerPickup: pickup, LaunchState: launchRoutePending, RouteCandidates: subset, LedgerGroup: gid, LedgerGeneration: s.ledgerBinding.Generation, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: s.workspace, State: "route_pending", Controls: map[string]replay{}}
+			if e = s.journal.Put(rec); e != nil {
+				return e
+			}
+			if entry == nil {
+				entry = &owned{record: rec, replies: map[string]InboxReplyTarget{}}
+				s.mu.Lock()
+				s.runs[run.ID] = entry
+				s.mu.Unlock()
+			} else {
+				s.setLedgerRecord(rec)
+			}
+			attempt = &rec
+			if s.ledgerBarrier != nil {
+				s.ledgerBarrier("intent")
+			}
+		}
+		accountIDs = candidateIDs(attempt.RouteCandidates)
 	}
 	if route.AccountID == "" {
 		route, err = s.api.Route(ctx, run.ID, s.daemonID, accountIDs, s.estimates)
 		if err != nil {
+			return err
+		}
+	}
+	if attempt != nil {
+		if err = s.confirmLedgerRoute(attempt, route); err != nil {
 			return err
 		}
 	}
@@ -1107,6 +1174,10 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		entry.mu.Lock()
 		next := entry.record
 		next.ClaimRoute, next.AccountID, next.RouteReleased = &route, route.AccountID, false
+		next.LaunchState, next.State = launchPrepared, "claim_pending"
+		if s.ledger != nil {
+			next.Generation = s.generation
+		}
 		if err := s.journal.Put(next); err != nil {
 			entry.mu.Unlock()
 			return err
@@ -1311,6 +1382,17 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if !verification && !review {
 		launchRev, launchDefault = workspaceHEAD(ctx, s.workspace), launchDefaultRev(ctx, s.workspace)
 	}
+	if s.ledger != nil {
+		entry.mu.Lock()
+		r := entry.record
+		entry.mu.Unlock()
+		if err = s.ledger.Launching(s.ledgerBinding.Member.ID, r.LedgerGeneration, r.LedgerGroup); err != nil {
+			return err
+		}
+		if s.ledgerBarrier != nil {
+			s.ledgerBarrier("launching")
+		}
+	}
 	entry.mu.Lock()
 	intent := entry.record
 	intent.LaunchState, intent.State = launchAttempted, "starting"
@@ -1326,6 +1408,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		_ = entry.tools.Close()
 		closeHarness("process_failed")
 		return err
+	}
+	if s.ledgerBarrier != nil {
+		s.ledgerBarrier("attempted")
 	}
 	launchedAt := time.Now()
 	s.verificationDiagnosticFor(run.ID, run.AccountID, run.Purpose, "starting", "")
@@ -1353,9 +1438,14 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	entry.mu.Lock()
 	entry.process = proc
 	entry.record.PID = proc.PID()
+	entry.record.ProcessStartedAt = launchedAt
 	entry.record.State = "running"
 	saveErr := s.journal.Put(entry.record)
+	runningRecord := entry.record
 	entry.mu.Unlock()
+	if s.ledger != nil {
+		saveErr = errors.Join(saveErr, s.ledger.Running(s.ledgerBinding.Member.ID, runningRecord.LedgerGeneration, runningRecord.LedgerGroup, proc.PID(), launchedAt))
+	}
 	entry.mu.Lock()
 	entry.monitorDone = make(chan struct{})
 	done := entry.monitorDone
@@ -2281,6 +2371,11 @@ func (s *Supervisor) Close(ctx context.Context) error {
 			case <-ctx.Done():
 				return ctx.Err()
 			}
+		}
+	}
+	if s.ledger != nil {
+		if err := s.reconcileLedgerLocked(ctx); err != nil {
+			return err
 		}
 	}
 	if err := s.releaseCheckout(); err != nil {
