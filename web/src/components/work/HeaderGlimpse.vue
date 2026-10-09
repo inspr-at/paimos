@@ -45,6 +45,7 @@ function measureRegion() {
   const boxes = [...page.querySelectorAll<HTMLElement>(GLIMPSE_CLEAR_SELECTOR)]
     .filter(el => el.getClientRects().length)
     .map(el => { const rect = el.getBoundingClientRect(); return { x: rect.left - box.left, y: rect.top - top, width: rect.width, height: rect.height } })
+    .filter(box => box.width > 0 && box.height > 0)
   mask.value = glimpseTextMask(box.width, height, boxes)
   const spot = glimpseControlSpot(box.width, height, boxes, { width: controls.value?.offsetWidth ?? 310, height: controls.value?.offsetHeight ?? 34 })
   controlSpot.value = spot ? { left: `${spot.x}px`, top: `${spot.y}px`, width: `${spot.width}px`, height: `${spot.height}px` } : null

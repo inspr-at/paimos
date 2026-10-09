@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync } from 'node:fs'
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, mockWork, mockView, me } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 
-const shots = 'test-results/aeon-639'
 const errors = new WeakMap<Page, string[]>()
 test.beforeEach(async ({ page }) => {
   const failures: string[] = []; errors.set(page, failures)
@@ -34,7 +32,7 @@ async function noSideways(controls: Record<string, Locator>, before: Awaited<Ret
     expect(after[name]!.height - before[name]!.height, `${name} height change`).toBe(0)
   }
 }
-async function capture(page: Page, name: string) { await settled(page); mkdirSync(shots, { recursive: true }); await page.screenshot({ path: `${shots}/${name}.png` }) }
+async function capture(page: Page, name: string) { await settled(page); await page.screenshot({ path: test.info().outputPath(`${name}.png`) }) }
 async function phoneRoomy(page: Page, name: string) {
   await page.getByRole('button', { name: 'Filters', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
@@ -144,8 +142,8 @@ for (const dimension of ['assignee', 'epic'] as const) {
     const epic = data.nodes.find(node => node.id === 'n-epic')!
     epic.title = 'Mandantenübergreifende Berechtigungsverwaltung und Betriebsprüfung'
     const value = dimension === 'assignee' ? person.id : epic.id
-    const title = dimension === 'assignee' ? 'Assignee' : 'Epic'
-    const placeholder = dimension === 'assignee' ? 'Someone' : 'An epic'
+    const title = dimension === 'assignee' ? 'Assignee' : 'Parent'
+    const placeholder = dimension === 'assignee' ? 'Someone' : 'A parent'
     const resolved = dimension === 'assignee' ? person.name : epic.title
     let release!: () => void, requested!: () => void
     const response = new Promise<void>(resolve => { release = resolve })
@@ -153,7 +151,7 @@ for (const dimension of ['assignee', 'epic'] as const) {
     await mockWork(page, data, { hold: ({ path, query }) => {
       const resolver = dimension === 'assignee'
         ? query.get('assignee') === value && query.get('limit') === '1'
-        : query.get('kind') === 'epic'
+        : query.get('kind') === 'work,epic'
       if (path === '/api/nodes' && resolver) return { until: response, computed: requested }
     } })
     try {
