@@ -61,3 +61,25 @@ privacy/SSE masking, and migration expansion/transactional rollback/old writers/
 RLS. The reset behavior cases are registered as ESSENTIAL Go tests. Reporter
 contract validation runs after generating OpenAPI; static validation uses
 `ci-static --merge-main` on the approved remote runner.
+
+## Settings › Accounts and computers (AEON-1037)
+
+Each account's Use and limits section keeps only per-account overrides: the
+floor, and a Resets card while the vendor reports spendable resets (`resets`
+not null in the overview; otherwise nothing is shown). The card states the count
+and expiry days ("2 resets · 1 expires Sun, 1 on 6 Nov") and has one switch,
+"Don't let resets expire", which writes `suggest` / `auto_before_expiry` through
+the reset-policy route with the account's shared floor/reset revision. Only the
+owning person with `account.manage` can change it; others see it read-only with
+that explanation. The switch shows the saved policy until the server confirms a
+write that advances the revision for the same account and binding; refusals
+keep the old state and say so. With the switch on, the card shows the server's
+`reset_plan` (planned moment and raised pace) or that nothing is planned yet.
+
+The Careful / Balanced / Max out posture control and "Follow my Models
+setting" are removed: Pace and Boost today on the dial replace them and apply
+per harness to every account. The web client no longer writes the legacy
+posture route; the route stays for older clients. The design's "From the last
+4 weeks" usage summary is not shown because the overview carries no such
+learning summary yet.
+
