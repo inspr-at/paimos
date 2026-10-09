@@ -370,7 +370,7 @@ func TestStepupListExpiredResultsPrecedeEvents(t *testing.T) {
 			projects, sessions := make([]string, 2), make([]string, 2)
 			agents := []tenant.Principal{f.agent, f.otherAgent}
 			for i, agent := range agents {
-				if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,$2,'Expiry result project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, agent.TenantID, "EXPIRY-"+agent.ID).Scan(&projects[i]); err != nil {
+				if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,$2,'Expiry result project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, agent.TenantID, []string{"EXPIRY-1", "EXPIRY-2"}[i]).Scan(&projects[i]); err != nil {
 					t.Fatal(err)
 				}
 				if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest) VALUES($1,$2,$3,'codex','fixture','unmanaged','worker',decode(repeat('00',32),'hex'),decode(repeat('00',32),'hex')) RETURNING id::text`, agent.TenantID, projects[i], agent.ID).Scan(&sessions[i]); err != nil {
