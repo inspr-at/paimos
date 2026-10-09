@@ -53,6 +53,9 @@ type githubRun struct {
 	Pulls      []struct {
 		Number int64 `json:"number"`
 	} `json:"pull_requests"`
+	HeadCommit struct {
+		Tree string `json:"tree_id"`
+	} `json:"head_commit"`
 }
 
 // metricRunFrom validates one workflow run attempt. An incomplete run is not
@@ -70,6 +73,9 @@ func metricRunFrom(r githubRun) (metricRun, bool, error) {
 		started = *r.Started
 	}
 	out := metricRun{ID: r.ID, Attempt: r.Attempt, Workflow: r.Path, Name: r.Name, Event: r.Event, Branch: r.Branch, Head: r.Head, Created: r.Created.UTC(), Started: started.UTC(), Completed: r.Updated.UTC(), Conclusion: *r.Conclusion}
+	if reviewgate.ValidSHA(r.HeadCommit.Tree) {
+		out.HeadTree = r.HeadCommit.Tree
+	}
 	if len(r.Pulls) > 0 && r.Pulls[0].Number > 0 {
 		n := r.Pulls[0].Number
 		out.PR = &n
@@ -151,6 +157,98 @@ func readRunAttempts(get func(string, any) error, r githubRun, from int, include
 		}
 	}
 	return out, 0, nil
+}
+
+// Job facts (AEON-1016). The Delivery numbers need two things from the jobs of
+// attempt 1 of a pull-request or merge-queue run: whether the required checks
+// passed, and how long the worst job waited for a runner. Nothing else of a job
+// is kept: no step, log, runner name or label.
+const (
+	jobPageSize  = 100
+	jobPageLimit = 5
+)
+
+type githubJob struct {
+	Name       string     `json:"name"`
+	Conclusion *string    `json:"conclusion"`
+	Created    time.Time  `json:"created_at"`
+	Started    *time.Time `json:"started_at"`
+}
+
+type jobFacts struct {
+	Required    map[string]string
+	WorstWaitMS *int
+}
+
+// jobRunEvents are the events whose runs the numbers read jobs for.
+func jobRunEvent(event string) bool { return event == "pull_request" || event == "merge_group" }
+
+// readJobFacts reads every job of one attempt, up to a bound, and summarizes it
+// for the given required checks. A partial list is a read error: a fact is
+// stored whole or not at all. A required check without a job of that name is
+// "missing" (red), the way measure-v2 counts it; a job that ran without a
+// conclusion is "missing" too.
+func readJobFacts(get func(string, any) error, runID int64, attempt int, required []string) (jobFacts, error) {
+	var jobs []githubJob
+	for page := 1; ; page++ {
+		var response struct {
+			Total int         `json:"total_count"`
+			Jobs  []githubJob `json:"jobs"`
+		}
+		if err := get(fmt.Sprintf("/actions/runs/%d/attempts/%d/jobs?per_page=%d&page=%d", runID, attempt, jobPageSize, page), &response); err != nil {
+			return jobFacts{}, err
+		}
+		if response.Total < 0 || response.Total > jobPageSize*jobPageLimit || len(response.Jobs) > jobPageSize {
+			return jobFacts{}, errRead
+		}
+		jobs = append(jobs, response.Jobs...)
+		if len(jobs) >= response.Total {
+			break
+		}
+		if page >= jobPageLimit || len(response.Jobs) == 0 {
+			return jobFacts{}, errRead
+		}
+	}
+	facts := jobFacts{Required: map[string]string{}}
+	for _, name := range required {
+		facts.Required[name] = "missing"
+		for _, job := range jobs {
+			if job.Name == name {
+				if job.Conclusion != nil && *job.Conclusion != "" && len(*job.Conclusion) <= 32 {
+					facts.Required[name] = *job.Conclusion
+				}
+				break
+			}
+		}
+	}
+	for _, job := range jobs {
+		if job.Started == nil || job.Started.IsZero() || job.Created.IsZero() || job.Conclusion != nil && *job.Conclusion == "skipped" {
+			continue
+		}
+		wait := int(max(0, job.Started.Sub(job.Created).Milliseconds()))
+		if facts.WorstWaitMS == nil || wait > *facts.WorstWaitMS {
+			facts.WorstWaitMS = &wait
+		}
+	}
+	return facts, nil
+}
+
+// attachJobFacts reads the jobs of each eligible attempt-1 run into the run. A
+// failed read leaves that run without job facts: its numbers are then missing
+// and the windows holding it partial, never guessed. eligible decides whether
+// the run is one of the CI workflow's.
+func attachJobFacts(get func(string, any) error, runs []metricRun, eligible func(metricRun) bool, required []string) {
+	for i := range runs {
+		run := &runs[i]
+		if run.Attempt != 1 || !jobRunEvent(run.Event) || !eligible(*run) {
+			continue
+		}
+		facts, err := readJobFacts(get, run.ID, run.Attempt, required)
+		if err != nil {
+			continue
+		}
+		run.JobsRead, run.Required, run.WorstWaitMS = true, facts.Required, facts.WorstWaitMS
+	}
 }
 
 type githubPullFact struct {

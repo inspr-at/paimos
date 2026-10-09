@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -50,14 +51,17 @@ type backfillInput struct {
 }
 
 type BackfillResult struct {
-	State     string    `json:"state"`
-	Since     time.Time `json:"since"`
-	Phase     string    `json:"phase"`
-	Day       *string   `json:"day"`
-	Calls     int       `json:"calls"`
-	Runs      int       `json:"runs"`
-	Pulls     int       `json:"pulls"`
-	Truncated bool      `json:"truncated"`
+	State string    `json:"state"`
+	Since time.Time `json:"since"`
+	Phase string    `json:"phase"`
+	Day   *string   `json:"day"`
+	Calls int       `json:"calls"`
+	Runs  int       `json:"runs"`
+	Pulls int       `json:"pulls"`
+	// Jobs counts the runs whose jobs this step read (the jobs pass that follows
+	// the runs and pulls phases).
+	Jobs      int  `json:"jobs"`
+	Truncated bool `json:"truncated"`
 }
 
 type metricFactInput struct {
@@ -228,6 +232,9 @@ func (m *Module) getMetrics(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if err = loadProjectInputTx(r.Context(), tx, project, &in, now); err != nil {
+			return err
+		}
 		// A disconnected App no longer observes the repository. Coverage ends
 		// at the last stored GitHub fact or the finished backfill, so a window
 		// that runs through now cannot stay complete.
@@ -375,7 +382,13 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	result := BackfillResult{Since: cursor.Since, Phase: cursor.Phase, Truncated: cursor.Truncated}
 	if cursor.Phase == "done" && source.DoneAt != nil {
-		result.State = "done"
+		// The runs and pulls are in; the jobs pass reads what the check suites
+		// did not bring (AEON-1016) until no eligible run lacks job facts.
+		result, err = m.fillJobs(r.Context(), p, project, source, reader, cursor, now)
+		if err != nil {
+			respondError(w, err)
+			return
+		}
 		httpapi.WriteJSON(w, 200, result)
 		return
 	}
@@ -446,15 +459,17 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, result)
 }
 
-func validFact(f metricFactInput, now time.Time) (metricMark, error) {
+// validFact checks one reported fact. Timing facts become marks; review audits
+// and escaped defects (AEON-1016) become reports. Exactly one of them is set.
+func validFact(f metricFactInput, now time.Time) (metricMark, *metricReport, error) {
 	k := metricMark{Kind: f.Kind, Key: f.Key, PR: f.PullRequest, Started: f.StartedAt, At: f.At.UTC(), Outcome: f.Outcome}
 	if !metricFactKey.MatchString(f.Key) || f.At.IsZero() || f.At.After(now.Add(5*time.Minute)) || f.At.Before(now.AddDate(0, 0, -400)) ||
 		f.PullRequest != nil && (*f.PullRequest < 1 || *f.PullRequest > 2147483647) || f.StartedAt != nil && (f.StartedAt.After(f.At) || f.At.Sub(*f.StartedAt) > 30*24*time.Hour) {
-		return k, fail(400, "invalid delivery metric fact")
+		return k, nil, fail(400, "invalid delivery metric fact")
 	}
 	if f.HeadSHA != nil {
 		if !reviewgate.ValidSHA(*f.HeadSHA) {
-			return k, fail(400, "invalid delivery metric fact head")
+			return k, nil, fail(400, "invalid delivery metric fact head")
 		}
 		k.Head = *f.HeadSHA
 	}
@@ -464,13 +479,14 @@ func validFact(f metricFactInput, now time.Time) (metricMark, error) {
 	}
 	// Release facts (AEON-1001): name, tag and the time the live version was
 	// healthy again, only on a release, and healthy only after it went live.
-	if f.Kind != "release" && (f.Release != nil || f.Tag != nil || f.HealthyAt != nil) ||
+	// An escaped defect (AEON-1016) may name the release that caused it.
+	if f.Kind != "release" && (f.Tag != nil || f.HealthyAt != nil) || f.Kind != "release" && f.Kind != "escaped_defect" && f.Release != nil ||
 		f.Release != nil && !metricReleaseName.MatchString(*f.Release) || f.Tag != nil && !metricReleaseTag.MatchString(*f.Tag) {
-		return k, fail(400, "release, tag and healthy_at belong to a release fact")
+		return k, nil, fail(400, "release, tag and healthy_at belong to a release fact")
 	}
 	if f.HealthyAt != nil {
 		if f.Outcome != "live" || f.HealthyAt.Before(f.At) || f.HealthyAt.After(now.Add(5*time.Minute)) || f.HealthyAt.Sub(f.At) > 30*24*time.Hour {
-			return k, fail(400, "healthy_at needs a live release and lies between at and now")
+			return k, nil, fail(400, "healthy_at needs a live release and lies between at and now")
 		}
 		v := f.HealthyAt.UTC()
 		k.Healthy = &v
@@ -479,20 +495,39 @@ func validFact(f metricFactInput, now time.Time) (metricMark, error) {
 	switch f.Kind {
 	case "review":
 		if f.StartedAt == nil || f.Outcome != "ok" && f.Outcome != "changes" {
-			return k, fail(400, "a review needs started_at and outcome ok or changes")
+			return k, nil, fail(400, "a review needs started_at and outcome ok or changes")
 		}
 	case "merge_round":
 		if f.PullRequest == nil || f.Outcome != "scripted" && f.Outcome != "model" {
-			return k, fail(400, "a merge round needs pull_request and outcome scripted or model")
+			return k, nil, fail(400, "a merge round needs pull_request and outcome scripted or model")
 		}
 	case "release":
 		if f.StartedAt == nil || f.Outcome != "live" && f.Outcome != "failed" {
-			return k, fail(400, "a release needs started_at and outcome live or failed")
+			return k, nil, fail(400, "a release needs started_at and outcome live or failed")
 		}
+	case "review_audit":
+		// The audit of a merged pull request; the outcome is the highest severity
+		// among its findings, clean when it found none.
+		if f.PullRequest == nil || f.Outcome != "clean" && f.Outcome != "low" && f.Outcome != "medium" && f.Outcome != "high" {
+			return k, nil, fail(400, "a review audit needs pull_request and outcome clean, low, medium or high")
+		}
+		severity := f.Outcome
+		if severity == "clean" {
+			severity = "none"
+		}
+		return k, &metricReport{Kind: f.Kind, Key: f.Key, PR: f.PullRequest, Severity: severity, Started: k.Started, At: k.At}, nil
+	case "escaped_defect":
+		// The key names the bug or incident ticket; the link says what caused
+		// it: a merged pull request, a release, or both. Without that link the
+		// defect is not "caused by" anything and does not count.
+		if f.PullRequest == nil && f.Release == nil || f.Outcome != "low" && f.Outcome != "medium" && f.Outcome != "high" {
+			return k, nil, fail(400, "an escaped defect needs pull_request or release, and outcome low, medium or high")
+		}
+		return k, &metricReport{Kind: f.Kind, Key: f.Key, PR: f.PullRequest, Release: f.Release, Severity: f.Outcome, Started: k.Started, At: k.At}, nil
 	default:
-		return k, fail(400, "fact kind must be review, merge_round or release")
+		return k, nil, fail(400, "fact kind must be review, merge_round, release, review_audit or escaped_defect")
 	}
-	return k, nil
+	return k, nil, nil
 }
 
 func (m *Module) reportMetricFacts(w http.ResponseWriter, r *http.Request) {
@@ -511,9 +546,10 @@ func (m *Module) reportMetricFacts(w http.ResponseWriter, r *http.Request) {
 	}
 	now := m.now()
 	marks := make([]metricMark, 0, len(in.Facts))
+	var reports []metricReport
 	seen := map[string]bool{}
 	for _, f := range in.Facts {
-		k, err := validFact(f, now)
+		k, report, err := validFact(f, now)
 		if err != nil {
 			respondError(w, err)
 			return
@@ -523,6 +559,10 @@ func (m *Module) reportMetricFacts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		seen[k.Kind+"\x00"+k.Key] = true
+		if report != nil {
+			reports = append(reports, *report)
+			continue
+		}
 		marks = append(marks, k)
 	}
 	stored := 0
@@ -546,7 +586,10 @@ func (m *Module) reportMetricFacts(w http.ResponseWriter, r *http.Request) {
 		if err = upsertMarksTx(r.Context(), tx, p.TenantID, s.Repository, "report", marks, now); err != nil {
 			return err
 		}
-		stored = len(marks)
+		if err = upsertReportsTx(r.Context(), tx, p.TenantID, s.Repository, reports, now); err != nil {
+			return err
+		}
+		stored = len(marks) + len(reports)
 		return nil
 	})
 	if err != nil {
@@ -554,4 +597,114 @@ func (m *Module) reportMetricFacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, 200, map[string]int{"stored": stored})
+}
+
+const (
+	jobFillBudget = 40 // GitHub reads per step
+	jobFillRetry  = time.Hour
+)
+
+// fillJobs reads the jobs of attempt 1 of pull-request and merge-queue runs of
+// the CI workflow that have none yet, newest first, within one step's budget.
+// A run whose jobs GitHub could not return is tried again after an hour, so a
+// few persistent failures never block the rest; its window stays partial and
+// says so. Authority is checked again in the write transaction.
+func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project string, source *metricSourceRow, reader metricsReader, cursor *backfillCursor, now time.Time) (BackfillResult, error) {
+	result := BackfillResult{State: "running", Since: cursor.Since, Phase: "jobs", Truncated: cursor.Truncated}
+	var runs []int64
+	var required []string
+	from := windowSpan(now, metricLongDays, true).first.Add(-metricSlack)
+	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := requireMetrics(ctx, tx, p, "delivery.manage", project); err != nil {
+			return err
+		}
+		var err error
+		if required, err = requiredChecksTx(ctx, tx, []string{project}); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT run_id FROM delivery_metric_runs
+			WHERE repository=$1 AND attempt=1 AND jobs_read_at IS NULL AND event IN ('pull_request','merge_group') AND completed_at>=$2
+			AND regexp_replace(workflow_path,'^.*/','')=$3 AND (jobs_failed_at IS NULL OR jobs_failed_at<$4)
+			ORDER BY completed_at DESC LIMIT $5`, source.Repository, from, path.Base(source.CIWorkflow), now.Add(-jobFillRetry), jobFillBudget)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			if err = rows.Scan(&id); err != nil {
+				return err
+			}
+			runs = append(runs, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return result, err
+	}
+	if len(runs) == 0 {
+		result.State, result.Phase = "done", "done"
+		return result, nil
+	}
+	facts := map[int64]jobFacts{}
+	var failedRuns []int64
+	calls := 0
+	err = reader.MetricsRead(ctx, p.TenantID, func(get func(string, any) error) error {
+		counted := func(path string, out any) error { calls++; return get(path, out) }
+		for _, id := range runs {
+			if calls >= jobFillBudget {
+				break
+			}
+			f, err := readJobFacts(counted, id, 1, required)
+			if err != nil {
+				failedRuns = append(failedRuns, id)
+				continue
+			}
+			facts[id] = f
+		}
+		return nil
+	})
+	// Nothing read at all is GitHub's fault, not the runs': report it and keep
+	// every run eligible. Failures among successes mark only those runs.
+	if err != nil || len(facts) == 0 {
+		return result, fail(502, "GitHub could not be read; the jobs pass resumes from the runs that still lack job facts")
+	}
+	result.Calls = calls
+	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
+		if _, err := projectSettings(ctx, tx, project); err != nil {
+			return err
+		}
+		if err := requireMetrics(ctx, tx, p, "delivery.manage", project); err != nil {
+			return err
+		}
+		current, err := loadMetricSourceTx(ctx, tx, project, true)
+		if err != nil {
+			return err
+		}
+		if current == nil || current.Revision != source.Revision || current.Repository != source.Repository {
+			return fail(409, "the backfill moved or the source changed meanwhile; call again to continue")
+		}
+		at := m.now()
+		for id, f := range facts {
+			raw, err := json.Marshal(f.Required)
+			if err != nil {
+				return err
+			}
+			if _, err = tx.Exec(ctx, `UPDATE delivery_metric_runs SET jobs_read_at=$4,jobs_failed_at=NULL,worst_job_wait_ms=$5,required_jobs=$6 WHERE repository=$1 AND run_id=$2 AND attempt=$3`,
+				source.Repository, id, 1, at, f.WorstWaitMS, raw); err != nil {
+				return err
+			}
+		}
+		for _, id := range failedRuns {
+			if _, err = tx.Exec(ctx, `UPDATE delivery_metric_runs SET jobs_failed_at=$3 WHERE repository=$1 AND run_id=$2 AND attempt=1`, source.Repository, id, at); err != nil {
+				return err
+			}
+		}
+		result.Jobs = len(facts)
+		return nil
+	})
+	return result, err
 }

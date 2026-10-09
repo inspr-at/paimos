@@ -24,11 +24,30 @@ const (
 // first source is kept, so coverage never moves later.
 func upsertRunsTx(ctx context.Context, tx pgx.Tx, tid, repository, source string, runs []metricRun, at time.Time) error {
 	for _, r := range runs {
-		if _, err := tx.Exec(ctx, `INSERT INTO delivery_metric_runs(tenant_id,repository,run_id,attempt,workflow_path,workflow_name,event,head_branch,head_sha,pull_request,created_at,started_at,completed_at,conclusion,source,recorded_at)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+		var tree *string
+		if r.HeadTree != "" {
+			tree = &r.HeadTree
+		}
+		// Job facts are stored with the run that read them; a later upsert of
+		// the same attempt without them keeps what is there.
+		var jobsAt *time.Time
+		var required []byte
+		if r.JobsRead {
+			jobsAt = &at
+			var err error
+			if required, err = json.Marshal(r.Required); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO delivery_metric_runs(tenant_id,repository,run_id,attempt,workflow_path,workflow_name,event,head_branch,head_sha,pull_request,created_at,started_at,completed_at,conclusion,source,recorded_at,head_tree,jobs_read_at,worst_job_wait_ms,required_jobs)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 			ON CONFLICT(tenant_id,repository,run_id,attempt) DO UPDATE SET workflow_path=EXCLUDED.workflow_path,workflow_name=EXCLUDED.workflow_name,event=EXCLUDED.event,head_branch=EXCLUDED.head_branch,head_sha=EXCLUDED.head_sha,
-			pull_request=coalesce(EXCLUDED.pull_request,delivery_metric_runs.pull_request),created_at=EXCLUDED.created_at,started_at=EXCLUDED.started_at,completed_at=EXCLUDED.completed_at,conclusion=EXCLUDED.conclusion`,
-			tid, repository, r.ID, r.Attempt, r.Workflow, r.Name, r.Event, r.Branch, r.Head, r.PR, r.Created, r.Started, r.Completed, r.Conclusion, source, at); err != nil {
+			pull_request=coalesce(EXCLUDED.pull_request,delivery_metric_runs.pull_request),created_at=EXCLUDED.created_at,started_at=EXCLUDED.started_at,completed_at=EXCLUDED.completed_at,conclusion=EXCLUDED.conclusion,
+			head_tree=coalesce(EXCLUDED.head_tree,delivery_metric_runs.head_tree),
+			jobs_read_at=coalesce(EXCLUDED.jobs_read_at,delivery_metric_runs.jobs_read_at),
+			worst_job_wait_ms=CASE WHEN EXCLUDED.jobs_read_at IS NOT NULL THEN EXCLUDED.worst_job_wait_ms ELSE delivery_metric_runs.worst_job_wait_ms END,
+			required_jobs=CASE WHEN EXCLUDED.jobs_read_at IS NOT NULL THEN EXCLUDED.required_jobs ELSE delivery_metric_runs.required_jobs END`,
+			tid, repository, r.ID, r.Attempt, r.Workflow, r.Name, r.Event, r.Branch, r.Head, r.PR, r.Created, r.Started, r.Completed, r.Conclusion, source, at, tree, jobsAt, r.WorstWaitMS, required); err != nil {
 			return err
 		}
 	}
@@ -64,6 +83,21 @@ func upsertMarksTx(ctx context.Context, tx pgx.Tx, tid, repository, source strin
 			healthy_at=CASE WHEN EXCLUDED.source='report' THEN EXCLUDED.healthy_at ELSE delivery_metric_marks.healthy_at END,
 			outcome=EXCLUDED.outcome`,
 			tid, repository, k.Kind, k.Key, k.PR, k.Head, k.Started, k.At, k.Outcome, source, at, k.Release, k.Tag, k.Healthy); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// upsertReportsTx stores reported audits and defects. A report with the same
+// kind and key corrects the earlier one, so a ticket re-linked to another cause
+// or re-rated keeps one row.
+func upsertReportsTx(ctx context.Context, tx pgx.Tx, tid, repository string, reports []metricReport, at time.Time) error {
+	for _, k := range reports {
+		if _, err := tx.Exec(ctx, `INSERT INTO delivery_metric_reports(tenant_id,repository,kind,report_key,pull_request,release_name,severity,started_at,at,recorded_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+			ON CONFLICT(tenant_id,repository,kind,report_key) DO UPDATE SET pull_request=EXCLUDED.pull_request,release_name=EXCLUDED.release_name,severity=EXCLUDED.severity,started_at=EXCLUDED.started_at,at=EXCLUDED.at`,
+			tid, repository, k.Kind, k.Key, k.PR, k.Release, k.Severity, k.Started, k.At, at); err != nil {
 			return err
 		}
 	}
@@ -113,10 +147,20 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) erro
 		if !ok || e.Suite.App.Slug != "github-actions" || e.Suite.Status != "completed" {
 			return nil
 		}
-		err := reader.MetricsRead(ctx, m.config.TenantID, func(get func(string, any) error) error {
+		scope, err := m.jobScope(ctx)
+		if err != nil {
+			return err
+		}
+		err = reader.MetricsRead(ctx, m.config.TenantID, func(get func(string, any) error) error {
 			var err error
 			runs, err = suiteRuns(get, e.Suite.ID, e.Suite.Head)
-			return err
+			if err != nil {
+				return err
+			}
+			// Job facts are best effort: a run stored without them is a visible
+			// gap that the backfill's jobs pass fills, never a lost run.
+			attachJobFacts(get, runs, scope.ci, scope.Required)
+			return nil
 		})
 		if err != nil {
 			return err
@@ -159,6 +203,7 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) erro
 
 // metricSourceRow is a project's repository link and backfill position.
 type metricSourceRow struct {
+	Project                                 string
 	Repository, CIWorkflow, NightlyWorkflow string
 	Cursor                                  *backfillCursor
 	Revision                                int64
@@ -168,11 +213,11 @@ type metricSourceRow struct {
 func loadMetricSourceTx(ctx context.Context, tx pgx.Tx, project string, lock bool) (*metricSourceRow, error) {
 	var s metricSourceRow
 	var raw []byte
-	query := `SELECT repository,ci_workflow,nightly_workflow,backfill_cursor,backfill_revision,backfill_since,backfill_done_at FROM delivery_metric_sources WHERE project_id=$1`
+	query := `SELECT project_id::text,repository,ci_workflow,nightly_workflow,backfill_cursor,backfill_revision,backfill_since,backfill_done_at FROM delivery_metric_sources WHERE project_id=$1`
 	if lock {
 		query += ` FOR NO KEY UPDATE`
 	}
-	err := tx.QueryRow(ctx, query, project).Scan(&s.Repository, &s.CIWorkflow, &s.NightlyWorkflow, &raw, &s.Revision, &s.Since, &s.DoneAt)
+	err := tx.QueryRow(ctx, query, project).Scan(&s.Project, &s.Repository, &s.CIWorkflow, &s.NightlyWorkflow, &raw, &s.Revision, &s.Since, &s.DoneAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -200,16 +245,25 @@ func loadMetricInputTx(ctx context.Context, tx pgx.Tx, s metricSourceRow, now ti
 	cut := func(oldest time.Time) {
 		in.ReadFrom = later(in.ReadFrom, oldest.UTC().Add(metricSlack))
 	}
-	rows, err := tx.Query(ctx, `SELECT run_id,attempt,workflow_path,workflow_name,event,head_branch,head_sha,pull_request,created_at,started_at,completed_at,conclusion,source
+	rows, err := tx.Query(ctx, `SELECT run_id,attempt,workflow_path,workflow_name,event,head_branch,head_sha,pull_request,created_at,started_at,completed_at,conclusion,source,
+		coalesce(head_tree,''),jobs_read_at IS NOT NULL,worst_job_wait_ms,required_jobs
 		FROM delivery_metric_runs WHERE repository=$1 AND completed_at>=$2 ORDER BY completed_at DESC LIMIT $3`, s.Repository, from, metricRunLimit+1)
 	if err != nil {
 		return in, err
 	}
 	for rows.Next() {
 		var r metricRun
-		if err = rows.Scan(&r.ID, &r.Attempt, &r.Workflow, &r.Name, &r.Event, &r.Branch, &r.Head, &r.PR, &r.Created, &r.Started, &r.Completed, &r.Conclusion, &r.Source); err != nil {
+		var required []byte
+		if err = rows.Scan(&r.ID, &r.Attempt, &r.Workflow, &r.Name, &r.Event, &r.Branch, &r.Head, &r.PR, &r.Created, &r.Started, &r.Completed, &r.Conclusion, &r.Source,
+			&r.HeadTree, &r.JobsRead, &r.WorstWaitMS, &required); err != nil {
 			rows.Close()
 			return in, err
+		}
+		if required != nil {
+			if err = json.Unmarshal(required, &r.Required); err != nil {
+				rows.Close()
+				return in, err
+			}
 		}
 		in.Runs = append(in.Runs, r)
 	}
@@ -263,6 +317,27 @@ func loadMetricInputTx(ctx context.Context, tx pgx.Tx, s metricSourceRow, now ti
 		in.Marks = in.Marks[:metricFactLimit]
 		cut(in.Marks[metricFactLimit-1].At)
 	}
+	rows, err = tx.Query(ctx, `SELECT kind,report_key,pull_request,release_name,severity,started_at,at FROM delivery_metric_reports
+		WHERE repository=$1 AND at>=$2 ORDER BY at DESC LIMIT $3`, s.Repository, from, metricFactLimit+1)
+	if err != nil {
+		return in, err
+	}
+	for rows.Next() {
+		var k metricReport
+		if err = rows.Scan(&k.Kind, &k.Key, &k.PR, &k.Release, &k.Severity, &k.Started, &k.At); err != nil {
+			rows.Close()
+			return in, err
+		}
+		in.Reports = append(in.Reports, k)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return in, err
+	}
+	if len(in.Reports) > metricFactLimit {
+		in.Reports = in.Reports[:metricFactLimit]
+		cut(in.Reports[metricFactLimit-1].At)
+	}
 	// Coverage: a finished backfill covers from its start; otherwise facts are
 	// complete from the first one the webhook recorded.
 	if s.DoneAt != nil && s.Since != nil {
@@ -281,4 +356,123 @@ func loadMetricInputTx(ctx context.Context, tx pgx.Tx, s metricSourceRow, now ti
 		in.Truncated = true
 	}
 	return in, nil
+}
+
+// loadProjectInputTx adds what belongs to the project rather than the
+// repository: its required checks and the rollout incidents of its releases.
+// An incident is the production side of an escaped defect (down is high,
+// degraded medium); coverage starts with the first release run recorded.
+func loadProjectInputTx(ctx context.Context, tx pgx.Tx, project string, in *metricInput, now time.Time) error {
+	settings, err := settingsTx(ctx, tx, &project)
+	if err != nil {
+		return err
+	}
+	if settings.RequiredChecks != nil {
+		in.Required = append([]string(nil), (*settings.RequiredChecks)...)
+	}
+	from := windowSpan(now, metricLongDays, true).first.Add(-metricSlack)
+	rows, err := tx.Query(ctx, `SELECT i.source_key,i.severity,i.started_at FROM delivery_flow_incidents i
+		JOIN delivery_flow_items it ON it.tenant_id=i.tenant_id AND it.id=i.item_id
+		WHERE i.project_id=$1 AND it.kind='release' AND i.started_at>=$2 ORDER BY i.started_at DESC LIMIT $3`, project, from, metricFactLimit+1)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var key, severity string
+		var at time.Time
+		if err = rows.Scan(&key, &severity, &at); err != nil {
+			rows.Close()
+			return err
+		}
+		level := "medium"
+		if severity == "down" {
+			level = "high"
+		}
+		in.Incidents = append(in.Incidents, metricIncident{Key: key, Severity: level, At: at.UTC()})
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	if len(in.Incidents) > metricFactLimit {
+		in.Incidents = in.Incidents[:metricFactLimit]
+		in.ReadFrom = later(in.ReadFrom, in.Incidents[metricFactLimit-1].At.Add(metricSlack))
+	}
+	var first *time.Time
+	if err = tx.QueryRow(ctx, `SELECT min(started_at) FROM delivery_flow_items WHERE project_id=$1 AND kind='release'`, project).Scan(&first); err != nil {
+		return err
+	}
+	if first != nil {
+		v := first.UTC()
+		in.IncidentCovered = &v
+	}
+	return nil
+}
+
+// jobScope is what the webhook needs to read jobs: whether a run belongs to the
+// CI workflow of a project that reads this repository, and the required checks
+// of those projects.
+type jobScope struct {
+	workflows []string
+	Required  []string
+}
+
+func (j jobScope) ci(run metricRun) bool {
+	for _, workflow := range j.workflows {
+		if sameWorkflow(run, workflow) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Module) jobScope(ctx context.Context) (jobScope, error) {
+	var scope jobScope
+	service := db.AllProjects(ctx, "delivery metric webhook job scope")
+	err := db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT project_id::text,ci_workflow FROM delivery_metric_sources WHERE repository=$1 ORDER BY project_id`, m.config.Repository)
+		if err != nil {
+			return err
+		}
+		var projects []string
+		for rows.Next() {
+			var project, workflow string
+			if err = rows.Scan(&project, &workflow); err != nil {
+				rows.Close()
+				return err
+			}
+			projects = append(projects, project)
+			scope.workflows = append(scope.workflows, workflow)
+		}
+		rows.Close()
+		if err = rows.Err(); err != nil {
+			return err
+		}
+		scope.Required, err = requiredChecksTx(ctx, tx, projects)
+		return err
+	})
+	return scope, err
+}
+
+// requiredChecksTx is the union of the projects' required checks, in order.
+// Without any project it is empty, and so is every job read.
+func requiredChecksTx(ctx context.Context, tx pgx.Tx, projects []string) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	for _, project := range projects {
+		settings, err := settingsTx(ctx, tx, &project)
+		if err != nil {
+			return nil, err
+		}
+		if settings.RequiredChecks == nil {
+			continue
+		}
+		for _, name := range *settings.RequiredChecks {
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		}
+	}
+	return out, nil
 }
