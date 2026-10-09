@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { expectStableControls } from './helpers/stable'
 import { mockDecisionDesk, sampleQuestion } from './decision-desk-fixtures'
 import { mockRules } from './rules-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 import { defaultSchedule } from './capacity-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
@@ -638,6 +639,13 @@ for (const width of [320, 1024]) for (const theme of ['light', 'dark'] as const)
         expect(box!.x + box!.width).toBeLessThanOrEqual(width)
         if (width === 320) expect(box!.width).toBeGreaterThanOrEqual(44)
       }
+      const fold = page.getByRole('button', { name: 'PHAROS: project header, expanded', exact: true })
+      if (await fold.isVisible()) {
+        const box = await fold.boundingBox(), search = await page.getByRole('button', { name: 'Search everything', exact: true }).boundingBox()
+        expect(box && search).toBeTruthy()
+        expect(box!.width).toBeGreaterThanOrEqual(44)
+        expect(box!.x + box!.width, 'project fold must not overlap Search').toBeLessThanOrEqual(search!.x)
+      }
       await expectStableControls({ controls: { places, gear }, interactions: [
         { name: 'open and close app menu', run: async () => { await gear.click(); await expect(page.getByRole('menu', { name: 'App and workspace' })).toBeVisible(); await page.keyboard.press('Escape'); await expect(gear).toBeFocused() } },
       ] })
@@ -653,14 +661,20 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
     await page.clock.install({ time: now })
     await page.clock.pauseAt(now)
     await page.setViewportSize({ width, height: 1000 })
+    // The connection read succeeds while unrelated session/account APIs fail.
     await mockDecisionDesk(page, { theme })
+    await page.route('**/api/me/permissions*', route => {
+      const permissions = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+      permissions.workspace.permissions.push('account.manage', 'approvals.read', 'questions.read', 'questions.decide', 'rules.write')
+      return route.fulfill({ json: permissions })
+    })
     const review = { request_id: 'connection-original', request_digest: 'a'.repeat(64), consent_digest: 'b'.repeat(64), consent_mode: 'aeon', state: 'pending', expires_at: new Date(now + 120_000).toISOString(), snapshot: { platform: 'darwin', computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: 'Arbeitsrechner für mandantenspezifische Qualitätsprüfungen', harness: 'codex', transcript: '/fixture/session.jsonl', file_id: '1:234', process: { pid: 1234, uid: 501, started: new Date(now).toISOString(), executable: '/fixture/codex', cwd: '/fixture/project' } } }
     await page.route('**/api/agent-pairing/attach/pending', route => route.fulfill({ json: { requests: [review] } }))
     const writes: string[] = []
     await page.route('**/api/agent-pairing/attach/*/approve', route => { writes.push(new URL(route.request().url()).pathname); return route.fulfill({ json: { ...review, state: 'approved' } }) })
     await page.goto('/agents')
     const chores = page.getByRole('region', { name: 'Sign-ins and connections', exact: true })
-    const row = chores.getByRole('listitem', { name: 'Attach request', exact: true })
+    const row = chores.locator('li').filter({ hasText: review.snapshot.host })
     const button = row.getByRole('button', { name: 'Review connection', exact: true })
     await expect(row).toContainText('and share its conversation')
     await expect(row).toContainText('PHAROS-12')

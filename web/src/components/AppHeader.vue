@@ -442,7 +442,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   /* The breadcrumb keeps only where you are. */
   .crumbs { gap: 6px; }
   /* The fold button's full touch target and focus ring must clear its trail. */
-  .crumbs:has(> .phone-header-fold) { height: 44px; flex-shrink: 0; overflow: visible; }
+  .crumbs:has(> .phone-header-fold) { height: 44px; overflow: visible; }
   .crumbs > :not(:last-child) { display: none; }
   .crumbs.lead { padding-left: 2px; }
   .crumb { height: 44px; margin: 0; padding: 0 4px; }
@@ -451,7 +451,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .crumb-name { display: none; }
   .crumb-long { display: none; }
   .crumb-short { display: inline; }
-  .search-pill { flex-shrink: 0; min-width: 44px; width: 44px; height: 44px; padding: 0; justify-content: center; }
+  .search-pill { width: 44px; height: 44px; padding: 0; justify-content: center; }
   .pill-text, .pill-keys { display: none; }
   .app-header :deep(.header-btn) { width: 44px; height: 44px; }
 }
