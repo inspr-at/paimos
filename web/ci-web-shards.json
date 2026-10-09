@@ -1034,6 +1034,8 @@
         ,
         {"file":"tests/status-buckets.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/stepup-desk.spec.ts","listedTests":9,"weightSeconds":12,"weightSource":"local-single-worker-AEON-1048-9.1s-plus-margin"}
+        ,
         {"file":"tests/tap-targets.spec.ts","listedTests":28,"weightSeconds":62.146341,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/theme-settings.spec.ts","listedTests":45,"weightSeconds":84.341463,"weightSource":"unmeasured-test-rate"}
@@ -1143,7 +1145,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/phone-approvals.spec.ts","listedTests":8,"weightSeconds":7.48,"weightSource":"aeon-903-local-serial-wall"}
+        {"file":"tests/phone-approvals.spec.ts","listedTests":11,"weightSeconds":7.48,"weightSource":"aeon-903-local-serial-wall"}
       ]
     }
     ,

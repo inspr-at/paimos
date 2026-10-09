@@ -24,9 +24,14 @@ export async function phoneRequest<T>(path: string, method = 'GET', body?: unkno
 }
 // AEON-455 advertises availability through its existing settings read. A 404
 // means the package is absent; other errors must not enable an unverified write.
-export async function phoneVerificationAvailable(): Promise<boolean> {
-  try { return (await phoneRequest<{ available: boolean }>('/me/phone-approvals')).available === true }
-  catch (cause) { if (cause instanceof APIError && cause.status === 404) return false; throw cause }
+export async function phoneVerificationAvailable(): Promise<boolean> { return (await phoneCapability()).available }
+// AEON-1048: step-up Approve uses an existing passkey when the person has one,
+// otherwise a fresh sign-in. The same read tells the desk which one to name.
+export async function phoneCapability(): Promise<{ available: boolean; passkeys: number }> {
+  try {
+    const settings = await phoneRequest<{ available: boolean; passkeys?: unknown[] }>('/me/phone-approvals')
+    return { available: settings.available === true, passkeys: Array.isArray(settings.passkeys) ? settings.passkeys.length : 0 }
+  } catch (cause) { if (cause instanceof APIError && cause.status === 404) return { available: false, passkeys: 0 }; throw cause }
 }
 export const reviewPath = (kind: 'approval', id: string) => `/phone-approvals/${kind}/${encodeURIComponent(id)}`
 export function decodeBytes(value: string): ArrayBuffer {

@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -43,6 +44,7 @@ func setup(t *testing.T) *fixture {
 	f.person = principal(tenant.Person, "Markus")
 	f.other = principal(tenant.Person, "Anna")
 	f.m = New(f.d.App, nil, "https://aeon.example")
+	f.m.RecordResultsTx = inbox.RecordResults
 	f.m.now = func() time.Time { return f.now }
 	return f
 }
@@ -145,8 +147,83 @@ func TestStepupTransitionsAndAtomicAudit(t *testing.T) {
 			if strings.Contains(string(raw), "credential") || strings.Contains(string(raw), "token") {
 				t.Fatal("proof material in audit")
 			}
+			var body, recipient string
+			var unread bool
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT body,recipient_principal_id::text,acked_at IS NULL FROM inbox_messages WHERE id=$1`, r.ID).Scan(&body, &recipient, &unread); err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]string{"applied": "Approved by Markus with device passkey · applied", "declined": "Declined by Markus", "withdrawn": "Withdrawn", "expired": "Expired after 15 min · ask again", "stale": "Not applied · changed meanwhile", "failed": "Not applied · the change could not be saved"}[outcome]
+			if body != want || recipient != f.agent.ID || !unread || event["result_line"] != body {
+				t.Fatalf("wrong result delivery %q %s %t", body, recipient, unread)
+			}
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM inbox_messages WHERE id=$1`, r.ID).Scan(&count); err != nil || count != 1 {
+				t.Fatal("later decision duplicated result")
+			}
 			if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM agent_permission_grants`).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("created authority %d %v", count, err)
+			}
+		})
+	}
+}
+
+// Risk: a workspace request's result leaks into a different session/project,
+// or a result write failure leaves an applied target without an agent result.
+func TestStepupSessionResultIsAtomicAndBound(t *testing.T) {
+	for _, reject := range []bool{false, true} {
+		t.Run(map[bool]string{false: "exact session", true: "rollback"}[reject], func(t *testing.T) {
+			f := setup(t)
+			var project, session string
+			if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'RESULT-1','Result project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.agent.TenantID).Scan(&project); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest) VALUES($1,$2,$3,'codex','fixture','unmanaged','worker',decode(repeat('00',32),'hex'),decode(repeat('00',32),'hex')) RETURNING id::text`, f.agent.TenantID, project, f.agent.ID).Scan(&session); err != nil {
+				t.Fatal(err)
+			}
+			before := json.RawMessage(`{"key":"workspace-summary","project_id":null,"override":null,"revision":0}`)
+			r, err := f.m.Create(t.Context(), f.agent, Create{Payload: json.RawMessage(`{"kind":"feature","key":"workspace-summary","enabled":true,"expected_revision":0}`), BeforeHash: Hash(before), SessionID: session})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reject {
+				if _, err := f.d.Admin.Exec(t.Context(), `CREATE FUNCTION reject_stepup_result() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.idempotency_key LIKE 'stepup-result/%' THEN RAISE EXCEPTION 'fixture result rejection'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_stepup_result BEFORE INSERT ON inbox_messages FOR EACH ROW EXECUTE FUNCTION reject_stepup_result()`); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				// First-use System creation must not acquire the audit counter
+				// before the inbox/FK writes. Inspect actual PostgreSQL locks,
+				// including those acquired inside SQL functions and triggers.
+				// Preserve the seeded actor and its audit, but force first use of
+				// the named System sender in this decision transaction.
+				if _, err := f.d.Admin.Exec(t.Context(), `UPDATE principals SET name='Existing System fixture' WHERE tenant_id=$1 AND name='System' AND roles @> ARRAY['system']::text[]`, f.agent.TenantID); err != nil {
+					t.Fatal(err)
+				}
+				var systemCount int
+				if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM principals WHERE tenant_id=$1 AND name='System' AND roles @> ARRAY['system']::text[]`, f.agent.TenantID).Scan(&systemCount); err != nil || systemCount != 0 {
+					t.Fatalf("fixture must exercise first-use System creation: %d %v", systemCount, err)
+				}
+				if _, err := f.d.Admin.Exec(t.Context(), `CREATE FUNCTION guard_stepup_result_lock_order() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF EXISTS(SELECT 1 FROM pg_locks WHERE pid=pg_backend_pid() AND relation='event_counters'::regclass AND mode='RowExclusiveLock') THEN RAISE EXCEPTION 'fixture event counter before result rows'; END IF; RETURN NEW; END $$; CREATE TRIGGER guard_stepup_result_lock_order BEFORE INSERT ON inbox_messages FOR EACH ROW EXECUTE FUNCTION guard_stepup_result_lock_order()`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			out, err := f.m.decide(t.Context(), f.person, r.ID, input(r), "approve", func(pgx.Tx, ApprovalRequest) (string, time.Time, error) { return "oidc_reauth", f.now, nil })
+			if reject {
+				if err == nil || !strings.Contains(err.Error(), "fixture result rejection") {
+					t.Fatalf("wrong failure: %v", err)
+				}
+				var state string
+				var applied, messages, audits int
+				if err := f.d.Admin.QueryRow(t.Context(), `SELECT state,(SELECT count(*) FROM features WHERE enabled),(SELECT count(*) FROM inbox_messages),(SELECT count(*) FROM events WHERE type='stepup.applied') FROM stepup_requests WHERE id=$1`, r.ID).Scan(&state, &applied, &messages, &audits); err != nil || state != "pending" || applied != 0 || messages != 0 || audits != 0 {
+					t.Fatal("partial apply committed after result failure", err)
+				}
+				return
+			}
+			if err != nil || out.State != "applied" {
+				t.Fatal(err)
+			}
+			var gotProject, gotSession, recipient, body string
+			var eventID int64
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT project_id::text,recipient_session_id::text,recipient_principal_id::text,body,sent_event_id FROM inbox_compat_messages WHERE id=$1`, r.ID).Scan(&gotProject, &gotSession, &recipient, &body, &eventID); err != nil || gotProject != project || gotSession != session || recipient != f.agent.ID || body != "Approved by Markus with fresh sign-in · applied" || eventID <= 0 {
+				t.Fatalf("result not bound to workspace request's own chat: %s %s %s %q %v", gotProject, gotSession, recipient, body, err)
 			}
 		})
 	}
@@ -222,6 +299,7 @@ func TestStepupFirstDecisionWinsWithTwoApprovers(t *testing.T) {
 	r := f.create(t)
 	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return sql == db.TenantFenceSQL })
 	first := New(pool, nil, "")
+	first.RecordResultsTx = inbox.RecordResults
 	first.now = f.m.now
 	type result struct {
 		r   ApprovalRequest
@@ -281,6 +359,84 @@ func TestStepupApprovalRechecksAuthorityAfterFenceWait(t *testing.T) {
 		t.Fatal("revoked decision changed target")
 	}
 }
+
+// Risk: settling a page of expired requests locks the event counter before
+// later agents' result rows, or a failed later result commits a partial page.
+func TestStepupListExpiredResultsPrecedeEvents(t *testing.T) {
+	for _, reject := range []bool{false, true} {
+		t.Run(map[bool]string{false: "two sessions", true: "rollback second result"}[reject], func(t *testing.T) {
+			f := setup(t)
+			requests := make([]ApprovalRequest, 0, 2)
+			projects, sessions := make([]string, 2), make([]string, 2)
+			agents := []tenant.Principal{f.agent, f.otherAgent}
+			for i, agent := range agents {
+				if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,$2,'Expiry result project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, agent.TenantID, []string{"EXPIRY-1", "EXPIRY-2"}[i]).Scan(&projects[i]); err != nil {
+					t.Fatal(err)
+				}
+				if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest) VALUES($1,$2,$3,'codex','fixture','unmanaged','worker',decode(repeat('00',32),'hex'),decode(repeat('00',32),'hex')) RETURNING id::text`, agent.TenantID, projects[i], agent.ID).Scan(&sessions[i]); err != nil {
+					t.Fatal(err)
+				}
+				before := json.RawMessage(`{"key":"workspace-summary","project_id":null,"override":null,"revision":0}`)
+				r, err := f.m.Create(t.Context(), agent, Create{Payload: json.RawMessage(`{"kind":"feature","key":"workspace-summary","enabled":true,"expected_revision":0}`), BeforeHash: Hash(before), SessionID: sessions[i]})
+				if err != nil {
+					t.Fatal(err)
+				}
+				requests = append(requests, r)
+				f.now = f.now.Add(time.Second)
+			}
+			// Retain the seeded actor and audits while exercising first-use sender
+			// creation in the same transaction as both result messages.
+			if _, err := f.d.Admin.Exec(t.Context(), `UPDATE principals SET name='Existing System fixture' WHERE tenant_id=$1 AND name='System' AND roles @> ARRAY['system']::text[]`, f.agent.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.d.Admin.Exec(t.Context(), `CREATE FUNCTION guard_stepup_result_lock_order() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF EXISTS(SELECT 1 FROM pg_locks WHERE pid=pg_backend_pid() AND relation='event_counters'::regclass AND mode='RowExclusiveLock') THEN RAISE EXCEPTION 'fixture event counter before result rows'; END IF; RETURN NEW; END $$; CREATE TRIGGER guard_stepup_result_lock_order BEFORE INSERT ON inbox_messages FOR EACH ROW EXECUTE FUNCTION guard_stepup_result_lock_order()`); err != nil {
+				t.Fatal(err)
+			}
+			if reject {
+				// Decided pages sort by expiry descending, so the older request's
+				// result is inserted second. Fail it after the first insert succeeds.
+				if _, err := f.d.Admin.Exec(t.Context(), `CREATE FUNCTION reject_second_stepup_result() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id='`+requests[0].ID+`'::uuid THEN RAISE EXCEPTION 'fixture second result rejection'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_second_stepup_result AFTER INSERT ON inbox_messages FOR EACH ROW EXECUTE FUNCTION reject_second_stepup_result()`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.now = requests[1].ExpiresAt
+			page, err := f.m.List(t.Context(), f.person, "decided", 10, "")
+			if reject {
+				if err == nil || !strings.Contains(err.Error(), "fixture second result rejection") {
+					t.Fatalf("wrong failure: %v", err)
+				}
+				var pending, messages, compat, audits, senders int
+				if err := f.d.Admin.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM stepup_requests WHERE state='pending' AND revision=1),(SELECT count(*) FROM inbox_messages),(SELECT count(*) FROM inbox_compat_messages),(SELECT count(*) FROM events WHERE type='stepup.expired'),(SELECT count(*) FROM principals WHERE name='System' AND roles @> ARRAY['system']::text[])`).Scan(&pending, &messages, &compat, &audits, &senders); err != nil || pending != 2 || messages != 0 || compat != 0 || audits != 0 || senders != 0 {
+					t.Fatalf("partial expiry page committed: %d %d %d %d %d %v", pending, messages, compat, audits, senders, err)
+				}
+				return
+			}
+			if err != nil || len(page.Items) != 2 || page.HasMore || page.Items[0].ID != requests[1].ID || page.Items[1].ID != requests[0].ID {
+				t.Fatalf("expiry page %+v: %v", page, err)
+			}
+			for _, r := range page.Items {
+				if r.State != "expired" || r.Revision != 2 || r.DecidedAt == nil || !r.DecidedAt.Equal(r.ExpiresAt) {
+					t.Fatalf("wrong expiry transition: %+v", r)
+				}
+			}
+			for i, r := range requests {
+				var recipient, session, project, body string
+				var sentEvent int64
+				if err := f.d.Admin.QueryRow(t.Context(), `SELECT recipient_principal_id::text,recipient_session_id::text,project_id::text,body,sent_event_id FROM inbox_compat_messages WHERE id=$1`, r.ID).Scan(&recipient, &session, &project, &body, &sentEvent); err != nil || recipient != agents[i].ID || session != sessions[i] || project != projects[i] || body != "Expired after 15 min · ask again" || sentEvent <= 0 {
+					t.Fatalf("result crossed agent/session/project: %s %s %s %q %d %v", recipient, session, project, body, sentEvent, err)
+				}
+			}
+			if _, err := f.m.List(t.Context(), f.person, "decided", 10, ""); err != nil {
+				t.Fatal(err)
+			}
+			var messages, audits, senders int
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM inbox_messages),(SELECT count(*) FROM events WHERE type='stepup.expired'),(SELECT count(*) FROM principals WHERE name='System' AND roles @> ARRAY['system']::text[])`).Scan(&messages, &audits, &senders); err != nil || messages != 2 || audits != 2 || senders != 1 {
+				t.Fatalf("duplicate result, audit or System sender: %d %d %d %v", messages, audits, senders, err)
+			}
+		})
+	}
+}
+
 func TestStepupListKeysetsExpiryAndTenantIsolation(t *testing.T) {
 	f := setup(t)
 	r := f.create(t)

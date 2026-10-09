@@ -355,6 +355,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	}
 	phoneMod := phoneapprovals.New(pool, pairingMod, cfg.PublicURL, cfg.LinkKey, vapid)
 	stepupMod := stepup.New(pool, phoneMod, cfg.PublicURL)
+	stepupMod.RecordResultsTx = inbox.RecordResults
 	stepupMod.Reauthenticate = authMod.BeginStepUp
 	authMod.StepUp = stepupMod
 	startWorker(func() { phoneMod.Run(workerCtx) })
