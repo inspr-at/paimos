@@ -6584,6 +6584,8 @@
     ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the Agents desk panel names each item's project with a new-tab link","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the Agents doctrine project link stays put through a second desk refresh without repeated lookups","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the Agents doctrine row resolves its project through the authorized ticket lookup","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

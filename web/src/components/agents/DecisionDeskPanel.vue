@@ -3,32 +3,41 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDecisionDesk } from '../../stores/decisionDesk'
 import { useProjects } from '../../stores/projects'
+import { useSession } from '../../stores/session'
 import { deskItemID, deskProject, projectColor, type DeskProjectionItem } from '../../lib/decisionDesk'
 import { getDoctrineInbox } from '../../lib/doctrine'
 import { readDoctrineProjects } from '../../lib/decisionDeskApi'
 import AppIcon from '../AppIcon.vue'
 
-const desk = useDecisionDesk(), projects = useProjects()
+const desk = useDecisionDesk(), projects = useProjects(), session = useSession()
+const owner = computed(() => `${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`)
 onMounted(() => { void projects.load() })
 const doctrineProjects = ref(new Map<string, string>()), projectError = ref('')
 let projectGeneration = 0
-watch(() => desk.projection, async projection => {
+watch([() => desk.projection, owner], async ([projection, identity], [, previousOwner]) => {
   const turn = ++projectGeneration
-  doctrineProjects.value = new Map(); projectError.value = ''
-  const ids = new Set(projection?.items.filter(item => item.kind === 'doctrine' && !item.project_id).map(item => item.id))
+  // Polls replace the projection object. Keep resolved links under the pointer,
+  // but discard the previous person's cache and any late lookup on invalidation.
+  if (!projection || identity !== previousOwner) { doctrineProjects.value = new Map(); projectError.value = '' }
+  const ids = new Set(projection?.items.filter(item => item.kind === 'doctrine' && !item.project_id && !doctrineProjects.value.has(item.id)).map(item => item.id))
   if (!ids.size) return
+  projectError.value = ''
+  const current = () => turn === projectGeneration && desk.projection === projection && identity === owner.value && session.authenticationCurrent()
   try {
     const inbox = await getDoctrineInbox()
-    if (turn !== projectGeneration || desk.projection !== projection) return
+    if (!current()) return
     const rules = inbox.items.filter(rule => ids.has(rule.id))
     const tickets = await readDoctrineProjects(rules)
-    if (turn !== projectGeneration || desk.projection !== projection) return
-    doctrineProjects.value = new Map(rules.flatMap(rule => {
+    if (!current()) return
+    const resolved = new Map(doctrineProjects.value)
+    for (const rule of rules) {
       const project = rule.ticket ? tickets.get(rule.ticket) : undefined
-      return project ? [[rule.id, project] as const] : []
-    }))
+      if (project) resolved.set(rule.id, project)
+      else if (!rule.ticket) resolved.set(rule.id, '') // A workspace rule is resolved without a project.
+    }
+    doctrineProjects.value = resolved
   } catch {
-    if (turn === projectGeneration && desk.projection === projection) projectError.value = 'The projects of some rule changes could not be read.'
+    if (current()) projectError.value = 'The projects of some rule changes could not be read.'
   }
 }, { immediate: true, flush: 'sync' })
 onBeforeUnmount(() => { projectGeneration++ })

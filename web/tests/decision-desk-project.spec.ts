@@ -151,6 +151,43 @@ test('the Agents doctrine row resolves its project through the authorized ticket
   }
 })
 
+// Risk: a poll removes a project link under the pointer while its ticket is read again.
+test('the Agents doctrine project link stays put through a second desk refresh without repeated lookups', async ({ page }, testInfo) => {
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    const world = await mockDecisionDesk(page, { theme })
+    await page.goto('/agents')
+    const panel = page.getByRole('region', { name: 'Decision Desk', exact: true })
+    const row = panel.getByRole('listitem').filter({ hasText: 'Doctrine change' })
+    const link = row.getByTestId('agents-desk-project'), title = row.getByRole('link', { name: 'Doctrine change', exact: true })
+    await expect(link).toHaveAttribute('href', AEON.href)
+    const lookups = world.reads.filter(path => path.startsWith('/api/nodes/lookup?')).length
+    let repeatedInbox = 0, repeatedLookup = 0, release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    // Hold redundant reads, so the old link cannot disappear and return between samples.
+    await page.route('**/api/rules/doctrine/inbox', async route => { repeatedInbox++; await held; await route.fallback() })
+    await page.route('**/api/nodes/lookup?**', async route => { repeatedLookup++; await held; await route.fallback() })
+    try {
+      await expectStableControls({
+        controls: { review: panel.getByTestId('agents-desk-review'), history: panel.getByTestId('agents-desk-history'), project: link, title, row },
+        scrollAreas: { panel },
+        interactions: [{ name: 'refresh the same doctrine row', run: async () => {
+          await page.evaluate(async () => {
+            const app = document.querySelector('#app') as HTMLElement & { __vue_app__: { config: { globalProperties: { $pinia: { _s: Map<string, { refresh: () => Promise<void> }> } } } } }
+            await app.__vue_app__.config.globalProperties.$pinia._s.get('decisionDesk')!.refresh()
+          })
+          expect(await link.count(), 'the resolved project stays present while redundant reads are held').toBe(1)
+          await expect(link).toHaveAttribute('href', AEON.href)
+        } }],
+      })
+      expect(repeatedInbox, 'refresh needs no doctrine inbox read for a resolved rule').toBe(0)
+      expect(repeatedLookup, 'refresh needs no ticket lookup for a resolved rule').toBe(0)
+      expect(world.reads.filter(path => path.startsWith('/api/nodes/lookup?'))).toHaveLength(lookups)
+      await panel.screenshot({ path: testInfo.outputPath(`agents-project-refresh-${width}-${theme}.png`) })
+    } finally { release() }
+  }
+})
+
 for (const theme of ['light', 'dark'] as const) {
   test(`tablet toolbar stays visible and stable on opening and resizing ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 768, height: 1000 })
