@@ -3,6 +3,7 @@ package agentplan
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -14,11 +15,27 @@ import (
 // Snapshot contains the same owner-bound facts exposed by GET /api/agents/plan.
 type Snapshot struct {
 	Plan
-	PrincipalID  string         `json:"principal_id"`
-	Running      map[string]int `json:"running"`
-	RunningTotal int            `json:"running_total"`
-	Source       string         `json:"source"`
-	UpdatedAt    *time.Time     `json:"updated_at"`
+	DailyState         map[string]DailyState `json:"daily_state"`
+	DailyDefaultPoints int                   `json:"daily_default_points"`
+	DailyTimezone      string                `json:"daily_timezone"`
+	DailyUntil         time.Time             `json:"daily_until"`
+	PrincipalID        string                `json:"principal_id"`
+	Running            map[string]int        `json:"running"`
+	RunningTotal       int                   `json:"running_total"`
+	Source             string                `json:"source"`
+	UpdatedAt          *time.Time            `json:"updated_at"`
+}
+
+func (s Snapshot) MarshalJSON() ([]byte, error) {
+	type plain Snapshot
+	daily := s.Plan.Daily
+	if daily == nil {
+		daily = map[string]DailySettings{}
+	}
+	return json.Marshal(struct {
+		plain
+		Daily map[string]DailySettings `json:"daily"`
+	}{plain: plain(s), Daily: daily})
 }
 
 // ReadTx checks live read authority and canonical ownership. Only the running
@@ -188,5 +205,61 @@ func samePlan(a, b Plan) bool {
 			}
 		}
 	}
+	for _, daily := range []map[string]DailySettings{a.Daily, b.Daily} {
+		for harness := range daily {
+			if !SameDaily(a.DailySetting(harness), b.DailySetting(harness)) {
+				return false
+			}
+		}
+	}
 	return true
+}
+
+// ReadDailyForWriteTx preserves daily controls while unconditional legacy saves
+// repair conflicting count ceilings. Daily conflicts still require an explicit
+// repair; arbitrarily selecting a higher allowance would weaken the plan.
+func ReadDailyForWriteTx(ctx context.Context, tx pgx.Tx, tenantID, owner string) (map[string]DailySettings, error) {
+	rows, err := tx.Query(ctx, `SELECT pref.value FROM user_preferences pref JOIN principals p ON p.tenant_id=pref.tenant_id AND p.id=pref.principal_id
+ WHERE pref.tenant_id=$1 AND pref.key=$3 AND p.kind='person' AND coalesce(p.linked_to,p.id)=$2 ORDER BY (p.id=$2) DESC,p.id LIMIT 65`, tenantID, owner, PreferenceKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var selected map[string]DailySettings
+	count := 0
+	for rows.Next() {
+		count++
+		if count > 64 {
+			return nil, errors.New("linked daily plans exceed bound")
+		}
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		if len(raw) > 16<<10 {
+			return nil, errors.New("daily plan exceeds bound")
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return nil, err
+		}
+		var daily map[string]DailySettings
+		if value, exists := fields["daily"]; exists {
+			if string(value) == "null" {
+				return nil, errors.New("invalid daily plan")
+			}
+			if err := json.Unmarshal(value, &daily); err != nil {
+				return nil, err
+			}
+			if err := (Plan{Total: DefaultTotal, Daily: daily}).Validate(); err != nil {
+				return nil, err
+			}
+		}
+		if count == 1 {
+			selected = daily
+		} else if !samePlan(Plan{Daily: selected}, Plan{Daily: daily}) {
+			return nil, errors.New("conflicting linked daily plans")
+		}
+	}
+	return selected, rows.Err()
 }
