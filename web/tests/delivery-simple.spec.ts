@@ -23,22 +23,16 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en
 const head = (page: Page) => page.locator('.dl-head')
 const simpleTile = (page: Page, name: string) => page.getByTestId('delivery-simple').getByRole('listitem').filter({ has: page.getByRole('heading', { name, level: 4 }) })
 
-const copy = (lang: 'en' | 'de') => lang === 'de'
-  ? {
-      window: 'Zeitraum der Diagramme', level: 'Detailgrad', days: (n: number) => `${n} Tage`,
-      warning: 'Zeitraum und Detailgrad konnten nicht gespeichert werden. Die Auswahl bleibt auf dieser Seite.', retrySave: 'Erneut speichern',
-      learn: 'Lernen: Wie lange die PR-Checks dauern', last: 'Lernen: Voller Testlauf jede Nacht', tile: 'Wie lange die PR-Checks dauern',
-      summary: 'Letzte 7 Tage gegen die 7 davor', failed: 'Die Lieferzahlen konnten nicht geladen werden.', notLoaded: 'Nicht geladen', retry: 'Erneut versuchen',
-    }
-  : {
-      window: 'Chart window', level: 'Level of detail', days: (n: number) => `${n} days`,
-      warning: 'The window and level could not be saved. This choice stays on this page.', retrySave: 'Save again',
-      learn: 'Learn: How long the PR checks take', last: 'Learn: Full test run each night', tile: 'How long the PR checks take',
-      summary: 'Last 7 days vs. the 7 before', failed: 'Delivery numbers could not be loaded.', notLoaded: 'Not loaded', retry: 'Retry',
-    }
+// AEON-998: a de-AT profile still uses the one English app language.
+const copy = (_lang: 'en' | 'de') => ({
+  window: 'Chart window', level: 'Level of detail', days: (n: number) => `${n} days`,
+  warning: 'The window and level could not be saved. This choice stays on this page.', retrySave: 'Save again',
+  learn: 'Learn: How long the PR checks take', last: 'Learn: Full test run each night', tile: 'How long the PR checks take',
+  summary: 'Last 7 days vs. the 7 before', failed: 'Delivery numbers could not be loaded.', notLoaded: 'Not loaded', retry: 'Retry',
+})
 
 for (const lang of ['en', 'de'] as const) {
-  test(`a failed preference save keeps the choice and shows a ${lang === 'de' ? 'German' : 'English'} warning with retry`, async ({ page }) => {
+  test(`a failed preference save keeps the choice and shows an English warning with retry for the ${lang} profile`, async ({ page }) => {
     test.setTimeout(90_000)
     const text = copy(lang)
     await page.setViewportSize({ width: 1440, height: 1000 })
@@ -82,7 +76,7 @@ for (const lang of ['en', 'de'] as const) {
     const phoneLevels = head(page).getByRole('radiogroup', { name: text.level })
     const phoneChosen = phoneWindows.getByRole('radio', { name: text.days(90) })
     await expect(phoneWindows.getByRole('radio', { name: text.days(30) })).toHaveAttribute('aria-checked', 'true')
-    await expect(page.getByTestId('delivery-summary')).toContainText(lang === 'de' ? 'Letzte 30 Tage gegen die 30 davor' : 'Last 30 days vs. the 30 before')
+    await expect(page.getByTestId('delivery-summary')).toContainText('Last 30 days vs. the 30 before')
     const phoneLearn = page.getByTestId('delivery-simple').getByRole('button', { name: text.learn })
     const phoneLast = page.getByTestId('delivery-simple').getByRole('button', { name: text.last })
     const phone = await controlStability(page, { windows: phoneWindows, levels: phoneLevels, learn: phoneLearn, last: phoneLast })
@@ -302,12 +296,12 @@ for (const width of [400, 1440]) for (const theme of ['light', 'dark'] as const)
     await page.goto('/p/AEON/delivery')
     await expect(page.getByTestId('delivery-summary')).toBeVisible()
     await expect(page.getByTestId('delivery-simple').locator('[aria-busy="true"]')).toHaveCount(0)
-    const windows = head(page).getByRole('radiogroup', { name: lang === 'de' ? 'Zeitraum der Diagramme' : 'Chart window' })
-    const levels = head(page).getByRole('radiogroup', { name: lang === 'de' ? 'Detailgrad' : 'Level of detail' })
-    const learn = page.getByTestId('delivery-simple').getByRole('button', { name: lang === 'de' ? /^Lernen:/ : /^Learn:/ }).first()
+    const windows = head(page).getByRole('radiogroup', { name: 'Chart window' })
+    const levels = head(page).getByRole('radiogroup', { name: 'Level of detail' })
+    const learn = page.getByTestId('delivery-simple').getByRole('button', { name: /^Learn:/ }).first()
     const guard = await controlStability(page, { windows, levels, learn })
-    await guard.check(() => windows.getByRole('radio', { name: lang === 'de' ? '90 Tage' : '90 days' }).click())
-    await guard.check(() => windows.getByRole('radio', { name: lang === 'de' ? '7 Tage' : '7 days' }).click())
+    await guard.check(() => windows.getByRole('radio', { name: '90 days' }).click())
+    await guard.check(() => windows.getByRole('radio', { name: '7 days' }).click())
     guard.done()
     // Touch targets: Learn is at least 44 px tall on phones.
     if (width === 400) expect((await learn.boundingBox())!.height).toBeGreaterThanOrEqual(44)

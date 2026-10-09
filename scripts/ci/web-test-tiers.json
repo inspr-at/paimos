@@ -5686,8 +5686,6 @@
     ,
     {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"with motion › fold probe rejects a premature removal timer (existing history)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"German pairing guidance still only prefills the approval code","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"New menu preserves authorized attach and header controls dark 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"New menu preserves authorized attach and header controls dark 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -5699,6 +5697,8 @@
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"New menu preserves authorized attach and header controls light 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"New menu preserves authorized attach and header controls light 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"a de-AT browser still shows English pairing guidance and only prefills the approval code","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"a decision refreshes the list instead of waiting for the next poll","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -6730,9 +6730,9 @@
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"Simple explains each number in plain words, and its controls stay still through every window","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows a English warning with retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows an English warning with retry for the de profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows a German warning with retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed preference save keeps the choice and shows an English warning with retry for the en profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-simple.spec.ts","name":"a failed refresh keeps Learn still through the error and the retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -10810,27 +10810,27 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1024 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1024 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1440 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1440 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 390 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 390 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1024 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1024 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1440 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1440 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 390 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 390 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"own posts show quiet delivery ticks from the sender status","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

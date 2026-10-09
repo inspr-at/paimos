@@ -35,14 +35,15 @@ for (const width of [390, 1024, 1280, 1440]) for (const theme of ['light', 'dark
   await page.locator(`.list-row[data-accounts~="${ACCOUNTS.main}"]`).click()
   const usage = page.locator('[data-account-usage]').first()
   await expect(usage.locator('[data-account-posture="balanced"]')).toHaveAttribute('aria-pressed', 'true')
-  const guard = await controlStability(page, { options: usage.locator('.usage-options'), careful: usage.locator('[data-account-posture="careful"]'), maxout: usage.locator('[data-account-posture="maxout"]'), inherit: usage.getByRole('button', { name: 'Meiner Modelleinstellung folgen' }), floor: usage.getByRole('spinbutton'), save: usage.getByRole('button', { name: 'Untergrenze speichern' }), accountSwitch: page.locator('.use-sec [role="switch"]').first() })
+  // ?lang=de does not translate the app (AEON-998).
+  const guard = await controlStability(page, { options: usage.locator('.usage-options'), careful: usage.locator('[data-account-posture="careful"]'), maxout: usage.locator('[data-account-posture="maxout"]'), inherit: usage.getByRole('button', { name: 'Follow my Models setting' }), floor: usage.getByRole('spinbutton'), save: usage.getByRole('button', { name: 'Save floor' }), accountSwitch: page.locator('.use-sec [role="switch"]').first() })
   for (const posture of ['careful', 'maxout']) await guard.check(async () => { await usage.locator(`[data-account-posture="${posture}"]`).click(); await expect(usage.locator(`[data-account-posture="${posture}"]`)).toHaveAttribute('aria-pressed', 'true') })
   await guard.check(async () => {
-    const input = usage.getByRole('spinbutton'), save = usage.getByRole('button', { name: /Untergrenze speichern/ })
+    const input = usage.getByRole('spinbutton'), save = usage.getByRole('button', { name: /Save floor/ })
     await input.fill('25'); await input.press('Enter'); expect(writes).toHaveLength(2)
     await input.press('Escape'); await expect(save).toBeFocused()
     await input.focus(); await input.press(await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) ? 'Meta+Enter' : 'Control+Enter')
-    await expect(usage.locator('.policy-note')).toContainText('25 %')
+    await expect(usage.locator('.policy-note')).toContainText('Floor: 25%.')
   })
   fail = true
   await guard.check(async () => { await usage.locator('[data-account-posture="careful"]').click(); await expect(usage.locator('[role="alert"]')).toBeVisible(); await expect(usage.locator('[data-account-posture="maxout"]')).toHaveAttribute('aria-pressed', 'true') })
