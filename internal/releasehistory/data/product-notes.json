@@ -5666,8 +5666,8 @@
     "261009095632.0.0": {
       "release_channel": "stable",
       "release_sequence": 128,
-      "snapshot_sha256": "2ecb8d65cc7c1dd2b671cb55d76b064b0e106a84d89ed09698718e89a3d68c6f",
-      "captured_at": "2026-10-09T09:57:41Z",
+      "snapshot_sha256": "770503ef9451a0750a2fe119c550712378d8bf2aff505fce8d2c234189571e01",
+      "captured_at": "2026-10-09T10:04:34Z",
       "release_revision": 1,
       "items": [
         {
@@ -5679,35 +5679,19 @@
           "group": "fixes"
         },
         {
-          "key": "AEON-1019",
-          "pill_en": "No missed tests",
-          "pill_de": "Keine verpassten Tests",
-          "benefit_en": "A change always runs every browser test that touches it.",
-          "benefit_de": "Eine Änderung führt immer alle Browsertests aus, die sie betreffen.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1024",
-          "pill_en": "No slow test pole",
-          "pill_de": "Kein langsamer Ausreißer",
-          "benefit_en": "No single slow test holds up the whole run.",
-          "benefit_de": "Kein einzelner langsamer Test hält den ganzen Lauf auf.",
-          "group": "features"
-        },
-        {
           "key": "AEON-1027",
           "pill_en": "Collapsible lead card",
           "pill_de": "Einklappbare Lead-Karte",
-          "benefit_en": "The 'No lead' card folds into one line, so the ticket list moves up and stays in view.",
-          "benefit_de": "Die Karte „Kein Lead“ lässt sich auf eine Zeile einklappen, damit die Ticketliste sichtbar bleibt.",
+          "benefit_en": "The “No lead” card can be collapsed, freeing space above the ticket list.",
+          "benefit_de": "Die Karte „Kein Lead“ lässt sich einklappen, damit mehr Platz über der Ticketliste bleibt.",
           "group": "features"
         },
         {
           "key": "AEON-1031",
           "pill_en": "Safe database upgrade",
           "pill_de": "Sicheres Datenbank-Update",
-          "benefit_en": "The release upgrades the database under its normal access rules without stopping the service.",
-          "benefit_de": "Das Release aktualisiert die Datenbank unter ihren normalen Zugriffsregeln, ohne den Dienst anzuhalten.",
+          "benefit_en": "Fixes the database migration error that prevented server startup.",
+          "benefit_de": "Ein Fehler bei der Datenbankmigration, der den Serverstart verhinderte, wird behoben.",
           "group": "fixes"
         },
         {
@@ -5722,8 +5706,8 @@
           "key": "AEON-998",
           "pill_en": "One app language",
           "pill_de": "Eine App-Sprache",
-          "benefit_en": "Every screen shows one language instead of mixing English and German.",
-          "benefit_de": "Jeder Bildschirm zeigt eine Sprache statt Englisch und Deutsch gemischt.",
+          "benefit_en": "Updated app controls consistently use English; release notes and authored content retain their language choices.",
+          "benefit_de": "Überarbeitete App-Bedienelemente verwenden durchgehend Englisch; Release-Notes und verfasste Inhalte behalten ihre Sprachwahl.",
           "group": "fixes"
         }
       ]
