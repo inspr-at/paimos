@@ -13,6 +13,27 @@ import { exactPattern, key, splitOwner, validate } from './core.mjs'
 import { goOutcomes } from './report.mjs'
 import { generateOpenAPI } from '../../api/generate.mjs'
 
+export function goExecutionIdentity(text) {
+  // This fixture names its seven subtests after two freshly-created node IDs.
+  // Preserve their distinct identities, reuse, order of first appearance and
+  // filter punctuation with a per-run bijection; every other label is exact.
+  const ids = new Map(), started = [], terminal = []
+  for (const event of text.split('\n').filter(Boolean).map(JSON.parse)) {
+    if (!event.Test) continue
+    let name = event.Test
+    if (event.Package === 'github.com/inspr-at/paimos/internal/nodes' && name.startsWith('TestListEpicMembershipSetBasedAndScoped/')) {
+      name = name.replace(/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}/g, id => {
+        if (!ids.has(id)) ids.set(id, `fixture-node-${ids.size + 1}`)
+        return ids.get(id)
+      })
+    }
+    const identity = `${event.Package}:${name}`
+    if (event.Action === 'run') started.push(identity)
+    if (['pass', 'fail', 'skip'].includes(event.Action)) terminal.push(`${identity}:${event.Action}`)
+  }
+  return { started: started.sort(), terminal: terminal.sort() }
+}
+
 export function profile(output) {
   const owner = 'internal/nodes', pkg = `github.com/inspr-at/paimos/${owner}`
   const scratch = mkdtempSync(resolve(tmpdir(), 'aeon-go-profile-'))
@@ -48,14 +69,13 @@ export function profile(output) {
       assert.deepEqual(outcomes(after.output), outcomes(before.output), 'Every selected top-level outcome is preserved')
       assert.deepEqual(outcomes(after.output).map(row => row.key).sort(), part.rows.map(key).sort())
       assert.ok(outcomes(after.output).every(row => row.status === 'passed' && row.started), 'No skipped or absent proof cases')
-      const started = text => text.split('\n').filter(Boolean).map(JSON.parse).filter(event => event.Action === 'run' && event.Test).map(event => `${event.Package}:${event.Test}`).sort()
-      assert.deepEqual(started(after.output), started(before.output), 'Subtest execution identities are preserved')
+      assert.deepEqual(goExecutionIdentity(after.output), goExecutionIdentity(before.output), 'Subtest execution identities and outcomes are preserved')
       const elapsed = text => text.split('\n').filter(Boolean).map(JSON.parse).findLast(event => !event.Test && event.Action === 'pass').Elapsed
       measurements.push({ part: index + 1, selectedTests: part.rows.length, beforeListSeconds: beforeList.seconds,
         beforeRunWallSeconds: before.seconds, beforeRunPackageSeconds: elapsed(before.output),
         compileSeconds: compile.seconds, binaryListSeconds: afterList.seconds,
         binaryRunWallSeconds: after.seconds, binaryRunPackageSeconds: elapsed(after.output),
-        executedIncludingSubtests: started(after.output).length })
+        executedIncludingSubtests: goExecutionIdentity(after.output).started.length })
       cases.push(...part.rows.map(key))
       console.log(JSON.stringify(measurements.at(-1)))
     }
@@ -65,6 +85,7 @@ export function profile(output) {
       cache: 'Existing Go build cache; no cache purge and no test-result reuse (-count=1).',
       package: owner, nativeTests: names.length, selectedTests: cases.length, listSetEqual: true,
       executedSetEqual: true, subtestSetEqual: true, measurements, cases: cases.sort(),
+      subtestIdentityNormalization: 'Only TestListEpicMembershipSetBasedAndScoped runtime UUIDs use a per-run bijection in first-appearance order; distinct IDs, reuse, punctuation and outcomes remain exact.',
       followUpOwner: 'AEON lead / AEON-1014 coordinator: post the seven-day CI outcome after deployment.' }
     saveJSON(output, report)
     return report

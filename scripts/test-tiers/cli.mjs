@@ -14,6 +14,7 @@ import { boundedText } from './inputs.mjs'
 import { manifestsMain, classifyManifest } from './manifests.mjs'
 import { generateOpenAPI } from '../../api/generate.mjs'
 import { nightlyBrowserMap, gitTree, coverageSummary } from './browser-impact.mjs'
+import { createGoRunner } from './go-runner.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
@@ -129,9 +130,16 @@ export function browserRunnerIdentity(env=process.env) {
 
 // Inject native runners for policy tests; production retains the supervised
 // browser runner and the same bounded native commands/evidence paths.
-export async function run(kind,selection,{unit=false,job='local',env=process.env}={},
+export async function run(kind,selection,options={},dependencies={}) {
+  const goRunner=kind==='go'?createGoRunner({execute:dependencies.execute??execute,command:dependencies.command??command,
+    env:options.env??process.env,compileOwners:dependencies.compileOwners,now:dependencies.now}):undefined
+  try { return await runCases(kind,selection,options,{...dependencies,goRunner}) }
+  finally { goRunner?.close() }
+}
+
+async function runCases(kind,selection,{unit=false,job='local',env=process.env}={},
   {execute:executeCases=execute,command:nativeCommand=command,runPlaywright:browserRunner=runPlaywright,
-    loadBrowserPolicy:browserPolicy=loadBrowserPolicy,knownFlaky,saveJSON:save=saveJSON,log=console.log}={}) {
+    loadBrowserPolicy:browserPolicy=loadBrowserPolicy,knownFlaky,saveJSON:save=saveJSON,log=console.log,goRunner}={}) {
   const begin=performance.now(),batches=[],ledger=[],coverageReports=[]
   const runner=kind==='web'&&!unit?browserRunnerIdentity(env):undefined
   if(kind==='go') generateOpenAPI()
@@ -159,7 +167,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   const executeOwner=(owner,rows,stem)=>{
     let result,outcomes=[],failures=[],reportError=false
     if(kind==='go') {
-      result=executeCases('go',['test','-p','2','-count=1','-timeout=25m','-json','-run',exactPattern(rows.map(row=>row.name)),`./${owner}`],`${stem}.jsonl`,{env:{...env,GOMAXPROCS:'2'}})
+      result=goRunner.execute(owner,rows,stem)
       outcomes=goOutcomes(result.output)
       failures=goFailures(result.output)
     } else if(rows[0].kind==='node') {
@@ -209,7 +217,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
     const stem=resolve(evidence,`${job}-${owner.replaceAll('/','-')}`)
     if(kind==='go') {
       // Native enumeration proves the AST/current-platform inventory is exact.
-      const listed=nativeCommand('go',['test','-p','2','-list','^(Test|Fuzz)',`./${owner}`],{env:{...env,GOMAXPROCS:'2'}})
+      const listed=goRunner.prepare(owner,stem)
         .split('\n').filter(name=>/^(?:Test|Fuzz)\w+$/.test(name)).sort()
       const wanted=selection.all.filter(row=>row.package===owner&&row.active).map(row=>row.name).sort()
       if(JSON.stringify(listed)!==JSON.stringify(wanted)) throw new Error(`Native Go inventory mismatch: ${owner}`)
@@ -326,6 +334,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   report.scope=selection.scope??'changed-area'
   report.deferredBrowserCases=selection.deferredBrowserCases??0
   report.flakeLedger=ledger
+  if(goRunner) report.goPhases=goRunner.measurements
   report.exitCode=code
   if(Object.values(report.classes).some(c=>c.notRun||c.failed)) report.exitCode ||= 1
   save(resolve(evidence,`${job}-measurement.json`),report)
