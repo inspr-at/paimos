@@ -8,6 +8,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"github.com/inspr-at/paimos/internal/events"
 	"net/http"
 	"regexp"
 	"strings"
@@ -33,6 +34,7 @@ var usageModelRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
 // Null counters and costs are unknown; EstimatedCostUSD is never billed cost.
 // Aggregate consumers must not add overlapping managed-run telemetry to it.
 type SessionModelUsage struct {
+	AccountUse        string             `json:"account_use,omitempty"`
 	ModelTimeMS       *int64             `json:"model_time_ms,omitempty"`
 	ServiceTier       *string            `json:"service_tier"`
 	TierSegments      []TierUsageSegment `json:"tier_segments"`
@@ -311,6 +313,21 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 			}
 		}
 	}
+	if s.Management == "unmanaged" {
+		out.AccountUse, err = sessionAccountUse(ctx, tx, s, out.AccountID)
+		if err != nil {
+			return nil, err
+		}
+		if out.AccountUse != "allowed" {
+			typeName := "account_use.unattributed"
+			if out.AccountUse == "outside_matrix" {
+				typeName = "account_use.outside_matrix"
+			}
+			if _, err := events.Append(ctx, tx, p, events.Change{NodeID: &s.ProjectID, Type: typeName, After: map[string]any{"session_id": s.ID, "account_id": out.AccountID, "attribution": out.AccountUse}}); err != nil {
+				return nil, err
+			}
+		}
+	}
 	return usageReportResult{Usage: out}, record(ctx, tx, p, s, "usage_reported", before, out)
 }
 
@@ -334,6 +351,19 @@ func (m *Module) sessionUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 			return nil, err
 		}
 		items = append(items, item)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if s.Management == "unmanaged" {
+		for i := range items {
+			items[i].AccountUse, err = sessionAccountUse(r.Context(), tx, s, items[i].AccountID)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	return struct {
 		SessionID string              `json:"session_id"`

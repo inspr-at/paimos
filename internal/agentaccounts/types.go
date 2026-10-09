@@ -5,6 +5,7 @@ package agentaccounts
 import (
 	"encoding/json"
 	"errors"
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"io"
 	"net/http"
 	"regexp"
@@ -22,26 +23,27 @@ import (
 
 // Account is an opaque local enrollment. AccountKey is not a vendor credential.
 type Account struct {
-	UsageProbeEnabled    bool                `json:"usage_probe_enabled"`
-	UsageBudget          *capacity.Budget    `json:"usage_budget,omitempty"`
-	ShareUsage           bool                `json:"share_usage"`
-	PendingCheck         *AccountCheck       `json:"pending_check,omitempty"`
-	ReadinessResources   []ReadinessResource `json:"readiness_resources,omitempty"`
-	OwnerPersonID        *string             `json:"owner_person_id,omitempty"`
-	OwnerPersonName      string              `json:"owner_person_name,omitempty"`
-	LinkedAt             *time.Time          `json:"linked_at,omitempty"`
-	LinkRevision         int64               `json:"link_revision,omitempty"`
-	BillingMode          string              `json:"billing_mode"`
-	Provider             string              `json:"provider,omitempty"`
-	Model                string              `json:"model,omitempty"`
-	ModelStatus          string              `json:"model_status,omitempty"`
-	ModelDataNote        bool                `json:"model_data_note,omitempty"`
-	OpenRouterCredits    *openrouter.Credits `json:"openrouter_credits,omitempty"`
-	OngoingUseApproved   bool                `json:"ongoing_use_approved"`
-	ReadingSupport       string              `json:"reading_support"`
-	QuotaFingerprint     string              `json:"quota_fingerprint"`
-	QuotaPoolFingerprint string              `json:"quota_pool_fingerprint"`
-	StatuslineEnabled    bool                `json:"statusline_enabled"`
+	Contexts             []accountuse.ContextLabel `json:"contexts,omitempty"`
+	UsageProbeEnabled    bool                      `json:"usage_probe_enabled"`
+	UsageBudget          *capacity.Budget          `json:"usage_budget,omitempty"`
+	ShareUsage           bool                      `json:"share_usage"`
+	PendingCheck         *AccountCheck             `json:"pending_check,omitempty"`
+	ReadinessResources   []ReadinessResource       `json:"readiness_resources,omitempty"`
+	OwnerPersonID        *string                   `json:"owner_person_id,omitempty"`
+	OwnerPersonName      string                    `json:"owner_person_name,omitempty"`
+	LinkedAt             *time.Time                `json:"linked_at,omitempty"`
+	LinkRevision         int64                     `json:"link_revision,omitempty"`
+	BillingMode          string                    `json:"billing_mode"`
+	Provider             string                    `json:"provider,omitempty"`
+	Model                string                    `json:"model,omitempty"`
+	ModelStatus          string                    `json:"model_status,omitempty"`
+	ModelDataNote        bool                      `json:"model_data_note,omitempty"`
+	OpenRouterCredits    *openrouter.Credits       `json:"openrouter_credits,omitempty"`
+	OngoingUseApproved   bool                      `json:"ongoing_use_approved"`
+	ReadingSupport       string                    `json:"reading_support"`
+	QuotaFingerprint     string                    `json:"quota_fingerprint"`
+	QuotaPoolFingerprint string                    `json:"quota_pool_fingerprint"`
+	StatuslineEnabled    bool                      `json:"statusline_enabled"`
 	// StatuslineOptIn is own for the person who approved the paired computer,
 	// workspace for a workspace owner or admin who did not, and empty when
 	// this caller cannot opt the account in. It is not a stored column.
@@ -128,9 +130,10 @@ type RouteResult struct {
 // available, recently probed, and under their parallel cap. Dispatchable
 // also requires pace headroom on every active window.
 type HarnessHealth struct {
-	Accounts     int
-	Available    int
-	Dispatchable int
+	ContextDenied int
+	Accounts      int
+	Available     int
+	Dispatchable  int
 }
 
 type httpError struct {
@@ -177,6 +180,11 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 }
 
 func writeErr(w http.ResponseWriter, err error) {
+	var useErr *accountuse.Error
+	if errors.As(err, &useErr) {
+		httpapi.WriteJSON(w, useErr.Status, map[string]string{"error": useErr.Message, "code": useErr.Message})
+		return
+	}
 	var pairingErr *agentpairing.Error
 	if errors.As(err, &pairingErr) {
 		agentpairing.WriteError(w, err)

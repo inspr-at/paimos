@@ -75,6 +75,7 @@ paths:
       description: Person account.read permission, or a workspace-authorized agent with account.read. Paired agents and probe-only keys see only their own accounts. Order is soonest long-window reset, larger available cap, then account ID. Rechecks approval, probe, model grants, vendor truth, schedule, reserve and concurrency. Advisory only. No config path or credential is returned; --env resolves through the authenticated local agentd socket.
       security: &auth [{session: []}, {agentKey: []}]
       parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}, description: "Project context; omitted uses the default context. Unmapped and holding projects fail closed."}
         - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
         - {name: daemon_id, in: query, schema: {type: string, maxLength: 128}}
         - {name: model_profile_id, in: query, schema: {type: string, format: uuid}}
@@ -138,6 +139,7 @@ paths:
       description: Tenant-scoped host → harness → account → model → effort cascade derived from enrolled accounts, owner probes, allowance windows and the existing model registry. Availability is advisory; routing reserves atomically. Legacy null account profile policy inherits the tenant harness catalog, not provider entitlements. Empty explicit grants offer no models.
       security: [{session: []}]
       parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}, description: "Project context; omitted uses the default context. Unmapped and holding projects fail closed."}
         - {name: role, in: query, schema: {type: string, default: build, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
         - {name: author_family, in: query, description: Required for review-gate; that family is excluded., schema: {type: string, enum: [openai, anthropic, xai, cursor, google, local]}}
       responses:
@@ -318,6 +320,7 @@ paths:
       summary: Resolve a harness label or account id to door ids for the local agent
       description: Specify exactly one of label or account_id. Person account.read, or the same agent authority as capacity next. Returns ids, labels and the quota fingerprint only. No path, home, socket or credential. The shell export is printed by aeon use from the local agentd.
       parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}, description: "Project context; omitted uses the default context. Unmapped and holding projects fail closed."}
         - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
         - {name: label, in: query, schema: {type: string, maxLength: 128}}
         - {name: account_id, in: query, schema: {type: string, format: uuid}}
@@ -759,6 +762,7 @@ components:
       type: object
       required: [account_id, schedule, windows]
       properties:
+        contexts: {type: array, items: {$ref: '#/components/schemas/AccountContextLabel'}}
         budget: {$ref: '#/components/schemas/CapacityBudget'}
         account_id: {type: string, format: uuid}
         routing: {$ref: '#/components/schemas/CapacityRouting'}
@@ -922,6 +926,7 @@ components:
       additionalProperties: false
       required: [account_id, provider, harness, label, host_label, daemon_id, state, billing_mode, windows, routable, details_redacted]
       properties:
+        contexts: {type: array, items: {$ref: '#/components/schemas/AccountContextLabel'}}
         account_id: {type: string, format: uuid}
         provider: {type: string, description: "Configured provider, or the native harness provider; empty when unknown."}
         harness: {type: string}
@@ -1047,6 +1052,7 @@ components:
       type: object
       required: [id, label, order, posture, floor_percent, boost_percent, boost_until, keep_for_you_percent]
       properties:
+        contexts: {type: array, items: {$ref: '#/components/schemas/AccountContextLabel'}}
         id: {type: string, format: uuid}
         label: {type: string}
         order: {type: integer, minimum: 0, description: "Routing rank; zero means currently unavailable."}
@@ -1203,6 +1209,7 @@ components:
         - type: object
           required: [id, registered_by_principal_id, state, created_at]
           properties:
+        contexts: {type: array, items: {$ref: '#/components/schemas/AccountContextLabel'}}
             pending_check: {$ref: "#/components/schemas/AccountCheck"}
             readiness_resources: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/ReadinessResource"}}
             share_usage: {type: boolean, description: "Owner-controlled quota sharing, false until opted in."}
@@ -1587,3 +1594,10 @@ components:
       properties:
         enabled: {type: boolean}
         plan: {type: string, maxLength: 240, readOnly: true}
+
+    AccountContextLabel:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}

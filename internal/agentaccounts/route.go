@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"net/http"
 	"sort"
 	"strings"
@@ -57,6 +58,9 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if err := agentpairing.Lock(ctx, tx); err != nil {
 		return RouteResult{}, err
 	}
+	if err := accountuse.LockShared(ctx, tx); err != nil {
+		return RouteResult{}, err
+	}
 	if err := validateEstimates(estimates); err != nil {
 		return RouteResult{}, err
 	}
@@ -88,6 +92,9 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if run.RequestedAccountID != nil {
 		if !enrolled[*run.RequestedAccountID] {
 			return RouteResult{}, fail(http.StatusConflict, "requested account is not enrolled by this daemon")
+		}
+		if err := accountuse.RequireRun(ctx, tx, *run.RequestedAccountID, run.ID); err != nil {
+			return RouteResult{}, err
 		}
 		accountIDs = []string{*run.RequestedAccountID}
 		enrolled = map[string]bool{*run.RequestedAccountID: true}
@@ -249,6 +256,13 @@ func rerouteMovedAccount(ctx context.Context, tx pgx.Tx, r *http.Request, p tena
 }
 
 func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, accountID string) error {
+	if err := accountuse.RequireRun(ctx, tx, accountID, run.ID); err != nil {
+		var denied *accountuse.Error
+		if errors.As(err, &denied) && denied.Message == accountuse.NotAllowed {
+			return &httpError{status: 409, code: accountuse.NotAllowed, msg: accountuse.NotAllowed}
+		}
+		return err
+	}
 	a, err := lockAccount(ctx, tx, accountID)
 	if err != nil {
 		return err
@@ -463,8 +477,9 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
             AND c.principal_id=$3::uuid AND c.daemon_id=$2 AND c.state='connected' AND e.state='connected'))
 		  AND id::text = ANY($4::text[]) AND state = 'available'
           AND aeon_account_allows_profile(harness,allowed_model_profile_ids,$5::uuid)
+          AND aeon_account_use_allowed(id,$6::uuid)
 		ORDER BY id
-		FOR UPDATE`, harness, daemonID, principalID, accountIDs, profileID)
+		FOR UPDATE`, harness, daemonID, principalID, accountIDs, profileID, run.ID)
 	if err != nil {
 		return Account{}, nil, nil, err
 	}

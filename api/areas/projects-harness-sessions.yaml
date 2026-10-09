@@ -1251,6 +1251,7 @@ components:
       type: object
       required: [session_id, model, sequence, input_tokens, output_tokens, cached_input_tokens, provisional, price_version, estimated_cost_usd, cost_status, currency, account_id, account_label, billing_mode, subscription_label, metadata_source, reported_at]
       properties:
+        account_use: {type: string, enum: [allowed, outside_matrix, unattributed], description: "Unmanaged attribution uses an explicit account UUID only; labels never prove compliance. Usage totals remain complete."}
         service_tier: {type: [string, 'null'], enum: [default, fast, fastest, null]}
         model_time_ms: {type: [integer, 'null'], minimum: 0, maximum: 1000000000000, description: Optional cumulative measured model time for this session and model; missing is unknown.}
         tier_segments:

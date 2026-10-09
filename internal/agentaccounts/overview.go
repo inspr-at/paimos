@@ -3,6 +3,7 @@ package agentaccounts
 
 import (
 	"context"
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"math"
 	"net/http"
 	"slices"
@@ -28,32 +29,33 @@ type overviewPage struct {
 // Deliberately separate from Account and capacity.Reading: neither local keys,
 // vendor identity, arbitrary vendor metadata nor config-home bindings belong here.
 type overviewAccount struct {
-	AccountID          string                 `json:"account_id"`
-	Provider           string                 `json:"provider"`
-	Harness            string                 `json:"harness"`
-	Label              string                 `json:"label"`
-	HostLabel          string                 `json:"host_label"`
-	DaemonID           string                 `json:"daemon_id"`
-	OwnerPersonID      *string                `json:"owner_person_id,omitempty"`
-	OwnerPersonName    string                 `json:"owner_person_name,omitempty"`
-	State              string                 `json:"state"`
-	BillingMode        string                 `json:"billing_mode"`
-	Windows            []overviewWindow       `json:"windows"`
-	UsagePolicy        *usagePolicy           `json:"usage_policy,omitempty"`
-	Schedule           *capacity.Schedule     `json:"schedule,omitempty"`
-	Limit              *LimitRule             `json:"limit,omitempty"`
-	QuotaPool          string                 `json:"quota_pool_fingerprint,omitempty"`
-	Routing            *CapacityRouting       `json:"routing,omitempty"`
-	Routable           bool                   `json:"routable"`
-	Wait               *CapacityWait          `json:"wait,omitempty"`
-	DetailsRedacted    bool                   `json:"details_redacted"`
-	Resets             *capacity.ResetCredits `json:"resets"`
-	ResetPolicy        string                 `json:"reset_policy"`
-	ResetPlan          *capacity.ResetPlan    `json:"reset_plan"`
-	ResetRevision      int64                  `json:"reset_revision"`
-	BindingRevision    int64                  `json:"binding_revision"`
-	ResetUndoSupported bool                   `json:"reset_undo_supported"`
-	BoostWithheld      bool                   `json:"boost_withheld,omitempty"`
+	Contexts           []accountuse.ContextLabel `json:"contexts,omitempty"`
+	AccountID          string                    `json:"account_id"`
+	Provider           string                    `json:"provider"`
+	Harness            string                    `json:"harness"`
+	Label              string                    `json:"label"`
+	HostLabel          string                    `json:"host_label"`
+	DaemonID           string                    `json:"daemon_id"`
+	OwnerPersonID      *string                   `json:"owner_person_id,omitempty"`
+	OwnerPersonName    string                    `json:"owner_person_name,omitempty"`
+	State              string                    `json:"state"`
+	BillingMode        string                    `json:"billing_mode"`
+	Windows            []overviewWindow          `json:"windows"`
+	UsagePolicy        *usagePolicy              `json:"usage_policy,omitempty"`
+	Schedule           *capacity.Schedule        `json:"schedule,omitempty"`
+	Limit              *LimitRule                `json:"limit,omitempty"`
+	QuotaPool          string                    `json:"quota_pool_fingerprint,omitempty"`
+	Routing            *CapacityRouting          `json:"routing,omitempty"`
+	Routable           bool                      `json:"routable"`
+	Wait               *CapacityWait             `json:"wait,omitempty"`
+	DetailsRedacted    bool                      `json:"details_redacted"`
+	Resets             *capacity.ResetCredits    `json:"resets"`
+	ResetPolicy        string                    `json:"reset_policy"`
+	ResetPlan          *capacity.ResetPlan       `json:"reset_plan"`
+	ResetRevision      int64                     `json:"reset_revision"`
+	BindingRevision    int64                     `json:"binding_revision"`
+	ResetUndoSupported bool                      `json:"reset_undo_supported"`
+	BoostWithheld      bool                      `json:"boost_withheld,omitempty"`
 }
 
 type overviewWindow struct {
@@ -170,7 +172,7 @@ func (m *Module) overview(w http.ResponseWriter, r *http.Request) {
 				wait.Timezone = ""
 				route.Wait = &wait
 			}
-			item := overviewAccount{AccountID: a.ID, Provider: overviewProvider(a), Harness: a.Harness, Label: a.Label, HostLabel: a.HostLabel, DaemonID: a.DaemonID, OwnerPersonID: a.OwnerPersonID, OwnerPersonName: a.OwnerPersonName, State: a.State, BillingMode: a.BillingMode, Windows: []overviewWindow{}, Routable: route.AvailableSlots > 0, Wait: route.Wait, DetailsRedacted: !policy[a.ID], BoostWithheld: !policy[a.ID] && owned[a.ID], ResetPolicy: "suggest", BindingRevision: a.LinkRevision}
+			item := overviewAccount{Contexts: a.Contexts, AccountID: a.ID, Provider: overviewProvider(a), Harness: a.Harness, Label: a.Label, HostLabel: a.HostLabel, DaemonID: a.DaemonID, OwnerPersonID: a.OwnerPersonID, OwnerPersonName: a.OwnerPersonName, State: a.State, BillingMode: a.BillingMode, Windows: []overviewWindow{}, Routable: route.AvailableSlots > 0, Wait: route.Wait, DetailsRedacted: !policy[a.ID], BoostWithheld: !policy[a.ID] && owned[a.ID], ResetPolicy: "suggest", BindingRevision: a.LinkRevision}
 			if !policy[a.ID] {
 				// Available slots and a missing or capacity wait are quota
 				// headroom. A private row has one constant shape.

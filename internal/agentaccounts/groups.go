@@ -5,6 +5,7 @@ package agentaccounts
 import (
 	"context"
 	"errors"
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"net/http"
 	"regexp"
 	"sort"
@@ -213,6 +214,11 @@ func (m *Module) use(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	harness, label := r.URL.Query().Get("harness"), r.URL.Query().Get("label")
+	projectID := r.URL.Query().Get("project_id")
+	if projectID != "" && !uuidRE.MatchString(projectID) {
+		writeErr(w, fail(400, "invalid project id"))
+		return
+	}
 	accountID := strings.ToLower(r.URL.Query().Get("account_id"))
 	if !validHarness(harness) || (label == "") == (accountID == "") || label != "" && !pathFreeLabel(label) || accountID != "" && !uuidRE.MatchString(accountID) {
 		writeErr(w, fail(http.StatusBadRequest, "invalid account label"))
@@ -257,6 +263,18 @@ func (m *Module) use(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(matched) == 0 {
 			return fail(http.StatusNotFound, "account not found")
+		}
+		if accountID != "" {
+			if err := accountuse.RequireProject(r.Context(), tx, accountID, projectID); err != nil {
+				return err
+			}
+		}
+		matched, err = applyUse(r.Context(), tx, matched, projectID)
+		if err != nil {
+			return err
+		}
+		if len(matched) == 0 {
+			return fail(409, accountuse.NotAllowed)
 		}
 		quotas := map[string]bool{}
 		for _, a := range matched {
@@ -632,6 +650,17 @@ func putPin(ctx context.Context, tx pgx.Tx, p tenant.Principal, in pinWrite) err
 	}
 	var account, group any
 	if in.AccountID != "" {
+		var project *string
+		if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1`, in.TicketID).Scan(&project); err != nil {
+			return err
+		}
+		projectID := ""
+		if project != nil {
+			projectID = *project
+		}
+		if err := accountuse.RequireProject(ctx, tx, in.AccountID, projectID); err != nil {
+			return err
+		}
 		account = in.AccountID
 	}
 	if in.GroupID != "" {
@@ -710,6 +739,9 @@ func setRunTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID, acc
 		return fail(http.StatusConflict, "run is not awaiting an account")
 	}
 	if accountID != "" {
+		if err := accountuse.RequireRun(ctx, tx, accountID, runID); err != nil {
+			return err
+		}
 		var ok bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_accounts WHERE id=$1::uuid AND harness=$2)`, accountID, harness).Scan(&ok); err != nil {
 			return err
@@ -826,7 +858,18 @@ type groupFence struct {
 // A pin never widens a fence. An empty result waits; it does not spill.
 func narrowCandidates(ctx context.Context, tx pgx.Tx, run runRow, harness string, accounts []Account) ([]Account, bool, error) {
 	if run.Purpose == "pairing_verification" {
-		return accounts, false, nil
+		kept := []Account{}
+		for _, a := range accounts {
+			if err := accountuse.RequireRun(ctx, tx, a.ID, run.ID); err != nil {
+				var denied *accountuse.Error
+				if errors.As(err, &denied) && denied.Message == accountuse.NotAllowed {
+					continue
+				}
+				return nil, false, err
+			}
+			kept = append(kept, a)
+		}
+		return kept, false, nil
 	}
 	projectID, err := runProjectID(ctx, tx, run.ID)
 	if err != nil {
@@ -836,7 +879,10 @@ func narrowCandidates(ctx context.Context, tx pgx.Tx, run runRow, harness string
 	if err != nil {
 		return nil, false, err
 	}
-	kept := applyFence(accounts, fences, projectID)
+	kept, err := applyUse(ctx, tx, applyFence(accounts, fences, projectID), projectID)
+	if err != nil {
+		return nil, false, err
+	}
 	policy, err := modelprefs.RunRequirement(ctx, tx, run.ID)
 	if err != nil {
 		return nil, false, err

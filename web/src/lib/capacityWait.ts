@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { hostCapacityReason } from './hostCapacity.ts'
-export const WAIT_CODES = ['schedule', 'reserve', 'reading', 'vendor', 'offline', 'sign_in', 'hold', 'approval', 'capacity', 'allowance', 'models', 'state', 'residency'] as const
+export const WAIT_CODES = ['schedule', 'reserve', 'reading', 'vendor', 'offline', 'sign_in', 'hold', 'approval', 'capacity', 'allowance', 'models', 'state', 'residency', 'context'] as const
 export interface CapacityWait {
   code: typeof WAIT_CODES[number]
+  context?: string
   host_reason?: string
   until?: string
   read_at?: string
@@ -37,6 +38,7 @@ export function capacityWaitText(wait: CapacityWait, subject = 'Agents', now = D
     case 'approval': return 'Allow agents in Settings / Accounts'
     case 'capacity': return wait.host_reason ? `Waiting for host capacity: ${hostCapacityReason(wait.host_reason)}` : 'Waiting for the current run to finish'
     case 'allowance': return at ? `Capacity available after ${at}` : 'Waiting for capacity'
+    case 'context': return 'No account allowed for this project’s context'
     case 'residency': return 'Waiting for an account within the allowed providers'
     case 'models': return 'No model is granted for this account'
     // Why and how to resume, not just that it is paused (AEON-402).

@@ -17,6 +17,7 @@ import (
 
 // Resolution is the role choice exposed by GET /api/models/resolve.
 type Resolution struct {
+	Preview         bool        `json:"preview,omitempty"`
 	Role            string      `json:"role"`
 	AuthorFamily    string      `json:"author_family"`
 	Profile         *Profile    `json:"profile"`
@@ -87,7 +88,7 @@ func resolveRoleWithCatalog(ctx context.Context, tx pgx.Tx, q resolveQuery, now 
 	if q.Harness != "" && !ladderHasHarness(steps, q.Harness) {
 		return Resolution{}, fail(http.StatusBadRequest, "role and harness combination is unsupported")
 	}
-	health, err := agentaccounts.HarnessHealthAt(ctx, tx, now)
+	health, err := agentaccounts.HarnessHealthAt(ctx, tx, now, q.ProjectID)
 	if err != nil {
 		return Resolution{}, err
 	}
@@ -115,7 +116,10 @@ func resolveRoleWithCatalog(ctx context.Context, tx pgx.Tx, q resolveQuery, now 
 			if err != nil {
 				return Resolution{}, fail(http.StatusBadRequest, "profile has no command template")
 			}
-			out.CommandTemplate = command
+			out.Preview = health[profile.Harness].Accounts == 0
+			if !out.Preview {
+				out.CommandTemplate = command
+			}
 		}
 		out.Ladder = append(out.Ladder, candidate)
 	}
@@ -224,7 +228,9 @@ func skipReasons(step ladderStep, role roleDef, q resolveQuery, now time.Time, h
 		reasons = append(reasons, fmt.Sprintf("%s until %s: %s", step.State, step.ValidUntil.UTC().Format(time.RFC3339), step.Reason))
 	}
 	h := health[step.Profile.Harness]
-	if h.Accounts > 0 {
+	if h.Accounts > 0 && h.ContextDenied == h.Accounts {
+		reasons = append(reasons, agentaccounts.ContextSkipReason)
+	} else if h.Accounts > 0 {
 		if h.Available == 0 {
 			reasons = append(reasons, "account availability")
 		} else if h.Dispatchable == 0 {

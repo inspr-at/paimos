@@ -5,6 +5,7 @@ package agentaccounts
 import (
 	"context"
 	"errors"
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"math"
 	"net/http"
 	"time"
@@ -81,6 +82,17 @@ func queryAccounts(ctx context.Context, tx pgx.Tx, retired bool) ([]Account, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	ids := make([]string, len(out))
+	for i, a := range out {
+		ids[i] = a.ID
+	}
+	contexts, err := accountuse.ContextLabels(ctx, tx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Contexts = contexts[out[i].ID]
 	}
 	return attachWindows(ctx, tx, out)
 }

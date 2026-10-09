@@ -4,6 +4,7 @@ package agentruns
 import (
 	"context"
 	"encoding/json"
+	"github.com/inspr-at/paimos/internal/accountuse"
 
 	"github.com/jackc/pgx/v5"
 
@@ -39,6 +40,17 @@ func QueueReviewDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, o w
 		return Run{}, workorders.Fail(409, "independent review binding required")
 	}
 	if err := dispatchable(ctx, tx, o); err != nil {
+		return Run{}, err
+	}
+	var project *string
+	if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1`, o.NodeID).Scan(&project); err != nil {
+		return Run{}, err
+	}
+	projectID := ""
+	if project != nil {
+		projectID = *project
+	}
+	if err := accountuse.RequireProject(ctx, tx, accountID, projectID); err != nil {
 		return Run{}, err
 	}
 	var model, harness, family string

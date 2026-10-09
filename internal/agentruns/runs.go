@@ -146,6 +146,11 @@ func (m *module) Mount(mux *http.ServeMux) {
 			if lockErr != nil {
 				return nil, lockErr
 			}
+			if r.Method != http.MethodGet {
+				if err := accountuse.LockShared(r.Context(), tx); err != nil {
+					return nil, err
+				}
+			}
 			if route.pattern == "POST /api/runs/{runId}/claim" {
 				if err := queueLock(r.Context(), tx); err != nil {
 					return nil, err
@@ -376,6 +381,17 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 		return nil, err
 	}
 	if in.Account != nil {
+		var project *string
+		if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1`, o.NodeID).Scan(&project); err != nil {
+			return nil, err
+		}
+		projectID := ""
+		if project != nil {
+			projectID = *project
+		}
+		if err := accountuse.RequireProject(ctx, tx, *in.Account, projectID); err != nil {
+			return nil, err
+		}
 		var matches bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_accounts WHERE id=$1 AND registered_by_principal_id=$2 AND harness=$3 AND aeon_account_allows_profile(harness,allowed_model_profile_ids,$4::uuid))`, *in.Account, in.Agent, harness, in.Profile).Scan(&matches); err != nil {
 			return nil, err
@@ -658,6 +674,13 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			return v, nil
 		}
 		return nil, workorders.Fail(409, "run cannot be claimed")
+	}
+	if err := accountuse.RequireRun(ctx, tx, *v.AccountID, v.ID); err != nil {
+		var denied *accountuse.Error
+		if errors.As(err, &denied) && denied.Message == accountuse.NotAllowed && v.Purpose == "managed" {
+			return releaseObsoleteClaim(ctx, tx, p, v, accountuse.NotAllowed)
+		}
+		return nil, err
 	}
 	if !active || !fresh || state != "available" || !compatible {
 		return nil, workorders.Fail(409, "reservation or daemon probe is not eligible")

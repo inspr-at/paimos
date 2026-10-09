@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"math"
 	"net/http"
 	"strings"
@@ -365,15 +366,16 @@ type capacityWindow struct {
 	UsageTodayKnown bool             `json:"usage_today_known"`
 }
 type accountCapacity struct {
-	Budget             *capacity.Budget  `json:"budget,omitempty"`
-	Routing            *CapacityRouting  `json:"routing,omitempty"`
-	AccountID          string            `json:"account_id"`
-	OngoingUseApproved bool              `json:"ongoing_use_approved"`
-	ProbeFailure       string            `json:"probe_failure,omitempty"`
-	LimitingReset      *time.Time        `json:"limiting_reset,omitempty"`
-	AwaitingReading    bool              `json:"awaiting_reading,omitempty"`
-	Schedule           capacity.Schedule `json:"schedule"`
-	Windows            []capacityWindow  `json:"windows"`
+	Contexts           []accountuse.ContextLabel `json:"contexts,omitempty"`
+	Budget             *capacity.Budget          `json:"budget,omitempty"`
+	Routing            *CapacityRouting          `json:"routing,omitempty"`
+	AccountID          string                    `json:"account_id"`
+	OngoingUseApproved bool                      `json:"ongoing_use_approved"`
+	ProbeFailure       string                    `json:"probe_failure,omitempty"`
+	LimitingReset      *time.Time                `json:"limiting_reset,omitempty"`
+	AwaitingReading    bool                      `json:"awaiting_reading,omitempty"`
+	Schedule           capacity.Schedule         `json:"schedule"`
+	Windows            []capacityWindow          `json:"windows"`
 	// Limit is the Advanced sentence with its use this period (AEON-384).
 	Limit *limitUse `json:"limit,omitempty"`
 	// SpendMonthUSD is list-price spend this month for an API-key account.
@@ -536,7 +538,7 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previ
 		if draft != nil {
 			s = scheduleWithDraft(entries, a, previous, draft.schedule, draft.pools, now)
 		}
-		item := accountCapacity{AccountID: a.ID, Schedule: s, Windows: []capacityWindow{}, Budget: a.UsageBudget}
+		item := accountCapacity{Contexts: a.Contexts, AccountID: a.ID, Schedule: s, Windows: []capacityWindow{}, Budget: a.UsageBudget}
 		item.CostLimitSupported, err = costLimitSupported(ctx, tx, a.ID)
 		if err != nil {
 			return nil, err

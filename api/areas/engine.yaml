@@ -46,7 +46,7 @@ components:
           description: "Advisory result only. A shadow allow neither reserves a slot nor authorizes a start."
         reason:
           type: string
-          description: "Stable reason code, with no private account or host measurements. daily_limit means measured daily exhaustion; daily_limit_unknown means daily evidence cannot authorize a start."
+          description: "Stable reason code, with no private account or host measurements. context means every owned harness account is denied for this project and carries no retry time. daily_limit means measured daily exhaustion; daily_limit_unknown means daily evidence cannot authorize a start."
         retry_after:
           type: [integer, 'null']
           minimum: 1
