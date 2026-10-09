@@ -26,6 +26,9 @@ type ShipPage struct {
 type shippingReader interface {
 	Shipping(context.Context, string, string) (ShipFacts, error)
 }
+type preflightReader interface {
+	Preflight(context.Context, string) (string, error)
+}
 
 func (m *Module) mountShipping(mux *http.ServeMux) {
 	for _, route := range []struct {
@@ -194,6 +197,17 @@ func (m *Module) claimShipping(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				facts = emptyShipFacts()
 				readReason = "github_unavailable"
+			} else {
+				preflight, available := m.github.(preflightReader)
+				readReason = "preflight_lookup_failed"
+				if available {
+					ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+					reason, lookupErr := preflight.Preflight(ctx, in.Head)
+					cancel()
+					if lookupErr == nil {
+						readReason = reason
+					}
+				}
 			}
 		}
 	}

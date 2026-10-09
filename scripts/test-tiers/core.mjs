@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, lstatSync } from 'node:fs'
 import { dirname, extname, resolve, relative } from 'node:path'
 import { migrationObjects } from './migration.mjs'
+import { inputBounds, inputMetadata, readInput } from './inputs.mjs'
+import { browserImpact } from './browser-impact.mjs'
 
 export const key = row => row.kind === 'go' ? `${row.package}:${row.name}` : `${row.kind}:${row.file}:${row.name}${row.occurrence===undefined?'':`#${row.occurrence}`}`
 export const escapeRE = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -93,6 +95,7 @@ export const tierRank = { NIGHTLY: 0, 'GATED-FULL': 1, ESSENTIAL: 2 }
 // Two essential Go shards carry about one full hosted shard each; wider
 // consumer sets are cheaper in the seven-shard full layout.
 export const consumerCaseBound = 1000
+export const browserDataInput = path => /^web\/(?:src|tests|e2e)\//.test(path) && !/\.(?:ts|js|mjs|vue)$/.test(path)
 
 // Rows that this diff registers at, or promotes to, a gated tier. A promoted
 // case must execute in the lane; new NIGHTLY rows only need manifest checks.
@@ -260,9 +263,22 @@ export function reverseDependants(changed, imports) {
   return picked
 }
 
+// Over-cap is uncertainty, never permission to omit dependent packages.
+export function goImpact(tests, paths, imports = {}, seeds = new Set()) {
+  const packages = new Set([...tests.filter(t => t.kind === 'go').map(t => t.package), ...Object.keys(imports)])
+  const changed = new Set(seeds)
+  for (const path of paths.filter(path => /^(?:internal|cmd)\//.test(path))) {
+    const owner = [...packages].filter(pkg => path.startsWith(`${pkg}/`)).sort((a,b) => b.length-a.length)[0]
+    if (owner) changed.add(owner)
+  }
+  const dependants = reverseDependants(changed, imports)
+  const extra = tests.filter(t => t.kind === 'go' && dependants.has(t.package) && !changed.has(t.package) && t.tier !== 'ESSENTIAL').length
+  return { dependants, extra, full: extra > 300 }
+}
+
 // A missing diff, unmapped source, or shared input widens selection. The merge
 // queue always proves the full gate, independently of the affected PR switch.
-export function select(tests, { event, paths, imports = {}, webImports = {}, affectedLane, forceFull = false, forceAll = false, tree, promotions, readFile }) {
+export function select(tests, { event, paths, imports = {}, webImports = {}, browserMap, baseTree, affectedLane, forceFull = false, forceAll = false, tree, promotions, readFile }) {
   const full = reason => {
     // Full CI retains the established gate. Only nightly/--all widens to the
     // entire catalogue; missing impact data must not promote ungated cases.
@@ -275,10 +291,13 @@ export function select(tests, { event, paths, imports = {}, webImports = {}, aff
     return full('full event or uncertain impact')
   }
   if (!validImpactPaths(paths)) return full('invalid or oversized impact diff')
+  const browserData = paths.find(browserDataInput)
+  if (tests.some(row => row.kind === 'browser') && browserData) return full(`browser CSS, asset or data input: ${browserData}`)
   const risk = impactRisk(paths, { event, affectedLane, webImports, tree, promotions, readFile, tests })
   if (risk.full) return full(risk.reasons.join('; ') || 'full event or uncertain impact')
   const packages = new Set([...tests.filter(t => t.kind === 'go').map(t => t.package), ...Object.keys(imports)])
   const hasGo=tests.some(t=>t.kind==='go'),hasWeb=tests.some(t=>t.kind!=='go')
+  if (hasWeb && paths.some(path => path.startsWith('web/')) && webImports[graphIncomplete]) return full(`incomplete web dependency graph: ${webImports[graphIncomplete]}`)
   const changedGo = new Set(), changedWeb = new Set()
   for (const path of paths) {
     if (risk.handled.has(path)) continue
@@ -294,21 +313,19 @@ export function select(tests, { event, paths, imports = {}, webImports = {}, aff
     else return full(`unmapped input: ${path}`)
   }
   if (hasGo) for (const pkg of risk.goSeeds) if (packages.has(pkg)) changedGo.add(pkg)
-  const dependants = reverseDependants(changedGo, imports)
-  // Test-import cycles can turn a tiny package edit into almost the whole
-  // repository. The approved cheap-dependency policy retains every changed
-  // package but limits the optional reverse-dependency expansion.
-  const extraGoCases=tests.filter(t=>t.kind==='go'&&dependants.has(t.package)&&!changedGo.has(t.package)&&t.tier!=='ESSENTIAL').length
-  const boundedGo=extraGoCases>300
-  const go=boundedGo?changedGo:dependants
+  const go = goImpact(tests, paths, imports, changedGo)
+  if (go.full) return full(`Go reverse dependencies exceed 300 extra cases (${go.extra})`)
   // Deleted/unknown files cannot be analysed using only the candidate graph.
   if ([...changedWeb].some(file => !Object.hasOwn(webImports, file))) return full('missing web dependency metadata')
   if (hasWeb) for (const file of risk.webSeeds) if (Object.hasOwn(webImports, file)) changedWeb.add(file)
-  const web = reverseDependants(changedWeb, webImports)
+  const impact = browserImpact([...changedWeb], webImports, browserMap, baseTree)
+  if (tests.some(row => row.kind === 'browser') && impact.full) return full(impact.reason)
+  const web = new Set([...reverseDependants(changedWeb, webImports), ...impact.specs])
   if([...changedWeb].some(file=>file.startsWith('src/')&&!tests.some(row=>row.kind!=='go'&&web.has(row.file)))) return full('web module has no mapped test importer')
-  const reason = boundedGo?`essential plus changed area; optional Go reverse dependencies exceed 300 extra cases (${extraGoCases})`:'essential plus changed area and reverse dependencies'
+  if (tests.filter(t => t.kind === 'browser' && web.has(t.file)).length > 300) return full('browser fan-out exceeds 300 cases')
+  const reason = 'essential plus changed area and reverse dependencies'
   return { full: false, reason: risk.reasons.length ? `${reason}; ${risk.reasons.join('; ')}` : reason,
-    tests: tests.filter(t => t.tier === 'ESSENTIAL' || risk.promoted.has(key(t)) || (t.kind === 'go' ? go.has(t.package) : web.has(t.file))) }
+    tests: tests.filter(t => t.tier === 'ESSENTIAL' || risk.promoted.has(key(t)) || (t.kind === 'go' ? go.dependants.has(t.package) : web.has(t.file))) }
 }
 
 export function measuredWeights(manifest, rows) {
@@ -321,10 +338,32 @@ export function measuredWeights(manifest, rows) {
   return weights
 }
 
-export function shard(rows, index, count, weights = {}, { firstShardLast = false } = {}) {
+// Split only explicitly measured Go owners. Unknown/new cases retain an
+// average-case estimate and still execute; overhead is charged to each launch.
+export function splitOwner(rows, timing, limit) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 64) throw new Error('Invalid split shard limit')
+  const split = timing?.split
+  if (!split || split.count !== 2 || !Number.isFinite(split.overheadSeconds) || split.overheadSeconds < 0 ||
+      !split.caseSeconds || typeof split.caseSeconds !== 'object' || Array.isArray(split.caseSeconds) ||
+      !Number.isFinite(timing.seconds) || timing.seconds <= 0 || !Number.isSafeInteger(timing.selectedTests) || timing.selectedTests < 1 ||
+      Object.entries(split.caseSeconds).some(([name, seconds]) => !/^(?:Test|Fuzz)\w+$/.test(name) || !Number.isFinite(seconds) || seconds < 0))
+    throw new Error('Invalid measured owner split')
+  if (rows.some(row => row.kind !== 'go' || row.package !== rows[0].package) || new Set(rows.map(key)).size !== rows.length)
+    throw new Error('Owner split requires unique cases in one Go package')
+  const estimate = Math.max(0, timing.seconds - split.overheadSeconds) / timing.selectedTests
+  const cost = row => split.caseSeconds[row.name] ?? estimate
+  const parts = Array.from({ length: Math.min(split.count, limit, rows.length) }, () => ({ rows: [], weight: split.overheadSeconds }))
+  for (const row of [...rows].sort((a, b) => cost(b) - cost(a) || key(a).localeCompare(key(b)))) {
+    const part = parts.reduce((a, b) => b.weight < a.weight || (b.weight === a.weight && b.rows.length < a.rows.length) ? b : a)
+    part.rows.push(row)
+    part.weight += cost(row)
+  }
+  return parts
+}
+
+export function shard(rows, index, count, weights = {}, { firstShardLast = false, ownerTimings = {} } = {}) {
   if (!Number.isInteger(count) || count < 1 || count > 64 || !Number.isInteger(index) || index < 1 || index > count) throw new Error('Invalid shard i/N')
-  // Keep packages/files together to avoid compiling or launching a server for
-  // each individual test. Measured tier costs override historical/count estimates.
+  // Keep owners together except for explicitly measured package splits.
   const groups = new Map()
   for (const row of rows) {
     const owner = row.kind === 'go' ? row.package : row.file
@@ -335,40 +374,65 @@ export function shard(rows, index, count, weights = {}, { firstShardLast = false
   // Unit shard 1 also runs workflow and browser-supervisor regressions. Give
   // equally loaded peers first choice without inventing a hosted overhead cost.
   const preference = firstShardLast ? [...bins.slice(1), bins[0]] : bins
-  for (const [owner, entries] of [...groups].sort(([a,ar],[b,br]) => (weights[b] ?? br.length)-(weights[a] ?? ar.length) || a.localeCompare(b))) {
+  const batches = [...groups].flatMap(([owner, entries]) => ownerTimings[owner]?.split && entries[0].lane !== 'timing'
+    ? splitOwner(entries, ownerTimings[owner], count).map((part, i) => ({ ...part, owner, part: i }))
+    : [{ owner, rows: entries, weight: weights[owner] ?? entries.length, part: 0 }])
+  const assigned = new Map()
+  for (const { owner, rows: entries, weight, part } of batches.sort((a, b) => b.weight - a.weight || a.owner.localeCompare(b.owner) || a.part - b.part)) {
     // Zero-duration owners still need a shard. On equal loads prefer fewer
     // owners, then retain shard order for a deterministic final tie-break.
-    const bin = preference.reduce((a,b) => b.weight < a.weight || (b.weight === a.weight && b.owners < a.owners) ? b : a)
+    // Two halves of a package must use different shards, even if one bin is
+    // still cheapest after placing the first half.
+    const used = assigned.get(owner) ?? new Set()
+    const bin = preference.filter(bin => !used.has(bin)).reduce((a,b) => b.weight < a.weight || (b.weight === a.weight && b.owners < a.owners) ? b : a)
+    used.add(bin); assigned.set(owner, used)
     bin.rows.push(...entries)
     bin.owners++
-    bin.weight += weights[owner] ?? entries.length
+    bin.weight += weight
   }
   return bins[index-1].rows
 }
 
-export function webGraph(root) {
+export const graphIncomplete = Symbol('incomplete web graph')
+export function webGraph(root, { bounds = inputBounds, read = readInput } = {}) {
   const graph = {}
+  const files = []
+  let entries = 0, bytes = 0
   const visit = directory => {
+    const stat = lstatSync(resolve(root, directory))
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('non-directory or symlink in web graph')
     for (const entry of readdirSync(resolve(root, directory), { withFileTypes: true })) {
+      if (++entries >= bounds.entries) throw new Error('web graph entry count bound reached')
       const file = `${directory}/${entry.name}`
+      if (entry.isSymbolicLink()) throw new Error('symlink in web graph')
       if (entry.isDirectory()) visit(file)
-      else if (/\.(?:ts|js|mjs|vue|json|css)$/.test(file)) graph[file] = []
+      else if (/\.(?:ts|js|mjs|vue|json|css|html)$/.test(file)) {
+        const metadata = inputMetadata(root, file, bounds.fileBytes)
+        if (files.length + 1 >= bounds.files) throw new Error('web graph file count bound reached')
+        bytes += metadata.size
+        if (bytes >= bounds.totalBytes) throw new Error('web graph total byte bound reached')
+        files.push({ file, metadata })
+        graph[file] = []
+      }
     }
   }
-  for (const dir of ['src', 'tests', 'e2e']) visit(dir)
-  for (const file of Object.keys(graph)) {
-    const source = readFileSync(resolve(root, file), 'utf8')
-    for (const match of source.matchAll(/(?:\b(?:import|export)\s+(?:[\s\S]*?\s+from\s*)?|\bimport\s*\()\s*['"]([^'"]+)['"]/g)) {
-      const imported = match[1]
-      if (!imported.startsWith('.')) continue
-      const base = resolve(root, dirname(file), imported)
-      const candidates = [base, ...['.ts','.js','.mjs','.vue','.json','.css','/index.ts','/index.js'].map(s => base+s)]
-      const target = candidates.find(path => existsSync(path) && Object.hasOwn(graph, relative(root,path)))
-      if (target) graph[file].push(relative(root,target))
-      else if (extname(imported) === '') graph[file].push(relative(root,base)) // changed/deleted import remains a conservative edge
+  try {
+    for (const dir of ['src', 'tests', 'e2e']) visit(dir)
+    // Admit every size before reading anything. Partial graphs never narrow.
+    for (const { file, metadata } of files) {
+      const source = read(metadata, bounds.fileBytes)
+      for (const match of source.matchAll(/(?:\b(?:import|export)\s+(?:[\s\S]*?\s+from\s*)?|\bimport\s*\()\s*['"]([^'"]+)['"]/g)) {
+        const imported = match[1].split('?')[0]
+        if (!imported.startsWith('.') && !imported.startsWith('@/')) continue
+        const base = imported.startsWith('@/') ? resolve(root, 'src', imported.slice(2)) : resolve(root, dirname(file), imported)
+        const candidates = [base, ...['.ts','.js','.mjs','.vue','.json','.css','/index.ts','/index.js'].map(s => base+s)]
+        const target = candidates.find(path => existsSync(path) && Object.hasOwn(graph, relative(root,path)))
+        if (target) graph[file].push(relative(root,target))
+        else if (extname(imported) === '') graph[file].push(relative(root,base)) // changed/deleted import remains a conservative edge
+      }
     }
-  }
-  return graph
+    return graph
+  } catch (error) { return { [graphIncomplete]: error.message } }
 }
 
 export function counts(rows) {
