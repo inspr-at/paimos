@@ -44,7 +44,7 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 		// The board prefers the CLI's registered newest-version alias. Reuse
 		// that catalog pin so qualification and selection assert the same row.
 		var claude Profile
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh' AND version='1'`).Scan(&claude.ID); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh' AND version=$1`, CatalogVersion).Scan(&claude.ID); err != nil {
 			return err
 		}
 
