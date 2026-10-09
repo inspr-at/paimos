@@ -1235,6 +1235,22 @@ test('AEON-623: an account absent from a blocked diagnostic list is not ready', 
   assert.equal(describeEnrollmentDiagnostic(report, { account_id: ACCOUNT_2, harness: 'claude' }), null)
 })
 
+test('AEON-1041: old settlement gaps name the cause and account-scoped repair', async () => {
+  const report = view({ computer_state: 'connected', connectivity: 'online', enrollments: [ACCOUNT, ACCOUNT_2].map(account_id => enrollment({ account_id, harness: 'claude' })),
+    harness_statuses: { claude: 'ready' }, harness_details: { claude: { state: 'ready', attention_accounts: [{ account_id: ACCOUNT, reason: 'unsettled_previous_run' }], attention_count: 1 } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [report] })
+  const parsed = (await listPairingComputers())[0]!
+  assert.equal(describeEnrollmentStatus(parsed, { account_id: ACCOUNT, harness: 'claude' }), 'Previous run settlement unconfirmed')
+  const diagnostic = describeEnrollmentDiagnostic(parsed, { account_id: ACCOUNT, harness: 'claude' })!
+  assert.match(diagnostic.hint, /Restore the helper's connection to Aeon/)
+  assert.match(diagnostic.hint, /inspect the previous run and its reservations/)
+  assert.equal(diagnostic.command, '')
+  assert.equal(describeEnrollmentDiagnostic(parsed, { account_id: ACCOUNT_2, harness: 'claude' }), null)
+  parsed.harness_statuses!.claude = 'blocked'
+  parsed.harness_details!.claude = { state: 'blocked', reason: 'unsettled_previous_run' }
+  assert.match(describeHarnessHint(parsed, 'claude'), /reconciliation retries automatically/)
+})
+
 test('stalled verification preserves offline, login and setup recovery progress', () => {
   for (const [over, title] of [
     [{ connectivity: 'offline' }, 'The computer is offline'],

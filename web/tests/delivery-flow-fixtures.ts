@@ -59,6 +59,12 @@ const releaseSteps = (final: boolean): StepSpec[] => [
     { n: 32, item: R, key: 'hold', kind: 'wait', actor: 'person', label: 'Markus', from: '20:35', to: '20:47', wait: 'human_gate' },
   ] as StepSpec[] : []),
 ]
+// What the OPS rollout record adds from release 127 on (AEON-1022): the exact-SHA rehearsal and the full test
+// catalogue inside the merge-group run, both alongside the critical path.
+const recordSteps = (): StepSpec[] => [
+  { n: 33, item: R, key: 'rehearsal', kind: 'work', actor: 'ci', label: 'Checks', from: '19:25', to: '19:36', outcome: 'green', side: true },
+  { n: 34, item: R, key: 'catalogue', kind: 'work', actor: 'ci', label: 'Checks', from: '19:26', to: '19:48', outcome: 'green', side: true, p50: 21, p90: 24 },
+]
 const C1 = RUN.c991, C3 = RUN.c983, C9 = RUN.c993
 const changeSteps = (): StepSpec[] => [
   { n: 101, item: C1, key: 'build', kind: 'work', actor: 'agent', label: 'Builder', from: '19:10', to: '19:46', model: 'Opus 5.5', p50: 35, arion: 30 },
@@ -75,30 +81,33 @@ const changeSteps = (): StepSpec[] => [
 ]
 
 const eta = (p50: string | null, p90: string | null, reason: string | null = null) => ({ p50_at: p50 ? iso(p50) : null, p90_at: p90 ? iso(p90) : null, basis: p50 ? 'history' : 'none', reason })
-const items = (final: boolean) => [
+/** The release record facts the server always returns: null until a rollout record reports them. */
+const noRecord = { qualification_evidence: null, rollback_class: null }
+const items = (final: boolean, record = false) => [
   { id: R, kind: 'release', ref: '126', title: 'Release 126', prs: [405, 936, 937], started_at: iso('18:21'), ended_at: final ? iso('20:34:01') : null, pct_done: final ? 100 : 93, current_step_id: final ? null : id(10_028),
-    eta: final ? eta(null, null, 'run ended') : eta('20:35', '20:45'), target: { minutes: 24, from_step: 'a', source: 'Arion' }, next_human_gate: { principal_id: null, what: 'agm1 GO' } },
+    eta: final ? eta(null, null, 'run ended') : eta('20:35', '20:45'), target: { minutes: 24, from_step: 'a', source: 'Arion' }, next_human_gate: { principal_id: null, what: 'agm1 GO' },
+    ...(record ? { qualification_evidence: 'AEON-487/comment/native-qualification', rollback_class: 'digest_safe' } : noRecord) },
   { id: C1, kind: 'change', ref: 'AEON-991', title: 'CI fix', prs: [414], started_at: iso('19:10'), ended_at: null, pct_done: 75, current_step_id: id(10_106),
-    eta: eta('20:50', '21:08'), target: { minutes: 40, from_step: 'review', source: 'Arion' }, next_human_gate: null },
+    eta: eta('20:50', '21:08'), target: { minutes: 40, from_step: 'review', source: 'Arion' }, next_human_gate: null, ...noRecord },
   { id: C3, kind: 'change', ref: 'AEON-983', title: '4 changes', prs: [409], started_at: iso('18:24'), ended_at: null, pct_done: 70, current_step_id: id(10_204),
-    eta: eta('21:11', '21:40'), target: null, next_human_gate: null },
+    eta: eta('21:11', '21:40'), target: null, next_human_gate: null, ...noRecord },
   { id: C9, kind: 'change', ref: 'AEON-993', title: 'delivery numbers', prs: [], started_at: iso('19:47'), ended_at: null, pct_done: 0, current_step_id: id(10_301),
-    eta: eta(null, null, 'fewer than 3 finished build steps in 30 days'), target: null, next_human_gate: null },
+    eta: eta(null, null, 'fewer than 3 finished build steps in 30 days'), target: null, next_human_gate: null, ...noRecord },
 ]
 const incident = (final: boolean) => ({ id: id(900), item_id: R, started_at: iso('20:14:31'), ended_at: final ? iso('20:34:01') : null, severity: 'degraded', summary: 'ready 503, DB pool starved', recovery_step_ids: [26, 27, 28, ...(final ? [29, 30] : [])].map(n => id(10_000 + n)) })
 
 /** GET /delivery/flow at `now` (20:25 by default): the runs in flight. */
-export function flowAnswer(now = '20:25') {
+export function flowAnswer(now = '20:25', record = false) {
   return {
     project_id: id(1), now: iso(now), at: iso(now), from: iso('16:25'), to: iso(now),
-    items: items(false), steps: [...releaseSteps(false), ...changeSteps()].map(step), incidents: [incident(false)], truncated: false,
+    items: items(false, record), steps: [...releaseSteps(false), ...(record ? recordSteps() : []), ...changeSteps()].map(step), incidents: [incident(false)], truncated: false,
   }
 }
 /** GET /delivery/flow/runs/{itemId}: release 126 is final; the changes are as at 20:25. */
-export function runAnswer(itemId: string) {
+export function runAnswer(itemId: string, record = false) {
   const final = itemId === R
-  const all = final ? releaseSteps(true) : changeSteps().filter(s => s.item === itemId)
-  const item = items(final).find(i => i.id === itemId)!
+  const all = final ? [...releaseSteps(true), ...(record ? recordSteps() : [])] : changeSteps().filter(s => s.item === itemId)
+  const item = items(final, record).find(i => i.id === itemId)!
   return { project_id: id(1), now: iso('20:25'), at: iso('20:25'), item, steps: all.map(step), incidents: final ? [incident(true)] : [], truncated: false }
 }
 export const emptyFlow = () => ({ project_id: id(1), now: iso('20:25'), at: iso('20:25'), from: iso('19:40'), to: iso('20:25'), items: [], steps: [], incidents: [], truncated: false })
@@ -111,19 +120,19 @@ export interface FlowMock {
   setNow(now: string): void
 }
 /** Mocks the flow reads and the hint stream. The stream waits until a test sends a hint. */
-export async function mockFlow(page: Page, options: { empty?: boolean } = {}): Promise<FlowMock> {
+export async function mockFlow(page: Page, options: { empty?: boolean; record?: boolean } = {}): Promise<FlowMock> {
   const reads: string[] = []
   let now = '20:25'
   let release: (frame: string) => void = () => {}
   let waiting = new Promise<string>(resolve => { release = resolve })
   await page.route(/\/api\/projects\/[^/]+\/delivery\/flow(\?|$)/, route => {
     reads.push(new URL(route.request().url()).pathname + new URL(route.request().url()).search)
-    return route.fulfill({ json: options.empty ? emptyFlow() : flowAnswer(now) })
+    return route.fulfill({ json: options.empty ? emptyFlow() : flowAnswer(now, options.record) })
   })
   await page.route(/\/api\/projects\/[^/]+\/delivery\/flow\/runs\/[^/?]+/, route => {
     const itemId = new URL(route.request().url()).pathname.split('/').pop()!
     reads.push(`run:${itemId}`)
-    return route.fulfill({ json: runAnswer(itemId) })
+    return route.fulfill({ json: runAnswer(itemId, options.record) })
   })
   await page.route(/\/api\/projects\/[^/]+\/delivery\/flow\/stream/, async (route: Route) => {
     const frame = await waiting

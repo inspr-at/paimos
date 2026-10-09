@@ -75,6 +75,15 @@ retain their defaults; the marked-key decision path keeps self-approval refused.
 The exception is a draft-CI review artifact. Coordinator review and the existing
 previous-binary compatibility gate remain required before merge/release.
 
+AEON-1022's `1304_delivery_flow_release_record.sql` adds two nullable columns to
+`delivery_flow_items` (the qualification evidence reference and the rollback
+class); previous binaries never write them. `1305_delivery_flow_step_keys.sql`
+replaces the `step_key` check of `delivery_flow_steps` with its strict superset
+(the 23 released keys plus `rehearsal` and `catalogue`) in one transaction. Every
+key a previous binary writes still passes, so the replacement is rollback-safe
+by digest; `DROP CONSTRAINT` is outside the expand-safe allowlist, so the file
+carries an exact-byte exception and a case module that pins the key list.
+
 ## Expand and contract (AEON-415)
 
 Ship schema changes in two releases. The expansion release adds the replacement

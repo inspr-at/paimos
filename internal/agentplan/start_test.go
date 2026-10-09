@@ -51,6 +51,14 @@ func TestDailyStartDecisionsFailClosedAndRespectLadderOrWait(t *testing.T) {
 		{"API door", "ladder", "", false, func(s *Snapshot) {
 			s.DailyState["codex"] = DailyState{State: "no_limit", Accounts: []DailyAccount{{AccountID: "api"}}}
 		}},
+		// Risk: accounts that never reported a vendor percentage, including the
+		// pre-existing unknown-usage routes, were refused as if the reading were stale.
+		{"no vendor percentage", "ladder", "", false, func(s *Snapshot) {
+			s.DailyState["codex"].Accounts[0] = DailyAccount{AccountID: "blind", Freshness: "unknown", ResetPolicy: "suggest", FloorPct: Number(20)}
+		}},
+		{"partial unknown reading", "ladder", "daily_limit_unknown", false, func(s *Snapshot) {
+			s.DailyState["codex"].Accounts[0] = DailyAccount{AccountID: "partial", Freshness: "unknown", UsedPct: Number(10)}
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := DefaultDaily()

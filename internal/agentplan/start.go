@@ -15,11 +15,14 @@ type DailyDecision struct {
 
 // DailyAccountReason uses the same precise reading and ceiling as the dial.
 // Unknown, redacted, future and expired observations never imply headroom.
+// A door that has never reported a vendor percentage is not a stale reading:
+// there is no ceiling to enforce. Any present measurement that is incomplete
+// still refuses. API billing is the only serialized no-ceiling flag.
 func DailyAccountReason(a DailyAccount, now time.Time) string {
 	if now.IsZero() || a.DetailsRedacted {
 		return "daily_limit_unknown"
 	}
-	if a.NoDailyLimit {
+	if a.NoDailyLimit || vendorPercentageAbsent(a) {
 		return ""
 	}
 	if a.Freshness != "fresh" || a.ReadAt == nil || a.ReadAt.After(now) || now.Sub(*a.ReadAt) > DailyFreshness || a.ResetsAt == nil || !now.Before(*a.ResetsAt) || a.UsedPct == nil || a.LimitUsedPct == nil || !percent(*a.UsedPct) || !percent(*a.LimitUsedPct) {
@@ -29,6 +32,13 @@ func DailyAccountReason(a DailyAccount, now time.Time) string {
 		return "daily_limit"
 	}
 	return ""
+}
+
+// vendorPercentageAbsent is the wire shape of a door with no vendor window.
+// Freshness stays "unknown" and no percentage, reading or reset is present.
+// A zero-value door, a redacted door, or a partial reading is not this shape.
+func vendorPercentageAbsent(a DailyAccount) bool {
+	return a.Freshness == "unknown" && a.UsedPct == nil && a.LimitUsedPct == nil && a.StartOfDayUsedPct == nil && a.ReadAt == nil && a.ResetsAt == nil
 }
 
 // DailyStart checks all doors. One fresh door below its limit is sufficient;
