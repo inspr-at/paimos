@@ -5194,6 +5194,8 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestSourceClaimDoesNotScanProjectionAndCoverageIsExplicit","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestStepupProjectionBoundsTargetPermissionsAtProjectLimit","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestStepupProjectionUsesNativePermissionAndHeldExpiry","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestUndecidableApprovalDoesNotStarveHeldQuestion","tier":"GATED-FULL"}

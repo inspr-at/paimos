@@ -3,6 +3,7 @@ package decisiondesk
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -26,6 +27,100 @@ type fixture struct {
 	person, reader, agent         tenant.Principal
 	project, otherProject, ticket string
 	mux                           *http.ServeMux
+}
+
+type stepupVisibilityTx struct {
+	pgx.Tx
+	visibility []byte
+}
+
+func (tx *stepupVisibilityTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if sql == visibleSQL && len(args) == 22 {
+		tx.visibility, _ = args[21].([]byte)
+	}
+	return tx.Tx.QueryRow(ctx, sql, args...)
+}
+
+// Risk: unrelated permissions multiply the desk's step-up query input at the
+// project limit, or bounding that input hides authorized project requests.
+func TestStepupProjectionBoundsTargetPermissionsAtProjectLimit(t *testing.T) {
+	f := setup(t)
+	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Project' FROM node_kinds k CROSS JOIN generate_series(1,998) WHERE k.tenant_id=$1 AND k.slug='project'`, f.person.TenantID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var role string
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'feature_approver','Feature approver') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	f.exec(t, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'settings.manage')`, f.person.TenantID, role)
+	f.exec(t, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.person.TenantID, f.reader.ID, role, f.project)
+	agent := f.agent
+	agent.Scopes = append(agent.Scopes, "approvals.request", "nodes.read")
+	mod := stepup.New(f.d.App, nil, "")
+	requests := map[string]string{}
+	for _, project := range []string{"", f.project, f.otherProject} {
+		var projectValue any
+		if project != "" {
+			projectValue = project
+		}
+		projectJSON, err := json.Marshal(projectValue)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := json.RawMessage(fmt.Sprintf(`{"key":"workspace-summary","project_id":%s,"override":null,"revision":0}`, projectJSON))
+		payload := json.RawMessage(fmt.Sprintf(`{"kind":"feature","key":"workspace-summary","project_id":%s,"enabled":true,"expected_revision":0}`, projectJSON))
+		request, err := mod.Create(t.Context(), agent, stepup.Create{Payload: payload, BeforeHash: stepup.Hash(before)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		requests[project] = request.ID
+	}
+	for _, tc := range []struct {
+		name      string
+		person    tenant.Principal
+		wantItems map[string]bool
+		wantScope int
+	}{
+		{"workspace owner", f.person, map[string]bool{requests[""]: true, requests[f.project]: true, requests[f.otherProject]: true}, 1001},
+		{"project approver", f.reader, map[string]bool{requests[f.project]: true}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var page Page
+			var visibility []byte
+			err := db.InTenant(db.AllProjects(t.Context(), "step-up projection input regression"), f.d.App, tc.person.TenantID, func(tx pgx.Tx) error {
+				capture := &stepupVisibilityTx{Tx: tx}
+				var err error
+				page, err = ReadTx(t.Context(), capture, tc.person, 100, nil)
+				visibility = capture.visibility
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var permissions map[string][]string
+			if err := json.Unmarshal(visibility, &permissions); err != nil {
+				t.Fatal(err)
+			}
+			if len(permissions) != 1 || len(permissions["settings.manage"]) != tc.wantScope || len(visibility) > 64<<10 {
+				t.Fatalf("step-up input includes unrelated permissions or wrong coverage: permissions=%d scopes=%d bytes=%d", len(permissions), len(permissions["settings.manage"]), len(visibility))
+			}
+			if tc.person.ID == f.reader.ID && permissions["settings.manage"][0] != f.project {
+				t.Fatal("project authority escaped its binding")
+			}
+			if len(page.Items) != len(tc.wantItems) || page.Counts.Open != len(tc.wantItems) || page.Counts.Held != len(tc.wantItems) {
+				t.Fatalf("wrong authorized request count: %+v", page)
+			}
+			for _, item := range page.Items {
+				if !tc.wantItems[item.ID] || item.Kind != "stepup" || !item.Held {
+					t.Fatalf("wrong authorized request: %+v", item)
+				}
+			}
+		})
+	}
 }
 
 // Risk: a step-up is hidden from eligible people, disclosed to other readers,
