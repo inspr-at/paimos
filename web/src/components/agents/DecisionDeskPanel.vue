@@ -14,7 +14,7 @@ function rowProject(item: DeskProjectionItem) {
   return project ? deskProject({ projectId: project.id, projectName: project.title, projectKey: project.key }) : undefined
 }
 const groups = computed(() => {
-  const items = desk.projection?.items ?? []
+  const items = (desk.projection?.items ?? []).map(item => ({ ...item, project: rowProject(item) }))
   return [
     { label: 'Waiting on you', note: 'Something is held up until an answer.', items: items.filter(item => item.held) },
     { label: 'When you’re ready', note: 'The agents carry on meanwhile.', items: items.filter(item => !item.held) },
@@ -36,7 +36,7 @@ const incomplete = computed(() => !!desk.projection && (desk.projection.has_more
       <ul :aria-label="group.label">
         <li v-for="item in group.items" :key="deskItemID(item)" class="desk-item">
           <AppIcon name="chevron-right" :size="14" />
-          <a v-if="rowProject(item)" class="row-project" :href="rowProject(item)!.href" target="_blank" rel="noopener" :style="{ '--pc': projectColor(rowProject(item)!) }" :title="`Open ${rowProject(item)!.name} in a new tab`" data-testid="agents-desk-project"><i aria-hidden="true" /><span>{{ rowProject(item)!.name }}</span></a>
+          <a v-if="item.project?.href" class="row-project" :href="item.project.href" target="_blank" rel="noopener" :style="{ '--pc': projectColor(item.project) }" :title="`Open ${item.project.name} in a new tab`" data-testid="agents-desk-project"><i aria-hidden="true" /><span>{{ item.project.name }}</span></a>
           <RouterLink :to="{ path: '/decision-desk', query: { item: deskItemID(item) } }" class="row-open">{{ item.title }}</RouterLink>
         </li>
       </ul>
