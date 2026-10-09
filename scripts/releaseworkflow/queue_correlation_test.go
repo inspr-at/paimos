@@ -17,7 +17,8 @@ func TestQueueCorrelationPreservesEvidenceAndReadOnlyPublication(t *testing.T) {
 		t.Fatal("queue reporter permissions must remain read-only")
 	}
 	triggers := treeMap(w["on"])
-	if len(triggers) != 2 || triggers["schedule"] == nil || triggers["workflow_dispatch"] == nil {
+	_, dispatch := triggers["workflow_dispatch"]
+	if len(triggers) != 2 || triggers["schedule"] == nil || !dispatch {
 		t.Fatal("reporter must publish daily outside PR/merge-group checks")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
