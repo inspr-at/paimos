@@ -372,6 +372,68 @@ test.describe('collapsed header: the menu never scrolls', () => {
     await noScroll(page, 'back at 1440×900')
   })
 
+  // Split rows are positioned absolutely. Reordering must move the row into the
+  // slot its new order owns; the stored order changing while the picture stays
+  // is the failure (move up, Alt+arrow, and drag).
+  test('moves a split column row into the slot its new order reserves', async ({ page }) => {
+    await open(page, 1440, 'light', 700)
+    await fold(page, 1440)
+    await openMenu(page)
+    const body = menu(page).locator('.menu-body')
+    await expect(body).toHaveAttribute('data-split', '')
+    const list = menu(page).getByRole('list', { name: 'Columns' })
+    const rowById = (id: string) => list.getByRole('listitem').filter({ has: page.locator(`[data-column-row="${id}"]`) })
+    const orderOf = () => list.locator('input[data-column-row]').evaluateAll(els => els.map(el => (el as HTMLElement).dataset.columnRow ?? ''))
+    const boxOf = async (id: string) => {
+      const row = rowById(id)
+      await expect(row).toHaveCount(1)
+      return (await row.boundingBox())!
+    }
+    const near = (got: { x: number; y: number; width: number; height: number }, want: { x: number; y: number; width: number; height: number }, label: string) => {
+      for (const axis of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(got[axis] - want[axis]), `${label}.${axis} (${want[axis]} → ${got[axis]})`).toBeLessThanOrEqual(.5)
+    }
+    const keyBox = async () => (await list.getByRole('checkbox', { name: 'Key (always shown)' }).boundingBox())!
+    const still = async (samples: { key: { x: number; y: number; width: number; height: number }; sections: { x: number; y: number; width: number; height: number }; group: { x: number; y: number; width: number; height: number } }, label: string) => {
+      near(await keyBox(), samples.key, `${label}: key`)
+      const sections = (await menu(page).getByRole('navigation', { name: 'Project sections' }).boundingBox())!
+      const group = (await menu(page).getByRole('radiogroup', { name: 'Group by' }).boundingBox())!
+      near(sections, samples.sections, `${label}: sections`)
+      near(group, samples.group, `${label}: group`)
+    }
+    const key = await keyBox()
+    const sections = (await menu(page).getByRole('navigation', { name: 'Project sections' }).boundingBox())!
+    const group = (await menu(page).getByRole('radiogroup', { name: 'Group by' }).boundingBox())!
+    const samples = { key, sections, group }
+    async function swapUp(id: string, label: string, how: 'button' | 'key' | 'drag') {
+      const order = await orderOf()
+      const index = order.indexOf(id)
+      expect(index, `${label} has a row above it`).toBeGreaterThan(0)
+      const above = order[index - 1]!
+      const moving = await boxOf(id), displaced = await boxOf(above)
+      expect(Math.hypot(moving.x - displaced.x, moving.y - displaced.y), `${label} is not already on the slot above`).toBeGreaterThan(8)
+      const row = rowById(id)
+      if (how === 'button') {
+        await row.hover()
+        await row.getByRole('button', { name: `Move ${label} up` }).click()
+      } else if (how === 'key') {
+        await list.locator(`[data-column-row="${id}"]`).focus()
+        await page.keyboard.press('Alt+ArrowUp')
+      } else await row.dragTo(rowById(above))
+      await settled(page)
+      const next = await orderOf()
+      expect(next.indexOf(id), `${label} moves up in the stored order`).toBe(index - 1)
+      expect(next.indexOf(above), `${above} moves down in the stored order`).toBe(index)
+      near(await boxOf(id), displaced, `${how}: ${label} takes the slot above`)
+      near(await boxOf(above), moving, `${how}: ${above} takes the vacated slot`)
+      await still(samples, how)
+    }
+    await swapUp('priority', 'Priority', 'button')
+    await swapUp('assignee', 'Assignee', 'key')
+    await swapUp('epic', 'Epic', 'drag')
+    await expect(body).toHaveAttribute('data-split', '')
+    await noScroll(page, 'after reordering split columns')
+  })
+
   test('stays one column when the window is tall enough, and fits', async ({ page }) => {
     await open(page, 1440, 'light', 2400)
     await fold(page, 1440)

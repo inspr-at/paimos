@@ -102,6 +102,8 @@
     ,
     "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › lets a couple dozen saved views flow across columns without the panel scrolling"
     ,
+    "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › moves a split column row into the slot its new order reserves"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -4709,6 +4711,8 @@
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › lets a couple dozen saved views flow across columns without the panel scrolling","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › lets the long column list break between rows only when the window is too short for whole blocks","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › moves a split column row into the slot its new order reserves","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › phone targets are 44px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

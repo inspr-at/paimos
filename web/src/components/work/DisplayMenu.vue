@@ -24,9 +24,15 @@ const BELOW = 36
 // Blocks pinned for this open. Cleared before every recount (resize, sheet).
 let pinned: HTMLElement[] = []
 let sortWatch: ResizeObserver | null = null
+// Split column rows leave the flow one by one. Geometry belongs to the slot,
+// not the row: a reorder moves the node and would otherwise keep its old coordinates.
+type ColumnSlot = { left: string; top: string; width: string }
+let columnSlots: ColumnSlot[] = []
+let columnWatch: MutationObserver | null = null
+let columnEpoch = 0
 let alive = true
 
-function stopWatch() { sortWatch?.disconnect(); sortWatch = null }
+function stopWatch() { sortWatch?.disconnect(); sortWatch = null; stopColumnWatch() }
 
 function unpin(el: HTMLElement) {
   stopWatch()
@@ -75,6 +81,51 @@ function spills(el: HTMLElement) {
   })
 }
 
+function stopColumnWatch() {
+  columnEpoch += 1
+  columnWatch?.disconnect()
+  columnWatch = null
+  columnSlots = []
+}
+
+function columnList(el: HTMLElement) {
+  return el.querySelector<HTMLElement>('.columns > .list')
+}
+
+function columnRows(list: HTMLElement) {
+  return [...list.children].filter((node): node is HTMLElement => node instanceof HTMLElement && node.classList.contains('row'))
+}
+
+// Fill the slots reserved at pin time with the rows in their current order.
+function placeColumnRows(epoch: number) {
+  const el = body.value
+  if (epoch !== columnEpoch || !el || el.dataset.pinned === undefined || !columnSlots.length) return
+  const list = columnList(el)
+  if (!list) return
+  const rows = columnRows(list)
+  if (rows.length !== columnSlots.length) return
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!
+    const slot = columnSlots[i]!
+    row.style.left = slot.left
+    row.style.top = slot.top
+    row.style.width = slot.width
+  }
+}
+
+function watchColumns(el: HTMLElement) {
+  stopColumnWatch()
+  if (!el.hasAttribute('data-split')) return
+  const list = columnList(el)
+  if (!list || typeof MutationObserver === 'undefined') return
+  const rows = columnRows(list)
+  if (rows.length < 2) return
+  columnSlots = rows.map(row => ({ left: row.style.left, top: row.style.top, width: row.style.width }))
+  const epoch = columnEpoch
+  columnWatch = new MutationObserver(() => placeColumnRows(epoch))
+  columnWatch.observe(list, { childList: true })
+}
+
 // Freeze the open layout. The sort block sits last, so its keys grow downward
 // and the blocks measured here stay where they are. Every box is measured
 // before any leaves the flow: taking one out reflows the rest onto it.
@@ -112,6 +163,7 @@ function pin(el: HTMLElement) {
     sortWatch = new ResizeObserver(apply)
     sortWatch.observe(sort)
   }
+  watchColumns(el)
 }
 
 // Smallest height at which `count` columns hold the menu, or one past `room`
