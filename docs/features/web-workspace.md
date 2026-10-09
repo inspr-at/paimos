@@ -172,7 +172,7 @@ cd web
 npm run test:unit
 npm run test:browser-safety # tiny Node process fixtures; no browser locally
 # Full UI suites: prefer CI; sharded UI jobs are tracked in AEON-410 (PR #29).
-# Prepared mbp2606 entry point (refuses until OPS-247 bootstrap is approved):
+# Prepared build-6 entry point (refuses until OPS-247 bootstrap is approved):
 AEON_REMOTE_CONTROL_DIR=/path/to/coordinator/aeon npm run test:remote
 # Locally, only one targeted file, one worker, when there is a technical reason:
 npm test -- tests/authz.spec.ts --workers=1
@@ -183,7 +183,7 @@ currently refuses with exit 3 before SSH or dependency installation: OPS-247
 owns the approved browser bootstrap and shared heavy-job launcher. Use hosted
 draft PR CI while that work is pending. No environment flag enables the lane;
 the coordinator must confirm the launcher contract and review a follow-up change
-to enable it. No browsers or Playwright were installed on mbp2606 for AEON-508.
+to enable it. No browsers or Playwright were installed on build-6 for AEON-508.
 
 The prepared runner accepts extra arguments to select files or reporters. Set
 `AEON_REMOTE_CONTROL_DIR` to the existing

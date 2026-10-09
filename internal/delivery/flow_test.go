@@ -64,12 +64,12 @@ func TestDeliveryFlowETAFromHistoryOrNoneWithReason(t *testing.T) {
 	done := row
 	ended := at.Add(-time.Minute)
 	done.Ended = &ended
-	done.Gate = &FlowGate{What: "agm1 GO"}
-	if v = flowItemView(done, steps, full, at); v.ETA.Basis != "none" || v.ETA.Reason == nil || v.ETA.P50At != nil || v.PctDone != 100 || v.CurrentStepID != nil || v.NextHumanGate == nil || v.NextHumanGate.What != "agm1 GO" {
+	done.Gate = &FlowGate{What: "release GO"}
+	if v = flowItemView(done, steps, full, at); v.ETA.Basis != "none" || v.ETA.Reason == nil || v.ETA.P50At != nil || v.PctDone != 100 || v.CurrentStepID != nil || v.NextHumanGate == nil || v.NextHumanGate.What != "release GO" {
 		t.Fatalf("finished: %+v", v)
 	}
 	// Before the run ended, the same moment in Replay still shows it open.
-	if v = flowItemView(done, steps, full, ended.Add(-time.Minute)); v.PctDone == 100 || v.NextHumanGate == nil || v.NextHumanGate.What != "agm1 GO" {
+	if v = flowItemView(done, steps, full, ended.Add(-time.Minute)); v.PctDone == 100 || v.NextHumanGate == nil || v.NextHumanGate.What != "release GO" {
 		t.Fatalf("replayed moment: %+v", v)
 	}
 }

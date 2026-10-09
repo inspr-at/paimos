@@ -697,6 +697,27 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				j = normalizeParallelWebSetup(t, jobs)
 			}
 			j = cloneStep(t, j)
+			if id == "go-static" {
+				// AEON-1061 adds one public-source guard. Prove its exact command,
+				// shape and placement before comparing every older field to the
+				// unchanged accepted-CI pin.
+				steps := reuseSteps(j)
+				index := -1
+				for i, value := range steps {
+					step := treeMap(value)
+					if step["name"] != "Keep operator names out of public source" {
+						continue
+					}
+					if index != -1 || len(step) != 2 || step["run"] != "node --test scripts/check-public-names.test.mjs && node scripts/check-public-names.mjs" {
+						t.Fatal("public-source guard must retain its exact command and run unconditionally")
+					}
+					index = i
+				}
+				if index < 1 || index+1 >= len(steps) || treeMap(steps[index-1])["name"] != "Forbid volatile CI identity reads in Go tests" || treeMap(steps[index+1])["run"] != "go vet ./..." {
+					t.Fatal("public-source guard must run after the identity guard and before go vet")
+				}
+				j["steps"] = append(steps[:index], steps[index+1:]...)
+			}
 			if id == "go-test" || id == "go-timing" || id == "e2e-run" {
 				// OPS-287: assert the verified mirror pin, then restore only the
 				// image reference for comparison with the immutable CI fixture.

@@ -83,7 +83,7 @@ func TestPrivateQuoteNormalization(t *testing.T) {
 			t.Fatalf("public edit rejected: %v", err)
 		}
 	}
-	for _, text := range []string{"hsb\u200b1", "ｈｓｂ１", "barta\u200b.cm", "h\u034fsb1", "hsb\ufe0f1", "\u04bbsb1", "barta.\u0441m", "pm.b\u0430rta", "inspr\u2011doctrine\u2011private", "inspr\u2013doctrine\u2013private", "inspr\u2212doctrine\u2212private"} {
+	for _, text := range []string{"hsb\u200b" + "424242", "ｈｓｂ４２４２４２", "barta\u200b.cm", "h\u034fsb" + "424242", "hsb\ufe0f" + "424242", "\u04bbsb" + "424242", "barta.\u0441m", "pm.b\u0430rta", "inspr\u2011doctrine\u2011private", "inspr\u2013doctrine\u2013private", "inspr\u2212doctrine\u2212private"} {
 		if New(nil, Options{}).guardPublic(publicRepository, text) == nil {
 			t.Errorf("normalized pattern missed: %q", text)
 		}
@@ -808,8 +808,8 @@ func TestLatinLookalikeFoldAndIdentity(t *testing.T) {
 		t.Fatal("dotted capital I did not fold")
 	}
 	variants := []string{
-		"hsb1", "HSB1", "һsb1", "Һsb1", "Нsb1", "Ηsb1", "hѕb1", "hsь1", "hsΒ1",
-		"hsb١", "hsb१", "hsb\U0001d7cf", "hsb¹", "hsb 1",
+		"hsb" + "424242", "HSB" + "424242", "һsb" + "424242", "Һsb" + "424242", "Нsb" + "424242", "Ηsb" + "424242", "hѕb" + "424242", "hsь" + "424242", "hsΒ" + "424242",
+		"hsb٤٢٤٢٤٢", "hsb४२४२४२", "hsb\U0001d7d2\U0001d7d0\U0001d7d2\U0001d7d0\U0001d7d2\U0001d7d0", "hsb⁴²⁴²⁴²", "hsb " + "424242",
 		"barta.cm", "barta.сm", "barta.ϲm", "barta.ᴄm", "barta․cm", "bartaꓸcm", "barta．cm", "barta։cm",
 		"pm.barta", "pm.bаrta", "pm.ьarta", "ρm.barta", "pm.bɑrta",
 		"inspr-doctrine-private", "inspr‑doctrine‑private", "inspr‐doctrine‐private",
@@ -819,8 +819,8 @@ func TestLatinLookalikeFoldAndIdentity(t *testing.T) {
 		"іnspr-doctrine-private", "ınspr-doctrine-private", "inspr-dօctrine-private", "inspr-doϲtrine-private",
 		"inspr-doctrine-private\u00a0",
 		"markus@", "mаrkus@",
-		"/Users/x", "pm.bɑrta", "ʜsb1", "ınspr-doctrine-private", "markus@barta.cm",
-		"mark\u0301us@", "hs\u0332b1", "／Users／", "∕Users∕", "⁄Users⁄",
+		"/Users/x", "pm.bɑrta", "ʜsb" + "424242", "ınspr-doctrine-private", "markus@barta.cm",
+		"mark\u0301us@", "hs\u0332b" + "424242", "／Users／", "∕Users∕", "⁄Users⁄",
 	}
 	if len(variants) != 56 {
 		t.Fatalf("identity corpus has %d variants", len(variants))

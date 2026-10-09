@@ -441,6 +441,8 @@ jobs:
               sys.exit(1)
           print('Go tests do not depend on volatile CI identity')
           PY
+      - name: Keep operator names out of public source
+        run: node --test scripts/check-public-names.test.mjs && node scripts/check-public-names.mjs
       - run: go vet ./...
       - name: Check prepared rules bootstrap drift
         run: go run ./scripts/rules-bootstrap check

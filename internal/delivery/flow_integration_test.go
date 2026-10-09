@@ -74,7 +74,7 @@ func release126(f *fixture, cut time.Time, healthy *time.Time) map[string]any {
 		step("gate", "hold", "wait", you, 44, -1, map[string]any{"wait_reason": "human_gate", "waits_for": f.person.ID}),
 	}
 	body := map[string]any{"schema": "aeon.rollout.v1", "direction": "forward", "release": "126", "version": "261008161926.0.0", "outcome": "in_progress",
-		"cut_at": cut, "prs": []int64{405}, "next_human_gate": map[string]any{"principal_id": f.person.ID, "what": "agm1 GO"},
+		"cut_at": cut, "prs": []int64{405}, "next_human_gate": map[string]any{"principal_id": f.person.ID, "what": "release GO"},
 		// Unrelated rollout evidence is accepted and not stored.
 		"image_digest": "sha256:" + strings.Repeat("a", 64), "observation": map[string]any{"restart_count": 0},
 		"steps": steps,
@@ -119,7 +119,7 @@ func TestDeliveryFlowRolloutIngestIsIdempotentAndRead(t *testing.T) {
 	item := flow.Items[0]
 	if item.ID != res.ItemID || item.Kind != "release" || item.Ref != "126" || item.Title != "Release 126" || len(item.PRs) != 1 || item.PRs[0] != 405 ||
 		item.EndedAt != nil || item.Target == nil || item.Target.Minutes != 61 || item.Target.FromStep != "a" ||
-		item.NextHumanGate == nil || item.NextHumanGate.What != "agm1 GO" || item.NextHumanGate.PrincipalID == nil || *item.NextHumanGate.PrincipalID != f.person.ID {
+		item.NextHumanGate == nil || item.NextHumanGate.What != "release GO" || item.NextHumanGate.PrincipalID == nil || *item.NextHumanGate.PrincipalID != f.person.ID {
 		t.Fatalf("item: %+v", item)
 	}
 	// a, b, k and l (healthy on round 2) of twelve release steps are done.
@@ -148,7 +148,7 @@ func TestDeliveryFlowRolloutIngestIsIdempotentAndRead(t *testing.T) {
 	var run DeliveryFlowRun
 	f.call(t, f.person, "GET", path+"/runs/"+res.ItemID, nil, 200, &run)
 	if run.Item.PctDone != 100 || run.Item.EndedAt == nil || !run.Item.EndedAt.Equal(healthy) || run.Item.ETA.Basis != "none" || run.Item.ETA.P50At != nil ||
-		run.Item.NextHumanGate == nil || run.Item.NextHumanGate.What != "agm1 GO" || len(run.Steps) != 11 || len(run.Incidents) != 1 {
+		run.Item.NextHumanGate == nil || run.Item.NextHumanGate.What != "release GO" || len(run.Steps) != 11 || len(run.Incidents) != 1 {
 		t.Fatalf("run: %+v (%d steps)", run.Item, len(run.Steps))
 	}
 	cleared := release126(f, cut, &healthy)

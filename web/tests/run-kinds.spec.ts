@@ -52,7 +52,7 @@ test('host capacity guard rejects a spill that the old 160px ceiling accepts', a
     .c-host { width: 132px; box-sizing: border-box; padding: 0 8px; }
     .host-control { display: inline-flex; padding-right: 22px; }
     .host-badge { display: inline-block; flex: none; width: 94px; }
-  </style><div class="c-host"><span class="host-control"><span class="host-badge">mbp2606</span></span></div>`)
+  </style><div class="c-host"><span class="host-control"><span class="host-badge">build-6</span></span></div>`)
   const cell = page.locator('.c-host')
   const badge = page.locator('.host-badge')
   const available = await availableHostBadgeWidth(cell)
@@ -93,8 +93,8 @@ for (const theme of ['light', 'dark'] as const) test(`ended and lost-contact pho
   work.preferences.theme = { choice: 'system' }
   await mockWork(page, work, { admin: true })
   const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
-  const ended = { ...data.sessions[6]!, display_label: 'Ended', brief: 'Ship', host: 'mbp2606', harness: 'terminal', command: 'ffmpeg', run_id: null, ticket_node_id: null, ticket: null }
-  const silent = { ...data.sessions[4]!, display_label: 'Silent', brief: 'Ship', host: 'mbp2606', harness: 'terminal', command: 'ffmpeg', run_id: null, ticket_node_id: null, ticket: null, heartbeat_at: new Date(now - 20 * 60_000).toISOString() }
+  const ended = { ...data.sessions[6]!, display_label: 'Ended', brief: 'Ship', host: 'build-6', harness: 'terminal', command: 'ffmpeg', run_id: null, ticket_node_id: null, ticket: null }
+  const silent = { ...data.sessions[4]!, display_label: 'Silent', brief: 'Ship', host: 'build-6', harness: 'terminal', command: 'ffmpeg', run_id: null, ticket_node_id: null, ticket: null, heartbeat_at: new Date(now - 20 * 60_000).toISOString() }
   data.sessions.splice(0, data.sessions.length, ended, silent)
   data.runs.splice(0); data.approvals.splice(0); data.messages.splice(0); data.targets.splice(0)
   await mockAgents(page, data)
@@ -195,8 +195,8 @@ test('execution kinds and person-specific host names on the real agents table', 
   await mockWork(page, work, { admin: true })
   const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: { 'n-1': { key: 'PHAROS-42', title: 'Ship the execution kinds' } } })
   const lead = data.sessions[0]!
-  Object.assign(lead, { display_label: 'Release coordinator', model: 'claude-fixture', role: 'coordinator', harness: 'claude', run_id: null, host: 'mbp2607', progress_pct: 50, eta_live_at: new Date(now + 20 * 60_000).toISOString(), heartbeat_at: new Date(now - 5_000).toISOString() })
-  const ai = { ...data.sessions[1]!, run_id: null, ticket_node_id: lead.ticket_node_id, ticket: lead.ticket, parent_harness_session_id: lead.id, display_label: 'AI worker', harness: 'codex', model: 'gpt-fixture', reasoning_effort: 'high', host: 'mbp2606', phase: 'working', activity: 'busy', progress_pct: 20, eta_ready_at: new Date(now + 10 * 60_000).toISOString() }
+  Object.assign(lead, { display_label: 'Release coordinator', model: 'claude-fixture', role: 'coordinator', harness: 'claude', run_id: null, host: 'build-7', progress_pct: 50, eta_live_at: new Date(now + 20 * 60_000).toISOString(), heartbeat_at: new Date(now - 5_000).toISOString() })
+  const ai = { ...data.sessions[1]!, run_id: null, ticket_node_id: lead.ticket_node_id, ticket: lead.ticket, parent_harness_session_id: lead.id, display_label: 'AI worker', harness: 'codex', model: 'gpt-fixture', reasoning_effort: 'high', host: 'build-6', phase: 'working', activity: 'busy', progress_pct: 20, eta_ready_at: new Date(now + 10 * 60_000).toISOString() }
   const xai = { ...ai, id: '52000000-0000-4000-8000-000000000001', display_label: 'xAI worker', harness: 'grok', model: 'grok-fixture' }
   const media = { ...ai, id: '52000000-0000-4000-8000-000000000002', display_label: 'Media worker', harness: 'media', model: null, reasoning_effort: null, generator: 'higgsfield/kling3_0', progress_pct: 40 }
   const terminal = { ...ai, id: '52000000-0000-4000-8000-000000000003', display_label: 'Terminal worker', harness: 'terminal', model: null, reasoning_effort: null, command: 'ffmpeg', progress_pct: 90 }
@@ -260,7 +260,7 @@ test('execution kinds and person-specific host names on the real agents table', 
         await expect(dialog).toHaveCount(0)
       } },
     ] })
-    await expect(workerHost).toContainText('mbp2606')
+    await expect(workerHost).toContainText('build-6')
     expect(names.size).toBe(0)
     await workerHost.click()
     await expect(dialog.getByRole('textbox')).toBeEnabled()
@@ -268,7 +268,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     expect(await workerHost.boundingBox()).toEqual(original)
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()
     for (const child of [ai, xai, media, terminal]) await expect(page.locator(`[data-row="s:${child.id}"] .host-badge`)).toContainText("David's MacBook")
-    await expect(page.locator(`[data-row="s:${lead.id}"] .host-badge`)).toContainText('mbp2607')
+    await expect(page.locator(`[data-row="s:${lead.id}"] .host-badge`)).toContainText('build-7')
     const renamed = await workerHost.boundingBox()
     expect(renamed!.width).toBeGreaterThan(original!.width)
     expectHostBadgeFits(renamed!.width, availableBadgeWidth, 'renamed badge fits the cell beside the pencil')
@@ -276,7 +276,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     await workerHost.click()
     await expect(dialog.getByRole('button', { name: 'Use registered name', exact: true })).toBeEnabled()
     await dialog.getByRole('button', { name: 'Use registered name', exact: true }).click()
-    await expect(workerHost).toContainText('mbp2606')
+    await expect(workerHost).toContainText('build-6')
     expect((await workerHost.boundingBox())?.width).toBe(original?.width)
     // Long labels use the available width up to the cap, visibly ellipsised.
     const longLabel = 'Gemeinsame Entwicklungsstation für teamübergreifende Qualitätssicherung und Agenturkoordination'
@@ -286,7 +286,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(dialog).toHaveCount(0)
     await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
-    await expect(workerHost).toHaveAttribute('title', `${longLabel} · mbp2606`)
+    await expect(workerHost).toHaveAttribute('title', `${longLabel} · build-6`)
     const longBadge = await workerHost.boundingBox()
     expectHostBadgeFits(longBadge!.width, availableBadgeWidth, 'long badge fits the cell beside the pencil')
     expect(longBadge!.width).toBeGreaterThan(original!.width)
@@ -309,7 +309,7 @@ test('execution kinds and person-specific host names on the real agents table', 
         const responsivePencil = await page.locator(`[data-row="s:${ai.id}"] .host-pencil`).boundingBox()
         expect.soft(responsivePencil!.x + responsivePencil!.width).toBeLessThanOrEqual(responsiveCell!.x + responsiveCell!.width + 0.5)
         const leadName = page.locator(`[data-row="s:${lead.id}"] .host-name`)
-        await expect(leadName).toHaveText('mbp2607')
+        await expect(leadName).toHaveText('build-7')
         const leadNameSize = await leadName.evaluate(el => ({ scroll: el.scrollWidth, client: el.clientWidth }))
         expect.soft(leadNameSize.scroll, `${width}px: short host name stays fully visible`).toBeLessThanOrEqual(leadNameSize.client)
         if (width <= 768) {
@@ -394,7 +394,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     await expect(dialog.getByRole('button', { name: 'Use registered name', exact: true })).toBeEnabled()
     await dialog.getByRole('button', { name: 'Use registered name', exact: true }).click()
     await expect(dialog).toHaveCount(0)
-    await expect(workerHost.locator('.host-name')).toHaveText('mbp2606')
+    await expect(workerHost.locator('.host-name')).toHaveText('build-6')
   }
   expect(page.viewportSize(), 'base and candidate captures use the same viewport').toEqual({ width: 1600, height: 1000 })
   expect(await page.evaluate(() => matchMedia('(prefers-color-scheme: light)').matches), 'base and candidate captures use the light theme').toBe(true)

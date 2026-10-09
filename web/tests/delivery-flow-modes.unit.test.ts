@@ -33,7 +33,7 @@ function answer(): ApiFlow {
   const item = (id: string, kind: 'release' | 'change', ref: string, ended: number | null, eta: number | null) => ({
     id, kind, ref, title: kind === 'release' ? '' : 'CI fix', prs: [], started_at: at(0), ended_at: ended == null ? null : at(ended), pct_done: 50, current_step_id: null,
     eta: { p50_at: eta == null ? null : at(eta), p90_at: eta == null ? null : at(eta + 10), basis: eta == null ? 'none' as const : 'history' as const, reason: eta == null ? 'too little history' : null },
-    target: kind === 'release' ? { minutes: 24, from_step: 'a', source: 'Arion' } : null, next_human_gate: kind === 'release' ? { principal_id: null, what: 'agm1 GO' } : null,
+    target: kind === 'release' ? { minutes: 24, from_step: 'a', source: 'Arion' } : null, next_human_gate: kind === 'release' ? { principal_id: null, what: 'release GO' } : null,
   })
   const step = (n: number, item: string, key: string, kind: 'work' | 'wait' | 'rework' | 'recovery', who: ReturnType<typeof actor>, from: number, to: number | null, extra: Record<string, unknown> = {}) => ({
     id: `s${n}`, item_id: item, step_key: key, round: 1, kind, actor: who, started_at: at(from), ended_at: to == null ? null : at(to),
@@ -75,7 +75,7 @@ it('recorded steps become lanes and words from their facts; open steps run on to
   expect(release!.incident!.open).toBe(true)
   expect(release!.steps[4]!.after).toBeUndefined()
   expect(release!.target).toEqual({ start: minutes(at(10)), minutes: 24 })
-  expect(release!.facts!.gate).toBe('agm1 GO')
+  expect(release!.facts!.gate).toBe('release GO')
   // Replay ends an open step at now, never past it.
   const replay = recordedRuns(answer(), { extendOpen: false })
   expect(replay.runs.find(r => r.id === 'r')!.steps[3]!.end).toBe(now)
@@ -176,7 +176,7 @@ it('the in-flight table gives each run its step, wait, estimate and a verdict wi
   const rows = flightRows({ data: exampleLive(), lang: 'en', text: en })
   expect(rows.map(r => r.tag)).toEqual(['126', '991', '983–986', '993'])
   const release = rows[0]!
-  expect(release.waiting).toEqual({ text: 'the checks, then you: agm1 GO', you: true })
+  expect(release.waiting).toEqual({ text: 'the checks, then you: release GO', you: true })
   expect(release.expected).toBe('healthy ~20:35')
   expect(release.verdict).toEqual({ level: 'far', word: 'Far off', text: 'about 3× the target' })
   expect(release.etaX).toBe('20:35 · 20:45')

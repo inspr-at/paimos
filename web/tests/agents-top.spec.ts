@@ -71,7 +71,7 @@ test('chores preserve the sign-in and its command while approvals live in the de
   await open(page)
   const needs = page.getByRole('region', { name: 'Sign-ins and connections' })
   await expect(needs).toBeVisible()
-  const signin = needs.getByRole('listitem').filter({ hasText: 'Cursor needs a new sign-in on mbp2607' })
+  const signin = needs.getByRole('listitem').filter({ hasText: 'Cursor needs a new sign-in on build-7' })
   await expect(signin).toContainText('cursor-agent login · agents skip this account until then')
   await signin.getByRole('button', { name: 'Copy command' }).click()
   await expect(needs.getByRole('status')).toHaveText('Sign-in command copied.')

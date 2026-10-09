@@ -6,7 +6,11 @@ and deployment controls remain in force. Shipping remains off/shadow; a green
 receipt never grants execution, approval, push, merge or deployment authority.
 
 The reviewed controller must be installed outside the candidate checkout. On
-the approved mbp2606 test lane, in a clean checkout of the candidate commit:
+the approved test lane, in a clean checkout of the candidate commit. The installed
+controller sets `AEON_PREFLIGHT_RUNNER` to that lane's approved hostname or short
+label (for example, `build-mac`); an unset, malformed or different runner refuses
+execution. The receipt carries this configured label, and admission reads it
+only from the repository-bound, authorized workflow artifact:
 
 ```sh
 node /path/to/reviewed/scripts/ci-preflight-local.mjs "$candidate_sha" "$base_sha" "$receipt_file"
@@ -31,7 +35,7 @@ The authorized builder dispatcher supplies that receipt as `local-result` to
 `ci-preflight.yml`, dispatched from reviewed **main**, with `sha` naming the
 exact candidate. The local receipt is the authorized builder's attestation,
 not an independently signed runner proof: dispatch authority must remain with
-the controller that ran it on mbp2606. Never permit an untrusted candidate to
+the controller that ran it on the configured lane. Never permit an untrusted candidate to
 dispatch an invented receipt. No new credential or signer is introduced.
 
 The candidate must already exist on GitHub. For a new head on an existing PR,

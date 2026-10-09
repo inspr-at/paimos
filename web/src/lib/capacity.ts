@@ -450,7 +450,7 @@ function uniqueHosts(hosts: string[]): string[] {
   for (const host of hosts) if (host && !out.includes(host)) out.push(host)
   return out
 }
-/** Two doors of one login: "Same account on mbp2607 and studio". */
+/** Two doors of one login: "Same account on build-7 and studio". */
 export function sameAccountCopy(hosts: string[]): string {
   const list = uniqueHosts(hosts)
   if (list.length < 2) return ''
