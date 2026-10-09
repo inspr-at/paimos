@@ -170,7 +170,7 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(search).toBeFocused()
   await page.keyboard.type('hetzner')
   await expect(options(page)).toHaveCount(1)
-  await expect(sheet(page).locator('.filters [aria-live]')).toHaveText('1 matching releases')
+  await expect(sheet(page).locator('.filters [aria-live]')).toHaveText('1 of 7')
   await expect(sheet(page).locator('.detail mark')).toHaveText(['Hetzner'])
   await page.keyboard.press('Escape')
   await expect(search).toHaveValue('hetzner')
@@ -328,12 +328,12 @@ test('filters follow the feature and fix blocks, and still keep releases with ti
   const toggles = sheet(page).getByRole('group', { name: 'Show only releases with' })
   // These commits name tickets but none tells a benefit, so the rows show other, not features or fixes.
   await toggles.getByRole('button', { name: 'Features' }).click()
-  await expect(sheet(page).locator('.filters [aria-live]')).toHaveText('0 matching releases')
+  await expect(sheet(page).locator('.filters [aria-live]')).toHaveText('0 of 7')
   await expect(sheet(page).getByRole('heading', { name: 'No release matches' })).toBeVisible()
   await toggles.getByRole('button', { name: 'Features' }).click()
   await toggles.getByRole('button', { name: 'Fixes' }).click()
   await expect(toggles.getByRole('button', { name: 'Fixes' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(sheet(page).locator('.filters [aria-live]')).toHaveText('0 matching releases')
+  await expect(sheet(page).locator('.filters [aria-live]')).toHaveText('0 of 7')
   await toggles.getByRole('button', { name: 'Fixes' }).click()
   await toggles.getByRole('button', { name: 'Other', exact: true }).click()
   await expect(options(page)).toHaveCount(6)
@@ -504,7 +504,7 @@ test('nothing is clipped at 390: stat card and chart stacked, counts in notes, f
   await next.click()
   await expect(card.getByRole('group', { name: '2 of 7: Features per week' })).toBeVisible()
   await expect(sheet(page).getByRole('region', { name: 'Release cadence' })).toBeVisible()
-  await expect(sheet(page).locator('.filters [aria-live]')).toHaveText('')
+  await expect(sheet(page).locator('.filters [aria-live]')).toHaveText('6 published · 1 reserved')
   await expect(options(page).filter({ hasText: 'Reserved, never published' })).toHaveCount(1)
   const clipped = () => page.evaluate(() => {
     const out: string[] = []
