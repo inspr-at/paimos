@@ -365,5 +365,12 @@
     }
   },
   "followUpOwner": "AEON lead / AEON-1014 coordinator: post the seven-day CI outcome after deployment.",
-  "followUp": "Compare goPhases and tier executionMinutes with queue_run_wall/pr_ci_wall seven days after deployment, stratified by lane, runner class and cache state; retain failure history. No package-concurrency gain is claimed."
+  "followUp": "Compare goPhases and tier executionMinutes with queue_run_wall/pr_ci_wall seven days after deployment, stratified by lane, runner class and cache state; retain failure history. No package-concurrency gain is claimed.",
+  "handoff": {
+    "branch": "work/aeon-1025-gocompile",
+    "pushed": false,
+    "deployed": false,
+    "remoteTestResidueCleaned": true,
+    "releaseGateOwner": "AEON coordinator; worker did not run model review or change ticket status."
+  }
 }
