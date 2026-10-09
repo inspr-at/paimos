@@ -361,18 +361,62 @@ test('step-up phone decline needs no passkey and competing outcomes stay honest'
 })
 
 test('step-up phone cancels an outstanding proof when the person leaves the record', async ({ page }) => {
-  const { calls } = await stepupPhone(page)
-  let release!: () => void
-  const ready = new Promise<void>(resolve => { release = resolve })
-  await page.route(`**/api/stepup-requests/${id}/options`, async route => {
-    calls.options++; await ready
-    await route.fulfill({ json: { method: 'passkey', challenge_id: challenge, publicKey: { challenge: 'AQID', userVerification: 'required' } } })
+  // Risk: verification finishes while navigation is still waiting for session
+  // data. Hold that navigation open and prove cancellation at both proof stages.
+  for (const phase of ['options', 'passkey'] as const) await test.step(phase, async () => {
+    const { calls } = await stepupPhone(page)
+    let releaseOptions!: () => void, navigationStarted!: () => void, releaseNavigation!: () => void
+    const optionsReady = new Promise<void>(resolve => { releaseOptions = resolve })
+    const navigating = new Promise<void>(resolve => { navigationStarted = resolve })
+    const navigationReady = new Promise<void>(resolve => { releaseNavigation = resolve })
+    await page.route(`**/api/stepup-requests/${id}/options`, async route => {
+      calls.options++
+      if (phase === 'options') await optionsReady
+      await route.fulfill({ json: { method: 'passkey', challenge_id: challenge, publicKey: { challenge: 'AQID', userVerification: 'required' } } })
+    })
+    await page.goto(`/phone-approvals/stepup/${id}`)
+    await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeEnabled()
+    await page.evaluate(phase => {
+      const probe = { signal: null as AbortSignal | null, finished: false, passkeys: 0, release: () => {} }
+      Object.assign(window, { stepupProof: probe })
+      const fetch = window.fetch.bind(window), get = navigator.credentials.get.bind(navigator.credentials)
+      const ready = new Promise<void>(resolve => { probe.release = resolve })
+      window.fetch = async (input, init) => {
+        if (phase !== 'options' || !String(input).endsWith('/options')) return fetch(input, init)
+        probe.signal = init?.signal ?? null
+        try { return await fetch(input, init) } finally { probe.finished = true }
+      }
+      Object.defineProperty(navigator.credentials, 'get', { configurable: true, value: async (options: CredentialRequestOptions) => {
+        probe.passkeys++
+        if (phase !== 'passkey') return get(options)
+        probe.signal = options.signal ?? null
+        // Deliberately return a late credential even if the signal was aborted.
+        try { await ready; return await get(options) } finally { probe.finished = true }
+      } })
+    }, phase)
+    await page.route('**/api/me', async route => {
+      navigationStarted(); await navigationReady; await route.fallback()
+    })
+    try {
+      await page.getByRole('button', { name: 'Approve', exact: true }).click()
+      await expect(page.getByRole('status')).toContainText('Waiting for verification')
+      await page.waitForFunction(() => (window as unknown as { stepupProof: { signal: AbortSignal | null } }).stepupProof.signal !== null)
+      await page.getByRole('link', { name: 'Back to Agents', exact: true }).click()
+      await navigating
+      await expect(page.getByRole('heading', { name: 'Step-up approval', exact: true })).toBeVisible()
+      expect(await page.evaluate(() => (window as unknown as { stepupProof: { signal: AbortSignal } }).stepupProof.signal.aborted)).toBe(true)
+      releaseOptions()
+      await page.evaluate(() => (window as unknown as { stepupProof: { release: () => void } }).stepupProof.release())
+      await page.waitForFunction(() => (window as unknown as { stepupProof: { finished: boolean } }).stepupProof.finished)
+      releaseNavigation()
+      await expect(page).toHaveURL(/\/agents$/)
+      await expect(page.getByRole('heading', { name: 'Step-up approval', exact: true })).toHaveCount(0)
+      expect(calls.options).toBe(1); expect(calls.approves).toBe(0)
+      expect(await page.evaluate(() => (window as unknown as { stepupProof: { passkeys: number } }).stepupProof.passkeys)).toBe(phase === 'options' ? 0 : 1)
+    } finally {
+      releaseOptions(); releaseNavigation()
+      await page.evaluate(() => (window as unknown as { stepupProof: { release: () => void } }).stepupProof.release())
+      await page.unroute('**/api/me')
+    }
   })
-  await page.goto(`/phone-approvals/stepup/${id}`)
-  await page.getByRole('button', { name: 'Approve', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Waiting for verification')
-  await page.getByRole('link', { name: 'Back to Agents', exact: true }).click()
-  release()
-  await expect(page.getByRole('heading', { name: 'Step-up approval', exact: true })).toHaveCount(0)
-  expect(calls.options).toBe(1); expect(calls.approves).toBe(0)
 })

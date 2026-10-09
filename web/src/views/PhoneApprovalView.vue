@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { onAccessChange, can } from '../lib/authz'
 import { useIdentityScope } from '../lib/useIdentityScope'
 import { useSession } from '../stores/session'
@@ -57,6 +57,9 @@ function decide(decision: 'approved' | 'denied') {
   }), { failed: e => { error.value = phoneError(e) }, settled: () => { busy.value = false } })
 }
 watch([() => route.fullPath, scope.owner], () => { scope.reset(); busy.value = false; load() }, { immediate: true, flush: 'sync' })
+// Leaving starts before session refresh and the next view's bundle have loaded.
+// End the proof now; waiting for the route watcher leaves time for a late approve.
+onBeforeRouteLeave(() => { scope.reset(); busy.value = false })
 const stopAccess = onAccessChange(() => { scope.reset(); busy.value = false; load() })
 onBeforeUnmount(() => { clearInterval(tick); stopAccess() })
 </script>
