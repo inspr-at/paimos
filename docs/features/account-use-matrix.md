@@ -26,8 +26,18 @@ unconditional principal-entry guard explicitly refuses older binaries, even
 when the account pool is empty. The bound pairing verification run alone is
 exempt. Boot checks enforce the database capability floor for future binaries.
 
-Matrix UI, all Go selection filters, model activation and daemon enrolment are
-separate slices of the same release. This core alone is not a complete release
+Settings › Accounts › "Where accounts may work" shows the matrix to people with
+`account.use.manage`: the four switches for new accounts, contexts, projects
+and model versions; Allow all and Allow none; tri-state row and column boxes;
+single cells; Undo (button or U outside text fields) for the last save; and the
+context menu for rename, "New accounts: never" and archive. A conflicting save
+reloads the stored state and says nothing was saved. Running work outside the
+matrix is listed and keeps running. Project settings choose the project's
+context, the pairing review shows the ticks the rule gives new accounts, and
+model Auto-update sends the matrix revision as the "New model versions" rule.
+
+All Go selection filters, model activation and daemon enrolment are separate
+slices of the same release. This core alone is not a complete release
 of the account matrix. Exact-byte migration-policy records are review artifacts
 and require the coordinator's review and previous-image compatibility gate.
 
