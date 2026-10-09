@@ -17,8 +17,6 @@ import (
 
 type resetAction struct {
 	ResetRequest
-	PersonID     string
-	Revision     int64
 	By           string
 	ExpiredAt    time.Time
 	Confirmed    bool
@@ -67,7 +65,7 @@ func (m *Module) useReset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) prepareReset(ctx context.Context, p tenant.Principal, id string, binding int64, count int, confirmed bool, by string) (resetAction, error) {
-	out := resetAction{PersonID: p.ID, By: by, Confirmed: confirmed}
+	out := resetAction{By: by, Confirmed: confirmed}
 	err := m.inReadinessWrite(ctx, p, func(tx pgx.Tx) error {
 		a, err := resetOwner(ctx, tx, p, id, binding)
 		if err != nil {
@@ -97,10 +95,10 @@ func (m *Module) prepareReset(ctx context.Context, p tenant.Principal, id string
 			return &httpError{status: 422, code: "reset_unsupported", msg: "vendor reset execution is unavailable"}
 		}
 		out.ResetRequest = ResetRequest{AccountID: id, Harness: a.Harness, Provider: a.Provider, DaemonID: a.DaemonID, BindingRevision: binding, ExpectedCount: count}
-		out.Revision, out.ExpiredAt, out.Plan = state.Revision, state.Credits.ExpiresAt[0], state.Plan
+		out.ExpiredAt, out.Plan = state.Credits.ExpiresAt[0], state.Plan
 		out.ReportReadAt, out.Window = state.report.ReadAt, *state.reading
 		return tx.QueryRow(ctx, `INSERT INTO account_reset_actions(tenant_id,account_id,person_id,binding_revision,policy_revision,state,by_kind,expected_count,expired_at,requested_at)
- VALUES($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9) RETURNING id::text`, p.TenantID, id, p.ID, binding, out.Revision, by, count, out.ExpiredAt, now).Scan(&out.ActionID)
+ VALUES($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9) RETURNING id::text`, p.TenantID, id, p.ID, binding, state.Revision, by, count, out.ExpiredAt, now).Scan(&out.ActionID)
 	})
 	return out, err
 }
@@ -134,7 +132,11 @@ func (m *Module) executeReset(ctx context.Context, p tenant.Principal, action re
 			return err
 		}
 		if revision != currentRevision {
-			return fail(409, "account policy changed before reset execution")
+			if _, err := tx.Exec(ctx, `UPDATE account_reset_actions SET state=CASE WHEN state='undo_pending' THEN 'succeeded' ELSE 'cancelled' END WHERE id=$1 AND state IN ('pending','undo_pending')`, action.ActionID); err != nil {
+				return err
+			}
+			outcome = fail(409, "account policy changed before reset execution")
+			return nil
 		}
 		wanted := "pending"
 		if undo {
@@ -285,7 +287,7 @@ func (m *Module) undoReset(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	action := resetAction{By: "person", PersonID: p.ID, Confirmed: true}
+	action := resetAction{By: "person", Confirmed: true}
 	err := m.inReadinessWrite(ctx, p, func(tx pgx.Tx) error {
 		a, err := resetOwner(ctx, tx, p, id, *in.Binding)
 		if err != nil {
@@ -318,7 +320,15 @@ func (m *Module) undoReset(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		action.ResetRequest = ResetRequest{ActionID: actionID, AccountID: id, Harness: a.Harness, Provider: a.Provider, DaemonID: a.DaemonID, BindingRevision: a.LinkRevision, ExpectedCount: result.Report.Count}
-		action.ReportReadAt, action.Window = result.Report.ReadAt, result.Window
+		var reportRaw []byte
+		if err := tx.QueryRow(ctx, `SELECT reset_report FROM agent_accounts WHERE id=$1`, id).Scan(&reportRaw); err != nil {
+			return err
+		}
+		var currentReport capacity.ResetReport
+		if json.Unmarshal(reportRaw, &currentReport) != nil || currentReport.Validate(now) != nil || currentReport.BindingRevision != a.LinkRevision || now.Sub(currentReport.ReadAt) > ProbeFreshness || currentReport.Credits(now).Count != result.Report.Count {
+			return fail(409, "fresh reset count changed before Undo")
+		}
+		action.ReportReadAt, action.Window = currentReport.ReadAt, result.Window
 		_, err = tx.Exec(ctx, `UPDATE account_reset_actions SET state='undo_pending',policy_revision=(SELECT COALESCE(usage_revision,0) FROM agent_accounts WHERE id=$2) WHERE id=$1`, actionID, id)
 		return err
 	})

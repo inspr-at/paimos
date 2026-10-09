@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -18,18 +19,14 @@ import (
 )
 
 type resetVendorFixture struct {
-	result     ResetResult
-	err        error
-	calls      int
-	undoCalls  int
-	beforeCall func()
+	result    ResetResult
+	err       error
+	calls     int
+	undoCalls int
 }
 
 func (v *resetVendorFixture) Use(ctx context.Context, r ResetRequest) (ResetResult, error) {
 	v.calls++
-	if v.beforeCall != nil {
-		v.beforeCall()
-	}
 	return v.result, v.err
 }
 func (v *resetVendorFixture) Undo(ctx context.Context, r ResetRequest) (ResetResult, error) {
@@ -257,6 +254,62 @@ func TestResetUnknownOutcomeAndFinalAuthorization(t *testing.T) {
 	var httpErr *httpError
 	if !errors.As(err, &httpErr) || httpErr.status != 403 || f.vendor.calls != 0 {
 		t.Fatalf("final owner check failed: %v", err)
+	}
+}
+
+// Risk: cached person roles authorize a spend after access revocation. Observe
+// the real tenant-row lock wait before committing the permission change.
+func TestResetFinalFenceRejectsConcurrentRevocation(t *testing.T) {
+	f := newResetsFixture(t)
+	ctx, cancel := context.WithTimeout(context.WithValue(dbtest.Seed(t.Context()), clockKey{}, f.now), 15*time.Second)
+	defer cancel()
+	action, err := f.module.prepareReset(ctx, f.owner, f.account.ID, 0, 2, false, "person")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker, err := adminPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(context.Background())
+	var pid int
+	if err := blocker.QueryRow(ctx, `SELECT pg_backend_pid() FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.owner.TenantID).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := f.module.executeReset(ctx, f.owner, action, false); done <- err }()
+	for {
+		var waiting bool
+		if err := adminPool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)))`, pid).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("reset crossed held tenant fence: %v", err)
+		default:
+		}
+		runtime.Gosched()
+	}
+	if _, err := blocker.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.owner.TenantID, f.owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		var denied *httpError
+		if !errors.As(err, &denied) || denied.status != 403 {
+			t.Fatalf("revoked permission did not reject spend: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if f.vendor.calls != 0 {
+		t.Fatal("vendor called after live permission revocation")
 	}
 }
 

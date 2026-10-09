@@ -872,6 +872,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestResetAutomaticCaptureTimingAuditAndPace","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetFinalFenceRejectsConcurrentRevocation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestResetPolicyReportingOwnershipRevisionAndPrivacy","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestResetUnknownOutcomeAndFinalAuthorization","tier":"ESSENTIAL"}
