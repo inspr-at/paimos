@@ -20,7 +20,7 @@ test('Agents retries a stalled session read and keeps the loaded table through t
   let fail = false
   await page.route(sessions, async route => {
     attempts++
-    if (attempts === 1) { await new Promise(resolve => setTimeout(resolve, 150)); return route.abort('timedout') }
+    if (attempts === 1) return route.abort('timedout')
     if (fail) return route.abort('failed')
     return route.fallback()
   })
@@ -32,7 +32,7 @@ test('Agents retries a stalled session read and keeps the loaded table through t
     const before = attempts
     await page.evaluate(() => window.dispatchEvent(new Event('online')))
     await expect.poll(() => attempts).toBeGreaterThanOrEqual(before + 3)
-    await expect(page.locator('.last-updated')).toContainText('retrying')
+    await expect(page.getByRole('region', { name: 'Agents', exact: true }).getByRole('status').filter({ hasText: 'Update delayed' })).toBeVisible()
     await expect(sessionRows(page).first()).toBeVisible()
     if (n < 3) await expect(page.getByText('Sessions could not be refreshed:')).toHaveCount(0)
   }
@@ -40,7 +40,7 @@ test('Agents retries a stalled session read and keeps the loaded table through t
   await expect(sessionRows(page).first()).toBeVisible()
   fail = false
   await page.getByRole('button', { name: 'Try again' }).last().click()
-  await expect(page.locator('.last-updated')).not.toContainText('retrying')
+  await expect(page.getByRole('region', { name: 'Agents', exact: true }).getByRole('status').filter({ hasText: 'Update delayed' })).toHaveCount(0)
   await expect(page.getByText('Sessions could not be refreshed:', { exact: false })).toHaveCount(0)
 })
 
@@ -52,7 +52,7 @@ test('Live Agents pauses in a hidden tab and refreshes when shown and back onlin
   // The live read includes inactive sessions, so the URL is /live?include_inactive=true.
   await page.route('**/api/harness-sessions/live*', async route => {
     attempts++
-    if (attempts === 1) { await new Promise(resolve => setTimeout(resolve, 150)); return route.abort('timedout') }
+    if (attempts === 1) return route.abort('timedout')
     return route.fallback()
   })
   await page.goto('/')

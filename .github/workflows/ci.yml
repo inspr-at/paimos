@@ -446,7 +446,7 @@ jobs:
         # Browser-free and dependency-free; static CI does not install web.
         run: node --test scripts/test-tiers/test-tiers.test.mjs
       - name: Validate every Go tier against native collection
-        run: node scripts/test-tiers/cli.mjs check go
+        run: node scripts/test-tiers/cli.mjs check go --strict
       - name: Check the shard list covers go test ./...
         run: |
           go run ./scripts/ci-go-shards check -count 7
@@ -608,6 +608,8 @@ jobs:
         run: npm ci
       - name: Check Docker web inputs without Docker
         run: node --test scripts/docker-web-inputs.test.mjs
+      - name: Require every web case to be classified
+        run: node scripts/test-tiers/cli.mjs check web --strict
       - working-directory: web
         run: npm run typecheck
       # The session and run ledger fences (AEON-449): endpoints only in lib/agentRows.ts, wire rows only through the ledger.
