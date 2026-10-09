@@ -242,17 +242,29 @@ type GitHubCheck struct {
 // ReadInstallation mints a separate token with read permissions only. Callers
 // never receive it. The existing publisher's token and writes are unchanged.
 func (g *GitHubApp) ReadInstallation(ctx context.Context, read func(func(string, any) error, func(int64, string) (bool, string, error)) error) error {
-	return g.readInstallation(ctx, false, read)
+	return g.readInstallation(ctx, false, func(get func(string, any) error, queue func(int64, string) (bool, string, error), _ func(int64) ([]byte, error)) error {
+		return read(get, queue)
+	})
 }
 
 // ReadShippingInstallation additionally requests actions:read to distinguish
 // failed aggregate jobs from cancelled shards. No PR, queue or actions write
 // scope is requested in the shadow rollout, even if the App supports them.
 func (g *GitHubApp) ReadShippingInstallation(ctx context.Context, read func(func(string, any) error, func(int64, string) (bool, string, error)) error) error {
-	return g.readInstallation(ctx, true, read)
+	return g.readInstallation(ctx, true, func(get func(string, any) error, queue func(int64, string) (bool, string, error), _ func(int64) ([]byte, error)) error {
+		return read(get, queue)
+	})
 }
 
-func (g *GitHubApp) readInstallation(ctx context.Context, shipping bool, read func(func(string, any) error, func(int64, string) (bool, string, error)) error) error {
+// ReadArtifactInstallation uses the same existing, repository-scoped read-only
+// authority as shipping. Signed artifact URLs and tokens never leave this layer.
+func (g *GitHubApp) ReadArtifactInstallation(ctx context.Context, read func(func(string, any) error, func(int64) ([]byte, error)) error) error {
+	return g.readInstallation(ctx, true, func(get func(string, any) error, _ func(int64, string) (bool, string, error), archive func(int64) ([]byte, error)) error {
+		return read(get, archive)
+	})
+}
+
+func (g *GitHubApp) readInstallation(ctx context.Context, shipping bool, read func(func(string, any) error, func(int64, string) (bool, string, error), func(int64) ([]byte, error)) error) error {
 	if !g.Configured(g.Config.TenantID, g.Config.Repository) {
 		return errGitHub
 	}
@@ -338,5 +350,5 @@ func (g *GitHubApp) readInstallation(ctx context.Context, shipping bool, read fu
 			}
 		}
 		return true, queueHead, nil
-	})
+	}, func(id int64) ([]byte, error) { return g.artifactArchive(ctx, token.Token, id) })
 }

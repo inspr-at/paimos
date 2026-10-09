@@ -5509,6 +5509,159 @@
           "group": "features"
         }
       ]
+    },
+    "261009063244.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 127,
+      "snapshot_sha256": "0314c2da8b5d116c61364a8b8ccd41e2b0e4c719127d4955f8a4f492755c7ba2",
+      "captured_at": "2026-10-09T06:48:46Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-1000",
+          "pill_en": "Models run again",
+          "pill_de": "Modelle laufen wieder",
+          "benefit_en": "Registered newer versions in the same model line inherit existing account allowances.",
+          "benefit_de": "Registrierte neuere Versionen derselben Modellreihe übernehmen bestehende Kontofreigaben.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1001",
+          "pill_en": "Honest delivery numbers",
+          "pill_de": "Ehrliche Lieferzahlen",
+          "benefit_en": "Every delivery number says how much data it covers and compares with the period before.",
+          "benefit_de": "Jede Lieferzahl zeigt, wie viele Daten sie abdeckt, und vergleicht mit dem Zeitraum davor.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1002",
+          "pill_en": "Delivery numbers page",
+          "pill_de": "Seite für Lieferzahlen",
+          "benefit_en": "Each project gets a Delivery page that shows how fast changes reach live.",
+          "benefit_de": "Jedes Projekt bekommt eine Seite, die zeigt, wie schnell Änderungen live gehen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1003",
+          "pill_en": "Simple delivery view",
+          "pill_de": "Einfache Lieferansicht",
+          "benefit_en": "A plain view explains each delivery number with its target.",
+          "benefit_de": "Eine einfache Ansicht erklärt jede Lieferzahl mit ihrem Ziel.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1004",
+          "pill_en": "Live delivery flow data",
+          "pill_de": "Live-Daten zum Lieferfluss",
+          "benefit_en": "PAIMOS records reported release steps and supported change steps so the Flow view can show live and past runs.",
+          "benefit_de": "PAIMOS hält gemeldete Release-Schritte und unterstützte Änderungsschritte fest, damit die Flow-Ansicht laufende und vergangene Läufe zeigt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1005",
+          "pill_en": "Delivery flow lanes",
+          "pill_de": "Spuren im Lieferfluss",
+          "benefit_en": "Each run shows who worked and who waited, lane by lane, on a zoomable timeline.",
+          "benefit_de": "Jeder Lauf zeigt Spur für Spur, wer gearbeitet und wer gewartet hat, auf einer zoombaren Zeitleiste.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1006",
+          "pill_en": "Live, replay and compare",
+          "pill_de": "Live, Wiederholung, Vergleich",
+          "benefit_en": "Watch a release live, replay a past one, or compare a release with the Arion target.",
+          "benefit_de": "Ein Release live verfolgen, ein vergangenes abspielen oder ein Release mit dem Arion-Ziel vergleichen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1007",
+          "pill_en": "Delivery on phone",
+          "pill_de": "Lieferung am Handy",
+          "benefit_en": "The Delivery page works on a phone, in dark mode and with the keyboard.",
+          "benefit_de": "Die Lieferseite funktioniert am Handy, im Dunkelmodus und mit der Tastatur.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1010",
+          "pill_en": "Smarter model registry",
+          "pill_de": "Klügeres Modellregister",
+          "benefit_en": "With auto-update enabled, PAIMOS adopts discovered successor versions of models in use. If a pick is unavailable, it tries eligible alternatives in the configured order.",
+          "benefit_de": "Bei aktivierter automatischer Aktualisierung übernimmt PAIMOS erkannte Nachfolgeversionen verwendeter Modelle. Ist eine Wahl nicht verfügbar, werden zulässige Alternativen in der konfigurierten Reihenfolge versucht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1011",
+          "pill_en": "Pick models",
+          "pill_de": "Modelle wählen",
+          "benefit_en": "One default model and a few exceptions replace the big ranking board.",
+          "benefit_de": "Ein Standardmodell und wenige Ausnahmen ersetzen die große Rangliste.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1012",
+          "pill_en": "Model registry in Settings",
+          "pill_de": "Modellregister in Einstellungen",
+          "benefit_en": "See non-retired registered models, with their levels and notes; people with model-management permission can add their own.",
+          "benefit_de": "Alle registrierten, nicht stillgelegten Modelle mit Stufen und Notizen sehen; eigene Modelle lassen sich mit Berechtigung zur Modellverwaltung hinzufügen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-541",
+          "pill_en": "Steadier dialog controls",
+          "pill_de": "Stabile Dialogsteuerung",
+          "benefit_en": "Updated lead and confirmation dialogs keep controls in place while you choose.",
+          "benefit_de": "In überarbeiteten Lead- und Bestätigungsdialogen bleiben Bedienelemente beim Auswählen an ihrem Platz.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-991",
+          "pill_en": "Full access stays full",
+          "pill_de": "Vollzugriff bleibt vollständig",
+          "benefit_en": "A full-access agent key always includes every agent permission, including ones added later.",
+          "benefit_de": "Ein Agentenschlüssel mit Vollzugriff enthält immer alle Agentenrechte, auch später hinzugekommene.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-993",
+          "pill_en": "Delivery numbers per project",
+          "pill_de": "Liefer-Kennzahlen pro Projekt",
+          "benefit_en": "PAIMOS records CI, merge-queue and reported release timings per project, so delivery improvements can be measured.",
+          "benefit_de": "PAIMOS erfasst pro Projekt Zeiten für CI, Merge-Warteschlange und gemeldete Releases, damit Verbesserungen im Lieferablauf messbar werden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-994",
+          "pill_en": "Delivery dashboard",
+          "pill_de": "Lieferseite pro Projekt",
+          "benefit_en": "See per project how fast changes and releases move, with trends and targets, at a glance.",
+          "benefit_de": "Pro Projekt auf einen Blick sehen, wie schnell Änderungen und Releases vorankommen, mit Trends und Zielen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-995",
+          "pill_en": "Reliable server startup",
+          "pill_de": "Zuverlässiger Serverstart",
+          "benefit_en": "Background workers leave database connection capacity for requests.",
+          "benefit_de": "Hintergrundprozesse lassen Datenbank-Verbindungskapazität für Anfragen frei.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-996",
+          "pill_en": "Clearer work names",
+          "pill_de": "Klarere Arbeitsnamen",
+          "benefit_en": "Choosing names and icons for work levels shows the real icons and the hierarchy from top to bottom.",
+          "benefit_de": "Beim Benennen der Arbeitsebenen sind die echten Symbole und die Hierarchie von oben nach unten sichtbar.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-997",
+          "pill_en": "Clearer kinds settings",
+          "pill_de": "Klarere Arbeitsarten",
+          "benefit_en": "Kinds of work are easier to read and to edit, in one language.",
+          "benefit_de": "Arbeitsarten sind leichter zu lesen und zu bearbeiten, in einer Sprache.",
+          "group": "fixes"
+        }
+      ]
     }
   }
 }

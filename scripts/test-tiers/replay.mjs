@@ -3,12 +3,13 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
-import { select, webGraph } from './core.mjs'
+import { select, webGraph, key } from './core.mjs'
 import { schedulingDecision, effectiveLane, sourceTree } from './diff.mjs'
 import { boundedText } from './inputs.mjs'
 import { classifyPaths } from '../ci-pr-plan.mjs'
 
 const fixture=JSON.parse(readFileSync(new URL('./affected-replay.json',import.meta.url)))
+const evidence=JSON.parse(readFileSync(new URL('./selector-evidence.json',import.meta.url)))
 const legacy=await import(`data:text/javascript;base64,${Buffer.from(fixture.legacySelector).toString('base64')}`)
 const rows=['go','web'].flatMap(kind=>JSON.parse(readFileSync(new URL(`../ci/${kind}-test-tiers.json`,import.meta.url))).tests)
 const root=fileURLToPath(new URL('../../',import.meta.url))
@@ -23,7 +24,8 @@ const exists=path=>readFile(path)!==undefined
 const replay=fixture.prs.map(({number,paths})=>{
   const options={event:'pull_request',paths,imports:fixture.goImports,webImports:graph}
   const classifiedLane=classifyPaths(paths).lane
-  const before=schedulingDecision('pull_request',paths,undefined,{graph})
+  const before=fixture.selectorBaseline.decisions.find(row=>row.number===number)
+  if(!before)throw new Error(`Missing recorded baseline for PR ${number}`)
   const after=schedulingDecision('pull_request',paths,exists,{affectedLane:'on',graph,tree,promotions})
   const oldLane=effectiveLane(classifiedLane,{...before,event:'pull_request',affectedLane:'off'})
   const lane=effectiveLane(classifiedLane,{...after,event:'pull_request',affectedLane:'on'})
@@ -52,9 +54,16 @@ const narrowed=replay.filter(row=>row.new!=='full').length
 const summary={prs:replay.length,oldEssential:replay.filter(row=>row.old==='essential').length,newNarrowed:narrowed,
   newStatic:replay.filter(row=>row.new==='static').length,percentNarrowed:Math.round(100*narrowed/replay.length),
   oldJobs:replay.reduce((sum,row)=>sum+row.oldJobs,0),newJobs:replay.reduce((sum,row)=>sum+row.newJobs,0),fullReasons}
-if(process.argv[2]==='--json')console.log(JSON.stringify({base:fixture.base,transitions,summary,replay},null,2))
+const historicalFailures=evidence.historicalFailures.map(row=>{
+  const decision=schedulingDecision('pull_request',row.paths,exists,{graph})
+  const selection=select(rows,{event:'pull_request',paths:row.paths,webImports:graph,imports:fixture.goImports,forceFull:decision.mode==='full'})
+  return {...row,selected:selection.tests.some(test=>key(test)===row.expectedFailureKey)}
+})
+const correctness={recordedFailureCases:historicalFailures.length,misses:historicalFailures.filter(row=>!row.selected).length}
+if(correctness.misses)process.exitCode=1
+if(process.argv[2]==='--json')console.log(JSON.stringify({base:fixture.base,transitions,summary,replay,historicalFailures,correctness},null,2))
 else {
   console.table(replay.map(row=>({PR:row.number,lane:row.lane,old:row.old,new:row.new,
     cases:`${row.oldCases}->${row.newCases}`,jobs:`${row.oldJobs}->${row.newJobs}`,reason:row.reason.slice(0,110)})))
-  console.log(JSON.stringify({transitions,summary}))
+  console.log(JSON.stringify({transitions,summary,correctness}))
 }

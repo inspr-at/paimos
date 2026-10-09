@@ -4916,6 +4916,8 @@
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestPreferenceSnapshotKeepsCanonicalPersonAndLevelsTogether","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/crossreview","name":"TestPreflightArtifactRedirectBoundsAndAuthority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/crossreview","name":"TestPreparationExactKeyRevocationBeforeFenceLeavesCatalogUntouched","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestQueueReviewRejectsLegacyProfileFamily","tier":"GATED-FULL"}
@@ -5280,6 +5282,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingRechecksRevocationAndPendingRoundsAfterRead","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingRefusesPreflightWithoutGrantingActions","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingShadowOwnershipReplayAndIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryUIFactsHoldReplayAndAvailability","tier":"ESSENTIAL"}
@@ -5303,6 +5307,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestMergeAuditPendingAlertsAndAtomicFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeAuditWebhookReconciliationAndIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestPreflightAdmissionMissingRedStaleAndLookupFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestProjectionReplayAndInheritedSettings","tier":"ESSENTIAL"}
     ,
@@ -9110,6 +9116,8 @@
     ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestNightlyFullRequiresAllThreeTiers","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/ci-runner-guard","name":"TestPreflightPolicyRejectsPoolStaleAttemptWriteAndLayoutChanges","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestProtectedJobsAndSecrets","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestRepositoryWorkflows","tier":"GATED-FULL"}
@@ -9175,6 +9183,8 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestParallelWebUnitsShareRuntimeAndRunOnce","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestPinProposalFollowsVerificationWithoutWaitingForAssets","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestPreflightRoutingPermissionsAndResultBehavior","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestPublishedRuntimeMustMatchSmokedRuntime","tier":"GATED-FULL"}
     ,
@@ -9262,7 +9272,7 @@
   "ticket": "AEON-681"
   ,
   "timingWeights": {
-    "basis": "Measured full-gate owner costs. Go: terminal package elapsed; unit: Vitest startTime-to-endTime or top-level Node durations. Residual tier executionMinutes are apportioned equally across that shard's owner launches, including native enumeration/launch overhead. Separate workflow checks and runner setup are excluded. Missing owners retain prior explicit estimates; partial selections scale by active selected case count."
+    "basis": "Measured full-gate owner costs. Go: terminal package elapsed; unit: Vitest startTime-to-endTime or top-level Node durations. Residual tier executionMinutes are apportioned equally across that shard's owner launches, including native enumeration/launch overhead. Separate workflow checks and runner setup are excluded. Missing owners retain prior explicit estimates; partial selections scale by active selected case count. AEON-1024: internal/nodes is split into two disjoint measured case batches; each launch retains the full owner residual, and new/unmeasured cases retain an explicit average-case estimate."
     ,
     "owners": {
       "cmd/aeon": {"seconds":27.381101,"selectedTests":26}
@@ -9403,7 +9413,7 @@
       ,
       "internal/modelregistry": {"seconds":25.004826,"selectedTests":52}
       ,
-      "internal/nodes": {"seconds":367.444407,"selectedTests":150}
+      "internal/nodes": {"seconds":367.444407,"selectedTests":150,"split":{"caseSeconds":{"TestAccessWritesDoNotDeadlockNodeMove":4.28,"TestBulkChangeSkipsWithReasonsAndUndoesAsOne":0.9,"TestBulkPreconditionsSkipNodesChangedSince":0.5,"TestBulkUndoNeedsTheEditPermission":0.47,"TestCanonicalRoadmapPublication":0,"TestCanonicalRouteFields":0,"TestClassicAssigneeProjectionAndFacets":0.66,"TestConcurrentMovesPrecondition":1.33,"TestConvertClearsForgedRoadmapPublication":0.82,"TestConvertCustomIssueFamily":0.52,"TestConvertDropsFieldsOutsideAClosedSchema":0.52,"TestConvertIssueKindMatrix":0.59,"TestConvertRefusesChildrenParentFieldsAgentsAndOtherTenants":0.57,"TestConvertValidatesRootSchemaConstraints":0.48,"TestConvertWritesOneEventAndUndo":0.57,"TestDeleteAnswersTheRevisionOfItsEvent":0.44,"TestEstimateComplexityBucketsAndHints":0,"TestEstimateOnlyPatchPreservesFieldsAndRevision":0.46,"TestEstimateRouteDefaultsAndDerivedComplexity":0.5,"TestEstimateSortRollupAndRevision":0.89,"TestEstimateValidationAttributionAndPreservation":0.58,"TestEstimatedTicketSuggestionsAndConfirmation":0.44,"TestExactAPIExpiredListCursor":0.96,"TestExactAPIGraphUsesConfiguredBuckets":0.49,"TestExactAPISameKindHumanCheck":0.5,"TestFieldSchema":0,"TestHideClosedAgreesWithBuckets":1.03,"TestHumanCheckCRUDFilterAndRevision":0.61,"TestHumanCheckValidationAndAttribution":0,"TestKindCRUD":0.38,"TestKindConcurrentDisjointPatches":0.41,"TestLeadMinutesFollowTheWebRules":0,"TestLinkedAssigneesListFacetsPickerAndWrites":0.59,"TestList6000FiltersWithStaleKindStatistics":51.48,"TestList6000WithProjectVisibility":48.94,"TestListAssignedLeadUsesTheSameStatement":0.61,"TestListAssigneeFacetOverLargeImportedFields":7.05,"TestListAssigneeSortLeadsWithTheAttentionState":0.6,"TestListAssigneeSortPagesStably":0.87,"TestListAssigneeSortProbesEachUnassignedRowOnce":38.37,"TestListAssigneeSortSkipsLiveLookupForStoredPeople":3.2,"TestListAssigneeSortStoppedOnlyProbesAtMostOnce":23.65,"TestListAssigneeSortUsesLiveWorkerName":2.78,"TestListAssigneeSortUsesTheNameTheViewerSees":0.93,"TestListCursorFiltersAndTree":0.68,"TestListFiltersExclusionsLabelsEpicsAndDates":1.69,"TestListIDsNarrowsTheQueryToTheChangedRows":0.57,"TestListLeadExactNamesUseVisibleSessionKey":0.56,"TestListLeadExactPublicTiesIgnoreHiddenRenames":2.88,"TestListLeadIgnoresReportedProgress":0.59,"TestListLeadKeepsTheSortSnapshot":0.63,"TestListLeadPermissionProjection":0.61,"TestListLeadRestrictedKeyStaysStable":0.76,"TestListLeadTieBreakIgnoresWithheldSessionIDs":0.99,"TestListLeadUsesTheViewerHeartbeatThresholds":0.75,"TestListNearestEpic":0.57,"TestListPlanningColumns":1.42,"TestListWithoutStatistics":60.14,"TestLookupNodesByKeyHidesProjectsTheCallerCannotSee":0.46,"TestLookupNodesByKeyResolvesProjectAndEarlierKeys":0.49,"TestLookupNodesIsBoundedAndTenantScoped":0.43,"TestMicrosFromText":0,"TestMoveDeleteAndNarrowedKind":0.56,"TestMoveOutOfAnUnseenParentIsRefused":0.44,"TestMovePreconditionCycleAndTenantIsolation":0.49,"TestMovePreconditions":0.46,"TestNodeChangesNameProjectFieldsAndRevisionForVisibleNodesOnly":0.49,"TestNodeKeysFieldsAndEvents":0.49,"TestNodeWritesAllowConcurrentCommentTenantFK":0.96,"TestPatchPreconditionAtomic":0.52,"TestPatchRefusesDifferentKind":0.49,"TestPeopleSayWhetherTheyHaveAPicture":0.53,"TestPlaceRanks":0,"TestPlainMoveTransfersDescendantJourneyTickets":0.57,"TestPlainMoveTransfersJourneyAndUndoRestoresIt":0.6,"TestPlanningActualModels":0.68,"TestPlanningCalibration":0,"TestPlanningCalibrationSkipsIneligibleAndOtherRoutes":3.37,"TestPlanningCostMicrosAgree":1.82,"TestPlanningDegradedHistoryRetainsLegacyCalibration":0,"TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange":4.66,"TestPlanningHugeUsageDoesNotBreakTheList":0.87,"TestPlanningLearningAnyRouteBasis":0,"TestPlanningLearningBackoffAndSpeed":0,"TestPlanningLearningCacheSeparatesCells":0,"TestPlanningLearningEpicExcludesDefaultChildren":1.67,"TestPlanningLearningEpicKeepsAllUncalibratedEvidence":0.64,"TestPlanningLearningExcludesMixedModelsPlacementsAndCrossProjectWorkers":1.77,"TestPlanningLearningFailureDoesNotAbortWorkStart":0.48,"TestPlanningLearningFailureLogsSafeContextOnce":0.41,"TestPlanningLearningReadOncePerPage":0.62,"TestPlanningLearningSeededActiveTimeSortAndSnapshot":1.7,"TestPlanningLearningSnapshotSpeedReproducesFrozenTokens":0.78,"TestPlanningLinkedViewerAndCanonicalAssignee":2.81,"TestPlanningListCost":0,"TestPlanningListHoverFixture":0.77,"TestPlanningListPlanShape":0,"TestPlanningMedian":0,"TestPlanningRawAndUnknownSessionModels":0.58,"TestPlanningRegistryVersionAndEffortPins":0.52,"TestPlanningRoundedCostTie":0.78,"TestPlanningSampleOf":0,"TestPlanningSortUsesDisplayedNumbersAndCursor":2.03,"TestPlanningSortedListSharesLearningRead":0.87,"TestPlanningSourceProjectCosts":1.23,"TestPlanningTruncatedHistoryListFixture":1.02,"TestPlanningUsageLessSessionDoesNotAddBilling":0,"TestPolishedNodeList":1.4,"TestPortalIndirectWritesFailClosed":1.07,"TestPortalMutationGuard":1.13,"TestProjectCountsWorkKindsAndStateGroups":0.66,"TestProjectMoveAliasAndUndo":0.52,"TestProjectMoveRejectsNestedIssues":0.45,"TestProjectStatusBuckets":0.94,"TestProjectSummaryRecentPeople":0.45,"TestRoadmapPublicationIsPersonOnly":0.53,"TestRoadmapPublicationKeepsNumbers":0,"TestRouteClassificationConfirmsAgentAndClearsProvenance":0,"TestRouteRoleAndAreaProvenance":0.51,"TestSafeListPerformancePlan":0,"TestSchemaAndTagMutationsRequirePersonAdmin":0.44,"TestServicePrincipalsCannotBeAssignees":0.48,"TestSortMicrosDecimal":0,"TestStateSortFollowsWorkflow":0.99,"TestStateSortNormalisesSpellings":0.77,"TestStatusDefinitions":0,"TestStatusHelpHTTP":0.41,"TestStatusHelpLiveLimitsAndProjectOverrides":0.42,"TestTagAssignmentMutationIsAtomicAndTenantScoped":0.67,"TestTagMutationRollsBackAfterEventFailure":0.46,"TestTenantIsolation":0.41,"TestTicketAreasAreProjectScopedAndSystemRowsStaySeparate":0.53,"TestTicketBenefitsBulkAndUndo":2.72,"TestTicketBenefitsConcurrentFieldsAndCompletion":0.45,"TestTicketBenefitsCreationCompletionAndHistory":2.94,"TestTicketGraphAgentKeyScope":0.49,"TestTicketGraphCap":18.03,"TestTicketGraphQueryCount":0.59,"TestTicketGraphShapeClosedFilterAndIsolation":0.75,"TestTrimDecimal":0,"TestUSDFromMicros":0,"TestUnauthorized":0,"TestWorkStartSnapshotBaselineHistoryAndCostScope":0.81,"TestWorkStartSnapshotConcurrentUnknownAndTenantIsolation":0.57,"TestWorkStartSnapshotFixedProgressBuckets":0.94,"TestWorkStartSnapshotProjectVisibilityFollowsTicket":0.57,"TestWorkStartSnapshotUsesKindCategoriesAndClosesSessionFirstEpisodes":1.06,"TestWorkStatusEntryFencesTenantBeforeTree":0.44,"TestWorkingAgentConfirmsEstimate":0.45,"TestWriterSeam":0.36},"count":2,"overheadSeconds":13.164407}}
       ,
       "internal/openrouter": {"seconds":1.070654,"selectedTests":5}
       ,
