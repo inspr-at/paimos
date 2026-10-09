@@ -25,16 +25,16 @@ for (const width of [400, 1024, 1440]) for (const theme of ['light', 'dark']) te
     return route.fulfill({ json: permissions })
   })
   let policy: AccountUsagePolicy = { account_id: ACCOUNTS.main, posture: 'balanced', source: 'person', floor_percent: 10, own_floor_percent: 10, revision: 1, binding_revision: 2, can_set_posture: true, can_set_floor: true }
-  let resetPolicy: ResetPolicy = 'suggest', fail = false
+  let resetPolicy: ResetPolicy = 'suggest', fail = false, planned = true
   const writes: Record<string, unknown>[] = []
-  await page.route('**/api/agent-accounts/overview*', route => route.fulfill({ json: { accounts: [{ account_id: policy.account_id, harness: 'codex', usage_policy: policy, resets: credits, reset_policy: resetPolicy, reset_plan: resetPolicy === 'auto_before_expiry' ? plan : null, reset_revision: policy.revision, binding_revision: policy.binding_revision }], has_more: false } }))
+  await page.route('**/api/agent-accounts/overview*', route => route.fulfill({ json: { accounts: [{ account_id: policy.account_id, harness: 'codex', usage_policy: policy, resets: credits, reset_policy: resetPolicy, reset_plan: resetPolicy === 'auto_before_expiry' && planned ? plan : null, reset_revision: policy.revision, binding_revision: policy.binding_revision }], has_more: false } }))
   await page.route(/\/api\/agent-accounts\/[^/]+\/(floor|reset-policy|posture)$/, route => {
     const body = route.request().postDataJSON(); writes.push(body)
     if (fail || route.request().url().endsWith('/posture')) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
     policy = { ...policy, revision: policy.revision + 1 }
     if (body.floor_percent !== undefined) { policy = { ...policy, floor_percent: body.floor_percent, own_floor_percent: body.floor_percent }; return route.fulfill({ json: policy }) }
     resetPolicy = body.reset_policy
-    const state: AccountResetState = { account_id: policy.account_id, reset_policy: resetPolicy, revision: policy.revision, binding_revision: policy.binding_revision, resets: credits, reset_plan: resetPolicy === 'auto_before_expiry' ? plan : null, undo_supported: false }
+    const state: AccountResetState = { account_id: policy.account_id, reset_policy: resetPolicy, revision: policy.revision, binding_revision: policy.binding_revision, resets: credits, reset_plan: resetPolicy === 'auto_before_expiry' && planned ? plan : null, undo_supported: false }
     return route.fulfill({ json: state })
   })
   await page.goto('/settings/accounts?lang=de')
@@ -45,8 +45,10 @@ for (const width of [400, 1024, 1440]) for (const theme of ['light', 'dark']) te
   await expect(usage.getByRole('button', { name: 'Follow my Models setting' })).toHaveCount(0)
   await expect(card.locator('[data-reset-summary]')).toHaveText('2 resets · 1 expires Sun, 1 on 6 Nov')
   await expect(toggle).not.toBeChecked(); await expect(card.locator('[data-reset-plan]')).toHaveText('Off: PAIMOS only suggests.')
-  // ?lang=de does not translate the app (AEON-998).
-  const guard = await controlStability(page, { floor: usage.getByRole('spinbutton'), save: usage.getByRole('button', { name: /Save floor/ }), resets: card.locator('.rs-sw'), summary: card.locator('[data-reset-summary]'), accountSwitch: page.locator('.use-sec [role="switch"]').first() })
+  // ?lang=de does not translate the app (AEON-998). The account controls below the card must not move
+  // while the plan line changes between off, planned and nothing planned yet (gate fix 2).
+  const account = page.locator(`.use-sec [data-account="${ACCOUNTS.main}"]`)
+  const guard = await controlStability(page, { floor: usage.getByRole('spinbutton'), save: usage.getByRole('button', { name: /Save floor/ }), resets: card.locator('.rs-sw'), summary: card.locator('[data-reset-summary]'), accountSwitch: account.getByRole('switch', { name: /^Agents may use it · / }), accountDetails: account.getByRole('button', { name: /^Details for / }) })
   await guard.check(async () => { await toggle.click(); await expect(toggle).toBeChecked(); await expect(card.locator('[data-reset-plan]')).toHaveText('Planned: Sat ~18:00, then +18 percentage points a day until Sun.') })
   if (width === 1440) await page.screenshot({ path: testInfo.outputPath(`resets-on-${width}-${theme}.png`), fullPage: true })
   await guard.check(async () => { await toggle.click(); await expect(toggle).not.toBeChecked(); await expect(card.locator('[data-reset-plan]')).toHaveText('Off: PAIMOS only suggests.') })
@@ -60,7 +62,10 @@ for (const width of [400, 1024, 1440]) for (const theme of ['light', 'dark']) te
   fail = true
   await guard.check(async () => { await toggle.click(); await expect(usage.locator('[role="alert"]')).toBeVisible(); await expect(toggle).not.toBeChecked() })
   fail = false
-  await guard.check(async () => { await toggle.click(); await expect(toggle).toBeChecked(); await expect(usage.locator('[role="alert"]')).toHaveCount(0) }); guard.done()
-  expect(writes).toEqual([{ reset_policy: 'auto_before_expiry', revision: 1, binding_revision: 2 }, { reset_policy: 'suggest', revision: 2, binding_revision: 2 }, { floor_percent: 25, revision: 3, binding_revision: 2 }, { reset_policy: 'auto_before_expiry', revision: 4, binding_revision: 2 }, { reset_policy: 'auto_before_expiry', revision: 4, binding_revision: 2 }])
+  await guard.check(async () => { await toggle.click(); await expect(toggle).toBeChecked(); await expect(usage.locator('[role="alert"]')).toHaveCount(0) })
+  await guard.check(async () => { await toggle.click(); await expect(toggle).not.toBeChecked(); await expect(card.locator('[data-reset-plan]')).toHaveText('Off: PAIMOS only suggests.') })
+  planned = false
+  await guard.check(async () => { await toggle.click(); await expect(toggle).toBeChecked(); await expect(card.locator('[data-reset-plan]')).toHaveText('On: nothing planned yet. PAIMOS plans the moment once the window is nearly used.') }); guard.done()
+  expect(writes).toEqual([{ reset_policy: 'auto_before_expiry', revision: 1, binding_revision: 2 }, { reset_policy: 'suggest', revision: 2, binding_revision: 2 }, { floor_percent: 25, revision: 3, binding_revision: 2 }, { reset_policy: 'auto_before_expiry', revision: 4, binding_revision: 2 }, { reset_policy: 'auto_before_expiry', revision: 4, binding_revision: 2 }, { reset_policy: 'suggest', revision: 5, binding_revision: 2 }, { reset_policy: 'auto_before_expiry', revision: 6, binding_revision: 2 }])
   await page.screenshot({ path: testInfo.outputPath(`accounts-resets-${width}-${theme}.png`), fullPage: true })
 })

@@ -39,3 +39,11 @@ export function resetPlanLine(policy: ResetPolicy, plan: ResetPlan | null, now: 
   const lead = `Planned: ${dayLabel(plan.planned_at, now, timezone)} ~${clockLabel(plan.planned_at, timezone)}`
   return { lead, rest: points > 0 ? `, then +${points} percentage point${points === 1 ? '' : 's'} a day until ${dayLabel(plan.raised_pace_until, now, timezone)}.` : '.' }
 }
+
+/** Every shape of the plan line at its widest ("tomorrow" is the longest day label). The card
+ * reserves the tallest, so switching never moves the account controls below it (AEON-541). */
+export const RESET_PLAN_WIDEST: readonly { lead: string; rest: string }[] = [
+  resetPlanLine('suggest', null, 0),
+  resetPlanLine('auto_before_expiry', null, 0),
+  { lead: 'Planned: tomorrow ~00:00', rest: ', then +100 percentage points a day until tomorrow.' },
+]

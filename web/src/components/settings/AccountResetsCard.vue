@@ -3,7 +3,7 @@
 // AEON-1037: Settings › Accounts › one account · the Resets card (AEON-1030 draft 6).
 // Shown only while the vendor reports spendable resets; the parent owns the write.
 import { computed } from 'vue'
-import { resetPlanLine, resetsSummary, type ResetCredits, type ResetPlan, type ResetPolicy } from '../../lib/accountResets'
+import { RESET_PLAN_WIDEST, resetPlanLine, resetsSummary, type ResetCredits, type ResetPlan, type ResetPolicy } from '../../lib/accountResets'
 import AppIcon from '../AppIcon.vue'
 import HarnessMark from '../agents/HarnessMark.vue'
 const props = defineProps<{ accountId: string; harness: string; provider?: string; credits: ResetCredits; policy: ResetPolicy; plan: ResetPlan | null; now: number; canSet: boolean; busy: boolean }>()
@@ -26,7 +26,11 @@ function change(event: Event) {
       <label class="switch rs-sw"><input type="checkbox" role="switch" :checked="on" :disabled="!canSet || busy" :aria-describedby="`rs-hint-${accountId}`" @change="change" /><span>Don’t let resets expire</span></label>
     </div>
     <p :id="`rs-hint-${accountId}`" class="rs-hint">If a reset would go unused, PAIMOS uses it in time and speeds up the pace so it counts.</p>
-    <p class="rs-stats" data-reset-plan><AppIcon name="gauge" :size="13" /><span><b v-if="line.lead">{{ line.lead }}</b>{{ line.rest }}</span></p>
+    <!-- The slot holds the widest line of every state, so the switch never moves the controls below. -->
+    <div class="rs-plan">
+      <p class="rs-stats" data-reset-plan><AppIcon name="gauge" :size="13" /><span><b v-if="line.lead">{{ line.lead }}</b>{{ line.rest }}</span></p>
+      <p v-for="(widest, i) in RESET_PLAN_WIDEST" :key="i" class="rs-stats rs-sizer" aria-hidden="true"><AppIcon name="gauge" :size="13" /><span><b v-if="widest.lead">{{ widest.lead }}</b>{{ widest.rest }}</span></p>
+    </div>
     <p v-if="!canSet" class="rs-who">Only the account owner can change this.</p>
   </div>
 </template>
@@ -42,7 +46,10 @@ function change(event: Event) {
 .rs-sw input:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .rs-sw input:disabled { cursor: default; opacity: .55; }
 .rs-hint { margin-top: 8px; color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
-.rs-stats { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; color: var(--ink-3); font-size: 12px; line-height: 1.45; }
+.rs-plan { display: grid; margin-top: 6px; }
+.rs-plan > .rs-stats { grid-area: 1 / 1; }
+.rs-sizer { visibility: hidden; }
+.rs-stats { display: flex; align-items: flex-start; gap: 6px; color: var(--ink-3); font-size: 12px; line-height: 1.45; }
 .rs-stats svg { flex: none; margin-top: 2px; }
 .rs-stats b { color: var(--ink); font-weight: 600; }
 .rs-who { margin-top: 6px; color: var(--ink-3); font-size: 12px; }

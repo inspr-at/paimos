@@ -2,7 +2,7 @@
 // AEON-1037: the Resets card says only what the vendor reported and what the plan holds.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { resetPlanLine, resetsSummary } from '../src/lib/accountResets.ts'
+import { RESET_PLAN_WIDEST, resetPlanLine, resetsSummary } from '../src/lib/accountResets.ts'
 
 const TZ = 'Europe/Vienna'
 const NOW = Date.parse('2026-09-29T12:02:00Z') // Tue 14:02 in Vienna
@@ -22,4 +22,14 @@ test('the plan line is honest about off, nothing planned and the planned moment'
   assert.match(resetPlanLine('auto_before_expiry', null, NOW, TZ).rest, /^On: nothing planned yet\./)
   assert.deepEqual(resetPlanLine('auto_before_expiry', plan, NOW, TZ), { lead: 'Planned: Sat ~18:00', rest: ', then +18 percentage points a day until Sun.' })
   assert.deepEqual(resetPlanLine('auto_before_expiry', { ...plan, raised_pace_points: 0 }, NOW, TZ), { lead: 'Planned: Sat ~18:00', rest: '.' })
+})
+
+test('the reserved plan slot is at least as wide as every line the card can show', () => {
+  const [off, unplanned, planned] = RESET_PLAN_WIDEST
+  assert.deepEqual(off, resetPlanLine('suggest', null, NOW, TZ))
+  assert.deepEqual(unplanned, resetPlanLine('auto_before_expiry', null, NOW, TZ))
+  for (const day of ['2026-09-29T20:00:00Z', '2026-09-30T08:00:00Z', '2026-10-03T16:00:00Z', '2026-11-06T09:00:00Z']) for (const points of [0, 1, 18, 100]) {
+    const line = resetPlanLine('auto_before_expiry', { planned_at: day, raised_pace_points: points, raised_pace_until: day }, NOW, TZ)
+    assert.ok(line.lead.length <= planned!.lead.length && line.rest.length <= planned!.rest.length, `${line.lead}${line.rest}`)
+  }
 })
