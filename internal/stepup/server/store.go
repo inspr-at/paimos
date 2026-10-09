@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/phoneapprovals"
+	stepupwire "github.com/inspr-at/paimos/internal/stepup"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -66,7 +67,8 @@ type Module struct {
 	now     func() time.Time
 	// Reauthenticate starts the existing OIDC flow, with its existing signing
 	// key and callback. No credential or proof is accepted from an agent.
-	Reauthenticate func(http.ResponseWriter, *http.Request, tenant.Principal, ReauthStart) (string, error)
+	Reauthenticate  func(http.ResponseWriter, *http.Request, tenant.Principal, ReauthStart) (string, error)
+	RecordResultsTx func(context.Context, pgx.Tx, tenant.Principal, []stepupwire.OutcomeMessage) error
 }
 type ReauthStart struct {
 	RequestID, ChallengeID, Digest string
@@ -74,7 +76,11 @@ type ReauthStart struct {
 }
 
 func New(pool *pgxpool.Pool, phone *phoneapprovals.Module, origin string) *Module {
-	return &Module{pool: pool, phone: phone, origin: origin, targets: registeredTargets(), now: time.Now}
+	m := &Module{pool: pool, phone: phone, origin: origin, targets: registeredTargets(), now: time.Now}
+	if phone != nil {
+		phone.StepUpReviewTx = m.phoneReviewTx
+	}
+	return m
 }
 func (m *Module) target(raw json.RawMessage) (Target, json.RawMessage, string, error) {
 	if len(raw) > payloadLimit {
@@ -219,7 +225,7 @@ func (m *Module) Create(ctx context.Context, p tenant.Principal, in Create) (App
 func audit(ctx context.Context, tx pgx.Tx, p tenant.Principal, r ApprovalRequest) error {
 	// Native typed snapshots contain no credentials. Proofs/tokens never reach
 	// this event; method and auth_time describe only verified authentication.
-	_, err := events.Append(ctx, tx, p, events.Change{Type: "stepup." + r.State, NodeID: r.ProjectID, Before: r.Before, After: map[string]any{"request_id": r.ID, "requested_by": r.RequestedBy, "approved_by": actorFor(r, "approve"), "declined_by": actorFor(r, "decline"), "decided_by": r.DecidedBy, "method": r.Method, "auth_time": r.AuthTime, "before": r.Before, "after": r.After, "request_digest": r.Digest, "expires_at": r.ExpiresAt, "outcome": r.State}})
+	_, err := events.Append(ctx, tx, p, events.Change{Type: "stepup." + r.State, NodeID: r.ProjectID, Before: r.Before, After: map[string]any{"request_id": r.ID, "requested_by": r.RequestedBy, "session_id": r.SessionID, "approved_by": actorFor(r, "approve"), "declined_by": actorFor(r, "decline"), "decided_by": r.DecidedBy, "method": r.Method, "auth_time": r.AuthTime, "before": r.Before, "after": r.After, "request_digest": r.Digest, "expires_at": r.ExpiresAt, "outcome": r.State, "result_line": resultLine(r)}})
 	return err
 }
 func actorFor(r ApprovalRequest, decision string) *string {
@@ -229,6 +235,14 @@ func actorFor(r ApprovalRequest, decision string) *string {
 	return nil
 }
 func (m *Module) settle(ctx context.Context, tx pgx.Tx, p tenant.Principal, r *ApprovalRequest, state, decision, method string, authTime *time.Time) error {
+	if err := m.settleRows(ctx, tx, p, r, state, decision, method, authTime); err != nil {
+		return err
+	}
+	return m.recordResults(ctx, tx, p, []ApprovalRequest{*r})
+}
+
+// Batch expiry finishes every request mutation before result and audit events.
+func (m *Module) settleRows(ctx context.Context, tx pgx.Tx, p tenant.Principal, r *ApprovalRequest, state, decision, method string, authTime *time.Time) error {
 	now := m.now().UTC()
 	if state == "expired" {
 		now = r.ExpiresAt
@@ -253,10 +267,7 @@ func (m *Module) settle(ctx context.Context, tx pgx.Tx, p tenant.Principal, r *A
 	if tag.RowsAffected() != 1 {
 		return fault(409, "request already decided")
 	}
-	if err := decorate(ctx, tx, r); err != nil {
-		return err
-	}
-	return audit(ctx, tx, p, *r)
+	return decorate(ctx, tx, r)
 }
 func (m *Module) expire(ctx context.Context, tx pgx.Tx, p tenant.Principal, r *ApprovalRequest) error {
 	if r.State == "pending" && !r.ExpiresAt.After(m.now()) {

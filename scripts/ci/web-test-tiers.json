@@ -9346,6 +9346,12 @@
     ,
     {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"registration awaits one fresh options response before platform verification and keeps actions still","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"step-up phone cancels an outstanding proof when the person leaves the record","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"step-up phone card binds passkey approval and keeps its footer still in both themes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"step-up phone decline needs no passkey and competing outcomes stay honest","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"Compare works by pointer with long German captions at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"Compare works by pointer with long German captions at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

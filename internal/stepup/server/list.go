@@ -142,10 +142,20 @@ func (m *Module) List(ctx context.Context, p tenant.Principal, state string, lim
 			}
 			out.NextCursor = base64.RawURLEncoding.EncodeToString(raw)
 		}
+		// Settle the bounded page in two phases: all request/result row writes
+		// precede events, including foreign-key locks for later recipients.
+		var expired []ApprovalRequest
 		for i := range candidates {
-			if err := m.expire(ctx, tx, p, &candidates[i]); err != nil {
-				return err
+			r := &candidates[i]
+			if r.State == "pending" && !r.ExpiresAt.After(m.now()) {
+				if err := m.settleRows(ctx, tx, p, r, "expired", "expire", "", nil); err != nil {
+					return err
+				}
+				expired = append(expired, *r)
 			}
+		}
+		if err := m.recordResults(ctx, tx, p, expired); err != nil {
+			return err
 		}
 		out.Items = candidates
 		return nil

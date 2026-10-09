@@ -479,6 +479,61 @@ func TestPhonePushPointerQuietEscalationAndGone(t *testing.T) {
 	}
 }
 
+// Risk: a short-lived step-up waits behind escalation, notifies a non-holder,
+// or a notification grants authority after access changes.
+func TestPhoneStepupPushAllHoldersAndCurrentAuthority(t *testing.T) {
+	f := fixtureFor(t)
+	f.addKey(t, f.other)
+	key, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []tenant.Principal{f.p, f.other} {
+		sub := webpush.Subscription{Endpoint: "https://web.push.apple.com/stepup/" + p.ID, Keys: webpush.Keys{P256dh: base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), Auth: base64.RawURLEncoding.EncodeToString(make([]byte, 16))}}
+		status(t, f.call(t, p, "POST", "/api/me/phone-approvals/subscriptions", sub, testOrigin), 200)
+		status(t, f.call(t, p, "PUT", "/api/me/phone-approvals/settings", Preferences{Enabled: true, Zone: "UTC", Escalation: 1440}, testOrigin), 200)
+	}
+	var id string
+	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO stepup_requests(tenant_id,requested_by,permission,payload,before_value,after_value,before_hash,after_hash,request_digest,created_at,expires_at) VALUES($1,$2,'settings.manage','{}','{}','{}',repeat('a',64),repeat('b',64),repeat('c',64),now(),now()+interval '15 minutes') RETURNING id::text`, f.p.TenantID, f.agent.ID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	f.m.StepUpReviewTx = func(ctx context.Context, tx pgx.Tx, p tenant.Principal, requestID string) (Review, error) {
+		if err := authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{}); err != nil {
+			return Review{}, err
+		}
+		var pending bool
+		var hash string
+		err := tx.QueryRow(ctx, `SELECT state='pending' AND expires_at>now(),request_digest FROM stepup_requests WHERE id=$1`, requestID).Scan(&pending, &hash)
+		return Review{Kind: "stepup", ID: requestID, Hash: hash, Pending: pending}, err
+	}
+	sent := 0
+	f.m.send = func(_ context.Context, b []byte, _ *webpush.Subscription, _ *webpush.Options) (*http.Response, error) {
+		var pointer map[string]string
+		if json.Unmarshal(b, &pointer) != nil || len(pointer) != 1 || pointer["url"] != "/phone-approvals/stepup/"+id {
+			t.Fatal("step-up push is not a harmless pointer")
+		}
+		sent++
+		return &http.Response{StatusCode: 201, Body: io.NopCloser(strings.NewReader(""))}, nil
+	}
+	if err := f.m.dispatch(t.Context()); err != nil || sent != 2 {
+		t.Fatalf("all current holders were not notified immediately: %d %v", sent, err)
+	}
+	f.exec(t, `DELETE FROM role_bindings WHERE principal_id=$1`, f.other.ID)
+	f.exec(t, `UPDATE phone_push_deliveries SET sent_at=NULL,retry_at=now() WHERE kind='stepup'`)
+	if err := f.m.dispatch(t.Context()); err != nil || sent != 3 {
+		t.Fatalf("revoked holder received notification: %d %v", sent, err)
+	}
+	f.exec(t, `UPDATE stepup_requests SET state='withdrawn' WHERE id=$1`, id)
+	f.exec(t, `UPDATE phone_push_deliveries SET sent_at=NULL,retry_at=now() WHERE kind='stepup'`)
+	if err := f.m.dispatch(t.Context()); err != nil || sent != 3 {
+		t.Fatal("ended request was notified", err)
+	}
+	var approvals, challenges int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM stepup_requests WHERE state='applied'),(SELECT count(*) FROM phone_approval_challenges WHERE kind='stepup')`).Scan(&approvals, &challenges); err != nil || approvals != 0 || challenges != 0 {
+		t.Fatal("push started or approved a ceremony", err)
+	}
+}
+
 // Risk: a committed proposal or attach request waits for the recovery ticker,
 // or event-driven wakeups bypass durable deduplication and recipient checks.
 func TestPhonePushCommittedEventsAndRecoveryTick(t *testing.T) {
