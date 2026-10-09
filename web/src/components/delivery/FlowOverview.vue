@@ -8,6 +8,7 @@ import { panBy, setWindow, tickStep, timeLabel, type FlowData, type LaneSet, typ
 import type { FlowText } from '../../lib/deliveryFlowText'
 
 const props = defineProps<{ data: FlowData; sets: LaneSet[]; timeline: Timeline; text: FlowText }>()
+const emit = defineEmits<{ scrub: [] }>()
 
 const OV_H = 64
 const host = ref<HTMLElement>()
@@ -60,7 +61,7 @@ function onDown(event: PointerEvent) {
   const part = (event.target as Element).closest?.('[data-part]')?.getAttribute('data-part') as Drag['kind'] | null
   const t = props.timeline
   drag = { kind: part ?? 'bg', x: localX(event), v0: t.v0, v1: t.v1, moved: part === 'ovph', id: event.pointerId }
-  if (part === 'ovph') { t.follow = false; event.preventDefault() }
+  if (part === 'ovph') { t.follow = false; emit('scrub'); event.preventDefault() }
   host.value?.setPointerCapture?.(event.pointerId)
 }
 function onMove(event: PointerEvent) {

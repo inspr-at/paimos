@@ -2,8 +2,11 @@
 // Example flow (AEON-994 draft 5, package 5): release 126 and the three changes in
 // flight with it on 8 Oct 2026, taken from the approved mock (final OPS timeline via
 // the LEAD). Live "now" is 20:25, inside the incident. Flow shows it, labelled as an
-// example, until package 6 reads recorded runs.
-import { LANES, type FlowData, type FlowRun, type FlowStep, type Lane, type StepKind } from './deliveryFlow'
+// example, while a project has no recorded run (package 6); Replay shows release 126
+// final and the changes so far, Compare races 126 against the Arion target.
+import type { DeliveryLanguage } from './delivery'
+import { LANES, type FlowData, type FlowRun, type FlowStep, type Lane, type RunFacts, type StepFacts, type StepKind } from './deliveryFlow'
+import { arionTarget, compareData, replayData } from './deliveryFlowData'
 
 const hm = (at: string) => { const [h, m, s = 0] = at.split(':').map(Number); return h! * 60 + m! + s / 60 }
 type Extra = Pick<FlowStep, 'side' | 'incident' | 'after' | 'stepKey'>
@@ -83,11 +86,63 @@ const c993: FlowRun = {
   ],
 }
 
+// ---------- Facts the mock derives from the words (usual and target minutes, outcome, round) ----------
+const STEP_NORM: Record<string, [number, number]> = { a: [15, 3], b: [5, 0.5], c: [20, 6], d: [5, 0.5], e: [10, 2], f: [5, 1], g: [5, 0.5], h: [15, 1], i: [15, 3], j: [3, 0.5], k: [10, 3], l: [20, 3] }
+function normOf(step: FlowStep): [number, number] | null {
+  const en = step.expert.en
+  if (step.stepKey && STEP_NORM[step.stepKey]) return STEP_NORM[step.stepKey]!
+  if (/^Build/.test(en)) return [35, 30]
+  if (/^Review/.test(en)) return [13, 8]
+  if (/^CI run|CI \(/.test(en)) return [16, 8]
+  if (/Merge queue/.test(en)) return [15, 7]
+  return null
+}
+function factsOf(step: FlowStep, source: StepFacts['source']): StepFacts {
+  const en = step.expert.en, norm = normOf(step)
+  const outcome = /DEGRADED/.test(en) ? 'degraded' : /changes/.test(en) ? 'changes' : /flake/i.test(en) ? 'flaky' : /\bred\b/.test(en) ? 'red' : /green|QUALIFIED|\bok\b/.test(en) ? 'ok' : null
+  const m = en.match(/\br(\d)\b|run (\d)|check (\d)/), round = m ? Number(m[1] ?? m[2] ?? m[3]) : undefined
+  const waitReason = step.kind !== 'wait' ? null : /reviewer|copy gate/.test(en) ? 'reviewer' : /re-run/.test(en) ? 'rerun' : /Held/.test(en) ? 'dependency' : /GO/.test(en) ? 'human_gate' : null
+  const waitsFor = /Held/.test(en) ? 'AEON-991' : /GO/.test(en) ? 'agm1 GO' : null
+  return { round, outcome, waitReason, waitsFor, source: step.lane === 'ci' ? 'github_app' : source, norm: norm ? { p50: norm[0], p90: null, arion: norm[1] } : null }
+}
+const at = (value: string | null) => value == null ? null : hm(value)
+function withFacts(run: FlowRun, source: StepFacts['source'], facts: Omit<RunFacts, 'started' | 'eta' | 'currentStepId'> & { eta: [string, string] | null; reason?: string }): FlowRun {
+  run.steps.forEach(step => { step.facts = factsOf(step, source) })
+  run.facts = {
+    kind: facts.kind, ref: facts.ref, started: Math.min(...run.steps.map(s => s.start)), ended: facts.ended, pct: facts.pct, currentStepId: null, gate: facts.gate,
+    eta: facts.eta ? { p50: at(facts.eta[0]), p90: at(facts.eta[1]), basis: 'history', reason: null } : { p50: null, p90: null, basis: 'none', reason: facts.reason ?? null },
+  }
+  return run
+}
+withFacts(r126, 'ops_rollout', { kind: 'release', ref: '126', ended: null, pct: 93, gate: 'agm1 GO', eta: ['20:35', '20:45'] })
+withFacts(c991, 'paimos', { kind: 'change', ref: 'AEON-991', ended: null, pct: 75, gate: null, eta: ['20:50', '21:08'] })
+withFacts(c983, 'paimos', { kind: 'change', ref: 'AEON-983', ended: null, pct: 70, gate: null, eta: ['21:11', '21:40'] })
+withFacts(c993, 'paimos', { kind: 'change', ref: 'AEON-993', ended: null, pct: null, gate: null, eta: null, reason: 'first build on this model' })
+const r126Open = r126.incident!
+r126.incident = { ...r126Open, open: true }
+
+export const EXAMPLE_ORIGIN = new Date(2026, 9, 8).getTime()
 /** The Live example: four runs in one set of six lanes, release 126 the main one. */
 export function exampleLive(): FlowData {
   return {
-    origin: new Date(2026, 9, 8).getTime(), now: EXAMPLE_NOW,
+    origin: EXAMPLE_ORIGIN, now: EXAMPLE_NOW,
     range: [hm('18:10'), hm('21:40')], play: [hm('18:10'), hm('21:40')],
     sets: [{ runs: [r126, c991, c983, c993], lanes: LANES, main: r126, multi: true }],
   }
 }
+/** Runs Replay offers: release 126 final, the changes so far (cut at now). */
+export const EXAMPLE_REPLAY = ['r126', 'c991', 'c983'] as const
+const finalRelease = (): FlowRun => ({ ...r126, incident: { ...r126Open, open: false }, facts: { ...r126.facts!, ended: hm('20:34:01'), pct: 100 } })
+function soFar(run: FlowRun): FlowRun {
+  const steps = run.steps.filter(s => s.start < EXAMPLE_NOW).map(s => s.end > EXAMPLE_NOW ? { ...s, end: EXAMPLE_NOW, facts: { ...s.facts, open: true } } : s)
+  return { ...run, steps }
+}
+export function exampleRun(id: string): FlowRun | null {
+  return id === 'r126' ? finalRelease() : id === 'c991' ? soFar(c991) : id === 'c983' ? soFar(c983) : null
+}
+export function exampleReplay(id: string): FlowData | null {
+  const run = exampleRun(id)
+  return run ? replayData(run, EXAMPLE_ORIGIN, run.facts?.ended == null ? EXAMPLE_NOW : null) : null
+}
+/** Compare: release 126 from step a against the Arion target. */
+export const exampleCompare = (lang: DeliveryLanguage): FlowData | null => compareData(finalRelease(), arionTarget(lang))

@@ -80,6 +80,42 @@ a lane, Enter selects the step under the playhead, Esc clears and +/− zoom. Li
 at 45 minutes (20 on a phone) with now at 65 % and follows now; moving the playhead
 away shows "Viewing HH:MM" and **Back to now** returns.
 
-Until the flow data package records runs, Flow says that no flow data is recorded yet
-and shows release 126 of 8 Oct 2026 as an example. The moment panel and the Live,
-Replay and Compare modes follow in a later package of AEON-994.
+**Flow modes** (`?mode=live|replay|compare`, `?run=`) sit left of the legend. Flow reads
+the recorded runs (`GET /api/projects/{projectId}/delivery/flow` and
+`/delivery/flow/runs/{itemId}`, see [Delivery Flow data](delivery-flow-data.md)) and
+follows the server-sent hints `delivery.step`, `delivery.item` and `delivery.incident`
+by reading again; Live also reads every minute. New data for the same view keeps the
+person's window, time and selected step; a failed read shows an error with **Retry**,
+never an old answer. Steps carry facts only, so their labels are built from the step
+key, kind, round, outcome and wait reason. Without any recorded run, Flow says so and
+shows release 126 of 8 Oct 2026 as a labelled example in all three modes. A failed
+preference save hides that example line in place, the same way Numbers hides its
+status row.
+
+- **Live** shows the runs active in the last hours (and those that ended in the last
+  45 minutes): releases first, then the soonest estimate. An open step runs on to its
+  usual length (a dependency to the awaited run's estimate), drawn as expected past
+  now. Below, the runs in flight: Simple says what happens now, who is on it, what it
+  waits for, how much is done and when it is expected, with a verdict against the
+  target (on target, close, far off: shape and word); Expert shows step, actor, step ETA
+  and run ETA with p90.
+- **Replay** opens at the start of the latest release (or the latest run) and plays it
+  once per browser session: 60 s for the whole run at 1×, 30 s at 2×. Playing follows
+  the playhead; a pan or zoom stops following, a playhead drag pauses. With reduced
+  motion nothing plays: the run stands still, Play is off, and the handle and
+  Shift+←/→ still move the time.
+- **Compare** races a release from its step a against the Arion target (the release
+  path a to l of arion.md § 4, 24 minutes) on one relative axis: two lane sets
+  (Reviewer, OPS, Checks), one overview, one playhead, finish lines.
+- Replay and Compare list **where the time went**: working, waiting, doing it again and
+  incident + recovery along the critical path, hand-overs, and the biggest waits and
+  repeats.
+
+The headline above the card says the state in one Simple sentence or one Expert line.
+The **moment panel** (196 px, 300 px stacked on phones) says "At HH:MM" with one
+sentence, one line per active lane (step, minutes so far of its length, usual p50,
+Arion target) and one idle line; on the right the selected step (start to end to the
+second, took, usual, target, outcome, round, waits for, source) or the incident. The
+avatar, the PAIMOS Orbit agent cube carrying the run's parcel, stands at the playhead on
+the main run's current step, with a clock badge while waiting and a red one during an
+incident.

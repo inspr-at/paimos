@@ -4,7 +4,8 @@
 // the 7 · 30 · 90 · 180 · 365-day window and Simple | Expert, both the person's
 // own (saved server-side) — and the Numbers views: Simple (the default; summary,
 // three plain sections, small charts) and Expert (ten tiles, ten trends).
-// Controls sit in the head and never move; content below grows downward.
+// Controls sit in the head and never move; content below grows downward. Flow
+// (package 6) reads the recorded runs: ?mode=live|replay|compare and ?run=.
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
@@ -18,8 +19,10 @@ import WindowSwitch from './WindowSwitch.vue'
 import { deliveryLanguage } from '../../lib/delivery'
 import { bucketOf, clockTime, DEFAULT_PREFS, DELIVERY_PREFS_KEY, hasAnyData, numbersOf, readDeliveryMetrics, readPrefs, shortDate, type DeliveryMetrics, type DeliveryPrefs, type Level, type TileModel, type WindowDays } from '../../lib/deliveryNumbers'
 import { deliveryText, fill } from '../../lib/deliveryNumbersText'
-import { exampleLive } from '../../lib/deliveryFlowExample'
-import { flowText } from '../../lib/deliveryFlowText'
+import { FLOW_MODES, type FlowMode } from '../../lib/deliveryFlowModes'
+import { timeLabel } from '../../lib/deliveryFlow'
+import { flowText, put } from '../../lib/deliveryFlowText'
+import { useDeliveryFlow } from '../../lib/useDeliveryFlow'
 import { onPreferenceFailure, preferenceSaves, usePreference } from '../../lib/preferences'
 import { usePoller } from '../../lib/usePolledData'
 import { vClipTip } from '../../directives/clipTip'
@@ -72,8 +75,18 @@ function retryPrefs() {
 const setWindow = (window: WindowDays) => choose({ window })
 const setLevel = (level: Level) => choose({ level })
 
-// ---------- Flow: the approved example until recorded runs arrive (package 6) ----------
-const flowExample = exampleLive()
+// ---------- Flow: ?mode=live|replay|compare and ?run=, read while Flow is shown ----------
+const flowMode = computed<FlowMode>(() => FLOW_MODES.includes(route.query.mode as FlowMode) ? route.query.mode as FlowMode : 'live')
+const flowRun = computed(() => typeof route.query.run === 'string' && route.query.run ? route.query.run : null)
+const flow = useDeliveryFlow({ projectId: () => props.project.id, mode: () => flowMode.value, run: () => flowRun.value, active: () => view.value === 'flow', lang: () => lang.value })
+function setFlowMode(mode: FlowMode) {
+  if (mode === flowMode.value) return
+  const { mode: _mode, run: _run, ...query } = route.query
+  void router.replace({ path: route.path, query: mode === 'live' ? query : { ...query, mode }, hash: route.hash })
+}
+function setFlowRun(run: string) {
+  void router.replace({ path: route.path, query: { ...route.query, run }, hash: route.hash })
+}
 
 // ---------- Numbers: one bounded read, refreshed every minute while visible ----------
 // A failed read shows no numbers at all: an old answer never stands in for a new one.
@@ -111,6 +124,11 @@ const charts = computed(() => state.value === 'ready' && numbers.value ? numbers
 const source = computed(() => data.value?.source ?? null)
 const noData = computed(() => state.value === 'ready' && !!data.value && !hasAnyData(data.value))
 const updated = computed(() => {
+  if (view.value === 'flow') {
+    // Flow names its own moment: Live says what "now" is; Replay and Compare show recorded runs.
+    const shown = flow.data.value
+    return flowMode.value === 'live' && shown?.now != null ? put(flowText(lang.value).nowLive, { t: timeLabel(shown, shown.now) }) : ''
+  }
   if (state.value !== 'ready' || !data.value?.generated_at) return ''
   const at = fill(text.value.updated, { t: clockTime(data.value.generated_at, lang.value) })
   return source.value?.app_connected ? `${at} · ${text.value.live}` : at
@@ -265,13 +283,15 @@ watch(state, (next, prev) => {
       </div>
     </template>
     <template v-else>
-      <!-- Until package 6 reads recorded runs, Flow shows the approved example, and says so.
+      <!-- Without any recorded run, Flow shows the approved example, and says so.
            A failed preference save hides this banner in place, the same way Numbers hides its status row. -->
-      <div class="flow-empty banner" :class="{ veiled: prefFailed }" role="status">
+      <div v-if="flow.example.value" class="flow-empty banner" :class="{ veiled: prefFailed }" role="status">
         <AppIcon name="flow" :size="16" />
         <span class="grow"><b>{{ text.flowNone }}</b> {{ flowText(lang).example }}</span>
       </div>
-      <FlowView :data="flowExample" :level="prefs.level" :lang="lang" />
+      <FlowView :data="flow.data.value" :data-key="flow.key.value" :mode="flowMode" :status="flow.status.value" :empty="flow.empty.value"
+        :choices="flow.choices.value" :choice="flow.runId.value" :truncated="flow.truncated.value" :level="prefs.level" :lang="lang"
+        @update:mode="setFlowMode" @choose="setFlowRun" @retry="flow.retry" />
     </template>
 
     <Teleport to="body">
