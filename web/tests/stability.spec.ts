@@ -80,7 +80,8 @@ for (const width of [390, 1440]) {
     })
 
     test('an open session holds still while runs and messages land', async ({ page }) => {
-      for (const theme of ['light', 'dark'] as const) {
+      for (const sampleWidth of width === 390 ? [390, 1024] : [1440]) for (const theme of ['light', 'dark'] as const) {
+        await page.setViewportSize({ width: sampleWidth, height: sampleWidth === 390 ? 844 : 900 })
         await base(page, theme)
         let release!: () => void, started!: () => void
         const held = new Promise<void>(resolve => { release = resolve })
@@ -94,7 +95,7 @@ for (const width of [390, 1440]) {
         await expect(page.locator('.session-panel .facts')).toBeVisible()
         await expect(page.locator('.session-panel .pause-controls')).toBeVisible()
         await expectStill(page)
-        await page.screenshot({ path: test.info().outputPath(`session-loaded-${width}-${theme}.png`) })
+        await page.screenshot({ path: test.info().outputPath(`session-loaded-${sampleWidth}-${theme}.png`) })
       }
     })
 

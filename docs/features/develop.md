@@ -60,6 +60,7 @@ FULL gate after merge; a full premerge run is required only when impact is
 uncertain. Releases require a green full main-push gate (or full nightly run) on the
 exact freeze SHA, in addition to the release rehearsal. Nightly is separate from
 the required PR/main checks; its failures remain visible for classification.
+[Nightly CI evidence and reporting](nightly-ci.md) describes the reporter and its ownership.
 A red nightly needs a ticket naming its failing cases and tested SHA. The existing
 PAIMOS reporter can invoke `node scripts/nightly-ticket.mjs --run-id ID` for a
 read-only preview. To deliver it, supply its existing absolute CLI path with
