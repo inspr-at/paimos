@@ -23,8 +23,8 @@ export class StepupNavigation extends Error {
 }
 
 const MAX_BYTES = 8 * 1024 * 1024
-async function stepupRequest<T>(path: string, input?: unknown): Promise<T> {
-  const response = await api(path, input === undefined ? undefined : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+async function stepupRequest<T>(path: string, input?: unknown, signal?: AbortSignal): Promise<T> {
+  const response = await api(path, input === undefined ? { signal } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal })
   if (Number(response.headers.get('Content-Length')) > MAX_BYTES) { await response.body?.cancel(); throw new Error('The step-up response is too large.') }
   if (!response.body) throw new APIError(response.status, 'The step-up response is missing.')
   const reader = response.body.getReader(), decoder = new TextDecoder()
@@ -68,33 +68,55 @@ function navigable(url: string): URL {
   if (target.protocol !== 'https:' && !(target.protocol === 'http:' && location.protocol === 'http:')) throw new Error('The sign-in address is not secure. Nothing changed.')
   return target
 }
-export interface StepupDevices { credentials?: Pick<CredentialsContainer, 'get'>; navigate?: (url: string) => void }
+export interface StepupDevices {
+  credentials?: Pick<CredentialsContainer, 'get'>; navigate?: (url: string) => void
+  /** Aborted when the memo closes or the person changes; nothing starts after that. */
+  signal?: AbortSignal
+}
+/** A 409 means the request ended or moved on before this decision. Read it
+ * again: a settled request is returned so the desk shows the actual outcome
+ * and decider; anything else keeps the original refusal. */
+async function settledOr(request: StepupRequest, cause: unknown, signal?: AbortSignal): Promise<StepupRequest> {
+  if (!(cause instanceof APIError) || cause.status !== 409) throw cause
+  let current: StepupRequest
+  try { current = await stepupRequest<StepupRequest>(`/stepup-requests/${encodeURIComponent(request.id)}`, undefined, signal) } catch { throw cause }
+  signal?.throwIfAborted()
+  if (current.id !== request.id || current.request_digest !== request.request_digest || current.state === 'pending') throw cause
+  return current
+}
 
 /** Approve: an existing passkey when the person has one, otherwise a fresh
  * OIDC sign-in. The server binds either proof to this person, request digest
  * and decision. Assertions go to the server only and are never kept here. */
 export async function approveStepup(request: StepupRequest, devices: StepupDevices = {}): Promise<StepupRequest> {
-  const path = `/stepup-requests/${encodeURIComponent(request.id)}`
-  const options = await stepupRequest<Options>(`${path}/options`, decision(request))
+  const path = `/stepup-requests/${encodeURIComponent(request.id)}`, { signal } = devices
+  let options: Options
+  try { options = await stepupRequest<Options>(`${path}/options`, decision(request), signal) } catch (cause) { return settledOr(request, cause, signal) }
+  signal?.throwIfAborted()
   if (options.method === 'oidc_reauth') {
     if (typeof options.authorize_url !== 'string') throw new Error('The fresh sign-in could not start. Nothing changed.')
     const target = navigable(options.authorize_url)
+    signal?.throwIfAborted()
     ;(devices.navigate ?? (url => window.location.assign(url)))(target.href)
     throw new StepupNavigation()
   }
   if (options.method !== 'passkey' || typeof options.challenge_id !== 'string' || !options.publicKey) throw new Error('The passkey check could not start. Nothing changed.')
   let credential: PublicKeyCredential | null
   try {
-    credential = await (devices.credentials ?? navigator.credentials).get({ publicKey: requestOptions(options.publicKey) }) as PublicKeyCredential | null
+    credential = await (devices.credentials ?? navigator.credentials).get({ publicKey: requestOptions(options.publicKey), signal }) as PublicKeyCredential | null
   } catch (cause) {
+    signal?.throwIfAborted()
     if (cause instanceof DOMException && (cause.name === 'NotAllowedError' || cause.name === 'AbortError')) credential = null
     else throw cause
   }
+  signal?.throwIfAborted()
   if (!credential) throw new Error('The passkey check was cancelled. Nothing changed. Approve to try again.')
-  return confirmed(request, await stepupRequest<StepupRequest>(`${path}/approve`, { ...decision(request), challenge_id: options.challenge_id, credential: credentialJSON(credential) }))
+  const body = { ...decision(request), challenge_id: options.challenge_id, credential: credentialJSON(credential) }
+  try { return confirmed(request, await stepupRequest<StepupRequest>(`${path}/approve`, body, signal)) } catch (cause) { return settledOr(request, cause, signal) }
 }
-export async function declineStepup(request: StepupRequest): Promise<StepupRequest> {
-  return confirmed(request, await stepupRequest<StepupRequest>(`/stepup-requests/${encodeURIComponent(request.id)}/decline`, decision(request)))
+export async function declineStepup(request: StepupRequest, signal?: AbortSignal): Promise<StepupRequest> {
+  signal?.throwIfAborted()
+  try { return confirmed(request, await stepupRequest<StepupRequest>(`/stepup-requests/${encodeURIComponent(request.id)}/decline`, decision(request), signal)) } catch (cause) { return settledOr(request, cause, signal) }
 }
 
 const clock = (value?: string) => { const at = value ? Date.parse(value) : NaN; return Number.isFinite(at) ? new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(at) : 'an unknown time' }

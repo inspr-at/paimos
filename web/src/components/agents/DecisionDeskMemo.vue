@@ -13,7 +13,8 @@ import { StepupNavigation, stepupRows } from '../../lib/stepup'
 
 const props = defineProps<{
   items: DeskItem[]; round: string[]; start: string; arrivalsCount: number; allowed: (item: DeskItem) => boolean
-  decide: (item: DeskItem, draft: DeskDraft, requestId: string) => Promise<DeskItem>
+  // The signal aborts when the memo closes; late step-up responses start nothing.
+  decide: (item: DeskItem, draft: DeskDraft, requestId: string, signal?: AbortSignal) => Promise<DeskItem>
   stepupMethod?: string
 }>()
 const emit = defineEmits<{ close: []; recorded: [item: DeskItem] }>()
@@ -33,7 +34,7 @@ const outcomes: DeskOutcome[] = ['once', 'always', 'requirement', 'doctrine']
 const outcomeKeys = ['O', 'A', 'R', 'D']
 const expired = ref(false)
 let contextGeneration = 0, live = true, expiryTimer: ReturnType<typeof setTimeout> | undefined, opener: HTMLElement | null = null
-let sizeObserver: ResizeObserver | undefined
+let sizeObserver: ResizeObserver | undefined, decision: AbortController | undefined
 watch(frame, element => {
   sizeObserver?.disconnect()
   if (!element) return
@@ -129,7 +130,8 @@ async function submit(trimAction?: 'approve' | 'decline' | 'restore') {
   status.value = current.kind === 'stepup' && payload.optionId === 'approve' ? (props.stepupMethod === 'Sign in again' ? 'Opening the fresh sign-in…' : 'Waiting for your passkey…') : 'Recording the decision…'
   let navigating = false
   try {
-    const result = await props.decide({ ...current }, payload, requestId)
+    decision = new AbortController()
+    const result = await props.decide({ ...current }, payload, requestId, decision.signal)
     if (!live) return
     if (item.value?.id !== capturedId || item.value.revision !== capturedRevision || index.value !== capturedIndex || (item.value.unavailable && !(trimAction === 'decline' && item.value.unavailable === current.keyTrim?.blocked_reason)) || !props.allowed(item.value)) {
       status.value = 'The source changed while recording. Reopen it to confirm the result.'
@@ -188,7 +190,7 @@ watch(dialog, element => {
   opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
   element.showModal(); void nextTick(() => memo.value?.focus({ preventScroll: true }))
 })
-onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTimer); sizeObserver?.disconnect(); dialog.value?.close(); if (opener?.isConnected) opener.focus({ preventScroll: true }) })
+onBeforeUnmount(() => { live = false; decision?.abort(); contextGeneration++; clearTimeout(expiryTimer); sizeObserver?.disconnect(); dialog.value?.close(); if (opener?.isConnected) opener.focus({ preventScroll: true }) })
 </script>
 
 <template>

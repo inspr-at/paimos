@@ -320,7 +320,7 @@ export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: Desk
     const source = sources.stepups.get(item.id)
     if (!source || !item.stepup || source.request_digest !== item.stepup.request_digest || source.revision !== item.revision || source.state !== 'pending' || item.decided) throw new Error('The step-up request changed. Reopen the memo.')
     if (draft.optionId !== 'approve' && draft.optionId !== 'decline') throw new Error('Choose Approve or Decline.')
-    const updated = draft.optionId === 'approve' ? await approveStepup(source, adapters.stepup) : await declineStepup(source)
+    const updated = draft.optionId === 'approve' ? await approveStepup(source, adapters.stepup) : await declineStepup(source, adapters.stepup?.signal)
     sources.stepups.set(item.id, updated)
     return stepupItem(updated, item.projectName)
   }

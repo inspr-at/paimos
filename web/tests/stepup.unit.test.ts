@@ -85,3 +85,52 @@ it('shows the feature change as Before → After and reads both states bounded',
   expect(read.items.filter(item => item.kind === 'stepup').map(item => [item.title, item.decided, item.answer])).toEqual([['Turn on workspace-summary for the workspace?', false, undefined], ['Turn on workspace-summary for the workspace?', true, 'Expired without a decision']])
   expect(read.warnings).toContain('More step-up approvals are waiting; the first 100 are shown.')
 })
+it('a late response after the memo closed starts no sign-in, passkey prompt or approval', async () => {
+  // Barrier: /options answers only after the memo has aborted the flow.
+  for (const options of [{ method: 'oidc_reauth', authorize_url: 'https://login.example.test/authorize' }, { method: 'passkey', challenge_id: 'challenge-1', publicKey: { challenge: 'AQID' } }]) {
+    let release!: () => void, asked!: () => void
+    const released = new Promise<void>(resolve => { release = resolve }), optionsAsked = new Promise<void>(resolve => { asked = resolve })
+    const paths: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => { paths.push(path); asked(); await released; return Response.json(options) }))
+    const navigate = vi.fn(), get = vi.fn(async () => credential), closed = new AbortController()
+    const { item, sources } = sourced(stepupFixture())
+    const flow = commitDesk(item, { ...draftFor(item), optionId: 'approve' }, sources, 'unused', false, { stepup: { navigate, credentials: { get } as never, signal: closed.signal } })
+    await optionsAsked; closed.abort(); release()
+    await expect(flow).rejects.toMatchObject({ name: 'AbortError' })
+    expect(navigate).not.toHaveBeenCalled(); expect(get).not.toHaveBeenCalled()
+    expect(paths).toEqual(['/api/stepup-requests/step-1/options'])
+    expect(sources.stepups.get(item.id)?.state).toBe('pending')
+  }
+  // Closing during the passkey prompt cancels it and never posts the assertion.
+  const paths: string[] = [], closed = new AbortController()
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => { paths.push(path); return Response.json({ method: 'passkey', challenge_id: 'challenge-1', publicKey: { challenge: 'AQID' } }) }))
+  const get = vi.fn(async ({ signal }: CredentialRequestOptions) => { closed.abort(); expect(signal?.aborted).toBe(true); return credential })
+  const { item, sources } = sourced(stepupFixture())
+  await expect(commitDesk(item, { ...draftFor(item), optionId: 'approve' }, sources, 'unused', false, { stepup: { credentials: { get } as never, signal: closed.signal } })).rejects.toMatchObject({ name: 'AbortError' })
+  expect(paths).toEqual(['/api/stepup-requests/step-1/options'])
+})
+it('a request settled elsewhere before /options shows the winning outcome and decider', async () => {
+  const request = stepupFixture(), anna = { ...request, state: 'applied' as const, revision: 2, decided_by: 'person-2', decided_by_name: 'Anna', decision: 'approve' as const, method: 'passkey' as const, applied_at: '2026-10-09T15:02:00Z' }
+  let current: StepupRequest = anna
+  const paths: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    paths.push(`${init?.method ?? 'GET'} ${path}`)
+    return init?.method === 'POST' ? Response.json({ error: 'request ended' }, { status: 409 }) : Response.json(current)
+  }))
+  for (const optionId of ['approve', 'decline']) {
+    paths.length = 0
+    const { item, sources } = sourced(request)
+    const result = await commitDesk(item, { ...draftFor(item), optionId }, sources, 'unused', false, { stepup: { navigate: () => { throw new Error('no navigation') } } })
+    expect(paths).toEqual([`POST /api/stepup-requests/step-1/${optionId === 'approve' ? 'options' : 'decline'}`, 'GET /api/stepup-requests/step-1'])
+    expect(result).toMatchObject({ decided: true, answer: 'Approved · Anna · passkey' })
+    expect(sources.stepups.get(item.id)?.state).toBe('applied')
+    expect(settledElsewhere(result.stepup!, 'person-1')).toBe('Decided by Anna first: Approved · Anna · passkey. Nothing for you to do.')
+  }
+  // Still pending (a changed revision) or another request: the refusal stands.
+  for (const read of [{ ...request, revision: 2 }, { ...anna, request_digest: 'e'.repeat(64) }]) {
+    current = read
+    const { item, sources } = sourced(request)
+    await expect(commitDesk(item, { ...draftFor(item), optionId: 'decline' }, sources, 'unused', false)).rejects.toThrow('Request ended. Nothing changed.')
+    expect(sources.stepups.get(item.id)?.state).toBe('pending')
+  }
+})

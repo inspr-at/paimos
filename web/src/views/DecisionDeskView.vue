@@ -82,13 +82,13 @@ function begin(id?: string) {
   start.value = id && round.value.includes(id) ? id : round.value[0]!
   opened.value = true
 }
-async function decide(item: DeskItem, draft: DeskDraft, requestId: string) {
+async function decide(item: DeskItem, draft: DeskDraft, requestId: string, signal?: AbortSignal) {
   const identity = owner.value
   const declineBlockedTrim = item.kind === 'key_trim' && draft.optionId === 'decline' && item.keyTrim?.state === 'pending' && item.unavailable === item.keyTrim.blocked_reason
   if (!allowed(item) || (item.unavailable && !declineBlockedTrim)) throw new Error('This action is no longer available to this person.')
   if (item.expiresAt && Date.parse(item.expiresAt) <= Date.now()) throw new Error('This request expired.')
   if (item.kind === 'approval' && phoneVerification.value === undefined) throw new Error(capabilityError.value || 'Approval verification availability is still being checked.')
-  const result = await commitDesk(item, draft, sources, requestId, phoneVerification.value === true, adapters)
+  const result = await commitDesk(item, draft, sources, requestId, phoneVerification.value === true, { ...adapters, stepup: { signal } })
   if (!alive || identity !== owner.value) throw new Error('The signed-in person changed. Reopen the desk.')
   // First decision wins: someone else's outcome is shown, never as recorded by this person.
   const elsewhere = result.stepup && settledElsewhere(result.stepup, session.identity?.principal.id ?? '')

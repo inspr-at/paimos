@@ -31,6 +31,10 @@ cancelled prompt changes nothing. Without one the page leaves for the
 returns to `/decision-desk?needs=s:<id>`, which opens that decided memo. A
 response settled by someone else, by expiry or by withdrawal is shown as
 that outcome ("Decided by Anna first: …"), never as this person's decision.
+When a decision call answers 409 because the request already ended, the desk
+reads the request again and shows that settled outcome and decider instead of
+keeping the pending memo. Closing the memo, or a change of signed-in person,
+aborts the flow: a late answer starts no sign-in, passkey prompt or approval.
 
 The Decided answer names who and how: "Approved · Markus · device passkey",
 "Approved · Markus · fresh sign-in at 11:21", "Declined · Markus",

@@ -874,6 +874,8 @@
     ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 390 light"
     ,
+    "browser:tests/stepup-desk.spec.ts:Approve on a request someone else settled first shows their outcome, not the pending memo"
+    ,
     "browser:tests/stepup-desk.spec.ts:Decline needs no step-up; the Decided view names who and how, and a first decision elsewhere stays theirs"
     ,
     "browser:tests/stepup-desk.spec.ts:an approval memo is pixel-identical with and without step-up requests at 1440 dark"
@@ -881,6 +883,8 @@
     "browser:tests/stepup-desk.spec.ts:an approval memo is pixel-identical with and without step-up requests at 1440 light"
     ,
     "browser:tests/stepup-desk.spec.ts:an approval memo is pixel-identical with and without step-up requests at 390 light"
+    ,
+    "browser:tests/stepup-desk.spec.ts:closing the memo while Approve waits cancels the step-up, so a late answer starts no sign-in"
     ,
     "browser:tests/stepup-desk.spec.ts:step-up Approve uses the passkey with the desk controls still at 1440"
     ,
@@ -11614,6 +11618,8 @@
     ,
     {"kind":"browser","file":"tests/status-help.spec.ts","name":"human-check filter is linked and removes tickets that do not need a check","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"Approve on a request someone else settled first shows their outcome, not the pending memo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"Decline needs no step-up; the Decided view names who and how, and a first decision elsewhere stays theirs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"an approval memo is pixel-identical with and without step-up requests at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -11621,6 +11627,8 @@
     {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"an approval memo is pixel-identical with and without step-up requests at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"an approval memo is pixel-identical with and without step-up requests at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"closing the memo while Approve waits cancels the step-up, so a late answer starts no sign-in","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/stepup-desk.spec.ts","name":"step-up Approve uses the passkey with the desk controls still at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -16785,6 +16793,10 @@
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > reuses a ready order without resetting its status or budgets","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/stepup-readiness.unit.test.ts","name":"Touch ID pairing readiness > requires a server pin and keeps unknown distinct from missing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"a late response after the memo closed starts no sign-in, passkey prompt or approval","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"a request settled elsewhere before /options shows the winning outcome and decider","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/stepup.unit.test.ts","name":"approves with a bound passkey assertion and names the method in the Decided answer","tier":"GATED-FULL"}
     ,

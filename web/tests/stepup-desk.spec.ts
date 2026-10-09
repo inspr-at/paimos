@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { expect, test, type Page, type Route, type TestInfo } from '@playwright/test'
 import { mockDecisionDesk } from './decision-desk-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { me } from './work-fixtures'
@@ -16,7 +16,9 @@ const anna = { decided_by: 'person-anna', decided_by_name: 'Anna', decision: 'ap
 async function mockStepups(page: Page, options: { passkeys?: boolean; theme?: 'light' | 'dark'; rows?: StepupRequest[] } = {}) {
   const desk = await mockDecisionDesk(page, { theme: options.theme })
   const control = { rows: options.rows ?? [request('step-1'), request('step-2', { state: 'applied', revision: 2, ...anna })], calls: [] as { path: string; body: Record<string, unknown> }[],
-    passkeys: options.passkeys ?? true, settle: undefined as undefined | ((row: StepupRequest, path: string) => void), desk }
+    passkeys: options.passkeys ?? true, settle: undefined as undefined | ((row: StepupRequest, path: string) => void), desk,
+    // hold delays the next decision call; ended settles the row elsewhere first and answers 409.
+    hold: undefined as undefined | Promise<void>, ended: undefined as undefined | ((row: StepupRequest) => void), handled: [] as Promise<void>[] }
   await page.addInitScript(() => {
     const bytes = (n: number) => new Uint8Array([n]).buffer
     const credential = { id: 'cred', rawId: bytes(1), type: 'public-key', authenticatorAttachment: 'platform', getClientExtensionResults: () => ({}),
@@ -26,10 +28,17 @@ async function mockStepups(page: Page, options: { passkeys?: boolean; theme?: 'l
   await page.route('**/api/me/phone-approvals', route => route.fulfill({ json: { available: true, push_available: false, passkeys: control.passkeys ? [{ id: 'passkey-1', created: '2026-10-01T08:00:00Z' }] : [], subscriptions: [] } }))
   await page.route('**/api/stepup-requests**', async route => {
     const call = route.request(), url = new URL(call.url()), path = url.pathname
+    const one = control.rows.find(row => path === `/api/stepup-requests/${row.id}`)
+    if (call.method() === 'GET' && one) return route.fulfill({ json: one })
     if (call.method() === 'GET') return route.fulfill({ json: { items: control.rows.filter(row => (row.state === 'pending') === (url.searchParams.get('state') === 'pending')), has_more: false } })
     const body = call.postDataJSON(); control.calls.push({ path, body })
     const row = control.rows.find(row => row.id === path.split('/')[3])!
     expect(body).toMatchObject({ request_digest: row.request_digest, revision: row.revision })
+    if (control.hold) { const hold = control.hold; control.hold = undefined; control.handled.push(hold.then(() => answer(route, path, url, row)).catch(() => undefined)); return }
+    if (control.ended) { control.ended(row); return route.fulfill({ status: 409, json: { error: 'request ended' } }) }
+    return answer(route, path, url, row)
+  })
+  async function answer(route: Route, path: string, url: URL, row: StepupRequest) {
     if (path.endsWith('/options')) {
       if (control.passkeys) return route.fulfill({ json: { method: 'passkey', challenge_id: 'challenge-1', publicKey: { challenge: 'AQID', rpId: '127.0.0.1', userVerification: 'required' } } })
       // The provider round trip ends at the callback, which applies and redirects back.
@@ -40,7 +49,7 @@ async function mockStepups(page: Page, options: { passkeys?: boolean; theme?: 'l
     else Object.assign(row, { state: path.endsWith('/approve') ? 'applied' : 'declined', revision: row.revision + 1, decided_by: me.id, decided_by_name: me.name, decision: path.endsWith('/approve') ? 'approve' : 'decline',
       ...(path.endsWith('/approve') && { method: 'passkey_platform', applied_at: new Date().toISOString() }) })
     return route.fulfill({ json: row })
-  })
+  }
   return control
 }
 // The desk page behind the glass memo carries list counts; only the memo is compared.
@@ -98,6 +107,39 @@ test('without a passkey Approve leaves for a fresh sign-in and the return opens 
   await page.waitForURL(/needs=s:step-1/)
   await expect(page.getByTestId('stepup-answer')).toHaveText(/Approved · Markus Barta · fresh sign-in at /)
   await expect(page.getByRole('button', { name: /^Decided / })).toHaveAttribute('aria-pressed', 'true')
+  expect(control.calls.map(call => call.path)).toEqual(['/api/stepup-requests/step-1/options'])
+})
+test('closing the memo while Approve waits cancels the step-up, so a late answer starts no sign-in', async ({ page }) => {
+  const control = await mockStepups(page, { passkeys: false })
+  let release!: () => void
+  control.hold = new Promise(resolve => { release = resolve })
+  // The fetch's own timeout aborts too; only the memo's close carries AbortError.
+  await page.addInitScript(() => {
+    const native = window.fetch.bind(window)
+    window.fetch = (input, init) => {
+      if (String(input).endsWith('/options')) init?.signal?.addEventListener('abort', () => { (window as unknown as { optionsAbort: string }).optionsAbort = (init.signal!.reason as DOMException).name }, { once: true })
+      return native(input, init)
+    }
+  })
+  await page.goto('/decision-desk'); await page.getByTestId('desk-row-s:step-1').click()
+  const asked = page.waitForRequest(request => request.url().endsWith('/api/stepup-requests/step-1/options'))
+  await page.getByTestId('desk-decide').click(); await asked
+  await page.getByTestId('desk-close').click()
+  await expect.poll(() => page.evaluate(() => (window as unknown as { optionsAbort?: string }).optionsAbort)).toBe('AbortError')
+  // The held answer arrives late; the page must stay on the desk.
+  release(); await Promise.all(control.handled)
+  await expect(page.getByTestId('desk-frame')).toHaveCount(0)
+  expect(new URL(page.url()).search).toBe('')
+  expect(control.calls.map(call => call.path)).toEqual(['/api/stepup-requests/step-1/options'])
+})
+test('Approve on a request someone else settled first shows their outcome, not the pending memo', async ({ page }) => {
+  const control = await mockStepups(page)
+  await page.goto('/decision-desk'); await page.getByTestId('desk-row-s:step-1').click()
+  control.ended = row => Object.assign(row, { state: 'applied', revision: row.revision + 1, ...anna, method: 'passkey' })
+  await page.getByTestId('desk-decide').click()
+  await expect(page.getByTestId('desk-status')).toHaveText('Decided by Anna first: Approved · Anna · passkey. Nothing for you to do.')
+  await expect(page.getByTestId('stepup-answer')).toHaveText('Approved · Anna · passkey')
+  await expect(page.getByTestId('desk-decide')).toHaveText(/Next/)
   expect(control.calls.map(call => call.path)).toEqual(['/api/stepup-requests/step-1/options'])
 })
 for (const theme of ['light', 'dark'] as const) {
