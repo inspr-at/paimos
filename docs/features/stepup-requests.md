@@ -11,7 +11,34 @@ Pending requests hold work and sort with held approvals by expiry. The
 request API supplies before/after snapshots and method-bearing decided history.
 Desk visibility checks only registered target permissions, retaining workspace
 and project coverage within the existing 1000-project limit.
-The desk and phone UI extensions are separate delivery packages.
+The phone UI extension is a separate delivery package.
+
+## On the Decision Desk (AEON-1048)
+
+A step-up request is the desk kind "Step-up approval", in the same memo,
+queue, keys and Decided view as approvals and key trims. The memo adds two
+things only: a Before → After block in the answer column (for a feature
+override: feature, scope and setting, with the changed setting tinted), and an
+Approve in the Decide slot (Enter) that names its method, "Passkey" when the
+person has a registered passkey, otherwise "Sign in again". The server makes
+the actual choice. Decline sits in the Decline slot and needs no step-up. The
+stamp is always Once.
+
+Approve sends the request digest and revision to `.../options`. With a
+passkey the browser prompt runs and the assertion goes to `.../approve`; a
+cancelled prompt changes nothing. Without one the page leaves for the
+`authorize_url` (https only, or http on an http origin) and the OIDC callback
+returns to `/decision-desk?needs=s:<id>`, which opens that decided memo. A
+response settled by someone else, by expiry or by withdrawal is shown as
+that outcome ("Decided by Anna first: …"), never as this person's decision.
+
+The Decided answer names who and how: "Approved · Markus · device passkey",
+"Approved · Markus · fresh sign-in at 11:21", "Declined · Markus",
+"Withdrawn by the agent", "Expired without a decision", "Not applied ·
+changed meanwhile". The desk reads at most 100 pending and 100 decided
+requests and says so when more exist. The existing approval memo is
+pixel-identical before and after this change (Playwright capture, 390 light,
+1440 light and dark).
 
 The first typed mutation is a shipped feature override, requiring
 `settings.manage`. Its payload is `{ "kind": "feature", "key":
