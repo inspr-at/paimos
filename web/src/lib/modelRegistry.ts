@@ -324,13 +324,18 @@ export function acceptedModelCount(models: string[] | undefined): number {
   return seen.size
 }
 
-/** The line read with a usage revision, or null when that answer did not bring its own profiles. */
-export function lineFromUsage(current: RegistryProfile[], harness: string, model: string, usage: LineUsage): RegistryLine | null {
+/** One read of a line: the revision and the profiles it was read with, fixed together so a later read can never pair its revision with these fields. */
+export interface LineSnapshot { readonly revision: string; readonly line: Readonly<RegistryLine> }
+
+/** The line and revision read together by one usage answer, or null when that answer did not bring its own profiles. */
+export function snapshotFromUsage(current: RegistryProfile[], harness: string, model: string, usage: LineUsage): LineSnapshot | null {
   if (!Array.isArray(usage.line_profiles) || !usage.revision) return null
   const fresh = usage.line_profiles.filter(profile => profile && profile.harness === harness && profile.model === model && !profile.retired)
   if (!fresh.length) return null
   const kept = current.filter(profile => profile.retired || profile.harness !== harness || profile.model !== model)
-  return buildLines(kept.concat(fresh)).find(line => line.harness === harness && line.model === model) ?? null
+  const line = buildLines(kept.concat(fresh)).find(candidate => candidate.harness === harness && candidate.model === model)
+  if (!line) return null
+  return Object.freeze({ revision: usage.revision, line: Object.freeze({ ...line, efforts: Object.freeze([...line.efforts]) as string[], profileIds: Object.freeze([...line.profileIds]) as string[] }) })
 }
 
 export function draftsMatch(a: LineDraft, b: LineDraft): boolean {

@@ -15298,6 +15298,12 @@
     ,
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > uses server review evidence, including newly qualified harnesses and per-model residency","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a save that waited for a read and lost its editor writes nothing and does not call it a conflict","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"an answer from a closed editor never reaches the reopened one: Undo restores the values that editor was read with","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"an earlier answer that arrives first does not stand in for the reopened editor's own read","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"answers that are not what the page expects > is an error, not a crash, when the list or the refresh status has the wrong shape","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"copy > does not call a profile addition accepted, and counts one accepted model once however many efforts it has","tier":"GATED-FULL"}

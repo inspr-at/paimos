@@ -10,9 +10,9 @@ import { toast } from '../../../lib/toast'
 import { listWorkKinds } from '../../../lib/workKinds'
 import { useSession } from '../../../stores/session'
 import {
-  RegistryError, REMOVED_REASON, UNDONE_REASON, addLine, buildLines, changeOf, checkNow, checkReport, cooldownLabel, draftOf, draftsMatch, editLine, emptyDraft, getRefreshStatus, hasErrors, intervalLabel, lastChecked, lineFromUsage, lineWriteOf,
-  listProfiles, metaParts, modelSlug, previewRemoval, putRefreshSettings, removalText, removeLine, restoreLine, shortDate, splitLevels, validateDraft,
-  type DraftErrors, type LineDraft, type LinePick, type LineUsage, type RefreshStatus, type RegistryLine, type RegistryProfile, type WriteScope,
+  RegistryError, REMOVED_REASON, UNDONE_REASON, addLine, buildLines, changeOf, checkNow, checkReport, cooldownLabel, draftOf, draftsMatch, editLine, emptyDraft, getRefreshStatus, hasErrors, intervalLabel, lastChecked, lineWriteOf,
+  listProfiles, metaParts, modelSlug, previewRemoval, putRefreshSettings, removalText, removeLine, restoreLine, shortDate, snapshotFromUsage, splitLevels, validateDraft,
+  type DraftErrors, type LineDraft, type LinePick, type LineSnapshot, type LineUsage, type RefreshStatus, type RegistryLine, type RegistryProfile, type WriteScope,
 } from '../../../lib/modelRegistry'
 
 // Settings › Models › Model registry (AEON-1012). Admins edit, everyone else reads.
@@ -40,8 +40,9 @@ const now = ref(Date.now()), cooldownUntil = ref(0), checking = ref(false)
 const editing = ref<'new' | string | null>(null)   // 'new' or a line key
 const draft = ref<LineDraft>(emptyDraft()), errors = ref<DraftErrors>({}), saving = ref(false), formError = ref('')
 const question = ref<RemoveQuestion | null>(null)
-let revisionWait: Promise<string> | null = null
-let baseline: RegistryLine | null = null
+// What the editor was opened on: one usage read, whose revision and line fields stay together. editorTurn moves on with every open, close and switch of the editor, so a read or save of an earlier editor can never touch the current one.
+let revisionWait: Promise<LineSnapshot> | null = null
+let editorTurn = 0
 type EditorHandle = { focusName(): void; focusFor(found: DraftErrors): void }
 let editor: EditorHandle | null = null, opener: HTMLElement | null = null, ticker: ReturnType<typeof setInterval> | undefined, questionTurn = 0
 const bindEditor = (el: unknown) => { editor = el as EditorHandle | null }
@@ -116,26 +117,26 @@ function openEditor(key: 'new' | string, trigger: HTMLElement | null) {
   if (editing.value === key) { closeEditor(true); return }
   const line = key === 'new' ? null : lineOf(key)
   if (key !== 'new' && !line) return
-  closeQuestion(); opener = trigger; editing.value = key; baseline = line; draft.value = line ? draftOf(line) : emptyDraft(); errors.value = {}; formError.value = ''; revisionWait = null
+  closeQuestion(); opener = trigger; editing.value = key; editorTurn++; draft.value = line ? draftOf(line) : emptyDraft(); errors.value = {}; formError.value = ''; revisionWait = null
   if (line) captureRevision(line)
   void nextTick(() => editor?.focusName())
 }
 function closeEditor(restoreFocus: boolean) {
   const back = opener
-  editing.value = null; errors.value = {}; formError.value = ''; closeQuestion(); opener = null; revisionWait = null; baseline = null
+  editing.value = null; editorTurn++; errors.value = {}; formError.value = ''; closeQuestion(); opener = null; revisionWait = null
   if (restoreFocus && back) void nextTick(() => { if (back.isConnected) back.focus() })
 }
-// Fields and revision come from the usage read, not from the list already on screen.
+// Fields and revision come from the usage read, not from the list already on screen. The read answers only the editor that asked for it.
 function captureRevision(line: RegistryLine) {
-  const key = line.key
+  const key = line.key, turn = editorTurn
   const opened = draftOf(line)
   let settled = false
-  const pending = new Promise<string>((resolve, reject) => {
-    const finish = (error?: unknown, value?: string) => {
+  const pending = new Promise<LineSnapshot>((resolve, reject) => {
+    const finish = (error?: unknown, value?: LineSnapshot) => {
       if (settled) return
       settled = true
-      if (error) reject(error)
-      else resolve(value ?? '')
+      if (error || !value) reject(error ?? new RegistryError(502, 'The registry revision is not available.'))
+      else resolve(value)
     }
     void scope.run(({ after, signal }) => {
       if (signal.aborted) { finish(new Error('The person or workspace changed.')); return Promise.resolve(undefined) }
@@ -143,15 +144,15 @@ function captureRevision(line: RegistryLine) {
       signal.addEventListener('abort', abort, { once: true })
       return after(previewRemoval(line.harness, line.model, signal), usage => {
         signal.removeEventListener('abort', abort)
-        if (editing.value !== key) { finish(new Error('The editor moved on.')); return }
-        const fresh = lineFromUsage(profiles.value, line.harness, line.model, usage)
-        if (!fresh || !usage.revision) { finish(new RegistryError(502, 'The registry revision is not available.')); return }
-        const next = draftOf(fresh)
+        // Closed, switched or reopened since: this answer belongs to an editor that is gone, even when the same line is open again.
+        if (turn !== editorTurn || editing.value !== key) { finish(new Error('The editor moved on.')); return }
+        const snapshot = snapshotFromUsage(profiles.value, line.harness, line.model, usage)
+        if (!snapshot) { finish(new RegistryError(502, 'The registry revision is not available.')); return }
+        const next = draftOf(snapshot.line)
         // Edits typed on the stale list must not be saved at the newer revision.
         if (!draftsMatch(draft.value, opened) && !draftsMatch(opened, next)) { finish(new RegistryError(409, 'stale registry revision')); return }
         if (draftsMatch(draft.value, opened)) draft.value = next
-        baseline = fresh
-        finish(undefined, usage.revision)
+        finish(undefined, snapshot)
       })
     }, { failed: error => finish(error) })
   })
@@ -164,6 +165,8 @@ function writeScope(signal: AbortSignal): WriteScope {
 }
 // An answer belongs to the entry it was asked for: if the person has moved to another form since, that form is left alone.
 const stillOn = (key: string | null) => editing.value === key
+// An edit also belongs to the editor session that started it, so a form reopened on the same line is left alone too.
+const stillIn = (key: string, turn: number) => editing.value === key && editorTurn === turn
 const clearError = (field: keyof DraftErrors) => { if (errors.value[field]) errors.value = { ...errors.value, [field]: undefined } }
 function failure(error: unknown) {
   if (error instanceof RegistryError && error.status === 403) return 'You can’t change models. Ask a workspace admin.'
@@ -184,12 +187,11 @@ function save() {
   const opened = editedLine.value
   saving.value = true; formError.value = ''
   if (opened) {
-    const key = opened.key
+    const key = opened.key, turn = editorTurn
     const pending = revisionWait
-    void scope.run(({ after, signal }) => after(pending ?? Promise.reject(new RegistryError(502, 'The registry revision is not available.')), revision => {
-      if (!revision) throw new RegistryError(502, 'The registry revision is not available.')
-      const line = baseline
-      if (!line || line.key !== key || editing.value !== key) throw new RegistryError(409, 'stale registry revision')
+    void scope.run(({ after, signal }) => after(pending ?? Promise.reject(new RegistryError(502, 'The registry revision is not available.')), ({ line, revision }) => {
+      // Cancelled, or the editor was reopened, while this save waited: nothing is written for a form that is gone.
+      if (!stillIn(key, turn)) return
       // The snapshot may have replaced the cached draft while this save was waiting.
       const nowDraft: LineDraft = { ...draft.value, efforts: splitLevels(draft.value.level, draft.value.efforts), level: '' }
       const write = lineWriteOf(nowDraft, line)
@@ -197,7 +199,7 @@ function save() {
       const back = lineWriteOf(draftOf(line), line)
       const body = { ...write, revision }
       return after(editLine(line.harness, line.model, body, signal), saved => after(reload(), () => {
-        if (stillOn(key)) closeEditor(true)
+        if (stillIn(key, turn)) closeEditor(true)
         // Undo writes the earlier values back as another version, at the revision this edit produced.
         if (!saved.revision) { toast('Saved. Undo is unavailable because the registry did not confirm its revision.', { tone: 'error' }); return }
         const undoRevision = saved.revision
@@ -207,11 +209,11 @@ function save() {
       failed: error => {
         if (error instanceof RegistryError && error.status === 409) {
           toast('This model changed somewhere else. The list was reloaded; review it before saving again.', { tone: 'error' })
-          if (stillOn(key)) closeEditor(false)
+          if (stillIn(key, turn)) closeEditor(false)
           void reload()
           return
         }
-        if (stillOn(key)) formError.value = failure(error)
+        if (stillIn(key, turn)) formError.value = failure(error)
       },
       settled: () => { saving.value = false },
     })
@@ -221,10 +223,10 @@ function save() {
     if (added.failed) {
       // The first level exists; the person finishes the rest from its own Edit.
       if (!stillOn('new')) { toast(`${written.name.trim()} was added with its first level only. Open its Edit to add the rest.`, { tone: 'error' }); return }
-      editing.value = `${written.harness}\u0000${modelSlug(written)}`
+      editing.value = `${written.harness}\u0000${modelSlug(written)}`; editorTurn++
       // The form is now an edit of the line that exists. Save must send the revision captured with that line.
       const created = lineOf(editing.value)
-      if (created) { baseline = created; captureRevision(created) }
+      if (created) captureRevision(created)
       formError.value = `Added with its first level only. The rest could not be saved: ${added.failed}. Save again to add the rest.`
       return
     }
