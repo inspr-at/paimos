@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -160,5 +162,84 @@ func TestLeadHandoffCLIAndQueueDispatchPrivacy(t *testing.T) {
 		if code != 2 {
 			t.Fatalf("invalid handoff args: %v", args)
 		}
+	}
+}
+
+func TestHarnessLeadClaimUsesExistingFilesAndRedactsProof(t *testing.T) {
+	const project = "11111111-1111-1111-1111-111111111111"
+	const ref = "codex:existing-context-fixture-000000"
+	const lease = "fixture-adoptlead-private-lease-000000"
+	for _, mode := range []string{"success", "server_error", "echo_success", "no_person_confirmation"} {
+		t.Run(mode, func(t *testing.T) {
+			isolate(t)
+			dir := t.TempDir()
+			refFile := filepath.Join(dir, "session")
+			leaseFile := filepath.Join(dir, "lease")
+			if err := os.WriteFile(refFile, []byte(ref), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(leaseFile, []byte(lease), 0600); err != nil {
+				t.Fatal(err)
+			}
+			claims := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/nodes/" + project:
+					_, _ = w.Write([]byte(`{"id":"` + project + `","key":"LEAD"}`))
+				case "/api/nodes":
+					_, _ = w.Write([]byte(`{"items":[{"id":"` + project + `","key":"` + project + `","kind_id":"p"}]}`))
+				case "/api/kinds":
+					_, _ = w.Write([]byte(`{"items":[{"id":"p","slug":"project"}]}`))
+				case "/api/projects/" + project + "/lead":
+					if r.Method != "GET" || r.Header.Get("X-Aeon-Worker-Lease") != "" {
+						t.Error("state read leaked proof or mutated")
+					}
+					revision := 1
+					if mode == "no_person_confirmation" {
+						revision = 0
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"revision": revision, "reason": "adoption_pending"})
+				case "/api/projects/" + project + "/lead/claim":
+					claims++
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+					}
+					if r.Method != "POST" || r.Header.Get("X-Aeon-Worker-Lease") != lease || body["harness_session_ref"] != ref || body["expected_revision"] != float64(1) || len(body) != 2 {
+						t.Error("wrong claim proof or revision")
+					}
+					if mode == "server_error" {
+						w.WriteHeader(403)
+						_ = json.NewEncoder(w).Encode(map[string]string{"error": "rejected " + lease + " " + ref})
+						return
+					}
+					reason := ""
+					if mode == "echo_success" {
+						reason = lease + ref
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"project_id": project, "revision": 2, "generation": 1, "state": "working", "reason": reason, "process_active": true})
+				default:
+					t.Errorf("unexpected route %s", r.URL.Path)
+					http.Error(w, "unexpected", 400)
+				}
+			}))
+			defer server.Close()
+			t.Setenv("AEON_URL", server.URL)
+			t.Setenv("AEON_API_KEY", testKey)
+			code, out, stderr := runCLI([]string{"aeon", "--json", "harness", "lead", "claim", "--project", project, "--harness-session-file", refFile, "--worker-lease-file", leaseFile}, "")
+			if mode == "success" && (code != 0 || claims != 1 || !strings.Contains(out, `"state":"working"`)) {
+				t.Fatalf("claim failed %d %s %s", code, out, stderr)
+			}
+			if mode != "success" && code == 0 {
+				t.Fatal("failed or unconfirmed claim reported success")
+			}
+			if mode == "no_person_confirmation" && claims != 0 {
+				t.Fatal("claim bypassed person confirmation")
+			}
+			if strings.Contains(out+stderr, ref) || strings.Contains(out+stderr, lease) {
+				t.Fatal("private proof appeared in output")
+			}
+			assertNoSecret(t, out+stderr)
+		})
 	}
 }
