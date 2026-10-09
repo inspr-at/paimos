@@ -6,11 +6,31 @@
   "tests": {
     "checkpoint_and_existing_telemetry": "passed, 4.786s",
     "pairing_ui_node": "55 passed",
-    "remote_integration": "pending",
-    "ci_static_merge_main": "pending"
+    "remote_integration": "All five affected Go packages passed: agentd, agentsetup, agentpairing, agentruns, reportercontract.",
+    "ci_static_merge_main": "exit 0; 41 checks passed, 0 skipped, 110.19s; origin/main d3c91cd676aaa59f195e53e1876c98f409d92d38; published base v261009095632.0.0",
+    "remote_agentd": "full package passed, 202.782s",
+    "remote_agentsetup": "full package passed, 21.204s",
+    "remote_agentruns": "full package passed, 385.166s",
+    "remote_reportercontract": "full package passed, 4.489s",
+    "remote_pairing_regressions": "Fable failure/recovery/success, empty/active/released/mixed reservation proof and attached contract cases passed, 3.060s",
+    "web_lint": "passed",
+    "remote_agentpairing": "full package passed, 140.507s after fixture/setup corrections"
   },
   "limitations": [
     "No live verification requested; mbp2607 checkpoint preserved.",
     "UI reuses existing presentation and changes only specified text; needs Opus design."
+  ],
+  "validation_transport": "Transferred incremental Git bundles over existing SSH to a new isolated checkout on the approved test host; no git push or shared source-ref updates. Generated api/openapi.yaml there from authored sources. Temporary test databases and runner markers are cleaned after each run.",
+  "test_corrections": [
+    "Initial isolated checkout lacked generated api/openapi.yaml; generated it and reran the affected contract tests.",
+    "Successful Fable telemetry has NULL error_code; normalize it to the absent error in the fixture assertion. No production telemetry behavior was changed."
+  ],
+  "checked_code_commit": "7028cb98869e6c1fd53f0b789dd98b226d904892",
+  "safety": [
+    "Assigned branch and worktree only; selected PPM/workstation-agents/INSPR identity and coordinator worker attribution verified.",
+    "Only an additive optional response field was added to the existing run detail; no routes, scopes, secrets, DB migrations or checkpoint schema changes.",
+    "Original rejected accounting evidence and claim/process provenance remain durable; unreachable, unsettled, mismatched or unconfirmed state stays blocked.",
+    "No live checkpoint reads or writes, helper release/signing, model calls, review gates, push or deployment.",
+    "Remote validation used isolated bundle checkouts, owned temporary databases and the shared static-check lock."
   ]
 }
