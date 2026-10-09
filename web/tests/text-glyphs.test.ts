@@ -28,6 +28,8 @@ const ALLOW: { file: string; includes: string; why: string }[] = [
   { file: 'components/settings/models/KindMenu.vue', includes: 'Settings › Kinds of work', why: 'approved AEON-999 breadcrumb naming where kinds of work are managed; a sentence, not an icon (AEON-1011)' },
   { file: 'components/settings/models/ModelPicker.vue', includes: 'Type to filter · ←→ thinking', why: 'approved AEON-999 placeholder; a field placeholder cannot hold a KeyCap, and the arrows name the keys (AEON-1011)' },
   { file: 'lib/deliveryNumbersText.ts', includes: "const TO = '→'", why: 'approved AEON-994 Delivery copy uses the arrow as the word "to" (run start → run end, PR opened → merged); text, not an icon' },
+  { file: 'lib/deliveryFlowExample.ts', includes: "'Build ×4', 'Build ×4'", why: 'approved AEON-994 run copy: four changes built together, a multiplicity in text, not an icon' },
+  { file: 'lib/deliveryFlowExample.ts', includes: "'Review ×4 · ok', 'Review ×4 · ok'", why: 'approved AEON-994 run copy: four reviews, a multiplicity in text, not an icon' },
   { file: 'lib/workKindsCopy.ts', includes: 'Settings › Models', why: 'approved AEON-854 breadcrumb in the kinds lead; it names the Models board in a sentence and is not an icon' },
 ]
 
