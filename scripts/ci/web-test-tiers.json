@@ -462,11 +462,11 @@
     ,
     "browser:tests/models-registry.spec.ts:screenshots of the card at 1440 and 400 px, light and dark"
     ,
-    "browser:tests/no-shift.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
+    "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
     ,
-    "browser:tests/no-shift.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1440"
+    "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1440"
     ,
-    "browser:tests/no-shift.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 390"
+    "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 390"
     ,
     "browser:tests/phone-approvals.spec.ts:ended requests offer context without a decision button"
     ,
@@ -4702,6 +4702,18 @@
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"settings names 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/aeon-632b-clip-touch.spec.ts","name":"stationary touch explains a restricted shared group 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-632b-clip-touch.spec.ts","name":"stationary touch explains a restricted shared group 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-632b-clip-touch.spec.ts","name":"stationary touch explains a restricted shared group 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-632b-clip-touch.spec.ts","name":"stationary touch explains a restricted shared group 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-632b-clip-touch.spec.ts","name":"stationary touch explains a restricted shared group 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-632b-clip-touch.spec.ts","name":"stationary touch explains a restricted shared group 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"planning names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"planning names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -4713,18 +4725,6 @@
     {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"planning names 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"planning names 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"stationary touch explains a restricted shared group 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"stationary touch explains a restricted shared group 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"stationary touch explains a restricted shared group 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"stationary touch explains a restricted shared group 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"stationary touch explains a restricted shared group 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"stationary touch explains a restricted shared group 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"approved releases keep their controls still at 1024 dark (AEON-635)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6036,6 +6036,180 @@
     ,
     {"kind":"browser","file":"tests/classic-invite.spec.ts","name":"verified imported-account sign-in explains the invite and preserves ambiguous linking","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1024px dark › focus disclosure follows real scrolling; pointer disclosure dismisses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1024px dark › keyboard disclosure survives pointer movement until Escape or blur","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1024px dark › long default disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1024px dark › long end disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1024px light › focus disclosure follows real scrolling; pointer disclosure dismisses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1024px light › keyboard disclosure survives pointer movement until Escape or blur","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1024px light › long default disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1024px light › long end disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1440px dark › focus disclosure follows real scrolling; pointer disclosure dismisses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1440px dark › keyboard disclosure survives pointer movement until Escape or blur","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1440px dark › long default disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1440px dark › long end disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1440px light › focus disclosure follows real scrolling; pointer disclosure dismisses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1440px light › keyboard disclosure survives pointer movement until Escape or blur","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1440px light › long default disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 1440px light › long end disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 390px dark › focus disclosure follows real scrolling; pointer disclosure dismisses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 390px dark › keyboard disclosure survives pointer movement until Escape or blur","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 390px dark › long default disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 390px dark › long end disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 390px light › focus disclosure follows real scrolling; pointer disclosure dismisses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 390px light › keyboard disclosure survives pointer movement until Escape or blur","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 390px light › long default disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-disclosure.spec.ts","name":"tooltip fix: 390px light › long end disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1024px dark › Tab reads picker overflow and Escape returns to the same option before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1024px dark › keyboard reaches the final line and Escape restores the standalone source","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1024px dark › scrollbar scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1024px dark › touch scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1024px light › Tab reads picker overflow and Escape returns to the same option before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1024px light › keyboard reaches the final line and Escape restores the standalone source","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1024px light › scrollbar scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1024px light › touch scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1440px dark › Tab reads picker overflow and Escape returns to the same option before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1440px dark › keyboard reaches the final line and Escape restores the standalone source","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1440px dark › scrollbar scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1440px dark › touch scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1440px light › Tab reads picker overflow and Escape returns to the same option before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1440px light › keyboard reaches the final line and Escape restores the standalone source","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1440px light › scrollbar scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 1440px light › touch scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 390px dark › Tab reads picker overflow and Escape returns to the same option before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 390px dark › keyboard reaches the final line and Escape restores the standalone source","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 390px dark › scrollbar scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 390px dark › touch scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 390px light › Tab reads picker overflow and Escape returns to the same option before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 390px light › keyboard reaches the final line and Escape restores the standalone source","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 390px light › scrollbar scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 390px light › touch scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px dark › long press reads a production epic picker before a tap selects and closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px dark › long press remains until an outside tap; cancellation and changed records cannot reveal stale text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px dark › movement beyond 8 px and scrolling cancel pending long presses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px dark › production table hold discloses without selection and the next tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px dark › real touch scrolling cancels a hold without blocking the page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px dark › tap activates a list row and never reveals its clipped name","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px light › long press reads a production epic picker before a tap selects and closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px light › long press remains until an outside tap; cancellation and changed records cannot reveal stale text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px light › movement beyond 8 px and scrolling cancel pending long presses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px light › production table hold discloses without selection and the next tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px light › real touch scrolling cancels a hold without blocking the page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px light › tap activates a list row and never reveals its clipped name","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1440px dark › long press reads a production epic picker before a tap selects and closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1440px dark › long press remains until an outside tap; cancellation and changed records cannot reveal stale text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1440px dark › movement beyond 8 px and scrolling cancel pending long presses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1440px dark › production table hold discloses without selection and the next tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1440px dark › real touch scrolling cancels a hold without blocking the page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1440px dark › tap activates a list row and never reveals its clipped name","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1440px light › long press reads a production epic picker before a tap selects and closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1440px light › long press remains until an outside tap; cancellation and changed records cannot reveal stale text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1440px light › movement beyond 8 px and scrolling cancel pending long presses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1440px light › production table hold discloses without selection and the next tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1440px light › real touch scrolling cancels a hold without blocking the page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1440px light › tap activates a list row and never reveals its clipped name","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 390px dark › long press reads a production epic picker before a tap selects and closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 390px dark › long press remains until an outside tap; cancellation and changed records cannot reveal stale text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 390px dark › movement beyond 8 px and scrolling cancel pending long presses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 390px dark › production phone selection holds still work and clipped holds preserve an existing selection","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 390px dark › production table hold discloses without selection and the next tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 390px dark › real touch scrolling cancels a hold without blocking the page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 390px dark › tap activates a list row and never reveals its clipped name","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 390px light › long press reads a production epic picker before a tap selects and closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 390px light › long press remains until an outside tap; cancellation and changed records cannot reveal stale text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 390px light › movement beyond 8 px and scrolling cancel pending long presses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 390px light › production phone selection holds still work and clipped holds preserve an existing selection","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 390px light › production table hold discloses without selection and the next tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 390px light › real touch scrolling cancels a hold without blocking the page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 390px light › tap activates a list row and never reveals its clipped name","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch selection reveals the same full graph card after leaving ticket details","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"1024px dark › clipped work and agent names reveal without moving controls; phone pickers reserve two lines","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"1024px dark › lifecycle: delayed single epic discloses while search keeps focus","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -6179,180 +6353,6 @@
     {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"768px light › lifecycle: keyboard disclosure follows unclipped without refocus","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"768px light › ticket titles keep the existing two-line phone layout and reveal full desktop names","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1024px dark › Tab reads picker overflow and Escape returns to the same option before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1024px dark › keyboard reaches the final line and Escape restores the standalone source","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1024px dark › scrollbar scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1024px dark › touch scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1024px light › Tab reads picker overflow and Escape returns to the same option before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1024px light › keyboard reaches the final line and Escape restores the standalone source","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1024px light › scrollbar scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1024px light › touch scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1440px dark › Tab reads picker overflow and Escape returns to the same option before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1440px dark › keyboard reaches the final line and Escape restores the standalone source","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1440px dark › scrollbar scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1440px dark › touch scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1440px light › Tab reads picker overflow and Escape returns to the same option before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1440px light › keyboard reaches the final line and Escape restores the standalone source","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1440px light › scrollbar scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 1440px light › touch scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 390px dark › Tab reads picker overflow and Escape returns to the same option before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 390px dark › keyboard reaches the final line and Escape restores the standalone source","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 390px dark › scrollbar scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 390px dark › touch scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 390px light › Tab reads picker overflow and Escape returns to the same option before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 390px light › keyboard reaches the final line and Escape restores the standalone source","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 390px light › scrollbar scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"overflow fix4: 390px light › touch scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1024px dark › focus disclosure follows real scrolling; pointer disclosure dismisses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1024px dark › keyboard disclosure survives pointer movement until Escape or blur","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1024px dark › long default disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1024px dark › long end disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1024px light › focus disclosure follows real scrolling; pointer disclosure dismisses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1024px light › keyboard disclosure survives pointer movement until Escape or blur","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1024px light › long default disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1024px light › long end disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1440px dark › focus disclosure follows real scrolling; pointer disclosure dismisses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1440px dark › keyboard disclosure survives pointer movement until Escape or blur","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1440px dark › long default disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1440px dark › long end disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1440px light › focus disclosure follows real scrolling; pointer disclosure dismisses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1440px light › keyboard disclosure survives pointer movement until Escape or blur","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1440px light › long default disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 1440px light › long end disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 390px dark › focus disclosure follows real scrolling; pointer disclosure dismisses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 390px dark › keyboard disclosure survives pointer movement until Escape or blur","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 390px dark › long default disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 390px dark › long end disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 390px light › focus disclosure follows real scrolling; pointer disclosure dismisses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 390px light › keyboard disclosure survives pointer movement until Escape or blur","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 390px light › long default disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"tooltip fix: 390px light › long end disclosure is viewport bounded and scrolls inside","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1024px dark › long press reads a production epic picker before a tap selects and closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1024px dark › long press remains until an outside tap; cancellation and changed records cannot reveal stale text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1024px dark › movement beyond 8 px and scrolling cancel pending long presses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1024px dark › production table hold discloses without selection and the next tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1024px dark › real touch scrolling cancels a hold without blocking the page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1024px dark › tap activates a list row and never reveals its clipped name","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1024px light › long press reads a production epic picker before a tap selects and closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1024px light › long press remains until an outside tap; cancellation and changed records cannot reveal stale text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1024px light › movement beyond 8 px and scrolling cancel pending long presses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1024px light › production table hold discloses without selection and the next tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1024px light › real touch scrolling cancels a hold without blocking the page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1024px light › tap activates a list row and never reveals its clipped name","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1440px dark › long press reads a production epic picker before a tap selects and closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1440px dark › long press remains until an outside tap; cancellation and changed records cannot reveal stale text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1440px dark › movement beyond 8 px and scrolling cancel pending long presses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1440px dark › production table hold discloses without selection and the next tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1440px dark › real touch scrolling cancels a hold without blocking the page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1440px dark › tap activates a list row and never reveals its clipped name","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1440px light › long press reads a production epic picker before a tap selects and closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1440px light › long press remains until an outside tap; cancellation and changed records cannot reveal stale text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1440px light › movement beyond 8 px and scrolling cancel pending long presses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1440px light › production table hold discloses without selection and the next tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1440px light › real touch scrolling cancels a hold without blocking the page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 1440px light › tap activates a list row and never reveals its clipped name","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 390px dark › long press reads a production epic picker before a tap selects and closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 390px dark › long press remains until an outside tap; cancellation and changed records cannot reveal stale text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 390px dark › movement beyond 8 px and scrolling cancel pending long presses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 390px dark › production phone selection holds still work and clipped holds preserve an existing selection","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 390px dark › production table hold discloses without selection and the next tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 390px dark › real touch scrolling cancels a hold without blocking the page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 390px dark › tap activates a list row and never reveals its clipped name","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 390px light › long press reads a production epic picker before a tap selects and closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 390px light › long press remains until an outside tap; cancellation and changed records cannot reveal stale text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 390px light › movement beyond 8 px and scrolling cancel pending long presses","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 390px light › production phone selection holds still work and clipped holds preserve an existing selection","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 390px light › production table hold discloses without selection and the next tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 390px light › real touch scrolling cancels a hold without blocking the page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch fix5: 390px light › tap activates a list row and never reveals its clipped name","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch selection reveals the same full graph card after leaving ticket details","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/coarse-hit-area.spec.ts","name":"1024px coarse pointer › shared controls extend to a 44px hit area","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -8238,6 +8238,42 @@
     ,
     {"kind":"browser","file":"tests/knowledge.spec.ts","name":"the palette finds knowledge by its words and leads to the tab and the search","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"keyboard: Tab reaches Start lead and the fold, folded details leave the tab order","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"motion › folding animates the card’s height and nothing else","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"on a phone the fold and Start lead are 44 px targets that do not overlap","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"reduced motion › folding shows no animation at all","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"stability › folding never moves a control at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"stability › folding never moves a control at 400","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card folds to one line with Start lead at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card folds to one line with Start lead at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card folds to one line with Start lead at 400 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card folds to one line with Start lead at 400 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card, open or folded, keeps one card gap above the section bar at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card, open or folded, keeps one card gap above the section bar at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card, open or folded, keeps one card gap above the section bar at 400","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the fold is remembered for this person and project, and a lead clears it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 400 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 400 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8784,103 +8820,101 @@
     ,
     {"kind":"browser","file":"tests/new-agent.spec.ts","name":"selected projects, clipboard rejection and duplicate-name recovery","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Agents header keeps pause actions and Decision Desk navigation at 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Agents header keeps pause actions and Decision Desk navigation at 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Agents header keeps pause actions and Decision Desk navigation at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Agents header keeps pause actions and Decision Desk navigation at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Agents header keeps pause actions and Decision Desk navigation at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Agents header keeps pause actions and Decision Desk navigation at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Agents working dial and selectors stay put at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Agents working dial and selectors stay put at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Agents working dial and selectors stay put at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Agents working dial and selectors stay put at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Agents working dial and selectors stay put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Agents working dial and selectors stay put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Agents working harness modes stay put at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Agents working harness modes stay put at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Agents working harness modes stay put at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Agents working harness modes stay put at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Agents working harness modes stay put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Agents working harness modes stay put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Display grouping keeps sort, density and columns in their slots at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Sessions tree and section folds keep their controls put at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Display grouping keeps sort, density and columns in their slots at 1024 with wider text and scrollbar","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Sessions tree and section folds keep their controls put at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Display grouping keeps sort, density and columns in their slots at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Sessions tree and section folds keep their controls put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Display grouping keeps sort, density and columns in their slots at 1440 with wider text and scrollbar","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Stop now menu and Pause dialog stay put through the session series at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Done validation keeps its action position without padding at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Stop now menu and Pause dialog stay put through the session series at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Done validation keeps its action position without padding at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Stop now menu and Pause dialog stay put through the session series at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Keep for you uses a natural vendor disclosure and stable actions at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"approval choices, typing and failure keep the decision controls put at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Keep for you uses a natural vendor disclosure and stable actions at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"approval choices, typing and failure keep the decision controls put at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Sessions tree and section folds keep their controls put at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"approval choices, typing and failure keep the decision controls put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Sessions tree and section folds keep their controls put at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"managed Interrupt menu and Stop now button stay put at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Sessions tree and section folds keep their controls put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"managed Interrupt menu and Stop now button stay put at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Stop now menu and Pause dialog stay put through the session series at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"managed Interrupt menu and Stop now button stay put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Stop now menu and Pause dialog stay put through the session series at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"phone steer feedback and retry never move the pinned action bar","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Stop now menu and Pause dialog stay put through the session series at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"saving a pacing option keeps keyboard focus on it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"access short task grows below desktop actions and pins phone actions at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"Display grouping keeps sort, density and columns in their slots at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"access short task grows below desktop actions and pins phone actions at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"Display grouping keeps sort, density and columns in their slots at 1024 with wider text and scrollbar","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"approval choices, typing and failure keep the decision controls put at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"Display grouping keeps sort, density and columns in their slots at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"approval choices, typing and failure keep the decision controls put at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"Display grouping keeps sort, density and columns in their slots at 1440 with wider text and scrollbar","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"approval choices, typing and failure keep the decision controls put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"Done validation keeps its action position without padding at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"Done validation keeps its action position without padding at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"Keep for you uses a natural vendor disclosure and stable actions at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"Keep for you uses a natural vendor disclosure and stable actions at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"access short task grows below desktop actions and pins phone actions at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"access short task grows below desktop actions and pins phone actions at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"floating search above its trigger keeps controls while results change","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"floating search below its trigger keeps controls while results change","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"invalid date range feedback never moves Apply at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"invalid date range feedback never moves Apply at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"model estimate picker hints and selection hold every control at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"model estimate picker hints and selection hold every control at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"rules short task grows below desktop actions and pins phone actions at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"rules short task grows below desktop actions and pins phone actions at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"schedule model changes grow downward with actions in place at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"schedule model changes grow downward with actions in place at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"short recovery states keep actions above content at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift-dialogs.spec.ts","name":"short recovery states keep actions above content at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"confirmation content grows away from its controls at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"confirmation content grows away from its controls at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"dial content budget rejects fixed whitespace, clipped controls and overflow","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"floating search above its trigger keeps controls while results change","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"floating search below its trigger keeps controls while results change","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"invalid date range feedback never moves Apply at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"invalid date range feedback never moves Apply at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"managed Interrupt menu and Stop now button stay put at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"managed Interrupt menu and Stop now button stay put at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"managed Interrupt menu and Stop now button stay put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"model estimate picker hints and selection hold every control at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"model estimate picker hints and selection hold every control at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"phone steer feedback and retry never move the pinned action bar","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"rules short task grows below desktop actions and pins phone actions at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"rules short task grows below desktop actions and pins phone actions at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"saving a pacing option keeps keyboard focus for Escape","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"saving a pacing option keeps keyboard focus on it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"schedule model changes grow downward with actions in place at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"schedule model changes grow downward with actions in place at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"short recovery states keep actions above content at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"short recovery states keep actions above content at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"stability guard allows scrolling but detects movement, resizing and overflow","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -15019,6 +15053,24 @@
     {"kind":"vitest","file":"tests/key-trim.unit.test.ts","name":"routes approve, decline and restore through protected native CAS endpoints","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/key-trim.unit.test.ts","name":"shows source evidence without assuming unknown scopes are unused and requires manage rights","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"stored shape > keeps ids only, once each, and at most MAX_FOLDED (the oldest fold goes first)","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > a project that gets a lead forgets its fold, and the card opens the next time it has none","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > another person never sees this person's fold, and gets their own once their preference is read","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > moves only for a person’s own toggle, never for a stored fold, another project or reduced motion","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > shows nothing until the preference is read, and a fold made then cannot overwrite the others","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > signed out: nothing folds, nothing is written and nothing waits to move","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > starts open, folds one project and remembers it for that person and project only","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > the transition end settles only the fold’s own height transition","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > unfolding removes only that project from the stored list","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/ledger.unit.test.ts","name":"a row with no version never replaces one that has it; the other way round it does","tier":"GATED-FULL"}
     ,

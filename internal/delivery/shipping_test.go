@@ -104,10 +104,12 @@ func TestDeliveryShippingHeadBoundActionsAndInfraShards(t *testing.T) {
 
 type shipTestReader struct {
 	*fakeGitHub
-	facts ShipFacts
-	read  func()
-	err   error
-	reads int32
+	facts           ShipFacts
+	read            func()
+	err             error
+	reads           int32
+	preflightReason string
+	preflightErr    error
 }
 
 func (g *shipTestReader) Shipping(context.Context, string, string) (ShipFacts, error) {
@@ -116,6 +118,9 @@ func (g *shipTestReader) Shipping(context.Context, string, string) (ShipFacts, e
 		g.read()
 	}
 	return g.facts, g.err
+}
+func (g *shipTestReader) Preflight(context.Context, string) (string, error) {
+	return g.preflightReason, g.preflightErr
 }
 func shipPath(f *fixture) string { return "/api/projects/" + f.project + "/delivery-shipping" }
 func shipFixture(t *testing.T) (*fixture, Round, *shipTestReader) {
