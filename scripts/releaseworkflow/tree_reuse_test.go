@@ -46,6 +46,7 @@ func reuseStep(t *testing.T, j map[string]any, name string) map[string]any {
 
 const fullQueueFallback = "needs.tree-reuse.outputs.reuse != 'merge_group'"
 const verifiedQueueReuse = "needs.tree-reuse.outputs.reuse == 'merge_group'"
+const mirroredPGVectorImage = "ghcr.io/inspr-at/paimos-ci/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11"
 
 func TestQueuePushReuseRetainsMainStructureAndFallback(t *testing.T) {
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
@@ -73,7 +74,7 @@ func TestQueuePushReuseRetainsMainStructureAndFallback(t *testing.T) {
 			}
 		}
 		for _, service := range treeMap(j["services"]) {
-			if treeMap(service)["image"] != "pgvector/pgvector:pg18" {
+			if treeMap(service)["image"] != mirroredPGVectorImage {
 				t.Fatalf("%s full fallback lost its database", id)
 			}
 		}
@@ -716,6 +717,15 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 					t.Fatal("public-source guard must run after the identity guard and before go vet")
 				}
 				j["steps"] = append(steps[:index], steps[index+1:]...)
+			}
+			if id == "go-test" || id == "go-timing" || id == "e2e-run" {
+				// OPS-287: assert the verified mirror pin, then restore only the
+				// image reference for comparison with the immutable CI fixture.
+				postgres := treeMap(treeMap(j["services"])["postgres"])
+				if postgres["image"] != mirroredPGVectorImage {
+					t.Fatalf("%s must use the verified pgvector mirror digest", id)
+				}
+				postgres["image"] = "pgvector/pgvector:pg18"
 			}
 			if id == "go-test" {
 				// AEON-777 broadens routing through the router's event switch.

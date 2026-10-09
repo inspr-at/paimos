@@ -3,6 +3,9 @@
 # Read-only image pull; every container/network belongs to this disposable run.
 set -euo pipefail
 
+# OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
+pgvector_image="${PGVECTOR_IMAGE:-ghcr.io/inspr-at/paimos-ci/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11}"
+
 for tool in docker python3 go; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
@@ -37,7 +40,7 @@ echo "Previous image: $image_id"
 docker network create "$network" >/dev/null
 docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=aeon \
-  pgvector/pgvector:pg18 >/dev/null
+  "$pgvector_image" >/dev/null
 ready=0
 for _ in {1..60}; do
   if docker exec "$db" pg_isready -h 127.0.0.1 -U postgres -d postgres >/dev/null 2>&1; then ready=1; break; fi
