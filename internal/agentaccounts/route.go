@@ -312,6 +312,9 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 			return err
 		}
 		if wait != nil {
+			if wait.Code == "daily_limit" || wait.Code == "daily_limit_unknown" {
+				return &httpError{status: http.StatusConflict, code: wait.Code, msg: wait.Code}
+			}
 			return fail(http.StatusConflict, "reserved capacity is not eligible: "+wait.Code)
 		}
 		for _, w := range windows {
@@ -507,6 +510,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		return Account{}, nil, nil, err
 	}
 	var picks []ranked
+	dailyReason := ""
 	for _, account := range accounts {
 		slots := slotCount(account, usedSlots, quotaSlots)
 		if !probeFresh(account, now) || slots >= account.MaxParallel {
@@ -538,6 +542,9 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 				return Account{}, nil, nil, err
 			}
 			if wait != nil {
+				if wait.Code == "daily_limit_unknown" || wait.Code == "daily_limit" && dailyReason == "" {
+					dailyReason = wait.Code
+				}
 				continue
 			}
 		}
@@ -570,6 +577,9 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		picks = append(picks, pick)
 	}
 	if len(picks) == 0 {
+		if dailyReason != "" {
+			return Account{}, nil, nil, &httpError{status: http.StatusConflict, code: dailyReason, msg: dailyReason}
+		}
 		return Account{}, nil, nil, fail(http.StatusConflict, "no eligible account")
 	}
 	orderPicks(picks)

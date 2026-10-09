@@ -102,7 +102,7 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	role, _ := roleByName(out.Role)
 	qualified := map[string]*agentaccounts.Account{}
 	for _, step := range steps {
-		reasons := skipReasons(step, role, resolveQuery{Role: out.Role, AuthorFamily: author, Harness: q.Harness}, now, nil)
+		reasons := skipReasons(step, role, resolveQuery{Role: out.Role, AuthorFamily: author, Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, nil)
 		for _, policy := range policies {
 			if allowed, reason := policy.Decision(author, step.Profile.Family); !allowed {
 				reasons = append(reasons, reason)

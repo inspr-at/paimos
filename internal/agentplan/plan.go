@@ -219,7 +219,12 @@ func strictJSON(raw []byte, out any) error {
 // CanStart checks a snapshot, including counts above a newly lowered plan.
 // Callers must serialize competing starts and check account room separately.
 // Every harness contributes to the total, even when that harness is now Off.
-func CanStart(plan Plan, running map[string]int, harness string) (bool, string) {
+func CanStart(plan Plan, running map[string]int, harness string, daily ...DailyDecision) (bool, string) {
+	for _, setting := range plan.Daily {
+		if setting.Validate() != nil {
+			return false, "daily_limit_unknown"
+		}
+	}
 	if err := plan.Validate(); err != nil {
 		return false, "invalid plan"
 	}
@@ -249,6 +254,12 @@ func CanStart(plan Plan, running map[string]int, harness string) (bool, string) 
 				return false, fmt.Sprintf("%s at its limit", label)
 			}
 		}
+	}
+	if len(daily) > 1 || len(daily) == 0 && len(plan.Daily) > 0 {
+		return false, "daily_limit_unknown"
+	}
+	if len(daily) == 1 && daily[0].Reason != "" {
+		return false, daily[0].Reason
 	}
 	return true, ""
 }
