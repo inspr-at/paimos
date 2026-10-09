@@ -56,8 +56,12 @@ func run(args []string, out io.Writer) error {
 		return errors.New("usage: paimos-agentd pair|setup|status|disconnect|add-harness|repin|repair|attach|link-account|verify|serve|control|capacity")
 	}
 	switch args[0] {
+	case "ledger":
+		return ledgerCommand(args[1:], out)
+	case "uninstall":
+		return setupCommand("disconnect", args[1:], out)
 	case "--version", "version":
-		_, err := fmt.Fprintln(out, "paimos-agentd "+version.Version)
+		_, err := fmt.Fprintln(out, "paimos-agentd "+version.Version+" ledger-v1")
 		return err
 	case "pair", "setup", "status", "disconnect", "add-harness", "repin", "repair":
 		return setupCommand(args[0], args[1:], out)

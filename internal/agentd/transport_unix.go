@@ -265,6 +265,44 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(status)
 	})
+	mux.HandleFunc("POST /v1/ledger/import", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 8192)
+		d := json.NewDecoder(r.Body)
+		d.DisallowUnknownFields()
+		var config LedgerConfig
+		if d.Decode(&config) != nil || d.Decode(&struct{}{}) != io.EOF {
+			http.Error(w, "invalid ledger handover", 400)
+			return
+		}
+		if err := s.EnableLedger(r.Context(), config); err != nil {
+			http.Error(w, "ledger handover unconfirmed", 409)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"imported": true})
+	})
+	mux.HandleFunc("POST /v1/ledger/leave", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 2)
+		raw, err := io.ReadAll(r.Body)
+		if err != nil || len(raw) != 0 {
+			http.Error(w, "invalid ledger leave", 400)
+			return
+		}
+		if err := s.LeaveLedger(r.Context()); err != nil {
+			http.Error(w, "ledger leave unconfirmed", 409)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"left": true})
+	})
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r, token) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)

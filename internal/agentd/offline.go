@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/localjournal"
@@ -70,13 +72,100 @@ func OfflineLifecycle(root, daemon, tenant, principal, account string) (Lifecycl
 		if account != "" && r.AccountID != "" && r.AccountID != account {
 			continue
 		}
+		if r.LedgerGroup != "" && !noLocalProcess(r) && confirmedLedgerExit(r) {
+			r.ExitObserved = true
+			if err = j.Put(r); err != nil {
+				return LifecycleStatus{}, err
+			}
+		}
 		if !noLocalProcess(r) {
 			v.State = "unconfirmed"
 			v.UnconfirmedRunIDs = append(v.UnconfirmedRunIDs, r.RunID)
 		}
-		if len(r.Pending) > 0 || r.SettlementGap || r.State == "claim_pending" {
+		if len(r.Pending) > 0 || r.SettlementGap || r.State == "claim_pending" || r.State == "route_pending" {
 			v.SettlementPendingRunIDs = append(v.SettlementPendingRunIDs, r.RunID)
 		}
 	}
 	return v, nil
+}
+
+// OfflineLeaveLedger is the fenced owner's cleanup path after server revocation.
+// It needs no runtime bearer key and cannot enrol or dispatch. Every uncertain
+// intent, settlement and possible process remains a refusal. The caller must
+// already have independently confirmed computer revocation through lifecycle.
+func OfflineLeaveLedger(root, daemon, tenant, principal string) error {
+	status, err := OfflineLifecycle(root, daemon, tenant, principal, "")
+	if err != nil {
+		return err
+	}
+	if status.State != "drained" || len(status.SettlementPendingRunIDs) > 0 {
+		return ErrProcessesUnconfirmed
+	}
+	store, err := agentsetup.OpenStore(root, false)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	lock, err := store.LockNamed("aeon-agentd-" + daemon + ".lock")
+	if err != nil {
+		return ErrProcessesUnconfirmed
+	}
+	defer lock.Close()
+	raw, err := store.Read("ledger-member.json", 8192)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var binding ledgerBinding
+	if json.Unmarshal(raw, &binding) != nil || binding.Member.Root != filepath.Dir(root) || binding.Config.Root != binding.Member.Root {
+		return ErrScope
+	}
+	j, err := localjournal.Open(localjournal.Config[Record]{Directory: root, Prefix: "aeon-agentd-" + daemon, Version: RecordSchemaVersion, Migrations: recordMigrations(), MaxBytes: 4 << 20, MaxRecords: 4096, Key: func(r Record) (string, error) { return r.RunID, nil }, Validate: func(r Record) error {
+		if r.TenantID != tenant || r.PrincipalID != principal || r.Generation == "" || r.RunID == "" {
+			return ErrScope
+		}
+		return validateLaunchRecord(r)
+	}})
+	if err != nil {
+		return err
+	}
+	for _, r := range j.Snapshot() {
+		if !noLocalProcess(r) || r.State == "claim_pending" || r.State == "route_pending" || len(r.Pending) > 0 || r.SettlementGap {
+			return ErrProcessesUnconfirmed
+		}
+	}
+	ledger, err := agentsetup.OpenSharedLedger(binding.Config.Path, false)
+	if err != nil {
+		return err
+	}
+	defer ledger.Close()
+	data, members, err := ledger.Snapshot()
+	if err != nil {
+		return err
+	}
+	// Retrying after a confirmed prior leave is idempotent, but cannot invent or
+	// delete another member. The private durable root binding supplies ownership.
+	found := false
+	for _, member := range members {
+		if member.ID == binding.Member.ID {
+			if member != binding.Member {
+				return ErrScope
+			}
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	origin, err := agentsetup.CanonicalLedgerOrigin(binding.Config.Origin)
+	if err != nil {
+		return err
+	}
+	_, err = ledger.Import(binding.Member.ID, agentsetup.LedgerInstance{Fingerprint: agentsetup.LedgerFingerprint(data.Generation, "instance", origin+"\x00"+tenant), PID: os.Getpid(), StartedAt: time.Now().UTC()}, nil)
+	if err != nil {
+		return err
+	}
+	return ledger.Leave(binding.Member.ID, data.Generation, true)
 }
