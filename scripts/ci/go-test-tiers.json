@@ -1746,6 +1746,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSettledInboxDoesNotExhaustControlSlots","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestSettlementReadTimeoutDoesNotAbortLivePoll","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestSlowManagedControlCannotRestartBudgetAfterLock","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStatuslineOffWithoutExecutable","tier":"GATED-FULL"}

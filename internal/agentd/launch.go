@@ -187,7 +187,10 @@ func (s *Supervisor) reconcileOldSettlement(ctx context.Context, entry *owned) e
 	defer cancel()
 	run, err := s.api.GetRun(readCtx, r.RunID)
 	if err != nil {
-		return errors.Join(errSettlementParked, pollContextError(ctx, err))
+		// The nested read deadline is not the poll deadline. Join only the
+		// parent context so one hung run detail cannot skip other accounts,
+		// queued work, or the unsettled_previous_run diagnostic.
+		return errors.Join(errSettlementParked, ctx.Err())
 	}
 	if run.ID != r.RunID || run.WorkOrderID != r.WorkOrderID || run.AgentPrincipalID != r.PrincipalID ||
 		run.AccountID != r.AccountID || run.Purpose != r.ExecutionMode || run.Status != r.State ||
