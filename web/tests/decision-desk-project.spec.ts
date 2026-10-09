@@ -127,25 +127,28 @@ test('revisiting a question after Decide & next retains its project link, colour
   expect(await opened(page)).toEqual([[AEON.href, '_blank']])
 })
 
-test('the Agents doctrine row resolves its project through the authorized ticket lookup', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1000 })
-  const world = await mockDecisionDesk(page)
-  world.rule.ticket = 'AEON-1'
-  await page.goto('/agents')
-  const panel = page.getByRole('region', { name: 'Decision Desk', exact: true })
-  const row = panel.getByRole('listitem').filter({ hasText: 'Doctrine change' })
-  const link = row.getByTestId('agents-desk-project')
-  await expect(link).toHaveText(AEON.name)
-  await expect(link).toHaveAttribute('href', AEON.href)
-  await expect(link).toHaveAttribute('target', '_blank')
-  await expect(link).toHaveAttribute('rel', /\bnoopener\b/)
-  expect(world.reads.some(path => path.startsWith('/api/nodes/lookup?') && path.includes('AEON-1'))).toBe(true)
-  await expectStableControls({
-    controls: { review: panel.getByTestId('agents-desk-review'), history: panel.getByTestId('agents-desk-history'), project: link },
-    interactions: [{ name: 'hover the doctrine project', run: async () => { await link.hover() } }],
-  })
-  await row.getByRole('link', { name: 'Doctrine change', exact: true }).click()
-  await expect(page).toHaveURL(/item=r:rule-1$/)
+test('the Agents doctrine row resolves its project through the authorized ticket lookup', async ({ page }, testInfo) => {
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    const world = await mockDecisionDesk(page, { theme })
+    world.rule.ticket = 'AEON-1'
+    await page.goto('/agents')
+    const panel = page.getByRole('region', { name: 'Decision Desk', exact: true })
+    const row = panel.getByRole('listitem').filter({ hasText: 'Doctrine change' })
+    const link = row.getByTestId('agents-desk-project')
+    await expect(link).toHaveText(AEON.name)
+    await expect(link).toHaveAttribute('href', AEON.href)
+    await expect(link).toHaveAttribute('target', '_blank')
+    await expect(link).toHaveAttribute('rel', /\bnoopener\b/)
+    expect(world.reads.some(path => path.startsWith('/api/nodes/lookup?') && path.includes('AEON-1'))).toBe(true)
+    await expectStableControls({
+      controls: { review: panel.getByTestId('agents-desk-review'), history: panel.getByTestId('agents-desk-history'), project: link, row },
+      interactions: [{ name: 'hover the doctrine project', run: async () => { await link.hover() } }],
+    })
+    await panel.screenshot({ path: testInfo.outputPath(`agents-project-${width}-${theme}.png`) })
+    await row.getByRole('link', { name: 'Doctrine change', exact: true }).click()
+    await expect(page).toHaveURL(/item=r:rule-1$/)
+  }
 })
 
 for (const theme of ['light', 'dark'] as const) {
