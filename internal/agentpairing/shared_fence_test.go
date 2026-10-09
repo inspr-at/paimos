@@ -92,6 +92,12 @@ func TestSharedFenceCallerInventory(t *testing.T) {
 
 func TestSharedFencePrimitiveOrder(t *testing.T) {
 	checks := []struct{ path, fn, first, second string }{
+		{"ledger.go", "enrollLedger", "m.in(", "accountuse.LockExclusive("},
+		{"ledger.go", "enrollLedger", "accountuse.LockExclusive(", "authz.RequireTx("},
+		{"ledger.go", "enrollLedger", "authz.RequireTx(", "FOR NO KEY UPDATE"},
+		{"ledger.go", "enrollLedger", "out, err = view(", "return audit("},
+		{"../agentaccounts/route.go", "reserve", "RequireLedgerWork(", "activeRoute("},
+		{"../agentruns/runs.go", "claim", "RequireLedgerWork(", "refuseVerification("},
 		{"../db/fences.go", "LockTree", "LockTenant(", "pg_advisory_xact_lock"},
 		{"lifecycle.go", "Lock", "db.LockCurrentTree(", "aeon-pairing:"},
 		{"../auth/store.go", "revokeAgentKeyTx", "db.LockTenant(", "lockAgentKey("},

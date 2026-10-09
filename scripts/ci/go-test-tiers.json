@@ -2212,6 +2212,18 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestLaterConnectOnlyApprovalCancelsQueuedVerification","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestLedgerBoundaryApprovalCrashBeforeEnrollment","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestLedgerBoundaryApprovalRequiresCapability","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestLedgerBoundaryDowngradeReplayRebuildAndVerification","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestLedgerBoundaryLifecycleAdvertisement","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestLedgerBoundaryNeverEnrolledAndClassicDaemon","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestLedgerEnrollmentBoundedInputAndLiveAuthority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestLegacyAttachRegistrationKeepsDaemonIdentityButGrantsNoAttach","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestLegacyPairingUsesAeonApprovalDespiteCapabilityReport","tier":"GATED-FULL"}
@@ -2741,6 +2753,8 @@
     {"kind":"go","package":"internal/agentsetup","name":"TestInitialPairReportsReadinessWithoutUnconfirmedFallback","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestLaunchdPrivateDiagnosticPaths","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestLedgerServerNegotiationAndEnrollmentClient","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestLinuxGroupWritableAncestorRefused","tier":"GATED-FULL"}
     ,
