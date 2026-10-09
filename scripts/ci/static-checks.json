@@ -264,12 +264,12 @@
     },
     {
       "id": "go-tiers",
-      "command": "node scripts/test-tiers/cli.mjs check go",
+      "command": "node scripts/test-tiers/cli.mjs check go --strict",
       "cwd": ".",
       "ci": {
         "job": "go-static",
         "step": "Validate every Go tier against native collection",
-        "command": "node scripts/test-tiers/cli.mjs check go",
+        "command": "node scripts/test-tiers/cli.mjs check go --strict",
         "cwd": "."
       },
       "needs": [
@@ -724,7 +724,7 @@
     },
     {
       "id": "web-tiers",
-      "command": "node scripts/test-tiers/cli.mjs check web",
+      "command": "node scripts/test-tiers/cli.mjs check web --strict",
       "cwd": ".",
       "ci": {
         "job": "web-unit",
@@ -808,6 +808,22 @@
       ],
       "timeout_seconds": 30,
       "local_only": "AEON-933: every apt and Playwright install-deps step must carry a step timeout and a bounded retry. This guard only reads workflow files."
+    },
+    {
+      "id": "web-classification",
+      "command": "node scripts/test-tiers/cli.mjs check web --strict",
+      "cwd": ".",
+      "ci": {
+        "job": "web-setup",
+        "step": "Require every web case to be classified",
+        "command": "node scripts/test-tiers/cli.mjs check web --strict",
+        "cwd": "."
+      },
+      "needs": [
+        "node",
+        "npm-installed"
+      ],
+      "timeout_seconds": 120
     }
   ]
 }

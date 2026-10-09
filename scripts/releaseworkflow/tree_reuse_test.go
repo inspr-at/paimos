@@ -448,10 +448,46 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 		setup["if"] = strings.Replace(condition, " && needs.tree-reuse.outputs.reuse != 'pull_request'", "", 1)
 	}
 	normalizeEffectiveLane(t, "web-setup", setup)
+	normalizeAEON1018Classification(t, "web-setup", setup)
 	if !reflect.DeepEqual(setup, want) {
 		t.Fatal("Parallel setup changed beyond moving units and their prerequisites/proofs")
 	}
 	return before
+}
+
+// Prove the newly required classification checks before projecting onto the
+// immutable pre-reuse CI pins. Every historical check still matches bytewise.
+func normalizeAEON1018Classification(t *testing.T, id string, j map[string]any) {
+	t.Helper()
+	if id == "go-static" {
+		check := reuseStep(t, j, "Validate every Go tier against native collection")
+		want := map[string]any{"name": "Validate every Go tier against native collection", "run": "node scripts/test-tiers/cli.mjs check go --strict"}
+		if !reflect.DeepEqual(check, want) {
+			t.Fatal("strict Go classification must be unconditional and blocking")
+		}
+		check["run"] = "node scripts/test-tiers/cli.mjs check go"
+	}
+	if id == "web-setup" {
+		steps := reuseSteps(j)
+		var preserved []any
+		found := 0
+		for i, value := range steps {
+			check := treeMap(value)
+			if check["name"] != "Require every web case to be classified" {
+				preserved = append(preserved, value)
+				continue
+			}
+			found++
+			want := map[string]any{"name": "Require every web case to be classified", "run": "node scripts/test-tiers/cli.mjs check web --strict"}
+			if !reflect.DeepEqual(check, want) || i == 0 || treeMap(steps[i-1])["name"] != "Check Docker web inputs without Docker" {
+				t.Fatal("strict web classification must block setup immediately after dependency/input checks")
+			}
+		}
+		if found != 1 {
+			t.Fatal("exactly one strict web classification check is required")
+		}
+		j["steps"] = preserved
+	}
 }
 
 // Project the reviewed effective-lane wiring back onto immutable historical
@@ -738,6 +774,9 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				}
 			}
 			normalizeAEON933InstallBounds(t, id, j)
+			if id != "web-setup" { // Already proved and projected by normalizeParallelWebSetup.
+				normalizeAEON1018Classification(t, id, j)
+			}
 		}
 		var encoded bytes.Buffer
 		encoder := json.NewEncoder(&encoded)

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
@@ -56,13 +54,12 @@ test('pi sessions retain their SVG harness icon and provider account label', asy
   await expect(item.locator('.exec-account')).toContainText('Pi · pi / anthropic (local profile)')
   await expect(item.locator('svg[viewBox="165.29 165.29 469.43 469.43"] path').first()).toBeVisible()
   if (process.env.PI_PAIRING_SHOTS) {
-    mkdirSync(process.env.PI_PAIRING_SHOTS, { recursive: true })
     for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: theme })
       await item.scrollIntoViewIfNeeded()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-      await page.screenshot({ path: join(process.env.PI_PAIRING_SHOTS, `pi-agents__${width}__${theme}.png`), fullPage: true })
+      await page.screenshot({ path: test.info().outputPath(`pi-agents__${width}__${theme}.png`), fullPage: true })
     }
   }
 
@@ -304,6 +301,18 @@ test('read-only people see requests but cannot decide or control', async ({ page
 test('the session panel shows the ticket, runs, telemetry and the thread, and sends messages', async ({ page }) => {
   const { calls, data } = await setup(page)
   for (const m of data.messages.filter(m => m.project === 'p-pharos')) Object.assign(m, m.sender_principal_id === data.me ? { recipient_session_id: camy } : { sender_session_id: camy, sender_label: 'camy' })
+  let releaseReceipt!: () => void, receiptStarted!: () => void
+  const receiptHeld = new Promise<void>(resolve => { releaseReceipt = resolve })
+  const receiptRequested = new Promise<void>(resolve => { receiptStarted = resolve })
+  await page.route('**/api/inbox/message-status?*', async route => {
+    const ids = new URL(route.request().url()).searchParams.get('ids')!.split(',')
+    const sent = data.sent.find(message => ids.includes(message.id))
+    if (!sent) return route.fallback()
+    receiptStarted(); await receiptHeld
+    // Historical posts already reached this thread. A new receipt must not
+    // reclassify them as queued while it confirms the current send.
+    return route.fulfill({ json: { items: ids.map(id => ({ message_id: id, status: 'delivered', delivered_at: id === sent.id ? new Date().toISOString() : data.messages.find(message => message.id === id)!.created_at, read_at: null, deliver_by: null })) } })
+  })
   await openAgents(page, `/agents/${camy}`)
   const details = panel(page)
   await expect(details.getByRole('heading', { name: /camy/ })).toBeVisible()
@@ -323,16 +332,28 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   await expect(details.locator('.msg .msg-time').first()).toHaveAttribute('data-tip', /\d{2}:\d{2}/)
   await details.getByRole('button', { name: 'Reply' }).last().click()
   await expect(details.locator('.replying')).toContainText('Counts are in')
-  await details.getByRole('radio', { name: 'Steer' }).click()
-  await details.getByRole('textbox', { name: 'Message to camy' }).fill('Sort stale hosts last.')
-  await page.keyboard.press('Control+Enter')
+  const field = details.getByRole('textbox', { name: 'Message to camy' })
+  await field.fill('Sort stale hosts last.')
+  // The current composer uses a direct send action; the delivery payload stays exact.
+  await expect(details.locator('.steer-send')).toBeEnabled()
+  const mac = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform))
+  await field.press(mac ? 'Meta+Enter' : 'Control+Enter')
+  await receiptRequested
+  await expect(details.getByRole('list', { name: 'Queued messages', exact: true })).toContainText('Sort stale hosts last.')
+  await expect(details.locator('.msg')).toHaveCount(4)
+  releaseReceipt()
   await expect(details.locator('.msg')).toHaveCount(5)
+  await expect(details.locator('.msg').last()).toContainText('Sort stale hosts last.')
+  await expect(details.getByRole('list', { name: 'Queued messages', exact: true })).toHaveCount(0)
   const sent = calls.find(c => c.method === 'POST' && c.path.endsWith('/messages'))?.body as Record<string, unknown>
   expect(sent).toMatchObject({ to: 'claude:camy', recipient_session_id: camy, body: 'Sort stale hosts last.', delivery_level: 'steer', expects_reply: false, is_action_request: false, reply_to: '3e000000-0000-4000-8000-000000000004' })
   expect(typeof sent.idempotency_key).toBe('string')
-  // B7: runs by agent, messages newest first in one page, sessions tenant-wide.
+  // B7: runs by agent, bounded session messages, sessions tenant-wide. The
+  // native thread now uses 50-post windows and keyset catch-up after sends.
   expect(calls.some(c => c.path === '/api/runs' && c.query?.get('agent') === 'a0000000-0000-4000-8000-000000000001')).toBe(true)
-  expect(calls.some(c => c.path === '/api/projects/p-pharos/messages' && c.method === 'GET' && c.query?.get('session') === camy && c.query?.get('newest_first') === 'true' && c.query?.get('limit') === '200')).toBe(true)
+  const threadReads = calls.filter(c => c.path === '/api/projects/p-pharos/messages' && c.method === 'GET' && c.query?.get('session') === camy)
+  expect(threadReads.some(c => c.query?.get('newest_first') === 'true' && c.query?.get('limit') === '50')).toBe(true)
+  expect(threadReads.every(c => c.query?.get('limit') === '50')).toBe(true)
   expect(calls.some(c => /\/api\/projects\/[^/]+\/harness-sessions$/.test(c.path))).toBe(false)
 })
 

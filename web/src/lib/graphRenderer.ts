@@ -685,7 +685,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       const radius = 55 + Math.sqrt(nodes.length) * 3
       // The backdrop spans the whole header, including the masked text islands.
       // Spread anchors to the content edges instead of the old middle column.
-      const aspect = Math.max(1.4, Math.min(12, graph.width() / Math.max(1, graph.height()) * 1.65))
+      const aspect = Math.max(1.4, Math.min(16, graph.width() / Math.max(1, graph.height()) * 1.65))
       nodes.forEach((n, i) => {
         const index = (i * anchorStride) % nodes.length
         const y = 1 - 2 * (index + .5) / nodes.length, angle = i * Math.PI * (3 - Math.sqrt(5))

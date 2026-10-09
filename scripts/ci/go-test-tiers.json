@@ -132,8 +132,6 @@
     ,
     "internal/inbox:TestMessageEventReservationCannotCommitIncomplete"
     ,
-    "internal/journey:TestLiveReleaseFactsExcludeFormerLeavesInBothProjections"
-    ,
     "internal/knowledge:TestChangelogNeverAppendsInsideCodeExamples"
     ,
     "internal/knowledge:TestHistoricalSlugFollowsRenameOrderAfterBodyEdit"
@@ -5182,6 +5180,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowETAUsesThirtyDaysOfHistory","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowEarlierRunQueuedAfterLaterRunMovesItemStart","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowGitHubRunsBecomeChecksSteps","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowLateQueuedKeepsRunningStart","tier":"ESSENTIAL"}
@@ -5196,7 +5196,11 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowOpenCatalogueIsTheCurrentStepNotAPhase","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowParkAfterMergeStaysClosed","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowParkEpisodesStayDistinct","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowParkIgnoresAmbiguousRepository","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowParkReplayAtOneTimestamp","tier":"ESSENTIAL"}
     ,
@@ -6382,8 +6386,6 @@
     ,
     {"kind":"go","package":"internal/intake","name":"TestTargetRefusalCodes","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/journey","name":"TestLiveReleaseFactsExcludeFormerLeavesInBothProjections","tier":"NIGHTLY"}
-    ,
     {"kind":"go","package":"internal/journey","name":"TestRetiredJourneyNeverTouchesStorage","tags":[],"tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestAnalysisLearningAdapterPreservesCurrentInbox","tier":"GATED-FULL"}
@@ -6417,8 +6419,6 @@
     {"kind":"go","package":"internal/knowledge","name":"TestKnowledgeLockedEligibilityAfterConcurrentDelete","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestKnowledgeTenantTreeBeforeRowForDeleteAndUndo","tier":"GATED-FULL"}
-    ,
-    {"kind":"go","package":"internal/knowledge","name":"TestKnowledgeUndoPairingBeforeTreeWithWorkStatusOff","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestKnowledgeUndoTenantBeforeSharedFencesWithWorkStatusOff","tier":"GATED-FULL"}
     ,
@@ -9206,6 +9206,8 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestNativePlatformsAndIndexPublication","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestNightlyBackupUsesItsPostgresServiceClients","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestNixVendorHashGate","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestParallelWebUnitsShareRuntimeAndRunOnce","tier":"NIGHTLY"}
@@ -9217,6 +9219,8 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestPublishedRuntimeMustMatchSmokedRuntime","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestPushedImageMatchesSmokedBuild","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestQueueCorrelationPreservesEvidenceAndReadOnlyPublication","reason":"AEON-1020: recorded W2 replay and read-only daily queue publication evidence.","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestQueueProofFailureCannotSkipRequiredJobs","tier":"GATED-FULL"}
     ,

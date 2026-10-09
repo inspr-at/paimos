@@ -77,7 +77,7 @@ export async function openOne(browser: Browser, url: string, settings: { hold?: 
   const live = liveServer(data)
   const context = await browser.newContext()
   const page = await context.newPage()
-  const calls = await mockWork(page, data, { hold: settings.hold })
+  const calls = await mockWork(page, data, { hold: settings.hold, nativeEvents: true })
   await live.install(page, 'a', { first: settings.first })
   const errors = watchErrors(page)
   await page.goto(url)
@@ -95,7 +95,7 @@ export async function openBoth(browser: Browser, url: string, viewport?: Viewpor
   const scheme = 'colorScheme' in settings && settings.colorScheme ? { colorScheme: settings.colorScheme } : {}
   const contexts: BrowserContext[] = [await browser.newContext({ ...scheme, ...(viewportA ? { viewport: viewportA } : {}) }), await browser.newContext({ ...scheme, ...(viewportB ? { viewport: viewportB } : {}) })]
   const [a, b] = await Promise.all(contexts.map(context => context.newPage()))
-  for (const [page, name] of [[a, 'a'], [b, 'b']] as const) { await mockWork(page, data); await live.install(page, name) }
+  for (const [page, name] of [[a, 'a'], [b, 'b']] as const) { await mockWork(page, data, { nativeEvents: true }); await live.install(page, name) }
   const errors = watchErrors(b), errorsA = watchErrors(a)
   await Promise.all([a.goto(url), b.goto(url)])
   // Both listen from here on: their first stream requests have been answered.
