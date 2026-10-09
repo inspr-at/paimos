@@ -243,4 +243,9 @@ components:
         priority: {type: string, enum: [critical, high, medium, low]}
         tags: {type: array, maxItems: 50, uniqueItems: true, items: {type: string, format: uuid}, description: Existing tag-node UUIDs in this project or workspace; stored as current tag names in ordinary node fields.tags.}
         type: {type: string, enum: [work, ticket, task, epic], default: work, description: Legacy kinds normalize to work; recurrences create leaves.}
-      description: 'Variables in title, description and criteria: {{occurrence}}, {{date}}, {{release_name}}, {{release_version}}. Unknown variables are rejected. Release variables are empty for time and manual runs. queue_each requires positive estimate_hours and non-empty acceptance_criteria.'
+        pill_en: {type: string, maxLength: 512, description: 'Optional English release pill; 2–4 words required before Done.'}
+        pill_de: {type: string, maxLength: 512, description: 'Optional German release pill; 2–4 words required before Done.'}
+        benefit_en: {type: string, maxLength: 4096, description: 'Optional English benefit; nonblank text required before Done.'}
+        benefit_de: {type: string, maxLength: 4096, description: 'Optional German benefit in impersonal form; nonblank text required before Done.'}
+        hide_from_release_notes: {type: boolean, default: true, description: 'Recurring routines default to hidden; explicit false includes generated tickets in release notes. Hiding does not waive the Done copy requirements.'}
+      description: 'Variables in title, description, criteria and release copy: {{occurrence}}, {{date}}, {{release_name}}, {{release_version}}. Unknown variables are rejected. Release variables are empty for time and manual runs. queue_each requires positive estimate_hours and non-empty acceptance_criteria. Release copy may be incomplete in a template; generated tickets still require all four valid texts before Done.'
