@@ -175,11 +175,11 @@ func ingestReadings(ctx context.Context, tx pgx.Tx, p tenant.Principal, id strin
 	if a.RegisteredBy != p.ID {
 		return fail(403, "only the registering agent can report capacity")
 	}
-	return ingestLockedReadings(ctx, tx, p.TenantID, a, readings)
+	return ingestLockedReadings(ctx, tx, p.TenantID, a, readings, true)
 }
 
 // The caller already holds tenant/tree/pairing and this account's row fence.
-func ingestLockedReadings(ctx context.Context, tx pgx.Tx, tenantID string, a Account, readings []capacity.Reading) error {
+func ingestLockedReadings(ctx context.Context, tx pgx.Tx, tenantID string, a Account, readings []capacity.Reading, fullSnapshot bool) error {
 	id := a.ID
 	now, err := dbNow(ctx, tx)
 	if err != nil {
@@ -265,6 +265,9 @@ func ingestLockedReadings(ctx context.Context, tx pgx.Tx, tenantID string, a Acc
 		if err != nil {
 			return err
 		}
+	}
+	if !fullSnapshot {
+		return nil
 	}
 	for _, source := range []string{"harness", "agentd"} {
 		var at time.Time

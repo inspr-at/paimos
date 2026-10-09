@@ -255,7 +255,7 @@ func persistResetResult(ctx context.Context, tx pgx.Tx, a Account, out ResetResu
 	if err := tx.QueryRow(ctx, `SELECT tenant_id::text FROM agent_accounts WHERE id=$1`, a.ID).Scan(&tenantID); err != nil {
 		return err
 	}
-	if err := ingestLockedReadings(ctx, tx, tenantID, a, []capacity.Reading{out.Window}); err != nil {
+	if err := ingestLockedReadings(ctx, tx, tenantID, a, []capacity.Reading{out.Window}, false); err != nil {
 		return err
 	}
 	return storeResetReport(ctx, tx, a, out.Report, now)

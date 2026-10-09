@@ -162,6 +162,14 @@ func TestResetUseAuditCountConfirmationAndVendorUndo(t *testing.T) {
 	f.module.resetVendor = nil
 	callStatusAt(t, f.module, &f.owner, "", "POST", f.path()+"/resets/use", f.body(false), f.now, 422, nil)
 	f.module.resetVendor = f.vendor
+	f.seed(t, func(tx pgx.Tx) error {
+		other := f.window
+		other.WindowKind = "5h"
+		other.WindowMinutes = 300
+		other.UsedPercent = 17
+		other.ResetsAt = f.now.Add(2 * time.Hour)
+		return ingestReadings(context.WithValue(t.Context(), clockKey{}, f.now), tx, f.runner, f.account.ID, []capacity.Reading{f.window, other})
+	})
 	var result ResetResult
 	callStatusAt(t, f.module, &f.owner, "", "POST", f.path()+"/resets/use", f.body(false), f.now, 200, &result)
 	if result.ActionID == "" || result.AccountID != f.account.ID || result.Window.UsedPercent != 0 || result.Report.Count != 1 || f.vendor.calls != 1 {
@@ -181,8 +189,13 @@ func TestResetUseAuditCountConfirmationAndVendorUndo(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if len(readings) != 1 || readings[0].UsedPercent != 0 {
-			return errors.New("fresh window not published")
+		if len(readings) != 2 {
+			return errors.New("partial reset retired another vendor window")
+		}
+		for _, reading := range readings {
+			if reading.WindowKind == "weekly" && reading.UsedPercent != 0 || reading.WindowKind == "5h" && reading.UsedPercent != 17 {
+				return errors.New("fresh window not published or independent window changed")
+			}
 		}
 		return nil
 	})
@@ -205,7 +218,7 @@ func TestResetUseAuditCountConfirmationAndVendorUndo(t *testing.T) {
 		return err
 	})
 	status, raw := callAt(t, f.module, &f.owner, "", "POST", f.path()+"/resets/use", f.body(false), f.now)
-	if status != 409 || !strings.Contains(raw, "reset_confirmation_required") || f.vendor.calls != 0 {
+	if status != 409 || !strings.Contains(string(raw), "reset_confirmation_required") || f.vendor.calls != 0 {
 		t.Fatal("irreversible reset did not require inline confirmation")
 	}
 	callStatusAt(t, f.module, &f.owner, "", "POST", f.path()+"/resets/use", f.body(true), f.now, 200, &result)
