@@ -240,6 +240,14 @@
         "expected_revision": "optional current revision; omitted binds to own current enrollment/computer scope"
       },
       "response": "PairingView"
+    },
+    "POST /api/agent-pairing/self/ledger": {
+      "permission": "own connected redeemed paired agent with run.claim",
+      "request": {
+        "generation": "random 128-bit lowercase UUID after local member registration and occupancy import"
+      },
+      "response": "PairingView",
+      "notes": "Activates monotonic tenant ledger_mode_at and account-use enforced_at. Identical retries append no duplicate event."
     }
   },
   "PairingView": {
@@ -325,7 +333,13 @@
         "reason": "Native Grok verification is qualified only on macOS arm64 with a pinned native build."
       }
     },
-    "verification_helper_version": "exact server-supported helper release coordinate"
+    "verification_helper_version": "exact server-supported helper release coordinate",
+    "ledger_mode": "boolean; requirement applies to every computer in tenant",
+    "ledger_generation": "enrolled UUID or null",
+    "ledger_enrolled_at": "RFC3339 or null",
+    "server_capabilities": [
+      "ledger-v1"
+    ]
   },
   "runtime_permissions": [
     "run.read",
@@ -364,7 +378,8 @@
     "run_errors": "Existing claim/telemetry error envelope retains error field containing stable pairing code; pairing and account endpoints additionally return code.",
     "setup_command": "verified absolute binary path setup --url configured origin --workspace approved absolute folder --state-root private absolute folder outside repos --harness chosen harness --start-service; default tenant slug from guide",
     "installation": "PAIR4 exact official GitHub inspr-at/paimos release artifact and SHA256SUMS (OCI image inspr-at/aeon is a different repository). Verify exact filename before executable permissions. Install only into new versioned user-owned directory; refuse existing destination and Nix/existing tool. Crossbuild target is not service qualification.",
-    "distribution_evidence": "Read-only gh release view v260927160212.0.0 --repo inspr-at/paimos verified current macOS arm64/amd64, Linux amd64 and SHA256SUMS artifact URLs. Linux arm64 is a candidate added by PAIR4 for the forthcoming release."
+    "distribution_evidence": "Read-only gh release view v260927160212.0.0 --repo inspr-at/paimos verified current macOS arm64/amd64, Linux amd64 and SHA256SUMS artifact URLs. Linux arm64 is a candidate added by PAIR4 for the forthcoming release.",
+    "ledger": "In ledger mode, queued list is empty and Route/claim return 409 ledger_enrollment_required unless own connected redeemed computer has an enrolled generation matching X-Aeon-Ledger-Generation. Fresh/replacement/Add harness approval requires ledger-v1; Add harness invalidates prior enrollment. No release report substitutes for the header."
   },
   "verification_capabilities_contract": {
     "fields": "GET guide and every PairingView add verification_capabilities map keyed by harness plus verification_helper_version (exact server-supported helper release). Server-derived; clients cannot claim support.",

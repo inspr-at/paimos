@@ -655,6 +655,9 @@ func TestStaleQueueUndoFences(t *testing.T) {
 					return err
 				})
 			case "started":
+				// A started run needs a real allowed account/reservation. Keep
+				// this fixture valid under the activated account-use boundary.
+				f.reserve(t, agentruns.Run{ID: e.Undo.RunID})
 				f.tx(t, f.person, func(tx pgx.Tx) error {
 					_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='starting' WHERE id=$1`, e.Undo.RunID)
 					return err

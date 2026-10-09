@@ -395,8 +395,19 @@ func TestNodeKeysFieldsAndEvents(t *testing.T) {
 	}
 
 	ev := tenantEvents(t, p.TenantID)[baseline:]
-	var created int
+	var created, mappings int
+	var system string
+	if err := adminPool.QueryRow(t.Context(), `SELECT id::text FROM principals WHERE tenant_id=$1 AND kind='agent' AND name='System' AND roles @> '{system}'`, p.TenantID).Scan(&system); err != nil {
+		t.Fatal(err)
+	}
 	for _, event := range ev {
+		if event.Type == "work_context.project_set" {
+			mappings++
+			if event.Actor != system || event.NodeID == nil || event.After == nil {
+				t.Fatalf("project mapping audit %#v", event)
+			}
+			continue
+		}
 		if event.Actor != p.ID {
 			t.Fatalf("actor %#v", event)
 		}
@@ -409,6 +420,9 @@ func TestNodeKeysFieldsAndEvents(t *testing.T) {
 	}
 	if created != 4 {
 		t.Fatalf("created events %d in %#v", created, ev)
+	}
+	if mappings != 3 {
+		t.Fatalf("project mapping events %d in %#v", mappings, ev)
 	}
 }
 

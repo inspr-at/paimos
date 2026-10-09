@@ -94,6 +94,12 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) A
  WHERE s.tenant_id=$1 AND s.state='pending' AND s.expires_at>(SELECT at FROM clock)
  AND (s.project_id IS NULL OR project.id IS NOT NULL AND project.deleted_at IS NULL)
  AND ($2='' OR $2='stepup' AND s.id=$3::uuid)
+), account_matrix(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT r.tenant_id,'account_matrix'::text,NULL::uuid,r.revision,'Looks right? · Account matrix'::text,
+ coalesce((SELECT min(e.at) FROM events e WHERE e.type='account_use.migrated'), 'epoch'::timestamptz),
+ NULL::timestamptz,false,'/api/account-use'
+ FROM account_use_rules r WHERE r.tenant_id=$1 AND r.confirmation_required
+ AND ($2='' OR $2='account_matrix' AND r.tenant_id=$3::uuid)
 )`
 
 const visibleSQL = sourceSQL + `, visible AS MATERIALIZED (
@@ -108,6 +114,7 @@ const visibleSQL = sourceSQL + `, visible AS MATERIALIZED (
  UNION ALL SELECT * FROM doctrine WHERE $9
  UNION ALL SELECT * FROM key_trims WHERE $21
  UNION ALL SELECT * FROM stepups WHERE EXISTS(SELECT 1 FROM stepup_requests s WHERE s.tenant_id=$1 AND s.id=stepups.id AND coalesce($22::jsonb->s.permission,'[]'::jsonb) @> jsonb_build_array(coalesce(s.project_id::text,'')))
+ UNION ALL SELECT * FROM account_matrix WHERE $23
  ) items
 ), totals AS (
  SELECT count(*)::int AS open,count(*) FILTER (WHERE held)::int AS held,
@@ -191,7 +198,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
+	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, check("account.use.manage", "")).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
 	if err != nil {
 		return page, err
 	}
@@ -214,7 +221,9 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		if err = json.Unmarshal(record.OrderAt, &i.OrderAt); err != nil {
 			return page, err
 		}
-		if i.Kind == "doctrine" {
+		if i.Kind == "account_matrix" {
+			i.Href = "/settings/accounts#account-use"
+		} else if i.Kind == "doctrine" {
 			i.Href = "/settings/agent-rules#doctrine-inbox"
 		} else {
 			prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:", "key_trim": "k:"}[i.Kind]
