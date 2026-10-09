@@ -77,14 +77,22 @@ export function deliverTicket(ticket, { paimos, write = false, invoke = command 
   if (!paimos || !paimos.startsWith('/')) throw new Error('Use the existing reporter’s absolute PAIMOS CLI path')
   const account = invoke(paimos, ['whoami'])
   if (!/^instance: ppm \(https:\/\/aeon\.barta\.cm\)\r?$/m.test(account) || !/^tenant: INSPR \(inspr\)\r?$/m.test(account)) throw new Error('Nightly reporter requires the ppm INSPR account')
-  const found = JSON.parse(invoke(paimos, ['issue', 'search', ticket.title, '--project', 'AEON', '--limit', '100', '--json']))
-  const rows = Array.isArray(found) ? found : found.items
-  if (!Array.isArray(rows) || rows.length >= 100 || found.next_cursor) throw new Error('Nightly ticket deduplication is incomplete')
-  const previous = rows.filter(row => row.title === ticket.title)
+  const raw = invoke(paimos, ['issue', 'search', ticket.title, '--project', 'AEON', '--limit', '100', '--json'])
+  // issue search --json is {issues, has_more} (internal/cli/work.go issueSearchResult). A missing
+  // issues array or has_more:true means this page cannot prove the title is absent.
+  if (typeof raw !== 'string' || raw.length > maxBytes) throw new Error('Nightly ticket deduplication is incomplete')
+  const found = JSON.parse(raw)
+  const keys = found !== null && typeof found === 'object' && !Array.isArray(found) ? Object.keys(found) : []
+  if (keys.length !== 2 || !Object.hasOwn(found, 'issues') || !Object.hasOwn(found, 'has_more') ||
+      !Array.isArray(found.issues) || found.has_more !== false) throw new Error('Nightly ticket deduplication is incomplete')
+  for (const row of found.issues) {
+    if (row === null || typeof row !== 'object' || Array.isArray(row) || typeof row.title !== 'string' || typeof row.issue_key !== 'string') throw new Error('Nightly ticket deduplication is incomplete')
+  }
+  const previous = found.issues.filter(row => row.title === ticket.title)
   if (previous.length > 1) throw new Error('Duplicate nightly tickets need reconciliation')
   if (previous.length) {
-    const key = previous[0].issue_key ?? previous[0].key
-    if (!/^AEON-\d+$/.test(key ?? '')) throw new Error('Existing nightly ticket identity is invalid')
+    const key = previous[0].issue_key
+    if (!/^AEON-\d+$/.test(key)) throw new Error('Existing nightly ticket identity is invalid')
     return { status: 'already-reported', key }
   }
   const created = JSON.parse(invoke(paimos, ['issue', 'create', '--project', 'AEON', '--title', ticket.title,
