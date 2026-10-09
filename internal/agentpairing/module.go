@@ -59,6 +59,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agent-pairing/accounts/sign-out", m.person("account.manage", m.signOutEverywhere))
 	mux.HandleFunc("PUT /api/agent-pairing/computers/{computerId}/capacity", m.person("account.manage", m.saveHostCapacity))
 	mux.HandleFunc("POST /api/agent-pairing/self/capacity", m.reportHostCapacity)
+	mux.HandleFunc("POST /api/agent-pairing/self/ledger", m.enrollLedger)
 	m.mountAccountLink(mux)
 	mux.HandleFunc("POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/verify", m.person("account.manage", m.verifyAgain))
 	m.mountAttachedMessages(mux)
@@ -94,6 +95,7 @@ func (m *Module) guide(w http.ResponseWriter, r *http.Request) {
 	}
 	guide["homebrew_command"] = homebrewCommand(m.origin)
 	guide["agent_compatibility"] = agentcompat.Supported()
+	guide["server_capabilities"] = []string{LedgerCapability}
 	reply(w, guide)
 }
 
