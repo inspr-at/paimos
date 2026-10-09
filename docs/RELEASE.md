@@ -244,9 +244,12 @@ The `public-names` static check scans product source, web fixtures, API and
 documentation for operator host and business names. It runs in CI and the
 existing pre-push static bundle. Replace a new match with a neutral fictional
 example or tenant-reported data. Only published release-note history may be
-allowlisted in `scripts/ci/public-names-allowlist.json`, pinned to its content
-digest; review a history update before refreshing that digest. Other paths
-cannot be exempted.
+allowlisted in `scripts/ci/public-names-allowlist.json`, with each exception
+pinned to its release version and the SHA-256 of its entry's compact JSON
+with object keys sorted recursively (array order is preserved). The guard
+scans all other release entries and bundle metadata. Adding a release needs
+no allowlist update; changing an exempt published entry fails the check.
+Whole files and other paths cannot be exempted.
 
 CI's hosted `runner-route` job calls `test-runner-route.yml`, requests four idle
 slots, and selects the entire Go batch behind independent event, ref and

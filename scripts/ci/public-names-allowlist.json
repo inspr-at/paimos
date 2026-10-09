@@ -1,7 +1,8 @@
 [
   {
     "path": "internal/releasehistory/data/product-notes.json",
-    "sha256": "43faac061d1b4d5ab573b8c34095a26a91b5aa17b5a642b9ed2dbb1006e1fc3d",
-    "reason": "Published release-note history retains its original text. Review any history update before refreshing this digest."
+    "version": "261001072608.0.0",
+    "sha256": "97a3b11444ee887b0852e45063448e13dac8333838910efb10b8e410e0b1dac6",
+    "reason": "This published release entry retains its original text; all other release entries and bundle metadata are scanned."
   }
 ]
