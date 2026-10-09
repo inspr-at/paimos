@@ -1,14 +1,16 @@
 {
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "builtin_agent_exclusions": [
-    "account.overview.read"
+    "account.overview.read",
+    "account.use.manage"
   ],
   "words": {
     "resources": {
       "account": "agent accounts"
     },
     "special": {
-      "account.overview.read": "See all enrolled account capacity"
+      "account.overview.read": "See all enrolled account capacity",
+      "account.use.manage": "Manage account use contexts and rules"
     }
   }
 }
