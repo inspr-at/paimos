@@ -85,7 +85,7 @@ export function capacityWorld(options: CapacityOptions = {}) {
       [ACCOUNTS.grok]: 'markus on the studio SuperGrok Heavy seat',
       [ACCOUNTS.cursor]: 'markus on the Cursor Business seat for reviews',
     }
-    const hosts: Record<string, string> = { build-7: 'build-7-markus-primary', studio: 'graz-studio-rack-07' }
+    const hosts: Record<string, string> = { 'build-7': 'build-7-markus-primary', studio: 'graz-studio-rack-07' }
     for (const a of accts) {
       if (labels[a.id]) a.label = labels[a.id]
       a.hostLabel = hosts[a.host] ?? a.host
