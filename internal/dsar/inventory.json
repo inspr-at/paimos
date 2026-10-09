@@ -353,6 +353,25 @@
     {
       "classification": "metadata",
       "columns": {
+        "at": "metadata",
+        "kind": "metadata",
+        "pull_request": "metadata",
+        "recorded_at": "metadata",
+        "release_name": "metadata",
+        "report_key": "metadata",
+        "repository": "metadata",
+        "severity": "metadata",
+        "started_at": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_metric_reports"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
         "attempt": "metadata",
         "completed_at": "metadata",
         "conclusion": "metadata",
@@ -360,15 +379,20 @@
         "event": "metadata",
         "head_branch": "metadata",
         "head_sha": "metadata",
+        "head_tree": "metadata",
+        "jobs_failed_at": "metadata",
+        "jobs_read_at": "metadata",
         "pull_request": "metadata",
         "recorded_at": "metadata",
         "repository": "metadata",
+        "required_jobs": "metadata",
         "run_id": "metadata",
         "source": "metadata",
         "started_at": "metadata",
         "tenant_id": "metadata",
         "workflow_name": "metadata",
-        "workflow_path": "metadata"
+        "workflow_path": "metadata",
+        "worst_job_wait_ms": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
@@ -805,11 +829,11 @@
     {
       "classification": "metadata",
       "columns": {
-        "tenant_id": "metadata",
-        "subject_kind": "metadata",
         "slug": "metadata",
-        "words_en": "metadata",
-        "words_de": "metadata"
+        "subject_kind": "metadata",
+        "tenant_id": "metadata",
+        "words_de": "metadata",
+        "words_en": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
