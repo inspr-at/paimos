@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -283,13 +284,14 @@ func (m *Module) checkLeadAdmission(ctx context.Context, tx pgx.Tx, p tenant.Pri
 }
 func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Revision  int64  `json:"expected_revision"`
-		SessionID string `json:"session_id"`
+		Revision   int64  `json:"expected_revision"`
+		SessionID  string `json:"session_id"`
+		SessionRef string `json:"harness_session_ref"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
-	if in.Revision < 1 || !workorders.UUID(in.SessionID) {
+	if in.Revision < 1 || (in.SessionID == "") == (in.SessionRef == "") || in.SessionID != "" && !workorders.UUID(in.SessionID) || in.SessionRef != "" && (len(in.SessionRef) < 16 || len(in.SessionRef) > 4096 || strings.ContainsAny(in.SessionRef, "\r\n")) {
 		return nil, workorders.Fail(400, "valid revision and session required")
 	}
 	ctx, id := r.Context(), r.PathValue("projectId")
@@ -316,6 +318,15 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = leadOwner(ctx, tx, p, id, l.owner); err != nil {
 		return nil, err
 	}
+	if in.SessionRef != "" {
+		err = tx.QueryRow(ctx, `SELECT id::text FROM harness_sessions WHERE project_id=$1 AND agent_principal_id=$2 AND ref_digest=$3 AND stopped_at IS NULL AND archived_at IS NULL`, id, p.ID, digest("ref", in.SessionRef)).Scan(&in.SessionID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, workorders.Fail(403, "harness worker proof rejected")
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
 	r.SetPathValue("sessionId", in.SessionID)
 	s, err := worker(ctx, tx, r, p)
 	if err != nil {
@@ -330,6 +341,22 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	if !fresh {
 		return nil, workorders.Fail(409, "fresh reporting generation required")
+	}
+	adopting := l.Reason == adoptionPending
+	if adopting {
+		if l.SessionID == nil || *l.SessionID != s.ID {
+			return nil, workorders.Fail(409, "person-confirmed session required")
+		}
+		var eligible bool
+		if err = tx.QueryRow(ctx, `SELECT `+adoptEligibleSQL+` FROM harness_sessions WHERE id=$1`, s.ID).Scan(&eligible); err != nil {
+			return nil, err
+		}
+		if !eligible {
+			return nil, workorders.Fail(409, "eligible owned reporting root coordinator required")
+		}
+	}
+	if l.Reason == selectionCleared {
+		return nil, workorders.Fail(409, "explicit start request required after cancelled adoption")
 	}
 	before := l
 	var predecessor *Session
@@ -356,9 +383,12 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if l.State == "paused" {
 		return nil, workorders.Fail(409, "explicit start request required after pause")
 	}
-	reason, err := m.checkLeadAdmission(ctx, tx, p, l.owner, s)
-	if err != nil {
-		return nil, err
+	reason := ""
+	if !adopting {
+		reason, err = m.checkLeadAdmission(ctx, tx, p, l.owner, s)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if reason == "" && (l.SessionID == nil || *l.SessionID != s.ID) {
 		reason, err = m.leadScheduleWait(ctx, tx, p, l, true)
@@ -372,12 +402,12 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		// The claiming key becomes the generation's dispatch credential. Fair
 		// turns qualify this exact key; a claim through a weaker key cannot
 		// borrow a stronger key the same principal happens to hold.
-		l, err = scanLead(tx.QueryRow(ctx, `UPDATE project_leads SET generation=generation+CASE WHEN session_id IS DISTINCT FROM $2::uuid THEN 1 ELSE 0 END,session_id=$2,dispatch_key_id=nullif($3,'')::uuid,state='working',reason='',revision=revision+1,updated_at=clock_timestamp() WHERE project_id=$1 RETURNING `+leadColumns, id, s.ID, p.AuthKeyID))
+		l, err = scanLead(tx.QueryRow(ctx, `UPDATE project_leads SET generation=generation+CASE WHEN session_id IS DISTINCT FROM $2::uuid OR $4 THEN 1 ELSE 0 END,session_id=$2,dispatch_key_id=nullif($3,'')::uuid,state='working',reason='',revision=revision+1,updated_at=clock_timestamp() WHERE project_id=$1 RETURNING `+leadColumns, id, s.ID, p.AuthKeyID, adopting))
 	}
 	if err != nil {
 		return nil, err
 	}
-	if reason == "" && (before.SessionID == nil || *before.SessionID != s.ID) {
+	if reason == "" && (adopting || before.SessionID == nil || *before.SessionID != s.ID) {
 		if _, err = tx.Exec(ctx, `INSERT INTO project_lead_generations(tenant_id,project_id,generation,session_id) VALUES($1,$2,$3,$4)`, p.TenantID, id, l.Generation, s.ID); err != nil {
 			return nil, err
 		}
@@ -452,6 +482,11 @@ func (m *Module) pauseLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		if !leaseProof(s, r, p) {
 			return nil, workorders.Fail(403, "current lead worker proof required")
 		}
+	}
+	// An unclaimed adoption has no generation to checkpoint. Reject before
+	// cooperative pause or the lead-state write, so the live process is untouched.
+	if l.Reason == adoptionPending {
+		return nil, workorders.Fail(409, "unclaimed adoption cannot be paused")
 	}
 	before := l
 	reason := "handover_pending"

@@ -63,6 +63,23 @@ test('unreadable gates mean WAIT, never a start', () => {
   assert.match(waitCopy('something_new').status, /Waiting for room/)
 })
 
+test('an unclaimed adoption offers Cancel and neither Pause nor Resume', () => {
+  const pending = lead({ state: 'waiting_for_room', reason: 'adoption_pending', generation: 0, session_id: 's1', process_active: true })
+  const band = leadBand(pending, 'AEON', 2)
+  assert.equal(band.action, 'cancel_adoption')
+  assert.equal(band.actionLabel, 'Cancel')
+  assert.equal(canPause(pending), false)
+  assert.equal(canResume(pending), false)
+  assert.equal(canResume(lead({ state: 'paused', reason: 'adoption_pending', process_active: false })), false)
+  const cleared = lead({ state: 'waiting_for_room', reason: 'selection_cleared', generation: 0, session_id: null, process_active: false, revision: 2 })
+  const next = leadBand(cleared, 'AEON', 2)
+  assert.equal(next.action, 'start')
+  assert.equal(next.actionLabel, 'Start lead')
+  assert.equal(next.status, 'No session selected')
+  assert.match(next.now, /previous choice was cleared/)
+  assert.equal(canPause(lead({ state: 'waiting_for_room', session_id: null, reason: '' })), true)
+})
+
 test('Resume is only a restart after a confirmed stop; Pause needs an existing intent', () => {
   assert.equal(canResume(lead({ state: 'paused', process_active: true })), false)
   assert.equal(canResume(lead({ state: 'paused', process_active: false })), true)

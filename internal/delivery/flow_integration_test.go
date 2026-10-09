@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func flowEventCount(t *testing.T, f *fixture) int {
@@ -117,7 +118,7 @@ func TestDeliveryFlowRolloutIngestIsIdempotentAndRead(t *testing.T) {
 	}
 	item := flow.Items[0]
 	if item.ID != res.ItemID || item.Kind != "release" || item.Ref != "126" || item.Title != "Release 126" || len(item.PRs) != 1 || item.PRs[0] != 405 ||
-		item.EndedAt != nil || item.Target == nil || item.Target.Minutes != 24 || item.Target.FromStep != "a" ||
+		item.EndedAt != nil || item.Target == nil || item.Target.Minutes != 61 || item.Target.FromStep != "a" ||
 		item.NextHumanGate == nil || item.NextHumanGate.What != "agm1 GO" || item.NextHumanGate.PrincipalID == nil || *item.NextHumanGate.PrincipalID != f.person.ID {
 		t.Fatalf("item: %+v", item)
 	}
@@ -128,6 +129,9 @@ func TestDeliveryFlowRolloutIngestIsIdempotentAndRead(t *testing.T) {
 	inc := flow.Incidents[0]
 	if inc.Severity != "degraded" || len(inc.RecoveryStepIDs) != 3 || inc.RecoveryStepIDs[2] != flowStepID(f.person.TenantID, item.ID, "ops_rollout", "l-2") {
 		t.Fatalf("incident: %+v", inc)
+	}
+	if item.QualificationEvidence != nil || item.RollbackClass != nil {
+		t.Fatalf("a record without release facts invented some: %+v", item)
 	}
 	raw, _ := json.Marshal(flow)
 	if strings.Contains(string(raw), "sha256:") || strings.Contains(string(raw), "restart_count") {
@@ -1308,5 +1312,194 @@ func TestDeliveryFlowEarlierRunQueuedAfterLaterRunMovesItemStart(t *testing.T) {
 	auditSend(t, f, "workflow_run", "flow-order-earlier-again", workflowRunBody("requested", 501, 1, "pull_request", p.Branch, p.Head, defaultCIWorkflow, early, nil, nil, 7), 204)
 	if got := itemStart(); !got.Equal(early) || flowEventCount(t, f) != events {
 		t.Fatalf("queued redelivery: item start %s, events %d → %d", got, events, flowEventCount(t, f))
+	}
+}
+
+// release127 is the record the OPS producer emits from release 127 on
+// (AEON-1022): the 126 path a → l with the exact-SHA rehearsal and the full test
+// catalogue inside the merge-group run, a human wait for the qualification, the
+// qualification evidence reference and the rollback class. Minutes after the cut:
+// a 0–16, rehearsal 0–11 (alongside), catalogue 1–23 (the pole), b 23–24, c 24–36,
+// d 36–37, e 37–47 then the person's wait 47–52, f 52–54, g 54–55, h 55–60,
+// i 60–61, j 61–64, k 64–70, l 70–75. through names the last step in the record.
+func release127(f *fixture, cut time.Time, through string) map[string]any {
+	ops := map[string]any{"type": "agent", "principal_id": f.agent.ID, "label": "OPS", "model": nil}
+	ci := map[string]any{"type": "ci", "principal_id": nil, "label": "Checks", "model": nil}
+	review := map[string]any{"type": "agent", "principal_id": nil, "label": "Reviewer", "model": nil}
+	you := map[string]any{"type": "person", "principal_id": f.person.ID, "label": "You", "model": nil}
+	type row struct {
+		key, step, kind string
+		actor           map[string]any
+		start, end      int
+		extra           map[string]any
+	}
+	rows := []row{
+		{"a", "a", "work", ci, 0, 16, map[string]any{"outcome": "green"}},
+		{"rehearsal", "rehearsal", "work", ci, 0, 11, map[string]any{"outcome": "green", "side": true}},
+		{"catalogue", "catalogue", "work", ci, 1, 23, map[string]any{"outcome": "green"}},
+		{"b", "b", "work", ops, 23, 24, nil},
+		{"c", "c", "work", ci, 24, 36, nil},
+		{"d", "d", "work", ops, 36, 37, nil},
+		{"e", "e", "work", ops, 37, 47, nil},
+		{"e-approval", "e", "wait", you, 47, 52, map[string]any{"wait_reason": "human_gate", "waits_for": f.person.ID}},
+		{"f", "f", "work", ci, 52, 54, nil},
+		{"g", "g", "work", ops, 54, 55, nil},
+		{"h", "h", "work", review, 55, 60, map[string]any{"outcome": "ok"}},
+		{"i", "i", "work", ci, 60, 61, nil},
+		{"j", "j", "work", ops, 61, 64, nil},
+		{"k", "k", "work", ops, 64, 70, nil},
+		{"l", "l", "work", ops, 70, 75, map[string]any{"outcome": "green"}},
+	}
+	var steps []any
+	for _, r := range rows {
+		s := map[string]any{"key": r.key, "step": r.step, "kind": r.kind, "actor": r.actor, "started_at": cut.Add(time.Duration(r.start) * time.Minute), "ended_at": cut.Add(time.Duration(r.end) * time.Minute)}
+		for k, v := range r.extra {
+			s[k] = v
+		}
+		steps = append(steps, s)
+		if r.key == through {
+			break
+		}
+	}
+	return map[string]any{"schema": "aeon.rollout.v1", "direction": "forward", "release": "127", "version": "261009063244.0.0", "outcome": "in_progress",
+		"cut_at": cut, "prs": []int64{426},
+		// The qualification object is the one scripts/verify-live.mjs validates; the Flow keeps only its evidence reference.
+		"qualification": map[string]any{"version": "261009063244.0.0", "asset": "paimos-agentd-darwin-arm64", "sha256": strings.Repeat("b", 64), "sha256sums": strings.Repeat("c", 64),
+			"operator": "markus-barta", "spctl": true, "foreground_socket": true, "acl_fixture": true, "attach_preview": true, "touch_id": true, "evidence": "AEON-487/comment/native-qualification"},
+		"rollback_class": "digest_safe", "image_digest": "sha256:" + strings.Repeat("a", 64),
+		"steps": steps}
+}
+
+func TestDeliveryFlowRolloutRecordsCatalogueRehearsalQualificationAndRollbackClass(t *testing.T) {
+	// Risk: the Flow drops the catalogue or the rehearsal step (or refuses the
+	// whole record for them), loses the qualification evidence or the rollback
+	// class, stores more of the qualification object than its reference, counts
+	// the catalogue as a phase of its own, or a partial re-report erases a fact.
+	f := newFixture(t)
+	cut := f.at.Add(-90 * time.Minute)
+	path := "/api/projects/" + f.project + "/delivery/flow"
+	var res RolloutResult
+	f.call(t, f.person, "POST", path+"/rollout", release127(f, cut, "e-approval"), 200, &res)
+	if res.Steps != 8 || res.Changed != 9 {
+		t.Fatalf("first report: %+v", res)
+	}
+	item := res.ItemID
+	var run DeliveryFlowRun
+	f.call(t, f.person, "GET", path+"/runs/"+item, nil, 200, &run)
+	steps := map[string]FlowStep{}
+	for _, s := range run.Steps {
+		steps[s.StepKey+"/"+s.Kind] = s
+	}
+	cat, ok := steps["catalogue/work"]
+	if !ok || cat.EndedAt == nil || cat.EndedAt.Sub(cat.StartedAt) != 22*time.Minute || cat.Outcome == nil || *cat.Outcome != "green" || cat.Side || cat.Actor.Type != "ci" || cat.Source != "ops_rollout" {
+		t.Fatalf("catalogue: %+v", cat)
+	}
+	reh, ok := steps["rehearsal/work"]
+	if !ok || reh.EndedAt == nil || reh.EndedAt.Sub(reh.StartedAt) != 11*time.Minute || !reh.Side {
+		t.Fatalf("rehearsal: %+v", reh)
+	}
+	if run.Item.QualificationEvidence == nil || *run.Item.QualificationEvidence != "AEON-487/comment/native-qualification" || run.Item.RollbackClass == nil || *run.Item.RollbackClass != "digest_safe" {
+		t.Fatalf("release facts: %+v", run.Item)
+	}
+	// Progress follows a → l. Done: a, b, c, d and e's work (the person's wait
+	// is not a phase of its own); the rehearsal and the catalogue add none.
+	if run.Item.PctDone != 42 {
+		t.Fatalf("progress %d", run.Item.PctDone)
+	}
+	raw, _ := json.Marshal(run)
+	for _, leaked := range []string{"paimos-agentd-darwin-arm64", strings.Repeat("b", 64), strings.Repeat("c", 64), "touch_id", "markus-barta", "sha256:"} {
+		if strings.Contains(string(raw), leaked) {
+			t.Fatalf("the qualification object leaked %q into the flow", leaked)
+		}
+	}
+
+	// The list read carries the same facts.
+	var flow DeliveryFlow
+	f.call(t, f.person, "GET", path+"?from="+cut.Add(-time.Minute).Format(time.RFC3339)+"&to="+f.at.Format(time.RFC3339), nil, 200, &flow)
+	if len(flow.Items) != 1 || flow.Items[0].RollbackClass == nil || *flow.Items[0].RollbackClass != "digest_safe" || flow.Items[0].QualificationEvidence == nil {
+		t.Fatalf("flow items: %+v", flow.Items)
+	}
+
+	// A repeated report changes nothing and emits no event.
+	before := flowEventCount(t, f)
+	f.call(t, f.person, "POST", path+"/rollout", release127(f, cut, "e-approval"), 200, &res)
+	if res.Changed != 0 || flowEventCount(t, f) != before {
+		t.Fatalf("replay changed %d rows, events %d → %d", res.Changed, before, flowEventCount(t, f))
+	}
+
+	// A report without the release facts keeps what is recorded: evidence is
+	// never erased by a partial record.
+	partial := release127(f, cut, "e-approval")
+	delete(partial, "qualification")
+	delete(partial, "rollback_class")
+	f.call(t, f.person, "POST", path+"/rollout", partial, 200, &res)
+	f.call(t, f.person, "GET", path+"/runs/"+item, nil, 200, &run)
+	if res.Changed != 0 || run.Item.QualificationEvidence == nil || run.Item.RollbackClass == nil || *run.Item.RollbackClass != "digest_safe" {
+		t.Fatalf("partial report: %+v changed %d", run.Item, res.Changed)
+	}
+	// A qualification object without an evidence reference is accepted and says nothing.
+	partial["qualification"] = map[string]any{"version": "261009063244.0.0", "operator": "markus-barta"}
+	f.call(t, f.person, "POST", path+"/rollout", partial, 200, &res)
+	f.call(t, f.person, "GET", path+"/runs/"+item, nil, 200, &run)
+	if res.Changed != 0 || run.Item.QualificationEvidence == nil || *run.Item.QualificationEvidence != "AEON-487/comment/native-qualification" {
+		t.Fatalf("evidence-less qualification: %+v", run.Item)
+	}
+
+	// A corrected record replaces both facts, and the finished record ends the run.
+	healthy := f.at.Add(-10 * time.Minute)
+	full := release127(f, cut, "")
+	full["outcome"], full["live_at"], full["healthy_at"] = "live", healthy, healthy
+	full["rollback_class"] = "restore_required"
+	full["qualification"].(map[string]any)["evidence"] = "AEON-487/comment/native-qualification-2"
+	f.call(t, f.person, "POST", path+"/rollout", full, 200, &res)
+	f.call(t, f.person, "GET", path+"/runs/"+item, nil, 200, &run)
+	if run.Item.PctDone != 100 || run.Item.EndedAt == nil || *run.Item.RollbackClass != "restore_required" || *run.Item.QualificationEvidence != "AEON-487/comment/native-qualification-2" || len(run.Steps) != 15 {
+		t.Fatalf("corrected record: %+v (%d steps)", run.Item, len(run.Steps))
+	}
+}
+
+func TestDeliveryFlowOpenCatalogueIsTheCurrentStepNotAPhase(t *testing.T) {
+	// Risk: a catalogue that is still running counts as progress, or does not
+	// show as the step the release is in when it is the pole (Arion v5 §4b).
+	f := newFixture(t)
+	cut := f.at.Add(-20 * time.Minute)
+	path := "/api/projects/" + f.project + "/delivery/flow"
+	ci := map[string]any{"type": "ci", "principal_id": nil, "label": "Checks", "model": nil}
+	body := map[string]any{"schema": "aeon.rollout.v1", "release": "128", "cut_at": cut, "steps": []any{
+		map[string]any{"key": "a", "step": "a", "kind": "work", "actor": ci, "started_at": cut, "ended_at": cut.Add(16 * time.Minute), "outcome": "green"},
+		map[string]any{"key": "catalogue", "step": "catalogue", "kind": "work", "actor": ci, "started_at": cut.Add(time.Minute)},
+	}}
+	var res RolloutResult
+	f.call(t, f.person, "POST", path+"/rollout", body, 200, &res)
+	var run DeliveryFlowRun
+	f.call(t, f.person, "GET", path+"/runs/"+res.ItemID, nil, 200, &run)
+	if run.Item.PctDone != 8 || run.Item.CurrentStepID == nil || *run.Item.CurrentStepID != flowStepID(f.person.TenantID, res.ItemID, "ops_rollout", "catalogue") {
+		t.Fatalf("progress %d current %v", run.Item.PctDone, run.Item.CurrentStepID)
+	}
+	if run.Item.QualificationEvidence != nil || run.Item.RollbackClass != nil {
+		t.Fatalf("facts nobody reported were filled in: %+v", run.Item)
+	}
+}
+
+func TestDeliveryFlowStepKeyCheckKeepsGuardingAfterWidening(t *testing.T) {
+	// Risk: widening the step_key check (1305) opens the column to any text, or
+	// drops a key a previous binary writes. The API refuses unknown keys first,
+	// so this asks the database directly.
+	f := newFixture(t)
+	path := "/api/projects/" + f.project + "/delivery/flow"
+	var res RolloutResult
+	f.call(t, f.person, "POST", path+"/rollout", release126(f, f.at.Add(-50*time.Minute), nil), 200, &res)
+	update := func(key string) error {
+		_, err := f.d.Admin.Exec(t.Context(), `UPDATE delivery_flow_steps SET step_key=$1 WHERE source_key='b'`, key)
+		return err
+	}
+	for _, key := range []string{"catalogue", "rehearsal", "b", "live_check"} {
+		if err := update(key); err != nil {
+			t.Fatalf("key %s refused: %v", key, err)
+		}
+	}
+	var pgErr *pgconn.PgError
+	if err := update("catalog"); !errors.As(err, &pgErr) || pgErr.Code != "23514" || pgErr.ConstraintName != "delivery_flow_steps_step_key_check" {
+		t.Fatalf("an unknown key must violate the step_key check: %v", err)
 	}
 }
