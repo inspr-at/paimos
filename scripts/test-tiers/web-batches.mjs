@@ -21,9 +21,11 @@ function launchFlags(flags) {
 }
 
 // Selection has already happened. Only coalesce compatible launch policies:
-// same config/project/flags, no conflicting environment values, and the same
-// host restriction. Screenshot variables are a union; trace retention widens
-// to retain-on-failure when any contributing group requires it.
+// same config/project/flags, no conflicting environment values, the same host
+// restriction, and the same trace retention. Screenshot variables are a union.
+// Trace stays with the groups that request it. Widening retain-on-failure onto
+// a neighbour made the routed panel stability case exceed its 120s budget
+// (shard 6, run 37923530553, 17 of 24 viewports).
 export function browserBatches(rows, policy) {
   const batches = [], assigned = new Set()
   for (const group of policy.groups) {
@@ -39,7 +41,7 @@ export function browserBatches(rows, policy) {
     const launch = launchFlags(group.flags)
     const executionEnv = Object.entries(group.env).filter(([name]) => !artifactVariables.has(name))
       .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
-    const signature = JSON.stringify([group.config, group.project ?? null, group.hostedOnly ?? null, launch.flags, executionEnv])
+    const signature = JSON.stringify([group.config, group.project ?? null, group.hostedOnly ?? null, launch.flags, executionEnv, launch.trace])
     let batch = batches.find(candidate => candidate.signature === signature &&
       Object.entries(group.env).every(([name, value]) => !Object.hasOwn(candidate.env, name) || candidate.env[name] === value))
     if (!batch) {

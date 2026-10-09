@@ -43,9 +43,11 @@ test('AEON-1023 compatible policies share a launch; conflicting configs/projects
     group('c', { env: { AEON_DESK_SHOTS: '${RUNNER_TEMP}/other' } }),
     group('d', { flags: ['--timeout=5000'] })] }
   const batches = browserBatches(rows, policy)
-  assert.deepEqual(batches.map(batch => batch.groups), [['a', 'b'], ['c'], ['d']])
-  assert.deepEqual(batches[0].env, { AEON_DESK_SHOTS: '${RUNNER_TEMP}/a', RELEASE_LIST_SHOTS: '${RUNNER_TEMP}/b' })
-  assert.deepEqual(batches[0].flags, ['--trace=retain-on-failure'])
+  assert.deepEqual(batches.map(batch => batch.groups), [['a'], ['b'], ['c'], ['d']])
+  assert.deepEqual(batches[0].env, { AEON_DESK_SHOTS: '${RUNNER_TEMP}/a' })
+  assert.deepEqual(batches[0].flags, [], 'a group that did not request trace stays untraced')
+  assert.deepEqual(batches[1].env, { RELEASE_LIST_SHOTS: '${RUNNER_TEMP}/b' })
+  assert.deepEqual(batches[1].flags, ['--trace=retain-on-failure'])
   assert.deepEqual(batches.flatMap(batch => batch.rows).map(key).sort(), rows.map(key).sort())
   for (const different of [{ config: 'playwright.perf.config.ts' }, { project: 'chromium' }, { hostedOnly: false },
     { flags: ['--trace=on'] }, { env: { REGISTRATION_MODE: 'enabled' } }]) {
@@ -57,6 +59,35 @@ test('AEON-1023 compatible policies share a launch; conflicting configs/projects
   assert.throws(() => browserBatches([rows[0]], { groups: [group('a', { config: 'playwright.perf.config.ts' })] }), /Browser launch policy mismatch/)
   assert.equal(browserBatches(rows.slice(0, 2), { groups: [group('a', { env: { MODE: 'x', OTHER: 'y' } }),
     group('b', { env: { OTHER: 'y', MODE: 'x' } })] }).length, 1, 'identical execution policy is order-independent')
+})
+
+test('AEON-1023 the same trace policy still shares one launch and unions screenshot variables', () => {
+  const rows = [row('a', 'a'), row('b', 'b'), row('c', 'c'), row('d', 'd')]
+  const traced = { flags: ['--workers=1', '--trace=retain-on-failure'] }
+  const batches = browserBatches(rows, { groups: [
+    group('a', { ...traced, env: { AEON_DESK_SHOTS: '${RUNNER_TEMP}/a' } }),
+    group('b', { ...traced, env: { RELEASE_LIST_SHOTS: '${RUNNER_TEMP}/b' } }),
+    group('c', { env: { AEON_DESK_SHOTS: '${RUNNER_TEMP}/c' } }),
+    group('d', { env: { RELEASE_LIST_SHOTS: '${RUNNER_TEMP}/d' } }),
+  ] })
+  assert.deepEqual(batches.map(batch => batch.groups), [['a', 'b'], ['c', 'd']])
+  assert.deepEqual(batches[0].flags, ['--trace=retain-on-failure'])
+  assert.deepEqual(batches[1].flags, [])
+  assert.deepEqual(batches[0].env, { AEON_DESK_SHOTS: '${RUNNER_TEMP}/a', RELEASE_LIST_SHOTS: '${RUNNER_TEMP}/b' })
+  assert.deepEqual(batches[1].env, { AEON_DESK_SHOTS: '${RUNNER_TEMP}/c', RELEASE_LIST_SHOTS: '${RUNNER_TEMP}/d' })
+})
+
+test('AEON-1023 a neighbour trace request does not trace the routed-panel launch', () => {
+  // Shard 6 of run 37923530553 inherited retain-on-failure onto dispatch.
+  // The routed panel case then passed 17 of 24 viewports and hit its 120s budget.
+  const rows = [row('ticket-panel', 'routed'), row('access', 'dialogs')]
+  const batches = browserBatches(rows, { groups: [
+    group('dispatch', { specs: [{ file: 'tests/ticket-panel.spec.ts' }] }),
+    group('access-dialogs', { flags: ['--workers=2', '--trace=retain-on-failure'], specs: [{ file: 'tests/access.spec.ts' }] }),
+  ] })
+  assert.equal(batches.length, 2)
+  assert.deepEqual(batches.find(batch => batch.groups.includes('dispatch')).flags, [])
+  assert.ok(batches.find(batch => batch.groups.includes('access-dialogs')).flags.includes('--trace=retain-on-failure'))
 })
 
 test('AEON-1023 browser-only discovery preserves full/catalogue/changed-area decisions and every shard case', async () => {

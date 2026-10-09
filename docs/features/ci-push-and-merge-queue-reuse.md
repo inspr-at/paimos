@@ -8,10 +8,11 @@ complete web catalogue. Case selection, shard weights, required checks and retry
 unchanged. Compatible groups share a supervised Playwright execution and Vite
 server: config, project, remaining flags and host restriction must match, and
 execution environment must match, including presence versus absence. The
-known screenshot output variables are combined when their values do not conflict, and
-failure tracing is retained when any contributing group requests it. The tier
-runner still forces one worker and disables automatic retries. Conflicting
-policies and the separate performance config keep their own execution.
+known screenshot output variables are combined when their values do not conflict.
+Failure tracing stays with the groups that request it and does not spread to a
+neighbour. The tier runner still forces one worker and disables automatic
+retries. Conflicting policies, including trace retention, and the separate
+performance config keep their own execution.
 
 Each browser shard measurement includes `webShardTiming`: monotonic collection,
 planning and run seconds, summed native case durations including explicit
@@ -47,6 +48,17 @@ browser cases and server startup, and establish no end-to-end latency claim.
 Actual browser execution set equality and the requested before/after runtime
 overhead sample remain a coordinator handoff: the remote browser launcher is
 closed pending OPS-247, and this worker is not authorised to push or deploy.
+
+Hosted run 37923530553 then showed the cost of widening trace. Shard 6 put
+dispatch, which does not request tracing, in `release-combined` with traced
+groups. `the routed panel keeps usable list space and stable controls` finished
+17 of 24 viewport iterations and exceeded its 120s budget while following
+PHAROS-14; the manifest's untraced maximum for that file is 102.5s. Trace
+retention is now part of launch compatibility. The same full twelve-shard
+layout plans 25 executions: one untraced UI launch and one traced UI launch on
+every shard, plus the separate performance execution. That is still far below
+the previous 84 group launches, and a group that asked for `retain-on-failure`
+still gets it.
 
 Main-push reuse keeps its existing `CI_TREE_REUSE` semantics: unless set to
 `off`, a successful full merge-group run at the **same commit SHA** can replace
