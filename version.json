@@ -1,12 +1,12 @@
 {
   "product": "PAIMOS AEON",
   "version_scheme": "inspr-calver-3",
-  "version": "261009063244.0.0",
+  "version": "261009095632.0.0",
   "release_channel": "stable",
-  "release_sequence": 127,
-  "codename": "Glassy Geoid",
-  "reserved_at": "2026-10-09T06:32:44Z",
-  "ticket": "AEON-1026",
+  "release_sequence": 128,
+  "codename": "Hidden Helium",
+  "reserved_at": "2026-10-09T09:56:32Z",
+  "ticket": "AEON-1032",
   "unpublished_reservations": [
     "260923134337.0.0",
     "260925231350.0.0",
