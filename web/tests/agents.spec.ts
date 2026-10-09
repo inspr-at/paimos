@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
@@ -56,13 +54,12 @@ test('pi sessions retain their SVG harness icon and provider account label', asy
   await expect(item.locator('.exec-account')).toContainText('Pi · pi / anthropic (local profile)')
   await expect(item.locator('svg[viewBox="165.29 165.29 469.43 469.43"] path').first()).toBeVisible()
   if (process.env.PI_PAIRING_SHOTS) {
-    mkdirSync(process.env.PI_PAIRING_SHOTS, { recursive: true })
     for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: theme })
       await item.scrollIntoViewIfNeeded()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-      await page.screenshot({ path: join(process.env.PI_PAIRING_SHOTS, `pi-agents__${width}__${theme}.png`), fullPage: true })
+      await page.screenshot({ path: test.info().outputPath(`pi-agents__${width}__${theme}.png`), fullPage: true })
     }
   }
 
@@ -323,9 +320,12 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   await expect(details.locator('.msg .msg-time').first()).toHaveAttribute('data-tip', /\d{2}:\d{2}/)
   await details.getByRole('button', { name: 'Reply' }).last().click()
   await expect(details.locator('.replying')).toContainText('Counts are in')
-  await details.getByRole('radio', { name: 'Steer' }).click()
-  await details.getByRole('textbox', { name: 'Message to camy' }).fill('Sort stale hosts last.')
-  await page.keyboard.press('Control+Enter')
+  const field = details.getByRole('textbox', { name: 'Message to camy' })
+  await field.fill('Sort stale hosts last.')
+  // The current composer uses a direct send action; the delivery payload stays exact.
+  await expect(details.locator('.steer-send')).toBeEnabled()
+  const mac = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform))
+  await field.press(mac ? 'Meta+Enter' : 'Control+Enter')
   await expect(details.locator('.msg')).toHaveCount(5)
   const sent = calls.find(c => c.method === 'POST' && c.path.endsWith('/messages'))?.body as Record<string, unknown>
   expect(sent).toMatchObject({ to: 'claude:camy', recipient_session_id: camy, body: 'Sort stale hosts last.', delivery_level: 'steer', expects_reply: false, is_action_request: false, reply_to: '3e000000-0000-4000-8000-000000000004' })
