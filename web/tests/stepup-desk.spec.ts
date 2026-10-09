@@ -121,19 +121,19 @@ for (const theme of ['light', 'dark'] as const) {
     await capture(page, testInfo, `stepup-memo-1024-${theme}`)
   })
 }
-for (const width of [390, 1440]) {
-  test(`an approval memo is pixel-identical with and without step-up requests at ${width}`, async ({ page }, testInfo) => {
+for (const [width, theme] of [[390, 'light'], [1440, 'light'], [1440, 'dark']] as const) {
+  test(`an approval memo is pixel-identical with and without step-up requests at ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     // Decided step-ups only, so the open round and its pager count stay the same.
-    const control = await mockStepups(page, { rows: [] })
+    const control = await mockStepups(page, { rows: [], theme })
     await page.goto('/decision-desk'); await page.getByTestId('desk-row-a:approval-1').click()
     await expect(page.getByRole('heading', { name: 'Allow nodes.read?' })).toBeVisible()
-    const without = await capture(page, testInfo, `approval-memo-${width}`)
+    const without = await capture(page, testInfo, `approval-memo-${width}-${theme}`)
     control.rows.push(request('step-2', { state: 'applied', revision: 2, ...anna }), request('step-4', { state: 'declined', revision: 2, ...anna, decision: 'decline' }))
     await page.reload(); await page.getByTestId('desk-row-a:approval-1').click()
     await expect(page.getByRole('heading', { name: 'Allow nodes.read?' })).toBeVisible()
     await expect(page.getByRole('button', { name: /^Decided 2/ })).toBeAttached()
-    const withStepups = await capture(page, testInfo, `approval-memo-with-stepups-${width}`)
+    const withStepups = await capture(page, testInfo, `approval-memo-with-stepups-${width}-${theme}`)
     expect(withStepups.equals(without), 'approval memo pixels changed').toBe(true)
   })
 }
