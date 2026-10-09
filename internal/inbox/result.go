@@ -3,6 +3,7 @@ package inbox
 
 import (
 	"context"
+	"errors"
 
 	"github.com/inspr-at/paimos/internal/events"
 	stepupwire "github.com/inspr-at/paimos/internal/stepup"
@@ -18,7 +19,7 @@ type Result = stepupwire.OutcomeMessage
 func RecordResult(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Result) error {
 	// Withdrawal and expiry can be settled by the requesting agent. A System
 	// result preserves the no-self-message rule and names the decider in its body.
-	actor, err := systemActor(ctx, tx, p.TenantID)
+	actor, created, err := resultActor(ctx, tx, p.TenantID)
 	if err != nil {
 		return err
 	}
@@ -47,6 +48,11 @@ func RecordResult(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Result)
 	if in.ProjectID != "" {
 		project, typ = &in.ProjectID, "inbox.compat_sent"
 	}
+	if created {
+		if _, err = events.Append(ctx, tx, p, events.Change{Type: "principal.created", After: map[string]any{"id": p.ID, "kind": "agent", "name": "System", "roles": []string{"system"}}}); err != nil {
+			return err
+		}
+	}
 	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: project, Type: typ, After: map[string]string{"id": in.ID, "sender_principal_id": p.ID, "recipient_principal_id": in.RecipientID, "stepup_request_id": in.ID, "outcome_line": in.Body}})
 	if err != nil {
 		return err
@@ -64,4 +70,20 @@ func RecordResult(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Result)
 		}
 	}
 	return nil
+}
+
+// Match the existing System actor's advisory/unique-index protocol, but let
+// RecordResult append first-use audit after all message and receipt writes.
+// Calling aeon_authz_system_actor here would acquire the event counter early.
+func resultActor(ctx context.Context, tx pgx.Tx, tenantID string) (tenant.Principal, bool, error) {
+	p := tenant.Principal{TenantID: tenantID, Kind: tenant.Agent, Name: "System", Roles: []string{"system"}}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-system-actor:' || $1::uuid::text, 0))`, tenantID); err != nil {
+		return p, false, err
+	}
+	err := tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE tenant_id=$1 AND kind='agent' AND name='System' AND roles @> ARRAY['system']::text[] ORDER BY created_at,id LIMIT 1`, tenantID).Scan(&p.ID)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return p, false, err
+	}
+	err = tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'agent','System',ARRAY['system']::text[]) RETURNING id::text`, tenantID).Scan(&p.ID)
+	return p, err == nil, err
 }

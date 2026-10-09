@@ -188,6 +188,17 @@ func TestStepupSessionResultIsAtomicAndBound(t *testing.T) {
 				if _, err := f.d.Admin.Exec(t.Context(), `CREATE FUNCTION reject_stepup_result() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.idempotency_key LIKE 'stepup-result/%' THEN RAISE EXCEPTION 'fixture result rejection'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_stepup_result BEFORE INSERT ON inbox_messages FOR EACH ROW EXECUTE FUNCTION reject_stepup_result()`); err != nil {
 					t.Fatal(err)
 				}
+			} else {
+				// First-use System creation must not acquire the audit counter
+				// before the inbox/FK writes. Inspect actual PostgreSQL locks,
+				// including those acquired inside SQL functions and triggers.
+				var systemCount int
+				if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM principals WHERE tenant_id=$1 AND name='System' AND roles @> ARRAY['system']::text[]`, f.agent.TenantID).Scan(&systemCount); err != nil || systemCount != 0 {
+					t.Fatalf("fixture must exercise first-use System creation: %d %v", systemCount, err)
+				}
+				if _, err := f.d.Admin.Exec(t.Context(), `CREATE FUNCTION guard_stepup_result_lock_order() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF EXISTS(SELECT 1 FROM pg_locks WHERE pid=pg_backend_pid() AND relation='event_counters'::regclass AND mode='RowExclusiveLock') THEN RAISE EXCEPTION 'fixture event counter before result rows'; END IF; RETURN NEW; END $$; CREATE TRIGGER guard_stepup_result_lock_order BEFORE INSERT ON inbox_messages FOR EACH ROW EXECUTE FUNCTION guard_stepup_result_lock_order()`); err != nil {
+					t.Fatal(err)
+				}
 			}
 			out, err := f.m.decide(t.Context(), f.person, r.ID, input(r), "approve", func(pgx.Tx, ApprovalRequest) (string, time.Time, error) { return "oidc_reauth", f.now, nil })
 			if reject {
