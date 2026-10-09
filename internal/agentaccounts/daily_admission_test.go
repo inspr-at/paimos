@@ -11,6 +11,7 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -128,4 +129,99 @@ func TestDailyAdmissionRechecksCurrentPlanAtReservationAndClaim(t *testing.T) {
 	ctx = context.WithValue(ctx, clockKey{}, now.Add(2*time.Minute+time.Nanosecond))
 	now = now.Add(2*time.Minute + time.Nanosecond)
 	check(t, false, "daily_limit_unknown")
+}
+
+// Risk: a weekly/monthly fact with missing fields disappears from the overview
+// and is mistaken for a door that has never reported a daily percentage.
+func TestDailyAdmissionIncompleteFactsFailClosed(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	for _, window := range []string{"weekly", "monthly"} {
+		for _, missing := range []string{"percentage", "reading_time", "reset"} {
+			t.Run(window+"/"+missing, func(t *testing.T) {
+				f := readinessWorld(t, "daily-incomplete", now)
+				fact := ReadinessFactWrite{ResourceID: bResource(t, f), WindowKey: window + ":", Source: "harness", ObservedAt: now, ReadingAt: &now, ResetsAt: timePtr(now.Add(5 * 24 * time.Hour)), UsedPercent: agentplan.Number(40), CreditState: "unknown", StopKind: "none"}
+				switch missing {
+				case "percentage":
+					fact.UsedPercent = nil
+					fact.Remaining = agentplan.Number(10) // Retain the measured timestamp.
+				case "reading_time":
+					fact.UsedPercent, fact.ReadingAt = nil, nil
+				case "reset":
+					fact.ResetsAt = nil
+				}
+				callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{fact}}}), 200, nil)
+				if scalar(t, f.admin, `SELECT count(*) FROM account_capacity_readings WHERE account_id=$1`, f.account.ID) != 0 || scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key=$2`, fact.ResourceID, fact.WindowKey) != 1 {
+					t.Fatal("fixture must retain a fact-only incomplete window")
+				}
+				ctx := context.WithValue(dbtest.Seed(t.Context()), clockKey{}, now)
+				if err := db.InTenant(ctx, appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+					a, err := getAccount(ctx, tx, f.account.ID)
+					if err != nil {
+						return err
+					}
+					for _, claiming := range []bool{false, true} {
+						_, wait, err := admission(ctx, tx, a, a.Windows, now, 0, runRow{Purpose: "managed", CapacityOverride: "now"}, claiming)
+						if err != nil {
+							return err
+						}
+						if wait == nil || wait.Code != "daily_limit_unknown" || wait.RunNowAllowed {
+							t.Fatalf("incomplete %s fact admitted (claiming=%v): %+v", missing, claiming, wait)
+						}
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}
+
+// Risk: a retained pre-link legacy window with a later reset outranks a
+// current fact window, hiding exhaustion during reservation and claim.
+func TestDailyAdmissionCurrentFactSurvivesPreLinkWindow(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "daily-mixed-binding", now)
+	linked := now.Add(-5 * time.Minute)
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET linked_at=$2 WHERE id=$1`, f.account.ID, linked); err != nil {
+		t.Fatal(err)
+	}
+	resource := bResource(t, f)
+	resets := now.Add(5 * 24 * time.Hour)
+	for i, used := range []float64{40, 50} {
+		read := now.Add(time.Duration(i-1) * time.Minute)
+		fact := ReadinessFactWrite{ResourceID: resource, WindowKey: "weekly:", Source: "harness", ObservedAt: read, ReadingAt: &read, ResetsAt: &resets, UsedPercent: &used, CreditState: "unknown", StopKind: "none"}
+		callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{fact}}}), 200, nil)
+	}
+	ctx := context.WithValue(tenant.WithPrincipal(dbtest.Seed(t.Context()), f.runner), clockKey{}, now)
+	if err := db.InTenant(ctx, appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+		return ingestReadings(ctx, tx, f.runner, f.account.ID, []capacity.Reading{{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: 10, ResetsAt: now.Add(7 * 24 * time.Hour), ReadAt: linked.Add(-time.Minute), Source: "harness"}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM account_capacity_readings WHERE account_id=$1`, f.account.ID) != 1 || scalar(t, f.admin, `SELECT count(*) FROM account_daily_observations WHERE resource_id=$1`, resource) != 2 {
+		t.Fatal("fixture must retain pre-link legacy evidence and the current fact baseline")
+	}
+	_, end, err := agentplan.LocalDay(now, "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(ctx, appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+		a, err := getAccount(ctx, tx, f.account.ID)
+		if err != nil {
+			return err
+		}
+		for _, claiming := range []bool{false, true} {
+			_, wait, err := admission(ctx, tx, a, a.Windows, now, 0, runRow{Purpose: "managed", CapacityOverride: "now"}, claiming)
+			if err != nil {
+				return err
+			}
+			if wait == nil || wait.Code != "daily_limit" || wait.Until == nil || !wait.Until.Equal(end) || wait.RunNowAllowed {
+				t.Fatalf("pre-link window hid current exhaustion (claiming=%v): %+v", claiming, wait)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

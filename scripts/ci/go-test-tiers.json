@@ -692,6 +692,10 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCostLimitRequiresPricedRunAccounting","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestDailyAdmissionCurrentFactSurvivesPreLinkWindow","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestDailyAdmissionIncompleteFactsFailClosed","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestDailyAdmissionRechecksCurrentPlanAtReservationAndClaim","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy","tier":"ESSENTIAL"}
