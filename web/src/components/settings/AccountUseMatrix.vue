@@ -212,9 +212,18 @@ function pageKeys(event: KeyboardEvent) {
   if (menu.value || form.value || document.querySelector('dialog[open]') || !canUndo.value) return
   event.preventDefault(); undo()
 }
+// Whether the matrix scrolls sideways is decided when it appears or the frame resizes, never while ticking.
+const scroller = ref<HTMLElement>(), overflowing = ref(false)
+let sizes: ResizeObserver | null = null
+watch(scroller, element => {
+  sizes?.disconnect(); sizes = null
+  if (!element) return
+  const measure = () => { overflowing.value = element.scrollWidth > element.clientWidth + 1 }
+  sizes = new ResizeObserver(measure); sizes.observe(element); measure()
+})
 const onFocus = () => { if (!busy.value) load(true) }
 onMounted(() => { load(); window.addEventListener('keydown', pageKeys); window.addEventListener('focus', onFocus) })
-onBeforeUnmount(() => { window.removeEventListener('keydown', pageKeys); window.removeEventListener('focus', onFocus) })
+onBeforeUnmount(() => { sizes?.disconnect(); window.removeEventListener('keydown', pageKeys); window.removeEventListener('focus', onFocus) })
 // Another person or workspace: drop the matrix, the Undo and any open form.
 watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new Set(); last.value = null; menu.value = null; form.value = null; said.value = ''; busy.value = ''; confirmedHere.value = false; if (owner) load() })
 </script>
@@ -226,7 +235,7 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
     <p v-else-if="state === 'error'" class="empty" role="alert">Where accounts may work could not be read. <button type="button" class="btn sm" @click="load()">Try again</button></p>
     <template v-else-if="matrix">
       <div v-if="matrix.rules.confirmation_required || confirmedHere" class="confirm" role="region" aria-label="Confirm the matrix">
-        <p><b>Looks right?</b> Every account is still allowed everywhere, exactly as before the matrix. Confirm once; change ticks any time.</p>
+        <p><b>Looks right?</b> The matrix was carried over so every account kept working as before. Confirm once that it fits; change ticks any time.</p>
         <button v-if="matrix.rules.confirmation_required" type="button" class="btn sm primary" data-use-confirm :disabled="!!busy" @click="confirm">Looks right</button>
         <span v-else class="done"><AppIcon name="check" :size="14" />Confirmed</span>
       </div>
@@ -250,14 +259,14 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
       </div>
       <p class="sr-only" role="status" aria-live="polite">{{ said }}</p>
 
-      <div v-if="rows.length && columns.length" class="matrix-scroll" tabindex="-1">
+      <div v-if="rows.length && columns.length" ref="scroller" class="matrix-scroll" tabindex="-1">
         <table class="grid" aria-label="Where accounts may work" :aria-busy="!!busy" :style="{ '--cols': columns.length }" @keydown="gridKeys">
           <thead><tr>
             <th scope="col" class="corner">Account</th>
             <th v-for="(c, ci) in columns" :key="c.id" scope="col" :data-use-col="c.id">
               <div class="col-head">
                 <input type="checkbox" class="tri" :data-r="0" :data-c="ci + 1" :checked="columnState(c.id, rows, set) === 'all'" :indeterminate="columnState(c.id, rows, set) === 'some'" :aria-label="`Every account in ${c.name}`" @change="bulkColumn($event, c)" />
-                <span class="col-name"><b v-clip-tip>{{ c.name }}</b><small>{{ c.kind === 'default' ? 'Default · work without a project' : c.new_accounts_override === 'deny' ? 'New accounts: never' : 'Context' }}</small></span>
+                <span class="col-name"><b v-clip-tip>{{ c.name }}</b><small v-clip-tip>{{ c.kind === 'default' ? 'Also work without a project' : c.new_accounts_override === 'deny' ? 'New accounts: never' : 'Context' }}</small></span>
                 <button type="button" class="icon-btn flat" :aria-label="`More for ${c.name}`" :aria-expanded="menu?.context.id === c.id" @click="openMenu(c, $event)"><AppIcon name="more" :size="14" /></button>
               </div>
             </th>
@@ -278,7 +287,8 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
           </tbody>
         </table>
       </div>
-      <p v-else class="empty">{{ !rows.length ? 'No accounts yet. New accounts follow the switch above.' : 'No contexts yet.' }}</p>
+      <p v-if="rows.length && columns.length && overflowing" class="scroll-hint"><AppIcon name="arrow" :size="14" />Scroll sideways for all {{ columns.length }} contexts</p>
+      <p v-else-if="!rows.length || !columns.length" class="empty">{{ !rows.length ? 'No accounts yet. New accounts follow the switch above.' : 'No contexts yet.' }}</p>
       <p v-if="truncated" class="footnote" role="note"><AppIcon name="info" :size="14" /><span>Showing the first 200 accounts and contexts. Allow all, rows and columns still apply to all of them.</span></p>
       <p v-if="holding" class="footnote"><AppIcon name="lock" :size="14" /><span><b>{{ holding.name }}</b> holds projects waiting for a decision. No account works there until the project gets a context in its settings.</span></p>
 
@@ -344,6 +354,7 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
 .cell { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 52px; cursor: pointer; border-radius: var(--radius-row); }
 .cell:hover { background: var(--row-hover); }
 .grid input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(--primary); cursor: pointer; }
+.scroll-hint { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--ink-3); }
 .footnote { display: flex; gap: 8px; margin-top: 12px; font-size: 12.5px; color: var(--ink-3); }
 .footnote svg { flex: none; margin-top: 2px; }
 .outside { margin-top: 22px; }
@@ -368,7 +379,10 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
 @media (max-width: 720px) {
   .switch-row { grid-template-columns: minmax(0, 1fr); }
   .tools .add { margin-left: 0; }
-  .grid .corner { width: 200px; min-width: 200px; }
+  .grid { min-width: calc(160px + var(--cols, 2) * 96px); }
+  .grid .corner { width: 160px; min-width: 160px; }
+  .row-head { gap: 8px; padding: 6px 8px; }
+  .col-head { gap: 6px; padding: 6px 2px 6px 8px; }
 }
 @media (pointer: coarse) {
   .seg button, .tools .btn { min-height: 44px; }

@@ -285,7 +285,7 @@ test('context menu sets "never" for new accounts; confirmation and running work 
   })
   await open(page)
   const confirm = zone(page).getByRole('region', { name: 'Confirm the matrix' })
-  await expect(confirm).toContainText('Looks right? Every account is still allowed everywhere')
+  await expect(confirm).toContainText('Looks right? The matrix was carried over so every account kept working as before.')
   const guard = await controlStability(page, { newAccounts: sw(page, 'New accounts'), allowAll: zone(page).getByRole('button', { name: 'Allow all' }), firstCell: cell(page, ACCOUNTS.main, C.def) })
   await guard.check(() => confirm.getByRole('button', { name: 'Looks right' }).click())
   await expect(confirm).toContainText('Confirmed')
