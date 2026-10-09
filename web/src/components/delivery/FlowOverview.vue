@@ -4,7 +4,7 @@
 // with a brush for the visible window. Drag the brush to pan, its edges to resize,
 // click beside it to centre it there; the overview playhead moves the time.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { panBy, setWindow, tickStep, timeLabel, type FlowData, type LaneSet, type Timeline } from '../../lib/deliveryFlow'
+import { panBy, placeOverviewTargets, setWindow, tickStep, timeLabel, type FlowData, type LaneSet, type Timeline } from '../../lib/deliveryFlow'
 import type { FlowText } from '../../lib/deliveryFlowText'
 
 const props = defineProps<{ data: FlowData; sets: LaneSet[]; timeline: Timeline; text: FlowText }>()
@@ -50,42 +50,13 @@ const map = computed(() => {
   return { lines, segs, bands, targets, ticks, nowX: live ? g.X(now) : null }
 })
 const brush = computed(() => { const g = geo.value, t = props.timeline; return { x0: g.X(t.v0), x1: g.X(t.v1) } })
-// Touch and phone (AEON-1007): a 44 px hit stays inside the overview. It reaches outward
-// so a narrow brush's handles do not cover each other, then shifts in only to stay on
-// screen and off the playhead.
+// Touch and phone (AEON-1007): 44 px hits stay inside the strip and off each other.
 const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
 const hit = computed(() => coarse || geo.value.W < 640 ? 44 : 0)
 const playX = computed(() => geo.value.X(props.timeline.T))
-const playHit = computed(() => {
-  const width = hit.value || 14, limit = geo.value.W
-  const hw = Math.min(width, Math.max(0, limit))
-  return { hx: Math.min(Math.max(0, playX.value - width / 2), Math.max(0, limit - hw)), hw, hy: 0, hh: OV_H - 14 }
-})
-const handles = computed(() => {
-  const { x0, x1 } = brush.value, h = hit.value, limit = geo.value.W, play = playHit.value
-  const overlaps = (hx: number, hw: number, other: { hx: number; hw: number } = play) => hx < other.hx + other.hw && other.hx < hx + hw
-  const inside = (preferred: number, width: number) => {
-    const hw = Math.min(width, Math.max(0, limit))
-    return { hx: Math.min(Math.max(0, preferred), Math.max(0, limit - hw)), hw }
-  }
-  const placed = ([[x0, 'hl'], [x1, 'hr']] as const).map(([x, side]) => {
-    if (!h) return { x, side, hx: x - 4, hw: 8, hy: 10, hh: OV_H - 33 }
-    let box = inside(side === 'hl' ? x - h + 6 : x - 6, h)
-    if (overlaps(box.hx, box.hw)) {
-      const outward = inside(side === 'hl' ? play.hx - h : play.hx + play.hw, h)
-      const inward = inside(side === 'hl' ? play.hx + play.hw : play.hx - h, h)
-      box = overlaps(outward.hx, outward.hw) ? inward : outward
-    }
-    return { x, side, hx: box.hx, hw: box.hw, hy: (OV_H - 14 - h) / 2, hh: h }
-  })
-  const [left, right] = placed
-  if (h && left && right && overlaps(left.hx, left.hw, right)) {
-    const rightHx = Math.max(0, limit - right.hw)
-    const leftHx = Math.max(0, Math.min(left.hx, rightHx - left.hw))
-    if (!overlaps(leftHx, left.hw) && !overlaps(rightHx, right.hw)) { left.hx = leftHx; right.hx = rightHx }
-  }
-  return placed
-})
+const hits = computed(() => placeOverviewTargets({
+  width: geo.value.W, left: brush.value.x0, right: brush.value.x1, play: playX.value, hit: hit.value, height: OV_H,
+}))
 const valueText = computed(() => `${timeLabel(props.data, props.timeline.v0)} – ${timeLabel(props.data, props.timeline.v1)}`)
 
 type Drag = { kind: 'ovph' | 'hl' | 'hr' | 'brush' | 'bg'; x: number; v0: number; v1: number; moved: boolean; id: number }
@@ -146,14 +117,14 @@ function onKey(event: KeyboardEvent) {
       <text v-for="tick in map.ticks" :key="tick.x" class="ln-ovax" :x="tick.x" :y="OV_H - 3" text-anchor="middle">{{ tick.label }}</text>
       <line v-if="map.nowX != null" class="ov-now" :x1="map.nowX" :x2="map.nowX" y1="4" :y2="OV_H - 14" />
       <rect class="ln-brush" data-part="brush" :x="brush.x0" y="1" :width="Math.max(6, brush.x1 - brush.x0)" :height="OV_H - 15" rx="4" />
-      <g v-for="h in handles" :key="h.side">
-        <rect class="ln-handle" :data-part="h.side" :x="h.x - 4" y="10" width="8" :height="OV_H - 33" rx="3" />
-        <path class="ln-grip" :d="`M${h.x - 1},${(OV_H - 14) / 2 - 4}v8M${h.x + 1},${(OV_H - 14) / 2 - 4}v8`" />
+      <g v-for="h in hits.handles" :key="h.side">
+        <rect class="ln-handle" :data-part="h.side" :x="h.gx - 4" y="10" width="8" :height="OV_H - 33" rx="3" />
+        <path class="ln-grip" :d="`M${h.gx - 1},${(OV_H - 14) / 2 - 4}v8M${h.gx + 1},${(OV_H - 14) / 2 - 4}v8`" />
         <rect class="ln-hhit" :data-part="h.side" :data-testid="`flow-overview-${h.side}`" :x="h.hx" :y="h.hy" :width="h.hw" :height="h.hh" />
       </g>
       <line class="ln-ph" :x1="playX" :x2="playX" y1="1" :y2="OV_H - 14" />
       <path class="ln-phtri" :d="`M${playX - 5},1h10l-5,6z`" />
-      <rect class="ln-phhit" data-part="ovph" data-testid="flow-overview-playhead" :x="playHit.hx" :y="playHit.hy" :width="playHit.hw" :height="playHit.hh" />
+      <rect class="ln-phhit" data-part="ovph" data-testid="flow-overview-playhead" :x="hits.play.hx" :y="hits.play.hy" :width="hits.play.hw" :height="hits.play.hh" />
     </svg>
   </div>
 </template>

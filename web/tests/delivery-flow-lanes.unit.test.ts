@@ -4,8 +4,8 @@
 // keys or a follow tick move the time when they should move only the window.
 import { expect, it } from 'vitest'
 import {
-  CHAR_W, createTimeline, fitAll, fitLabel, following, followTick, keyInput, laneFrame, laneModel, MAX_ROWS, panBy, placeIncidentCaption, resetTimeline, rowPieces, setTime, timeLabel, wheelInput, zoomPreset, zoomTo,
-  type FlowData, type FlowRun, type FlowStep, type Lane,
+  CHAR_W, createTimeline, fitAll, fitLabel, following, followTick, keyInput, laneFrame, laneModel, MAX_ROWS, panBy, placeIncidentCaption, placeOverviewTargets, resetTimeline, rowPieces, setTime, timeLabel, wheelInput, zoomPreset, zoomTo,
+  type FlowData, type FlowRun, type FlowStep, type Lane, type OverviewHit,
 } from '../src/lib/deliveryFlow'
 import { exampleLive, EXAMPLE_NOW } from '../src/lib/deliveryFlowExample'
 import { hintParts, flowText } from '../src/lib/deliveryFlowText'
@@ -180,6 +180,39 @@ it('following: Live keeps now at 65 % until the playhead leaves now; a run keeps
   const v0 = replay.v0
   replay.T = 120; followTick(replay)
   expect(replay.v0).toBe(v0)
+})
+
+it('a 15 min window at the phone overview edge keeps the three resize targets apart', () => {
+  // 320 px overview, the whole example run (210 min). The review's right-end case
+  // put both 44 px handles on x=232–276 and the playhead over both grips.
+  const width = 320, span = 210, frame = laneFrame(width)
+  const X = (minute: number) => frame.x0 + (minute / span) * (frame.x1 - frame.x0)
+  const area = (a: OverviewHit, b: OverviewHit) => Math.max(0, Math.min(a.hx + a.hw, b.hx + b.hw) - Math.max(a.hx, b.hx))
+  const ownsGrip = (handle: { hx: number; hw: number; gx: number }, play: OverviewHit) => {
+    expect(handle.gx - 4).toBeGreaterThanOrEqual(handle.hx)
+    expect(handle.gx + 4).toBeLessThanOrEqual(handle.hx + handle.hw)
+    expect(handle.gx + 4 <= play.hx || handle.gx - 4 >= play.hx + play.hw).toBe(true)
+  }
+  const right = placeOverviewTargets({ width, left: X(span - 15), right: X(span), play: X(span), hit: 44, height: 64 })
+  expect(right.handles.map(handle => handle.hx)).toEqual([188, 232])
+  expect(right.play.hx).toBe(276)
+  expect([right.handles[0]!.hw, right.handles[1]!.hw, right.play.hw]).toEqual([44, 44, 44])
+  expect(area(right.handles[0]!, right.handles[1]!) + area(right.handles[0]!, right.play) + area(right.handles[1]!, right.play)).toBe(0)
+  expect(right.play.hx + right.play.hw).toBe(width)
+  for (const handle of right.handles) ownsGrip(handle, right.play)
+  const left = placeOverviewTargets({ width, left: X(0), right: X(15), play: X(0), hit: 44, height: 64 })
+  expect(area(left.handles[0]!, left.handles[1]!) + area(left.handles[0]!, left.play) + area(left.handles[1]!, left.play)).toBe(0)
+  expect(left.handles[0]!.hx).toBeGreaterThanOrEqual(0)
+  expect(left.handles[1]!.hx).toBeGreaterThanOrEqual(left.handles[0]!.hx + left.handles[0]!.hw)
+  for (const handle of left.handles) ownsGrip(handle, left.play)
+  // Fit all still puts the right handle on the screen edge and leaves both grips on the brush.
+  const fit = placeOverviewTargets({ width, left: X(0), right: X(span), play: X(135), hit: 44, height: 64 })
+  expect(fit.handles[1]!.hx + fit.handles[1]!.hw).toBe(width)
+  expect(fit.handles[0]!.gx).toBeCloseTo(X(0), 5)
+  expect(fit.handles[1]!.gx).toBeCloseTo(X(span), 5)
+  expect(area(fit.handles[0]!, fit.handles[1]!) + area(fit.handles[0]!, fit.play) + area(fit.handles[1]!, fit.play)).toBe(0)
+  const fine = placeOverviewTargets({ width: 1440, left: 400, right: 900, play: 700, hit: 0, height: 64 })
+  expect(fine.handles.map(handle => [handle.gx, handle.hw])).toEqual([[400, 8], [900, 8]])
 })
 
 it('the hint draws its keys instead of typing arrow symbols, in both languages', () => {

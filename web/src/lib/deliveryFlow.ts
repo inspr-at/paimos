@@ -234,6 +234,79 @@ export function rowPieces<T extends { step: { start: number; end: number } }>(ro
   return out
 }
 
+// ---------- Overview touch targets ----------
+export interface OverviewHit { hx: number; hw: number; hy: number; hh: number }
+export interface OverviewHandleHit extends OverviewHit {
+  /** Brush edge the handle belongs to. */
+  x: number
+  side: 'hl' | 'hr'
+  /** Where the 8 px grip is drawn, inside this handle's own target. */
+  gx: number
+}
+/**
+ * Phone and touch hits for the overview. A 44 px target stays inside the strip.
+ * Handles reach outward so a narrow brush does not stack them, then, at a range
+ * end where that outward slot is already taken, sit in order beside the playhead.
+ * The drawn grip stays inside its own target, so the playhead cannot cover it.
+ */
+export function placeOverviewTargets(input: {
+  width: number
+  left: number
+  right: number
+  play: number
+  /** 44 on a phone or a coarse pointer; 0 keeps the fine-pointer grip. */
+  hit: number
+  height: number
+}): { play: OverviewHit; handles: OverviewHandleHit[] } {
+  const limit = Math.max(0, input.width), height = input.height
+  const clampBox = (preferred: number, size: number) => {
+    const hw = Math.min(size, limit)
+    return { hx: Math.min(Math.max(0, preferred), Math.max(0, limit - hw)), hw }
+  }
+  const overlaps = (a: { hx: number; hw: number }, b: { hx: number; hw: number }) => a.hx < b.hx + b.hw && b.hx < a.hx + a.hw
+  const grip = (anchor: number, hx: number, hw: number) => {
+    const inset = 4
+    return anchor >= hx + inset && anchor <= hx + hw - inset ? anchor : hx + hw / 2
+  }
+  if (!input.hit) {
+    const playBox = clampBox(input.play - 7, 14)
+    return {
+      play: { ...playBox, hy: 0, hh: height - 14 },
+      handles: ([['hl', input.left], ['hr', input.right]] as const).map(([side, x]) => ({ x, side, hx: x - 4, hw: 8, hy: 10, hh: height - 33, gx: x })),
+    }
+  }
+  const size = input.hit
+  const playBox = clampBox(input.play - size / 2, size)
+  const placed = ([['hl', input.left], ['hr', input.right]] as const).map(([side, x]) => {
+    let box = clampBox(side === 'hl' ? x - size + 6 : x - 6, size)
+    if (overlaps(box, playBox)) {
+      const outward = clampBox(side === 'hl' ? playBox.hx - size : playBox.hx + playBox.hw, size)
+      const inward = clampBox(side === 'hl' ? playBox.hx + playBox.hw : playBox.hx - size, size)
+      box = overlaps(outward, playBox) ? inward : outward
+    }
+    return { x, side, ...box, hy: (height - 14 - size) / 2, hh: size, gx: x }
+  })
+  const left = placed[0]!, right = placed[1]!
+  if (overlaps(left, right)) {
+    const gaps = [{ start: 0, end: playBox.hx }, { start: playBox.hx + playBox.hw, end: limit }]
+    const anchor = (left.x + right.x) / 2
+    const fits = gaps.filter(gap => gap.end - gap.start >= size * 2)
+    const pool = fits.length ? fits : gaps
+    const distance = (gap: { start: number; end: number }) => anchor < gap.start ? gap.start - anchor : anchor > gap.end ? anchor - gap.end : 0
+    const gap = pool.slice().sort((a, b) => distance(a) - distance(b) || (b.end - b.start) - (a.end - a.start))[0]
+    if (gap && gap.end - gap.start >= size * 2) {
+      if (playBox.hx >= gap.end) { right.hx = gap.end - size; left.hx = right.hx - size }
+      else if (playBox.hx + playBox.hw <= gap.start) { left.hx = gap.start; right.hx = left.hx + size }
+      else { left.hx = Math.min(Math.max(gap.start, left.x - size + 6), gap.end - size * 2); right.hx = left.hx + size }
+    } else if (limit >= size * 3) {
+      if (anchor >= limit / 2) { playBox.hx = limit - size; right.hx = playBox.hx - size; left.hx = right.hx - size }
+      else { playBox.hx = 0; left.hx = size; right.hx = size * 2 }
+    }
+  }
+  for (const handle of placed) handle.gx = grip(handle.x, handle.hx, handle.hw)
+  return { play: { ...playBox, hy: 0, hh: height - 14 }, handles: placed }
+}
+
 // ---------- The time window ----------
 /** The shortest window the zoom allows, in minutes. */
 export const MIN_SPAN = 4

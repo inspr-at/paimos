@@ -6592,6 +6592,8 @@
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 400 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"a 15 min window at a phone overview edge keeps both handles draggable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"at Fit all a phone overview keeps each 44 px handle inside and a drag at either edge resizes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"lanes zoom, pan and move the time without moving a control, and a click never moves the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -14649,6 +14651,8 @@
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"Live opens at 45 min with now at 65 % (20 on a phone) and presets zoom around now while following","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"Shift+←/→ move the time a minute, plain arrows pan, and Home/End jump within the run","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"a 15 min window at the phone overview edge keeps the three resize targets apart","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"a label falls back from tag and text, to the text, to the duration, to an ellipsis that keeps \"since\"","tier":"ESSENTIAL"}
     ,
