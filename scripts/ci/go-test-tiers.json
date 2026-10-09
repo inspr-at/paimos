@@ -3230,6 +3230,8 @@
     ,
     {"kind":"go","package":"internal/attachments","name":"TestGCWaitsForReusedBlobReferenceCommit","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/attachments","name":"TestGzipAttachmentUploadAndIsolatedDownload","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/attachments","name":"TestHTMLPreviewCapabilities","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestHTMLPreviewDisabledAndSessionRevoked","tier":"GATED-FULL"}
@@ -3247,6 +3249,8 @@
     {"kind":"go","package":"internal/attachments","name":"TestSandboxHostBoundary","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestSandboxOrigin","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/attachments","name":"TestStorageGzipPreservesBytesAndLimit","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestUploadDedupeVariantsETagIsolationUndoAndOps","tier":"ESSENTIAL"}
     ,
@@ -7901,6 +7905,8 @@
     {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceCreatesWorkLeafAndReopensDoneParent","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceFenceAllowsTenantKeyShare","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceReleaseCopySurvivesEditsAndDoneGate","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceTenantBeforeTree","tier":"NIGHTLY"}
     ,
