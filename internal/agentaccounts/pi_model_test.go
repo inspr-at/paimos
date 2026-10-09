@@ -42,10 +42,10 @@ func TestPiModelUnderDenyRequiresAccountUseManage(t *testing.T) {
 		if enabled {
 			return fmt.Errorf("legacy pi model bypassed deny")
 		}
-		if _, err := tx.Exec(t.Context(), `WITH r AS (INSERT INTO roles(tenant_id,key,name) VALUES($1,'account-only','Accounts only') RETURNING id) INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,id,unnest(ARRAY['account.manage','account.read']) FROM r`, admin.TenantID); err != nil {
+		if _, err := tx.Exec(t.Context(), `WITH r AS (INSERT INTO roles(tenant_id,key,name) VALUES($1,'account_only','Accounts only') RETURNING id) INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,id,unnest(ARRAY['account.manage','account.read']) FROM r`, admin.TenantID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='account-only') WHERE principal_id=$1 AND scope_type='workspace'`, admin.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='account_only') WHERE principal_id=$1 AND scope_type='workspace'`, admin.ID)
 		return err
 	}); err != nil {
 		t.Fatal(err)

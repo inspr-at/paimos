@@ -155,10 +155,10 @@ func TestPersonModelWritersUnderDenyRecheckPermissions(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_observations(tenant_id,harness,model,effort,source) VALUES($1,'codex','gpt-6.8-sol','high','fixture')`, p.TenantID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `WITH r AS (INSERT INTO roles(tenant_id,key,name) VALUES($1,'model-only','Models only') RETURNING id) INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,id,unnest(ARRAY['models.manage','models.read']) FROM r`, p.TenantID); err != nil {
+		if _, err := tx.Exec(t.Context(), `WITH r AS (INSERT INTO roles(tenant_id,key,name) VALUES($1,'model_only','Models only') RETURNING id) INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,id,unnest(ARRAY['models.manage','models.read']) FROM r`, p.TenantID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='model-only') WHERE principal_id=$1 AND scope_type='workspace'`, p.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='model_only') WHERE principal_id=$1 AND scope_type='workspace'`, p.ID)
 		return err
 	}); err != nil {
 		t.Fatal(err)

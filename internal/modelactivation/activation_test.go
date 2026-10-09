@@ -184,8 +184,22 @@ func TestModelActivationFailedInsertRetryAndPersonAuthority(t *testing.T) {
 	d := dbtest.Open(t)
 	p := fixture(t, d, "authority", "deny", true)
 	fenced(t, d, p, func(tx pgx.Tx) error {
+		// Policy must not turn an invalid NULL state into a valid disabled pin.
+		sub, err := tx.Begin(t.Context())
+		if err != nil {
+			return err
+		}
+		_, err = sub.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled) VALUES($1,'null-state','1','codex','openai','gpt-6-sol','high','standard',NULL)`, p.TenantID)
+		var nullErr *pgconn.PgError
+		if !errors.As(err, &nullErr) || nullErr.Code != "23502" {
+			_ = sub.Rollback(t.Context())
+			return fmt.Errorf("NULL state bypassed existing constraint: %v", err)
+		}
+		if err = sub.Rollback(t.Context()); err != nil {
+			return err
+		}
 		invalid := pin("INVALID")
-		_, err := Activate(t.Context(), tx, p, invalid, Person)
+		_, err = Activate(t.Context(), tx, p, invalid, Person)
 		var pgerr *pgconn.PgError
 		if !errors.As(err, &pgerr) || pgerr.Code != "23514" {
 			return fmt.Errorf("wrong insert failure: %v", err)
@@ -201,11 +215,11 @@ func TestModelActivationFailedInsertRetryAndPersonAuthority(t *testing.T) {
 	})
 	// A custom role keeps the existing models.manage permission only.
 	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `WITH r AS (INSERT INTO roles(tenant_id,key,name) VALUES($1,'model-only','Models only') RETURNING id) INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,id,'models.manage' FROM r`, p.TenantID)
+		_, err := tx.Exec(t.Context(), `WITH r AS (INSERT INTO roles(tenant_id,key,name) VALUES($1,'model_only','Models only') RETURNING id) INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,id,'models.manage' FROM r`, p.TenantID)
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='model-only') WHERE principal_id=$1 AND scope_type='workspace'`, p.ID)
+		_, err = tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='model_only') WHERE principal_id=$1 AND scope_type='workspace'`, p.ID)
 		return err
 	}); err != nil {
 		t.Fatal(err)

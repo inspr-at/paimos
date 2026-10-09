@@ -113,6 +113,7 @@ func prepareCatalogDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal) 
 	}
 	profiles := catalogProfiles()
 	ids := make(map[string]string, len(profiles))
+	disabled := make(map[string]bool, len(profiles))
 	seeded := make([]Profile, 0, len(profiles))
 	for _, profile := range profiles {
 		row, err := insertActivatedProfile(ctx, tx, p, profileWrite{
@@ -122,15 +123,17 @@ func prepareCatalogDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal) 
 		if err != nil {
 			return nil, err
 		}
-		if row.Enabled {
-			ids[profile.Slug] = row.ID
-		}
+		ids[profile.Slug] = row.ID
+		disabled[profile.Slug] = !row.Enabled
 		seeded = append(seeded, row)
 	}
 	routes := make([]Route, 0)
 	for _, route := range defaultRoutes(profiles) {
 		id := ids[route.Slug]
 		if id == "" {
+			return nil, fail(http.StatusInternalServerError, "catalog route is missing its profile")
+		}
+		if disabled[route.Slug] {
 			continue
 		}
 		stored := Route{Role: route.Role, Priority: route.Priority, ProfileID: id, State: "available"}
@@ -148,17 +151,9 @@ func prepareCatalogDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal) 
 	}{seeded, routes}}}, nil
 }
 
-func insertProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite) (Profile, error) {
-	return insertProfileWithState(ctx, tx, tenantID, in, true)
-}
-
 // Discovery records a pin without granting it to wildcard accounts.
 func insertObservedProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite) (Profile, error) {
-	return insertProfileWithState(ctx, tx, tenantID, in, false)
-}
-
-func insertProfileWithState(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite, enabled bool) (Profile, error) {
-	return insertActivatedProfile(ctx, tx, tenant.Principal{TenantID: tenantID}, in, enabled, "")
+	return insertActivatedProfile(ctx, tx, tenant.Principal{TenantID: tenantID}, in, false, "")
 }
 
 func insertActivatedProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite, enabled bool, cause modelactivation.Cause) (Profile, error) {

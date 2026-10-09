@@ -77,7 +77,7 @@ func Activate(ctx context.Context, tx pgx.Tx, p tenant.Principal, pin Pin, cause
 			return out, permissionError{}
 		}
 		if err = authz.RequireTx(ctx, tx, p, pin.Permission, authz.Scope{}); err != nil {
-			return out, errors.Join(permissionError{}, err)
+			return out, err
 		}
 		var rule string
 		if err = tx.QueryRow(ctx, `SELECT new_models FROM account_use_rules WHERE tenant_id=$1`, p.TenantID).Scan(&rule); err != nil {
@@ -85,7 +85,7 @@ func Activate(ctx context.Context, tx pgx.Tx, p tenant.Principal, pin Pin, cause
 		}
 		if pin.Enabled && rule == "deny" {
 			if err = authz.RequireTx(ctx, tx, p, "account.use.manage", authz.Scope{}); err != nil {
-				return out, errors.Join(permissionError{}, err)
+				return out, err
 			}
 		}
 	}

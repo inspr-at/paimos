@@ -2,12 +2,12 @@
 package modelregistry
 
 import (
-	"github.com/inspr-at/paimos/internal/modelactivation"
 	"net/http"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelactivation"
 	"github.com/jackc/pgx/v5"
 )
 

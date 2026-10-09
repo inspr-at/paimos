@@ -9,7 +9,7 @@ DECLARE
     activated timestamptz;
 BEGIN
     PERFORM set_config('aeon.model_activation_cause','',true);
-    IF NOT NEW.enabled THEN RETURN NEW; END IF;
+    IF NEW.enabled IS DISTINCT FROM true THEN RETURN NEW; END IF;
     SELECT new_models,revision,enforced_at INTO STRICT rule,rule_revision,activated
         FROM account_use_rules WHERE tenant_id=NEW.tenant_id;
     IF activated IS NULL OR rule='allow' OR cause='person'
