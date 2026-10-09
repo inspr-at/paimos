@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Delivery › Flow lanes (AEON-994 draft 5, package 5): the lane model and the time
-// window. Lanes are actors; rows inside a lane are reserved once per data set, so
+// Delivery › Flow lanes (AEON-994 draft 5, packages 5 and 6): the lane model and the
+// time window. Lanes are actors; rows inside a lane are reserved once per data set, so
 // zooming and panning never move a lane. Time is in minutes: on an absolute axis
 // minutes after `origin` (epoch ms), on a relative axis minutes after the run's start.
 import { reactive } from 'vue'
@@ -11,15 +11,36 @@ export const LANES: readonly Lane[] = ['you', 'lead', 'ops', 'review', 'build', 
 export type StepKind = 'work' | 'wait' | 'rework'
 export type FlowLevel = 'simple' | 'expert'
 export interface Words { en: string; de: string }
+export type StepOutcome = 'ok' | 'changes' | 'red' | 'flaky' | 'degraded' | 'green'
+export type WaitReason = 'reviewer' | 'queue' | 'dependency' | 'human_gate' | 'rerun' | 'release_train'
+/** Usual minutes of the same step (p50, p90) and Arion's target, where known. */
+export interface StepNorm { p50: number | null; p90: number | null; arion: number | null }
+/** Recorded facts of a step (package 6): the moment panel and the tables read them. */
+export interface StepFacts {
+  id?: string; round?: number; outcome?: StepOutcome | null; waitReason?: WaitReason | null
+  /** Who or what a wait is for, already in words (a run tag, a person's role). */
+  waitsFor?: string | null
+  source?: 'github_app' | 'paimos' | 'ops_rollout' | 'arion'; norm?: StepNorm | null; model?: string | null
+  /** Still running: the end is the expected one. */
+  open?: boolean
+}
 export interface FlowStep {
   start: number; end: number; kind: StepKind; lane: Lane
   expert: Words; simple: Words
-  side?: boolean; incident?: boolean; after?: boolean; stepKey?: string
+  side?: boolean; incident?: boolean; after?: boolean; stepKey?: string; facts?: StepFacts
 }
-export interface FlowIncident { start: number; end: number; expert: Words; simple: Words }
+export interface FlowIncident { start: number; end: number; expert: Words; simple: Words; open?: boolean }
+/** A run's progress and estimate at the moment of reading (package 6), in minutes on the data's axis. */
+export interface RunFacts {
+  kind: 'release' | 'change'; ref: string
+  started: number | null; ended: number | null
+  pct: number | null; currentStepId: string | null
+  eta: { p50: number | null; p90: number | null; basis: 'history' | 'ops' | 'none'; reason: string | null }
+  gate: string | null
+}
 export interface FlowRun {
   id: string; tag: string; title: Words; steps: FlowStep[]
-  incident?: FlowIncident; target?: { start: number; minutes: number }; isTarget?: boolean
+  incident?: FlowIncident; target?: { start: number; minutes: number }; isTarget?: boolean; facts?: RunFacts
 }
 export interface FlowSetInput { title?: Words; runs: FlowRun[]; lanes: readonly Lane[]; main: FlowRun; multi?: boolean }
 export interface FlowData {
@@ -59,6 +80,19 @@ export function laneModel(data: FlowData): LaneSet[] {
 
 /** The steps a run walks through, alongside work left out. */
 export const criticalPath = (run: FlowRun) => run.steps.filter(step => !step.side && !step.after).sort((a, b) => a.start - b.start)
+/** Where the run ends: the end of its last critical step. */
+export function runEnd(run: FlowRun): number {
+  const path = criticalPath(run)
+  return path.length ? Math.max(...path.map(step => step.end)) : 0
+}
+/** The critical step at a moment: the one running, else the last one before it, else the first. */
+export function stepAt(path: readonly FlowStep[], at: number): FlowStep | null {
+  if (!path.length) return null
+  const running = path.filter(step => at >= step.start - 1e-6 && at < step.end - 1e-6)
+  if (running.length) return running[running.length - 1]!
+  const before = path.filter(step => step.end <= at + 1e-6)
+  return before.length ? before[before.length - 1]! : path[0]!
+}
 
 // ---------- Words and times ----------
 const NB = ' '
@@ -209,12 +243,15 @@ export interface Timeline {
   /** Playhead, visible window, whole range, play range. */
   T: number; v0: number; v1: number; r0: number; r1: number; p0: number; p1: number
   now: number | null; follow: boolean
+  /** Epoch ms of minute 0. A later read can move midnight without moving the person. */
+  origin: number | null
 }
 export interface TimelineDefaults { narrow: boolean }
 export const LIVE_AT = 0.65
 
 /** Default windows: Live 45 min (20 on phone) with now at 65 %; otherwise 40 min (15) from the start. */
 export function resetTimeline(t: Timeline, data: FlowData, { narrow }: TimelineDefaults) {
+  t.origin = data.origin
   t.r0 = data.range[0]; t.r1 = data.range[1]; t.p0 = data.play[0]; t.p1 = data.play[1]; t.now = data.now; t.follow = true
   if (data.now != null) { t.T = data.now; setWindow(t, narrow ? 20 : 45, data.now, LIVE_AT) }
   else { t.T = t.p0; setWindow(t, narrow ? 15 : 40, t.p0, 0.1) }
@@ -299,6 +336,29 @@ export function keyInput(t: Timeline, key: string, shiftKey: boolean): KeyResult
   return null
 }
 
+/**
+ * New data for the same view (a live update, a refetched run): ranges and "now" move,
+ * the person's window and time stay. Minute coordinates belong to an origin, so a read
+ * that moves midnight (an older run dropped out) is translated before the clamp.
+ * Following Live keeps the playhead on the new now.
+ */
+export function refreshTimeline(t: Timeline, data: FlowData) {
+  const wasNow = atNow(t)
+  if (t.origin != null && data.origin != null && t.origin !== data.origin) {
+    const shift = (t.origin - data.origin) / 60_000
+    t.T += shift
+    t.v0 += shift
+    t.v1 += shift
+  }
+  t.origin = data.origin
+  t.r0 = data.range[0]; t.r1 = data.range[1]; t.p0 = data.play[0]; t.p1 = data.play[1]; t.now = data.now
+  const w = Math.min(t.v1 - t.v0, t.r1 - t.r0)
+  t.v0 = clamp(t.v0, t.r0, t.r1 - w); t.v1 = t.v0 + w
+  if (data.now != null && wasNow) t.T = data.now
+  else t.T = clamp(t.T, t.r0, t.r1)
+  followTick(t)
+}
+
 export function createTimeline(): Timeline {
-  return reactive<Timeline>({ T: 0, v0: 0, v1: 1, r0: 0, r1: 1, p0: 0, p1: 1, now: null, follow: true })
+  return reactive<Timeline>({ T: 0, v0: 0, v1: 1, r0: 0, r1: 1, p0: 0, p1: 1, now: null, follow: true, origin: null })
 }

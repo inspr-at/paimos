@@ -28,6 +28,8 @@ const ALLOW: { file: string; includes: string; why: string }[] = [
   { file: 'lib/deliveryNumbersText.ts', includes: "const TO = '→'", why: 'approved AEON-994 Delivery copy uses the arrow as the word "to" (run start → run end, PR opened → merged); text, not an icon' },
   { file: 'lib/deliveryFlowExample.ts', includes: "'Build ×4', 'Build ×4'", why: 'approved AEON-994 run copy: four changes built together, a multiplicity in text, not an icon' },
   { file: 'lib/deliveryFlowExample.ts', includes: "'Review ×4 · ok', 'Review ×4 · ok'", why: 'approved AEON-994 run copy: four reviews, a multiplicity in text, not an icon' },
+  { file: 'lib/deliveryFlowText.ts', includes: "export const TO = '→'", why: 'approved AEON-994 Flow copy uses the arrow as the word "to" (a to l, start to end); text, not an icon (AEON-1006)' },
+  { file: 'lib/deliveryFlowText.ts', includes: "export const TIMES = '×'", why: 'approved AEON-994 Flow copy: a multiple in text (1x and 2x speed, "3x the target"), not an icon (AEON-1006)' },
   { file: 'lib/workKindsCopy.ts', includes: 'Settings › Models', why: 'approved AEON-854 breadcrumb in the kinds lead; it names the Models board in a sentence and is not an icon' },
 ]
 
