@@ -497,7 +497,7 @@ func ledgerAttemptObsolete(record Record, run Run) bool {
 		// Route did not give this daemon a confirmed account binding. An
 		// independently observed binding makes this pending attempt obsolete.
 		return run.AccountID != ""
-	case "starting", "running", "waiting", "completed", "failed", "cancelled":
+	case "starting", "running", "waiting", "completed", "failed", "cancelled", "ownership_lost":
 		return true
 	default:
 		return false
