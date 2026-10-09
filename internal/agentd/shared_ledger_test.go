@@ -443,7 +443,7 @@ func TestSharedLedgerCrashBeforeIntentAndUnreachableRecovery(t *testing.T) {
 					t.Fatal("pre-intent orphan was routed", err, d)
 				}
 			} else {
-				if err == nil || len(d.Groups) != 1 || s.journal.Snapshot()[0].LaunchState != launchRoutePending {
+				if err != nil || len(d.Groups) != 1 || s.journal.Snapshot()[0].LaunchState != launchRoutePending {
 					t.Fatal("unreachable server forgot attempt", err, d)
 				}
 				peer := fixtureLedgerPeer(t, s, 2)
@@ -560,6 +560,8 @@ func TestSharedLedgerEnrollmentCrashAndOldServerFailClosed(t *testing.T) {
 func TestSharedLedgerGenericConflictKeepsAttempt(t *testing.T) {
 	s, a, _ := testSupervisor(t)
 	api, _ := enableLedgerFixture(t, s, a)
+	var reasons []string
+	s.pollDiagnostic = func(reason string) { reasons = append(reasons, reason) }
 	s.probedAccounts["account"] = true
 	api.routeErr = &client.StatusError{Status: 409, Message: "fixture capacity wait"}
 	if err := s.StartRun(t.Context(), a.run); err == nil {
@@ -568,8 +570,11 @@ func TestSharedLedgerGenericConflictKeepsAttempt(t *testing.T) {
 	if err := s.recoverUnlaunched(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RefreshLedger(t.Context(), s.ledgerBinding.Config); err == nil {
-		t.Fatal("conflict silently cleared")
+	if err := s.RefreshLedger(t.Context(), s.ledgerBinding.Config); err != nil {
+		t.Fatal("conflict stopped unrelated admission", err)
+	}
+	if !slices.Equal(reasons, []string{"ledger_route_unconfirmed"}) {
+		t.Fatal("conflict was not diagnosed", reasons)
 	}
 	d, _, err := s.ledger.Snapshot()
 	if err != nil || len(d.Groups) != 1 || s.journal.Snapshot()[0].LaunchState != launchRoutePending {

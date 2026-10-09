@@ -200,6 +200,8 @@ type Supervisor struct {
 	verificationDiagnostic func(string, string, string, string)
 	pollDiagnosticMu       sync.Mutex
 	pollDiagnosticLast     map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
+	ledgerRouteUnconfirmed bool                 // Protected by mu; unresolved attempts retain their own holds.
+	ledgerReplayAfter      string               // Protected by dispatchMu; rotate bounded replay fairly.
 	loginRequired          map[string]bool
 	signInUnverified       map[string]bool
 	probeFailureReasons    map[string]string // Bounded local causes, protected by mu.
@@ -804,6 +806,12 @@ func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
 	reasons := make([]string, 0, 3)
 	if reason != "" {
 		reasons = append(reasons, reason)
+	}
+	s.mu.Lock()
+	ledgerRouteUnconfirmed := s.ledgerRouteUnconfirmed
+	s.mu.Unlock()
+	if ledgerRouteUnconfirmed {
+		reasons = append(reasons, "ledger_route_unconfirmed")
 	}
 	// Multiple accounts produce at most one line per readiness cause per poll.
 	failed, timedOut, unsettled := false, false, false

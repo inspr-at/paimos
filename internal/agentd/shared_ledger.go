@@ -372,6 +372,20 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 	if len(records) > 4096 {
 		return agentsetup.ErrLedgerUnavailable
 	}
+	if next := slices.IndexFunc(records, func(r Record) bool { return r.RunID > s.ledgerReplayAfter }); next > 0 {
+		records = slices.Concat(records[next:], records[:next])
+	}
+	// Replay cannot consume the poll's entire HTTP budget. A timed-out or refused
+	// intent retains its own slot and logins; other records and admission continue.
+	replayCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	unconfirmed := false
+	defer func() {
+		s.mu.Lock()
+		s.ledgerRouteUnconfirmed = unconfirmed
+		s.mu.Unlock()
+		s.reportPollDiagnostic("")
+	}()
 	for _, r := range records {
 		if !noLocalProcess(r) {
 			proof := s.ledgerExitProof
@@ -402,30 +416,48 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 			if err = s.ledger.CheckGroup(s.ledgerBinding.Member.ID, r.LedgerGeneration, r.LedgerGroup); err != nil {
 				return err
 			}
-			route, e := s.api.Route(ctx, r.RunID, s.daemonID, candidateIDs(r.RouteCandidates), s.estimates)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if replayCtx.Err() != nil {
+				unconfirmed = true
+				continue
+			}
+			s.ledgerReplayAfter = r.RunID
+			routeCtx, routeCancel := context.WithTimeout(replayCtx, 500*time.Millisecond)
+			route, e := s.api.Route(routeCtx, r.RunID, s.daemonID, candidateIDs(r.RouteCandidates), s.estimates)
+			routeCancel()
 			if e != nil {
 				// A generic 409 includes capacity/grant/generation refusals. Release only
 				// after independent run state confirms this attempt can no longer route.
 				var status *client.StatusError
 				if errors.As(e, &status) && status.Status == 409 {
-					run, readErr := s.api.GetRun(ctx, r.RunID)
-					if readErr == nil && run.ID == r.RunID && run.AgentPrincipalID == r.PrincipalID && run.WorkOrderID == r.WorkOrderID && (run.Status == "completed" || run.Status == "failed" || run.Status == "cancelled") {
+					readCtx, readCancel := context.WithTimeout(replayCtx, 500*time.Millisecond)
+					run, readErr := s.api.GetRun(readCtx, r.RunID)
+					readCancel()
+					if readErr == nil && ledgerAttemptObsolete(r, run) {
 						if err = s.releaseLedger(r); err != nil {
 							return err
 						}
-						r.LaunchState, r.State = launchRoutePending, run.Status
-						r.LedgerGroup, r.LedgerGeneration = "", ""
-						r.RouteCandidates = nil
-						if err = s.journal.Put(r); err != nil {
+						// Nothing was forked for an attempt. Remove its private marker
+						// only after owner release; a crash before Delete replays safely.
+						if err = s.journal.Delete(r.RunID); err != nil {
 							return err
 						}
-						s.setLedgerRecord(r)
+						s.mu.Lock()
+						delete(s.runs, r.RunID)
+						s.mu.Unlock()
 						continue
 					}
 				}
-				return e
+				unconfirmed = true
+				continue
 			}
 			if err = s.confirmLedgerRoute(&r, route); err != nil {
+				if errors.Is(err, ErrScope) {
+					unconfirmed = true
+					continue
+				}
 				return err
 			}
 			r.LaunchState, r.State = launchPrepared, "claim_pending"
@@ -449,6 +481,22 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func ledgerAttemptObsolete(record Record, run Run) bool {
+	if run.ID != record.RunID || run.AgentPrincipalID != record.PrincipalID || run.WorkOrderID != record.WorkOrderID {
+		return false
+	}
+	switch run.Status {
+	case "queued":
+		// Route did not give this daemon a confirmed account binding. An
+		// independently observed binding makes this pending attempt obsolete.
+		return run.AccountID != ""
+	case "starting", "running", "waiting", "completed", "failed", "cancelled":
+		return true
+	default:
+		return false
+	}
 }
 func (s *Supervisor) setLedgerRecord(r Record) {
 	s.mu.Lock()
