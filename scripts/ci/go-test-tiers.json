@@ -694,6 +694,12 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCostLimitRequiresPricedRunAccounting","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestDailyAdmissionCurrentFactSurvivesPreLinkWindow","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestDailyAdmissionIncompleteFactsFailClosed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestDailyAdmissionRechecksCurrentPlanAtReservationAndClaim","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestDailyPlanReadKeepsDecliningWeeklyPercent","tier":"ESSENTIAL"}
@@ -2377,6 +2383,8 @@
     {"kind":"go","package":"internal/agentplan","name":"TestDailyHarnessSummaryAndUnknownUsage","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentplan","name":"TestDailySettingsValidationLocalDayAndLimitMath","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentplan","name":"TestDailyStartDecisionsFailClosedAndRespectLadderOrWait","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentplan","name":"TestDecodePlanAndLegacyMapping","tier":"GATED-FULL"}
     ,
@@ -5212,6 +5220,12 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryAlertsEpisodesIsolationAndSettings","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryBackfillSkipsConfirmedAbsentPreflight","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryCompleteJobMapServesEveryProject","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryConfirmedFlakesAndSuspectsStayApart","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowCompletionKeepsFlake","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowETAFromHistoryOrNoneWithReason","tier":"ESSENTIAL"}
@@ -5268,6 +5282,10 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowWorkflowRunShowsRunningChecks","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryLegacyCatchupLeavesAbsentPreflightUncovered","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryLegacyJobMapIsRefreshedOnce","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryManageExplicitAgentGrant","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent","tier":"ESSENTIAL"}
@@ -5298,6 +5316,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsFromFixedFacts","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsJobsPassFillsRunsWithoutJobFacts","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsNeverReportMissingDataAsZero","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsQueueRunsCountOnlyMergedPulls","tier":"ESSENTIAL"}
@@ -5310,17 +5330,39 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsReleaseFactsRoundTrip","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsReportsReviewAuditsAndEscapedDefects","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsWebhookRecordsEachEventKind","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsWebhookStoresJobFactsAndHeadTree","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsWindowsCoverPreviousAndBuckets","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryNumbersEqualMeasureV2","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryPreflightAbsenceFinishesTheBackfill","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryPreflightCatchupListsOnlyPreflight","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryPreflightDisconnectEndsObservation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryPreflightRedRateIsItsOwnLine","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryQueueEjectionsAndUnclassifiedRunsPerHundredMergedPRs","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryReconciliationHealsMissedWebhooksAndFanoutRetry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryRequiredChecksGreenSitsBesideWorkflowGreen","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryReviewAuditsAndEscapedDefectsCountBySeverity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryReviewsConcurrentClaimsHaveOneOwner","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryReviewsSeverityFloorAndBoundedObservations","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryReviewsShadowFixCapFollowUpReplayAndIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryRunnerWaitIsTheP90OfTheWorstJobPerRun","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliverySettingsAndIngressBinding","tier":"ESSENTIAL"}
     ,
@@ -5337,6 +5379,10 @@
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingRefusesPreflightWithoutGrantingActions","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingShadowOwnershipReplayAndIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryTargetsAreArionV5","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryTimeToFirstGreenPerCommitAndBranchKeepsNeverGreen","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryUIFactsHoldReplayAndAvailability","tier":"ESSENTIAL"}
     ,
@@ -5364,6 +5410,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeBackfillPreviewApplyAndSafety","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeDoneOwnerFallbackWithoutLeadSettings","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeDoneProtectsOwnershipParentsAndHumanChecks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeDoneQueueConstituentsRequireActualMerge","tier":"ESSENTIAL"}
@@ -5385,6 +5433,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestQueueQuarantineBindsHeadClassifiesFailuresAndIsolates","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestQueueWorkflowReadRejectsWrongSubjectAndPartialSuite","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestReadJobFactsKeepsEveryConclusionAndTheWorstName","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestReconcileContinuesAfterConfirmedMissingPull","tier":"ESSENTIAL"}
     ,
@@ -5447,6 +5497,8 @@
     {"kind":"go","package":"internal/embedding","name":"TestWorkerKeepsStaleVectorOffTheRow","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/embedding","name":"TestWorkerStoresRewritesAndIsolates","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionDailyLimitUnknownAndMidnightWait","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionExplicitAuthorityFinalWriteAndIdempotentReplay","tier":"ESSENTIAL"}
     ,
@@ -6649,6 +6701,10 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestClosedBoardAnswersExplicitPlacementButNotReviewDispatch","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCommandTemplates","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestDailyReviewKeepsReviewQualifiedAccounts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestDefaultRefreshNoNetworkAndOneAuditPerRun","tier":"GATED-FULL"}
     ,

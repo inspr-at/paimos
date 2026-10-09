@@ -103,7 +103,7 @@ test('tiles and charts tell partial, missing and clipped data apart and never sh
   const release = world.holdNext()
   await page.goto('/p/AEON/delivery')
   const tiles = page.getByTestId('delivery-tiles')
-  await expect(tiles.locator('[aria-busy="true"]')).toHaveCount(10)
+  await expect(tiles.locator('[aria-busy="true"]')).toHaveCount(18)
   release()
   await expect(tiles.locator('[aria-busy="true"]')).toHaveCount(0)
   // 30 days reach back before the backfill (11 Sept): partial, with the coverage named.
@@ -127,7 +127,7 @@ test('tiles and charts tell partial, missing and clipped data apart and never sh
   world.answer(500, { error: 'boom' })
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
   await expect(page.getByRole('alert')).toContainText('Delivery numbers could not be loaded.')
-  await expect(tiles.locator('.t-value.empty')).toHaveCount(10)
+  await expect(tiles.locator('.t-value.empty')).toHaveCount(18)
   await expect(tiles.locator('.t-value.empty').first()).toHaveText('Not loaded')
   world.metrics({})
   await page.getByRole('button', { name: 'Retry', exact: true }).click()

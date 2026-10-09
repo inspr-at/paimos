@@ -232,7 +232,7 @@ components:
       required: [code, run_now_allowed]
       description: Server routing advice; times use the account owner schedule. Does not grant dispatch authority.
       properties:
-        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state, residency]}
+        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state, residency, daily_limit, daily_limit_unknown]}
         host_reason: {type: string, description: Content-free host admission reason; present only on a capacity wait.}
         until: {type: string, format: date-time}
         read_at: {type: string, format: date-time}
@@ -361,10 +361,10 @@ components:
       additionalProperties: false
       required: [number, key, label, unit, source, definition, status, reason, latest, windows, daily, series, target]
       properties:
-        number: {type: integer, minimum: 1, maximum: 10, description: 'Project Arion number this metric belongs to; numbers 3 and 7 have two metrics.'}
-        key: {type: string, enum: [pr_ci_wall, queue_run_wall, first_attempt_green, flaked_failures, time_to_first_green, pr_open_to_merged, queue_runs_per_pr, review_time, review_changes_share, merge_rounds_model_share, release_queue_to_live, nightly_green]}
+        number: {type: integer, minimum: 1, maximum: 18, description: 'Project Arion number this metric belongs to: 1 to 10 are the original numbers (3 and 7 have two metrics), 11 to 18 the Arion v5 readings.'}
+        key: {type: string, enum: [pr_ci_wall, queue_run_wall, first_attempt_green, required_checks_green, flaked_failures, time_to_first_green, time_to_first_green_commit, pr_open_to_merged, queue_runs_per_pr, queue_ejections, queue_unclassified, review_time, review_changes_share, merge_rounds_model_share, release_queue_to_live, nightly_green, runner_wait, preflight_red_rate, review_audits, escaped_defects]}
         label: {type: string}
-        unit: {type: string, enum: [minutes, percent, runs]}
+        unit: {type: string, enum: [minutes, percent, runs, per100, audits, defects]}
         source: {type: string, description: 'Where the samples come from.'}
         definition: {type: string, description: 'What one sample measures, written for the page.'}
         status: {type: string, enum: [ok, partial, no_data], description: 'Status of the 30-day window.'}
@@ -415,14 +415,14 @@ components:
             additionalProperties: false
             required: [kind, key, at, outcome]
             properties:
-              kind: {type: string, enum: [review, merge_round, release]}
+              kind: {type: string, enum: [review, merge_round, release, review_audit, escaped_defect]}
               key: {type: string, pattern: '^[A-Za-z0-9._:/+-]{1,128}$', description: 'Idempotency key per kind, for example a release version or a gate run id.'}
-              pull_request: {type: [integer, 'null'], minimum: 1, description: 'Required for merge_round.'}
+              pull_request: {type: [integer, 'null'], minimum: 1, description: 'Required for merge_round and review_audit (the audited pull request); for escaped_defect the pull request that caused the defect (this or release is required).'}
               head_sha: {type: [string, 'null'], pattern: '^[0-9a-f]{40}$'}
               started_at: {type: [string, 'null'], format: date-time, description: 'Review requested, or the release PR entering the merge queue. Required for review and release.'}
               at: {type: string, format: date-time, description: 'Verdict, merge round or live time.'}
-              outcome: {type: string, enum: [ok, changes, scripted, model, live, failed], description: 'review ok or changes; merge_round scripted or model; release live or failed.'}
-              release: {type: [string, 'null'], pattern: '^[A-Za-z0-9._-]{1,32}$', description: 'Release only: the release name, for example 126.'}
+              outcome: {type: string, enum: [ok, changes, scripted, model, live, failed, clean, low, medium, high], description: 'review ok or changes; merge_round scripted or model; release live or failed; review_audit clean, low, medium or high (the highest severity among its findings); escaped_defect low, medium or high.'}
+              release: {type: [string, 'null'], pattern: '^[A-Za-z0-9._-]{1,32}$', description: 'Release: the release name, for example 126. escaped_defect: the release that caused the defect (this or pull_request is required).'}
               tag: {type: [string, 'null'], pattern: '^[A-Za-z0-9._+-]{1,128}$', description: 'Release only: the version tag.'}
               healthy_at: {type: [string, 'null'], format: date-time, description: 'Release only, outcome live: when the live version was healthy again after its live check; at or after at.'}
     DeliveryMetricPoint:
@@ -504,9 +504,10 @@ components:
         days: {type: integer, enum: [7, 30, 90, 180, 365], description: 'Whole UTC days ending today.'}
         status: {type: string, enum: [ok, partial, no_data]}
         n: {type: integer, minimum: 0, description: 'Samples in the window.'}
-        value: {type: [number, 'null'], description: 'p50 for durations, the mean for runs per PR, the share in percent for rates.'}
+        value: {type: [number, 'null'], description: 'p50 for durations, the mean for runs per PR, the share in percent for rates, p90 for runner wait, the events per 100 merged pull requests for queue readings, the count for audits and defects. Null, never 0, when the confirmed flake share is withheld because case, workflow revision and runner class are not stored; counts then still name workflow_rescue and suspect.'}
         p50: {type: [number, 'null']}
         p90: {type: [number, 'null']}
+        counts: {type: object, additionalProperties: {type: integer, minimum: 0}, description: 'Exact numbers behind the value, named by the metric: never_green, superseded and first_run_green for time to first green; confirmed, suspect and workflow_rescue for flakes (workflow_rescue is a same-run pass, not a confirmed flake); events and base for readings per 100 merged pull requests; high, medium, low and clean for audits and defects. Omitted when a metric names none.'}
         coverage: {$ref: '#/components/schemas/DeliveryMetricCoverage'}
         previous: {oneOf: [{$ref: '#/components/schemas/DeliveryMetricPrevious'}, {type: 'null'}], description: 'The same number of days just before the window, for the change; null when no comparison is computed.'}
     DeliveryMetrics:
@@ -517,7 +518,7 @@ components:
         project_id: {type: string, format: uuid}
         generated_at: {type: string, format: date-time}
         source: {oneOf: [{$ref: '#/components/schemas/DeliveryMetricSource'}, {type: 'null'}], description: 'Null when no repository is linked.'}
-        metrics: {type: array, maxItems: 12, items: {$ref: '#/components/schemas/DeliveryMetric'}}
+        metrics: {type: array, maxItems: 24, items: {$ref: '#/components/schemas/DeliveryMetric'}}
     DeliveryMetricsBackfill:
       type: object
       additionalProperties: false
@@ -525,11 +526,13 @@ components:
       properties:
         state: {type: string, enum: [running, done]}
         since: {type: string, format: date-time}
-        phase: {type: string, enum: [runs, pulls, done]}
+        phase: {type: string, enum: [runs, pulls, jobs, done], description: 'jobs is the pass that reads job conclusions after the runs and pulls are in. A deferred jobs failure keeps phase jobs until retry_at.'}
         day: {type: [string, 'null'], format: date, description: 'Next UTC day of runs to read.'}
         calls: {type: integer, minimum: 0, description: 'GitHub reads in this step.'}
         runs: {type: integer, minimum: 0}
         pulls: {type: integer, minimum: 0}
+        jobs: {type: integer, minimum: 0, description: 'Runs whose jobs this step read (the jobs pass).'}
+        retry_at: {type: [string, 'null'], format: date-time, description: 'When a jobs read failed and no other job work is eligible, the earliest time to call again. Absent when this step has no deferred retry.'}
         truncated: {type: boolean, description: 'A day had more runs than GitHub lists; metrics stay partial.'}
     DeliveryMetricsBackfillInput:
       type: object

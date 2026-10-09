@@ -102,7 +102,7 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	role, _ := roleByName(out.Role)
 	qualified := map[string]*agentaccounts.Account{}
 	for _, step := range steps {
-		reasons := skipReasons(step, role, resolveQuery{Role: out.Role, AuthorFamily: author, Harness: q.Harness}, now, nil)
+		reasons := skipReasons(step, role, resolveQuery{Role: out.Role, AuthorFamily: author, Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, nil)
 		for _, policy := range policies {
 			if allowed, reason := policy.Decision(author, step.Profile.Family); !allowed {
 				reasons = append(reasons, reason)
@@ -131,8 +131,8 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 					}
 				}
 				if account != nil && step.Profile.Harness == "grok" {
-					var native bool
-					if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id WHERE e.account_id=$1 AND q.details->>'platform'='darwin' AND q.details->>'arch'='arm64')`, account.ID).Scan(&native); err != nil {
+					native, err := nativeGrokEnrolled(ctx, tx, account.ID)
+					if err != nil {
 						return out, err
 					}
 					if !native {
@@ -211,4 +211,36 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		out.Trace.QualifyingAccountIDs = []string{out.Account.ID}
 	}
 	return out, nil
+}
+
+// nativeGrokEnrolled is the review boundary for native Grok: only an account
+// enrolled from a macOS arm64 computer qualifies.
+func nativeGrokEnrolled(ctx context.Context, tx pgx.Tx, accountID string) (bool, error) {
+	var native bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id WHERE e.account_id=$1 AND q.details->>'platform'='darwin' AND q.details->>'arch'='arm64')`, accountID).Scan(&native)
+	return native, err
+}
+
+// reviewQualifiedAccountIDs is the set the review route itself admits for a
+// profile: the approved principal, project and enrollment checks, and the
+// native Grok boundary. Later narrowing, such as the daily ceiling, starts here.
+func reviewQualifiedAccountIDs(ctx context.Context, tx pgx.Tx, profile Profile, projectID, requirement string, now time.Time) ([]string, error) {
+	accounts, err := agentaccounts.ReviewAccounts(ctx, tx, profile.ID, profile.Harness, projectID, now, requirement)
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{}
+	for _, a := range accounts {
+		if profile.Harness == "grok" {
+			native, err := nativeGrokEnrolled(ctx, tx, a.ID)
+			if err != nil {
+				return nil, err
+			}
+			if !native {
+				continue
+			}
+		}
+		ids = append(ids, a.ID)
+	}
+	return ids, nil
 }

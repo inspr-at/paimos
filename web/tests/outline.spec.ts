@@ -168,7 +168,8 @@ test('search shows matches with their ancestors, dimmed and opened, and counts m
   await expect(row(page, 'PHAROS-12')).toHaveClass(/dimmed/)
   await expect(row(page, 'PHAROS-11')).not.toHaveClass(/dimmed/)
   await expect(row(page, 'PHAROS-13')).toHaveAttribute('aria-level', '3')
-  await expect(page.getByRole('toolbar').getByText('2 tickets')).toBeVisible()
+  // The count lives in the footer (footer-summary.spec.ts); the toolbar no longer repeats it.
+  await expect(page.getByRole('toolbar').getByText('2 tickets')).toHaveCount(0)
   await expect(outline(page).locator('mark')).toHaveText(['Hetzner', 'Hetzner'])
   await row(page, 'PHAROS-12').getByRole('button', { name: 'Collapse PHAROS-12' }).click()
   await expect(row(page, 'PHAROS-13')).toHaveCount(0)

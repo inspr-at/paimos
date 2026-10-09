@@ -124,6 +124,7 @@ components:
         limit_used_pct: {type: [number, 'null'], minimum: 0, maximum: 100}
         floor_pct: {type: [number, 'null'], minimum: 0, maximum: 100}
         resets_at: {type: [string, 'null'], format: date-time}
+        no_daily_limit: {type: boolean, description: 'True only for a privacy-visible API-billed door; absence means false.'}
         read_at: {type: [string, 'null'], format: date-time}
         freshness: {type: string, enum: [fresh, stale, expired, unknown]}
         resets: {$ref: '#/components/schemas/AccountResetCreditsOrNull'}

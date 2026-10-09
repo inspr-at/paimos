@@ -55,15 +55,17 @@ it('each tile shows its verdict as shape and word: the icon follows the level', 
 it('the summary counts numbers on target and names the closest and the biggest gap from this window’s numbers', () => {
   const page = simpleNumbersOf(deliveryMetrics() as never, 7, 'ready', false, 'en')
   expect(page.summary).toEqual({
-    kind: 'ready', big: 'None of the 10 numbers with a target is on target yet.',
-    gaps: [{ label: 'Closest', name: 'how long a review takes', gap: '1.6× the target' }, { label: 'Biggest gap', name: 'from release to live', gap: 'about 5× the target' }],
-    week: 'Last 7 days vs. the 7 before: 0 better · 0 worse · 7 steady · 3 without a comparison',
+    kind: 'ready', big: '1 of 13 numbers are on target.',
+    gaps: [{ label: 'Closest', name: 'how long a review takes', gap: '1.6× the target' }, { label: 'Biggest gap', name: 'waiting for a runner', gap: 'about 6× the target' }],
+    week: 'Last 7 days vs. the 7 before: 0 better · 0 worse · 12 steady · 6 without a comparison',
     charts: 'Small charts: one point per day · hatched = no data yet (history starts 11 Sept)',
   })
   expect(page.sections.map(section => [section.title, section.count, section.tiles.map(tile => tile.key)])).toEqual([
-    ['Making a change ready', '0 of 4 on target', ['pr_ci_wall', 'first_attempt_green', 'time_to_first_green', 'review_time']],
-    ['Getting it merged', '0 of 4 on target', ['pr_open_to_merged', 'queue_run_wall', 'queue_runs_per_pr', 'merge_rounds_model_share']],
+    ['Making a change ready', '1 of 6 on target', ['pr_ci_wall', 'first_attempt_green', 'time_to_first_green', 'review_time', 'runner_wait', 'flaked_failures', 'time_to_first_green_commit', 'preflight_red_rate']],
+    ['Getting it merged', '0 of 5 on target', ['pr_open_to_merged', 'queue_run_wall', 'queue_runs_per_pr', 'merge_rounds_model_share', 'queue_ejections', 'queue_unclassified']],
     ['Shipping it', '0 of 2 on target', ['release_queue_to_live', 'nightly_green']],
+    // Audits and defects have no target, so the section says no count rather than "0 of 0".
+    ['Keeping it safe', '', ['review_audits', 'escaped_defects']],
   ])
   const nightly = page.sections[2].tiles[1]
   expect(nightly.verdict).toMatchObject({ level: 'far', gap: 'red every night since 5 Oct' })
@@ -73,9 +75,9 @@ it('the summary counts numbers on target and names the closest and the biggest g
   const review = data.metrics.find(metric => metric.key === 'review_time')!
   review.windows[0] = { ...review.windows[0], value: 7, p50: 7 }
   const better = simpleNumbersOf(data as never, 7, 'ready', false, 'en')
-  expect(better.summary).toMatchObject({ big: '1 of 10 numbers are on target.', gaps: [{ label: 'Closest', name: 'queue tries per change', gap: '1.6× the target' }, { label: 'Biggest gap', name: 'from release to live' }] })
-  expect(better.sections[0].count).toBe('1 of 4 on target')
-  expect(simpleNumbersOf(deliveryMetrics() as never, 7, 'ready', false, 'de').summary).toMatchObject({ big: 'Noch keine der 10 Zahlen mit Ziel ist im Ziel.', gaps: [{ label: 'Am nächsten dran', name: 'Wie lange ein Review dauert' }, { label: 'Größte Lücke' }] })
+  expect(better.summary).toMatchObject({ big: '2 of 13 numbers are on target.', gaps: [{ label: 'Closest', name: 'queue tries per change', gap: '1.6× the target' }, { label: 'Biggest gap', name: 'waiting for a runner' }] })
+  expect(better.sections[0].count).toBe('2 of 6 on target')
+  expect(simpleNumbersOf(deliveryMetrics() as never, 7, 'ready', false, 'de').summary).toMatchObject({ big: '1 von 13 Zahlen sind im Ziel.', gaps: [{ label: 'Am nächsten dran', name: 'Wie lange ein Review dauert' }, { label: 'Größte Lücke' }] })
   // No data says so; a failed read shows no summary at all, never old numbers.
   expect(simpleNumbersOf(deliveryMetrics({ empty: true }) as never, 7, 'ready', true, 'en').summary).toEqual({ kind: 'nodata', title: 'No numbers yet.', body: 'They appear with the first pull request. The targets below already apply.' })
   const failed = simpleNumbersOf(null, 7, 'error', false, 'en')
@@ -294,3 +296,111 @@ for (const lang of ['en', 'de'] as const) {
     expect(textOf(retryOf('delivery-load-error'))).toBe(labels.load)
   })
 }
+
+it('the v5 readings get a verdict, a sentence and a direction from this window’s exact numbers', () => {
+  // Risk: a reading is judged by the wrong side of its target, says "defects" for one, or turns a rare rate into a share of 100.
+  const page = simpleNumbersOf(deliveryMetrics() as never, 7, 'ready', false, 'en')
+  const tile = (key: string) => page.sections.flatMap(section => section.tiles).find(item => item.key === key)!
+  // Flakes: lower is better, a rare rate scales on its own (a 100 % axis would flatten it), and it is on target at 2 %.
+  expect(tile('flaked_failures')).toMatchObject({ up: false, hasTarget: true, verdict: { level: 'on' }, value: [{ text: '2', unit: '%' }] })
+  expect(tile('flaked_failures').say).toContain('workflow rescues')
+  expect(tile('flaked_failures').say).not.toMatch(/re-run of the same commit/)
+  expect(tile('flaked_failures').spark.percent).toBe(false)
+  const data = deliveryMetrics() as { metrics: { key: string; reason: string | null; windows: { days: number; status: string; n: number; value: number | null; coverage: { full: boolean; buckets_covered: number; buckets_total: number } }[] }[] }
+  const required = data.metrics.find(item => item.key === 'required_checks_green')!
+  required.reason = '4 runs without job facts yet, so their required checks and runner waits are not counted.'
+  const window = required.windows.find(item => item.days === 7)!
+  window.status = 'partial'
+  window.coverage.full = false
+  window.coverage.buckets_covered = 4
+  const green = simpleNumbersOf(data as never, 7, 'ready', false, 'en').sections.flatMap(section => section.tiles).find(item => item.key === 'first_attempt_green')!
+  expect(green.say).toMatch(/of \d+ do/)
+  expect(green.foot).toContain('without job facts')
+  expect(green.foot).toContain('covers 4 of')
+  const flakes = deliveryMetrics() as { metrics: { key: string; windows: { days: number; status: string; n: number; value: number | null; counts?: Record<string, number> }[] }[] }
+  const flake = flakes.metrics.find(item => item.key === 'flaked_failures')!
+  const flakeWindow = flake.windows.find(item => item.days === 7)!
+  flakeWindow.status = 'no_data'
+  flakeWindow.value = null
+  flakeWindow.counts = { confirmed: 0, suspect: 1, workflow_rescue: 2 }
+  const withheld = simpleNumbersOf(flakes as never, 7, 'ready', false, 'en').sections.flatMap(section => section.tiles).find(item => item.key === 'flaked_failures')!
+  expect(withheld.value).toBeNull()
+  expect(withheld.say).toContain('unavailable')
+  expect(withheld.say).toContain('Workflow rescues: 2')
+  expect(withheld.say).toContain('Suspects: 1')
+  expect(tile('first_attempt_green').spark.percent).toBe(true)
+  // No target: no verdict, and the arrow still says lower is better for trouble counts.
+  for (const key of ['time_to_first_green_commit', 'queue_unclassified', 'preflight_red_rate', 'review_audits', 'escaped_defects']) {
+    expect(tile(key)).toMatchObject({ hasTarget: false, verdict: { level: 'none', word: 'No target yet' } })
+  }
+  expect(tile('escaped_defects').up).toBe(false)
+  expect(tile('queue_ejections')).toMatchObject({ verdict: { level: 'far' }, value: [{ text: '55', unit: 'per 100 PRs' }] })
+  expect(tile('queue_ejections').say).toContain('(35 runs for 63 merged changes)')
+  expect(tile('runner_wait').say).toBe('One run in ten waits 5.8 min or longer for a runner, counting its slowest job. Arion wants 3 min, later 1.')
+  expect(tile('time_to_first_green').learn.body).toContain('7 of 58 branches never went green')
+  expect(tile('review_audits').value).toEqual([{ text: '4', unit: 'audits' }])
+  expect(tile('escaped_defects').value).toEqual([{ text: '1', unit: 'defect' }])
+  // German, impersonal.
+  const de = simpleNumbersOf(deliveryMetrics() as never, 7, 'ready', false, 'de').sections.flatMap(section => section.tiles)
+  expect(de.find(item => item.key === 'queue_ejections')!.say).toContain('flogen vorher aus der Merge-Queue')
+  expect(de.map(item => item.say + item.learn.body).join(' ')).not.toMatch(/\b(du|dein|deine|wir|unser|unsere)\b/i)
+})
+
+it('missing job facts read as unavailable, never as a measured 0 of N, in the sentence and in Learn', () => {
+  // Risk: runs without job facts have no required-check result; saying "0 of N do" reports a failed result where none exists.
+  type Fixture = { metrics: { key: string; status: string; reason: string | null; windows: { days: number; status: string; n: number; value: number | null; coverage: { full: boolean } }[]; daily: { status: string; n: number; value: number | null }[] }[] }
+  const tile = (data: Fixture, lang: 'en' | 'de') => simpleNumbersOf(data as never, 7, 'ready', false, lang).sections.flatMap(section => section.tiles).find(item => item.key === 'first_attempt_green')!
+  const unavailable = deliveryMetrics() as Fixture
+  const required = unavailable.metrics.find(item => item.key === 'required_checks_green')!
+  const n = unavailable.metrics.find(item => item.key === 'first_attempt_green')!.windows.find(item => item.days === 7)!.n
+  required.status = 'no_data'
+  required.reason = '6 runs without job facts yet, so their required checks and runner waits are not counted.'
+  for (const window of required.windows) {
+    window.status = 'no_data'
+    window.n = 0
+    window.value = null
+    window.coverage.full = true
+  }
+  for (const point of required.daily) {
+    point.status = 'no_data'
+    point.n = 0
+    point.value = null
+  }
+  const english = tile(unavailable, 'en')
+  expect(english.say).toContain('unavailable')
+  expect(english.say).toContain(`job facts cover 0 of ${numbers.num(n, 'en')} runs`)
+  expect(english.learn.body).toContain('unavailable')
+  expect(english.learn.body).toContain(`job facts cover 0 of ${numbers.num(n, 'en')} runs`)
+  expect(english.foot).toContain('without job facts')
+  expect(english.learn.body).toContain('without job facts')
+  // Neither text may read as the merge-rule count: no "the way the merge rule counts", no "0 of N do", no "(0 of N)".
+  for (const text of [english.say, english.learn.body]) {
+    expect(text).not.toMatch(/the way the merge rule counts/)
+    expect(text).not.toMatch(/\b0 of [\d.,]+ do\b/)
+    expect(text).not.toMatch(/\(0 of [\d.,]+\)/)
+    expect(text).not.toContain('{')
+  }
+  const german = tile(unavailable, 'de')
+  expect(german.say).toContain('nicht verfügbar')
+  expect(german.say).toContain(`Jobdaten decken 0 von ${numbers.num(n, 'de')} Läufen ab`)
+  expect(german.learn.body).toContain('nicht verfügbar')
+  expect(german.learn.body).toContain(`Jobdaten decken 0 von ${numbers.num(n, 'de')} Läufen ab`)
+  for (const text of [german.say, german.learn.body]) {
+    expect(text).not.toMatch(/so gezählt, wie die Merge-Regel zählt/)
+    expect(text).not.toMatch(/\bsind es 0 von/)
+    expect(text).not.toMatch(/\(0 von [\d.,]+\)/)
+    expect(text).not.toContain('{')
+  }
+  // A measured zero is a different statement: five required-check runs, none green. It keeps the count wording and is not "unavailable".
+  const measured = deliveryMetrics() as Fixture
+  for (const window of measured.metrics.find(item => item.key === 'required_checks_green')!.windows) {
+    window.status = 'ok'
+    window.n = 5
+    window.value = 0
+  }
+  const zero = tile(measured, 'en')
+  expect(zero.say).toMatch(/the way the merge rule counts, 0\s?% of 5 do/)
+  expect(zero.say).not.toContain('unavailable')
+  expect(zero.learn.body).not.toContain('unavailable')
+  expect(tile(measured, 'de').say).toMatch(/so gezählt, wie die Merge-Regel zählt, sind es 0\s?% von 5/)
+})

@@ -109,7 +109,9 @@ func TestDeliveryMetricsFix2KeepsIntermediateAttempts(t *testing.T) {
 	merged := day.Add(4 * time.Hour)
 	metrics := computeMetrics(metricInput{CIWorkflow: defaultCIWorkflow, NightlyWorkflow: defaultNightlyWorkflow, Covered: &covered, Runs: runs,
 		Pulls: []metricPull{{Number: 9, Opened: day, Merged: &merged}}}, now)
-	wantWindow(t, metricByKey(t, metrics, "flaked_failures"), 30, "ok", 1, f64(100), nil, nil)
+	flaky := metricByKey(t, metrics, "flaked_failures")
+	wantWindow(t, flaky, 30, "no_data", 1, nil, nil, nil)
+	wantCounts(t, flaky, 30, map[string]int{"confirmed": 0, "workflow_rescue": 1})
 	wantWindow(t, metricByKey(t, metrics, "time_to_first_green"), 30, "ok", 1, f64(40), f64(40), f64(40))
 	wantWindow(t, metricByKey(t, metrics, "queue_runs_per_pr"), 30, "ok", 1, f64(3), f64(3), f64(3))
 }
@@ -408,5 +410,54 @@ func TestDeliveryMetricsFix2DisconnectKeepsHistoryPartial(t *testing.T) {
 	release = metricByKey(t, after.Metrics, "release_queue_to_live")
 	if release.Status != "ok" || release.Latest == nil || release.Latest.Value != 40 {
 		t.Fatalf("reported release after disconnect: %+v", release)
+	}
+}
+
+func TestDeliveryPreflightDisconnectEndsObservation(t *testing.T) {
+	// Risk: after the App disconnects, preflight still reports a full span, so
+	// later chart days look observed. The window-status fallback alone is not enough.
+	f, _ := newMetricsFixture(t)
+	since := f.at.AddDate(0, 0, -40)
+	completed := time.Date(2026, 10, 5, 22, 0, 0, 0, time.UTC)
+	created := completed.Add(-6 * time.Minute)
+	cursor, err := json.Marshal(backfillCursor{Since: since, Phase: "done", Workflows: []string{defaultCIWorkflow, defaultNightlyWorkflow, defaultPreflightWorkflow}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_since=$3,backfill_done_at=$4 WHERE project_id=$1`, f.project, cursor, since, completed); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO delivery_metric_runs(tenant_id,repository,run_id,attempt,workflow_path,workflow_name,event,head_branch,head_sha,created_at,started_at,completed_at,conclusion,source,recorded_at)
+			VALUES($1,$2,720,1,$3,'preflight','workflow_dispatch','main',$4,$5,$6,$7,'failure','backfill',$8)`,
+			f.person.TenantID, f.m.config.Repository, defaultPreflightWorkflow, strings.Repeat("b", 40), created, created.Add(time.Minute), completed, f.at)
+		return err
+	})
+	var before DeliveryMetrics
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/metrics", nil, 200, &before)
+	connected := metricByKey(t, before.Metrics, "preflight_red_rate")
+	wantWindow(t, connected, 7, "ok", 1, f64(100), nil, nil)
+	if !metricWindow(t, connected, 7).Coverage.Full {
+		t.Fatalf("connected preflight coverage: %+v", metricWindow(t, connected, 7).Coverage)
+	}
+	f.m.config.InstallationID = ""
+	var after DeliveryMetrics
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/metrics", nil, 200, &after)
+	stopped := metricByKey(t, after.Metrics, "preflight_red_rate")
+	window := metricWindow(t, stopped, 7)
+	if window.Coverage.Full {
+		t.Fatalf("preflight coverage stayed full after disconnect: %+v", window.Coverage)
+	}
+	var sampleDay *MetricPoint
+	for i := range stopped.Daily {
+		if stopped.Daily[i].Date == "2026-10-05" {
+			sampleDay = &stopped.Daily[i]
+		}
+	}
+	if sampleDay == nil || sampleDay.Status != "partial" || sampleDay.N != 1 {
+		t.Fatalf("retained preflight day: %+v", sampleDay)
+	}
+	if stopped.Reason == nil || !strings.Contains(*stopped.Reason, "complete only through") {
+		t.Fatalf("preflight disconnect reason: %v", stopped.Reason)
 	}
 }

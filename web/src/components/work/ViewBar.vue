@@ -143,6 +143,8 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
 .tab { display: inline-flex; align-items: center; flex-shrink: 0; border-radius: 999px; }
 .view-tab { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; max-width: 260px; height: 28px; padding: 0 4px 0 12px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .view-tab .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Saved views end in their own options button; the plain list has none, so its pill keeps the same 12 px as on the left. */
+.view-tab.plain { padding-right: 12px; }
 .view-tab:hover { color: var(--ink); background: var(--row-hover); }
 .view-tab:focus-visible, .tab-menu:focus-visible { box-shadow: var(--focus-ring); }
 .view-tab[aria-current="page"] { color: var(--teal-ink); font-weight: 600; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
@@ -175,6 +177,7 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
   .view-bar { gap: 6px; padding: 0 0 8px; }
   .strip { gap: 6px; }
   .view-tab { position: relative; height: 40px; padding: 0 4px 0 14px; font-size: 14px; }
+  .view-tab.plain { padding-right: 14px; }
   .view-tab::after { content: ''; position: absolute; inset: -2px 0; border-radius: inherit; }
   .tab.active .view-tab { padding-right: 4px; }
   .tab-menu { position: relative; width: 40px; height: 40px; margin-right: 0; }

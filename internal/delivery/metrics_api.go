@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -50,14 +51,21 @@ type backfillInput struct {
 }
 
 type BackfillResult struct {
-	State     string    `json:"state"`
-	Since     time.Time `json:"since"`
-	Phase     string    `json:"phase"`
-	Day       *string   `json:"day"`
-	Calls     int       `json:"calls"`
-	Runs      int       `json:"runs"`
-	Pulls     int       `json:"pulls"`
-	Truncated bool      `json:"truncated"`
+	State string    `json:"state"`
+	Since time.Time `json:"since"`
+	Phase string    `json:"phase"`
+	Day   *string   `json:"day"`
+	Calls int       `json:"calls"`
+	Runs  int       `json:"runs"`
+	Pulls int       `json:"pulls"`
+	// Jobs counts the runs whose jobs this step read (the jobs pass that follows
+	// the runs and pulls phases).
+	Jobs      int  `json:"jobs"`
+	Truncated bool `json:"truncated"`
+	// RetryAt is the earliest time a deferred jobs read should be tried again.
+	// Set only when nothing is eligible now but a failed read is still inside
+	// its retry hour. Callers stop only when state is done.
+	RetryAt *time.Time `json:"retry_at,omitempty"`
 }
 
 type metricFactInput struct {
@@ -228,6 +236,9 @@ func (m *Module) getMetrics(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if err = loadProjectInputTx(r.Context(), tx, project, &in, now); err != nil {
+			return err
+		}
 		// A disconnected App no longer observes the repository. Coverage ends
 		// at the last stored GitHub fact or the finished backfill, so a window
 		// that runs through now cannot stay complete.
@@ -371,18 +382,29 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 	cursor := source.Cursor
 	if cursor == nil || in.Restart {
 		since := dayStart(now.AddDate(0, 0, -days))
-		cursor = &backfillCursor{Since: since, Phase: "runs", Day: since.Format("2006-01-02"), Page: 1}
+		cursor = &backfillCursor{Since: since, Phase: "runs", Day: since.Format("2006-01-02"), Page: 1, Workflows: fullBackfillWorkflows(source)}
+	}
+	// A finished backfill that never listed preflight catches that workflow up
+	// once, then returns to the jobs pass. It does not read CI again and it
+	// does not walk pulls again.
+	if !in.Restart && source.DoneAt != nil && needsPreflightCatchup(cursor) {
+		caught := startPreflightCatchup(cursor, source)
+		cursor = &caught
 	}
 	result := BackfillResult{Since: cursor.Since, Phase: cursor.Phase, Truncated: cursor.Truncated}
-	if cursor.Phase == "done" && source.DoneAt != nil {
-		result.State = "done"
+	if source.DoneAt != nil && cursor.ResumePhase == "" && (cursor.Phase == "done" || cursor.Phase == "jobs") {
+		// The runs and pulls are in. The jobs pass reads what the check suites
+		// did not bring, including a legacy map that is not complete, until
+		// nothing unfinished remains. A deferred failure stays phase jobs.
+		result, err = m.fillJobs(r.Context(), p, project, source, reader, cursor, now)
+		if err != nil {
+			respondError(w, err)
+			return
+		}
 		httpapi.WriteJSON(w, 200, result)
 		return
 	}
-	workflows := []string{source.CIWorkflow}
-	if source.NightlyWorkflow != source.CIWorkflow {
-		workflows = append(workflows, source.NightlyWorkflow)
-	}
+	workflows := backfillWorkflowList(source, cursor)
 	next := *cursor
 	var batch backfillBatch
 	err = reader.MetricsRead(r.Context(), p.TenantID, func(get func(string, any) error) error {
@@ -396,6 +418,7 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 		respondError(w, fail(502, "GitHub could not be read; the backfill resumes from its last stored position"))
 		return
 	}
+	var retryAt *time.Time
 	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := db.LockTenant(r.Context(), tx, p.TenantID); err != nil {
 			return err
@@ -420,13 +443,42 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 		if err = upsertPullsTx(r.Context(), tx, p.TenantID, source.Repository, "backfill", batch.Pulls, at); err != nil {
 			return err
 		}
+		// Runs and pulls are in. Stay on the jobs phase while any first
+		// attempt still lacks a complete job map, including one whose read
+		// failed and is waiting out its hour. The cursor records that, so a
+		// caller that stops at done cannot stop early.
+		if next.Phase == "done" {
+			pending, err := jobWorklistTx(r.Context(), tx, current, now, 1)
+			if err != nil {
+				return err
+			}
+			unfinished, err := jobDeferredSinceTx(r.Context(), tx, current, now)
+			if err != nil {
+				return err
+			}
+			if len(pending) > 0 || unfinished != nil {
+				next.Phase = "jobs"
+				if len(pending) == 0 && unfinished != nil {
+					t := unfinished.Add(jobFillRetry)
+					retryAt = &t
+				}
+			}
+		}
 		raw, err := json.Marshal(next)
 		if err != nil {
 			return err
 		}
-		var done *time.Time
-		if next.Phase == "done" {
-			done = &at
+		done := (*time.Time)(nil)
+		switch {
+		case next.Phase == "done" || next.Phase == "jobs":
+			if current.DoneAt != nil {
+				done = current.DoneAt
+			} else {
+				done = &at
+			}
+		case cursor.ResumePhase != "" && current.DoneAt != nil:
+			// A preflight catch-up still walking days keeps the finished time.
+			done = current.DoneAt
 		}
 		_, err = tx.Exec(r.Context(), `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_revision=backfill_revision+1,backfill_since=$3,backfill_done_at=$4 WHERE project_id=$1`, project, raw, next.Since, done)
 		return err
@@ -435,7 +487,7 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	result = BackfillResult{State: "running", Since: next.Since, Phase: next.Phase, Calls: batch.Calls, Runs: len(batch.Runs), Pulls: len(batch.Pulls), Truncated: next.Truncated}
+	result = BackfillResult{State: "running", Since: next.Since, Phase: next.Phase, Calls: batch.Calls, Runs: len(batch.Runs), Pulls: len(batch.Pulls), Truncated: next.Truncated, RetryAt: retryAt}
 	if next.Phase == "runs" {
 		day := next.Day
 		result.Day = &day
@@ -446,15 +498,17 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, result)
 }
 
-func validFact(f metricFactInput, now time.Time) (metricMark, error) {
+// validFact checks one reported fact. Timing facts become marks; review audits
+// and escaped defects (AEON-1016) become reports. Exactly one of them is set.
+func validFact(f metricFactInput, now time.Time) (metricMark, *metricReport, error) {
 	k := metricMark{Kind: f.Kind, Key: f.Key, PR: f.PullRequest, Started: f.StartedAt, At: f.At.UTC(), Outcome: f.Outcome}
 	if !metricFactKey.MatchString(f.Key) || f.At.IsZero() || f.At.After(now.Add(5*time.Minute)) || f.At.Before(now.AddDate(0, 0, -400)) ||
 		f.PullRequest != nil && (*f.PullRequest < 1 || *f.PullRequest > 2147483647) || f.StartedAt != nil && (f.StartedAt.After(f.At) || f.At.Sub(*f.StartedAt) > 30*24*time.Hour) {
-		return k, fail(400, "invalid delivery metric fact")
+		return k, nil, fail(400, "invalid delivery metric fact")
 	}
 	if f.HeadSHA != nil {
 		if !reviewgate.ValidSHA(*f.HeadSHA) {
-			return k, fail(400, "invalid delivery metric fact head")
+			return k, nil, fail(400, "invalid delivery metric fact head")
 		}
 		k.Head = *f.HeadSHA
 	}
@@ -464,13 +518,14 @@ func validFact(f metricFactInput, now time.Time) (metricMark, error) {
 	}
 	// Release facts (AEON-1001): name, tag and the time the live version was
 	// healthy again, only on a release, and healthy only after it went live.
-	if f.Kind != "release" && (f.Release != nil || f.Tag != nil || f.HealthyAt != nil) ||
+	// An escaped defect (AEON-1016) may name the release that caused it.
+	if f.Kind != "release" && (f.Tag != nil || f.HealthyAt != nil) || f.Kind != "release" && f.Kind != "escaped_defect" && f.Release != nil ||
 		f.Release != nil && !metricReleaseName.MatchString(*f.Release) || f.Tag != nil && !metricReleaseTag.MatchString(*f.Tag) {
-		return k, fail(400, "release, tag and healthy_at belong to a release fact")
+		return k, nil, fail(400, "release, tag and healthy_at belong to a release fact")
 	}
 	if f.HealthyAt != nil {
 		if f.Outcome != "live" || f.HealthyAt.Before(f.At) || f.HealthyAt.After(now.Add(5*time.Minute)) || f.HealthyAt.Sub(f.At) > 30*24*time.Hour {
-			return k, fail(400, "healthy_at needs a live release and lies between at and now")
+			return k, nil, fail(400, "healthy_at needs a live release and lies between at and now")
 		}
 		v := f.HealthyAt.UTC()
 		k.Healthy = &v
@@ -479,20 +534,39 @@ func validFact(f metricFactInput, now time.Time) (metricMark, error) {
 	switch f.Kind {
 	case "review":
 		if f.StartedAt == nil || f.Outcome != "ok" && f.Outcome != "changes" {
-			return k, fail(400, "a review needs started_at and outcome ok or changes")
+			return k, nil, fail(400, "a review needs started_at and outcome ok or changes")
 		}
 	case "merge_round":
 		if f.PullRequest == nil || f.Outcome != "scripted" && f.Outcome != "model" {
-			return k, fail(400, "a merge round needs pull_request and outcome scripted or model")
+			return k, nil, fail(400, "a merge round needs pull_request and outcome scripted or model")
 		}
 	case "release":
 		if f.StartedAt == nil || f.Outcome != "live" && f.Outcome != "failed" {
-			return k, fail(400, "a release needs started_at and outcome live or failed")
+			return k, nil, fail(400, "a release needs started_at and outcome live or failed")
 		}
+	case "review_audit":
+		// The audit of a merged pull request; the outcome is the highest severity
+		// among its findings, clean when it found none.
+		if f.PullRequest == nil || f.Outcome != "clean" && f.Outcome != "low" && f.Outcome != "medium" && f.Outcome != "high" {
+			return k, nil, fail(400, "a review audit needs pull_request and outcome clean, low, medium or high")
+		}
+		severity := f.Outcome
+		if severity == "clean" {
+			severity = "none"
+		}
+		return k, &metricReport{Kind: f.Kind, Key: f.Key, PR: f.PullRequest, Severity: severity, Started: k.Started, At: k.At}, nil
+	case "escaped_defect":
+		// The key names the bug or incident ticket; the link says what caused
+		// it: a merged pull request, a release, or both. Without that link the
+		// defect is not "caused by" anything and does not count.
+		if f.PullRequest == nil && f.Release == nil || f.Outcome != "low" && f.Outcome != "medium" && f.Outcome != "high" {
+			return k, nil, fail(400, "an escaped defect needs pull_request or release, and outcome low, medium or high")
+		}
+		return k, &metricReport{Kind: f.Kind, Key: f.Key, PR: f.PullRequest, Release: f.Release, Severity: f.Outcome, Started: k.Started, At: k.At}, nil
 	default:
-		return k, fail(400, "fact kind must be review, merge_round or release")
+		return k, nil, fail(400, "fact kind must be review, merge_round, release, review_audit or escaped_defect")
 	}
-	return k, nil
+	return k, nil, nil
 }
 
 func (m *Module) reportMetricFacts(w http.ResponseWriter, r *http.Request) {
@@ -511,9 +585,10 @@ func (m *Module) reportMetricFacts(w http.ResponseWriter, r *http.Request) {
 	}
 	now := m.now()
 	marks := make([]metricMark, 0, len(in.Facts))
+	var reports []metricReport
 	seen := map[string]bool{}
 	for _, f := range in.Facts {
-		k, err := validFact(f, now)
+		k, report, err := validFact(f, now)
 		if err != nil {
 			respondError(w, err)
 			return
@@ -523,6 +598,10 @@ func (m *Module) reportMetricFacts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		seen[k.Kind+"\x00"+k.Key] = true
+		if report != nil {
+			reports = append(reports, *report)
+			continue
+		}
 		marks = append(marks, k)
 	}
 	stored := 0
@@ -546,7 +625,10 @@ func (m *Module) reportMetricFacts(w http.ResponseWriter, r *http.Request) {
 		if err = upsertMarksTx(r.Context(), tx, p.TenantID, s.Repository, "report", marks, now); err != nil {
 			return err
 		}
-		stored = len(marks)
+		if err = upsertReportsTx(r.Context(), tx, p.TenantID, s.Repository, reports, now); err != nil {
+			return err
+		}
+		stored = len(marks) + len(reports)
 		return nil
 	})
 	if err != nil {
@@ -554,4 +636,225 @@ func (m *Module) reportMetricFacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, 200, map[string]int{"stored": stored})
+}
+
+const (
+	jobFillBudget = 40 // GitHub reads per step
+	jobFillRetry  = time.Hour
+)
+
+// jobFactsMissing matches a run whose job map is absent or not complete.
+// A legacy flat map (no "complete": true) is missing and is read once more.
+const jobFactsMissing = `(jobs_read_at IS NULL OR coalesce(required_jobs->>'complete','') <> 'true')`
+
+func ciNightlyWorkflows(source *metricSourceRow) []string {
+	out := []string{source.CIWorkflow}
+	if source.NightlyWorkflow != source.CIWorkflow {
+		out = append(out, source.NightlyWorkflow)
+	}
+	return out
+}
+
+func fullBackfillWorkflows(source *metricSourceRow) []string {
+	out := ciNightlyWorkflows(source)
+	if !workflowListed(out, defaultPreflightWorkflow) {
+		out = append(out, defaultPreflightWorkflow)
+	}
+	return out
+}
+
+func workflowListed(list []string, workflow string) bool {
+	base := path.Base(workflow)
+	for _, name := range list {
+		if name == workflow || path.Base(name) == base {
+			return true
+		}
+	}
+	return false
+}
+
+// backfillWorkflowList is the workflow files this step may read. A catch-up
+// reads only its own list. An in-progress cursor that recorded its list keeps
+// that list, so day indexes stay valid. A legacy in-progress cursor has no
+// list and stays on CI and nightly. A fresh backfill reads all three.
+func backfillWorkflowList(source *metricSourceRow, cursor *backfillCursor) []string {
+	if cursor != nil && cursor.ResumePhase != "" && len(cursor.Workflows) > 0 {
+		return append([]string(nil), cursor.Workflows...)
+	}
+	if cursor != nil && (cursor.Phase == "runs" || cursor.Phase == "pulls") && len(cursor.Workflows) > 0 {
+		return append([]string(nil), cursor.Workflows...)
+	}
+	if cursor != nil && (cursor.Phase == "runs" || cursor.Phase == "pulls") {
+		return ciNightlyWorkflows(source)
+	}
+	return fullBackfillWorkflows(source)
+}
+
+func needsPreflightCatchup(cursor *backfillCursor) bool {
+	if cursor == nil || cursor.ResumePhase != "" || cursor.PreflightAbsent {
+		return false
+	}
+	if cursor.Phase != "done" && cursor.Phase != "jobs" {
+		return false
+	}
+	return !workflowListed(cursor.Workflows, defaultPreflightWorkflow)
+}
+
+func startPreflightCatchup(cursor *backfillCursor, source *metricSourceRow) backfillCursor {
+	return backfillCursor{
+		Since: cursor.Since, Phase: "runs", Day: dayStart(cursor.Since).Format("2006-01-02"), Page: 1,
+		Truncated: cursor.Truncated, Workflows: []string{defaultPreflightWorkflow},
+		ResumePhase: "jobs", ThenWorkflows: fullBackfillWorkflows(source),
+	}
+}
+
+// fillJobs reads the jobs of attempt 1 of pull-request and merge-queue runs of
+// the CI workflow that still lack a complete map, newest first, within one
+// step's budget. The map holds every job conclusion, so a later project's
+// checks are present or truly missing. A run whose jobs GitHub could not
+// return is tried again after an hour. While any such retry is outstanding
+// the phase stays jobs and retry_at names when to call; state done means
+// nothing is left. Authority is checked again in the write transaction.
+
+func jobWorklistTx(ctx context.Context, tx pgx.Tx, source *metricSourceRow, now time.Time, limit int) ([]int64, error) {
+	from := windowSpan(now, metricLongDays, true).first.Add(-metricSlack)
+	rows, err := tx.Query(ctx, `SELECT run_id FROM delivery_metric_runs
+		WHERE repository=$1 AND attempt=1 AND event IN ('pull_request','merge_group') AND completed_at>=$2
+		AND regexp_replace(workflow_path,'^.*/','')=$3 AND `+jobFactsMissing+`
+		AND (jobs_failed_at IS NULL OR jobs_failed_at<$4)
+		ORDER BY completed_at DESC LIMIT $5`, source.Repository, from, path.Base(source.CIWorkflow), now.Add(-jobFillRetry), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err = rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// jobDeferredSinceTx is the earliest jobs_failed_at of a run that still lacks
+// a complete map and is inside its retry hour. Nil when nothing is waiting.
+func jobDeferredSinceTx(ctx context.Context, tx pgx.Tx, source *metricSourceRow, now time.Time) (*time.Time, error) {
+	from := windowSpan(now, metricLongDays, true).first.Add(-metricSlack)
+	var at *time.Time
+	err := tx.QueryRow(ctx, `SELECT min(jobs_failed_at) FROM delivery_metric_runs
+		WHERE repository=$1 AND attempt=1 AND event IN ('pull_request','merge_group') AND completed_at>=$2
+		AND regexp_replace(workflow_path,'^.*/','')=$3 AND `+jobFactsMissing+`
+		AND jobs_failed_at IS NOT NULL AND jobs_failed_at>=$4`,
+		source.Repository, from, path.Base(source.CIWorkflow), now.Add(-jobFillRetry)).Scan(&at)
+	return at, err
+}
+
+func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project string, source *metricSourceRow, reader metricsReader, cursor *backfillCursor, now time.Time) (BackfillResult, error) {
+	result := BackfillResult{State: "running", Since: cursor.Since, Phase: "jobs", Truncated: cursor.Truncated}
+	var runs []int64
+	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := requireMetrics(ctx, tx, p, "delivery.manage", project); err != nil {
+			return err
+		}
+		var err error
+		runs, err = jobWorklistTx(ctx, tx, source, now, jobFillBudget)
+		return err
+	})
+	if err != nil {
+		return result, err
+	}
+	facts := map[int64]jobFacts{}
+	var failedRuns []int64
+	calls := 0
+	if len(runs) > 0 {
+		err = reader.MetricsRead(ctx, p.TenantID, func(get func(string, any) error) error {
+			counted := func(path string, out any) error { calls++; return get(path, out) }
+			for _, id := range runs {
+				if calls >= jobFillBudget {
+					break
+				}
+				f, err := readJobFacts(counted, id, 1)
+				if err != nil {
+					failedRuns = append(failedRuns, id)
+					continue
+				}
+				facts[id] = f
+			}
+			return nil
+		})
+		// Nothing read at all is GitHub's fault, not the runs': report it and keep
+		// every run eligible. Failures among successes mark only those runs.
+		if err != nil || len(facts) == 0 {
+			return result, fail(502, "GitHub could not be read; the jobs pass resumes from the runs that still lack job facts")
+		}
+		result.Calls = calls
+	}
+	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
+		if _, err := projectSettings(ctx, tx, project); err != nil {
+			return err
+		}
+		if err := requireMetrics(ctx, tx, p, "delivery.manage", project); err != nil {
+			return err
+		}
+		current, err := loadMetricSourceTx(ctx, tx, project, true)
+		if err != nil {
+			return err
+		}
+		if current == nil || current.Revision != source.Revision || current.Repository != source.Repository {
+			return fail(409, "the backfill moved or the source changed meanwhile; call again to continue")
+		}
+		at := m.now()
+		for id, f := range facts {
+			raw, err := encodeStoredJobs(f)
+			if err != nil {
+				return err
+			}
+			if _, err = tx.Exec(ctx, `UPDATE delivery_metric_runs SET jobs_read_at=$4,jobs_failed_at=NULL,worst_job_wait_ms=$5,required_jobs=$6 WHERE repository=$1 AND run_id=$2 AND attempt=$3`,
+				source.Repository, id, 1, at, f.WorstWaitMS, raw); err != nil {
+				return err
+			}
+		}
+		for _, id := range failedRuns {
+			if _, err = tx.Exec(ctx, `UPDATE delivery_metric_runs SET jobs_failed_at=$3 WHERE repository=$1 AND run_id=$2 AND attempt=1`, source.Repository, id, at); err != nil {
+				return err
+			}
+		}
+		pending, err := jobWorklistTx(ctx, tx, current, now, 1)
+		if err != nil {
+			return err
+		}
+		unfinished, err := jobDeferredSinceTx(ctx, tx, current, now)
+		if err != nil {
+			return err
+		}
+		stored := *cursor
+		stored.ResumePhase = ""
+		stored.ThenWorkflows = nil
+		stored.Phase = "done"
+		result.State, result.Phase = "done", "done"
+		result.RetryAt = nil
+		if len(pending) > 0 || unfinished != nil {
+			stored.Phase = "jobs"
+			result.State, result.Phase = "running", "jobs"
+			if len(pending) == 0 && unfinished != nil {
+				t := unfinished.Add(jobFillRetry)
+				result.RetryAt = &t
+			}
+		}
+		raw, err := json.Marshal(stored)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_revision=backfill_revision+1 WHERE project_id=$1`, project, raw); err != nil {
+			return err
+		}
+		result.Jobs = len(facts)
+		return nil
+	})
+	return result, err
 }

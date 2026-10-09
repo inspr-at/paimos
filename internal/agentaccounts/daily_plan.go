@@ -121,7 +121,9 @@ func PopulateDailyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, out *ag
 			continue
 		}
 		d, explicit := saved[a.Harness]
-		if !explicit {
+		if explicit {
+			d = out.Daily[a.Harness]
+		} else {
 			d = agentplan.DefaultDaily()
 		}
 		item := agentplan.DailyAccount{AccountID: a.ID, Label: a.Label, Order: len(groups[a.Harness]) + 1, Freshness: "unknown", ResetPolicy: "suggest", DetailsRedacted: !privacy[a.ID], CanEdit: canManage && privacy[a.ID]}
@@ -129,78 +131,13 @@ func PopulateDailyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, out *ag
 			groups[a.Harness] = append(groups[a.Harness], item)
 			continue
 		}
-		u, err := loadUsagePolicy(ctx, tx, a.ID)
+		item.Routable = advice[a.ID].AvailableSlots > 0
+		item, d, err = dailyAccountTx(ctx, tx, a, item, d, explicit, p.TenantID, out.PrincipalID, points, start, end, now)
 		if err != nil {
 			return err
-		}
-		if !explicit {
-			d = legacyDaily(u)
 		}
 		if _, exists := out.Daily[a.Harness]; !exists {
 			out.Daily[a.Harness] = d
-		}
-		reset, err := loadResetState(ctx, tx, a, now)
-		if err != nil {
-			return err
-		}
-		if reset.Credits != nil {
-			item.Resets = reset.Credits
-		}
-		if reset.Plan != nil {
-			item.ResetPlan = reset.Plan
-		}
-		item.ResetPolicy = reset.Policy
-
-		item.FloorPct = agentplan.Number(float64(u.Floor))
-		item.Routable = advice[a.ID].AvailableSlots > 0
-		item.NoDailyLimit = a.BillingMode == "api"
-		if !item.NoDailyLimit {
-			schedule, err := routingSchedule(ctx, tx, a)
-			if err != nil {
-				return err
-			}
-			windows, err := overviewWindows(ctx, tx, a, now, schedule)
-			if err != nil {
-				return err
-			}
-			if w := dailyWindow(windows); w != nil {
-				item.UsedPct = w.UsedPercent
-				item.ResetsAt = &w.ResetsAt
-				item.ReadAt = w.ReadAt
-				item.Freshness = "stale"
-				if !now.Before(w.ResetsAt) {
-					item.Freshness = "expired"
-				} else if w.ReadAt != nil && !w.ReadAt.After(now) && now.Sub(*w.ReadAt) <= ProbeFreshness {
-					item.Freshness = "fresh"
-				}
-				baseline, err := dailyBaselineTx(ctx, tx, a, *w, p.TenantID, out.PrincipalID, start, now)
-				if err != nil {
-					return err
-				}
-				item.StartOfDayUsedPct = baseline
-				if !explicit && u.Boost > 0 && u.BoostUntil != nil && now.Before(*u.BoostUntil) && baseline != nil {
-					pointsForAccount := points
-					if d.Pace.PointsPerDay != nil {
-						pointsForAccount = *d.Pace.PointsPerDay
-					}
-					limit := min(100, *baseline+float64(pointsForAccount+u.Boost))
-					if d.Pace.Mode == "everything" {
-						limit = 100
-					}
-					d.BoostToday = &agentplan.DailyBoost{LimitUsedPct: limit, EnteredAs: "used", Until: end}
-					if first := groups[a.Harness]; len(first) == 0 {
-						out.Daily[a.Harness] = d
-					}
-				}
-				raised, err := activeResetPace(ctx, tx, a, now)
-				if err != nil {
-					return err
-				}
-				item.ResetPacePoints = raised
-				if err := agentplan.ApplyDaily(&item, d, points, now); err != nil {
-					return err
-				}
-			}
 		}
 		groups[a.Harness] = append(groups[a.Harness], item)
 	}
@@ -211,6 +148,84 @@ func PopulateDailyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, out *ag
 		}
 	}
 	return nil
+}
+
+// dailyAccountTx projects one door without routing advice. Admission shares
+// this calculation without recursively calling PopulateDailyTx.
+func dailyAccountTx(ctx context.Context, tx pgx.Tx, a Account, item agentplan.DailyAccount, d agentplan.DailySettings, explicit bool, tenantID, owner string, points int, start, end, now time.Time) (agentplan.DailyAccount, agentplan.DailySettings, error) {
+	u, err := loadUsagePolicy(ctx, tx, a.ID)
+	if err != nil {
+		return item, d, err
+	}
+	if !explicit {
+		d = legacyDaily(u)
+	}
+	reset, err := loadResetState(ctx, tx, a, now)
+	if err != nil {
+		return item, d, err
+	}
+	if reset.Credits != nil {
+		item.Resets = reset.Credits
+	}
+	if reset.Plan != nil {
+		item.ResetPlan = reset.Plan
+	}
+	item.ResetPolicy = reset.Policy
+	item.FloorPct = agentplan.Number(float64(u.Floor))
+	item.NoDailyLimit = a.BillingMode == "api"
+	if item.NoDailyLimit {
+		return item, d, nil
+	}
+	schedule, err := routingSchedule(ctx, tx, a)
+	if err != nil {
+		return item, d, err
+	}
+	windows, err := overviewWindows(ctx, tx, a, now, schedule)
+	if err != nil {
+		return item, d, err
+	}
+	w := dailyWindow(windows, a.LinkedAt)
+	if w == nil {
+		// The overview omits incomplete facts. Preserve their evidence here:
+		// a reported long window with missing fields is not "no reading".
+		facts, err := loadReadinessFacts(ctx, tx, a, now)
+		if err != nil {
+			return item, d, err
+		}
+		if unreadableDailyWindow(windows, a.LinkedAt) || unreadableDailyFacts(facts, a.LinkedAt) {
+			item.Freshness = "stale"
+		}
+		return item, d, nil
+	}
+	item.UsedPct, item.ResetsAt, item.ReadAt = w.UsedPercent, &w.ResetsAt, w.ReadAt
+	item.Freshness = "stale"
+	if !now.Before(w.ResetsAt) {
+		item.Freshness = "expired"
+	} else if w.ReadAt != nil && !w.ReadAt.After(now) && now.Sub(*w.ReadAt) <= ProbeFreshness {
+		item.Freshness = "fresh"
+	}
+	item.StartOfDayUsedPct, err = dailyBaselineTx(ctx, tx, a, *w, tenantID, owner, start, now)
+	if err != nil {
+		return item, d, err
+	}
+	if !explicit && u.Boost > 0 && u.BoostUntil != nil && now.Before(*u.BoostUntil) && item.StartOfDayUsedPct != nil {
+		accountPoints := points
+		if d.Pace.PointsPerDay != nil {
+			accountPoints = *d.Pace.PointsPerDay
+		}
+		limit := min(100, *item.StartOfDayUsedPct+float64(accountPoints+u.Boost))
+		if d.Pace.Mode == "everything" {
+			limit = 100
+		}
+		d.BoostToday = &agentplan.DailyBoost{LimitUsedPct: limit, EnteredAs: "used", Until: end}
+	}
+	raised, err := activeResetPace(ctx, tx, a, now)
+	if err != nil {
+		return item, d, err
+	}
+	item.ResetPacePoints = raised
+	err = agentplan.ApplyDaily(&item, d, points, now)
+	return item, d, err
 }
 
 func legacyDaily(u usagePolicy) agentplan.DailySettings {
@@ -226,20 +241,63 @@ func legacyDaily(u usagePolicy) agentplan.DailySettings {
 	return d
 }
 
-func dailyWindow(windows []overviewWindow) *overviewWindow {
+func longDailyWindow(w *overviewWindow) bool {
+	return w.Kind == "weekly" || w.Kind == "monthly" || strings.Contains(w.Bucket, "weekly") || strings.Contains(w.Bucket, "monthly")
+}
+
+// dailyWindow is the subscription percentage. A 5h session window is a quota
+// hold, not the daily ceiling, even when it is the only vendor sample.
+func dailyWindow(windows []overviewWindow, linkedAt *time.Time) *overviewWindow {
 	var chosen *overviewWindow
 	for i := range windows {
 		w := &windows[i]
-		if w.Source != "vendor_reported" || w.UsedPercent == nil || w.ReadAt == nil {
+		if w.Source != "vendor_reported" || w.UsedPercent == nil || w.ReadAt == nil || w.ResetsAt.IsZero() || !longDailyWindow(w) {
 			continue
 		}
-		long := w.Kind == "weekly" || w.Kind == "monthly" || strings.Contains(w.Bucket, "weekly") || strings.Contains(w.Bucket, "monthly")
-		chosenLong := chosen != nil && (chosen.Kind == "weekly" || chosen.Kind == "monthly" || strings.Contains(chosen.Bucket, "weekly") || strings.Contains(chosen.Bucket, "monthly"))
-		if chosen == nil || long && !chosenLong || long == chosenLong && w.ResetsAt.After(chosen.ResetsAt) {
+		// Filter the previous binding before ranking resets, so retained
+		// history cannot hide a current window with an earlier reset.
+		if linkedAt != nil && w.ReadAt.Before(*linkedAt) {
+			continue
+		}
+		if chosen == nil || w.ResetsAt.After(chosen.ResetsAt) {
 			chosen = w
 		}
 	}
 	return chosen
+}
+
+func unreadableDailyWindow(windows []overviewWindow, linkedAt *time.Time) bool {
+	for i := range windows {
+		w := &windows[i]
+		if linkedAt != nil && w.ReadAt != nil && w.ReadAt.Before(*linkedAt) {
+			continue
+		}
+		if w.Source == "vendor_reported" && longDailyWindow(w) && (w.UsedPercent == nil || w.ReadAt == nil || w.ResetsAt.IsZero()) {
+			return true
+		}
+	}
+	return false
+}
+
+func unreadableDailyFacts(facts []ReadinessFact, linkedAt *time.Time) bool {
+	for _, f := range facts {
+		if f.UsedPercent != nil && f.ReadingAt != nil && f.ResetsAt != nil {
+			continue
+		}
+		// A null capture has no reading time; its observation still binds
+		// the incomplete evidence to the link active when it was reported.
+		at := f.ObservedAt
+		if f.ReadingAt != nil {
+			at = *f.ReadingAt
+		}
+		if linkedAt != nil && at.Before(*linkedAt) {
+			continue
+		}
+		if longDailyWindow(&overviewWindow{Kind: "fact", Bucket: f.WindowKey}) {
+			return true
+		}
+	}
+	return false
 }
 
 func dailyBaselineTx(ctx context.Context, tx pgx.Tx, a Account, w overviewWindow, tenantID, owner string, start, now time.Time) (*float64, error) {

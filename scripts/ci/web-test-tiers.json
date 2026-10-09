@@ -72,6 +72,12 @@
   "postGateCases": [
     "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
     ,
+    "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › keeps sort actions and the other blocks still when a sort key is added or removed (±0.5px)"
+    ,
+    "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › lets a couple dozen saved views flow across columns without the panel scrolling"
+    ,
+    "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › moves a split column row into the slot its new order reserves"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -141,6 +147,76 @@
     "browser:tests/agents-cleanup.spec.ts:a section preference that lands after a run link keeps Queued open until the person folds it"
     ,
     "browser:tests/agents-cleanup.spec.ts:a stored open choice opens open, without a flash of the folded line"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:1024 dark: folding, picking a harness, folds and the info area keep every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:1024 light: folding, picking a harness, folds and the info area keep every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:1440 dark: folding, picking a harness, folds and the info area keep every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:1440 light: folding, picking a harness, folds and the info area keep every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:400 dark: folding, picking a harness, folds and the info area keep every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:400 light: folding, picking a harness, folds and the info area keep every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: \"● N running (M waiting) ▾\" opens the info area, from the folded dial too, and it is remembered"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: a flag opens the dial at that harness, and a pick is remembered per person"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: a harness with no account says so and links to add one"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: a stale reading never claims the limit, although the server also refuses starts then"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: an older plan without daily fields still draws the dial"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: at the limit the flag is red and says where new work goes"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: each row shows its usage lines and pace state in a fixed 88 px row"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: folded, the dial is one row as high as the other folded cards and flags only what needs attention"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: honest states: no reading is not on pace, and nothing is flagged"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the Accounts tile names what blocks a harness and offers Verify again in place, as Accounts and computers does"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the detail reads week, today, the bar and the pace state, then lists the accounts read-only"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the dial and its detail pass axe, open with both folds and folded, in both themes"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the folded dial keeps its place when a flag appears"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the info area states demand against the dial, with and without waiting work"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the old header Boost today is gone and nothing writes to its endpoint"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: vendor-reported resets are shown, and nothing else is claimed about them"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: with no pick the dial selects what needs attention"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: with nothing to flag it selects the first harness with a daily limit, and a pick that is no row is ignored"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: without the right to manage accounts the Accounts tile names the problem and offers no Verify"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:phone › AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › At the limit works from the keyboard: the arrow keys pick the other option and take focus with them"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › At the limit: follow the model ladder or wait, and nothing else"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › Boost today is read-only for accounts the person may not change; the server refuses that write too"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › Boost today is read-only without the right to manage accounts"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › Boost today: one number for today, typed as used or left, restated both ways, ending at the person’s midnight"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › Pace: a wrong number is said in place and nothing is written"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › Pace: the choice and the points a day are written whole, with every harness and the total untouched"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › a changed plan revision is re-read and the edit is not forced over it"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › a failed write keeps the confirmed settings on screen and says so"
     ,
     "browser:tests/agents-dial.spec.ts:AEON-781: a dial folded before the fold sections stays folded"
     ,
@@ -4594,6 +4670,90 @@
     ,
     {"kind":"browser","file":"tests/add-account.spec.ts","name":"without account.manage the action is gone and the hint stays","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 400px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 400px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › stays beside New in the Graph view, where New is absent","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › stays on the toolbar at tablet width, where the header bar has no Display","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › flows into columns at 1024×800 and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › flows into columns at 1100×1000 and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › flows into columns at 1280×800 and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › flows into columns at 1440×900 and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › is a full-height sheet on a phone, with its title and Done pinned","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › keeps sort actions and the other blocks still when a sort key is added or removed (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › lets a couple dozen saved views flow across columns without the panel scrolling","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › lets the long column list break between rows only when the window is too short for whole blocks","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › moves a split column row into the slot its new order reserves","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › phone targets are 44px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › recounts its columns when the window changes height while open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › stays one column when the window is tall enough, and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › Hide closed switches in place, and the gear opens its choices where Display is","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › Needs attention opens this project's list of suggestions","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › a display choice keeps the menu open and shows on the button","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › choosing a header size from the menu unfolds the header","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › choosing a saved view opens it and says so the next time the menu opens","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › choosing a section goes there and closes the menu","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › lists the sections, then the saved views with Hide closed and its gear, then the usual options","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › opens focused on the current section, and Escape closes it back onto the button","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › saving the list as a view works from the menu","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: what the menu carries › unfolding the header closes the menu instead of leaving it on a hidden button","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"folding and unfolding the header › keeps the collapsed toolbar still while the menu opens, closes and takes choices (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"folding and unfolding the header › keeps the header switch and the bar below it where they are (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"folding and unfolding the header › keeps the menu's own controls still through every choice at 1440px (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"folding and unfolding the header › keeps the menu's own controls still through every choice at 400px (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"folding and unfolding the header › moves nothing in the toolbar at 1024px (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"folding and unfolding the header › moves nothing in the toolbar at 1440px (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"folding and unfolding the header › moves nothing in the toolbar at 390px (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the All tickets pill › ends with the same room as it starts with at 1440px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the All tickets pill › ends with the same room as it starts with at 400px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the other two header views › comfortable: Display keeps its place in the header bar and its menu is the one it was","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the other two header views › compact: Display keeps its place in the header bar and its menu is the one it was","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the ticket count › is gone from the Outline and Graph toolbars too","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the ticket count › is gone from the toolbar in every header view at 1440px; the footer still says it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the ticket count › is gone from the toolbar in every header view at 400px; the footer still says it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -5098,10 +5258,6 @@
     ,
     {"kind":"browser","file":"tests/agent-rules.spec.ts","name":"rule details stay behind the row disclosure","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-boost.spec.ts","name":"Boost today preserves the header controls through every option in both themes and languages","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/agents-boost.spec.ts","name":"a failed boost preserves the confirmed choice and non-owners have no buttons","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"Queued folds per person, says what waits, and a run link opens it without changing the preference","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a queued run can be cancelled from /agents","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -5111,6 +5267,76 @@
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a stored open choice opens open, without a flash of the folded line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"accounts and computers fold into one calm line, remembered per person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"1024 dark: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"1024 light: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"1440 dark: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"1440 light: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"400 dark: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"400 light: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: \"● N running (M waiting) ▾\" opens the info area, from the folded dial too, and it is remembered","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a flag opens the dial at that harness, and a pick is remembered per person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a harness with no account says so and links to add one","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a stale reading never claims the limit, although the server also refuses starts then","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: an older plan without daily fields still draws the dial","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: at the limit the flag is red and says where new work goes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: each row shows its usage lines and pace state in a fixed 88 px row","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: folded, the dial is one row as high as the other folded cards and flags only what needs attention","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: honest states: no reading is not on pace, and nothing is flagged","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the Accounts tile names what blocks a harness and offers Verify again in place, as Accounts and computers does","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the detail reads week, today, the bar and the pace state, then lists the accounts read-only","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the dial and its detail pass axe, open with both folds and folded, in both themes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the folded dial keeps its place when a flag appears","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the info area states demand against the dial, with and without waiting work","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the old header Boost today is gone and nothing writes to its endpoint","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: vendor-reported resets are shown, and nothing else is claimed about them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: with no pick the dial selects what needs attention","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: with nothing to flag it selects the first harness with a daily limit, and a pick that is no row is ignored","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: without the right to manage accounts the Accounts tile names the problem and offers no Verify","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"phone › AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › At the limit works from the keyboard: the arrow keys pick the other option and take focus with them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › At the limit: follow the model ladder or wait, and nothing else","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Boost today is read-only for accounts the person may not change; the server refuses that write too","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Boost today is read-only without the right to manage accounts","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Boost today: one number for today, typed as used or left, restated both ways, ending at the person’s midnight","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Pace: a wrong number is said in place and nothing is written","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Pace: the choice and the points a day are written whole, with every harness and the total untouched","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › a changed plan revision is re-read and the edit is not forced over it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › a failed write keeps the confirmed settings on screen and says so","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"1024 dark wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6365,6 +6591,34 @@
     {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 390 coarse dark › approval and held controls fit both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 390 coarse light › approval and held controls fit both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 1440 dark expert","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 1440 dark simple","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 1440 light expert","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 1440 light simple","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 400 dark expert","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 400 dark simple","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 400 light expert","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Delivery v5 readings at 400 light simple","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Simple keeps every Learn and section still through every window at 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Simple keeps every Learn and section still through every window at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"Simple keeps every Learn and section still through every window at 400","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"a v5 reading never moves its own tile or a control when the window or the level changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"missing, partial and unwatched facts are said as that, never as zero","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"the v5 readings sit in their tiles with exact counts and the plan’s targets","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -14128,19 +14382,49 @@
     ,
     {"kind":"vitest","file":"tests/agents-after-write.unit.test.ts","name":"schedule save: an older capacity read does not bring the old schedule back","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/agents-boost.unit.test.ts","name":"drops a held save on identity change and exposes no boost controls to agents or non-owners","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/agents-boost.unit.test.ts","name":"keeps the last confirmed selection on failure and blocks retry until a complete reload","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/agents-boost.unit.test.ts","name":"rejects incomplete overview pagination instead of boosting a partial account list","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/agents-boost.unit.test.ts","name":"shows Boost today when every owned account is withheld and saves without account ids","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/agents-boost.unit.test.ts","name":"writes only owned accounts with captured revisions and expires the confirmed selection at the local cutoff","tier":"ESSENTIAL"}
-    ,
     {"kind":"vitest","file":"tests/agents-cleanup-store.unit.test.ts","name":"a poll in flight during Cancel does not overwrite cancelled with queued","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-cleanup-store.unit.test.ts","name":"a poll in flight during Remove does not restore the removed account","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"Boost today and pace input > accepts only whole numbers in range and never clamps a wrong one into a right one","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"Boost today and pace input > compares settings by value, and a missing harness means the defaults","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"Boost today and pace input > stores the used percentage whichever way it was typed, and restates it both ways","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"saving a daily setting > carries every harness’s current settings and leaves the total and limits as they were","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"saving a daily setting > drops an edit made for another viewer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"saving a daily setting > never sends the effective daily map with a plain total or limit change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"saving a daily setting > shows the new setting at once, ignores an unchanged one, and restores the confirmed settings when the write fails","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"the numbers on the right > draws today’s bar teal to the share, gold over it and red past the limit, and the week when today is unknown","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"the numbers on the right > reads week used and left, then today’s points with the share, in the person’s words","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"the numbers on the right > shows vendor-reported resets only","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > does not turn a stale, expired or unknown reading above the ceiling into the red limit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > is on pace only with a fresh reading under today’s limit, and says nothing of a harness with no account","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > is over pace in gold with the points above today’s share, and at the limit in red","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > keeps the ceiling of an active Boost under use everything, since the server enforces it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > keeps the usage line to the limit, and says no daily limit for a billed-by-use harness and for everything","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > lets only an owner who may manage every account change today’s limit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > never reports the limit for a stale, missing or private reading, although the server also refuses starts then","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > words what happens at the limit without inventing a ladder","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial remembers > keeps only known keys with the right type","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial remembers > selects the pick, else a harness over pace or at its limit, else the first with a daily limit, else the first row","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agents-fixture-clock.unit.test.ts","name":"serves a projection after the browser has ended without evaluating the page","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
@@ -14620,17 +14904,35 @@
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"a run of nights ends at a night without a run; only tonight may still be due","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"a withheld measurement with recorded runs is unavailable, not \"Nothing recorded\"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"audits and defects show severities; inside the watched time nothing recorded is said as that, outside it is \"no data\"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"confirmed flaky runs and suspects are two numbers; the suspects never enter the share","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"days after coverage ends stay \"no data yet\", including a night after the App disconnects","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"days before the source covers them are \"no data yet\", later empty days are not, and nothing is invented","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"every reading draws a chart with its own target, and its readout names counts without extrapolating","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"long windows use the server’s weeks and months and label only some of them","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"p90 stretches the duration scale at most to twice its room, else it is clipped and named","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"queue readings say events of base from exact counts, and the unclassified cause stays unclassified","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"runner wait leads with p90, the number the plan judges, and says p50 beside it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"runs without job facts say 0 of N and why, on the tile and on the chart","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"the page preferences fall back to Simple and 7 days and refuse anything else","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"the paired numbers count what they say: flakes, “changes”, scripted rounds and green nights","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"the paired numbers count what they say: required checks, “changes”, scripted rounds and green nights","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"the v5 readings read German, impersonal","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"time to first green names how many never went green, per branch and per commit, from exact counts","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"Learn opens on focus, pins with Enter or a click, and Esc closes it and keeps focus on the button","tier":"ESSENTIAL"}
     ,
@@ -14642,9 +14944,13 @@
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"each tile shows its verdict as shape and word: the icon follows the level","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"missing job facts read as unavailable, never as a measured 0 of N, in the sentence and in Learn","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"the small chart shades the good side of the target and hatches only what no source covers","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"the summary counts numbers on target and names the closest and the biggest gap from this window’s numbers","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"the v5 readings get a verdict, a sentence and a direction from this window’s exact numbers","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"with a refused save and a failed read together, both alerts and both retries stay reachable (de)","tier":"ESSENTIAL"}
     ,
@@ -15283,6 +15589,24 @@
     {"kind":"vitest","file":"tests/live-views.unit.test.ts","name":"the list, the live list and the panel over any delivery order > show only what the tab may trust, and end at the server's state (300 seeds)","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/live-views.unit.test.ts","name":"the live Outline over delayed pages, gaps and child moves > admits trusted pages, patches live, and holds placement until Show (300 seeds)","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > asks the layout only as often as needed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > counts the columns a window can hold beside each other, with its margin","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > does not trust an unbreakable block: a column count that still overflows is skipped","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > lets the long list break across columns only when whole blocks cannot fit at any count","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > sizes the body and the panel from one column width and gap","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > splits into the fewest columns that fit, never more","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > stays at one column while the content fits the room, however much room there is","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > still gives up gracefully when even a broken list does not fit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/menu-columns.unit.test.ts","name":"collapsed header menu columns > takes the most columns the window holds when none fits, and at least one","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/model-display.unit.test.ts","name":"per-person Display preference persistence > defaults to On/Short/Show, merges other preferences, and reloads from the server","tier":"GATED-FULL"}
     ,
