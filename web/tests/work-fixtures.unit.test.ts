@@ -11,7 +11,13 @@ it('HTTP snapshot scenarios keep a healthy stream while explicit event transport
   vi.stubGlobal('window', browser)
   const page = { addInitScript: async (script: () => void) => script(), route: async () => {} } as unknown as Page
   await mockWork(page, fixtures())
-  const stream = new browser.EventSource(), ping = vi.fn()
+  const stream = new browser.EventSource() as EventTarget & { onopen: (() => void) | null; close(): void }, ping = vi.fn(), opened = vi.fn(), ready = vi.fn()
+  stream.onopen = opened
+  stream.addEventListener('stream.ready', ready)
+  await Promise.resolve()
+  expect(opened).toHaveBeenCalledTimes(1)
+  expect(ready).toHaveBeenCalledTimes(1)
+  expect(JSON.parse((ready.mock.calls[0]![0] as MessageEvent).data)).toEqual({ after: 0, resumed: false })
   stream.addEventListener('stream.ping', ping)
   vi.advanceTimersByTime(5_000)
   expect(ping).toHaveBeenCalledTimes(1)

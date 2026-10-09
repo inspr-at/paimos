@@ -301,8 +301,18 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     // regardless of Playwright's unspecified init-script order.
     if (window.EventSource.name !== 'EventSource') return
     class QuietStream extends EventTarget {
+      onopen: ((event: Event) => void) | null = null
+      private closed = false
       private timer = setInterval(() => this.dispatchEvent(new Event('stream.ping')), 5_000)
-      close() { clearInterval(this.timer) }
+      constructor() {
+        super()
+        queueMicrotask(() => {
+          if (this.closed) return
+          this.onopen?.(new Event('open'))
+          this.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 0, resumed: false }) }))
+        })
+      }
+      close() { this.closed = true; clearInterval(this.timer) }
     }
     Object.assign(window, { EventSource: QuietStream })
   })
