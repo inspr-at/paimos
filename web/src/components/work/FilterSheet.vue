@@ -18,14 +18,14 @@ import HeaderRoomyChoice from './HeaderRoomyChoice.vue'
 // Phones and small tablets share every filter and display preference with the toolbar.
 const props = withDefaults(defineProps<{
   summary?: ProjectSummary | null; filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null
-  view?: 'list' | 'outline' | 'graph'; canSave?: boolean; density: 'comfortable' | 'compact'; headerGraph?: boolean; projectHeader?: boolean
+  view?: 'list' | 'outline' | 'graph'; canSave?: boolean; density: 'comfortable' | 'compact'; projectHeader?: boolean
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
 }>(), { view: 'list' })
 const emit = defineEmits<{
   hideStates: [states: HideState[]]; toggle: [dimension: Dimension, value: string]; exclude: [dimension: Dimension, value: string]; clearAll: []; showClosed: [value: boolean]; group: [value: GroupBy]
   date: [value: DateFilter | null]; opened: []; expandAll: []; collapseAll: []; saveView: [anchor: HTMLElement]
   sort: [keys: SortKey[]]; density: [value: 'comfortable' | 'compact']; columns: [order: ColumnId[], visible: ColumnId[]]
-  columnsReset: []; headerGraph: [value: boolean]; expandGroups: []; collapseGroups: []
+  columnsReset: []; expandGroups: []; collapseGroups: []
 }>()
 const hideName = computed(() => hideLabel(props.filters.hideStates))
 const hideNames = computed(() => hiddenStates(props.filters.hideStates).map(state => statusMeta(state).label).join(', '))
@@ -79,10 +79,9 @@ defineExpose({ open, close })
           <h3 id="sheet-display-title" class="eyebrow">Display</h3>
           <DisplayPanel
             sheet :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns"
-            :grouped="view === 'list' && filters.group !== 'none'" :header-graph="headerGraph" :project-header="projectHeader"
+            :grouped="view === 'list' && filters.group !== 'none'" :project-header="projectHeader"
             @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
             @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
-            @header-graph="value => emit('headerGraph', value)"
             @expand-all="emit('expandAll'); close()" @collapse-all="emit('collapseAll'); close()"
             @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')"
           />

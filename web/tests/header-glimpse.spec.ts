@@ -265,22 +265,37 @@ test.describe('reduced motion', () => {
   })
 })
 
-test('the Display switch hides the glimpse and is remembered', async ({ page }) => {
-  const world = await mockHeaderGraph(page)
+// Absence only counts once the developer choice has been read and rendered.
+async function gotoSettled(page: Page, path: string) {
+  const read = page.waitForResponse(response => new URL(response.url()).pathname === '/api/preferences/developer-ui')
+  await page.goto(path)
+  await read
+  await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+}
+
+test('the glimpse is off unless the developer setting turns it on, even after an earlier Display choice', async ({ page }) => {
+  const world = ticketGraphWorld()
+  delete world.work.preferences['developer-ui']
+  world.work.preferences['list:display'] = { headerGraph: true }
+  await mockHeaderGraph(page, world)
+  await gotoSettled(page, '/p/PHAROS/tickets')
+  await expect(page.locator('[data-header-glimpse]')).toHaveCount(0)
+  await page.getByRole('button', { name: /^Display:/ }).click()
+  await expect(page.getByRole('checkbox', { name: 'Graph in project header' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await page.goto('/settings/developer')
+  const toggle = page.getByRole('switch', { name: 'Graph in project header', exact: true })
+  await expect(toggle).not.toBeChecked()
+  await toggle.check()
+  await expect.poll(() => (world.work.preferences['developer-ui'] as { show_header_graph?: boolean } | undefined)?.show_header_graph).toBe(true)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
-  await page.getByRole('button', { name: /^Display:/ }).click()
-  const toggle = page.getByRole('checkbox', { name: 'Graph in project header' })
-  await expect(toggle).toBeChecked()
-  await toggle.uncheck()
-  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
-  await expect.poll(() => (world.work.preferences['list:display'] as { headerGraph?: boolean } | undefined)?.headerGraph).toBe(false)
-  await page.reload()
-  await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
-  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
-  await page.getByRole('button', { name: /^Display:/ }).click()
-  await page.getByRole('checkbox', { name: 'Graph in project header' }).check()
-  await ready(page)
+  await page.goto('/settings/developer')
+  await page.getByRole('switch', { name: 'Graph in project header', exact: true }).uncheck()
+  await expect.poll(() => (world.work.preferences['developer-ui'] as { show_header_graph?: boolean } | undefined)?.show_header_graph).toBe(false)
+  await gotoSettled(page, '/p/PHAROS/tickets')
+  await expect(page.locator('[data-header-glimpse]')).toHaveCount(0)
 })
 
 test('leaving the project releases the WebGL context', async ({ page }) => {
