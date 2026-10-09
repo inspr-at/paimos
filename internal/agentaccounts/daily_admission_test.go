@@ -160,7 +160,7 @@ func TestDailyAdmissionIncompleteFactsFailClosed(t *testing.T) {
 						return err
 					}
 					for _, claiming := range []bool{false, true} {
-						_, wait, err := admission(ctx, tx, a, a.Windows, now, 0, runRow{Purpose: "managed", CapacityOverride: "now"}, claiming)
+						_, wait, err := admission(ctx, tx, a, a.Windows, now, 0, runRow{ID: "48a796a9-6c76-4fb5-86f9-c77c89118022", Purpose: "managed", CapacityOverride: "now"}, claiming)
 						if err != nil {
 							return err
 						}
@@ -212,7 +212,7 @@ func TestDailyAdmissionCurrentFactSurvivesPreLinkWindow(t *testing.T) {
 			return err
 		}
 		for _, claiming := range []bool{false, true} {
-			_, wait, err := admission(ctx, tx, a, a.Windows, now, 0, runRow{Purpose: "managed", CapacityOverride: "now"}, claiming)
+			_, wait, err := admission(ctx, tx, a, a.Windows, now, 0, runRow{ID: "48a796a9-6c76-4fb5-86f9-c77c89118022", Purpose: "managed", CapacityOverride: "now"}, claiming)
 			if err != nil {
 				return err
 			}
