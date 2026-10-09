@@ -118,3 +118,29 @@ retains those gates and the separate desk UI package's integration.
 The command-package suite also passed after OpenAPI generation in its temporary
 remote checkout. The final static run on `34d537a7e` passed all 41 checks with
 no skips (exit 0); the final handover commit adds only this validation record.
+
+AEON-1049 fix round 2 settles a bounded expiry page in two phases inside its
+existing transaction. Every request update, exact session lookup, result message
+and receipt write finishes before the first event takes the event counter lock.
+The System sender is resolved once for the batch; result events and request
+audits follow the row writes. A failed later result rolls back the entire page.
+
+The registered two-agent/session regression failed remotely on unchanged
+`d1ec5f8d` production code, with the corrected fixture at `7ca1497c6`, because
+PostgreSQL's lock guard detected the event counter before the second result row.
+It passes with the batch fix, and also checks exact agent/session/project
+destinations, first-use System creation, expiry timestamps, repeat-list
+idempotence and rollback when the second message insert is rejected.
+
+The affected remote step-up, inbox, authentication, Decision Desk, phone
+approval, command and reporter-contract suites passed on `354bef5a9`. The
+command and contract rerun first regenerated OpenAPI in this task's temporary
+remote checkout. Both push pointer tests and the three targeted phone spec
+cases passed; the latter used one local worker and covered three widths in both
+themes. The remote browser launcher refused twice pending OPS-247, so
+CI-equivalent Linux Chromium remains for coordinator CI.
+
+The final locked remote static gate passed all 41 checks with no skips (exit 0)
+after restoring its missing Apple SDK dependency. The tier manifest change is
+one additive regression entry. Non-blocking review findings remain follow-up
+work; no origin push, deployment or worker-run model review was performed.
