@@ -2140,7 +2140,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .project-navigation.legacy-navigation :deep(.sections) { margin-top: 18px; }
 .project-navigation.legacy-navigation .view-bar { padding: 2px 0 6px; }
 /* AEON-1027: the lead card, open or folded, keeps its own card gap (16px, as between the Agents page
-   cards) to the section bar, in every header density. */
+   cards) to the section bar, in every header density. One :deep() only: Vue leaves a second :deep()
+   literal and the browser drops the rule. */
 .project-page :deep(.lead) + .project-navigation { margin-top: 0; }
-.project-page :deep(.lead) + .legacy-navigation :deep(.sections) { margin-top: 0; }
+.project-page :deep(.lead + .legacy-navigation .sections) { margin-top: 0; }
 </style>

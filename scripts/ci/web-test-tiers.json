@@ -8256,6 +8256,14 @@
     ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the fold is remembered for this person and project, and a lead clears it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 400 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 400 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}

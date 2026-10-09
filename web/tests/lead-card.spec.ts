@@ -116,6 +116,23 @@ for (const width of [1440, 1024, 400]) {
   })
 }
 
+const sectionBar = (page: Page) => page.getByRole('tablist', { name: 'Project sections' })
+for (const width of [1440, 400]) for (const look of ['light', 'dark'] as const) {
+  test(`the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at ${width} ${look}`, async ({ page }) => {
+    await open(page, width)
+    await theme(page, look)
+    for (const name of ['Tickets', 'Knowledge', 'Settings']) {
+      await sectionBar(page).getByRole('tab', { name, exact: true }).click()
+      await expect(sectionBar(page).getByRole('tab', { name, exact: true })).toHaveAttribute('aria-selected', 'true')
+      await expect(card(page).getByRole('heading', { name: 'No lead in PHAROS' })).toBeVisible()
+      // The 18px tab margin must be computed as 0. A dropped stylesheet rule leaves 18px on Knowledge and Settings.
+      expect(await sectionBar(page).evaluate(element => getComputedStyle(element).marginTop), `${name} computed margin above the section bar`).toBe('0px')
+      const gap = (await box(bar(page))).y - ((await box(card(page))).y + (await box(card(page))).height)
+      expect(gap, `${name} card gap`).toBeCloseTo(16, 0)
+    }
+  })
+}
+
 test.describe('stability', () => {
   test.use({ reducedMotion: 'no-preference' })
   for (const width of [1440, 400]) {
