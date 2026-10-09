@@ -31,10 +31,13 @@ async function watchShifts(page: Page) {
     const w = window as unknown as { __cls: number; __shifts: string[] }
     w.__cls = 0; w.__shifts = []
     new PerformanceObserver(list => {
-      for (const entry of list.getEntries() as unknown as { value: number; hadRecentInput: boolean; sources?: { node: Node | null }[] }[]) {
+      for (const entry of list.getEntries() as unknown as { value: number; hadRecentInput: boolean; sources?: { node: Node | null; previousRect: DOMRectReadOnly; currentRect: DOMRectReadOnly }[] }[]) {
         if (entry.hadRecentInput) continue
         w.__cls += entry.value
-        w.__shifts.push(`${entry.value.toFixed(3)} ${(entry.sources ?? []).map(s => (s.node as Element | null)?.className ?? '?').join(', ')}`)
+        w.__shifts.push(`${entry.value.toFixed(3)} ${(entry.sources ?? []).map(s => {
+          const rect = (r: DOMRectReadOnly) => [r.x, r.y, r.width, r.height].map(n => Math.round(n))
+          return `${(s.node as Element | null)?.className ?? '?'} ${JSON.stringify(rect(s.previousRect))}→${JSON.stringify(rect(s.currentRect))}`
+        }).join(', ')}`)
       }
     }).observe({ type: 'layout-shift', buffered: true })
   })
