@@ -691,7 +691,7 @@ func backfillWorkflowList(source *metricSourceRow, cursor *backfillCursor) []str
 }
 
 func needsPreflightCatchup(cursor *backfillCursor) bool {
-	if cursor == nil || cursor.ResumePhase != "" {
+	if cursor == nil || cursor.ResumePhase != "" || cursor.PreflightAbsent {
 		return false
 	}
 	if cursor.Phase != "done" && cursor.Phase != "jobs" {

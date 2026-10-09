@@ -266,6 +266,43 @@ it('every reading draws a chart with its own target, and its readout names count
   expect(partialChart.readouts.at(-1)).toContain('without job facts')
 })
 
+it('runs without job facts say 0 of N and why, on the tile and on the chart', () => {
+  const reason = '6 runs without job facts yet, so their required checks and runner waits are not counted.'
+  const primary = metric('first_attempt_green', { unit: 'percent' }, { n: 6, value: 50 })
+  const required = metric('required_checks_green', { unit: 'percent', reason, status: 'no_data' }, { n: 0, value: null, status: 'no_data', p50: null, p90: null, coverage: coverage(7, day(6)) })
+  required.daily = required.daily.map(point => ({ ...point, status: 'no_data' as const, n: 0, value: null, p50: null, p90: null }))
+  const metrics = new Map<MetricKey, Metric>([['first_attempt_green', primary], ['required_checks_green', required]])
+  const line = tileModel(def('first_attempt_green'), metrics, 7, null, 'en').lineA.parts.map(part => part.text).join('')
+  expect(line).toContain('Required checks')
+  expect(line).toContain('0 of 6')
+  expect(line).toContain('6 runs without job facts yet')
+  expect(line).not.toBe('Required checks –')
+  const german = tileModel(def('first_attempt_green'), metrics, 7, null, 'de').lineA.parts.map(part => part.text).join('')
+  expect(german).toContain('0 von 6')
+  const chart = chartModel(def('first_attempt_green'), metrics, 7, null, 'en')
+  expect(chart.readouts.at(-1)).toContain('0 of')
+  expect(chart.readouts.at(-1)).toContain('without job facts')
+  const bare = tileModel(def('first_attempt_green'), new Map([['first_attempt_green', primary]]), 7, null, 'en')
+  expect(bare.lineA.parts.map(part => part.text).join('')).toBe('Required checks –')
+})
+
+it('a withheld measurement with recorded runs is unavailable, not "Nothing recorded"', () => {
+  const reason = 'Confirmed executions are unavailable until the same case, the workflow revision and the runner class are recorded.'
+  const daily = Array.from({ length: 30 }, (_, index) => {
+    const date = day(29 - index)
+    return { date, status: 'no_data' as const, n: index === 29 ? 10 : 0, value: null, p50: null, p90: null }
+  })
+  const subject = metric('flaked_failures', { unit: 'percent', reason, status: 'no_data', daily }, { n: 10, value: null, status: 'no_data', p50: null, p90: null })
+  const { buckets } = bucketsOf(subject, 7, 'en')
+  expect(buckets.at(-1)!.status).toBe('unavailable')
+  expect(buckets.slice(0, -1).map(bucket => bucket.status)).toEqual(['empty', 'empty', 'empty', 'empty', 'empty', 'empty'])
+  const model = chartModel(def('flaked_failures'), new Map([['flaked_failures', subject]]), 7, null, 'en')
+  expect(model.readouts.at(-1)).toContain('10 runs')
+  expect(model.readouts.at(-1)).toContain('unavailable')
+  expect(model.readouts.at(-1)).not.toContain('Nothing recorded')
+  expect(model.panels[0].lines[0].values.at(-1)).toBeNull()
+})
+
 it('the v5 readings read German, impersonal', () => {
   const tile = tileModel(def('queue_ejections'), counted('queue_ejections', 151, 59.6, { events: 90, base: 151 }, 'per100'), 7, null, 'de')
   expect(tile.value).toEqual({ main: '60', unit: 'pro 100 PRs' })

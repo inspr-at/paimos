@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -473,4 +474,125 @@ func TestDeliveryPreflightCatchupListsOnlyPreflight(t *testing.T) {
 	}
 	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/metrics", nil, 200, &out)
 	wantWindow(t, metricByKey(t, out.Metrics, "preflight_red_rate"), 30, "ok", 1, f64(100), nil, nil)
+}
+
+func TestDeliveryBackfillSkipsConfirmedAbsentPreflight(t *testing.T) {
+	// Risk: a repository with no ci-preflight.yml returns 502 forever, or the
+	// finished backfill reports that missing workflow as fully covered.
+	f, g := newMetricsFixture(t)
+	runAt := time.Date(2026, 10, 6, 15, 0, 0, 0, time.UTC)
+	g.respond = func(p string) (any, error) {
+		switch {
+		case strings.Contains(p, "ci-preflight.yml"):
+			return nil, crossreview.ErrNotFound
+		case strings.Contains(p, "/actions/workflows/ci.yml/runs") && strings.Contains(p, "2026-10-06"):
+			return map[string]any{"total_count": 1, "workflow_runs": []any{
+				githubRunBody(610, 1, defaultCIWorkflow, "pull_request", "work/a", strings.Repeat("a", 40), runAt, 8*time.Minute, "success", 0),
+			}}, nil
+		case strings.HasPrefix(p, "/actions/workflows/"):
+			return map[string]any{"total_count": 0, "workflow_runs": []any{}}, nil
+		case strings.Contains(p, "/jobs?"):
+			return githubJobsBody(runAt, 30, nil), nil
+		case p == "":
+			return map[string]any{"full_name": f.m.config.Repository, "default_branch": "main"}, nil
+		case strings.Contains(p, "/pulls?"):
+			return []any{}, nil
+		default:
+			return nil, fmt.Errorf("unexpected GitHub read %s", p)
+		}
+	}
+	var step BackfillResult
+	backfill := "/api/projects/" + f.project + "/delivery/metrics/backfill"
+	body := map[string]any{"days": 1}
+	jobs := 0
+	for i := 0; i < 6 && step.State != "done"; i++ {
+		f.call(t, f.person, "POST", backfill, body, 200, &step)
+		body = map[string]any{}
+		jobs += step.Jobs
+	}
+	if step.State != "done" || jobs < 1 {
+		t.Fatalf("backfill without preflight: %+v jobs %d", step, jobs)
+	}
+	var preflightRuns int
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_metric_runs WHERE repository=$1 AND workflow_path LIKE '%ci-preflight.yml'`, f.m.config.Repository).Scan(&preflightRuns)
+	})
+	if preflightRuns != 0 {
+		t.Fatalf("stored %d runs of a workflow GitHub says is absent", preflightRuns)
+	}
+	var out DeliveryMetrics
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/metrics", nil, 200, &out)
+	preflight := metricByKey(t, out.Metrics, "preflight_red_rate")
+	if metricWindow(t, preflight, 30).Coverage.Full || preflight.Status == "ok" {
+		t.Fatalf("absent preflight looks covered: status %s coverage %+v", preflight.Status, metricWindow(t, preflight, 30).Coverage)
+	}
+	before := len(g.calls)
+	f.call(t, f.person, "POST", backfill, map[string]any{}, 200, &step)
+	for _, call := range g.calls[before:] {
+		if strings.Contains(call, "ci-preflight.yml") {
+			t.Fatalf("a later step asked for the absent workflow again: %v", g.calls[before:])
+		}
+	}
+}
+
+func TestDeliveryLegacyCatchupLeavesAbsentPreflightUncovered(t *testing.T) {
+	// Risk: a finished CI backfill either blocks on the missing preflight
+	// workflow or, after one 404, starts the catch-up again on every call.
+	f, g := newMetricsFixture(t)
+	since := f.at.AddDate(0, 0, -30)
+	cursor, err := json.Marshal(backfillCursor{Since: since, Phase: "done", Workflows: []string{defaultCIWorkflow, defaultNightlyWorkflow}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := f.at.Add(-3 * time.Hour)
+	run := metricRun{ID: 710, Attempt: 1, Workflow: defaultPreflightWorkflow, Name: "preflight", Event: "workflow_dispatch", Branch: "main", Head: strings.Repeat("c", 40),
+		Created: created, Started: created.Add(time.Minute), Completed: created.Add(6 * time.Minute), Conclusion: "failure"}
+	f.tx(t, func(tx pgx.Tx) error {
+		if err := upsertRunsTx(t.Context(), tx, f.person.TenantID, f.m.config.Repository, "webhook", []metricRun{run}, f.at); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_since=$3,backfill_done_at=$4 WHERE project_id=$1`, f.project, cursor, since, f.at)
+		return err
+	})
+	var out DeliveryMetrics
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/metrics", nil, 200, &out)
+	before := metricByKey(t, out.Metrics, "preflight_red_rate")
+	wantWindow(t, before, 30, "partial", 1, f64(100), nil, nil)
+	if before.Windows[1].Coverage.Full {
+		t.Fatal("preflight coverage followed the CI backfill")
+	}
+	g.respond = func(p string) (any, error) {
+		if strings.Contains(p, "ci-preflight.yml") {
+			return nil, crossreview.ErrNotFound
+		}
+		return nil, fmt.Errorf("unexpected GitHub read %s", p)
+	}
+	var step BackfillResult
+	backfill := "/api/projects/" + f.project + "/delivery/metrics/backfill"
+	for i := 0; i < 4 && step.State != "done"; i++ {
+		f.call(t, f.person, "POST", backfill, map[string]any{}, 200, &step)
+	}
+	sawPreflight, sawCI := false, false
+	for _, call := range g.calls {
+		if strings.Contains(call, "ci-preflight.yml") {
+			sawPreflight = true
+		}
+		if strings.Contains(call, "/actions/workflows/ci.yml") || strings.Contains(call, "/pulls?") {
+			sawCI = true
+		}
+	}
+	if !sawPreflight || sawCI || step.State != "done" {
+		t.Fatalf("absent catch-up: state %s calls %v", step.State, g.calls)
+	}
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/metrics", nil, 200, &out)
+	after := metricByKey(t, out.Metrics, "preflight_red_rate")
+	wantWindow(t, after, 30, "partial", 1, f64(100), nil, nil)
+	if metricWindow(t, after, 30).Coverage.Full {
+		t.Fatal("absent preflight became fully covered")
+	}
+	calls := len(g.calls)
+	f.call(t, f.person, "POST", backfill, map[string]any{}, 200, &step)
+	if step.State != "done" || len(g.calls) != calls {
+		t.Fatalf("catch-up restarted: %+v calls %v", step, g.calls[calls:])
+	}
 }

@@ -127,7 +127,9 @@ test('missing, partial and unwatched facts are said as that, never as zero', asy
   await page.goto('/p/AEON/delivery')
   await expect(page.getByTestId('delivery-tiles').locator('[aria-busy="true"]')).toHaveCount(0)
   await expect(tile(page, 'Runner wait, worst job').locator('.t-value')).toHaveText('No data yet')
-  await expect(tile(page, 'Green on first try').locator('.t-line').nth(0)).toHaveText('Required checks –')
+  const requiredLine = tile(page, 'Green on first try').locator('.t-line').nth(0)
+  await expect(requiredLine).toContainText('0 of')
+  await expect(requiredLine).toContainText('4 runs without job facts yet')
   // Watched, nothing recorded: "0 recorded". Not watched yet: no data.
   await expect(tile(page, 'Escaped defects').locator('.t-value')).toHaveText('0recorded')
   await expect(tile(page, 'Escaped defects').locator('.t-line').nth(0)).toHaveText('None recorded')

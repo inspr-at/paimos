@@ -636,7 +636,7 @@ func computeMetricsFor(in metricInput, now time.Time, windows []int) []Metric {
 	}
 	out = append(out, build(metricSpec{number: 16, key: "preflight_red_rate", label: "Preflight red rate", unit: "percent", source: fmt.Sprintf("GitHub Actions workflow %s (GitHub App check suites and backfill)", path.Base(preflight)),
 		def:       "Share of exact-commit preflight runs (first attempt) that ended red, counted on the day the run was created. Preflight runs before a pull request opens; they are their own line and never count as CI greens. Coverage starts when a backfill has listed this workflow, not when CI history is complete.",
-		aggregate: "share", target: nil, coverage: in.PreflightCovered, readFrom: in.ReadFrom, noDataReason: "No completed " + path.Base(preflight) + " run in the last 30 days."}, pre))
+		aggregate: "share", target: nil, coverage: in.PreflightCovered, coverageEnd: in.CoveredUntil, readFrom: in.ReadFrom, noDataReason: "No completed " + path.Base(preflight) + " run in the last 30 days."}, pre))
 
 	// 17, 18: reported audits and defects, and rollout incidents.
 	audits, defects := []metricPoint{}, []metricPoint{}

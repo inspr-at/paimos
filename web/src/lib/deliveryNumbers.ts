@@ -172,8 +172,14 @@ export function nightStreak(nights: ('ok' | 'bad' | 'none' | 'nodata')[]): { ver
   return { verdict, count }
 }
 
+/** Every counted run lacks job facts: no companion samples, the calendar is covered, and the server said why. */
+export function jobFactsMissing(also: MetricWindow | null | undefined, reason: string | null | undefined): boolean {
+  return !!also && also.value == null && also.n === 0 && also.status === 'no_data' && also.coverage.full && !!reason?.trim()
+}
 /** Required checks beside workflow green: their own sample size, and coverage plus the missing-facts reason when that window is not whole. */
 function requiredParts(also: MetricWindow | null, alsoMetric: Metric | undefined, primaryN: number, text: DeliveryText, lang: DeliveryLanguage): Part[] {
+  const reason = alsoMetric?.reason?.trim()
+  if (also && jobFactsMissing(also, reason)) return [{ text: `${text.requiredChecks} –` }, { text: ` · ${num(also.n, lang)} ${text.of} ${num(primaryN, lang)}` }, { text: ` · ${reason}` }]
   if (!also || also.value == null) return [{ text: `${text.requiredChecks} –` }]
   const parts: Part[] = [{ text: `${text.requiredChecks} ` }, { text: pct(also.value, lang), strong: true }, { text: ` · ${num(also.n, lang)} ${text.of} ${num(primaryN, lang)}` }]
   if (also.status === 'partial' || !also.coverage.full) {
@@ -291,14 +297,18 @@ export function newestRelease(releases: MetricRelease[], days: number, daily: Me
 }
 
 // ---------- Chart buckets ----------
-export type BucketStatus = 'ok' | 'partial' | 'no_data' | 'empty'
+export type BucketStatus = 'ok' | 'partial' | 'no_data' | 'empty' | 'unavailable'
 export interface ChartBucket { from: string; to: string; unit: BucketUnit; status: BucketStatus; label: string; long: string; show: boolean }
 /** Buckets of one window: days from daily (7, 30), weeks (90, 180) or months (365) from series. A bucket outside the
- * covered span is "no data yet" (no_data); inside it, a bucket without samples is "empty", never zero. */
+ * covered span is "no data yet" (no_data); inside it, a bucket without samples is "empty", never zero. Recorded samples
+ * whose measurement is withheld (n > 0, value null, no_data) are "unavailable", not an empty day. */
 export function bucketsOf(metric: Metric | undefined, days: WindowDays, lang: DeliveryLanguage): { buckets: ChartBucket[]; samples: Measured[] } {
   const text = deliveryText(lang), unit = bucketOf(days)
   const coverage = windowOf(metric, days)?.coverage ?? null
-  const status = (sample: Measured, start: string, end: string): BucketStatus => sample.status !== 'no_data' ? sample.status : observed(coverage, start, end) ? 'empty' : 'no_data'
+  const status = (sample: Measured, start: string, end: string): BucketStatus => {
+    if (sample.n > 0 && sample.value == null && sample.status === 'no_data') return 'unavailable'
+    return sample.status !== 'no_data' ? sample.status : observed(coverage, start, end) ? 'empty' : 'no_data'
+  }
   if (unit === 'day') {
     const points = (metric?.daily ?? []).slice(-days)
     return {
@@ -400,7 +410,15 @@ export function chartModel(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
     return observed(covered, buckets[index].from, buckets[index].to) ? 'none' : 'nodata'
   }) as ChartModel['nights'] : []
   const alsoMetric = def.also ? metrics.get(def.also) : undefined
-  const readouts = buckets.map((bucket, index) => readout(def, bucket, samples[index], alsoSamples[index], nights[index], text, lang, alsoSamples[index]?.status === 'partial' ? alsoMetric?.reason?.trim() || null : null))
+  const factsMissing = jobFactsMissing(def.also ? windowOf(alsoMetric, days) : null, alsoMetric?.reason)
+  const readouts = buckets.map((bucket, index) => {
+    const companion = alsoSamples[index]
+    const sample = samples[index]
+    const missingDay = factsMissing && !!companion && companion.status === 'no_data' && companion.n === 0 && companion.value == null
+    const companionReason = companion?.status === 'partial' || missingDay ? alsoMetric?.reason?.trim() || null : null
+    const withheld = sample && sample.n > 0 && sample.value == null && sample.status === 'no_data' ? metric?.reason?.trim() || null : null
+    return readout(def, bucket, sample, companion, nights[index], text, lang, companionReason, withheld)
+  })
   const notes = [sourceLabel(def, source, text)]
   if (clippedTo != null) notes.push(`${text.clip}, ${text.upTo} ${duration(clippedTo, lang)}`)
   const cover = coverText(windowOf(metric, days)?.coverage, text)
@@ -409,12 +427,17 @@ export function chartModel(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
     legend: def.kind === 'share' ? 'two' : def.kind === 'nightly' ? 'nightly' : null, nights }
 }
 
-export function readout(def: TileDef, bucket: ChartBucket, sample: Measured | undefined, also: Measured | undefined, night: ChartModel['nights'][number] | undefined, text: DeliveryText, lang: DeliveryLanguage, companionReason: string | null = null): string {
+export function readout(def: TileDef, bucket: ChartBucket, sample: Measured | undefined, also: Measured | undefined, night: ChartModel['nights'][number] | undefined, text: DeliveryText, lang: DeliveryLanguage, companionReason: string | null = null, withheldReason: string | null = null): string {
   const head = bucket.long
   if (def.kind === 'nightly' && bucket.unit === 'day') {
     return `${head} · ${night === 'ok' ? text.green : night === 'bad' ? `${text.red} (${text.failed})` : night === 'none' ? text.noRun : text.noData}`
   }
   if (!sample || bucket.status === 'no_data') return `${head} · ${text.noData}`
+  if (bucket.status === 'unavailable') {
+    const words = text.metrics[def.key]
+    const count = `${num(sample.n, lang)} ${plural(sample.n, words.one, words.many)}`
+    return `${head} · ${count}${withheldReason ? ` · ${withheldReason}` : ''}`
+  }
   if (bucket.status === 'empty' || sample.n === 0) return `${head} · ${def.kind === 'nightly' ? text.noRun : text.nothing}`
   const partial = bucket.status === 'partial' ? ` · ${text.partial}` : ''
   const words = text.metrics[def.key]
@@ -428,7 +451,7 @@ export function readout(def: TileDef, bucket: ChartBucket, sample: Measured | un
       const green = `${sample.value == null ? '–' : pct(sample.value, lang)} ${text.greenWord}`
       const required = `${also?.value == null ? '–' : pct(also.value, lang)} ${text.required}`
       const denom = also ? `${num(also.n, lang)} ${text.of} ${count}` : count
-      const why = also?.status === 'partial' ? ` · ${text.partial}${companionReason ? ` · ${companionReason}` : ''}` : ''
+      const why = also?.status === 'partial' ? ` · ${text.partial}${companionReason ? ` · ${companionReason}` : ''}` : companionReason ? ` · ${companionReason}` : ''
       return `${head}${partial} · ${green} · ${required} · ${denom}${why}`
     }
     case 'rate': return `${head}${partial} · ${sample.value == null ? '–' : pct(sample.value, lang)} · ${count}`

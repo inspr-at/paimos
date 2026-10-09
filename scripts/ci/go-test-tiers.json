@@ -5176,6 +5176,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryAlertsEpisodesIsolationAndSettings","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryBackfillSkipsConfirmedAbsentPreflight","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryCompleteJobMapServesEveryProject","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryConfirmedFlakesAndSuspectsStayApart","tier":"ESSENTIAL"}
@@ -5221,6 +5223,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowStreamSendsValueFreeLiveHints","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowWorkflowRunShowsRunningChecks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryLegacyCatchupLeavesAbsentPreflightUncovered","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryLegacyJobMapIsRefreshedOnce","tier":"ESSENTIAL"}
     ,
@@ -5278,7 +5282,11 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryNumbersEqualMeasureV2","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryPreflightAbsenceFinishesTheBackfill","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryPreflightCatchupListsOnlyPreflight","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryPreflightDisconnectEndsObservation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryPreflightRedRateIsItsOwnLine","tier":"ESSENTIAL"}
     ,

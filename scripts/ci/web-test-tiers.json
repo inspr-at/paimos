@@ -14820,6 +14820,8 @@
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"a run of nights ends at a night without a run; only tonight may still be due","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"a withheld measurement with recorded runs is unavailable, not \"Nothing recorded\"","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"audits and defects show severities; inside the watched time nothing recorded is said as that, outside it is \"no data\"","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"confirmed flaky runs and suspects are two numbers; the suspects never enter the share","tier":"ESSENTIAL"}
@@ -14838,6 +14840,8 @@
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"runner wait leads with p90, the number the plan judges, and says p50 beside it","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"runs without job facts say 0 of N and why, on the tile and on the chart","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"the page preferences fall back to Simple and 7 days and refuse anything else","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"the paired numbers count what they say: required checks, “changes”, scripted rounds and green nights","tier":"ESSENTIAL"}
@@ -14855,6 +14859,8 @@
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"a verdict is on target up to 1×, close up to 1.5×, far off beyond, with a word and its own shape for each","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"each tile shows its verdict as shape and word: the icon follows the level","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"missing job facts stay in the sentence as 0 of N and say why","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-simple.unit.test.ts","name":"the small chart shades the good side of the target and hatches only what no source covers","tier":"ESSENTIAL"}
     ,

@@ -6,7 +6,7 @@
 // extrapolated and a missing number is "no data yet", never 0.
 import type { DeliveryLanguage } from './delivery'
 import {
-  bucketOf, bucketsOf, chartModel, coverText, deltaOf, duration, durationParts, newestRelease, num, pct, shortDate, sourceLabel, TILES, windowOf,
+  bucketOf, bucketsOf, chartModel, coverText, deltaOf, duration, durationParts, jobFactsMissing, newestRelease, num, pct, shortDate, sourceLabel, TILES, windowOf,
   type BucketStatus, type BucketUnit, type DeliveryMetrics, type Metric, type MetricKey, type MetricSource, type MetricWindow, type TileDef, type TileKind, type WindowDays,
 } from './deliveryNumbers'
 import { deliveryText, fill, type MetricTextKey } from './deliveryNumbersText'
@@ -154,7 +154,8 @@ export function simpleTile(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
   // The companion can be partial, or missing facts, while the workflow share is whole. Say that too.
   const alsoMetric = def.also ? metrics.get(def.also) : undefined
   const alsoOpen = ready && !!also && (also.status === 'partial' || !also.coverage.full)
-  const alsoReason = alsoOpen && alsoMetric?.reason?.trim() ? alsoMetric.reason.trim() : ''
+  const factsMissing = jobFactsMissing(also, alsoMetric?.reason)
+  const alsoReason = (alsoOpen || factsMissing) && alsoMetric?.reason?.trim() ? alsoMetric.reason.trim() : ''
   const alsoCover = alsoOpen && also ? coverText(also.coverage, deliveryText(lang)) : ''
   const reason = [ownReason, alsoReason].filter(Boolean).join(' · ')
   const footBase = partial && (cover || part) ? cover || part : words.src
@@ -174,10 +175,15 @@ export function simpleTile(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
       case 'runs': values.v = num(value, lang, 1); break
       case 'share': {
         values.v = pct(value, lang)
-        values.v2 = also?.value != null && also.n > 0 ? pct(also.value, lang) : '–'
-        values.n2 = also && also.n > 0 ? num(also.n, lang) : '–'
         values.t = target ? pct(target.value, lang) : '–'
-        if (values.v2 === '–') sentence = words.sayAlt ?? sentence
+        if (factsMissing) {
+          values.v2 = '0'
+          values.n2 = num(n, lang)
+        } else {
+          values.v2 = also?.value != null && also.n > 0 ? pct(also.value, lang) : '–'
+          values.n2 = also && also.n > 0 ? num(also.n, lang) : '–'
+          if (values.v2 === '–') sentence = words.sayAlt ?? sentence
+        }
         break
       }
       case 'rate': values.v = pct(value, lang); break

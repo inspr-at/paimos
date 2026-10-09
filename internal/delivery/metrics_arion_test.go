@@ -376,6 +376,34 @@ func TestDeliveryPreflightRedRateIsItsOwnLine(t *testing.T) {
 	metrics := computeMetrics(covered, metricNow)
 	wantWindow(t, metricByKey(t, metrics, "preflight_red_rate"), 7, "ok", 2, f64(50), nil, nil)
 	wantWindow(t, metricByKey(t, metrics, "first_attempt_green"), 7, "ok", 1, f64(100), nil, nil)
+	// The App stopped after these runs. Preflight keeps its own start and the same coverage end as CI.
+	ended := covered
+	end := time.Date(2026, 10, 7, 20, 0, 0, 0, time.UTC)
+	ended.CoveredUntil = &end
+	stopped := metricByKey(t, computeMetrics(ended, metricNow), "preflight_red_rate")
+	wantWindow(t, stopped, 7, "partial", 2, f64(50), nil, nil)
+	stoppedWindow := metricWindow(t, stopped, 7)
+	if stoppedWindow.Coverage.Full || stoppedWindow.Coverage.CoveredDays >= 7 {
+		t.Fatalf("preflight coverage stayed open after the last fact: %+v", stoppedWindow.Coverage)
+	}
+	var sampleDay, later *MetricPoint
+	for i := range stopped.Daily {
+		switch stopped.Daily[i].Date {
+		case "2026-10-07":
+			sampleDay = &stopped.Daily[i]
+		case "2026-10-08":
+			later = &stopped.Daily[i]
+		}
+	}
+	if sampleDay == nil || sampleDay.Status != "partial" || sampleDay.N != 2 {
+		t.Fatalf("preflight day of the last fact: %+v", sampleDay)
+	}
+	if later == nil || later.Status != "no_data" || later.N != 0 {
+		t.Fatalf("preflight day after the last fact: %+v", later)
+	}
+	if stopped.Reason == nil || !strings.Contains(*stopped.Reason, "GitHub facts are complete only through") {
+		t.Fatalf("preflight disconnect reason: %v", stopped.Reason)
+	}
 	if m := metricByKey(t, computeMetrics(arionBase(nil), metricNow), "preflight_red_rate"); m.Status != "no_data" || m.Reason == nil || m.Windows[0].Value != nil {
 		t.Fatalf("no preflight run is no data, never 0 %%: %+v", m)
 	}

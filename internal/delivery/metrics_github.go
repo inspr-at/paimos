@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"path"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
@@ -391,6 +393,9 @@ type backfillCursor struct {
 	Workflows     []string `json:"workflows,omitempty"`
 	ResumePhase   string   `json:"resume_phase,omitempty"`
 	ThenWorkflows []string `json:"then_workflows,omitempty"`
+	// PreflightAbsent is set when GitHub confirms ci-preflight.yml does not
+	// exist. The other workflows still finish, and a later catch-up does not start.
+	PreflightAbsent bool `json:"preflight_absent,omitempty"`
 }
 
 // doneRun is one run on the current page and the highest attempt stored for
@@ -470,10 +475,10 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 			if cursor.Workflow >= len(workflows) {
 				if cursor.ResumePhase != "" {
 					// A preflight catch-up returns to jobs or done. It must
-					// not walk pulls again.
-					return backfillCursor{Since: cursor.Since, Phase: cursor.ResumePhase, Truncated: cursor.Truncated, Workflows: cursor.ThenWorkflows}, batch, nil
+					// not walk pulls again. A confirmed absence is not listed.
+					return backfillCursor{Since: cursor.Since, Phase: cursor.ResumePhase, Truncated: cursor.Truncated, Workflows: storedWorkflows(cursor, cursor.ThenWorkflows), PreflightAbsent: cursor.PreflightAbsent}, batch, nil
 				}
-				cursor = backfillCursor{Since: cursor.Since, Phase: "pulls", Page: 1, Truncated: cursor.Truncated, Workflows: cursor.Workflows}
+				cursor = backfillCursor{Since: cursor.Since, Phase: "pulls", Page: 1, Truncated: cursor.Truncated, Workflows: storedWorkflows(cursor, cursor.Workflows), PreflightAbsent: cursor.PreflightAbsent}
 				continue
 			}
 			day, err := time.Parse("2006-01-02", cursor.Day)
@@ -481,7 +486,7 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 				return cursor, batch, errRead
 			}
 			if day.After(today) {
-				cursor = backfillCursor{Since: cursor.Since, Phase: "runs", Workflow: cursor.Workflow + 1, Day: dayStart(cursor.Since).Format("2006-01-02"), Page: 1, Truncated: cursor.Truncated, Workflows: cursor.Workflows, ResumePhase: cursor.ResumePhase, ThenWorkflows: cursor.ThenWorkflows}
+				cursor = backfillCursor{Since: cursor.Since, Phase: "runs", Workflow: cursor.Workflow + 1, Day: dayStart(cursor.Since).Format("2006-01-02"), Page: 1, Truncated: cursor.Truncated, Workflows: cursor.Workflows, ResumePhase: cursor.ResumePhase, ThenWorkflows: cursor.ThenWorkflows, PreflightAbsent: cursor.PreflightAbsent}
 				continue
 			}
 			var response struct {
@@ -491,6 +496,12 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 			batch.Calls++
 			file := url.PathEscape(path.Base(workflows[cursor.Workflow]))
 			if err := get(fmt.Sprintf("/actions/workflows/%s/runs?created=%s&status=completed&per_page=100&page=%d", file, cursor.Day, cursor.Page), &response); err != nil {
+				// Only a confirmed absence of the preflight file is skipped.
+				// Any other miss, including a 404 of CI or nightly, stops the step.
+				if errors.Is(err, crossreview.ErrNotFound) && isPreflightFile(workflows[cursor.Workflow]) {
+					cursor = backfillCursor{Since: cursor.Since, Phase: "runs", Workflow: cursor.Workflow + 1, Day: dayStart(cursor.Since).Format("2006-01-02"), Page: 1, Truncated: cursor.Truncated, Workflows: cursor.Workflows, ResumePhase: cursor.ResumePhase, ThenWorkflows: cursor.ThenWorkflows, PreflightAbsent: true}
+					continue
+				}
 				return cursor, batch, err
 			}
 			if response.Total < 0 || len(response.Runs) > 100 {
@@ -598,7 +609,7 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 				if capped {
 					cursor.Truncated = true
 				}
-				cursor = backfillCursor{Since: cursor.Since, Phase: "done", Truncated: cursor.Truncated, Workflows: cursor.Workflows}
+				cursor = backfillCursor{Since: cursor.Since, Phase: "done", Truncated: cursor.Truncated, Workflows: storedWorkflows(cursor, cursor.Workflows), PreflightAbsent: cursor.PreflightAbsent}
 				return cursor, batch, nil
 			}
 			cursor.Page++
@@ -609,6 +620,25 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 		}
 	}
 	return cursor, batch, nil
+}
+
+func isPreflightFile(name string) bool {
+	return path.Base(name) == path.Base(defaultPreflightWorkflow)
+}
+
+// storedWorkflows drops a confirmed-absent preflight file when the runs phase
+// ends. Stripping it earlier would shift the workflow index mid-pass.
+func storedWorkflows(cursor backfillCursor, list []string) []string {
+	if !cursor.PreflightAbsent {
+		return list
+	}
+	out := make([]string, 0, len(list))
+	for _, name := range list {
+		if !isPreflightFile(name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func metricDefaultBranch(name string) bool {

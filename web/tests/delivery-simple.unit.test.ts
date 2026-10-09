@@ -345,3 +345,30 @@ it('the v5 readings get a verdict, a sentence and a direction from this windowâ€
   expect(de.find(item => item.key === 'queue_ejections')!.say).toContain('flogen vorher aus der Merge-Queue')
   expect(de.map(item => item.say + item.learn.body).join(' ')).not.toMatch(/\b(du|dein|deine|wir|unser|unsere)\b/i)
 })
+
+it('missing job facts stay in the sentence as 0 of N and say why', () => {
+  const data = deliveryMetrics() as {
+    metrics: { key: string; status: string; reason: string | null; windows: { days: number; status: string; n: number; value: number | null; coverage: { full: boolean } }[]; daily: { status: string; n: number; value: number | null }[] }[]
+  }
+  const required = data.metrics.find(item => item.key === 'required_checks_green')!
+  const n = data.metrics.find(item => item.key === 'first_attempt_green')!.windows.find(item => item.days === 7)!.n
+  required.status = 'no_data'
+  required.reason = '6 runs without job facts yet, so their required checks and runner waits are not counted.'
+  for (const window of required.windows) {
+    window.status = 'no_data'
+    window.n = 0
+    window.value = null
+    window.coverage.full = true
+  }
+  for (const point of required.daily) {
+    point.status = 'no_data'
+    point.n = 0
+    point.value = null
+  }
+  const tile = simpleNumbersOf(data as never, 7, 'ready', false, 'en').sections.flatMap(section => section.tiles).find(item => item.key === 'first_attempt_green')!
+  expect(tile.say).toContain(`0 of ${numbers.num(n, 'en')}`)
+  expect(tile.foot).toContain('without job facts')
+  expect(tile.learn.body).toContain('without job facts')
+  const german = simpleNumbersOf(data as never, 7, 'ready', false, 'de').sections.flatMap(section => section.tiles).find(item => item.key === 'first_attempt_green')!
+  expect(german.say).toContain(`0 von ${numbers.num(n, 'de')}`)
+})
