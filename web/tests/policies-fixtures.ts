@@ -40,7 +40,7 @@ export async function mockPolicies(page: Page, theme: 'light' | 'dark', restrict
     if (new URL(route.request().url()).pathname === '/api/authz/permissions') return route.fulfill({ json: policyRegistry })
     const role = new URL(route.request().url()).searchParams.get('role') as PolicyRole
     const answer = policyLadder(role, count)
-    if (mode === 'unseeded') { answer.setup = false; answer.steps = []; answer.routes = []; answer.can_edit = false }
+    if (mode === 'unseeded') { answer.setup = false; answer.steps = []; answer.routes = []; answer.can_edit = false; if (role === 'review-gate') answer.managed_fallback_order = [] }
     return route.fulfill({ json: answer })
   })
   return { data, holdNext() { const held = { until: barrier(), started: barrier() }; next = held; return { started: held.started.promise, release: held.until.release } } }

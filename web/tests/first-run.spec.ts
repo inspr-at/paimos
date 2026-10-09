@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test, type Page } from '@playwright/test'
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { mockStartAgent } from './start-agent-fixtures'
 import { mockPairing } from './agent-pairing-fixtures'
 import { fixtures, mockWork } from './work-fixtures'
@@ -13,8 +11,7 @@ async function appearance(page: Page, theme: 'light' | 'dark') {
 async function capture(page: Page, name: string) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   if (process.env.AEON353_SHOTS) {
-    mkdirSync(process.env.AEON353_SHOTS, { recursive: true })
-    await page.screenshot({ path: join(process.env.AEON353_SHOTS, `${name}.png`), fullPage: true })
+    await page.screenshot({ path: test.info().outputPath(`${name}.png`), fullPage: true })
   }
 }
 for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const) {
@@ -25,7 +22,8 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
     const mock = await mockStartAgent(page, { wait: { code: 'schedule', until: '2026-09-30T06:00:00Z', timezone: 'Europe/Vienna', run_now_allowed: true } })
     await page.goto('/agents')
     await appearance(page, theme)
-    await page.locator('button.start-agent').click()
+    await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
+    await page.getByRole('menuitem', { name: /^Start agent manually…/ }).click()
     const dialog = page.getByRole('dialog', { name: 'Start agent', exact: true })
     await dialog.getByRole('button', { name: /PHAROS-11/ }).click()
     await dialog.getByLabel('Account', { exact: true }).selectOption(mock.account.id)
@@ -116,7 +114,8 @@ test('a queued run exposes its wait and a run-scoped override from the queue', a
   await page.setViewportSize({ width: 390, height: 844 })
   const mock = await mockStartAgent(page, { wait: { code: 'reserve', run_now_allowed: true } })
   await page.goto('/agents')
-  await page.locator('button.start-agent').click()
+  await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
+    await page.getByRole('menuitem', { name: /^Start agent manually…/ }).click()
   const dialog = page.getByRole('dialog', { name: 'Start agent', exact: true })
   await dialog.getByRole('button', { name: /PHAROS-11/ }).click()
   await dialog.getByLabel('Account', { exact: true }).selectOption(mock.account.id)

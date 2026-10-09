@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { inflateSync } from 'node:zlib'
-import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
+import { me } from './work-fixtures'
+import { headerStorageKey } from '../src/lib/projectHeader'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
 import type { TicketGraphLink } from '../src/lib/ticketGraph'
 
@@ -11,6 +12,12 @@ test.use({
   launchOptions: { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] },
 })
 test.setTimeout(60_000)
+
+// The graph composition was designed for the roomy header; the default is now Compact.
+async function mockHeaderGraph(page: Page, world = ticketGraphWorld()) {
+  await page.addInitScript(({ key }) => localStorage.setItem(key, JSON.stringify({ density: 'comfortable', roomy: 'comfortable' })), { key: headerStorageKey('t1', me.id) })
+  return mockTicketGraph(page, world)
+}
 
 const surface = (page: Page) => page.locator('.header-glimpse-canvas')
 const ready = (page: Page) => expect(surface(page)).toHaveAttribute('data-ready', 'true', { timeout: 20_000 })
@@ -28,14 +35,17 @@ async function releasePinnedGlimpse(page: Page) {
   await expect(surface(page)).toHaveAttribute('data-glimpse-pin', String(GLIMPSE_PIN_FRAMES), { timeout: 20_000 })
 }
 
-const protectedSelectors = ['.title-line > *', '.description', '.head-stats', '.project-tabs', '.view-bar .view-tab', '.view-bar .tab', '.view-bar .changes', '.toolbar-wrap']
+const protectedSelectors = ['.title-line > *', '.description', '.head-stats .stat', '.head-stats .q-warn', '.head-stats .progress-line', '.head-stats .group-count', '.head-stats .status-count', '.header-activity > *', '.project-tabs', '.project-navigation a', '.project-navigation button', '.project-navigation label', '.view-bar .view-tab', '.view-bar .tab', '.view-bar .changes', '.toolbar-wrap']
 async function protectedBoxes(page: Page) {
   return page.locator(protectedSelectors.join(', ')).evaluateAll(elements => elements.filter(el => el.getClientRects().length).map(el => {
     const box = el.getBoundingClientRect()
     return { x: box.x, y: box.y, width: box.width, height: box.height }
-  }))
+  }).filter(box => box.width > 0 && box.height > 0))
 }
 async function expectClearOfText(page: Page) {
+  // setViewportSize resolves before the browser dispatches resize. Require a
+  // measurement of this viewport, rather than accepting the previous frame.
+  await expect(page.locator('.glimpse-col')).toHaveAttribute('data-measured-viewport', String(page.viewportSize()!.width))
   await expect(page.locator('.glimpse-col')).toHaveAttribute('data-measured', 'true')
   await expect(page.locator('.glimpse-canvas')).toBeVisible()
   const region = (await page.locator('.glimpse-canvas').boundingBox())!
@@ -49,13 +59,18 @@ async function expectClearOfText(page: Page) {
   const controls = (await page.locator('.glimpse-controls').boundingBox())!
   for (const box of await protectedBoxes(page)) {
     const overlap = controls.x < box.x + box.width && controls.x + controls.width > box.x && controls.y < box.y + box.height && controls.y + controls.height > box.y
-    expect(overlap, 'hover controls stay clear of text and toolbar').toBe(false)
+    expect(overlap, `hover controls stay clear of text and toolbar: ${JSON.stringify({ controls, box, viewport: page.viewportSize() })}`).toBe(false)
   }
 }
 
 function sized(count: number, withLinks: boolean) {
   const world = ticketGraphWorld()
-  world.graph.nodes = world.graph.nodes.slice(0, count).map(node => ({ ...node, status: 'backlog', status_category: 'open' }))
+  world.graph.nodes = world.graph.nodes.slice(0, count).map(node => ({ ...node, type: 'ticket', status: 'backlog', status_category: 'open' }))
+  for (const node of world.graph.nodes) {
+    const work = world.work.nodes.find(item => item.id === node.id)!
+    work.kind_slug = 'ticket'
+    work.state = 'backlog'
+  }
   const ids = new Set(world.graph.nodes.map(node => node.id))
   const linked = world.graph.links.filter(link => ids.has(link.source) && ids.has(link.target))
   const links: TicketGraphLink[] = withLinks ? (linked.length ? linked : [{ source: world.graph.nodes[0].id, target: world.graph.nodes[1].id, kind: 'relates' }]) : []
@@ -110,7 +125,7 @@ function eightUnlinkedWhenFiltered() {
 }
 
 test('a wide project with tickets and a link shows a labelless 60fps glimpse', async ({ page }) => {
-  await mockTicketGraph(page)
+  await mockHeaderGraph(page)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   await expect(surface(page)).toHaveAttribute('data-fps', '60')
@@ -132,7 +147,7 @@ test('a wide project with tickets and a link shows a labelless 60fps glimpse', a
 test('the glimpse follows the viewer’s Off motion preference without adding labels', async ({ page }) => {
   const world = ticketGraphWorld()
   world.work.preferences['graph-motion'] = { pace: 'off' }
-  await mockTicketGraph(page, world)
+  await mockHeaderGraph(page, world)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   await expect(surface(page)).toHaveAttribute('data-orbit-seconds', '0')
@@ -141,7 +156,7 @@ test('the glimpse follows the viewer’s Off motion preference without adding la
 })
 
 test('hover shows Open graph and Pause; clicking the glimpse opens the graph', async ({ page }) => {
-  await mockTicketGraph(page)
+  await mockHeaderGraph(page)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   const controls = page.locator('.glimpse-controls')
@@ -168,7 +183,7 @@ test('the glimpse waits until the page is idle', async ({ page }) => {
       for (const cb of pending.splice(0)) cb({ didTimeout: false, timeRemaining: () => 30 } as IdleDeadline)
     }
   })
-  await mockTicketGraph(page)
+  await mockHeaderGraph(page)
   await page.goto('/p/PHAROS/tickets')
   await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
   await expect(surface(page)).toHaveCount(0)
@@ -177,7 +192,7 @@ test('the glimpse waits until the page is idle', async ({ page }) => {
 })
 
 test('narrow viewports and small or unlinked graphs stay empty', async ({ page }) => {
-  await mockTicketGraph(page, sized(7, true))
+  await mockHeaderGraph(page, sized(7, true))
   await page.goto('/p/PHAROS/tickets')
   await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
   await expect.poll(() => page.locator('[data-header-glimpse]').getAttribute('data-header-glimpse')).toBe('off')
@@ -185,7 +200,7 @@ test('narrow viewports and small or unlinked graphs stay empty', async ({ page }
 })
 
 test('eight tickets without a link stay empty', async ({ page }) => {
-  const { calls } = await mockTicketGraph(page, sized(8, false))
+  const { calls } = await mockHeaderGraph(page, sized(8, false))
   await page.goto('/p/PHAROS/tickets')
   await expect.poll(() => calls.length).toBeGreaterThan(0)
   await page.waitForTimeout(400)
@@ -196,13 +211,13 @@ test('eight visible tickets with exactly one edge show the glimpse', async ({ pa
   const world = eightWithOneEdge()
   expect(world.graph.nodes).toHaveLength(8)
   expect(world.graph.links).toHaveLength(1)
-  await mockTicketGraph(page, world)
+  await mockHeaderGraph(page, world)
   await page.goto('/p/PHAROS/tickets')
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveAttribute('data-shown', '8', { timeout: 20_000 })
 })
 
 test('a priority filter that leaves seven of those tickets hides the glimpse', async ({ page }) => {
-  const { calls } = await mockTicketGraph(page, eightWithOneEdge())
+  const { calls } = await mockHeaderGraph(page, eightWithOneEdge())
   await page.goto('/p/PHAROS/tickets')
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveAttribute('data-shown', '8', { timeout: 20_000 })
   const before = calls.length
@@ -218,7 +233,7 @@ test('a priority filter that keeps eight tickets but no link hides the glimpse',
   const world = eightUnlinkedWhenFiltered()
   expect(world.graph.nodes.filter(node => node.priority === 'high')).toHaveLength(8)
   expect(world.graph.links).toHaveLength(1)
-  const { calls } = await mockTicketGraph(page, world)
+  const { calls } = await mockHeaderGraph(page, world)
   await page.goto('/p/PHAROS/tickets?priority=high')
   await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
   await expect.poll(() => calls.length).toBeGreaterThan(0)
@@ -229,7 +244,7 @@ test('a priority filter that keeps eight tickets but no link hides the glimpse',
 
 test('eight linked tickets appear once the viewport reaches 1280', async ({ page }) => {
   await page.setViewportSize({ width: 1279, height: 900 })
-  await mockTicketGraph(page, sized(8, true))
+  await mockHeaderGraph(page, sized(8, true))
   await page.goto('/p/PHAROS/tickets')
   await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
   await expect(surface(page)).toHaveCount(0)
@@ -242,7 +257,7 @@ test('eight linked tickets appear once the viewport reaches 1280', async ({ page
 test.describe('reduced motion', () => {
   test.use({ reducedMotion: 'reduce' })
   test('shows nothing', async ({ page }) => {
-    await mockTicketGraph(page)
+    await mockHeaderGraph(page)
     await page.goto('/p/PHAROS/tickets')
     await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
     await page.waitForTimeout(1600)
@@ -251,7 +266,7 @@ test.describe('reduced motion', () => {
 })
 
 test('the Display switch hides the glimpse and is remembered', async ({ page }) => {
-  const world = await mockTicketGraph(page)
+  const world = await mockHeaderGraph(page)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   await page.getByRole('button', { name: /^Display:/ }).click()
@@ -280,7 +295,7 @@ test('leaving the project releases the WebGL context', async ({ page }) => {
       return ctx
     } as typeof proto.getContext
   })
-  await mockTicketGraph(page)
+  await mockHeaderGraph(page)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   await expect.poll(() => page.evaluate(() => (window as unknown as { __aeonLiveGL: Set<unknown> }).__aeonLiveGL.size)).toBeGreaterThan(0)
@@ -294,7 +309,7 @@ test('long title and description stay separate from the glimpse while resizing',
   const world = ticketGraphWorld(), project = world.work.projects[0]
   project.title = 'Pharos fleet management and operator workspace for every environment'
   project.description = 'Fleet management, service health, deployment history and host access across every environment in the INSPR family.'
-  await mockTicketGraph(page, world)
+  await mockHeaderGraph(page, world)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   for (const width of [1600, 1280, 1600]) {
@@ -310,7 +325,7 @@ test('the 2D fallback also frames the dense core with faded edges', async ({ pag
       return type.includes('webgl') ? null : original.call(this, type, attributes)
     } as typeof original
   })
-  await mockTicketGraph(page)
+  await mockHeaderGraph(page)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   await expect(surface(page)).toHaveAttribute('data-dimension', '2d')
@@ -431,12 +446,10 @@ async function expectSoftFittedGraph(page: Page, checkExtent = false) {
 for (const scheme of ['light', 'dark'] as const) {
   test.describe(`header shots ${scheme}`, () => {
     test.use({ colorScheme: scheme })
-    for (const width of [1600, 1280, 390]) test(`keeps AA contrast at ${width}`, async ({ page }) => {
+    for (const width of [1600, 1280, 390]) test(`keeps AA contrast at ${width}`, async ({ page }, testInfo) => {
       const errors: string[] = []
       page.on('pageerror', error => errors.push(error.message))
-      const world = await mockTicketGraph(page)
-      const dir = `../.agent-shots/${process.env.HG2_SHOT_PASS ?? 'pass-1'}`
-      mkdirSync(dir, { recursive: true })
+      const world = await mockHeaderGraph(page)
       if (width >= 1280) await page.addInitScript(`window.__aeonGlimpsePin = { frames: ${GLIMPSE_PIN_FRAMES} }`)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.goto('/p/PHAROS/tickets')
@@ -448,13 +461,13 @@ for (const scheme of ['light', 'dark'] as const) {
         await expect(surface(page)).toHaveAttribute('data-dimension', '3d')
         await expect(page.locator('.glimpse-canvas')).toHaveCSS('opacity', scheme === 'light' ? '0.35' : '0.3')
       }
-      await page.screenshot({ path: `${dir}/header-${width}-${scheme}.png` })
+      await page.screenshot({ path: testInfo.outputPath(`header-${width}-${scheme}.png`) })
       if (width >= 1280) {
         await expectSoftFittedGraph(page, true)
         await page.locator('.project-head').hover()
-        await page.screenshot({ path: `${dir}/header-${width}-${scheme}-hover.png` })
+        await page.screenshot({ path: testInfo.outputPath(`header-${width}-${scheme}-hover.png`) })
       }
-      for (const selector of ['#project-title', '.description', '.stat b']) {
+      for (const selector of ['#project-title', '.description', '.group-count b']) {
         expect(await textContrast(page, selector), `${selector} ${width} ${scheme}`).toBeGreaterThanOrEqual(4.5)
       }
       expect(errors).toEqual([])

@@ -130,6 +130,10 @@ test('at 1440 names get the room: the role drops out whole, and cut values show 
   await expect.poll(() => cut('.role')).toBe(true)
   expect(await cut('.person')).toBe(false)
   expect(await cell.locator('.role').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+  // Keyboard disclosure owns its hint until Escape. Exit it before testing
+  // the separate pointer disclosure; retain both full-text expectations.
+  await edge.press('Escape')
+  await expect(page.locator('.tooltip')).toHaveCount(0)
   await cell.hover()
   await expect(page.locator('.tooltip')).toHaveText('Jana Hofer · Managing director')
   // A value that fits carries no tooltip.
