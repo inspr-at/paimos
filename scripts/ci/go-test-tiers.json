@@ -7486,6 +7486,8 @@
     ,
     {"kind":"go","package":"internal/phoneapprovals","name":"TestPhoneRegistrationRequiresVerifiedPlatformCeremony","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/phoneapprovals","name":"TestPhoneStepupPushAllHoldersAndCurrentAuthority","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/piprobe","name":"TestProviderRPC","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/piprobe","name":"TestProviderRefusesUnpinnedAndBoundsCancellation","tier":"ESSENTIAL"}
@@ -8927,6 +8929,8 @@
     {"kind":"go","package":"internal/stepup/server","name":"TestStepupPasskeyProofBindingAndHTTPBoundary","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/stepup/server","name":"TestStepupReauthOneUseFreshnessAndBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/stepup/server","name":"TestStepupSessionResultIsAtomicAndBound","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/stepup/server","name":"TestStepupTransitionsAndAtomicAudit","tier":"ESSENTIAL"}
     ,

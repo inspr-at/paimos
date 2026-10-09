@@ -145,8 +145,66 @@ func TestStepupTransitionsAndAtomicAudit(t *testing.T) {
 			if strings.Contains(string(raw), "credential") || strings.Contains(string(raw), "token") {
 				t.Fatal("proof material in audit")
 			}
+			var body, recipient, messageState string
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT m.body,m.recipient_principal_id::text,d.state FROM inbox_messages m JOIN inbox_message_deliveries d ON d.tenant_id=m.tenant_id AND d.message_id=m.id WHERE m.id=$1`, r.ID).Scan(&body, &recipient, &messageState); err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]string{"applied": "Approved by Markus with device passkey · applied", "declined": "Declined by Markus", "withdrawn": "Withdrawn", "expired": "Expired after 15 min · ask again", "stale": "Not applied · changed meanwhile", "failed": "Not applied · the change could not be saved"}[outcome]
+			if body != want || recipient != f.agent.ID || messageState != "pending" || event["result_line"] != body {
+				t.Fatalf("wrong result delivery %q %s %s", body, recipient, messageState)
+			}
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM inbox_messages WHERE id=$1`, r.ID).Scan(&count); err != nil || count != 1 {
+				t.Fatal("later decision duplicated result")
+			}
 			if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM agent_permission_grants`).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("created authority %d %v", count, err)
+			}
+		})
+	}
+}
+
+// Risk: a workspace request's result leaks into a different session/project,
+// or a result write failure leaves an applied target without an agent result.
+func TestStepupSessionResultIsAtomicAndBound(t *testing.T) {
+	for _, reject := range []bool{false, true} {
+		t.Run(map[bool]string{false: "exact session", true: "rollback"}[reject], func(t *testing.T) {
+			f := setup(t)
+			var project, session string
+			if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'RESULT-1','Result project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.agent.TenantID).Scan(&project); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest) VALUES($1,$2,$3,'codex','fixture','unmanaged','worker',decode(repeat('00',32),'hex'),decode(repeat('00',32),'hex')) RETURNING id::text`, f.agent.TenantID, project, f.agent.ID).Scan(&session); err != nil {
+				t.Fatal(err)
+			}
+			before := json.RawMessage(`{"key":"workspace-summary","project_id":null,"override":null,"revision":0}`)
+			r, err := f.m.Create(t.Context(), f.agent, Create{Payload: json.RawMessage(`{"kind":"feature","key":"workspace-summary","enabled":true,"expected_revision":0}`), BeforeHash: Hash(before), SessionID: session})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reject {
+				if _, err := f.d.Admin.Exec(t.Context(), `CREATE FUNCTION reject_stepup_result() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.idempotency_key LIKE 'stepup-result/%' THEN RAISE EXCEPTION 'fixture result rejection'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_stepup_result BEFORE INSERT ON inbox_messages FOR EACH ROW EXECUTE FUNCTION reject_stepup_result()`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			out, err := f.m.decide(t.Context(), f.person, r.ID, input(r), "approve", func(pgx.Tx, ApprovalRequest) (string, time.Time, error) { return "oidc_reauth", f.now, nil })
+			if reject {
+				if err == nil || !strings.Contains(err.Error(), "fixture result rejection") {
+					t.Fatalf("wrong failure: %v", err)
+				}
+				var state string
+				var applied, messages, audits int
+				if err := f.d.Admin.QueryRow(t.Context(), `SELECT state,(SELECT count(*) FROM features WHERE enabled),(SELECT count(*) FROM inbox_messages),(SELECT count(*) FROM events WHERE type='stepup.applied') FROM stepup_requests WHERE id=$1`, r.ID).Scan(&state, &applied, &messages, &audits); err != nil || state != "pending" || applied != 0 || messages != 0 || audits != 0 {
+					t.Fatal("partial apply committed after result failure", err)
+				}
+				return
+			}
+			if err != nil || out.State != "applied" {
+				t.Fatal(err)
+			}
+			var gotProject, gotSession, recipient, body string
+			var eventID int64
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT project_id::text,recipient_session_id::text,recipient_principal_id::text,body,sent_event_id FROM inbox_compat_messages WHERE id=$1`, r.ID).Scan(&gotProject, &gotSession, &recipient, &body, &eventID); err != nil || gotProject != project || gotSession != session || recipient != f.agent.ID || body != "Approved by Markus with fresh sign-in · applied" || eventID <= 0 {
+				t.Fatalf("result not bound to workspace request's own chat: %s %s %s %q %v", gotProject, gotSession, recipient, body, err)
 			}
 		})
 	}

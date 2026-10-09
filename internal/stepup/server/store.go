@@ -74,7 +74,11 @@ type ReauthStart struct {
 }
 
 func New(pool *pgxpool.Pool, phone *phoneapprovals.Module, origin string) *Module {
-	return &Module{pool: pool, phone: phone, origin: origin, targets: registeredTargets(), now: time.Now}
+	m := &Module{pool: pool, phone: phone, origin: origin, targets: registeredTargets(), now: time.Now}
+	if phone != nil {
+		phone.StepUpReviewTx = m.phoneReviewTx
+	}
+	return m
 }
 func (m *Module) target(raw json.RawMessage) (Target, json.RawMessage, string, error) {
 	if len(raw) > payloadLimit {
@@ -219,7 +223,7 @@ func (m *Module) Create(ctx context.Context, p tenant.Principal, in Create) (App
 func audit(ctx context.Context, tx pgx.Tx, p tenant.Principal, r ApprovalRequest) error {
 	// Native typed snapshots contain no credentials. Proofs/tokens never reach
 	// this event; method and auth_time describe only verified authentication.
-	_, err := events.Append(ctx, tx, p, events.Change{Type: "stepup." + r.State, NodeID: r.ProjectID, Before: r.Before, After: map[string]any{"request_id": r.ID, "requested_by": r.RequestedBy, "approved_by": actorFor(r, "approve"), "declined_by": actorFor(r, "decline"), "decided_by": r.DecidedBy, "method": r.Method, "auth_time": r.AuthTime, "before": r.Before, "after": r.After, "request_digest": r.Digest, "expires_at": r.ExpiresAt, "outcome": r.State}})
+	_, err := events.Append(ctx, tx, p, events.Change{Type: "stepup." + r.State, NodeID: r.ProjectID, Before: r.Before, After: map[string]any{"request_id": r.ID, "requested_by": r.RequestedBy, "session_id": r.SessionID, "approved_by": actorFor(r, "approve"), "declined_by": actorFor(r, "decline"), "decided_by": r.DecidedBy, "method": r.Method, "auth_time": r.AuthTime, "before": r.Before, "after": r.After, "request_digest": r.Digest, "expires_at": r.ExpiresAt, "outcome": r.State, "result_line": resultLine(r)}})
 	return err
 }
 func actorFor(r ApprovalRequest, decision string) *string {
@@ -254,6 +258,9 @@ func (m *Module) settle(ctx context.Context, tx pgx.Tx, p tenant.Principal, r *A
 		return fault(409, "request already decided")
 	}
 	if err := decorate(ctx, tx, r); err != nil {
+		return err
+	}
+	if err := recordResult(ctx, tx, p, *r); err != nil {
 		return err
 	}
 	return audit(ctx, tx, p, *r)

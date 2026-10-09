@@ -275,3 +275,104 @@ test('account pause stays available when this browser has no Web Push', async ({
  expect(posts).toBe(0)
  expect(puts).toEqual([{ enabled: false, time_zone: 'Europe/Vienna', quiet_start: 1320, quiet_end: 420, escalation_minutes: 15 }])
 })
+
+// Risk: opening a phone pointer approves automatically, native outcomes are
+// misreported, or verification/status changes move the next tap.
+async function stepupPhone(page: Page, state = 'applied') {
+  await mockWork(page, fixtures({ admin: true }))
+  await mockSettings(page, settingsData())
+  const request = { id, requested_by: '22222222-2222-4222-8222-222222222222', permission: 'settings.manage',
+    request_digest: hash, revision: 1, state: 'pending', created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 900_000).toISOString(),
+    payload: { kind: 'feature', key: 'workspace-summary', enabled: true, expected_revision: 0 },
+    before: { revision: 0, override: null, description: 'Eine ausführliche Beschreibung der bestehenden Arbeitsbereichseinstellungen wird vor der einmaligen Freigabe vollständig angezeigt. '.repeat(8) },
+    after: { revision: 1, override: true } }
+  const calls = { options: 0, approves: 0, declines: 0 }
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.credentials, 'get', { configurable: true, value: async (options: CredentialRequestOptions) => {
+      if (options.publicKey?.userVerification !== 'required' || !options.signal) throw new Error('Unbound verification')
+      if ((window as unknown as { cancelStepup?: boolean }).cancelStepup) throw new DOMException('Cancelled', 'NotAllowedError')
+      const bytes = new Uint8Array([1, 2, 3]).buffer
+      return { id: 'AQID', rawId: bytes, type: 'public-key', authenticatorAttachment: 'platform', getClientExtensionResults: () => ({}),
+        response: { clientDataJSON: bytes, authenticatorData: bytes, signature: bytes, userHandle: null } }
+    } })
+  })
+  await page.route(`**/api/phone-approvals/stepup/${id}`, route => route.fulfill({ json: { kind: 'stepup', request_id: id, request_hash: hash, pending: request.state === 'pending', stepup: request } }))
+  await page.route(`**/api/stepup-requests/${id}/*`, route => {
+    const action = new URL(route.request().url()).pathname.split('/').at(-1)
+    const body = route.request().postDataJSON()
+    expect(body.request_digest).toBe(hash); expect(body.revision).toBe(1)
+    if (action === 'options') {
+      calls.options++
+      return route.fulfill({ json: { method: 'passkey', challenge_id: challenge, publicKey: { challenge: 'AQID', userVerification: 'required' } } })
+    }
+    if (action === 'approve') {
+      calls.approves++; expect(body.challenge_id).toBe(challenge); expect(body.credential.response.signature).toBe('AQID')
+    } else {
+      expect(action).toBe('decline'); calls.declines++; expect(body.credential).toBeUndefined(); expect(body.challenge_id).toBeUndefined()
+    }
+    Object.assign(request, { revision: 2, state: action === 'decline' ? 'declined' : state })
+    return route.fulfill({ json: { ...request, decided_by_name: 'Markus', method: 'passkey_platform' } })
+  })
+  return { calls, request }
+}
+
+test('step-up phone card binds passkey approval and keeps its footer still in both themes', async ({ page }, testInfo) => {
+  const { calls, request } = await stepupPhone(page)
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+    request.state = 'pending'; request.revision = 1
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto(`/phone-approvals/stepup/${id}`)
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    await expect(page.getByRole('heading', { name: 'Step-up approval', exact: true })).toBeVisible()
+    const approve = page.getByRole('button', { name: 'Approve', exact: true }), decline = page.getByRole('button', { name: 'Decline', exact: true })
+    await expect(approve).toBeEnabled()
+    const guard = await controlStability(page, { approve, decline, footer: page.getByTestId('stepup-phone-actions'), frame: page.locator('.stepup-review'), refresh: page.getByRole('button', { name: 'Review again', exact: true }) })
+    const optionsBefore = calls.options, approvesBefore = calls.approves
+    await guard.check(async () => {
+      await page.evaluate(() => { (window as unknown as { cancelStepup: boolean }).cancelStepup = true })
+      await approve.click(); await expect(page.getByRole('alert')).toContainText('Verification cancelled')
+    })
+    expect(calls.options).toBe(optionsBefore + 1); expect(calls.approves).toBe(approvesBefore)
+    await page.screenshot({ path: testInfo.outputPath(`aeon-1049-stepupphone/card-${width}-${theme}.png`), fullPage: true })
+    await guard.check(async () => {
+      await page.getByTestId('stepup-phone-body').evaluate(el => { el.scrollTop = el.scrollHeight })
+      await page.evaluate(() => { (window as unknown as { cancelStepup: boolean }).cancelStepup = false })
+      await approve.click(); await expect(page.getByRole('status')).toContainText('Approved by Markus with device passkey · applied')
+      await expect(approve).toBeDisabled(); await expect(decline).toBeDisabled()
+    })
+    expect(calls.approves).toBe(approvesBefore + 1)
+    expect(new URL((await page.getByRole('link', { name: 'Open in Decision Desk' }).getAttribute('href'))!, 'https://aeon.example').searchParams.get('needs')).toBe(`stepup:${id}`)
+    guard.done()
+  }
+})
+
+test('step-up phone decline needs no passkey and competing outcomes stay honest', async ({ page }) => {
+  for (const state of ['declined', 'expired', 'withdrawn', 'stale', 'failed']) {
+    const { calls } = await stepupPhone(page, state)
+    await page.goto(`/phone-approvals/stepup/${id}`)
+    await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeEnabled()
+    await page.getByRole('button', { name: state === 'declined' ? 'Decline' : 'Approve', exact: true }).click()
+    const expected = { declined: 'Declined by Markus', expired: 'Expired after 15 min · ask again', withdrawn: 'Withdrawn', stale: 'Not applied · changed meanwhile', failed: 'Not applied · the change could not be saved' }[state]!
+    await expect(page.getByRole('status')).toHaveText(expected)
+    expect(calls.options).toBe(state === 'declined' ? 0 : 1)
+    expect(calls.declines).toBe(state === 'declined' ? 1 : 0)
+    await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeDisabled()
+  }
+})
+
+test('step-up phone cancels an outstanding proof when the person leaves the record', async ({ page }) => {
+  const { calls } = await stepupPhone(page)
+  let release!: () => void
+  const ready = new Promise<void>(resolve => { release = resolve })
+  await page.route(`**/api/stepup-requests/${id}/options`, async route => {
+    calls.options++; await ready
+    await route.fulfill({ json: { method: 'passkey', challenge_id: challenge, publicKey: { challenge: 'AQID', userVerification: 'required' } } })
+  })
+  await page.goto(`/phone-approvals/stepup/${id}`)
+  await page.getByRole('button', { name: 'Approve', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('Waiting for verification')
+  await page.getByRole('link', { name: 'Back to Agents', exact: true }).click()
+  release()
+  await expect(page.getByRole('heading', { name: 'Step-up approval', exact: true })).toHaveCount(0)
+  expect(calls.options).toBe(1); expect(calls.approves).toBe(0)
+})

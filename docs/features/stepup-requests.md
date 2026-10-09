@@ -11,7 +11,26 @@ Pending requests hold work and sort with held approvals by expiry. The
 request API supplies before/after snapshots and method-bearing decided history.
 Desk visibility checks only registered target permissions, retaining workspace
 and project coverage within the existing 1000-project limit.
-The desk and phone UI extensions are separate delivery packages.
+The desk UI extension is a separate delivery package.
+
+Opted-in phone notifications reuse the existing push channel. A step-up goes
+to every currently authorized holder with an active registered passkey and
+subscription, subject to quiet hours and delivery bounds; it does not wait for
+the ordinary approval escalation interval. Push contains only the authenticated
+review URL. The phone card shows the exact before/after snapshot and opens the
+corresponding Decision Desk item. Approve reuses the native digest/revision-bound
+passkey or fresh sign-in path; Decline needs no extra authentication. Its scrolling
+body keeps the action footer in place, including safe-area spacing.
+
+Each terminal outcome atomically records one result message for the requesting
+agent: applied with the verified method/person, declined, expired, withdrawn,
+changed meanwhile, or failed to apply. A session-bound request records the same
+line in that exact session's project chat, including workspace-level requests;
+no arbitrary successor is selected. Requests without project/session context
+leave the result in the principal inbox. A result persistence failure rolls back
+the target change and outcome together. Audit and message events carry the result
+line without assertions or tokens. Platform passkeys are called device passkeys;
+the authenticator does not reliably distinguish Face ID from Touch ID.
 
 The first typed mutation is a shipped feature override, requiring
 `settings.manage`. Its payload is `{ "kind": "feature", "key":
