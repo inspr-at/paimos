@@ -95,3 +95,22 @@ kind regression passed on `3c1ab48f2`; the locked static check passed all 41
 checks with no skips. The remote runner used the host's installed Go 1.26.3
 after the Nix shell hit a missing derivation, and generated the OpenAPI output
 before contract tests. The non-blocking review findings remain follow-up work.
+
+AEON-1049 validation covered the remote phone-approval, native step-up, inbox,
+authorization, authentication and Decision Desk suites. The result regression
+checks exact session/project binding, all terminal lines, first-decision
+idempotence and rollback when recording the result fails. A first-use System
+sender fixture checks PostgreSQL's actual locks before the inbox insert, so
+SQL functions cannot take the event counter early. The reporter contract passed
+after regenerating the ignored OpenAPI output.
+
+The phone component regressions cover passkey cancellation, digest/revision
+binding, all recorded outcomes, and cancellation when leaving the record.
+The control stability guard passed at 390, 1024 and 1440 pixels in light and
+dark themes with long German context. Screenshots are local Playwright artifacts
+under `web/test-results/phone-approvals-step-up-ph-1449f-footer-still-in-both-themes/aeon-1049-stepupphone/`
+(`card-390-light.png`, `card-390-dark.png`, and corresponding 1024/1440 files).
+Ownership, test-tier/shard checks, typecheck, lint and push pointer validation
+passed. The locked static gate passed all 41 checks without skips. No origin
+push, deployment or worker-run model review was performed; the coordinator
+retains those gates and the separate desk UI package's integration.
