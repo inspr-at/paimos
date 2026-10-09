@@ -9,10 +9,12 @@ import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import { outcomeLine } from '../../lib/ticketOutcomes'
 import { vClipTip } from '../../lib/clipTip'
+import { StepupNavigation, stepupRows } from '../../lib/stepup'
 
 const props = defineProps<{
   items: DeskItem[]; round: string[]; start: string; arrivalsCount: number; allowed: (item: DeskItem) => boolean
   decide: (item: DeskItem, draft: DeskDraft, requestId: string) => Promise<DeskItem>
+  stepupMethod?: string
 }>()
 const emit = defineEmits<{ close: []; recorded: [item: DeskItem] }>()
 const dialog = ref<HTMLDialogElement>(), memo = ref<HTMLElement>(), decideButton = ref<HTMLButtonElement>(), pagerButton = ref<HTMLButtonElement>()
@@ -46,9 +48,13 @@ watch(frame, element => {
 })
 const blocked = computed(() => !item.value || !props.allowed(item.value) || !!item.value.unavailable || expired.value || busy.value)
 const trimDeclinable = computed(() => item.value?.kind === 'key_trim' && !item.value.decided && props.allowed(item.value) && !expired.value && !busy.value && (!item.value.unavailable || item.value.unavailable === item.value.keyTrim?.blocked_reason))
+// Step-up and key trim decide through their own Approve / Decline pair.
+const nativePending = computed(() => (item.value?.kind === 'key_trim' || item.value?.kind === 'stepup') && !item.value.decided)
+const stepupPending = computed(() => item.value?.kind === 'stepup' && !item.value.decided)
+const stepupChange = computed(() => item.value?.stepup ? stepupRows(item.value.stepup, item.value.projectName) : undefined)
 const canEdit = computed(() => !!item.value && (!item.value.decided || item.value.kind === 'question' || item.value.kind === 'handover'))
 const trimRestorable = computed(() => item.value?.keyTrim?.state === 'applied' && !!item.value.keyTrim.restore_until && Date.parse(item.value.keyTrim.restore_until) > Date.now())
-const primary = computed(() => item.value?.kind === 'key_trim' ? (!item.value.decided ? 'Approve' : trimRestorable.value ? 'Restore' : 'Next') : item.value?.decided && !draft.value?.dirty ? 'Next' : item.value?.decided ? 'Replace & next' : 'Decide & next')
+const primary = computed(() => item.value?.kind === 'stepup' ? (item.value.decided ? 'Next' : 'Approve') : item.value?.kind === 'key_trim' ? (!item.value.decided ? 'Approve' : trimRestorable.value ? 'Restore' : 'Next') : item.value?.decided && !draft.value?.dirty ? 'Next' : item.value?.decided ? 'Replace & next' : 'Decide & next')
 const announcement = ref('')
 const trimRequests = new Map<string, string>()
 const plainText = (value: unknown) => typeof value === 'string' ? value : 'Not supplied'
@@ -93,7 +99,7 @@ function navigate(delta: number, notice = '') {
   const next = props.items.find(item => item.id === props.round[index.value])
   announcement.value = `${notice ? notice + ' ' : ''}Memo ${index.value + 1} of ${props.round.length}. ${next?.title ?? 'Unavailable item'}`
 }
-function declineOrSkip() { if (item.value?.kind === 'key_trim' && !item.value.decided) void submit('decline'); else skip() }
+function declineOrSkip() { if (nativePending.value) void submit('decline'); else skip() }
 function skip() {
   if (!item.value || busy.value) return
   skipped.value = new Set([...skipped.value, item.value.id]); navigate(1, 'Skipped for this round. The request stays open.')
@@ -101,7 +107,7 @@ function skip() {
 }
 async function submit(trimAction?: 'approve' | 'decline' | 'restore') {
   const current = item.value
-  const trim = current?.kind === 'key_trim' && (!current.decided || trimRestorable.value)
+  const trim = (current?.kind === 'key_trim' && (!current.decided || trimRestorable.value)) || (current?.kind === 'stepup' && !current.decided)
   const sentDraft = trim && draft.value ? { ...draft.value, optionId: trimAction ?? (current?.decided ? 'restore' : 'approve'), dirty: true } : draft.value
   if (!current || !sentDraft || busy.value) return
   if (!trim && current.decided && !sentDraft.dirty) { navigate(1); return }
@@ -119,7 +125,9 @@ async function submit(trimAction?: 'approve' | 'decline' | 'restore') {
   const payload = { ...sentDraft }, requestKey = JSON.stringify([capturedId, capturedRevision, payload.optionId])
   const requestId = trim ? trimRequests.get(requestKey) ?? crypto.randomUUID() : crypto.randomUUID()
   if (trim) trimRequests.set(requestKey, requestId)
-  busy.value = true; slam.value = true; error.value = ''; status.value = 'Recording the decision…'
+  busy.value = true; slam.value = true; error.value = ''
+  status.value = current.kind === 'stepup' && payload.optionId === 'approve' ? (props.stepupMethod === 'Sign in again' ? 'Opening the fresh sign-in…' : 'Waiting for your passkey…') : 'Recording the decision…'
+  let navigating = false
   try {
     const result = await props.decide({ ...current }, payload, requestId)
     if (!live) return
@@ -135,8 +143,10 @@ async function submit(trimAction?: 'approve' | 'decline' | 'restore') {
     await nextTick()
     if (live) { busy.value = false; navigate(1, `Decision recorded for ${current.title}. ${result.delivery || ''}`); await nextTick(); decideButton.value?.focus({ preventScroll: true }) }
   } catch (cause) {
+    // The fresh sign-in replaces this page; the desk reopens the request afterwards.
+    if (cause instanceof StepupNavigation) { navigating = true; slam.value = false; status.value = cause.message; announcement.value = cause.message; return }
     if (live && item.value?.id === capturedId) { error.value = cause instanceof Error ? cause.message : 'The decision failed. Your answer is kept.'; status.value = 'The decision was not confirmed.'; announcement.value = `Decision not confirmed. ${error.value}` }
-  } finally { if (live) { busy.value = false; slam.value = false } }
+  } finally { if (live && !navigating) { busy.value = false; slam.value = false } }
 }
 function openPager() { if (busy.value) return; pager.value = !pager.value; jumpIndex.value = index.value; if (pager.value) void nextTick(() => dialog.value?.querySelector<HTMLElement>('[role="listbox"]')?.focus()) }
 function pickJump(at: number) { if (busy.value) return; index.value = at; pager.value = false; announcement.value = `Memo ${at + 1} of ${props.round.length}. ${props.items.find(item => item.id === props.round[at])?.title ?? 'Unavailable item'}`; void nextTick(() => pagerButton.value?.focus({ preventScroll: true })) }
@@ -191,8 +201,8 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
         </button>
         <span class="toolbar-space"><span v-if="arrivalsCount" class="arrival-hint" role="status">{{ arrivalsCount }} new for the next round</span></span>
         <div class="action-buttons">
-          <button type="button" :disabled="busy || (item?.kind === 'key_trim' && !item.decided && !trimDeclinable)" data-testid="desk-skip" @click="declineOrSkip">{{ item?.kind === 'key_trim' && !item.decided ? 'Decline' : 'Skip' }} <kbd v-if="item?.kind !== 'key_trim' || item.decided">S</kbd></button>
-          <button ref="decideButton" class="desk-primary" type="button" :disabled="busy || ((!item?.decided || trimRestorable) && (blocked || (item?.kind !== 'key_trim' && !draft?.optionId)))" data-testid="desk-decide" @click="submit()">{{ primary }} <KeyCap v-if="editing" k="mod" /><KeyCap k="enter" /></button>
+          <button type="button" :disabled="busy || (item?.kind === 'key_trim' && !item.decided && !trimDeclinable) || (stepupPending && blocked)" data-testid="desk-skip" @click="declineOrSkip">{{ nativePending ? 'Decline' : 'Skip' }} <kbd v-if="!nativePending">S</kbd></button>
+          <button ref="decideButton" class="desk-primary" type="button" :disabled="busy || ((!item?.decided || trimRestorable) && (blocked || (item?.kind !== 'key_trim' && item?.kind !== 'stepup' && !draft?.optionId)))" data-testid="desk-decide" @click="submit()"><span v-if="stepupPending" class="stepup-approve"><span>{{ primary }}</span><small data-testid="stepup-method">{{ stepupMethod || 'Passkey or sign-in' }}</small></span><template v-else>{{ primary }}</template> <KeyCap v-if="editing" k="mod" /><KeyCap k="enter" /></button>
           <button class="close-desk" type="button" aria-label="Close memo" data-testid="desk-close" @click="close"><AppIcon name="close" :size="18" /></button>
         </div>
         <div v-if="pager" class="jump-popover">
@@ -215,7 +225,7 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
             <span class="stamp-label">Stamp it as</span>
             <button v-for="(outcome, at) in outcomes" :key="outcome" class="stamp" :class="[`stamp-${outcome}`, { selected: draft.outcome === outcome, unavailable: !!outcomeUnavailable(item, outcome) }]" type="button" :aria-pressed="draft.outcome === outcome" :disabled="blocked || !canEdit || !!outcomeUnavailable(item, outcome)" :title="outcomeUnavailable(item, outcome) || ({ once: 'For this question only.', always: 'Answer the same question from the record.', requirement: 'Add an acceptance criterion.', doctrine: 'Propose a rule change.' }[outcome])" :data-testid="`stamp-${outcome}`" @click="stamp(outcome)">{{ outcomeLabels[outcome] }}<kbd v-if="!outcomeUnavailable(item, outcome)">{{ outcomeKeys[at] }}</kbd></button>
           </div>
-          <div class="memo-status" data-testid="desk-status">{{ error || status || item.unavailable || (expired ? 'This request expired.' : !allowed(item) ? 'You do not have permission to decide.' : outcomeUnavailable(item, draft.outcome) || item.delivery || item.suggestion) }}</div>
+          <div class="memo-status" data-testid="desk-status">{{ error || status || item.unavailable || (expired ? 'This request expired.' : !allowed(item) ? 'You do not have permission to decide.' : (item.kind !== 'stepup' && outcomeUnavailable(item, draft.outcome)) || item.delivery || item.suggestion) }}</div>
           <div ref="body" class="memo-body" data-testid="desk-body">
             <section v-if="item.keyTrim" class="answer-column key-trim-evidence" aria-label="Key trim evidence" data-testid="key-trim-evidence">
               <h3>{{ item.keyTrim.key_name }} · {{ item.keyTrim.owner_name }}</h3>
@@ -227,6 +237,14 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
               <p>Usage timestamps can lag by up to one minute. Approval rechecks the last 24 hours and the exact live scope set.</p>
               <p v-if="item.keyTrim.restore_until">Restore until {{ new Date(item.keyTrim.restore_until).toLocaleString() }}. An intervening scope edit or changed grant authority can prevent restore.</p>
               <p v-if="item.keyTrim.state === 'restored'">Previous scopes restored: <span class="scope-list">{{ item.keyTrim.previous_scopes.join(', ') }}</span></p>
+            </section>
+            <section v-else-if="item.stepup && stepupChange" class="answer-column stepup-change" aria-label="The change" data-testid="stepup-change">
+              <div class="stepup-diff">
+                <div data-testid="stepup-before"><h3>{{ item.stepup.state === 'stale' ? 'Before · no longer current' : 'Before' }}</h3><dl><div v-for="row in stepupChange.before" :key="row.label" :class="{ changed: row.changed }"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div></dl></div>
+                <span class="stepup-arrow"><AppIcon name="arrow" :size="18" /></span>
+                <div data-testid="stepup-after"><h3>After</h3><dl><div v-for="row in stepupChange.after" :key="row.label" :class="{ changed: row.changed }"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div></dl></div>
+              </div>
+              <p v-if="item.decided" class="stepup-answer" data-testid="stepup-answer">{{ item.answer }}</p>
             </section>
             <section v-else class="answer-column" aria-label="Your answer">
               <h3>Your answer</h3>
@@ -279,6 +297,11 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
 .arrival-hint { color: var(--ink-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action-buttons { display: flex; align-items: center; gap: 8px; }
 .action-buttons button[data-testid="desk-skip"] { width: 92px; }
+.stepup-approve { display: inline-grid; justify-items: start; line-height: 1.2; vertical-align: middle; }.stepup-approve small { font-size: 11px; font-weight: 500; opacity: .8; }
+.stepup-diff { display: grid; grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr); align-items: start; }.stepup-arrow { display: grid; place-items: center; height: 46px; margin-top: 22px; color: var(--ink-3); }
+.stepup-diff dl { margin: 0; font-size: 12px; }.stepup-diff dl>div { display: grid; grid-template-columns: minmax(70px, auto) minmax(0, 1fr); gap: 10px; padding: 9px 8px; border-bottom: 1px solid var(--line); }.stepup-diff dt { color: var(--ink-3); }.stepup-diff dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+[data-testid="stepup-before"] .changed dd { color: var(--ink-3); }[data-testid="stepup-after"] .changed { background: var(--row-hover); }[data-testid="stepup-after"] .changed dd { font-weight: 650; }
+.stepup-answer { font-size: 13px; font-weight: 550; margin: 18px 0 0; }
 .key-trim-evidence table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
 .key-trim-evidence th, .key-trim-evidence td { text-align: left; vertical-align: top; padding: 10px 8px 10px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .key-trim-evidence p { font-size: 12px; color: var(--ink-2); line-height: 1.5; }
@@ -313,6 +336,6 @@ h3 { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacin
 .jump-popover { position: absolute; z-index: 5; left: 0; top: 46px; width: min(480px, calc(100vw - 48px)); padding: 14px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: var(--shadow-pop); }.jump-popover p { margin: 0 0 10px; font-size: 12px; color: var(--ink-3); }.jump-popover ol { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow: auto; }.jump-popover li { display: grid; grid-template-columns: 20px minmax(0, 1fr) 55px; align-items: center; gap: 8px; height: 40px; padding: 0 8px; font-size: 12px; cursor: pointer; }.jump-popover li[aria-selected=true] { background: var(--row-selected); }.jump-popover li>span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.jump-popover small { font-size: 10px; color: var(--ink-3); }
 @media (prefers-reduced-motion: no-preference) { .slam { animation: stamp-slam .28s ease-out; } @keyframes stamp-slam { from { transform: scale(1.18); } to { transform: scale(1); } } }
 @media (max-width: 720px) {
-  .desk-dialog { top: 0; width: 100vw; height: 100dvh; max-height: none; padding: 0; border-radius: 0; border: 0; }.desk-frame { height: 100%; max-height: none; }.desk-toolbar { display: contents; }.desk-pager { order: 0; flex: none; height: 46px; margin-top: 12px; margin-left: 14px; }.toolbar-space { display: none; }.action-buttons { order: 2; display: grid; grid-template-columns: 64px minmax(0,1fr) 42px; flex: none; padding: 10px 14px max(10px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--glass); }.action-buttons .desk-primary { width: 100%; }.action-buttons button[data-testid="desk-skip"] { width: 64px; font-size: 12px; }.action-buttons button { padding: 0 10px; }.desk-paper { order: 1; border: 0; border-radius: 0; padding: 22px 18px 0; overflow: hidden; }.desk-paper::before { display: none; }.memo-heading { height: 92px; grid-template-columns: minmax(0,1fr) 100px; gap: 12px; }h2 { font-size: 20px; }.large-stamp { font-size: 13px; }.stamp-line { gap: 14px; height: 44px; }.stamp-label { display: none; }.stamp { font-size: 10px; }.memo-status { font-size: 11px; height: 48px; }.memo-body { display: flex; flex-direction: column; gap: 24px; padding-bottom: 20px; }.context-column { border-left: 0; padding-left: 0; }.jump-popover { position: fixed; top: 58px; left: 14px; width: calc(100vw - 28px); }kbd { display: none; }.choice-row button { gap: 6px; }.answer-field { margin-left: 8px; width: calc(100% - 16px); }
+  .desk-dialog { top: 0; width: 100vw; height: 100dvh; max-height: none; padding: 0; border-radius: 0; border: 0; }.desk-frame { height: 100%; max-height: none; }.desk-toolbar { display: contents; }.desk-pager { order: 0; flex: none; height: 46px; margin-top: 12px; margin-left: 14px; }.toolbar-space { display: none; }.action-buttons { order: 2; display: grid; grid-template-columns: 64px minmax(0,1fr) 42px; flex: none; padding: 10px 14px max(10px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--glass); }.action-buttons .desk-primary { width: 100%; }.action-buttons button[data-testid="desk-skip"] { width: 64px; font-size: 12px; }.action-buttons button { padding: 0 10px; }.desk-paper { order: 1; border: 0; border-radius: 0; padding: 22px 18px 0; overflow: hidden; }.desk-paper::before { display: none; }.memo-heading { height: 92px; grid-template-columns: minmax(0,1fr) 100px; gap: 12px; }h2 { font-size: 20px; }.large-stamp { font-size: 13px; }.stamp-line { gap: 14px; height: 44px; }.stamp-label { display: none; }.stamp { font-size: 10px; }.memo-status { font-size: 11px; height: 48px; }.memo-body { display: flex; flex-direction: column; gap: 24px; padding-bottom: 20px; }.context-column { border-left: 0; padding-left: 0; }.jump-popover { position: fixed; top: 58px; left: 14px; width: calc(100vw - 28px); }kbd { display: none; }.stepup-diff { grid-template-columns: minmax(0, 1fr); }.stepup-arrow { height: 32px; margin: 4px 0; transform: rotate(90deg); }.choice-row button { gap: 6px; }.answer-field { margin-left: 8px; width: calc(100% - 16px); }
 }
 </style>

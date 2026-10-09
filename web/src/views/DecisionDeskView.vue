@@ -5,7 +5,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
 import { arrivals, kindLabels, newRound, outcomeLabels, type DeskDraft, type DeskItem, type DeskOutcome } from '../lib/decisionDesk'
 import { commitDesk, decisionPermission, emptySources, loadDesk, loadMoreQuestions, nativeTierAdapter, MAX_QUESTION_PAGES, type DeskRead, type DeskSources } from '../lib/decisionDeskApi'
-import { phoneVerificationAvailable } from '../lib/deskPhoneApproval'
+import { phoneCapability } from '../lib/deskPhoneApproval'
+import { settledElsewhere } from '../lib/stepup'
 import { can, onAccessChange } from '../lib/authz'
 import { useSession } from '../stores/session'
 import { useAgents } from '../stores/agents'
@@ -20,6 +21,8 @@ const owner = computed(() => `${session.identity?.tenant.id ?? ''}:${session.ide
 const items = ref<DeskItem[]>([]), roundItems = ref<DeskItem[]>([]), round = ref<string[]>([]), start = ref(''), opened = ref(false)
 const state = ref<'loading' | 'ready'>('loading'), warnings = ref<string[]>([]), more = ref({ open: false, answered: false }), loading = ref(false), pages = ref({ open: 1, answered: 1 }), filter = ref<'open' | 'decided'>('open'), outcomeFilter = ref<DeskOutcome | ''>('')
 const roundBaseline = ref<string[]>([]), phoneVerification = ref<boolean | undefined>(), capabilityError = ref('')
+// Names the step-up method on Approve; the server makes the actual choice.
+const stepupMethod = ref('Passkey or sign-in')
 const trimCursors = ref<KeyTrimCursors>({}), nextKeyTrims = ref<KeyTrimCursors>({})
 const trimState = computed(() => filter.value === 'open' ? 'pending' : 'decided')
 let sources: DeskSources = emptySources(), generation = 0, alive = true
@@ -87,6 +90,9 @@ async function decide(item: DeskItem, draft: DeskDraft, requestId: string) {
   if (item.kind === 'approval' && phoneVerification.value === undefined) throw new Error(capabilityError.value || 'Approval verification availability is still being checked.')
   const result = await commitDesk(item, draft, sources, requestId, phoneVerification.value === true, adapters)
   if (!alive || identity !== owner.value) throw new Error('The signed-in person changed. Reopen the desk.')
+  // First decision wins: someone else's outcome is shown, never as recorded by this person.
+  const elsewhere = result.stepup && settledElsewhere(result.stepup, session.identity?.principal.id ?? '')
+  if (elsewhere) { recorded(result); throw new Error(elsewhere) }
   return result
 }
 function recorded(item: DeskItem) {
@@ -99,15 +105,20 @@ watch(owner, () => {
   sources = emptySources(); adapters = makeAdapters(); filter.value = 'open'; outcomeFilter.value = ''; pages.value = { open: 1, answered: 1 }
   trimCursors.value = {}; nextKeyTrims.value = {}
   currentRead = undefined
-  phoneVerification.value = undefined; capabilityError.value = ''
+  phoneVerification.value = undefined; capabilityError.value = ''; stepupMethod.value = 'Passkey or sign-in'
   const identity = owner.value
-  void phoneVerificationAvailable().then(available => { if (alive && identity === owner.value) phoneVerification.value = available })
+  void phoneCapability().then(capability => { if (alive && identity === owner.value) { phoneVerification.value = capability.available; stepupMethod.value = capability.passkeys ? 'Passkey' : 'Sign in again' } })
     .catch(() => { if (alive && identity === owner.value) capabilityError.value = 'Approval verification availability could not be confirmed. Refresh the page before deciding.' })
   void refresh()
 }, { immediate: true })
 // A refresh signal arrives before the permission response. Only an actual
 // reset invalidates the frozen source; can() reacts to the completed refresh.
-watch(() => [state.value, items.value] as const, () => { const needs = route.query.needs; if (!opened.value && typeof needs === 'string' && needs !== consumedLink.value && items.value.some(item => item.id === needs)) { consumedLink.value = needs; begin(needs) } })
+watch(() => [state.value, items.value] as const, () => { const needs = route.query.needs; if (!opened.value && typeof needs === 'string' && needs !== consumedLink.value && items.value.some(item => item.id === needs)) {
+  // A fresh sign-in returns to its decided step-up; open that memo, not the first open one.
+  consumedLink.value = needs
+  if (needs.startsWith('s:') && items.value.find(item => item.id === needs)?.decided) { filter.value = 'decided'; outcomeFilter.value = '' }
+  begin(needs)
+} })
 const stopAccess = onAccessChange(change => { if (change === 'reset' && opened.value) roundItems.value = roundItems.value.map(item => allowed(item) ? item : { ...item, unavailable: 'Access changed. Reopen the desk to confirm this source.' }) })
 let poll: ReturnType<typeof setInterval> | undefined
 const focus = () => { if (!loading.value) void refresh() }
@@ -127,7 +138,7 @@ onBeforeUnmount(() => { alive = false; generation++; stopAccess(); clearInterval
     <p v-if="more[filter === 'open' ? 'open' : 'answered']" class="incomplete">More questions are available. <button v-if="pages[filter === 'open' ? 'open' : 'answered'] < MAX_QUESTION_PAGES" type="button" :disabled="loading" @click="loadMore">Load 100 more</button><span v-else>The view is limited to 1,000 questions per state.</span></p>
     <p class="chore-line">Sign-ins and account setup remain in <RouterLink to="/agents">Agents</RouterLink>.</p>
     <p v-if="opened && fresh.length" class="arrival-line">{{ fresh.length }} new item{{ fresh.length === 1 ? '' : 's' }} waiting for the next round.</p>
-    <DecisionDeskMemo v-if="opened" :key="owner" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :allowed="allowed" :decide="decide" @recorded="recorded" @close="opened = false" />
+    <DecisionDeskMemo v-if="opened" :key="owner" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :allowed="allowed" :decide="decide" :stepup-method="stepupMethod" @recorded="recorded" @close="opened = false" />
   </main>
 </template>
 
