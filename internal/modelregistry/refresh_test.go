@@ -599,7 +599,7 @@ func TestDiscoveryVaultIsAccountBoundAndOutageKeepsPolicy(t *testing.T) {
 	send(p, "POST", "/api/models/refresh", "{}", 429)
 	outage = true
 	inRegistry(t, p, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=now()-interval '61 minutes'`)
+		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=now()-interval '61 minutes',last_manual_run_at=now()-interval '61 minutes'`)
 		return err
 	})
 	if err := json.Unmarshal(send(p, "POST", "/api/models/refresh", "{}", 200), &result); err != nil {

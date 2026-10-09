@@ -22,12 +22,14 @@ type BoardProfile struct {
 	Revision       int64    `json:"revision"`
 }
 type BoardOrder struct {
-	ProfileID string   `json:"profile_id"`
-	Column    string   `json:"column"`
-	Situation string   `json:"situation"`
-	Rank      []string `json:"rank"`
-	Not       []string `json:"not"`
-	Thinking  *string  `json:"thinking"`
+	ProfileID   string   `json:"profile_id"`
+	Column      string   `json:"column"`
+	Situation   string   `json:"situation"`
+	Rank        []string `json:"rank"`
+	Not         []string `json:"not"`
+	Thinking    *string  `json:"thinking"`
+	Effort      *string  `json:"effort"`
+	EffortLevel *int     `json:"effort_level"`
 }
 type Rule struct {
 	Scope     string    `json:"scope"`
@@ -103,6 +105,7 @@ type BoardDecision struct {
 	Cant           []HeldLine            `json:"-"`
 	Locks          map[string]*BoardLock `json:"-"`
 	Thinking       string                `json:"-"`
+	Effort         string                `json:"-"`
 	EffortLevel    int                   `json:"-"`
 	ThinkingSource string                `json:"-"`
 	Source         string                `json:"-"`
@@ -314,12 +317,35 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 	if d.Situation != "first" {
 		thinkingSituations = append(thinkingSituations, d.Situation)
 	}
+	// Native per-row effort inherits the All work row before the column's
+	// own controls. Legacy thinking retains its existing precedence.
+	if d.Column != "other" && !strings.HasPrefix(d.Column, "review:") {
+		for _, p := range profiles {
+			if o, ok := boardOrder(s, p, "other", "first"); ok && o.Effort != nil {
+				d.Effort = *o.Effort
+				if o.EffortLevel != nil {
+					d.EffortLevel = *o.EffortLevel
+				}
+			}
+		}
+	}
 	// An exact situation override precedes inherited First build thinking;
 	// within each situation the person's column precedes the workspace column.
 	for _, situation := range thinkingSituations {
 		for _, p := range profiles {
-			if o, ok := boardOrder(s, p, d.Column, situation); ok && o.Thinking != nil {
-				d.Thinking = *o.Thinking
+			if o, ok := boardOrder(s, p, d.Column, situation); ok && (o.Thinking != nil || o.Effort != nil) {
+				if o.Thinking != nil {
+					d.Effort = ""
+				}
+				if o.Effort != nil {
+					d.Effort = *o.Effort
+				}
+				if o.EffortLevel != nil {
+					d.EffortLevel = *o.EffortLevel
+				}
+				if o.Thinking != nil {
+					d.Thinking = *o.Thinking
+				}
 				d.ThinkingColumn = o.Situation == d.Situation
 				d.ThinkingSource = "default"
 				if p.Scope == "person" {
@@ -338,19 +364,22 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 		}
 	}
 	level := ThinkingLevel(d.Thinking)
+	if d.Effort != "" {
+		level = d.EffortLevel
+	}
 	explicitSituation := found && order.Situation == d.Situation
-	if d.Situation == "fix" && !d.ThinkingColumn {
+	if d.Situation == "fix" && !d.ThinkingColumn && d.Effort == "" {
 		level--
 	}
 	small := s.SmallHours
 	if small == 0 {
 		small = 2
 	}
-	if d.Situation == "first" && q.EstimateHours > 0 && q.EstimateHours <= float64(small) {
+	if d.Effort == "" && d.Situation == "first" && q.EstimateHours > 0 && q.EstimateHours <= float64(small) {
 		level--
 	}
 	if d.Situation == "stuck" {
-		if !d.ThinkingColumn && level < 4 {
+		if d.Effort == "" && !d.ThinkingColumn && level < 4 {
 			level = 4
 		}
 		if !explicitSituation && q.PreviousFamily != "" {
@@ -361,6 +390,7 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 		}
 	}
 	if strings.HasPrefix(d.Column, "review:") {
+		d.Effort = "xhigh"
 		level = 4
 	}
 	d.Thinking = ThinkingWord(level)

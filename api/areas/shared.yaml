@@ -1288,6 +1288,9 @@ components:
             created_at: {type: string, format: date-time}
             effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5, readOnly: true, description: "Shared effort scale from the immutable effort pin, including Gemini fixed thinking-budget buckets; unknown stays null."}
             provider: {type: string, readOnly: true, description: Registered model brand; separate from the routing family.}
+            source: {type: string, enum: [auto, manual], readOnly: true}
+            retire_at: {type: [string, 'null'], format: date-time, readOnly: true}
+            retired: {type: boolean, readOnly: true}
     ModelProfileWrite:
       type: object
       description: Family must match the fixed harness provider or an explicitly supported provider/model binding. Ambiguous multi-provider pins may use unknown and cannot perform independent review. Existing inconsistent immutable profiles are excluded from routing and review approval.
@@ -1303,6 +1306,7 @@ components:
         display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
         short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}
         model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
+        note: {type: string, maxLength: 80, description: 'Admin-owned note shown below the model name.'}
     ModelSelector:
       type: object
       additionalProperties: false
