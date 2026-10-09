@@ -10,6 +10,7 @@ import (
 	"errors"
 	confirmation "github.com/inspr-at/paimos/internal/stepup"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/features"
@@ -28,6 +29,26 @@ type Target interface {
 	Parse(json.RawMessage) (json.RawMessage, string, error)
 	Snapshot(context.Context, pgx.Tx, tenant.Principal, json.RawMessage) (json.RawMessage, json.RawMessage, error)
 	Apply(context.Context, pgx.Tx, tenant.Principal, json.RawMessage, json.RawMessage) error
+}
+
+func registeredTargets() map[string]Target {
+	return map[string]Target{"feature": FeatureTarget{}}
+}
+
+// TargetPermissions lists only authorities used by registered protected changes,
+// keeping desk visibility bounded independently of the full permission registry.
+func TargetPermissions() []string {
+	seen := map[string]bool{}
+	var permissions []string
+	for _, target := range registeredTargets() {
+		permission := target.Permission()
+		if !seen[permission] {
+			seen[permission] = true
+			permissions = append(permissions, permission)
+		}
+	}
+	slices.Sort(permissions)
+	return permissions
 }
 
 func decodeJSON(raw []byte, out any) error {

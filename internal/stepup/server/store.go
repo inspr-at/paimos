@@ -74,7 +74,7 @@ type ReauthStart struct {
 }
 
 func New(pool *pgxpool.Pool, phone *phoneapprovals.Module, origin string) *Module {
-	return &Module{pool: pool, phone: phone, origin: origin, targets: map[string]Target{"feature": FeatureTarget{}}, now: time.Now}
+	return &Module{pool: pool, phone: phone, origin: origin, targets: registeredTargets(), now: time.Now}
 }
 func (m *Module) target(raw json.RawMessage) (Target, json.RawMessage, string, error) {
 	if len(raw) > payloadLimit {

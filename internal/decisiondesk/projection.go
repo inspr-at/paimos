@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -145,10 +146,10 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	}
 	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "inbox.manage": {}}
 	stepupPermissions := map[string][]string{}
-	for _, permission := range authz.Registry {
-		stepupPermissions[permission.Key] = []string{}
-		if check(permission.Key, "") {
-			stepupPermissions[permission.Key] = append(stepupPermissions[permission.Key], "")
+	for _, permission := range stepup.TargetPermissions() {
+		stepupPermissions[permission] = []string{}
+		if check(permission, "") {
+			stepupPermissions[permission] = append(stepupPermissions[permission], "")
 		}
 	}
 	rows, err := tx.Query(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.tenant_id=$1 AND k.slug='project' AND n.deleted_at IS NULL ORDER BY n.id LIMIT 1001`, p.TenantID)
