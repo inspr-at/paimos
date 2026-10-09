@@ -12,6 +12,7 @@ import { useProjects } from '../../stores/projects'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import LeadBot from './LeadBot.vue'
+import LeadMenu from './LeadMenu.vue'
 
 // AEON-741: one calm line per project lead between the dial and Sessions. A
 // project without a lead is listed only while work waits for one.
@@ -67,7 +68,7 @@ defineExpose({ withoutLead, mayStart, launchAvailable, launchReason })
   <section v-if="rows.length" class="zone" aria-labelledby="leads-title">
     <div class="zone-head"><h2 id="leads-title">{{ w.P }}<span class="count mono">{{ count }}</span></h2><p class="small faint">One per project · each starts its workers within the dial</p></div>
     <ul class="list">
-      <li v-for="row in rows" :key="row.id">
+      <li v-for="row in rows" :key="row.id" class="lead-list-item">
         <button type="button" class="lead-row" :data-project="row.key" :aria-disabled="row.lead?.state === 'none' && (!mayStart || !canLaunchLead(row.lead))" @click="open(row, $event)">
           <span class="lead-bot"><LeadBot :busy="row.busy" /></span>
           <span class="lr-who"><span class="lr-name" :class="{ faint: row.lead?.state === 'none' }">{{ row.name }}</span><span class="lr-sub">{{ row.sub }}</span></span>
@@ -76,6 +77,7 @@ defineExpose({ withoutLead, mayStart, launchAvailable, launchReason })
           </span>
           <span class="chev"><AppIcon name="chevron-right" :size="16" /></span>
         </button>
+        <LeadMenu v-if="row.lead && row.lead.state !== 'none'" :project-id="row.id" :project-key="row.key" :lead="row.lead" />
       </li>
     </ul>
     <p v-if="leads.truncated" class="small faint more">Showing the first 50 projects. Open a project to see its {{ w.l }}.</p>
@@ -91,7 +93,9 @@ defineExpose({ withoutLead, mayStart, launchAvailable, launchReason })
 .faint { color: var(--ink-3); }
 .more { margin-top: 8px; }
 .list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
-.lead-row { display: grid; grid-template-columns: 36px minmax(0, 1.4fr) minmax(0, 1fr) 16px; grid-template-areas: 'icon who status chev'; align-items: center; gap: 2px 16px; width: 100%; min-height: 68px; padding: 10px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.lead-list-item { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: start; border-bottom: 1px solid var(--line); }
+.lead-list-item :deep(.lead-menu-trigger) { justify-self: center; margin-top: 12px; }
+.lead-row { display: grid; grid-template-columns: 36px minmax(0, 1.4fr) minmax(0, 1fr) 16px; grid-template-areas: 'icon who status chev'; align-items: center; gap: 2px 16px; width: 100%; min-height: 68px; padding: 10px; border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
 .lead-row:hover { background: var(--row-hover); }
 .lead-row[aria-disabled="true"] { cursor: default; }
 .lead-bot { grid-area: icon; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); }

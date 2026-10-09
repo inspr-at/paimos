@@ -116,6 +116,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	}{
 		{"GET /api/projects/{projectId}/lead", "harness.read", false, 200, m.readLead},
 		{"POST /api/projects/{projectId}/lead", "harness.control", false, 200, m.startLead},
+		{"DELETE /api/projects/{projectId}/lead", "harness.control", false, 200, m.removeLead},
 		{"POST /api/projects/{projectId}/lead/claim", "harness.worker", true, 200, m.claimLead},
 		{"POST /api/projects/{projectId}/lead/pause", "harness.worker", false, 200, m.pauseLead},
 		{"POST /api/projects/{projectId}/lead/yield", "harness.worker", true, 200, m.yieldLead},

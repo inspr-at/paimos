@@ -1335,6 +1335,8 @@
         ,
         {"file":"tests/lead-flow.spec.ts","listedTests":14,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
         ,
+        {"file":"tests/lead-remove.spec.ts","listedTests":7,"weightSeconds":25.5,"weightSource":"measured-local-targeted"}
+        ,
         {"file":"tests/lead-start.spec.ts","listedTests":7,"weightSeconds":10,"weightSource":"unmeasured-test-count-estimate"}
       ]
     }

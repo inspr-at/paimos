@@ -6,7 +6,7 @@ import { onAccessChange } from '../lib/authz'
 import { APIError, getNode } from '../lib/api'
 import { getSession } from '../lib/agentRows'
 import type { Question } from '../lib/decisionDeskApi'
-import { canLaunchLead, emptyFold, foldDecisions, leadLaunchReason, pauseLead, readLead, readLeadDecisions, readLeadSettings, readOpenQuestions, startLead, type DecisionFold, type LeadDecision, type LeadSettings, type ProjectLead } from '../lib/lead'
+import { canLaunchLead, canRemoveLead, emptyFold, foldDecisions, leadLaunchReason, pauseLead, readLead, readLeadDecisions, readLeadSettings, readOpenQuestions, removeLead, startLead, type DecisionFold, type LeadDecision, type LeadSettings, type ProjectLead } from '../lib/lead'
 import { useAgents } from './agents'
 
 // AEON-741: read projections of each project's lead. The server decides state;
@@ -36,8 +36,9 @@ export const useProjectLeads = defineStore('projectLeads', () => {
   const pending = new Map<string, Promise<void>>()
   // Per project: bumped by every write, so a read that began earlier is dropped.
   const writes = new Map<string, number>()
+  const reads = new Map<string, number>()
   const clear = () => {
-    epoch++; writes.clear()
+    epoch++; writes.clear(); reads.clear()
     for (const id of Object.keys(views)) delete views[id]
     for (const id of Object.keys(keys)) delete keys[id]
     for (const id of Object.keys(busy)) delete busy[id]
@@ -54,12 +55,16 @@ export const useProjectLeads = defineStore('projectLeads', () => {
   /** Lead state only: the Agents page reads one per project, bounded. */
   async function loadLead(id: string, started = epoch) {
     const wrote = writes.get(id) ?? 0
-    const stale = () => started !== epoch || (writes.get(id) ?? 0) !== wrote
+    const reading = (reads.get(id) ?? 0) + 1
+    reads.set(id, reading)
+    const stale = () => started !== epoch || (writes.get(id) ?? 0) !== wrote || reads.get(id) !== reading
     try {
       const lead = await readLead(id)
       if (stale()) return
       const shown = view(id).lead
-      if (shown && lead.revision < shown.revision) return
+      // Removal returns ordinary absence (revision zero). A fresh absence must
+      // clear another person's removed intent; an older overlapping read cannot.
+      if (shown && lead.state !== 'none' && lead.revision < shown.revision) return
       Object.assign(view(id), { lead, error: '', forbidden: false, loadedAt: Date.now() })
     } catch (e) {
       if (stale()) return
@@ -165,5 +170,9 @@ export const useProjectLeads = defineStore('projectLeads', () => {
     return startLead(id, lead.revision)
   })
   const pause = (id: string) => write(id, lead => pauseLead(id, lead.revision, lead.generation))
-  return { views, keys, busy, truncated, view, load, loadLead, loadMany, start, pause, keyOf, resolveKeys }
+  const remove = (id: string, revision: number) => write(id, lead => {
+    if (lead.revision !== revision || !canRemoveLead(lead)) throw new Error('The lead changed. Open its menu again.')
+    return removeLead(id, revision)
+  })
+  return { views, keys, busy, truncated, view, load, loadLead, loadMany, start, pause, remove, keyOf, resolveKeys }
 })

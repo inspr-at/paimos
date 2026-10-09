@@ -5814,6 +5814,14 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadOpenAPIContract","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadRemovalAuditsOnlyNeverStartedIntent","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadRemovalRejectsStartedAndHistoricalGenerations","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadRemovalRequiresPersonAndCurrentControl","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadRemovalSerializesClaimAndRevocation","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadReportingCadenceAndBoundaries","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadWaitProjection","tier":"GATED-FULL"}

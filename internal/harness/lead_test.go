@@ -506,6 +506,11 @@ func TestProjectLeadOpenAPIContract(t *testing.T) {
 				t.Fatal("lead writes lost revision contract")
 			}
 		}
+		remove := paths[prefix+"/projects/{projectId}/lead"].(map[string]any)["delete"].(map[string]any)
+		body := remove["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+		if body["additionalProperties"] != false || body["required"].([]any)[0] != "expected_revision" {
+			t.Fatal("lead removal lost its strict revision contract")
+		}
 		lead := doc["components"].(map[string]any)["schemas"].(map[string]any)["ProjectLead"].(map[string]any)
 		properties := lead["properties"].(map[string]any)
 		if len(properties["state"].(map[string]any)["enum"].([]any)) != 6 {
