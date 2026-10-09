@@ -106,6 +106,32 @@ func fixtureLedgerPeer(t *testing.T, s *Supervisor, cap int) agentsetup.LedgerMe
 	return m
 }
 
+func restartSharedLedgerFixture(t *testing.T, previous *Supervisor, api *ledgerFixtureAPI) *Supervisor {
+	t.Helper()
+	root := previous.state.Path()
+	previous.lock.Close()
+	previous.lock = nil
+	previous.state.Close()
+	if previous.ledger != nil {
+		previous.ledger.Close()
+		previous.ledger = nil
+	}
+	next, err := NewSupervisor(t.Context(), Config{API: api, StateRoot: root, DaemonID: previous.daemonID, Workspace: previous.workspace, Accounts: previous.accounts, EstimatedUnits: previous.estimates, Adapters: []Adapter{&fakeAdapter{proc: &fakeProcess{stopped: make(chan struct{})}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if next.lock != nil {
+			next.lock.Close()
+		}
+		next.state.Close()
+		if next.ledger != nil {
+			next.ledger.Close()
+		}
+	})
+	return next
+}
+
 // Risk: handover can miss a possible fork in either launch-write window. The
 // import request is established by a barrier while dispatchMu is held.
 func TestSharedLedgerHandoverWaitsAcrossLaunchWindows(t *testing.T) {
@@ -261,6 +287,7 @@ func TestSharedLedgerCrashBeforeIntentAndUnreachableRecovery(t *testing.T) {
 				s.runs[r.RunID] = &owned{record: r}
 				api.routeErr = errors.New("fixture unreachable")
 			}
+			s = restartSharedLedgerFixture(t, s, api)
 			err = s.EnableLedger(t.Context(), config)
 			d, _, readErr := s.ledger.Snapshot()
 			if readErr != nil {
@@ -751,5 +778,80 @@ func TestSharedLedgerJournalV3MigrationPreservesEvidenceAndRejectsDowngrade(t *t
 		if err != nil || !bytes.Equal(before[i], after) {
 			t.Fatal("downgrade damaged retained evidence", path, err)
 		}
+	}
+}
+
+// Risk: restarting after a deleted/corrupt ledger treats lost data as an empty
+// machine, sends Route too early, or loses the exact surviving owner intent.
+func TestSharedLedgerDamagedLedgerRestartWaitsForEveryMember(t *testing.T) {
+	for _, damage := range []string{"missing", "corrupt"} {
+		t.Run(damage, func(t *testing.T) {
+			s, a, _ := testSupervisor(t)
+			api, config := enableLedgerFixture(t, s, a)
+			peer := fixtureLedgerPeer(t, s, 2)
+			old := s.ledgerBinding.Generation
+			gid, err := agentsetup.LedgerID()
+			if err != nil {
+				t.Fatal(err)
+			}
+			subset, err := s.ledger.Acquire(s.ledgerBinding.Member.ID, old, gid, s.ledgerCandidates([]string{"account"}, old))
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: a.run.ID, WorkOrderID: a.run.WorkOrderID, Generation: s.generation, ExecutionMode: "managed", State: "route_pending", LaunchState: launchRoutePending, LedgerGroup: gid, LedgerGeneration: old, RouteCandidates: subset}
+			if err = s.journal.Put(r); err != nil {
+				t.Fatal(err)
+			}
+			s.runs[r.RunID] = &owned{record: r}
+			path := filepath.Join(config.Path, "ledger.json")
+			if damage == "missing" {
+				err = os.Remove(path)
+			} else {
+				err = os.WriteFile(path, []byte("corrupt"), 0600)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			s = restartSharedLedgerFixture(t, s, api)
+			if err = s.RefreshLedger(t.Context(), config); !errors.Is(err, agentsetup.ErrLedgerUnavailable) || api.routeCalls != 0 {
+				t.Fatal("damaged ledger was recreated or routed", err)
+			}
+			ledger, err := agentsetup.OpenSharedLedger(config.Path, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fresh, err := ledger.Rebuild()
+			ledger.Close()
+			if err != nil || fresh == old {
+				t.Fatal("rebuild reused generation", err)
+			}
+			if err = s.EnableLedger(t.Context(), config); err != nil || api.routeCalls != 0 {
+				t.Fatal("owner handover failed while waiting for the peer", err)
+			}
+			if err = s.StartRun(t.Context(), a.run); !errors.Is(err, agentsetup.ErrLedgerUnavailable) || api.routeCalls != 0 {
+				t.Fatal("owner admission preceded every member import", err)
+			}
+			data, members, err := s.ledger.Snapshot()
+			if err != nil || !data.Rebuilding || len(members) != 2 || len(data.Groups) != 1 || data.Groups[gid].Generation != fresh {
+				t.Fatal("restart lost surviving intent or tombstone", data, err)
+			}
+			if err = s.ledger.Launching(s.ledgerBinding.Member.ID, old, gid); !errors.Is(err, agentsetup.ErrLedgerGeneration) {
+				t.Fatal("stale launch survived restart", err)
+			}
+			_, err = s.ledger.Import(peer.ID, agentsetup.LedgerInstance{Fingerprint: agentsetup.LedgerFingerprint(fresh, "instance", "peer"), PID: os.Getpid(), StartedAt: time.Unix(11, 0).UTC(), MaximumAgents: 2}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = s.ledger.Enrolled(peer.ID, fresh); err != nil {
+				t.Fatal(err)
+			}
+			if err = s.RefreshLedger(t.Context(), config); err != nil {
+				t.Fatal(err)
+			}
+			got := s.journal.Snapshot()[0]
+			if got.LedgerGroup != gid || got.LedgerGeneration != fresh || got.LaunchState != launchPrepared || got.ClaimRoute == nil || api.routeCalls != 1 || !slices.Equal(api.offered[0], []string{"account"}) {
+				t.Fatal("post-rebuild replay lost owner attempt", got)
+			}
+		})
 	}
 }

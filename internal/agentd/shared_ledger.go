@@ -269,6 +269,25 @@ func (s *Supervisor) enableLedgerLocked(ctx context.Context, c LedgerConfig) err
 	}
 	s.ledger, s.ledgerBinding = ledger, binding
 	keep = true
+	// This owner has completed its fenced handover. Waiting for a peer is an
+	// admission condition, not a failed import: reporting failure here can
+	// prevent a partially provisioned peer from finishing its own handover.
+	data, members, err := ledger.Snapshot()
+	if err != nil {
+		return err
+	}
+	if data.Generation != generation {
+		return agentsetup.ErrLedgerGeneration
+	}
+	for _, member := range members {
+		v := data.Instances[member.ID]
+		if !v.Imported || !v.Enrolled {
+			return nil
+		}
+	}
+	if data.Rebuilding {
+		return nil
+	}
 	return s.reconcileLedgerLocked(ctx)
 }
 func candidateIDs(candidates []agentsetup.LedgerCandidate) []string {
@@ -380,6 +399,9 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 			continue
 		}
 		if r.LaunchState == launchRoutePending && r.State == "route_pending" {
+			if err = s.ledger.CheckGroup(s.ledgerBinding.Member.ID, r.LedgerGeneration, r.LedgerGroup); err != nil {
+				return err
+			}
 			route, e := s.api.Route(ctx, r.RunID, s.daemonID, candidateIDs(r.RouteCandidates), s.estimates)
 			if e != nil {
 				// A generic 409 includes capacity/grant/generation refusals. Release only

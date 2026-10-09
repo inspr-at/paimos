@@ -568,6 +568,28 @@ func (l *SharedLedger) Release(member, generation, gid string) error {
 		return nil
 	})
 }
+
+// CheckGroup validates retained attempt coordinates before a server replay.
+// Rebuilt occupancy cannot make a fresh routing attempt until every member is
+// imported and enrolled, even when this owner's server is already reachable.
+func (l *SharedLedger) CheckGroup(member, generation, gid string) error {
+	return l.locked(func() error {
+		d, err := l.read()
+		if err != nil {
+			return err
+		}
+		if d.Generation != generation {
+			return ErrLedgerGeneration
+		}
+		if err = l.ready(d); err != nil {
+			return err
+		}
+		if group, ok := d.Groups[gid]; !ok || group.Instance != member {
+			return ErrLedgerOwner
+		}
+		return nil
+	})
+}
 func (l *SharedLedger) Rebuild() (string, error) {
 	var generation string
 	err := l.locked(func() error {

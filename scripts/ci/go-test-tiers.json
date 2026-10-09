@@ -1790,6 +1790,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerCrashBeforeIntentAndUnreachableRecovery","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerDamagedLedgerRestartWaitsForEveryMember","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerDispatchPrunesRouteOfferAndKeepsPin","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerEnrollmentCrashAndOldServerFailClosed","tier":"ESSENTIAL"}
