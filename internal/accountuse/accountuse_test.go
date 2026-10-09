@@ -189,6 +189,13 @@ func TestAccountUseCreationRulesAndDatabaseFences(t *testing.T) {
 		}
 		return nil
 	})
+	f.in(t, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='starting' WHERE id=$1`, f.run); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='running' WHERE id=$1`, f.run)
+		return err
+	})
 	rules = f.rules(t, accountuse.RuleValues{"allow", "allow", "holding", "allow"})
 	f.in(t, func(tx pgx.Tx) error {
 		var project string
@@ -220,6 +227,14 @@ func TestAccountUseCreationRulesAndDatabaseFences(t *testing.T) {
 		return err
 	})
 	checkPG(t, err, "23514", "account not allowed for work context")
+	var matrix accountuse.Matrix
+	w := f.call(t, f.p, "GET", "/api/account-use", nil, 200)
+	if err := json.Unmarshal(w.Body.Bytes(), &matrix); err != nil {
+		t.Fatal(err)
+	}
+	if len(matrix.RunningOutside) != 1 || matrix.RunningOutside[0].RunID != f.run || matrix.RunningOutsideTruncated {
+		t.Fatal("running work was cancelled or omitted from the outside-context list")
+	}
 	err = db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='starting' WHERE id=$1`, f.run)
 		return err
@@ -320,6 +335,32 @@ func TestAccountUseBulkAndStaleUndo(t *testing.T) {
 	})
 	worker := tenant.Principal{ID: f.agent, TenantID: f.p.TenantID, Kind: tenant.Agent}
 	f.call(t, worker, "PUT", "/api/account-use/rules", map[string]any{}, 403)
+	f.in(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE account_use_rules SET confirmation_required=true`)
+		return err
+	})
+	var current accountuse.Rules
+	f.in(t, func(tx pgx.Tx) error { var err error; current, err = accountuse.ReadRules(t.Context(), tx); return err })
+	f.call(t, f.p, "POST", "/api/account-use/confirm", map[string]any{"expected_revision": current.Revision - 1}, 409)
+	w := f.call(t, f.p, "POST", "/api/account-use/confirm", map[string]any{"expected_revision": current.Revision}, 200)
+	var confirmed accountuse.Rules
+	if err := json.Unmarshal(w.Body.Bytes(), &confirmed); err != nil {
+		t.Fatal(err)
+	}
+	if confirmed.ConfirmationRequired || confirmed.ConfirmedAt == nil || confirmed.Revision != current.Revision+1 {
+		t.Fatal("confirmation did not persist its audited revision")
+	}
+	f.call(t, f.p, "POST", "/api/account-use/confirm", map[string]any{"expected_revision": confirmed.Revision}, 200)
+	f.in(t, func(tx pgx.Tx) error {
+		var audits int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='account_use.confirmed' AND actor_principal_id=$1`, f.p.ID).Scan(&audits); err != nil {
+			return err
+		}
+		if audits != 1 {
+			t.Fatal("confirmation retry duplicated the audit")
+		}
+		return nil
+	})
 }
 
 // Risk: a stale person retains matrix authority while waiting behind revocation.
