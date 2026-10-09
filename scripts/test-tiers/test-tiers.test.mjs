@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { spawnSync, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike } from './core.mjs'
+import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike, browserDataInput } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
@@ -15,7 +15,9 @@ import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDeci
 import { runnerDecision, runnerSelection } from './cli.mjs'
 import { treeStamp, reuse, webStampEntries } from './collect.mjs'
 import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs'
+import { buildBrowserMap } from './browser-impact.mjs'
 import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
+import './browser-impact.test.mjs'
 import './manifests.test.mjs'
 import './tiers-merge-driver.test.mjs'
 import '../merge-drivers/merge-drivers.test.mjs'
@@ -25,6 +27,8 @@ const w=(file,name,tier='NIGHTLY')=>({kind:'node',file,name,tier})
 const cases=[g('internal/auth','TestCeiling','ESSENTIAL'),g('internal/auth','TestRotation'),
   g('internal/nodes','TestCRUD','ESSENTIAL'),g('internal/nodes','TestUndo'),g('cmd/aeon','TestRoutes'),
   w('tests/scope.test.ts','ceiling','ESSENTIAL'),w('tests/scope.test.ts','revoked'),w('tests/tree.test.ts','tree')]
+const mapTree='a'.repeat(40)
+const completeMap=(source,specs)=>({baseTree:mapTree,browserMap:{version:1,tree:mapTree,complete:true,specs,modules:{[source]:specs}}})
 const fixture=()=>({version:1,tests:structuredClone(cases)})
 const noFlaky={version:1,entries:[]}
 
@@ -108,7 +112,7 @@ const goPackages=selection=>new Set(selection.tests.filter(row=>row.kind==='go'&
 const webFiles=selection=>new Set(selection.tests.filter(row=>row.kind!=='go'&&row.tier!=='ESSENTIAL').map(row=>row.file))
 const essentialOnly=selection=>selection.tests.every(row=>row.tier==='ESSENTIAL')
 
-test('affected kill switch off matches the frozen selector for all 80 real PR lists except instruction inputs (AEON-766)',()=>{
+test('affected kill switch off matches the frozen selector for all 80 real PR lists except instruction and AEON-1019 safety fallbacks',()=>{
   assert.equal(replay.prs.length,80)
   assert.equal(replay.base,'b6f74faa11d506efd3d21387ca4e2f5a9c687dcf')
   assert.equal(replay.legacySelectorSHA256,'737a4bb8a805c23e572ad83f2922e65d8c0d34a932afca2e13fd9fa51e26d710')
@@ -123,9 +127,10 @@ test('affected kill switch off matches the frozen selector for all 80 real PR li
       const selected=select(replayRows,{...options,affectedLane,tree:repoTree,promotions:noPromotions,readFile:readRepo})
       const message=`PR ${number}, switch ${affectedLane}`
       // AEON-766's instruction safety rule also applies with affected narrowing off.
-      if(paths.some(path=>/(?:^|\/)(?:AGENTS|CLAUDE)\.md$/i.test(path))) {
+      if(paths.some(path=>/(?:^|\/)(?:AGENTS|CLAUDE)\.md$/i.test(path)) || selected.full && (!expected.full || /^browser CSS, asset or data/.test(selected.reason))) {
         assert.equal(selected.full,true,message)
         assert.deepEqual(selected.tests,replayRows.filter(row=>row.tier==='ESSENTIAL'||row.tier==='GATED-FULL'),message)
+      assert.match(selected.reason,/test-pinned instruction|Go reverse dependencies|browser|web dependency|mapped test/,message)
       } else assert.deepEqual(selected,expected,message)
     }
     assert.deepEqual(schedulingDecision('pull_request',paths,()=>true,{graph:replayGraph}),schedulingDecision('pull_request',paths,()=>true,{affectedLane:'off',graph:replayGraph}),`PR ${number}`)
@@ -237,16 +242,17 @@ test('R1 manifest-only diffs take the static layout; promotions must execute and
 })
 
 test('R2 contract diffs run the Go packages that read the contract and keep web at essentials',()=>{
-  const selected=on(['api/openapi.yaml'])
+  assert.equal(on(['api/openapi.yaml']).full,true,'real consumer fan-out keeps the full gate')
+  const selected=on(['api/openapi.yaml'],{imports:{}})
   assert.equal(selected.full,false)
   const packages=goPackages(selected)
   for(const pkg of ['internal/chat','internal/modelregistry','internal/reportercontract','internal/harness']) assert.ok(packages.has(pkg),`${pkg} reads api/openapi.yaml`)
   assert.equal(webFiles(selected).size,0,'handwritten web wire types: no generated importers to select')
   assert.match(selected.reason,/R2: contract consumers: api\/openapi\.yaml; consumer packages: /)
-  const decision=decide(['api/openapi.yaml'])
+  const decision=decide(['api/openapi.yaml'],{imports:{}})
   assert.deepEqual([decision.mode,decision.layout],['essential','full'])
   assert.ok(selected.reason.endsWith(decision.reason))
-  assert.equal(on(['api/openapi-messaging.yaml']).full,false)
+  assert.equal(on(['api/openapi-messaging.yaml'],{imports:{}}).full,false)
   // The OpenAPI lint package, codegen configuration or generated sources stay full.
   assert.match(on(['api/openapi.yaml','internal/reportercontract/pins.json']).reason,/^R2 full: OpenAPI lint package changed/)
   assert.match(on(['api/codegen.yaml']).reason,/generated\/configuration/)
@@ -299,7 +305,8 @@ test('R4 migrations map recognised schema objects to referencing packages; unrea
   assert.deepEqual([...consumers({go:new Map([['internal/a/a.go','SELECT * FROM desk_claims'],['internal/b/b.go','desk_claims_extra']]),webTests:new Map()},{words:['desk_claims']}).goPackages],['internal/a'])
   const narrow='internal/db/migrations/1124_desk_notification_claims.sql'
   const simple='CREATE TABLE desk_notification_claims (id uuid, note text);'
-  const selected=on([narrow],{readFile:()=>simple})
+  assert.equal(on([narrow],{readFile:()=>simple}).full,true,'real migration fan-out keeps the full gate')
+  const selected=on([narrow],{readFile:()=>simple,imports:{}})
   assert.equal(selected.full,false)
   assert.ok(goPackages(selected).has('internal/db'),'the migration runner package always runs')
   const readers=consumers(repoTree,{words:[...migrationObjects(simple)]}).goPackages
@@ -311,7 +318,7 @@ test('R4 migrations map recognised schema objects to referencing packages; unrea
   assert.ok(!selected.tests.includes(unrelated),'narrow SQL selection must omit unrelated gated tests')
   assert.equal(webFiles(selected).size,0,'browser specs are API-mocked; the real server runs in e2e')
   assert.equal(decide([narrow]).mode,'full','the real migration contains unsupported policy and constraint expressions')
-  const decision=decide([narrow],{readFile:()=>simple})
+  const decision=decide([narrow],{readFile:()=>simple,imports:{}})
   assert.deepEqual([decision.mode,decision.layout],['essential','full'])
   assert.ok(selected.reason.endsWith(decision.reason))
   const wide='internal/db/migrations/1206_themes.sql'
@@ -323,7 +330,7 @@ test('R4 migrations map recognised schema objects to referencing packages; unrea
   assert.match(on([narrow],{readFile:()=>simple,tree:{go:new Map(),webTests:new Map()}}).reason,/^R4 full: no Go package references desk_notification_claims/)
   // Other database internals stay full; the migrations README belongs to internal/db.
   assert.match(on(['internal/db/db.go']).reason,/^unnarrowed risk: internal\/db\/db\.go/)
-  const readme=on(['internal/db/migrations/README.md'])
+  const readme=on(['internal/db/migrations/README.md'],{imports:{}})
   assert.equal(readme.full,false);assert.ok(goPackages(readme).has('internal/db'))
   assert.equal(decide(['internal/db/migrations/README.md']).layout,'full')
 })
@@ -508,27 +515,29 @@ test('test-pinned instruction files require the full gate under every affected s
 })
 
 test('R6 release data, R7 test data and R8 harness pages select their readers; docs-like files are static',()=>{
-  const release=on(['version.json','internal/releasehistory/data/product-notes.json'])
+  assert.equal(on(['version.json','internal/releasehistory/data/product-notes.json']).full,true,'real release consumer fan-out keeps the full gate')
+  const release=on(['version.json','internal/releasehistory/data/product-notes.json'],{imports:{}})
   assert.equal(release.full,false)
   for(const pkg of ['internal/releasehistory','internal/releases']) assert.ok(goPackages(release).has(pkg),pkg)
   assert.ok(webFiles(release).has('tests/calver3.test.ts'))
   assert.equal(decide(['version.json']).layout,'full')
   assert.match(on(['version.json'],{tree:{go:new Map(),webTests:new Map()}}).reason,/^R6 full: no Go consumer found/)
-  const data=on(['internal/auth/testdata/key_scope_ceiling.json'])
+  const data=on(['internal/auth/testdata/key_scope_ceiling.json'],{imports:{}})
   assert.equal(data.full,false)
   assert.ok(goPackages(data).has('internal/auth'),'owning package');assert.ok(webFiles(data).has('tests/access.test.ts'),'web reader by name')
-  const lonely=on(['internal/auth/testdata/key_scope_ceiling.json'],{tree:{go:new Map(),webTests:new Map()}})
+  const lonely=on(['internal/auth/testdata/key_scope_ceiling.json'],{tree:{go:new Map(),webTests:new Map()},imports:{}})
   assert.equal(lonely.full,false);assert.ok(goPackages(lonely).has('internal/auth'),'test data without other readers still runs its owner')
   const page=on(['web/tests/settings-shared-harness.html'])
-  assert.equal(page.full,false);assert.ok(webFiles(page).has('tests/settings-shared.spec.ts'))
-  assert.equal(decide(['web/tests/settings-shared-harness.html']).mode,'essential')
+  assert.equal(page.full,true)
+  assert.deepEqual(page.tests,replayRows.filter(row=>['ESSENTIAL','GATED-FULL'].includes(row.tier)))
+  assert.equal(decide(['web/tests/settings-shared-harness.html']).mode,'full')
   for(const paths of [['docs/RELEASE.md'],['web/README.md'],['scripts/audit/rubric.md'],['README.md','LICENSE','CHANGELOG.md']]) {
     const selected=on(paths)
     assert.equal(selected.full,false,paths.join());assert.ok(essentialOnly(selected))
     assert.deepEqual([decide(paths).mode,decide(paths).layout],['essential','static'],paths.join())
   }
   assert.equal(decide([]).layout,'full','an empty diff keeps the shard layout')
-  assert.match(on(['internal/auth/testdata/notes.md']).reason,/R7: test data owner/,'markdown inside testdata is test data, not docs')
+  assert.match(on(['internal/auth/testdata/notes.md'],{imports:{}}).reason,/R7: test data owner/,'markdown inside testdata is test data, not docs')
   assert.equal(decide(['internal/auth/testdata/notes.md']).layout,'full')
 })
 
@@ -546,7 +555,11 @@ test('R3 real helpers retain essentials and select every mapped importing case, 
   for(const path of helpers) {
     const rule=affectedRisk(path,replayGraph)
     const selected=on([path])
-    if(rule.full) { assert.equal(selected.full,true,path);continue }
+    if(rule.full || browserDataInput(path)) {
+      assert.equal(selected.full,true,path)
+      assert.deepEqual(selected.tests,replayRows.filter(row=>['ESSENTIAL','GATED-FULL'].includes(row.tier)))
+      continue
+    }
     narrowed++
     assert.equal(selected.full,false,path)
     assert.match(selected.reason,/R3: helper reverse dependants/)
@@ -587,7 +600,7 @@ test('trusted tier planner uses base classifier and base graph despite candidate
   const git=args=>execFileSync('git',args,{cwd:directory,env,encoding:'utf8'})
   const file=(path,source)=>{mkdirSync(resolve(directory,path,'..'),{recursive:true});writeFileSync(resolve(directory,path),source)}
   git(['init','-q'])
-  for(const name of ['core.mjs','diff.mjs','collect.mjs','inputs.mjs','migration.mjs','manifests.mjs','failures.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
+  for(const name of ['core.mjs','diff.mjs','collect.mjs','inputs.mjs','browser-impact.mjs','migration.mjs','manifests.mjs','failures.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
   file('scripts/ci/web-test-tiers.json',JSON.stringify({tests:[]}))
   file('scripts/ci/go-test-tiers.json',JSON.stringify({tests:[]}))
   file('web/src/unused.ts','export {}')
@@ -713,12 +726,14 @@ test('offline replay CLI prints every real PR with selected counts, effective la
   assert.equal(result.status,0,result.stderr)
   const report=JSON.parse(result.stdout)
   assert.equal(report.replay.length,80)
+  assert.deepEqual(report.correctness,{recordedFailureCases:1,misses:0})
+  assert.ok(report.historicalFailures.every(row=>row.selected))
   // Measured on the current tree (consumers, migrations); deleted files replay as full.
   // The merge keeps PR 200 and PR 245 over the 1000-case Go consumer bound (openapi fan-out).
   // AEON-879 retires the dialog files: historical PR 208 now safely widens
   // because those deleted paths have no dependency metadata in this tree.
-  assert.deepEqual(report.transitions,{'full->full':51,'full->essential':15,'essential->essential':14})
-  assert.equal(report.summary.newNarrowed,29)
+  assert.deepEqual(report.transitions,{'full->full':66,'essential->full':10,'essential->essential':4})
+  assert.equal(report.summary.newNarrowed,4)
   assert.equal(report.summary.oldEssential,14)
   assert.ok(report.summary.fullReasons['CI machinery']>=15)
   for(const row of report.replay) {
@@ -882,14 +897,14 @@ test('PR takes essential union changed package and reverse dependencies; docs re
   }
 })
 
-test('large optional reverse-dependency expansion keeps all changed-package tests within the core union',()=>{
-  const many=[...cases,...Array.from({length:301},(_,i)=>g('internal/dependant',`TestExtra${i}`))]
+test('Go reverse-dependency expansion over the cap runs the entire gate',()=>{
+  const many=[...cases,...Array.from({length:301},(_,i)=>g('internal/dependant',`TestExtra${i}`,'GATED-FULL'))]
   const selected=select(many,{event:'pull_request',paths:['internal/auth/key.go'],imports:{'internal/dependant':['internal/auth']}})
-  assert.equal(selected.full,false)
-  assert.ok(selected.tests.some(row=>row.name==='TestRotation'))
+  assert.equal(selected.full,true)
+  assert.deepEqual(selected.tests,many.filter(row=>['ESSENTIAL','GATED-FULL'].includes(row.tier)))
+  assert.ok(selected.tests.some(row=>row.name==='TestCeiling'))
   assert.ok(selected.tests.some(row=>row.name==='TestCRUD'))
-  assert.ok(!selected.tests.some(row=>row.package==='internal/dependant'))
-  assert.match(selected.reason,/optional Go reverse dependencies exceed 300/)
+  assert.match(selected.reason,/Go reverse dependencies exceed 300/)
 })
 
 test('uncertain and missing metadata select full on every premerge event',()=>{
@@ -905,7 +920,7 @@ test('uncertain and missing metadata select full on every premerge event',()=>{
 test('fan-out chooses full shard counts for uncertain and deleted paths, small counts for mapped changes',()=>{
   for(const event of ['pull_request']) {
     assert.equal(schedulingMode(event,['README.md']), 'essential')
-    assert.equal(schedulingMode(event,['internal/auth/flow.go'],()=>true),'essential')
+    assert.equal(schedulingMode(event,['internal/auth/flow.go'],()=>true,{tests:cases,imports:{'cmd/aeon':['internal/auth']}}),'essential')
     assert.equal(schedulingMode(event,['.github/workflows/ci.yml']), 'full')
     assert.equal(schedulingMode(event,['internal/removed/file.go'],()=>false),'full')
     assert.equal(schedulingMode(event,undefined),'full')
@@ -939,7 +954,7 @@ test('optional changed browser cases run in changed-area selection; uncertain im
     {kind:'browser',file:'tests/other.spec.ts',name:'other',tier:'GATED-FULL'}]
   const webImports={'src/store.ts':[],'tests/optional.spec.ts':['src/store.ts'],'tests/other.spec.ts':[]}
   for(const path of ['web/tests/optional.spec.ts','web/src/store.ts']) {
-    const picked=select(rows,{event:'pull_request',paths:[path],webImports})
+    const picked=select(rows,{event:'pull_request',paths:[path],webImports,...completeMap('src/store.ts',['tests/optional.spec.ts'])})
     assert.deepEqual(picked.tests,[rows[0]])
     assert.equal(picked.full,false)
   }
@@ -1048,7 +1063,9 @@ test('web dependency graph follows Vue, TS, export and index imports transitivel
   const graph=webGraph(root)
   assert.deepEqual(graph['src/Screen.vue'],['src/lib/index.ts'])
   const row={kind:'browser',file:'tests/grant.spec.ts',name:'grant',tier:'NIGHTLY'}
-  assert.equal(select([row],{event:'pull_request',paths:['web/src/lib/grant.ts'],webImports:graph}).tests.length,1)
+  const picked=select([row],{event:'pull_request',paths:['web/src/lib/grant.ts'],webImports:graph,...completeMap('src/lib/grant.ts',['tests/grant.spec.ts'])})
+  assert.equal(picked.full,false)
+  assert.deepEqual(picked.tests,[row])
 })
 
 test('two tier shards contain every selected identity exactly once, including equal printed titles',()=>{
@@ -1632,7 +1649,7 @@ test('MG reuse lookup misses retain main full scheduling and case selection',()=
       assert.equal(selected.tests.length,2)
     }
   }
-  assert.equal(schedulingMode('pull_request',['internal/nodes/module.go'],exists),'essential')
+  assert.equal(schedulingMode('pull_request',['internal/nodes/module.go'],exists,{tests:cases,imports:{}}),'essential')
   const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
   assert.match(ci,/^  CI_MG_REUSE: \$\{\{ vars.CI_MG_REUSE \}\}$/m)
   assert.match(ci,/^  CI_AFFECTED_LANE: \$\{\{ vars.CI_AFFECTED_LANE \}\}$/m)
