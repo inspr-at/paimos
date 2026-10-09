@@ -36,12 +36,12 @@ test.describe('wide lists', () => {
     const title = (await page.locator('thead th.c-title').boundingBox())!
     expect(title.width).toBeGreaterThan(900)
     expect(title.width).toBeLessThan(1140)
-    expect((await page.locator('thead th.c-epic').boundingBox())!.width).toBeGreaterThan(260)
     // The page has no width cap; the gutter grows to 48px.
     const table = (await page.locator('.table-card').boundingBox())!
     expect(table.x).toBeGreaterThanOrEqual(46)
     expect(table.x + table.width).toBeGreaterThan(2800 - 70)
     // Title resizes too: its width becomes the target, and is saved.
+    const epicBefore = (await page.locator('thead th.c-epic').boundingBox())!.width
     const handle = page.getByRole('separator', { name: 'Resize Title column' })
     const box = (await handle.boundingBox())!
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
@@ -49,6 +49,9 @@ test.describe('wide lists', () => {
     await page.mouse.move(box.x - 200, box.y + box.height / 2, { steps: 4 })
     await page.mouse.up()
     await expect.poll(async () => Math.round((await page.locator('thead th.c-title').boundingBox())!.width)).toBeLessThan(title.width - 150)
+    // Loaded-content fits stay still until an explicit Title resize returns spare width.
+    await expect.poll(async () => (await page.locator('thead th.c-epic').boundingBox())!.width).toBeGreaterThan(260)
+    expect((await page.locator('thead th.c-epic').boundingBox())!.width).toBeGreaterThan(epicBefore)
   })
 
   test('the Display menu shows, hides and reorders columns, saved per project on the server', async ({ page }) => {
@@ -63,13 +66,13 @@ test.describe('wide lists', () => {
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Assignee', 'Updated'])
     // Alt+Up moves Updated before Assignee (past the planning columns, AEON-329).
     await menu.getByRole('checkbox', { name: 'Updated' }).focus()
-    const order = () => menu.getByRole('list', { name: 'Columns', exact: true }).getByRole('checkbox').evaluateAll(inputs => inputs.map(input => input.getAttribute('aria-label')))
-    const initial = await order(), from = initial.indexOf('Updated'), target = initial.indexOf('Assignee')
+    const order = () => menu.getByRole('list', { name: 'Columns', exact: true }).getByRole('checkbox').evaluateAll(inputs => inputs.map(input => input.getAttribute('data-column-row') ?? input.getAttribute('aria-label')))
+    const initial = await order(), from = initial.indexOf('updated'), target = initial.indexOf('assignee')
     expect(from - target).toBeGreaterThan(0)
     expect(from - target).toBeLessThanOrEqual(30)
     for (let i = 0; i < from - target; i++) {
       await page.keyboard.press('Alt+ArrowUp')
-      await expect.poll(async () => (await order()).indexOf('Updated')).toBe(from - i - 1)
+      await expect.poll(async () => (await order()).indexOf('updated')).toBe(from - i - 1)
     }
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Updated', 'Assignee'])
     await menu.getByRole('checkbox', { name: 'Estimate' }).check()

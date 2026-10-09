@@ -24,6 +24,8 @@ test.beforeAll(({}, info) => {
 for (const width of [1600, 390]) test(`historic notes in a non-PPM tenant: filters and views at ${width}`, async ({ page }) => {
   await page.setViewportSize({ width, height: 1000 })
   const data = fixtures()
+  // Exercise all five historic rows, including the two reservations hidden by default.
+  data.preferences['developer-ui'] = { show_reserved_versions: true }
   data.projects = data.projects.filter(p => p.id !== 'p-aeon')
   data.nodes = data.nodes.filter(n => n.project !== 'p-aeon')
   await mockWork(page, data)
