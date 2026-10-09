@@ -12560,6 +12560,8 @@
     ,
     {"kind":"node","file":"tests/account-resets.test.ts","name":"the plan line is honest about off, nothing planned and the planned moment","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/account-resets.test.ts","name":"the reserved plan slot is at least as wide as every line the card can show","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/account-resets.test.ts","name":"the summary counts credits per expiry day and never hides later ones","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/accounts-overview.test.ts","name":"accounts overview merges only a canonical shared quota identity within one harness","tier":"ESSENTIAL"}
