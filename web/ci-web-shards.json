@@ -328,7 +328,11 @@
         ,
         {"file":"tests/managed-controls.spec.ts","listedTests":25,"tierTiming":{"caseSeconds":{"max":3.674,"median":1.823,"min":1.574},"seconds":50.762087,"selectedTests":25},"weightSeconds":61.988304,"weightSource":"web-13"}
         ,
-        {"file":"tests/no-shift.spec.ts","listedTests":46,"tierTiming":{"caseSeconds":{"max":19.97,"median":4.001,"min":0.151},"seconds":234.324689,"selectedTests":47},"weightSeconds":114.05848,"weightSource":"web-13"}
+        {"file":"tests/no-shift-agents.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":19.97,"median":5.109,"min":3.681},"derivedFrom":"tests/no-shift.spec.ts","estimatedTests":7,"measuredTests":16,"overheadSeconds":2.707689,"seconds":160.639111,"selectedTests":23},"weightSeconds":67.322244,"weightSource":"tierTiming:37377299349"}
+        ,
+        {"file":"tests/no-shift-dialogs.spec.ts","listedTests":22,"tierTiming":{"caseSeconds":{"max":6.489,"median":3.533,"min":2.056},"derivedFrom":"tests/no-shift.spec.ts","estimatedTests":0,"measuredTests":22,"overheadSeconds":2.707689,"seconds":87.247689,"selectedTests":22},"weightSeconds":36.564633,"weightSource":"tierTiming:37377299349"}
+        ,
+        {"file":"tests/no-shift.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":5.356,"median":2.966,"min":0.151},"derivedFrom":"tests/no-shift.spec.ts","estimatedTests":0,"measuredTests":8,"overheadSeconds":2.707689,"seconds":24.270689,"selectedTests":8},"weightSeconds":10.171603,"weightSource":"tierTiming:37377299349"}
         ,
         {"file":"tests/record-ownership.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
@@ -614,9 +618,17 @@
       "specs": [
         {"file":"tests/aeon-632b-clip-settings.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":29.754,"median":17.17,"min":10.052},"seconds":224.199013,"selectedTests":12},"weightSeconds":41.277104,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/aeon-632b-clip.spec.ts","listedTests":27,"tierTiming":{"caseSeconds":{"max":25.32,"median":4.688,"min":1.879},"seconds":245.962013,"selectedTests":27},"weightSeconds":45.283872,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/aeon-632b-clip-touch.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":5.561,"median":4.496,"min":4.378},"derivedFrom":"tests/aeon-632b-clip.spec.ts","estimatedTests":0,"measuredTests":6,"overheadSeconds":4.735013,"seconds":32.709013,"selectedTests":6},"weightSeconds":8.023393,"weightSource":"tierTiming:37377299349"}
         ,
-        {"file":"tests/clip-tip.spec.ts","listedTests":159,"tierTiming":{"caseSeconds":{"max":23.431,"median":1.388,"min":0.791},"seconds":347.012002,"selectedTests":159},"timingEstimate":{"command":"npm test -- tests/clip-tip.spec.ts --workers=1 --retries=0 --reporter=line,json","durationMs":165459.95,"failed":0,"flaky":0,"marginPercent":20,"note":"Full local one-worker runtime plus 20 percent scheduling margin; conservative for the group with two workers. Scheduling estimate only; hosted runtime remains unmeasured.","passed":159,"platform":"darwin","reportSha256":"5ea979ac66d2b4576cff1eb8a47d1c5d954a89d399325808b105ee3fad20496f","skipped":0,"workers":1},"weightSeconds":199,"weightSource":"local-serial-runtime-estimate"}
+        {"file":"tests/aeon-632b-clip.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":25.32,"median":24.638,"min":23.619},"derivedFrom":"tests/aeon-632b-clip.spec.ts","estimatedTests":0,"measuredTests":6,"overheadSeconds":4.735013,"seconds":151.900013,"selectedTests":6},"weightSeconds":37.260479,"weightSource":"tierTiming:37377299349"}
+        ,
+        {"file":"tests/clip-tip-disclosure.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":2.106,"median":1.372,"min":1.19},"derivedFrom":"tests/clip-tip.spec.ts","estimatedTests":0,"measuredTests":24,"overheadSeconds":5.225002,"seconds":40.872002,"selectedTests":24},"weightSeconds":22.425751,"weightSource":"tierTiming:37377299349"}
+        ,
+        {"file":"tests/clip-tip-overflow.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":3.063,"median":2.269,"min":1.236},"derivedFrom":"tests/clip-tip.spec.ts","estimatedTests":0,"measuredTests":24,"overheadSeconds":5.225002,"seconds":52.913002,"selectedTests":24},"weightSeconds":29.032436,"weightSource":"tierTiming:37377299349"}
+        ,
+        {"file":"tests/clip-tip-touch.spec.ts","listedTests":39,"tierTiming":{"caseSeconds":{"max":23.431,"median":1.322,"min":0.791},"derivedFrom":"tests/clip-tip.spec.ts","estimatedTests":0,"measuredTests":39,"overheadSeconds":5.225002,"seconds":105.837002,"selectedTests":39},"weightSeconds":58.070907,"weightSource":"tierTiming:37377299349"}
+        ,
+        {"file":"tests/clip-tip.spec.ts","listedTests":72,"tierTiming":{"caseSeconds":{"max":8.661,"median":1.772,"min":0.853},"derivedFrom":"tests/clip-tip.spec.ts","estimatedTests":0,"measuredTests":72,"overheadSeconds":5.225002,"seconds":163.065002,"selectedTests":72},"weightSeconds":89.470907,"weightSource":"tierTiming:37377299349"}
         ,
         {"file":"tests/key-trim.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":3.607,"median":2.179,"min":1.115},"seconds":17.02266,"selectedTests":7},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
@@ -1380,6 +1392,8 @@
     "AEON-878: models-board-controls stays gated at 1s, the largest weight that keeps the twelve-shard prior maximum under 300 (1.1s reaches 300.01). The 12 screenshot cases moved to ungated models-board-evidence.spec.ts carry the other 15s of the original 16s estimate. Behavior cases remain in the gate."
     ,
     "AEON-903: Phone approvals has seven native cases. The local one-worker run passed all seven in 7.480 seconds including browser/server startup; aeon-903-local-serial-wall records that observation as a scheduling estimate, not a hosted-runtime promise."
+    ,
+    "AEON-1024: split clip-tip into lifecycle, disclosure, overflow and touch owners; split aeon-632b planning from restricted-group touch; split no-shift agents from dialogs and guard checks. Native before/after catalogues preserve all 224 executable cases, original policies and tiers. Tier scheduling costs derive from run 37377299349 per-case duration; historical exact-spec weight budgets are redistributed in proportion to these costs; each new file retains its full original owner residual. Cases added since that run retain an explicit owner-average estimate. The baseline and executable equality/weight proof live in scripts/ci/slow-owner-baseline.json and scripts/test-tiers/slow-owners.mjs. No shard count or worker count changes."
   ]
   ,
   "originalNpmScripts": {
@@ -1426,6 +1440,10 @@
     "runId": "37377299349"
     ,
     "sha": "b2f9935a4264e932eae0fa2acd07c71e8d1fc417"
+    ,
+    "splitBasis": "Per-case duration from the pinned run; full original owner residual retained for each split. Unmeasured current cases use original owner seconds/selectedTests."
+    ,
+    "splitTicket": "AEON-1024"
   }
   ,
   "timingSource": {

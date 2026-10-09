@@ -79,7 +79,7 @@ export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',p
     for(const pkg of Object.keys(weights)) weights[pkg]*=filtered.filter(row=>row.package===pkg).length/all.filter(row=>row.package===pkg).length
   }
   if(kind==='go'||unit) Object.assign(weights,measuredWeights(manifest,filtered))
-  return {...selection,all,tests:shard(filtered,index,count,weights,{firstShardLast:unit})}
+  return {...selection,all,tests:shard(filtered,index,count,weights,{firstShardLast:unit,ownerTimings:kind==='go'?manifest.timingWeights?.owners:undefined})}
 }
 
 export function browserList(rows,all) {
@@ -349,7 +349,9 @@ export async function main(args, dependencies={}) {
   if(mode==='collect') { saveJSON(resolve(evidence,`${kind}-inventory.json`),target(kind));return 0 }
   if(mode==='check') {
     const all=validate(load(kind),target(kind).tests,undefined,{strict:options.strict})
-    measuredWeights(load(kind),all) // malformed timing weights fail the manifest check, not a later plan
+    const checked=load(kind)
+    measuredWeights(checked,all) // malformed timing weights fail the manifest check, not a later plan
+    shard(all,1,1,{}, {ownerTimings:kind==='go'?checked.timingWeights?.owners:undefined})
     if(kind==='web') { console.log(JSON.stringify({inventory:counts(all)}));return 0 }
     let output
     try {
