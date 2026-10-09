@@ -5,11 +5,11 @@ package agentaccounts
 import (
 	"context"
 	"errors"
-	"github.com/inspr-at/paimos/internal/accountuse"
 	"math"
 	"net/http"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"

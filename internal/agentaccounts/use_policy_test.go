@@ -86,17 +86,14 @@ func TestAccountContextSelectionPaths(t *testing.T) {
 	})
 
 	t.Run("2 SQL prefilter and C0 dispatch", func(t *testing.T) {
+		seed(t, person, func(tx pgx.Tx) error { return deletePin(t.Context(), tx, person, ticket, "codex") })
 		seed(t, person, func(tx pgx.Tx) error {
-			// Remove only the old pin so it cannot be the refusal reason.
-			if err := deletePin(t.Context(), tx, person, ticket, "codex"); err != nil {
-				return err
-			}
 			run, err := loadWaitRun(t.Context(), tx, runID)
 			if err != nil {
 				return err
 			}
-			if _, _, _, err := selectAccount(t.Context(), tx, run, runner.ID, "codex", profile, "daemon-a", []string{denied.ID}, map[string]int64{"requests": 1}, time.Now()); err == nil {
-				t.Fatal("denied SQL candidate reached admission")
+			if _, _, _, err := selectAccount(t.Context(), tx, run, runner.ID, "codex", profile, "daemon-a", []string{denied.ID}, map[string]int64{"requests": 1}, time.Now()); err == nil || err.Error() != "no eligible account" {
+				t.Fatalf("denied SQL candidate wrong refusal: %v", err)
 			}
 			selected, _, _, err := selectAccount(t.Context(), tx, run, runner.ID, "codex", profile, "daemon-a", []string{allowed.ID}, map[string]int64{"requests": 1}, time.Now())
 			if err != nil {
@@ -120,7 +117,7 @@ func TestAccountContextSelectionPaths(t *testing.T) {
 	})
 	t.Run("17 start catalog", func(t *testing.T) {
 		var catalog Catalog
-		callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/catalog?project_id="+project, nil, 200, &catalog)
+		callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/catalog?project_id="+project, "", 200, &catalog)
 		found := false
 		for _, host := range catalog.Hosts {
 			for _, h := range host.Harnesses {
@@ -140,14 +137,14 @@ func TestAccountContextSelectionPaths(t *testing.T) {
 	})
 	t.Run("18 capacity next and 19 use", func(t *testing.T) {
 		var next CapacityNext
-		callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/capacity/next?harness=codex&project_id="+project, nil, 200, &next)
+		callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/capacity/next?harness=codex&project_id="+project, "", 200, &next)
 		if len(next.Accounts) != 1 || next.Accounts[0].AccountID != allowed.ID {
 			t.Fatal("capacity hand-out widened", next)
 		}
-		callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/use?harness=codex&account_id="+denied.ID+"&project_id="+project, nil, 409, nil)
-		callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/use?harness=codex&account_id="+denied.ID, nil, 409, nil)
+		callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/use?harness=codex&account_id="+denied.ID+"&project_id="+project, "", 409, nil)
+		callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/use?harness=codex&account_id="+denied.ID, "", 409, nil)
 		var result UseResult
-		callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/use?harness=codex&account_id="+allowed.ID+"&project_id="+project, nil, 200, &result)
+		callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/use?harness=codex&account_id="+allowed.ID+"&project_id="+project, "", 200, &result)
 		if len(result.Accounts) != 1 || result.Accounts[0].AccountID != allowed.ID {
 			t.Fatal(result)
 		}
@@ -176,16 +173,50 @@ func TestAccountContextSelectionPaths(t *testing.T) {
 			return nil
 		})
 	})
+	t.Run("20 engine capacity ignores denied candidates", func(t *testing.T) {
+		seed(t, person, func(tx pgx.Tx) error {
+			out, err := EngineCapacityTx(t.Context(), tx, person, person.ID, "codex", 1, time.Now(), project)
+			if err != nil {
+				return err
+			}
+			if out.Reason == "context" {
+				t.Fatal("denied sibling replaced allowed candidate's reason", out)
+			}
+			return nil
+		})
+	})
+	t.Run("23 residency remains a separate check", func(t *testing.T) {
+		seed(t, person, func(tx pgx.Tx) error {
+			meets, err := AccountMeetsResidency(t.Context(), tx, denied.ID, profile, "any", time.Now())
+			if err != nil {
+				return err
+			}
+			if !meets {
+				t.Fatal("matrix denial changed residency evidence")
+			}
+			return nil
+		})
+	})
 	seed(t, person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `DELETE FROM account_use_cells WHERE account_id=$1`, allowed.ID)
 		return err
 	})
 	t.Run("all-denied next is context", func(t *testing.T) {
 		var next CapacityNext
-		callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/capacity/next?harness=codex&project_id="+project, nil, 200, &next)
+		callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/capacity/next?harness=codex&project_id="+project, "", 200, &next)
 		if len(next.Accounts) != 0 || next.Wait == nil || next.Wait.Code != "context" {
 			t.Fatal(next)
 		}
+		seed(t, person, func(tx pgx.Tx) error {
+			out, err := EngineCapacityTx(t.Context(), tx, person, person.ID, "codex", 1, time.Now(), project)
+			if err != nil {
+				return err
+			}
+			if out.Reason != "context" || out.Until != nil {
+				t.Fatal("all-denied engine capacity", out)
+			}
+			return nil
+		})
 	})
 }
 
@@ -201,6 +232,26 @@ func TestProjectDailySnapshotCapsContract(t *testing.T) {
 		return err
 	})
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	t.Run("f plan projection keeps every owned account", func(t *testing.T) {
+		seed(t, person, func(tx pgx.Tx) error {
+			plan, err := ReadPlanTx(t.Context(), tx, person)
+			if err != nil {
+				return err
+			}
+			filtered, _, err := ProjectDailySnapshot(t.Context(), tx, plan, "")
+			if err != nil {
+				return err
+			}
+			again, err := ReadPlanTx(t.Context(), tx, person)
+			if err != nil {
+				return err
+			}
+			if len(plan.DailyState["codex"].Accounts) != 2 || len(again.DailyState["codex"].Accounts) != 2 || len(filtered.DailyState["codex"].Accounts) != 1 || plan.Total != again.Total {
+				t.Fatal("start filter narrowed accounting projection", plan, filtered, again)
+			}
+			return nil
+		})
+	})
 	end := now.Add(12 * time.Hour)
 	percent := func(v float64) *float64 { return &v }
 	door := func(id string, used float64) agentplan.DailyAccount {

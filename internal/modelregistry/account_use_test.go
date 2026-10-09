@@ -17,15 +17,16 @@ import (
 // an all-denied harness obeys a daily wait instead of skipping context denial.
 func TestResolverProjectDailyCapsAndContextLadder(t *testing.T) {
 	for _, tc := range []struct {
-		name                  string
-		unknown, allDenied    bool
-		atLimit, pinned, want string
+		name                               string
+		unknown, allDenied, unknownAllowed bool
+		atLimit, pinned, want              string
 	}{
-		{"a denied headroom ladder", false, false, "ladder", "", "claude"},
-		{"a denied headroom wait", false, false, "wait", "", "daily_limit"},
-		{"b denied unknown", true, false, "ladder", "", "claude"},
-		{"c all denied ignores wait", false, true, "wait", "", "claude"},
-		{"c all denied pinned", false, true, "wait", "codex", "context"},
+		{"a denied headroom ladder", false, false, false, "ladder", "", "claude"},
+		{"a denied headroom wait", false, false, false, "wait", "", "daily_limit"},
+		{"b denied unknown", true, false, false, "ladder", "", "claude"},
+		{"c all denied ignores wait", false, true, false, "wait", "", "claude"},
+		{"c all denied pinned", false, true, false, "wait", "codex", "context"},
+		{"d allowed unknown", false, false, true, "ladder", "", "daily_limit_unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
@@ -61,7 +62,7 @@ func TestResolverProjectDailyCapsAndContextLadder(t *testing.T) {
 					}
 					accounts[spec.key] = id
 					readAt := now
-					if tc.unknown && spec.key == "denied" {
+					if tc.unknown && spec.key == "denied" || tc.unknownAllowed && spec.key == "allowed" {
 						readAt = now.Add(-3 * time.Minute)
 					}
 					if _, err := tx.Exec(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source) VALUES($1,$2,$3,$4,'percent',100,$5,'unrestricted',$6,true,'weekly','context','harness')`, p.TenantID, id, start, end.Add(5*24*time.Hour), int(spec.used), readAt); err != nil {

@@ -17,8 +17,8 @@ type ContextLabel struct {
 // ContextLabels projects matrix cells only; it never narrows usage totals.
 func ContextLabels(ctx context.Context, tx pgx.Tx, ids []string) (map[string][]ContextLabel, error) {
 	out := map[string][]ContextLabel{}
-	for start := 0; start < len(ids); start += 256 {
-		rows, err := tx.Query(ctx, `SELECT x.account_id::text,c.id::text,c.name FROM account_use_cells x JOIN work_contexts c ON c.tenant_id=x.tenant_id AND c.id=x.context_id WHERE x.account_id=ANY($1::uuid[]) AND c.archived_at IS NULL ORDER BY x.account_id,c.name,c.id LIMIT 4097`, ids[start:min(start+256, len(ids))])
+	for start := 0; start < len(ids); start += 16 {
+		rows, err := tx.Query(ctx, `SELECT x.account_id::text,c.id::text,c.name FROM account_use_cells x JOIN work_contexts c ON c.tenant_id=x.tenant_id AND c.id=x.context_id WHERE x.account_id=ANY($1::uuid[]) AND c.archived_at IS NULL ORDER BY x.account_id,c.name,c.id LIMIT 4097`, ids[start:min(start+16, len(ids))])
 		if err != nil {
 			return nil, err
 		}

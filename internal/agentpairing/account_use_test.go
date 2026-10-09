@@ -6,6 +6,9 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/jackc/pgx/v5"
 )
 
 // Risk 26: a broad verification bypass allows ordinary use of an account with
@@ -17,7 +20,10 @@ func TestPairingVerificationAccountContextExceptionIsBound(t *testing.T) {
 	v := f.redeem(p)
 	e := v.Enrollments[0]
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
-	if _, err := f.db.Admin.Exec(t.Context(), `DELETE FROM account_use_cells WHERE tenant_id=$1 AND account_id=$2`, f.tenantID, e.AccountID); err != nil {
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `DELETE FROM account_use_cells WHERE account_id=$1`, e.AccountID)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	var cells int

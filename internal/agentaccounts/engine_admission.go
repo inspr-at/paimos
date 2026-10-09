@@ -4,11 +4,11 @@ package agentaccounts
 import (
 	"context"
 	"encoding/json"
-	"github.com/inspr-at/paimos/internal/accountuse"
 	"math"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/accountprivacy"
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/hostcapacity"
@@ -95,6 +95,7 @@ func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, ow
 		return EngineCapacity{}, err
 	}
 	out := EngineCapacity{Reason: "account_unavailable"}
+	denied, allowedCandidate := false, false
 	for _, a := range accounts {
 		if a.Harness != harness || !privacy[a.ID] {
 			continue
@@ -111,9 +112,10 @@ func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, ow
 			return EngineCapacity{}, err
 		}
 		if !allowed {
-			out = EngineCapacity{Reason: "context"}
+			denied = true
 			continue
 		}
+		allowedCandidate = true
 		var model bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$1 AND aeon_account_allows_profile($1,$2::uuid[],id))`, harness, a.AllowedProfileIDs).Scan(&model); err != nil {
 			return EngineCapacity{}, err
@@ -185,6 +187,9 @@ func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, ow
 			continue
 		}
 		return EngineCapacity{Reason: "allowed"}, nil
+	}
+	if denied && !allowedCandidate {
+		return EngineCapacity{Reason: "context"}, nil
 	}
 	return out, nil
 }

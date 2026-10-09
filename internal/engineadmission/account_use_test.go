@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentplan"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/jackc/pgx/v5"
 )
 
 // Risk C2: engine admission counts denied headroom/unknown readings or returns
@@ -33,11 +36,27 @@ VALUES($1,'context-sibling','codex','sibling',$2,$3,'Denied sibling',$3,$4,$4,tr
 				f.exec(t, `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','context',10080,1,$3,$4,'harness')`, f.person.TenantID, sibling, f.at.Add(7*24*time.Hour), f.at.Add(-3*time.Minute))
 			}
 			// Preserve the allowed door; deny its sibling through actual matrix cells.
-			f.exec(t, `INSERT INTO account_use_cells(tenant_id,account_id,context_id,source) SELECT $1,$2,id,'migration' FROM work_contexts WHERE tenant_id=$1 AND kind='default' ON CONFLICT DO NOTHING`, f.person.TenantID, f.account)
-			f.exec(t, `DELETE FROM account_use_cells WHERE tenant_id=$1 AND account_id=$2`, f.person.TenantID, sibling)
-			if tc.allDenied {
-				f.exec(t, `DELETE FROM account_use_cells WHERE tenant_id=$1 AND account_id=$2`, f.person.TenantID, f.account)
-			}
+			must(t, db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO account_use_cells(tenant_id,account_id,context_id,source,set_by) SELECT $1,$2,id,'migration',$3 FROM work_contexts WHERE kind='default' ON CONFLICT DO NOTHING`, f.person.TenantID, f.account, f.person.ID); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `DELETE FROM account_use_cells WHERE account_id=$1`, sibling); err != nil {
+					return err
+				}
+				if tc.allDenied {
+					if _, err := tx.Exec(t.Context(), `DELETE FROM account_use_cells WHERE account_id=$1`, f.account); err != nil {
+						return err
+					}
+				}
+				var active bool
+				if err := tx.QueryRow(t.Context(), `SELECT enforced_at IS NOT NULL FROM account_use_rules`).Scan(&active); err != nil {
+					return err
+				}
+				if !active {
+					t.Fatal("fixture did not activate matrix")
+				}
+				return nil
+			}))
 			_, end, err := agentplan.LocalDay(f.at, "UTC")
 			must(t, err)
 			d := agentplan.DefaultDaily()

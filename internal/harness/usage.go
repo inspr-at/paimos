@@ -230,6 +230,9 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 			return nil, workorders.Fail(409, "report id already used with different payload")
 		}
 		out, err := loadUsage(ctx, tx, s.ID, in.Model)
+		if err == nil && s.Management == "unmanaged" {
+			out.AccountUse, err = sessionAccountUse(ctx, tx, s, out.AccountID)
+		}
 		return usageReportResult{Usage: out, Replayed: true}, err
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {

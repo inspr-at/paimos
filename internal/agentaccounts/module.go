@@ -5,9 +5,9 @@ package agentaccounts
 import (
 	"context"
 	"errors"
-	"github.com/inspr-at/paimos/internal/accountuse"
 	"net/http"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 

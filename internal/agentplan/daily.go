@@ -125,28 +125,28 @@ func percent(v float64) bool    { return !math.IsNaN(v) && !math.IsInf(v, 0) && 
 func Number(v float64) *float64 { return &v }
 
 type DailyAccount struct {
-	Contexts           any `json:"contexts,omitempty"`
-	AccountID          string                    `json:"account_id"`
-	Label              string                    `json:"label"`
-	Order              int                       `json:"order"`
-	UsedPct            *float64                  `json:"used_pct"`
-	LeftPct            *float64                  `json:"left_pct"`
-	StartOfDayUsedPct  *float64                  `json:"start_of_day_used_pct"`
-	LimitUsedPct       *float64                  `json:"limit_used_pct"`
-	FloorPct           *float64                  `json:"floor_pct"`
-	ResetsAt           *time.Time                `json:"resets_at"`
-	ReadAt             *time.Time                `json:"read_at"`
-	Freshness          string                    `json:"freshness"`
-	Resets             any                       `json:"resets"`
-	ResetPolicy        string                    `json:"reset_policy"`
-	ResetPlan          any                       `json:"reset_plan"`
-	Routable           bool                      `json:"routable"`
-	DetailsRedacted    bool                      `json:"details_redacted"`
-	CanEdit            bool                      `json:"can_edit"`
-	ResetPacePoints    float64                   `json:"-"`
-	NoDailyLimit       bool                      `json:"no_daily_limit,omitempty"`
-	TodayPointsAllowed *float64                  `json:"-"`
-	OverPacePoints     *float64                  `json:"-"`
+	Contexts           any        `json:"contexts,omitempty"`
+	AccountID          string     `json:"account_id"`
+	Label              string     `json:"label"`
+	Order              int        `json:"order"`
+	UsedPct            *float64   `json:"used_pct"`
+	LeftPct            *float64   `json:"left_pct"`
+	StartOfDayUsedPct  *float64   `json:"start_of_day_used_pct"`
+	LimitUsedPct       *float64   `json:"limit_used_pct"`
+	FloorPct           *float64   `json:"floor_pct"`
+	ResetsAt           *time.Time `json:"resets_at"`
+	ReadAt             *time.Time `json:"read_at"`
+	Freshness          string     `json:"freshness"`
+	Resets             any        `json:"resets"`
+	ResetPolicy        string     `json:"reset_policy"`
+	ResetPlan          any        `json:"reset_plan"`
+	Routable           bool       `json:"routable"`
+	DetailsRedacted    bool       `json:"details_redacted"`
+	CanEdit            bool       `json:"can_edit"`
+	ResetPacePoints    float64    `json:"-"`
+	NoDailyLimit       bool       `json:"no_daily_limit,omitempty"`
+	TodayPointsAllowed *float64   `json:"-"`
+	OverPacePoints     *float64   `json:"-"`
 }
 type DailyState struct {
 	State              string         `json:"state"`

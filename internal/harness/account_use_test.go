@@ -23,7 +23,7 @@ func TestUnmanagedAccountContextRequestsAndAttribution(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'context-request','1','codex','openai','test-model','high','standard') RETURNING id::text`, f.person.TenantID).Scan(&profile); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO account_use_cells(tenant_id,account_id,context_id,source) SELECT $1,$2,id,'migration' FROM work_contexts WHERE kind='default' ON CONFLICT DO NOTHING`, f.person.TenantID, allowed); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_use_cells(tenant_id,account_id,context_id,source,set_by) SELECT $1,$2,id,'migration',$3 FROM work_contexts WHERE kind='default' ON CONFLICT DO NOTHING`, f.person.TenantID, allowed, f.person.ID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `DELETE FROM account_use_cells WHERE account_id=$1`, denied)
@@ -43,7 +43,6 @@ func TestUnmanagedAccountContextRequestsAndAttribution(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			report := usagePayload()
-			report["model"] = "model-" + tc.name
 			report["model"] = "test-" + uid()
 			if tc.account != "" {
 				report["account_id"] = tc.account
@@ -54,6 +53,10 @@ func TestUnmanagedAccountContextRequestsAndAttribution(t *testing.T) {
 			out, replayed := usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
 			if replayed || out.AccountUse != tc.want || out.InputTokens == nil || *out.InputTokens != 100 {
 				t.Fatal("attribution or totals", out)
+			}
+			retry, replayed := usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
+			if !replayed || retry.AccountUse != tc.want || retry.SessionID != out.SessionID || retry.Model != out.Model || retry.Sequence != out.Sequence {
+				t.Fatal("replay lost attribution", retry)
 			}
 		})
 	}

@@ -4,8 +4,8 @@ package agentruns
 import (
 	"context"
 	"encoding/json"
-	"github.com/inspr-at/paimos/internal/accountuse"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/events"

@@ -4,10 +4,10 @@ package agentaccounts
 
 import (
 	"context"
-	"github.com/inspr-at/paimos/internal/accountuse"
 	"sort"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/jackc/pgx/v5"
 )
 

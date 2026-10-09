@@ -5,13 +5,13 @@ package agentaccounts
 import (
 	"encoding/json"
 	"errors"
-	"github.com/inspr-at/paimos/internal/accountuse"
 	"io"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"

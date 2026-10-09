@@ -3,7 +3,6 @@ package agentaccounts
 
 import (
 	"context"
-	"github.com/inspr-at/paimos/internal/accountuse"
 	"math"
 	"net/http"
 	"slices"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/accountprivacy"
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/httpapi"

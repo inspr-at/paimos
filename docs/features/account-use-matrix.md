@@ -55,7 +55,7 @@ a pinned harness and engine admission return `context` without a retry time.
 Plan views and stored usage retain all accounts and totals. Context labels are
 included in account projections. Unmanaged usage is compliant only with an
 explicit allowed account UUID; denied UUIDs emit `account_use.outside_matrix`
-and missing/unknown identities emit `account_use.unattributed`. Labels never
+and missing UUIDs or label-only reports emit `account_use.unattributed`. Labels never
 supply compliance evidence. Pairing verification bypasses context denial only
 for the enrollment-bound verification run and account.
 

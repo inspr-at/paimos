@@ -2,6 +2,8 @@
 package cli
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,4 +45,36 @@ func TestAccountProjectFolderLinksFailClosed(t *testing.T) {
 	if got != "" {
 		t.Fatal(got)
 	}
+	t.Run("18 and 19 explicit project binds both handouts", func(t *testing.T) {
+		isolate(t)
+		requests := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			if r.URL.Query().Get("project_id") != second {
+				t.Error("project was not sent", r.URL.RequestURI())
+			}
+			assertCLINoPath(t, r.URL.RequestURI())
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":"account_not_allowed_for_context","code":"account_not_allowed_for_context"}`))
+		}))
+		defer server.Close()
+		t.Setenv("AEON_URL", server.URL)
+		t.Setenv("AEON_API_KEY", testKey)
+		for _, args := range [][]string{
+			{"aeon", "use", "codex", first, "--project-id", second},
+			{"aeon", "capacity", "next", "codex", "--env", "--project-id", second},
+		} {
+			code, out, _ := runCLI(args, "")
+			if code == 0 || out != "" {
+				t.Fatal("denied project produced environment", args, code, out)
+			}
+		}
+		if requests != 2 {
+			t.Fatal("handout did not check context", requests)
+		}
+		code, _, _ := runCLI([]string{"aeon", "capacity", "next", "codex", "--project-id", "invalid"}, "")
+		if code == 0 || requests != 2 {
+			t.Fatal("invalid project reached server")
+		}
+	})
 }
