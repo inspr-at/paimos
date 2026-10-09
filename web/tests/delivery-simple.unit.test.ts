@@ -11,6 +11,9 @@ import * as Vue from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 vi.mock('../src/lib/api.ts', () => ({ api: async () => new Response('{}'), APIError: class extends Error {} }))
 import * as delivery from '../src/lib/delivery'
+import * as flow from '../src/lib/deliveryFlow'
+import * as flowModes from '../src/lib/deliveryFlowModes'
+import * as flowWords from '../src/lib/deliveryFlowText'
 import * as numbers from '../src/lib/deliveryNumbers'
 import * as simple from '../src/lib/deliverySimple'
 import { simpleNumbersOf, sparkGeometry, verdictOf, type SparkModel } from '../src/lib/deliverySimple'
@@ -221,7 +224,9 @@ for (const lang of ['en', 'de'] as const) {
       '../AppIcon.vue': sfc({ props: ['name', 'size'], render: () => Vue.h('svg') }),
       '../work/ProjectTabs.vue': stub, './ExpertTile.vue': stub, './FlowView.vue': stub, './LevelSwitch.vue': stub,
       './SimpleNumbers.vue': stub, './TrendChart.vue': stub, './WindowSwitch.vue': stub,
-      '../../lib/delivery': delivery, '../../lib/deliveryFlowExample': { exampleLive: () => ({}) }, '../../lib/deliveryFlowText': { flowText: () => ({ example: '' }) }, '../../lib/deliveryNumbersText': numbersText,
+      '../../lib/delivery': delivery, '../../lib/deliveryFlow': flow, '../../lib/deliveryFlowModes': flowModes, '../../lib/deliveryFlowText': flowWords, '../../lib/deliveryNumbersText': numbersText,
+      // Flow is not under test here: it reads nothing, shows no banner and offers nothing to choose.
+      '../../lib/useDeliveryFlow': { useDeliveryFlow: () => ({ status: Vue.ref('ready'), data: Vue.ref(null), example: Vue.ref(false), empty: Vue.ref(null), choices: Vue.ref([]), runId: Vue.ref(null), key: Vue.ref(''), truncated: Vue.ref(false), retry() {} }) },
       '../../lib/deliveryNumbers': { ...numbers, readDeliveryMetrics: () => read() },
       '../../lib/preferences': { onPreferenceFailure: (listener: (key: string) => void) => { failures.add(listener); return () => { failures.delete(listener) } }, preferenceSaves, usePreference: () => pref },
       '../../lib/usePolledData': { usePoller: (load: () => Promise<void>) => { reload = load; return { start: () => { void load() }, stop() {}, restart() {} } } },
