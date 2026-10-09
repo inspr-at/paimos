@@ -197,28 +197,51 @@ export function replayData(run: FlowRun, origin: number, now: number | null): Fl
 }
 
 // ---------- Compare: a release against the Arion target, aligned at step a ----------
+type ArionStep = readonly [key: string, minutes: number, lane: Lane, en: string, de: string]
 /**
  * The release path a to l as Project Arion v5 § 4b plans it today ("v5 now"), in minutes: 60.6 in all,
  * without the wait for a person (W). The rehearsal and the catalogue run inside segment a (the merge-group
  * run is the longest of the suite, the rehearsal and the catalogue), so they are not segments of their own.
  * § 4b gives h and i as one segment of 6 (model review, pin CI, merge); i is the measured pin-CI p50 of
  * 1.1 (§ 1b), h the rest. When the catalogue is the pole, a release's own step a runs past 15.4.
+ * The wait for a person (W) and the catalogue overrun are side steps of the target run and are not in this sum.
+ * After Phases 2 and 4 the same path is ARION_LATER.
  */
-export const ARION_PATH: readonly (readonly [key: string, minutes: number, lane: Lane, en: string, de: string])[] = [
+export const ARION_PATH: readonly ArionStep[] = [
   ['a', 15.4, 'ci', 'Through the queue', 'Durch die Queue'], ['b', 0.5, 'ops', 'Version tagged', 'Version getaggt'], ['c', 12.2, 'ci', 'Release built', 'Release gebaut'],
   ['d', 0.5, 'ops', 'Draft inspected', 'Entwurf geprüft'], ['e', 10, 'ops', 'Agent app tested', 'Agent-App getestet'], ['f', 1.5, 'ci', 'Published', 'Veröffentlicht'],
   ['g', 0.5, 'ops', 'Server update prepared', 'Server-Update vorbereitet'], ['h', 4.9, 'review', 'Server update reviewed', 'Server-Update geprüft'], ['i', 1.1, 'ci', 'Server config checked and merged', 'Server-Konfiguration geprüft und gemergt'],
   ['j', 3, 'ops', 'Database backed up', 'Datenbank gesichert'], ['k', 6, 'ops', 'Server switched', 'Server umgestellt'], ['l', 5, 'ops', 'Checked live', 'Live geprüft'],
 ]
+/** Same path after Phases 2 and 4: the queue is 10.7 and the switch is a 4 min pre-pull. 53.9 in all. */
+export const ARION_LATER: readonly ArionStep[] = ARION_PATH.map(([key, minutes, lane, en, de]) => [key, key === 'a' ? 10.7 : key === 'k' ? 4 : minutes, lane, en, de] as const)
 export const ARION_MINUTES = ARION_PATH.reduce((sum, step) => sum + step[1], 0)
-/** The target run on a relative axis; scaled when the release names another target length. */
+export const ARION_LATER_MINUTES = ARION_LATER.reduce((sum, step) => sum + step[1], 0)
+/** The target run on a relative axis; scaled when the release names another target length.
+ *  W and the catalogue overrun stay beside the critical path and never change its end. */
 export function arionTarget(lang: DeliveryLanguage, minutes = ARION_MINUTES): FlowRun {
   const scale = minutes / ARION_MINUTES
   let t = 0
+  let qualification = 0
   const steps = ARION_PATH.map(([key, length, lane, en, de]): FlowStep => {
+    if (key === 'e') qualification = t
     const step: FlowStep = { start: t, end: t + length * scale, kind: 'work', lane, stepKey: key, expert: { en: `${key} · ${en}`, de: `${key} · ${de}` }, simple: { en, de }, facts: { source: 'arion', norm: { p50: null, p90: null, arion: length * scale } } }
     t += length * scale
     return step
+  })
+  // D1(A): the catalogue pole overlaps step a. Its overrun (about 4.6–9.6 min now) is conditional and not in the 60.6.
+  steps.push({
+    start: 0, end: 9.6 * scale, kind: 'work', lane: 'ci', side: true, stepKey: 'catalogue',
+    expert: { en: 'Catalogue overrun if it does not fit beside the queue (about 4.6–9.6 min, not in the total)', de: 'Katalog-Überzug, wenn er nicht neben die Queue passt (etwa 4,6–9,6 min, nicht in der Summe)' },
+    simple: { en: 'Catalogue overrun, 4.6–9.6 min, not in the total', de: 'Katalog-Überzug, 4,6–9,6 min, nicht in der Summe' },
+    facts: { source: 'arion', norm: { p50: null, p90: null, arion: null } },
+  })
+  // Qualification is 10 min of work plus a human wait. W has no measured length and is not folded into the stage.
+  steps.push({
+    start: qualification, end: qualification, kind: 'wait', lane: 'you', side: true, stepKey: 'w',
+    expert: { en: 'W · Wait for a person, not in the total', de: 'W · Wartezeit auf eine Person, nicht in der Summe' },
+    simple: { en: 'Wait for a person (W)', de: 'Wartezeit auf eine Person (W)' },
+    facts: { source: 'arion', waitReason: 'human_gate', norm: { p50: null, p90: null, arion: null } },
   })
   return { id: 'arion', tag: lang === 'de' ? 'Ziel' : 'Target', title: { en: 'Arion target', de: 'Arion-Ziel' }, steps, isTarget: true }
 }

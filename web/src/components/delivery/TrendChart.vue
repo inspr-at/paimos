@@ -138,7 +138,7 @@ const id = computed(() => `dl-chart-${props.model.key}`)
       <h4 :id="`${id}-title`">{{ model.label }}</h4>
       <span v-if="model.legend === 'two'" class="c-key">
         <span><svg class="lg-sw" width="14" height="8" aria-hidden="true"><line x1="0" y1="4" x2="14" y2="4" class="g-line" /></svg>{{ text.firstTry }}</span>
-        <span><svg class="lg-sw" width="14" height="8" aria-hidden="true"><line x1="0" y1="4" x2="14" y2="4" class="g-line gold" /></svg>{{ text.flake }}</span>
+        <span><svg class="lg-sw" width="14" height="8" aria-hidden="true"><line x1="0" y1="4" x2="14" y2="4" class="g-line gold" /></svg>{{ text.required }}</span>
       </span>
       <span v-if="model.legend === 'nightly'" class="n-legend" aria-hidden="true">
         <span><svg width="12" height="12"><rect width="12" height="12" rx="3" class="n-key ok" /></svg>{{ text.green }}</span>
