@@ -604,16 +604,15 @@ func TestMinimalOmittedKindFollowsDefaultAndKeepsStoredTail(t *testing.T) {
 	if _, ok := shown(after, "concept"); ok || after.All.Line == nil || *after.All.Line != "anthropic:sonnet" {
 		t.Fatalf("reset concept stayed its own pick: all=%+v exceptions=%+v", after.All, after.Exceptions)
 	}
-	inRegistry(t, admin, func(tx pgx.Tx) error {
-		s, err := modelprefs.LoadBoard(t.Context(), tx, nil, "")
-		if err != nil {
-			return err
+	resolved := boardDecode[boardDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/board?layer=default", nil, ""), 200)
+	var conceptColumn boardColumn
+	for _, column := range resolved.Columns {
+		if column.Column == "concept" {
+			conceptColumn = column
 		}
-		d := modelprefs.ResolveBoard(s, modelprefs.BoardQuery{Column: "concept"}, nil)
-		if d.Source != "follows" || len(d.Rank) == 0 || d.Rank[0] != "anthropic:sonnet" {
-			t.Fatalf("concept dispatch left Default: %+v", d)
-		}
-		return nil
-	})
+	}
+	if conceptColumn.Source != "follows" || len(conceptColumn.List) == 0 || conceptColumn.List[0].Line != "anthropic:sonnet" || !slices.Equal(conceptColumn.Stored.Rank, []string{"anthropic:sonnet"}) {
+		t.Fatalf("concept dispatch left Default: %+v", conceptColumn)
+	}
 }
 func ptrInt(n int) *int { return &n }
