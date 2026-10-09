@@ -200,7 +200,7 @@ func TestDeliveryMetricsReleaseFactsAndGreenTarget(t *testing.T) {
 		}
 	}
 	green := metricByKey(t, metrics, "first_attempt_green")
-	if green.Target == nil || *green.Target != (MetricTarget{Value: 80, Direction: "min", Note: "D4″", Source: "Arion"}) {
+	if green.Target == nil || *green.Target != (MetricTarget{Value: 80, Direction: "min", Note: "≥ 70 % after Phases 1–2a (D4″)", Source: "Arion"}) {
 		t.Fatalf("green target: %+v", green.Target)
 	}
 	// On the wire, every window names coverage and previous, and releases

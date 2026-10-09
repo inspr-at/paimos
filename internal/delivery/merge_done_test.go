@@ -345,6 +345,93 @@ func TestMergeDoneRefusesWaitingLifecycleAction(t *testing.T) {
 	})
 }
 
+func TestMergeDoneOwnerFallbackWithoutLeadSettings(t *testing.T) {
+	// Risk: a project with no lead settings silently leaves merged work in place,
+	// or an agent binding is treated as the owner. A person who already holds
+	// nodes.write completes the ticket. When no person does, including while an
+	// agent still holds it, the merge is one non-applicable Needs You refusal.
+	t.Run("existing person", func(t *testing.T) {
+		f, g := mergeFixture(t)
+		g.facts[7] = mergeFactFixture(f, 7, "AEON-848", strings.Repeat("c", 40))
+		f.tx(t, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), `DELETE FROM project_lead_settings WHERE project_id=$1`, f.project); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `DELETE FROM project_leads WHERE project_id=$1`, f.project)
+			return err
+		})
+		recordedMergeWebhook(t, f, "pull_request.closed", "fallback-merge", 204, nil)
+		if mergedState(t, f, f.ticket) != "done" {
+			t.Fatal("project without lead settings did not complete")
+		}
+		f.tx(t, func(tx pgx.Tx) error {
+			var proposals, receipts int
+			if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM status_autopilot_proposals WHERE node_id=$1 AND status='pending'`, f.ticket).Scan(&proposals); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='delivery.merge_done' AND node_id=$1`, f.ticket).Scan(&receipts); err != nil {
+				return err
+			}
+			if proposals != 0 || receipts != 1 {
+				return fmt.Errorf("fallback wrote proposals=%d receipts=%d", proposals, receipts)
+			}
+			return nil
+		})
+	})
+	t.Run("no person", func(t *testing.T) {
+		f, g := mergeFixture(t)
+		g.facts[7] = mergeFactFixture(f, 7, "AEON-848", strings.Repeat("c", 40))
+		f.tx(t, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), `DELETE FROM project_lead_settings WHERE project_id=$1`, f.project); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `DELETE FROM project_leads WHERE project_id=$1`, f.project); err != nil {
+				return err
+			}
+			tag, err := tx.Exec(t.Context(), `UPDATE role_bindings b SET role_id=r.id FROM roles r WHERE b.principal_id=$1 AND b.scope_type='workspace' AND r.tenant_id=b.tenant_id AND r.key='viewer'`, f.person.ID)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() != 1 {
+				return fmt.Errorf("viewer binding updated %d rows", tag.RowsAffected())
+			}
+			var agentRole string
+			if err := tx.QueryRow(t.Context(), `SELECT r.key FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id WHERE b.principal_id=$1`, f.agent.ID).Scan(&agentRole); err != nil {
+				return err
+			}
+			if agentRole != "admin" {
+				return fmt.Errorf("agent role %s", agentRole)
+			}
+			return nil
+		})
+		recordedMergeWebhook(t, f, "pull_request.closed", "no-owner-merge", 204, nil)
+		if mergedState(t, f, f.ticket) != "qa" {
+			t.Fatal("missing owner completed the ticket")
+		}
+		var page struct {
+			Items []struct {
+				NodeID     string `json:"node_id"`
+				Reason     string `json:"reason"`
+				Applicable bool   `json:"applicable"`
+			} `json:"items"`
+		}
+		f.call(t, f.person, "GET", "/api/status-autopilot/attention", nil, 200, &page)
+		if len(page.Items) != 1 || page.Items[0].NodeID != f.ticket || page.Items[0].Applicable || !strings.Contains(page.Items[0].Reason, "nodes.write") {
+			t.Fatalf("Needs You owner refusal: %+v", page)
+		}
+		f.tx(t, func(tx pgx.Tx) error {
+			var receipts int
+			if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='delivery.merge_done' AND node_id=$1`, f.ticket).Scan(&receipts); err != nil {
+				return err
+			}
+			if receipts != 0 {
+				return fmt.Errorf("refused merge wrote %d completion receipts", receipts)
+			}
+			return nil
+		})
+	})
+}
+
 func TestMergeBackfillPreviewApplyAndSafety(t *testing.T) {
 	// Risk: historical repair writes before preview, completes open follow-up
 	// work, replays mutations, trusts stale revisions, or uses revoked access.

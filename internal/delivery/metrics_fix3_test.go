@@ -3,11 +3,14 @@ package delivery
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/crossreview"
 )
 
 func TestDeliveryMetricsFix3ResumeIncludesNewerAttempt(t *testing.T) {
@@ -298,5 +301,68 @@ func TestDeliveryMetricsFix4LegacyDoneRunIDStillReadsNewerAttempt(t *testing.T) 
 	}
 	if calls["/actions/runs/800/attempts/1"] != 0 || (next.AttemptRun == 800 && next.Attempt <= 44) {
 		t.Fatalf("legacy cursor restarted or stuck the paused run: calls %v cursor %+v", calls, next)
+	}
+}
+
+func TestDeliveryPreflightAbsenceFinishesTheBackfill(t *testing.T) {
+	// Risk: a repository without ci-preflight.yml never finishes its backfill,
+	// or a 404 on any other workflow is treated as "that workflow does not exist".
+	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	since := dayStart(now.AddDate(0, 0, -1))
+	workflows := []string{defaultCIWorkflow, defaultNightlyWorkflow, defaultPreflightWorkflow}
+	empty := map[string]any{"total_count": 0, "workflow_runs": []any{}}
+	get := func(path string, out any) error {
+		switch {
+		case strings.Contains(path, "ci-preflight.yml"):
+			return crossreview.ErrNotFound
+		case strings.Contains(path, "/actions/workflows/"):
+			return writeMetricJSON(out, empty)
+		case path == "":
+			return writeMetricJSON(out, map[string]any{"full_name": "example/delivery", "default_branch": "main"})
+		case strings.Contains(path, "/pulls?"):
+			return writeMetricJSON(out, []any{})
+		default:
+			return fmt.Errorf("unexpected %s", path)
+		}
+	}
+	cursor := backfillCursor{Since: since, Phase: "runs", Day: since.Format("2006-01-02"), Page: 1, Workflows: workflows}
+	next, _, err := backfillStep(get, "example/delivery", workflows, cursor, now)
+	if err != nil {
+		t.Fatalf("absent preflight blocked the backfill: %v", err)
+	}
+	if next.Phase != "done" || !next.PreflightAbsent || workflowListed(next.Workflows, defaultPreflightWorkflow) {
+		t.Fatalf("finished cursor: %+v", next)
+	}
+
+	// A failed read is not a confirmed absence, and neither is a 404 of CI.
+	onPreflight := cursor
+	onPreflight.Workflow = 2
+	failGet := func(path string, out any) error {
+		if strings.Contains(path, "ci-preflight.yml") {
+			return errRead
+		}
+		return fmt.Errorf("unexpected %s", path)
+	}
+	if _, _, err = backfillStep(failGet, "example/delivery", workflows, onPreflight, now); !errors.Is(err, errRead) {
+		t.Fatalf("preflight read failure: %v", err)
+	}
+	ciMissing := func(path string, out any) error {
+		if strings.Contains(path, "/actions/workflows/ci.yml/") {
+			return crossreview.ErrNotFound
+		}
+		return fmt.Errorf("unexpected %s", path)
+	}
+	if _, _, err = backfillStep(ciMissing, "example/delivery", workflows, cursor, now); !errors.Is(err, crossreview.ErrNotFound) {
+		t.Fatalf("CI 404: %v", err)
+	}
+
+	// A legacy catch-up that finds no such workflow returns to jobs and does not list it.
+	catchup := backfillCursor{
+		Since: since, Phase: "runs", Day: since.Format("2006-01-02"), Page: 1,
+		Workflows: []string{defaultPreflightWorkflow}, ResumePhase: "jobs", ThenWorkflows: workflows,
+	}
+	next, _, err = backfillStep(get, "example/delivery", catchup.Workflows, catchup, now)
+	if err != nil || next.Phase != "jobs" || !next.PreflightAbsent || workflowListed(next.Workflows, defaultPreflightWorkflow) {
+		t.Fatalf("catch-up cursor: %+v err %v", next, err)
 	}
 }
