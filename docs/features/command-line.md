@@ -8,6 +8,13 @@ edit returns a conflict instead of replacing newer fields; read the current
 node before retrying. If a tag was created but could not be attached, the error
 names that retained tag. A failed plan leaves earlier successful writes applied.
 
+Each tenant receives a default `tag` kind at creation; migration 1316 adds it to
+existing tenants that lack one, preserving custom tag definitions. `aeon tag
+create` uses that kind and creates a node with the existing `nodes.write`
+authority. Agents need no kind-creation request; direct kind creation remains
+person-only. Repeating tag-kind initialization leaves the existing definition
+unchanged.
+
 ```sh
 paimos auth login --url https://aeon.example --name default --key-file ./agent.key
 paimos whoami
