@@ -2,15 +2,18 @@
 package agentpairing_test
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -262,7 +265,7 @@ func TestLedgerBoundaryNeverEnrolledAndClassicDaemon(t *testing.T) {
 		Token       string `json:"token"`
 		PrincipalID string `json:"principal_id"`
 	}
-	decodeResult(t, f.call("POST", "/api/agent-keys", map[string]any{"name": "Classic daemon fixture", "scopes": []string{"run.read", "run.claim", "account.route"}}, true, "", 201), &classic)
+	decodeResult(t, f.call("POST", "/api/agent-keys", map[string]any{"name": "Classic daemon fixture", "scopes": []string{"run.read", "run.claim", "account.route", "work_orders.read", "nodes.read", "models.read"}}, true, "", 201), &classic)
 	var order workorders.Order
 	decodeResult(t, f.call("POST", "/api/work-orders", map[string]any{"title": "Classic daemon boundary", "criteria": []string{"No dispatch"}, "assignee_principal_id": classic.PrincipalID}, true, "", 201), &order)
 	decodeResult(t, f.call("PATCH", "/api/work-orders/"+order.NodeID, map[string]any{"expected_revision": order.Revision, "status": "ready"}, true, "", 200), &order)
@@ -299,16 +302,50 @@ func TestLedgerEnrollmentBoundedInputAndLiveAuthority(t *testing.T) {
 	for _, body := range []any{map[string]string{"generation": ""}, map[string]string{"generation": strings.Repeat("x", 129)}, map[string]string{"generation": generation, "computer_id": *v.ComputerID}} {
 		f.call("POST", "/api/agent-pairing/self/ledger", body, false, key, 400)
 	}
-	// Revoke the principal permission after authentication would have passed;
-	// RequireTx must read current authority inside the fenced enrollment write.
-	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+	// Capture authenticated runtime authority, then revoke while the handler is
+	// paused at a barrier. The mutation must re-check rather than trust it.
+	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: f.sessionKey, BootstrapTenantSlug: f.tenantSlug, BootstrapAdminEmail: "pairing@example.test"}, f.db.App)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	f.pairing.Mount(mux)
+	authenticated, resume, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	h := am.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(authenticated)
+		select {
+		case <-resume:
+			mux.ServeHTTP(w, r)
+		case <-r.Context().Done():
+		}
+	}))
+	r := f.request("POST", "/api/agent-pairing/self/ledger", map[string]string{"generation": generation}, false, key).WithContext(t.Context())
+	// The real server resolves the route before invoking authentication.
+	r.Pattern = "POST /api/agent-pairing/self/ledger"
+	w := httptest.NewRecorder()
+	go func() { defer close(finished); h.ServeHTTP(w, r) }()
+	select {
+	case <-authenticated:
+	case <-time.After(10 * time.Second):
+		close(resume)
+		t.Fatal("authenticated request did not reach the barrier")
+	}
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `DELETE FROM role_permissions WHERE permission='run.claim' AND role_id IN (SELECT role_id FROM role_bindings WHERE principal_id=$1)`, *v.PrincipalID)
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.call("POST", "/api/agent-pairing/self/ledger", map[string]string{"generation": generation}, false, key, 403)
+	close(resume)
+	select {
+	case <-finished:
+	case <-time.After(10 * time.Second):
+		t.Fatal("enrollment did not finish")
+	}
+	if w.Code != 403 || !strings.Contains(w.Body.String(), "forbidden") {
+		t.Fatal("revoked authority was not refused in the write")
+	}
 	var enrolled bool
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT ledger_generation IS NOT NULL FROM agent_pairing_computers WHERE id=$1`, *v.ComputerID).Scan(&enrolled); err != nil || enrolled {
 		t.Fatal("unauthorized or invalid enrollment wrote state")
@@ -321,6 +358,12 @@ func TestLedgerBoundaryLifecycleAdvertisement(t *testing.T) {
 	decodeResult(t, f.call("GET", "/api/agent-pairing/guide", nil, false, "", 200), &guide)
 	if !slices.Contains(guide.ServerCapabilities, agentpairing.LedgerCapability) {
 		t.Fatal("guide did not advertise ledger-v1")
+	}
+	if agentsetup.RequireLedgerServer(agentsetup.View{}) == nil {
+		t.Fatal("old server admitted shared mode")
+	}
+	if agentsetup.RequireLedgerServer(agentsetup.View{ServerCapabilities: guide.ServerCapabilities}) != nil {
+		t.Fatal("advertised server refused ledger negotiation")
 	}
 	p := f.propose("claude")
 	if !slices.Contains(p.review.ServerCapabilities, agentpairing.LedgerCapability) || p.review.LedgerMode {
