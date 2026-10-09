@@ -21,6 +21,27 @@ import './browser-impact.test.mjs'
 import './manifests.test.mjs'
 import './tiers-merge-driver.test.mjs'
 import '../merge-drivers/merge-drivers.test.mjs'
+import '../nightly-ticket.test.mjs'
+
+test('nightly failure artifacts bind failed cases and incomplete runners to the exact attempt', async () => {
+  const { run } = await import('./cli.mjs')
+  const rows = ['failed case', 'passed sibling'].map(name => ({ kind: 'node', file: 'tests/fixture.test.ts', name, tier: 'GATED-FULL' }))
+  const env = { GITHUB_EVENT_NAME: 'schedule', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '2', GITHUB_SHA: 'a'.repeat(40) }
+  const simulate = async incomplete => {
+    const artifacts = new Map()
+    const code = await run('web', { tests: rows, all: rows, full: true, scope: 'catalogue' }, { unit: true, job: 'web-unit', env }, {
+      knownFlaky: { version: 1, entries: [] }, log: () => {}, saveJSON: (path, value) => artifacts.set(path.split('/').at(-1), value),
+      execute: () => incomplete ? { code: 2, output: '', stderr: '', error: 'ETIMEDOUT' } : {
+        code: 1, stderr: '', output: rows.map((row, i) => JSON.stringify({ type: i ? 'test:pass' : 'test:fail', fullName: row.name })).join('\n'),
+      },
+    })
+    assert.notEqual(code, 0)
+    assert.equal(artifacts.get('web-unit-measurement.json').exitCode, code)
+    return artifacts.get('web-unit-failures.json')
+  }
+  assert.deepEqual(await simulate(false), { version: 1, job: 'web-unit', runId: '123', attempt: '2', sha: env.GITHUB_SHA, cases: [key(rows[0])], runnerFailure: false })
+  assert.deepEqual(await simulate(true), { version: 1, job: 'web-unit', runId: '123', attempt: '2', sha: env.GITHUB_SHA, cases: [], runnerFailure: true })
+})
 import './slow-owners.test.mjs'
 
 const g=(pkg,name,tier='NIGHTLY')=>({kind:'go',package:pkg,name,tier,active:true})
@@ -1596,7 +1617,7 @@ for(const [label,pkg,tier,names] of [
   assert.deepEqual(select(rows,{event:'pull_request',forceAll:true}).tests.map(key).sort(),ids)
 })
 
-test('strict classification maintenance is scheduled separately and never a required PR or nightly test dependency',()=>{
+test('strict classification is required before tests in CI and nightly; the independent inventory audit remains',()=>{
   const nightly=readFileSync(new URL('../../.github/workflows/nightly-full.yml',import.meta.url),'utf8')
   const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
   const job=nightly.slice(nightly.indexOf('\n  nightly-tier-classification:'),nightly.indexOf('\n  nightly-web-shard:'))
@@ -1604,7 +1625,13 @@ test('strict classification maintenance is scheduled separately and never a requ
   assert.match(job,/cli\.mjs check go --strict/)
   assert.match(job,/cli\.mjs check web --strict/)
   assert.match(job,/Report web cases needing classification\n\s+if: always\(\)/)
-  assert.doesNotMatch(ci,/--strict/)
+  for (const [source, prefix] of [[ci, ''], [nightly, 'nightly-']]) {
+    const job = name => source.match(new RegExp(`\\n  ${prefix}${name}:[\\s\\S]*?(?=\\n  [a-z][a-z0-9-]*:|$)`))?.[0] ?? ''
+    const go = job('go-static'), web = job('web-setup')
+    assert.match(go,/cli\.mjs check go --strict/)
+    assert.match(web,/Require every web case to be classified\n\s+run: node scripts\/test-tiers\/cli\.mjs check web --strict/)
+    assert.ok(web.indexOf('check web --strict') < web.indexOf('Build web'))
+  }
   assert.doesNotMatch(nightly,/needs:.*nightly-tier-classification/)
 })
 

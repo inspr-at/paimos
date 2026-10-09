@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, useId, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, setOverlayTitle } from '../../lib/brand'
@@ -149,6 +149,12 @@ const releases = computed(() => [...(history.value?.releases ?? [])].sort((a, b)
 const eligible = computed(() => visibleReleases(releases.value, showReservedVersions.value))
 // Result counts and statistics describe the full history, even when rows are hidden.
 const matching = computed(() => releases.value.filter(r => matches(r, filter, locale.value, view.value)))
+const resultId = useId()
+const historySummary = computed(() => {
+  const count = (state: Release['state']) => releases.value.filter(release => release.state === state).length
+  const candidates = count('candidate')
+  return `${count('published')} published · ${count('reserved')} reserved${candidates ? ` · ${candidates} candidate${candidates === 1 ? '' : 's'}` : ''}`
+})
 const visible = computed(() => visibleReleases(matching.value, showReservedVersions.value))
 const days = computed(() => groupByDay(visible.value, now.value))
 const order = computed(() => days.value.flatMap(d => d.releases))
@@ -510,7 +516,7 @@ const KINDS = [
 </script>
 
 <template>
-  <dialog ref="dialog" class="releases" :aria-label="`${brand.wordmark} releases`" tabindex="-1" @cancel.prevent @keydown="keydown">
+  <dialog ref="dialog" class="releases" :aria-label="`${brand.wordmark} releases`" :aria-describedby="resultId" tabindex="-1" @cancel.prevent @keydown="keydown">
     <div class="shell" :class="{ 'show-detail': showDetail, compare: mode === 'compare', peeking: !!peekKey }">
       <header class="head" :inert="covered">
         <div class="title-row">
@@ -576,7 +582,7 @@ const KINDS = [
               <button type="button" class="toggle" :aria-pressed="filter.fixes" @click="filter.fixes = !filter.fixes"><AppIcon name="bug" :size="13" />Fixes</button>
               <button type="button" class="toggle" :aria-pressed="filter.other" @click="filter.other = !filter.other"><AppIcon name="gear" :size="12" />Other</button>
             </div>
-            <p class="sr" aria-live="polite"><template v-if="filtering">{{ visible.length }} matching releases</template></p>
+            <p :id="resultId" class="sr result-count" aria-live="polite"><template v-if="filtering">{{ matching.length }} of {{ releases.length }}</template><template v-else>{{ historySummary }}</template></p>
           </div>
 
           <p v-if="mode === 'compare'" class="compare-hint" role="status">
@@ -765,6 +771,7 @@ button.sheet-sum { cursor: pointer; }
 .reload { display:inline-flex; align-items:center; gap:6px; min-height:30px; padding:0 12px; border-radius:999px; color:var(--teal-ink); background:var(--surface); }
 .spacer { display:none; }
 .switches { display:flex; flex-wrap:wrap; flex:none; align-items:center; gap:8px; min-width:0; }
+.switches .seg { padding:0; }
 .switches .seg button { height:36px; padding:0 12px; }
 .search { flex:1 1 220px; min-width:140px; }
 .search .field { height:36px; border-radius:999px; padding-right:34px; font-size:12px; }
@@ -842,6 +849,7 @@ button.sheet-sum { cursor: pointer; }
 .empty p,.hidden-history { font-size:13px; color:var(--ink-3); }
 .peek-pane,.pending-pane { position:absolute; top:46px; right:0; bottom:8px; width:min(400px,calc(100% - 16px)); z-index:4; display:flex; flex-direction:column; min-height:0; background:var(--surface-raised); border-radius:16px; box-shadow:0 0 0 1px var(--line-2),var(--shadow-pop); }
 .peek-pane > * { flex:1; }
+@media(min-width:1280px) { .peeking .detail-scroll { margin-right:416px; } }
 .peek-pane :deep(.peek.inline) { padding:0; }
 .pending-pane { padding:16px; gap:12px; }
 .pending-controls { display:flex; gap:8px; }

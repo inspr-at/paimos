@@ -45,6 +45,8 @@ export function mockView(partial: Partial<MockView> & Pick<MockView, 'id' | 'nam
   }
 }
 export interface MockOptions {
+  // The two-browser SSE server needs actual network requests and reconnects.
+  nativeEvents?: boolean
   // Kind-specific status buckets, as configured on the server. Omitted
   // entries retain the normal spelling-based fallback.
   workBuckets?: Record<string, Record<string, ReturnType<typeof workBucket>>>
@@ -292,6 +294,28 @@ function completionRefusal(node: MockNode, nextState: string, fields: Record<str
 }
 
 export async function mockWork(page: Page, data: Fixtures, options: MockOptions = {}) {
+  // These scenarios drive HTTP snapshots and polling explicitly. A real,
+  // unserved SSE connection would invalidate those reads nondeterministically.
+  if (!options.nativeEvents) await page.addInitScript(() => {
+    // Scenarios that install an event-driven stream keep their own transport,
+    // regardless of Playwright's unspecified init-script order.
+    if (window.EventSource.name !== 'EventSource') return
+    class QuietStream extends EventTarget {
+      onopen: ((event: Event) => void) | null = null
+      private closed = false
+      private timer = setInterval(() => this.dispatchEvent(new Event('stream.ping')), 5_000)
+      constructor() {
+        super()
+        queueMicrotask(() => {
+          if (this.closed) return
+          this.onopen?.(new Event('open'))
+          this.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 0, resumed: false }) }))
+        })
+      }
+      close() { this.closed = true; clearInterval(this.timer) }
+    }
+    Object.assign(window, { EventSource: QuietStream })
+  })
   const calls: Call[] = []
   const started = Date.now()
   const bucketOf = (node: MockNode) => options.workBuckets?.[node.kind_slug]?.[canonicalWorkStatus(node.state)] ?? workBucket(node.state)

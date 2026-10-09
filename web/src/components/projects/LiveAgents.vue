@@ -272,6 +272,7 @@ a.agent-line:hover .go { color: var(--teal-ink); }
 .chip-state :deep(.state-word) { white-space: nowrap; }
 .live-chip { opacity: var(--agent-state-opacity, 1); }
 .live-chip :deep(.live-bot), .live-chip :deep(.agent-state-label) { opacity: 1; }
+.live-pop :deep(.icon-btn) { transition: opacity .12s, transform .12s; }
 /* A narrow card keeps one line by showing two robots; the count still says how many. */
 @container live-card (max-width: 300px) {
   .as-card .face:nth-child(n+3) { display: none; }

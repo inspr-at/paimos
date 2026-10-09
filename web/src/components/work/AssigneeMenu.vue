@@ -52,6 +52,7 @@ function keys(event: KeyboardEvent) {
   <QueueReadyPanel v-if="fixing" :row="row" :project-id="projectId" :anchor="anchor" @close="restore => emit('close', restore)" />
   <FloatingPanel v-else :anchor="anchor" :width="372" :tallest="580" :label="`Assignee of ${row.key}`" @close="restore => emit('close', restore)">
     <p class="menu-title eyebrow">Assignee · {{ row.key }}</p>
+      <input v-model="query" type="search" class="field am-search" aria-label="Find assignee" placeholder="Find a person…" :data-autofocus="!allowed ? '' : undefined" :disabled="!canAssign" @keydown.enter.stop.prevent="() => { if (canAssign && people.length === 1) emit('choose', people[0]!.value) }" />
     <div class="menu" role="menu" :aria-label="`Assignee of ${row.key}`" @keydown="keys">
       <template v-if="row.is_leaf !== false">
       <button v-if="allowed && eligible && gaps.length" type="button" class="am-notready" @click="fixing = true"><AppIcon name="alert" :size="13" /><span>Not ready: {{ gaps.join(', ') }}</span><b>Fix</b></button>
@@ -64,7 +65,6 @@ function keys(event: KeyboardEvent) {
       </button>
       </template>
       <p class="am-sec mono-label" role="presentation">People</p>
-      <input v-model="query" type="search" class="field am-search" aria-label="Find assignee" placeholder="Find a person…" :data-autofocus="!allowed ? '' : undefined" :disabled="!canAssign" @keydown.enter.stop.prevent="() => { if (canAssign && people.length === 1) emit('choose', people[0]!.value) }" />
       <button v-for="person in people" :key="person.value" type="button" role="menuitemradio" class="menu-item" :disabled="!canAssign" :aria-checked="(row.assignee?.id ?? '') === person.value" @click="emit('choose', person.value)"><PersonAvatar v-if="person.value" :id="person.value" :name="person.label" :size="18" /><AppIcon v-else name="user" :size="14" /><span class="label">{{ person.label }}</span><AppIcon v-if="(row.assignee?.id ?? '') === person.value" name="check" :size="14" /></button>
     </div>
   </FloatingPanel>

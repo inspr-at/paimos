@@ -6,12 +6,12 @@
 // also remembered per person. A missing translation shows the other language
 // with a badge. Search follows what the view shows. 102 (backfilled) and 105
 // (current) share the renderer.
-import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockReleases, type History } from './releases-fixtures'
 import { historicHistory, NOTES } from './releases-historic-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 const SHOTS = process.env.AEON_323_SHOTS
 const V102 = '260929082208.0.0'
@@ -43,6 +43,8 @@ const V100 = '260929010000.0.0'
 function history(fallback = false, empty = false) {
   const h = structuredClone(historicHistory()) as History
   const [r105, r102] = h.releases as Rel[]
+  r105!.headline = 'stable105'
+  r102!.headline = 'evidence-only tag message'
   r105!.evidence.ci = { name: 'ci', url: 'https://github.com/inspr-at/aeon/actions/runs/105', status: 'completed', conclusion: 'success' }
   if (empty) {
     for (const [version, sequence, at] of [[V101, 101, '2026-09-29T02:00:00Z'], [V100, 100, '2026-09-29T01:00:00Z']] as const) {
@@ -94,7 +96,8 @@ test('Highlights is today\'s view and Details lists the commits open with the ev
   await expect(dead.locator('.benefit')).toHaveText('Sessions whose agent is gone end on their own, and the session menu offers only what works.')
   await expect(dead.locator('details.commits summary')).toHaveText('10 commits')
   await expect(dead.locator('details.commits')).not.toHaveAttribute('open', '')
-  await expect(detail(page).getByRole('button', { name: /Evidence/ })).toHaveAttribute('aria-expanded', 'false')
+  await expect(sheet(page).getByRole('button', { name: /Evidence/ })).toHaveAttribute('aria-pressed', 'false')
+  await expect(detail(page).getByRole('region', { name: 'Evidence' })).toHaveCount(0)
   await expect(rows(page).first().locator('.subjects')).toHaveCount(0)
 
   // Details: no benefit, every commit open with subject, short SHA and link; the evidence open.
@@ -112,7 +115,7 @@ test('Highlights is today\'s view and Details lists the commits open with the ev
   await expect(evidence.getByRole('button', { name: /^Copy / })).toHaveCount(3)
   for (const label of ['Version', 'Source commit', 'CI run', 'Image', 'OCI digest', 'GitHub release']) await expect(evidence.getByText(label, { exact: true })).toBeVisible()
   await expect(evidence.getByRole('link', { name: /passed/ })).toHaveAttribute('href', /actions\/runs\/105$/)
-  await expect(rows(page).first().locator('.subjects')).toContainText('Reserve stable105')
+  await expect(detail(page).getByRole('region', { name: 'Evidence' })).toContainText('Tag message: stable105')
 
   // The historic release reads the same, and its Other group stays in both views.
   await rows(page).nth(1).click()
@@ -120,13 +123,13 @@ test('Highlights is today\'s view and Details lists the commits open with the ev
   const deploy = block(page, 'Deploy target on screen')
   await expect(deploy.getByRole('list', { name: '4 commits' }).getByText('Preserve strict handoff bytes with optional deployment targets')).toBeVisible()
   await expect(deploy.getByRole('link', { name: 'Commit e9c460b on GitHub' })).toHaveAttribute('href', 'https://github.com/inspr-at/aeon/commit/e9c460bfea447621ea59142af57ab53be0032578')
-  await expect(detail(page).getByRole('region', { name: /^Other changes/ })).toBeVisible()
-  await expect(detail(page).getByRole('region', { name: 'Evidence' }).getByText('Tag message: stable102')).toBeVisible()
+  await expect(detail(page).getByRole('region', { name: /^Other\b/ })).toBeVisible()
+  await expect(detail(page).getByRole('region', { name: 'Evidence' }).getByText('Tag message: evidence-only tag message')).toBeVisible()
   await radio(page, 'Highlights').click()
   await expect(deploy.locator('.benefit')).toContainText('nothing is approved blind')
   await expect(deploy.locator('details.commits summary')).toHaveText('4 commits')
-  await expect(detail(page).getByRole('region', { name: /^Other changes/ })).toBeVisible()
-  await expect(detail(page).getByText('Tag message: stable102')).toHaveCount(0)
+  await expect(detail(page).getByRole('region', { name: /^Other\b/ })).toBeVisible()
+  await expect(detail(page).getByText('Tag message: evidence-only tag message')).toHaveCount(0)
 })
 
 test('EN and DE switch every text, round-trip in the address with the view, and keep ?view= of the page behind', async ({ page }) => {
@@ -236,7 +239,7 @@ test('search matches what the chosen language and view show', async ({ page }) =
   await expect(rows(page)).toHaveCount(1)
   await expect(block(page, 'Deploy target on screen').getByRole('list', { name: '4 commits' }).locator('mark')).toHaveText('contract pins')
   // The tag message is evidence: Details shows it, Highlights does not.
-  await search(page).fill('release: v')
+  await search(page).fill('evidence-only tag message')
   await expect(rows(page)).toHaveCount(1)
   await radio(page, 'Highlights').click()
   await expect(none).toBeVisible()
@@ -357,7 +360,8 @@ test('Details search finds the commit SHAs and the evidence it shows', async ({ 
   // 5a622e2 is 105's source commit under Evidence.
   await search(page).fill('5a622e2')
   await expect(rows(page)).toHaveCount(1)
-  await expect(rows(page).first()).toContainText('stable105')
+  await expect(rows(page).first()).toHaveAttribute('id', `release-${V105.replaceAll('.', '-')}`)
+  await expect(detail(page).getByRole('region', { name: 'Evidence' })).toContainText('Tag message: stable105')
   // A commit listed under a ticket: found by its short SHA, which is marked.
   await search(page).fill('')
   const sha = (await block(page, 'Dead sessions tidy up').getByRole('link', { name: /^Commit [0-9a-f]{7} on GitHub$/ }).nth(3).textContent())!.trim()
@@ -415,14 +419,18 @@ test('the switches sit with search and Compare at 36 px on desktop and take thei
   expect(box.x + box.width).toBeLessThanOrEqual(field.x)
   expect(compareBox.x).toBeGreaterThan(field.x)
 
-  // Between phone and desktop the switches take the next line, and the title keeps its words.
+  // The current tablet toolbar fits one line; title and controls keep their room.
   await page.setViewportSize({ width: 1024, height: 800 })
   const title = sheet(page).getByRole('heading', { level: 1 })
   expect(await title.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
   const mid = (await seg.boundingBox())!
-  expect(mid.y).toBeGreaterThan((await search(page).boundingBox())!.y + 30)
+  expect(mid.y).toBe((await search(page).boundingBox())!.y)
+  await expectStableControls({ controls: { view: seg, language: sheet(page).getByRole('radiogroup', { name: 'Language' }), search: search(page), compare: sheet(page).getByRole('button', { name: 'Compare', exact: true }) }, interactions: [
+    { name: 'German', run: async () => { await radio(page, 'DE').click(); await expect(radio(page, 'DE')).toHaveAttribute('aria-checked', 'true') } },
+    { name: 'Details', run: async () => { await radio(page, 'Details').click(); await expect(radio(page, 'Details')).toHaveAttribute('aria-checked', 'true') } },
+  ] })
   expect(await noHorizontalScroll(page)).toBe(true)
-  if (SHOTS) { mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: `${SHOTS}/header-1024-light.png` }) }
+  if (SHOTS) { await page.screenshot({ path: test.info().outputPath(`header-1024-light.png`) }) }
 
   await page.setViewportSize({ width: 390, height: 844 })
   const lang = (await sheet(page).getByRole('radiogroup', { name: 'Language' }).boundingBox())!
@@ -445,7 +453,7 @@ for (const width of [1600, 390]) {
       await page.waitForTimeout(250)
       // The calendar version is the vendored INSPR display (pinned presentation), as in releases.spec.
       const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.calendar-version').analyze()
-      const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')}`).join('\n')}`)
+      const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')}: ${n.failureSummary}`).join('\n')}`)
       expect(summary, summary.join('\n')).toEqual([])
       if (width === 390) await sheet(page).getByRole('button', { name: 'All releases' }).click()
       await expect(rows(page).first()).toBeVisible()
@@ -455,14 +463,13 @@ for (const width of [1600, 390]) {
 }
 
 test('screenshots of both switches on 102 and 105', async ({ page }) => {
-  test.skip(!SHOTS, 'set AEON_323_SHOTS to a directory')
+  test.skip(!SHOTS, 'AEON_323_SHOTS enables design evidence')
   test.setTimeout(180_000)
-  mkdirSync(SHOTS!, { recursive: true })
-  for (const width of [1600, 390]) {
+  for (const width of [1600, 1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     for (const colorScheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
-      const shot = (name: string) => page.screenshot({ path: `${SHOTS}/${name}-${width}-${colorScheme}.png` })
+      const shot = (name: string) => page.screenshot({ path: test.info().outputPath(`${name}-${width}-${colorScheme}.png`) })
       const list = async () => {
         if (width === 390 && await sheet(page).getByRole('button', { name: 'All releases' }).isVisible()) await sheet(page).getByRole('button', { name: 'All releases' }).click()
       }
