@@ -45,9 +45,11 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		// Retain only these fixture profiles so pre-seeded aliases of the same
-		// model/version cannot turn selection into a UUID tie.
-		if _, err := tx.Exec(ctx, `UPDATE model_profiles SET enabled=false WHERE harness IN ('codex','claude') AND id<>ALL($1::uuid[])`, []string{pin.ID, next.ID, claudePin.ID, claude.ID}); err != nil {
+		// Retire pre-seeded aliases so the same model/version cannot turn
+		// selection into a UUID tie. Profile rows remain immutable.
+		if _, err := tx.Exec(ctx, `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by)
+ SELECT tenant_id,id,'daily fixture alias',$2 FROM model_profiles
+ WHERE harness IN ('codex','claude') AND id<>ALL($1::uuid[])`, []string{pin.ID, next.ID, claudePin.ID, claude.ID}, p.ID); err != nil {
 			return err
 		}
 
