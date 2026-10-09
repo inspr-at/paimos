@@ -173,18 +173,27 @@ CREATE TRIGGER account_use_cells_guard BEFORE INSERT OR UPDATE ON account_use_ce
 
 -- No advisory locks in triggers. The Go writer owns the tenant/matrix fences.
 CREATE FUNCTION aeon_account_use_activate() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE prior text := current_setting('aeon.visible_projects',true);
 BEGIN
     IF current_setting('aeon.account_use_seeding',true)='on' THEN RETURN NULL; END IF;
+    PERFORM set_config('aeon.visible_projects','*',true);
     UPDATE account_use_rules r SET enforced_at=clock_timestamp()
     WHERE r.enforced_at IS NULL AND (
         r.new_models='deny' OR r.new_projects='holding'
         OR EXISTS (SELECT 1 FROM project_work_contexts m JOIN work_contexts c
                    ON c.tenant_id=m.tenant_id AND c.id=m.context_id WHERE c.kind='holding' OR c.archived_at IS NOT NULL)
+        OR EXISTS (SELECT 1 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+                   WHERE k.slug='project' AND n.deleted_at IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM project_work_contexts m WHERE m.project_id=n.id))
         OR EXISTS (SELECT 1 FROM agent_accounts a CROSS JOIN work_contexts c
                    WHERE a.archived_at IS NULL AND c.archived_at IS NULL AND c.kind<>'holding'
                    AND NOT EXISTS (SELECT 1 FROM account_use_cells x WHERE x.account_id=a.id AND x.context_id=c.id))
     );
+    PERFORM set_config('aeon.visible_projects',coalesce(prior,''),true);
     RETURN NULL;
+EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('aeon.visible_projects',coalesce(prior,''),true);
+    RAISE;
 END $$;
 CREATE TRIGGER account_use_cells_activate AFTER INSERT OR UPDATE OR DELETE ON account_use_cells
     FOR EACH STATEMENT EXECUTE FUNCTION aeon_account_use_activate();

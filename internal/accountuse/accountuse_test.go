@@ -94,10 +94,14 @@ func (f *fixture) addWork(t *testing.T, project bool) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Work',$2 FROM node_kinds k WHERE k.slug='work' RETURNING id::text`, f.p.TenantID, parent).Scan(&f.work); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, f.p.TenantID, f.work, f.p.ID); err != nil {
+		var order string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Order',$2 FROM node_kinds k WHERE k.slug='work_order' RETURNING id::text`, f.p.TenantID, f.work).Scan(&order); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,account_id,queue_node_id) VALUES($1,$2,$3,$4,$2) RETURNING id::text`, f.p.TenantID, f.work, f.agent, f.account).Scan(&f.run); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, f.p.TenantID, order, f.p.ID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,account_id,queue_node_id) VALUES($1,$2,$3,$4,$5) RETURNING id::text`, f.p.TenantID, order, f.agent, f.account, f.work).Scan(&f.run); err != nil {
 			return err
 		}
 		return tx.QueryRow(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model,burst_ratio) VALUES($1,$2,now(),now()+interval '1 day','requests',100,'unrestricted',1) RETURNING id::text`, f.p.TenantID, f.account).Scan(&f.window)

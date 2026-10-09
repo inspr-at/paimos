@@ -92,7 +92,7 @@ func TestAccountUseMigrationBackfillIdempotentAndPreservesBehavior(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	if err := db.Migrate(t.Context(), d.App); err != nil {
+	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
 		t.Fatal(err)
 	}
 }
