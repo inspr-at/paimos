@@ -94,6 +94,12 @@ export async function mockLeadFlow(page: Page, options: LeadFlowOptions = {}) {
       const current = state.leads[lead[1]!]
       if (!current) return json({ error: 'project not found' }, 404)
       if (method === 'GET') return json(current)
+      if (method === 'DELETE') {
+        if (body?.expected_revision !== current.revision) return json({ error: 'lead revision conflict' }, 409)
+        if (current.revision === 0 || current.generation !== 0 || current.session_id !== null) return json({ error: 'only a never-started lead can be removed' }, 409)
+        state.leads[lead[1]!] = { ...current, state: 'none', reason: '', revision: 0, generation: 0, session_id: null, process_active: false }
+        return json(state.leads[lead[1]!])
+      }
       if (!lead[2]) {
         if (body?.expected_revision !== current.revision) return json({ error: 'lead revision conflict' }, 409)
         state.leads[lead[1]!] = { ...current, state: 'waiting_for_room', reason: 'awaiting_generation', revision: current.revision + 1, session_id: null, process_active: false }

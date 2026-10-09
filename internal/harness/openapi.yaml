@@ -34,6 +34,29 @@ paths:
         '200': {description: 'Explicit lead intent, with unavailable gates shown as waiting_for_room'}
         '403': {description: Person or live owner permission required}
         '409': {description: Revision conflict or predecessor exit is unconfirmed}
+    delete:
+      summary: Remove a project lead that never started
+      description: 'Person-only harness.control, rechecked inside the final transaction under the same project fence as start and claim. Requires the displayed expected_revision. Refuses any lead with a session, a nonzero generation or generation history, even after it stopped. Deletes the unclaimed intent and appends lead.removed with the previous lead snapshot atomically. Queued work remains queued; no process is launched or stopped.'
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision]
+              additionalProperties: false
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: 'Lead removed; the project has no lead'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectLead'}
+        '403': {description: 'Person with current harness.control permission required'}
+        '409': {description: 'Revision conflict or the lead has already started'}
   /api/projects/{projectId}/lead/claim:
     post:
       summary: Bind a proven coordinator generation to the project lead intent

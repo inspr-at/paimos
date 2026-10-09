@@ -8390,6 +8390,20 @@
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"working lead: the line opens the docked panel, questions go to the Decision Desk, Pause is revision-bound","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: a previously started lead has no Remove control","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -15258,6 +15272,10 @@
     ,
     {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > unfolding removes only that project from the stored list","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/lead-remove.unit.test.ts","name":"AEON-1040: inline confirmation cancels, binds the shown revision and reports a failed removal","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-remove.unit.test.ts","name":"AEON-1040: project, revision, viewer and authority changes invalidate removal and stale errors","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/lead-start.unit.test.ts","name":"AEON-1038: a sheet with launch off rejects pointer and keyboard submissions before any settings write","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/lead-start.unit.test.ts","name":"AEON-1038: the card disables Start and Resume with a reason, preserves Cancel, and names actual check failures","tier":"GATED-FULL"}
@@ -16075,6 +16093,10 @@
     {"kind":"vitest","file":"tests/profile-permissions.unit.test.ts","name":"profile permissions describe the caller’s personal profile","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1038: launch-off or unreadable policy refuses Start without a POST","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1040: a fresh external removal clears the card and outranks an older overlapping read","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1040: removal sends the confirmed revision and older reads cannot resurrect the lead","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a failed later question page keeps the questions read and says the rest are unread","tier":"GATED-FULL"}
     ,

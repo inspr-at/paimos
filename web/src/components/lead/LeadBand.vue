@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, toRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { can } from '../../lib/authz'
 import { canLaunchLead, canPause, canResume, leadLaunchReason, unmanagedLeadCopy, LEAD_WORDS } from '../../lib/lead'
@@ -13,10 +13,10 @@ import { useProjectLeads } from '../../stores/projectLeads'
 import { useSession } from '../../stores/session'
 import { useWorkQueue } from '../../stores/workQueue'
 import AppIcon from '../AppIcon.vue'
-import FloatingPanel from '../work/FloatingPanel.vue'
 import LeadBot from './LeadBot.vue'
 import LeadAdoption from './LeadAdoption.vue'
 import LeadLine from './LeadLine.vue'
+import LeadMenu from './LeadMenu.vue'
 
 // AEON-741: the lead is the centre of a project. One sentence says whether it
 // runs, what it does and what comes next; one primary action per state.
@@ -99,8 +99,6 @@ async function control(kind: 'cancel' | 'resume' | 'cancel-adoption') {
     if (project === props.projectId) toast(e instanceof Error ? e.message : 'The lead did not change.', { tone: 'error' })
   }
 }
-const menu = ref<HTMLElement | null>(null)
-function openSession() { const id = lead.value?.session_id; menu.value = null; if (id) void router.push(`/agents/${id}`) }
 const openPanel = (from: HTMLElement) => { if (lead.value && lead.value.state !== 'none') openLeadPanel(props.projectId, from) }
 const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:${id}` } })
 </script>
@@ -130,7 +128,7 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
         <button v-if="action && action.label" type="button" class="btn act-main" :class="{ primary: action.primary }" :aria-disabled="action.disabled || busy" :aria-describedby="['start', 'resume'].includes(band.action) && !canLaunchLead(lead) ? 'lead-launch-reason-band' : undefined" :data-tip="action.tip" data-act="main" @click="act">
           <AppIcon v-if="action.icon" :name="action.icon" :size="15" />{{ action.label }}
         </button>
-        <button v-if="band.state !== 'none' && lead?.session_id" type="button" class="icon-btn" :aria-label="`More ${w.l} actions`" aria-haspopup="menu" :aria-expanded="!!menu" @click="menu = menu ? null : $event.currentTarget as HTMLElement"><AppIcon name="more" /></button>
+        <LeadMenu v-if="lead && band.state !== 'none'" :project-id="projectId" :project-key="projectKey" :lead="lead" />
         <button v-if="band.state === 'none'" type="button" class="icon-btn flat fold-btn" aria-controls="lead-fold" :aria-expanded="!folded" :aria-label="`What the ${w.l} does`" :data-tip="foldTip" data-act="fold" @click="toggleFold"><AppIcon name="chevron-right" :size="16" /></button>
       </div>
     </div>
@@ -167,11 +165,6 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
     </template>
     <p v-if="band.state !== 'none'" class="lead-foot"><AppIcon name="shield" :size="14" /><span>{{ unmanaged ? unmanagedLeadCopy : band.foot }}</span></p>
 
-    <FloatingPanel v-if="menu" :anchor="menu" align="end" :width="300" :label="`More ${w.l} actions`" @close="restore => { if (restore) menu?.focus(); menu = null }">
-      <div role="menu" class="lead-menu">
-        <button type="button" role="menuitem" class="mi" @click="openSession"><AppIcon name="agent" /><span class="t">Open session</span><span class="d">The {{ w.l }}’s own session: chat, steps, handover.</span></button>
-      </div>
-    </FloatingPanel>
   </section>
 </template>
 
@@ -220,12 +213,6 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
 .asks-more { margin: 0; padding: 0 20px 10px 66px; font-size: 12.5px; }
 .lead-foot { display: flex; align-items: center; gap: 8px; margin: 6px -20px 0; padding: 10px 20px 8px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
 .lead-foot svg { flex: none; color: var(--ink-3); }
-.lead-menu { display: grid; }
-.mi { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 2px 10px; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
-.mi:hover, .mi:focus-visible { background: var(--row-hover); outline: none; }
-.mi svg { grid-row: span 2; margin-top: 2px; color: var(--ink-2); }
-.mi .t { font-size: 13.5px; font-weight: 600; }
-.mi .d { color: var(--ink-3); font-size: 12px; line-height: 1.4; }
 .live-mark { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 18%, transparent); }
 .dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; }
 .dot.warn { background: var(--gold); }
@@ -237,6 +224,7 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
   .lead-bot { width: 40px; height: 40px; }
   .lead-acts { display: contents; }
   .lead-acts .icon-btn { grid-area: more; }
+  .lead-acts :deep(.lead-menu-trigger) { grid-area: more; }
   .lead-acts .act-main { grid-area: acts; justify-self: end; min-height: 44px; }
   .lead-acts .fold-btn { width: 44px; height: 44px; }
   /* Phone: the name and state already sit on their own row below the controls; folded, they stay stacked. */
@@ -249,6 +237,6 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
   .asks-more { padding-left: 60px; }
   .lead-foot { padding: 10px 14px 8px; }
 }
-@media (pointer: coarse) { .mi { min-height: 52px; } .fold-btn { width: 44px; height: 44px; } }
+@media (pointer: coarse) { .fold-btn { width: 44px; height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .lead.moving .lead-fold, .fold-btn :deep(svg) { transition: none; } }
 </style>

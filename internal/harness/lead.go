@@ -306,7 +306,9 @@ func (m *Module) startLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			return nil, workorders.Fail(409, "lead process exit is unconfirmed")
 		}
 	}
-	l, err = scanLead(tx.QueryRow(ctx, `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state,reason) VALUES($1,$2,$3,'waiting_for_room','awaiting_generation') ON CONFLICT(tenant_id,project_id) DO UPDATE SET owner_principal_id=excluded.owner_principal_id,state='waiting_for_room',reason='awaiting_generation',revision=project_leads.revision+1,updated_at=clock_timestamp() RETURNING `+leadColumns, p.TenantID, id, owner))
+	// An intent created after removal must not reuse a revision that an older
+	// confirmation could still carry. The append-only removal audit retains it.
+	l, err = scanLead(tx.QueryRow(ctx, `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state,reason,revision) VALUES($1,$2,$3,'waiting_for_room','awaiting_generation',coalesce((SELECT ("before"->>'revision')::bigint FROM events WHERE tenant_id=$1 AND node_id=$2 AND type='lead.removed' ORDER BY id DESC LIMIT 1),0)+1) ON CONFLICT(tenant_id,project_id) DO UPDATE SET owner_principal_id=excluded.owner_principal_id,state='waiting_for_room',reason='awaiting_generation',revision=project_leads.revision+1,updated_at=clock_timestamp() RETURNING `+leadColumns, p.TenantID, id, owner))
 	if err != nil {
 		return nil, err
 	}
@@ -315,6 +317,55 @@ func (m *Module) startLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	return projectLead(ctx, tx, p, l)
 }
+
+// Removing an intent never erases a generation's immutable history. The same
+// project fence as start/claim also serializes permission changes.
+func (m *Module) removeLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	var in struct {
+		Revision int64 `json:"expected_revision"`
+	}
+	if err := workorders.Decode(r, &in); err != nil {
+		return nil, err
+	}
+	if in.Revision < 1 {
+		return nil, workorders.Fail(400, "valid revision required")
+	}
+	if p.Kind != tenant.Person {
+		return nil, workorders.Fail(403, "person required to remove lead")
+	}
+	ctx, id := r.Context(), r.PathValue("projectId")
+	if err := leadFence(ctx, tx, id); err != nil {
+		return nil, err
+	}
+	if err := authz.RequireTx(ctx, tx, p, "harness.control", authz.Scope{ProjectID: id}); err != nil {
+		return nil, err
+	}
+	l, err := loadLead(ctx, tx, id, true)
+	if err != nil {
+		return nil, err
+	}
+	if l.Revision != in.Revision {
+		return nil, workorders.Fail(409, "lead revision conflict")
+	}
+	var history bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_lead_generations WHERE project_id=$1)`, id).Scan(&history); err != nil {
+		return nil, err
+	}
+	if l.Generation != 0 || l.SessionID != nil || history {
+		return nil, workorders.Fail(409, "only a never-started lead can be removed")
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM project_leads WHERE project_id=$1`, id); err != nil {
+		return nil, err
+	}
+	next := Lead{ProjectID: id, State: "none"}
+	// No locks or writes after the event counter: removal and its audit commit
+	// together, and the public response is the ordinary empty lead projection.
+	if err = workorders.Record(ctx, tx, p, id, "lead.removed", l, next); err != nil {
+		return nil, err
+	}
+	return next, nil
+}
+
 func (m *Module) checkLeadAdmission(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner string, s Session) (string, error) {
 	if m.leadAdmission == nil {
 		return "admission_unavailable", nil
