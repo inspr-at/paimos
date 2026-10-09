@@ -25,7 +25,15 @@
     "Initial isolated checkout lacked generated api/openapi.yaml; generated it and reran the affected contract tests.",
     "Successful Fable telemetry has NULL error_code; normalize it to the absent error in the fixture assertion. No production telemetry behavior was changed."
   ],
-  "checked_code_commit": "7028cb98869e6c1fd53f0b789dd98b226d904892",
+  "checked_code_commit": "5f29a9bfa5673f54b0891624e177bc9184f32321",
+  "fix_round_2": {
+    "cause": "A nested 5s GetRun timeout was passed through pollContextError, so context.DeadlineExceeded aborted the whole poll while the 20s parent context was still live. Other accounts were not probed, queued work was not dispatched, and unsettled_previous_run was not reported.",
+    "fix": "On GetRun failure, return errSettlementParked joined only with the parent context error. The child timeout is not a poll deadline. The account still freezes through freezePreviousRun and the gap is read again on the next poll.",
+    "regression": "TestSettlementReadTimeoutDoesNotAbortLivePoll failed on 05c5cb2f with a live parent and context.DeadlineExceeded, then passed after the fix together with the existing settlement and poll-context tests.",
+    "remote_agentd": "full package passed, 179.796s, head 5f29a9bfa5673f54b0891624e177bc9184f32321, mbp2606",
+    "ci_static_merge_main": "exit 0; 41 checks passed, 0 skipped, 132.31s",
+    "left_non_blocking": "Old-generation gaps whose local state is not completed, failed, or cancelled stay unread. An existing harness, pin, or profile block can still be reported ahead of unsettled_previous_run."
+  },
   "safety": [
     "Assigned branch and worktree only; selected PPM/workstation-agents/INSPR identity and coordinator worker attribution verified.",
     "Only an additive optional response field was added to the existing run detail; no routes, scopes, secrets, DB migrations or checkpoint schema changes.",
