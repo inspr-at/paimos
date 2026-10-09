@@ -14,10 +14,11 @@ import (
 // retain the old golden schema, and add an explicit forward migration.
 // Version 1 belongs to classic and is never opened implicitly. Releases 123
 // and 124 both wrote version 2; version 3 accepts their known additive fields.
-const RecordSchemaVersion = 3
+// Version 4 adds private ledger attempts and process-group exit evidence.
+const RecordSchemaVersion = 4
 
 func recordMigrations() map[int]func(json.RawMessage) (Record, error) {
-	return map[int]func(json.RawMessage) (Record, error){2: migrateRecordV2}
+	return map[int]func(json.RawMessage) (Record, error){2: migrateRecordV2, 3: migrateRecordV2}
 }
 
 func migrateRecordV2(raw json.RawMessage) (Record, error) {

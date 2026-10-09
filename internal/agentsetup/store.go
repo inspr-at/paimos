@@ -136,6 +136,51 @@ func openDirectory(path string, create, private bool) (_ *Store, resultErr error
 
 func (s *Store) Path() string { return s.path }
 
+// Names reads a bounded inventory from the pinned directory, without following
+// pathname replacements. Callers validate each artifact through Read.
+func (s *Store) Names(maximum int) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if maximum < 1 || maximum > 4096 || s.root == nil {
+		return nil, ErrUnsafePath
+	}
+	fd, err := unix.Openat(int(s.root.Fd()), ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), "state-inventory")
+	defer f.Close()
+	names, err := f.Readdirnames(maximum + 1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	if len(names) > maximum {
+		return nil, errors.New("state inventory exceeds bound")
+	}
+	return names, nil
+}
+
+// MoveExact retains a corrupt owned artifact for operator inspection. Both
+// names remain under the same pinned directory and the destination is exclusive.
+func (s *Store) MoveExact(name, destination, digest string) error {
+	if s.readOnly {
+		return ErrReadOnly
+	}
+	raw, err := s.Read(name, 1<<20)
+	if err != nil {
+		return err
+	}
+	if Hash(raw) != digest || !validName(destination) {
+		return ErrCollision
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := renameExclusive(int(s.root.Fd()), name, destination); err != nil {
+		return err
+	}
+	return unix.Fsync(int(s.root.Fd()))
+}
+
 // Lock is held until Close. A crash releases it; the lock inode is retained.
 func (s *Store) Lock() error {
 	s.mu.Lock()
