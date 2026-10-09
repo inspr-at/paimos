@@ -158,7 +158,8 @@ func (m *Module) adoptLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		return nil, err
 	}
 	before := l
-	l, err = scanLead(tx.QueryRow(ctx, `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,session_id,state,reason) VALUES($1,$2,$3,$4,'waiting_for_room',$5) ON CONFLICT(tenant_id,project_id) DO UPDATE SET session_id=excluded.session_id,state=excluded.state,reason=excluded.reason,dispatch_key_id=NULL,revision=project_leads.revision+1,updated_at=clock_timestamp() RETURNING `+leadColumns, p.TenantID, id, owner, in.SessionID, adoptionPending))
+	// Preserve the removal revision fence across every explicit creation path.
+	l, err = scanLead(tx.QueryRow(ctx, `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,session_id,state,reason,revision) VALUES($1,$2,$3,$4,'waiting_for_room',$5,coalesce((SELECT ("before"->>'revision')::bigint FROM events WHERE tenant_id=$1 AND node_id=$2 AND type='lead.removed' ORDER BY id DESC LIMIT 1),0)+1) ON CONFLICT(tenant_id,project_id) DO UPDATE SET session_id=excluded.session_id,state=excluded.state,reason=excluded.reason,dispatch_key_id=NULL,revision=project_leads.revision+1,updated_at=clock_timestamp() RETURNING `+leadColumns, p.TenantID, id, owner, in.SessionID, adoptionPending))
 	if err != nil {
 		return nil, err
 	}

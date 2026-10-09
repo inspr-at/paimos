@@ -86,6 +86,7 @@
         "internal/agentd/**",
         "internal/agentsetup/**",
         "internal/harness/**",
+        "internal/harness/lead_remove_test.go",
         "internal/harness/lead_adopt.go",
         "internal/servicetier/**",
         "internal/harnesslaunch/**",
@@ -138,6 +139,7 @@
       "title": "Rules, doctrine and knowledge",
       "paths": [
         "internal/rules/**",
+        "internal/doctrinerepo/**",
         "internal/rulesimport/**",
         "internal/rulescompare/**",
         "internal/knowledge/**",
@@ -237,6 +239,7 @@
       "paths": [
         "web/src/views/**",
         "web/src/components/**",
+        "web/src/components/lead/LeadMenu.vue",
         "web/src/components/work/AttentionGroupMenu.vue",
         "web/src/components/work/AttentionBulkPreview.vue",
         "web/src/components/agents/ChatCodeBlock.vue",

@@ -41,6 +41,9 @@ const project = (id: string) => `/projects/${encodeURIComponent(id)}`
 export const readLead = (id: string) => leadRequest<ProjectLead>(`${project(id)}/lead`)
 /** Requests a lead; launches nothing. Also the restart after a confirmed stop. */
 export const startLead = (id: string, revision: number) => leadRequest<ProjectLead>(`${project(id)}/lead`, 'POST', { expected_revision: revision })
+/** Removes only an unclaimed intent; existing generation history is preserved. */
+export const removeLead = (id: string, revision: number) => leadRequest<ProjectLead>(`${project(id)}/lead`, 'DELETE', { expected_revision: revision })
+export const canRemoveLead = (lead: ProjectLead | null | undefined) => !!lead && lead.revision > 0 && lead.generation === 0 && lead.session_id === null && !lead.process_active
 /** Checkpoints and pauses: new dispatch stops now; the process keeps its slot until it exits. */
 export const pauseLead = (id: string, revision: number, generation: number) => leadRequest<ProjectLead>(`${project(id)}/lead/pause`, 'POST', { expected_revision: revision, generation })
 export interface LeadCandidate { id: string; display_label: string | null; harness: string; host: string; management_mode: string; reported_at: string }

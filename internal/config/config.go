@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/doctrinerepo"
 )
 
 // Config is the process configuration for `paimos serve`.
@@ -51,6 +53,8 @@ type Config struct {
 	// keys, one credential file and <ref>.allowlist.json per reference
 	// (AEON_DOCTRINE_CREDENTIALS_DIR, AEON-318). Aeon stores only the names.
 	DoctrineCredentialsDir string
+	// DoctrineRepositories is validated deployment-owned proposal policy.
+	DoctrineRepositories *doctrinerepo.Pair
 	// PairingNixGuide is deployment-admin-owned public guidance. There is no
 	// tenant or pairing-peer write path; absent configuration hides the block.
 	PairingNixGuide *PairingNixGuide
@@ -115,6 +119,19 @@ func FromEnv() (Config, error) {
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("AEON_DATABASE_URL is required")
 	}
+	publicRepository, publicSet := os.LookupEnv("AEON_DOCTRINE_PUBLIC_REPOSITORY")
+	if !publicSet {
+		publicRepository = doctrinerepo.DefaultPublic
+	}
+	privateRepository, privateSet := os.LookupEnv("AEON_DOCTRINE_PRIVATE_REPOSITORY")
+	if !privateSet {
+		privateRepository = doctrinerepo.DefaultPrivate
+	}
+	repositories, repositoryErr := doctrinerepo.Parse(publicRepository, privateRepository)
+	if repositoryErr != nil {
+		return Config{}, repositoryErr
+	}
+	cfg.DoctrineRepositories = &repositories
 	if file := os.Getenv("AEON_REVIEW_WEBHOOK_SECRET_FILE"); file != "" {
 		secret, err := reviewWebhookSecret(file)
 		if err != nil {

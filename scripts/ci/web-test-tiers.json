@@ -4600,6 +4600,18 @@
     ,
     {"kind":"browser","file":"tests/account-link.spec.ts","name":"the reviewed account can be confirmed once from the keyboard","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 400 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 400 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/accounts-card-fit.spec.ts","name":"accounts and computers fit every width, panel open and closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 1020 to 950px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -5103,6 +5115,8 @@
     {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"a workspace manager links a repository at a pinned release","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"an agent can propose but never sees the person-only proposal list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"configured private doctrine can be proposed while public packs stay read-only","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"external merges show repository release guidance and contextual controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -8387,6 +8401,20 @@
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"ticket: queued without a lead offers Start lead; a parent queues its open leaves; manual start stays expert-only","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"working lead: the line opens the docked panel, questions go to the Decision Desk, Pause is revision-bound","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: a previously started lead has no Remove control","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -12034,22 +12062,6 @@
     ,
     {"kind":"browser","file":"tests/usage-dashboard.spec.ts","name":"without account access the capacity band is hidden and the rest works","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1280 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1280 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/vendor-signals.spec.ts","name":"a computer approver loses the statusline toggle when account.manage is revoked","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/vendor-signals.spec.ts","name":"vendor throttling and explicit statusline consent 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -12599,6 +12611,12 @@
     {"kind":"node","file":"tests/account-limits.test.ts","name":"the unit menu offers what the account can count, likeliest first","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/account-link.test.ts","name":"account code accepts the one-line format without URL or command parsing","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/account-resets.test.ts","name":"the plan line is honest about off, nothing planned and the planned moment","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-resets.test.ts","name":"the reserved plan slot is at least as wide as every line the card can show","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-resets.test.ts","name":"the summary counts credits per expiry day and never hides later ones","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/accounts-overview.test.ts","name":"accounts overview merges only a canonical shared quota identity within one harness","tier":"ESSENTIAL"}
     ,
@@ -15262,6 +15280,10 @@
     ,
     {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > unfolding removes only that project from the stored list","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/lead-remove.unit.test.ts","name":"AEON-1040: inline confirmation cancels, binds the shown revision and reports a failed removal","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-remove.unit.test.ts","name":"AEON-1040: project, revision, viewer and authority changes invalidate removal and stale errors","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/lead-start.unit.test.ts","name":"AEON-1038: a sheet with launch off rejects pointer and keyboard submissions before any settings write","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/lead-start.unit.test.ts","name":"AEON-1038: the card disables Start and Resume with a reason, preserves Cancel, and names actual check failures","tier":"GATED-FULL"}
@@ -15812,7 +15834,7 @@
     ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"preserves project, kind and ticket context when entry points navigate to Models","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"the account posture discards a held save after switching records and keeps failures honest","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"the account reset switch discards a held save after switching records and keeps failures honest","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"orders and locks > keeps a locked line and a fallback the resolved list omitted","tier":"ESSENTIAL"}
     ,
@@ -16079,6 +16101,10 @@
     {"kind":"vitest","file":"tests/profile-permissions.unit.test.ts","name":"profile permissions describe the caller’s personal profile","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1038: launch-off or unreadable policy refuses Start without a POST","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1040: a fresh external removal clears the card and outranks an older overlapping read","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1040: removal sends the confirmed revision and older reads cannot resurrect the lead","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a failed later question page keeps the questions read and says the rest are unread","tier":"GATED-FULL"}
     ,

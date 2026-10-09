@@ -57,7 +57,7 @@ func (m *Module) CheckDeskTargetTx(ctx context.Context, tx pgx.Tx, actor tenant.
 	if err != nil {
 		return err
 	}
-	if !writableSource(source) {
+	if !m.writableSource(source) {
 		return fail(422, "unsupported_repository", "This source does not accept doctrine proposals.")
 	}
 	if source.CredentialRef != "" {
@@ -76,7 +76,7 @@ func (m *Module) CheckDeskTargetTx(ctx context.Context, tx pgx.Tx, actor tenant.
 	if rule.TLDR == nil && (in.TLDR == nil || strings.TrimSpace(in.TLDR.EN) == "") {
 		return fail(422, "doctrine_tldr_required", "This rule needs an English TL;DR with the proposal.")
 	}
-	if source.Repository == publicRepository {
+	if m.repositories.IsPublic(source.Repository) {
 		_, err = m.privateGuard(ctx, tx, actor)
 	}
 	return err
@@ -332,8 +332,8 @@ func (m *Module) prepareInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Pri
 	if err != nil {
 		return nil, err
 	}
-	if !writableSource(source) {
-		return nil, fail(422, "unsupported_repository", "Only the public and private INSPR doctrine repositories accept proposals; their visibility must match.")
+	if !m.writableSource(source) {
+		return nil, fail(422, "unsupported_repository", "Only the deployment-configured doctrine repositories accept proposals; their visibility must match.")
 	}
 	if source.CredentialRef != "" {
 		if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
@@ -345,7 +345,7 @@ func (m *Module) prepareInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Pri
 		return nil, err
 	}
 	var guard *guardCorpus
-	if source.Repository == publicRepository {
+	if m.repositories.IsPublic(source.Repository) {
 		guard, err = m.privateGuard(ctx, tx, actor)
 		if err != nil {
 			return nil, err
@@ -371,7 +371,7 @@ func (m *Module) prepareInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Pri
 	if err := pin.validate(); err != nil {
 		return nil, err
 	}
-	_, old, next, err := editRuleViews(source, files, pin)
+	_, old, next, err := m.editRuleViews(source, files, pin)
 	if err != nil {
 		return nil, err
 	}
@@ -438,13 +438,13 @@ func (m *Module) verifyPreparedTx(ctx context.Context, tx pgx.Tx, actor tenant.P
 			return err
 		}
 	}
-	if current.Repository == publicRepository {
+	if m.repositories.IsPublic(current.Repository) {
 		sources, err := listSources(ctx, tx)
 		if err != nil {
 			return err
 		}
 		for _, source := range sources {
-			if source.Repository == privateRepository {
+			if m.repositories.IsPrivate(source.Repository) {
 				if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
 					return err
 				}
