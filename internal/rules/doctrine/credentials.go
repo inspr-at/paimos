@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/inspr-at/paimos/internal/doctrinerepo"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
@@ -31,7 +32,13 @@ var ErrCredential = errors.New("credential unavailable")
 // AEON_DOCTRINE_CREDENTIALS_DIR, read at fetch time and held for that fetch.
 // The operator must also provision <ref>.allowlist.json with explicit grants
 // pairing tenant_id and repository. Tenant configuration never grants access.
-type Credentials struct{ Dir string }
+type Credentials struct {
+	Dir            string
+	MirrorDir      string
+	mirrorReadOnly func(*os.File) bool
+	app            *AppConfig
+	repositories   doctrinerepo.Pair
+}
 
 type catalogCredentialsKey struct{}
 
@@ -46,6 +53,9 @@ func (c Credentials) CatalogMiddleware(next http.Handler) http.Handler {
 
 // Token authorizes the tenant/repository pair before reading the token for ref.
 func (c Credentials) Token(ref, tenantID, repository string) (string, error) {
+	if ref == "github-app" || ref == "host-mirror" {
+		return "", ErrCredential
+	}
 	if err := c.authorize(ref, tenantID, repository); err != nil {
 		return "", err
 	}
@@ -71,6 +81,26 @@ func (c Credentials) Token(ref, tenantID, repository string) (string, error) {
 
 // authorize also protects cached doctrine when the operator revokes a grant.
 func (c Credentials) authorize(ref, tenantID, repository string) error {
+	switch ref {
+	case "github-app":
+		if c.app == nil || !c.app.readConfigured() || tenantID != c.app.TenantID || !c.repositories.IsPublic(repository) && !c.repositories.IsPrivate(repository) {
+			return ErrCredential
+		}
+		return c.authorize(c.app.KeyRef, tenantID, repository)
+	case "host-mirror":
+		if err := (Credentials{Dir: c.MirrorDir}).authorizeFile("host-mirror", tenantID, repository); err != nil {
+			return err
+		}
+		root, _, err := openMirror(c.MirrorDir, repository, c.mirrorReadOnly)
+		if root != nil {
+			root.Close()
+		}
+		return err
+	}
+	return c.authorizeFile(ref, tenantID, repository)
+}
+
+func (c Credentials) authorizeFile(ref, tenantID, repository string) error {
 	file, err := c.file(ref)
 	if err != nil || !workorders.UUID(tenantID) || !repositoryPattern.MatchString(repository) {
 		return ErrCredential
@@ -106,6 +136,26 @@ func (c Credentials) authorize(ref, tenantID, repository string) error {
 	}
 	if !allowed {
 		return ErrCredential
+	}
+	return nil
+}
+
+// authorizeSource also rejects a cached mirror whose host marker has moved.
+func (c Credentials) authorizeSource(s Source, tenantID string) error {
+	if err := c.authorize(s.CredentialRef, tenantID, s.Repository); err != nil {
+		return err
+	}
+	if s.CredentialRef == "host-mirror" {
+		root, commit, err := openMirror(c.MirrorDir, s.Repository, c.mirrorReadOnly)
+		if root != nil {
+			root.Close()
+		}
+		if err != nil {
+			return err
+		}
+		if commit != s.Commit {
+			return gitFail("the host mirror commit changed; reindex the source")
+		}
 	}
 	return nil
 }

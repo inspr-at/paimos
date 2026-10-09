@@ -41,6 +41,8 @@ import (
 type Options struct {
 	Repositories      *doctrinerepo.Pair
 	CredentialsDir    string
+	MirrorDir         string
+	DefaultSource     bool
 	Client            *http.Client
 	App               AppConfig
 	GuardKey          []byte
@@ -52,6 +54,7 @@ type Options struct {
 // Module serves the doctrine layer.
 type Module struct {
 	pool              *pgxpool.Pool
+	defaultSource     bool
 	credentials       Credentials
 	client            *http.Client
 	app               AppConfig
@@ -77,7 +80,9 @@ func New(pool *pgxpool.Pool, opts Options) *Module {
 	if opts.Repositories != nil {
 		repositories = *opts.Repositories
 	}
-	return &Module{repositories: repositories, privateIdentity: privateRepositoryIdentity(repositories.Private()), pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client, app: opts.App, guardMaster: key, binaryAllowlist: maps.Clone(opts.BinaryAllowlist), analysis: opts.Analysis.defaults(), analysisLearnings: opts.AnalysisLearnings}
+	m := &Module{defaultSource: opts.DefaultSource, repositories: repositories, privateIdentity: privateRepositoryIdentity(repositories.Private()), pool: pool, credentials: Credentials{Dir: opts.CredentialsDir, MirrorDir: opts.MirrorDir, repositories: repositories}, client: opts.Client, app: opts.App, guardMaster: key, binaryAllowlist: maps.Clone(opts.BinaryAllowlist), analysis: opts.Analysis.defaults(), analysisLearnings: opts.AnalysisLearnings}
+	m.credentials.app = &m.app
+	return m
 }
 
 func (m *Module) guardKey(tenantID string) []byte {
@@ -263,7 +268,7 @@ func (m *Module) tx(ctx context.Context, p tenant.Principal, permission string, 
 		}
 		// Proposal mutations serialize with workspace access changes. Check
 		// authority after taking the same tenant lock used by role writers.
-		if permission == "rules.write" || permission == "rules.publish" {
+		if permission == "settings.manage" || permission == "rules.write" || permission == "rules.publish" {
 			if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
 				return err
 			}
@@ -292,10 +297,10 @@ func (m *Module) load(ctx context.Context, p tenant.Principal, permission string
 		}
 		for _, s := range sources {
 			if s.CredentialRef != "" {
-				if err := m.credentials.authorize(s.CredentialRef, p.TenantID, s.Repository); err != nil {
+				if err := m.credentials.authorizeSource(s, p.TenantID); err != nil {
 					// A revoked grant also hides cached bytes without preventing
 					// the owner from managing the source or reading other sources.
-					s.IndexError, s.IndexedAt = ErrCredential.Error(), nil
+					s.IndexError, s.IndexedAt = safeMessage(err), nil
 					s.Skipped = nil
 					all = append(all, loaded{source: s})
 					continue
@@ -370,28 +375,47 @@ func (in SourceInput) validate() error {
 	return nil
 }
 
-// reader builds the repository reader for one fetch, with the token the
-// source's credential reference resolves to (none for a public source
-// without a reference).
-func (m *Module) reader(tenantID, repository, credentialRef string) (Reader, error) {
+// reader acquires one operation's reader and its mandatory cleanup.
+func (m *Module) reader(ctx context.Context, tenantID, repository, credentialRef string) (Reader, func(), error) {
+	noop := func() {}
+	switch credentialRef {
+	case "github-app":
+		g, err := m.installationClient(ctx, tenantID, repository, true)
+		if err != nil {
+			return nil, noop, err
+		}
+		return g, g.revoke, nil
+	case "host-mirror":
+		if err := m.credentials.authorize(credentialRef, tenantID, repository); err != nil {
+			return nil, noop, err
+		}
+		r, err := readMirror(ctx, m.credentials.MirrorDir, repository, m.credentials.mirrorReadOnly)
+		return r, noop, err
+	}
 	token := ""
 	if credentialRef != "" {
 		var err error
 		if token, err = m.credentials.Token(credentialRef, tenantID, repository); err != nil {
-			return nil, err
+			return nil, noop, err
 		}
 	}
-	return &GitHub{Token: token, Client: m.client}, nil
+	return &GitHub{Token: token, Client: m.client}, noop, nil
+}
+
+// CatalogMiddleware shares host policy with all cached doctrine consumers.
+func (m *Module) CatalogMiddleware(next http.Handler) http.Handler {
+	return m.credentials.CatalogMiddleware(next)
 }
 
 // pin resolves the input to a commit on the repository host.
 func (m *Module) pin(ctx context.Context, tenantID string, in SourceInput) (Commit, error) {
-	reader, err := m.reader(tenantID, in.Repository, in.CredentialRef)
+	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	defer cancel()
+	reader, cleanup, err := m.reader(ctx, tenantID, in.Repository, in.CredentialRef)
 	if err != nil {
 		return Commit{}, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
-	defer cancel()
+	defer cleanup()
 	target := in.Commit
 	if target == "" {
 		target = in.Ref
@@ -543,11 +567,18 @@ func (m *Module) remove(r *http.Request, p tenant.Principal) (any, error) {
 func (m *Module) reindex(r *http.Request, p tenant.Principal) (any, error) {
 	ctx := r.Context()
 	id := r.PathValue("sourceId")
+	var source Source
 	if err := m.tx(ctx, p, "settings.manage", func(tx pgx.Tx) error {
-		_, err := getSource(ctx, tx, id, false)
+		var err error
+		source, err = getSource(ctx, tx, id, false)
 		return err
 	}); err != nil {
 		return nil, err
+	}
+	if source.Repository != m.repositories.Private() {
+		if err := m.EnsureDefaultSource(ctx); err != nil {
+			return nil, err
+		}
 	}
 	m.index(context.WithoutCancel(ctx), p, id)
 	return m.load(ctx, p, "settings.manage")
@@ -558,27 +589,46 @@ func (m *Module) reindex(r *http.Request, p tenant.Principal) (any, error) {
 // move meanwhile. A failure is recorded on the source, never returned: the
 // pin stays as configured and the layer shows why it could not be read.
 func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
+	err := m.indexWith(ctx, p, id, func(fn func(pgx.Tx) error) error { return m.tx(ctx, p, "settings.manage", fn) })
+	if err != nil {
+		slog.Error("doctrine index", "source", id, "err", err)
+	}
+}
+
+func (m *Module) indexWith(ctx context.Context, p tenant.Principal, id string, run func(func(pgx.Tx) error) error) error {
 	var s Source
-	if err := m.tx(ctx, p, "settings.manage", func(tx pgx.Tx) error {
+	if err := run(func(tx pgx.Tx) error {
 		var err error
 		s, err = getSource(ctx, tx, id, false)
 		return err
 	}); err != nil {
-		return
+		return err
+	}
+	before := s
+	var pinErr error
+	if s.CredentialRef == "host-mirror" {
+		var commit Commit
+		commit, pinErr = m.pin(ctx, p.TenantID, SourceInput{Repository: s.Repository, CredentialRef: s.CredentialRef, Ref: "main"})
+		if pinErr == nil {
+			s.Commit, s.CommittedAt = commit.SHA, commit.CommittedAt
+		}
 	}
 	files, skipped, corpus, fetchErr := m.fetch(ctx, p.TenantID, s)
+	if pinErr != nil {
+		fetchErr = pinErr
+	}
 	// Resolving main is an index operation, never a prerequisite fetched on a
 	// refusing proposal. A failed refresh removes the exemption cache only.
 	var main *publicMainSnapshot
 	if fetchErr == nil && m.repositories.IsPublic(s.Repository) && s.Visibility == "public" {
 		main = m.readPublicMain(ctx, p.TenantID, s)
 	}
-	err := m.tx(ctx, p, "settings.manage", func(tx pgx.Tx) error {
+	err := run(func(tx pgx.Tx) error {
 		current, err := getSource(ctx, tx, id, true)
 		if err != nil {
 			return err
 		}
-		if current.Commit != s.Commit || !slices.Equal(current.Paths, s.Paths) {
+		if current.Commit != before.Commit || current.CredentialRef != before.CredentialRef || current.Visibility != before.Visibility || !slices.Equal(current.Paths, before.Paths) {
 			return nil // the pin moved meanwhile; that change indexes itself
 		}
 		if fetchErr != nil {
@@ -586,6 +636,14 @@ func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
 				return err
 			}
 			return recordIndexError(ctx, tx, id, safeMessage(fetchErr))
+		}
+		if err := m.credentials.authorizeSource(s, p.TenantID); s.CredentialRef != "" && err != nil {
+			return recordIndexError(ctx, tx, id, safeMessage(err))
+		}
+		if current.Commit != s.Commit {
+			if s, err = updateSource(ctx, tx, current, s); err != nil {
+				return err
+			}
 		}
 		if err := storeIndex(ctx, tx, p.TenantID, s, files, skipped); err != nil {
 			return err
@@ -611,18 +669,17 @@ func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
 		}})
 		return err
 	})
-	if err != nil {
-		slog.Error("doctrine index", "source", id, "err", err)
-	}
+	return err
 }
 
 func (m *Module) fetch(ctx context.Context, tenantID string, s Source) ([]File, []Skip, []byte, error) {
-	reader, err := m.reader(tenantID, s.Repository, s.CredentialRef)
+	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	defer cancel()
+	reader, cleanup, err := m.reader(ctx, tenantID, s.Repository, s.CredentialRef)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
-	defer cancel()
+	defer cleanup()
 	files, skipped, err := Fetch(ctx, reader, s.Repository, s.Commit, s.Paths)
 	if err != nil {
 		return nil, nil, nil, err
@@ -722,13 +779,14 @@ func (m *Module) rebuildGuard(ctx context.Context, tenantID, id string) error {
 	if !m.repositories.IsPrivate(s.Repository) || s.Visibility != "private" || s.IndexedAt == nil || s.CredentialRef == "" {
 		return nil
 	}
-	reader, err := m.reader(tenantID, s.Repository, s.CredentialRef)
+	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	defer cancel()
+	reader, cleanup, err := m.reader(ctx, tenantID, s.Repository, s.CredentialRef)
 	if err != nil {
 		return err
 	}
-	fetchCtx, cancel := context.WithTimeout(ctx, fetchTimeout)
-	corpus, err := readPrivateCorpus(fetchCtx, reader, s.Repository, s.Commit, m.guardKey(tenantID), m.binaryAllowlist)
-	cancel()
+	defer cleanup()
+	corpus, err := readPrivateCorpus(ctx, reader, s.Repository, s.Commit, m.guardKey(tenantID), m.binaryAllowlist)
 	if err != nil {
 		return err
 	}
@@ -737,8 +795,11 @@ func (m *Module) rebuildGuard(ctx context.Context, tenantID, id string) error {
 		if err != nil {
 			return err
 		}
-		if current.Commit != s.Commit || current.IndexedAt == nil {
+		if current.Commit != s.Commit || current.CredentialRef != s.CredentialRef || current.Visibility != s.Visibility || current.IndexedAt == nil {
 			return nil
+		}
+		if err := m.credentials.authorizeSource(current, tenantID); err != nil {
+			return err
 		}
 		return storeGuardCorpus(ctx, tx, tenantID, current, corpus)
 	})

@@ -50,7 +50,7 @@ func LoadCatalog(ctx context.Context, tx pgx.Tx) (Catalog, error) {
 				return Catalog{}, err
 			}
 			credentials, _ := ctx.Value(catalogCredentialsKey{}).(Credentials)
-			if err := credentials.authorize(s.CredentialRef, tenantID, s.Repository); err != nil {
+			if err := credentials.authorizeSource(s, tenantID); err != nil {
 				// Fail closed before reading the cache or exposing a matching
 				// identity. Publication cannot certify an inaccessible source.
 				return Catalog{}, err

@@ -358,7 +358,7 @@ paths:
   /rules/doctrine/sources:
     post:
       operationId: addDoctrineSource
-      description: "settings.manage; person only. Adds a repository to the doctrine layer, pinned to a commit. The server resolves ref (or checks commit) on GitHub before anything is stored, then indexes the pinned commit; a failed index is recorded on the source (state failed, error), the pin stays. A private repository names a credential reference; the server requires an operator-owned tenant/repository grant in credential_ref.allowlist.json beside the token before reading it at fetch time and never stores, logs or returns it. Tenant owners cannot grant credential access. GitHub reads use only https://api.github.com and never follow redirects. At most 8 repositories per workspace."
+      description: "settings.manage; person only. Adds a repository to the doctrine layer, pinned to a commit. The server resolves ref (or checks commit) through the configured reader before anything is stored, then indexes the pinned commit; a failed index is recorded on the source (state failed, error), the pin stays. A private repository names a credential reference; the server requires an operator-owned tenant/repository grant before fetching with a token file, the GitHub App, or a read-only host mirror and never stores, logs or returns it. Tenant owners cannot grant credential access. GitHub reads use only https://api.github.com and never follow redirects. At most 8 repositories per workspace."
       requestBody:
         required: true
         content:
@@ -418,7 +418,7 @@ paths:
       - {name: sourceId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: indexDoctrineSource
-      description: "settings.manage; person only. Reads the source again at its pinned commit and replaces the cache. A failure keeps the files of the last successful index at this commit and sets error. An unavailable credential grant prevents fetching and hides cached files until the operator authorizes this workspace/repository again."
+      description: "For host-mirror, reindex resolves the current host commit marker and updates the pin and both indexes together. settings.manage; person only. Reads the source again at its pinned commit and replaces the cache. A failure keeps the files of the last successful index at this commit and sets error. An unavailable credential grant prevents fetching and hides cached files until the operator authorizes this workspace/repository again."
       responses:
         '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         "200":
@@ -1188,7 +1188,7 @@ components:
         committed_at: {type: string, format: date-time}
         pinned_at: {type: string, format: date-time, description: "When this commit was pinned in Aeon"}
         paths: {type: array, minItems: 1, maxItems: 20, items: {type: string}}
-        credential_ref: {type: string, description: "Name of the read-only credential; never the credential"}
+        credential_ref: {type: string, description: "Host credential name, github-app, or host-mirror; never a token"}
         url: {type: string, format: uri}
         state: {type: string, enum: [ready, not_indexed, failed]}
         error: {type: string, maxLength: 300}
@@ -1206,7 +1206,7 @@ components:
         ref: {type: string, maxLength: 128}
         commit: {type: string, pattern: "^[0-9a-f]{40}$"}
         paths: {type: array, maxItems: 20, items: {type: string, maxLength: 200}}
-        credential_ref: {type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$", description: "Required for a private repository. Names a token file in the server's AEON_DOCTRINE_CREDENTIALS_DIR, with an operator-owned credential_ref.allowlist.json granting this tenant/repository pair"}
+        credential_ref: {type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$", description: "Required for a private repository. Names a token file under AEON_DOCTRINE_CREDENTIALS_DIR with a tenant/repository allowlist, or github-app for a short-lived exact-repository contents:read token using the App key allowlist, or host-mirror for an allowlisted read-only host tree under AEON_DOCTRINE_MIRROR_DIR. Host policy is never tenant-editable"}
     DoctrineTLDR:
       type: object
       additionalProperties: false

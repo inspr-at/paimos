@@ -8492,6 +8492,14 @@
     ,
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDeploymentDoctrineRepositoryBoundary","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineAppReadBoundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineHostDefaultPreservesTokenFileSource","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineHostDefaultRegistration","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineHostMirrorBoundary","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineInboxDismissalBeatsARacingSubmission","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineInboxDraftCleanupRollsBack","tier":"GATED-FULL"}
