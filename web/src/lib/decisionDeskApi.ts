@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Single adapter for P1/P2/P3 and protected AEON-455/436/524 integrations.
 import { readKeyTrims, decideKeyTrim, type KeyTrimProposal, type KeyTrimCursors } from './keyTrim'
+import { approveStepup, declineStepup, readStepups, stepupAnswer, stepupDelivery, stepupTitle, type StepupDevices, type StepupRequest } from './stepup'
 import { api, APIError, getNode, getProjects, getRelations, lookupNodeKeys, type WorkNode } from './api'
 import { listApprovals, decideApproval, listMessages, resolveMessage, type Approval, type ProjectMessage, type HarnessSession } from './agents'
 import { canDecideApproval, decidedApprovals } from './agentState'
@@ -134,8 +135,20 @@ export function keyTrimItem(proposal: KeyTrimProposal): DeskItem {
     delivery: proposal.state === 'applied' ? 'Trim applied. Restore is available for 30 days, subject to current scopes and grant authority.' : proposal.state === 'restored' ? 'The previous scope set was restored.' : undefined,
   }
 }
-export interface DeskSources { questions: Map<string, Question>; approvals: Map<string, Approval>; actions: Map<string, ProjectMessage>; rules: Map<string, DoctrineInboxItem>; keyTrims: Map<string, KeyTrimProposal> }
-export const emptySources = (): DeskSources => ({ questions: new Map(), approvals: new Map(), actions: new Map(), rules: new Map(), keyTrims: new Map() })
+export function stepupItem(request: StepupRequest, projectName = request.project_id ? 'Project name unavailable' : 'Workspace'): DeskItem {
+  const pending = request.state === 'pending'
+  return { ...base(`s:${request.id}`, 'stepup', stepupTitle(request, projectName), 'An agent asked for this one protected change. Its own key cannot make it.', []),
+    projectId: request.project_id ?? '', projectName, revision: request.revision, createdAt: request.created_at,
+    expiresAt: pending ? request.expires_at : undefined, decided: !pending, stepup: request, answer: stepupAnswer(request),
+    findings: `Needs ${request.permission} · ${projectName}\nUsed once; expires 15 minutes after the request.\nBound to this change (sha256):\n${request.request_digest}`,
+    meanwhile: 'The agent waits for this one change.',
+    destination: 'This change only, applied once as you after your passkey or a fresh sign-in. The agent keeps its key and scopes as they are.',
+    suggestion: 'Approve asks for your passkey or a fresh sign-in, then applies exactly this change, once.',
+    delivery: stepupDelivery(request),
+  }
+}
+export interface DeskSources { questions: Map<string, Question>; approvals: Map<string, Approval>; actions: Map<string, ProjectMessage>; rules: Map<string, DoctrineInboxItem>; keyTrims: Map<string, KeyTrimProposal>; stepups: Map<string, StepupRequest> }
+export const emptySources = (): DeskSources => ({ questions: new Map(), approvals: new Map(), actions: new Map(), rules: new Map(), keyTrims: new Map(), stepups: new Map() })
 /** Upstream owners supply their native, permission-checked flows here. No
  * guessed endpoints, boolean verification bypass, or Q&A fallback is accepted. */
 export interface ProtectedDeskAdapters {
@@ -143,6 +156,8 @@ export interface ProtectedDeskAdapters {
   phoneApproval?: (approval: Approval, decision: 'approved' | 'denied', reason: string) => Promise<void>
   // AEON-436's exact generation, revision and native permission contract.
   tiers?: { read: (pending?: readonly DeskProjectionItem[]) => Promise<{ items: DeskItem[]; warnings: string[] }>; allowed: (item: DeskItem) => boolean; decide: (item: DeskItem, draft: DeskDraft, requestId: string) => Promise<DeskItem> }
+  // AEON-1048: the browser's passkey prompt and navigation, injectable for tests.
+  stepup?: StepupDevices
 }
 interface TierRequest { id: string; session_id: string; tier: 'default' | 'fast' | 'fastest'; reason: string; state: 'pending' | 'approved' | 'declined'; created_at: string }
 interface SessionTier { session_id: string; revision: number; read_only: boolean; read_only_reason?: string; requests: TierRequest[] }
@@ -283,7 +298,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
   const projection = trimCursorsOrProjection === null || 'items' in trimCursorsOrProjection ? trimCursorsOrProjection : suppliedProjection
   const trimCursors: KeyTrimCursors = trimCursorsOrProjection && !('items' in trimCursorsOrProjection) ? trimCursorsOrProjection : {}
   const sources = emptySources(), warnings: string[] = [], items: DeskItem[] = []
-  const [projectsResult, openResult, answeredResult, approvalsResult, rulesResult, trimsResult] = await Promise.allSettled([getProjects(), readQuestionPages('open', pages.open), readQuestionPages('answered', pages.answered), listApprovals(), getDoctrineInbox(), readKeyTrims(trimCursors)])
+  const [projectsResult, openResult, answeredResult, approvalsResult, rulesResult, trimsResult, stepupsResult] = await Promise.allSettled([getProjects(), readQuestionPages('open', pages.open), readQuestionPages('answered', pages.answered), listApprovals(), getDoctrineInbox(), readKeyTrims(trimCursors), readStepups()])
   const projects = projectsResult.status === 'fulfilled' ? projectsResult.value.items : []
   if (projectsResult.status === 'rejected') warnings.push('Project names unavailable; source access could not be confirmed.')
   const name = (id: string) => projects.find(project => project.id === id)?.title ?? 'Project name unavailable'
@@ -326,6 +341,10 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     warnings.push(...trimsResult.value.warnings)
     for (const proposal of trimsResult.value.items) { const item = keyTrimItem(proposal); sources.keyTrims.set(item.id, proposal); items.push(item) }
   } else warnings.push('Key trim proposals could not be read; key management rights are required.')
+  if (stepupsResult.status === 'fulfilled') {
+    warnings.push(...stepupsResult.value.warnings)
+    for (const request of stepupsResult.value.items) { const item = stepupItem(request, request.project_id ? name(request.project_id) : 'Workspace'); sources.stepups.set(item.id, request); items.push(item) }
+  } else warnings.push('Step-up approvals could not be read.')
   if (adapters.tiers) {
     try {
       const read = await adapters.tiers.read(projection?.items)
@@ -371,7 +390,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
       if (item && !item.decided) return { ...item, held: row.held, source: row.source,
         unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : item.unavailable }
       warnings.push('Some source details could not be confirmed. Retry remains available.')
-      return { ...base(id, row.kind === 'question' ? 'question' : row.kind === 'action_request' ? 'action' : row.kind === 'doctrine' ? 'rule' : row.kind === 'tier_request' ? 'tier' : row.kind === 'key_trim' ? 'key_trim' : 'approval', row.title, '', []),
+      return { ...base(id, row.kind === 'question' ? 'question' : row.kind === 'action_request' ? 'action' : row.kind === 'doctrine' ? 'rule' : row.kind === 'tier_request' ? 'tier' : row.kind === 'key_trim' ? 'key_trim' : row.kind === 'stepup' ? 'stepup' : 'approval', row.title, '', []),
         projectId: row.project_id ?? '', projectName: row.project_id ? name(row.project_id) : 'Workspace', revision: row.revision, createdAt: row.created_at,
         held: row.held, source: row.source, unavailable: 'Source details are unavailable or changed. Close and Retry before deciding.' }
     })
@@ -386,6 +405,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
 export function decisionPermission(item: DeskItem, sources: DeskSources, can: (permission: string, project?: string) => boolean, adapters: ProtectedDeskAdapters = {}): boolean {
   if (item.kind === 'question' || item.kind === 'handover') return can('questions.read', item.projectId) && can('questions.decide', item.projectId)
   if (item.kind === 'key_trim') return can('keys.manage')
+  if (item.kind === 'stepup') return !!item.stepup && can(item.stepup.permission, item.stepup.project_id)
   if (item.kind === 'approval') { const approval = sources.approvals.get(item.id); return !!approval && canDecideApproval(approval, can) }
   if (item.kind === 'action') return can('inbox.manage', item.projectId)
   if (item.kind === 'rule') return can('rules.write')
@@ -401,6 +421,14 @@ export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: Desk
     const updated = await decideKeyTrim(source, decision, requestId)
     sources.keyTrims.set(item.id, updated)
     return keyTrimItem(updated)
+  }
+  if (item.kind === 'stepup') {
+    const source = sources.stepups.get(item.id)
+    if (!source || !item.stepup || source.request_digest !== item.stepup.request_digest || source.revision !== item.revision || source.state !== 'pending' || item.decided) throw new Error('The step-up request changed. Reopen the memo.')
+    if (draft.optionId !== 'approve' && draft.optionId !== 'decline') throw new Error('Choose Approve or Decline.')
+    const updated = draft.optionId === 'approve' ? await approveStepup(source, adapters.stepup) : await declineStepup(source, adapters.stepup?.signal)
+    sources.stepups.set(item.id, updated)
+    return stepupItem(updated, item.projectName)
   }
   if (item.kind === 'question' || item.kind === 'handover') {
     const question = sources.questions.get(item.id)

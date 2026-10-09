@@ -7,7 +7,8 @@ import DoctrineProposalDialog from '../components/rules/DoctrineProposalDialog.v
 import { getDoctrine, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineInboxItem, type DoctrineProposal } from '../lib/doctrine'
 import { arrivals, deskItemID, deskLinkItem, kindLabels, newRound, outcomeLabels, type DeskDraft, type DeskItem, type DeskOutcome } from '../lib/decisionDesk'
 import { approvalItem, commitDesk, decisionPermission, emptySources, loadDesk, loadMoreQuestions, nativeTierAdapter, questionItem, readApproval, readQuestion, MAX_QUESTION_PAGES, type DeskRead, type DeskSources } from '../lib/decisionDeskApi'
-import { phoneVerificationAvailable } from '../lib/deskPhoneApproval'
+import { phoneCapability } from '../lib/deskPhoneApproval'
+import { settledElsewhere } from '../lib/stepup'
 import { can, onAccessChange } from '../lib/authz'
 import { useSession } from '../stores/session'
 import { useAgents } from '../stores/agents'
@@ -31,6 +32,8 @@ const items = ref<DeskItem[]>([]), roundItems = ref<DeskItem[]>([]), round = ref
 const memoRound = ref(0)
 const state = ref<'loading' | 'ready'>('loading'), warnings = ref<string[]>([]), more = ref({ open: false, answered: false }), loading = ref(false), pages = ref({ open: 1, answered: 1 }), filter = ref<'open' | 'decided'>('open'), outcomeFilter = ref<DeskOutcome | ''>('')
 const roundBaseline = ref<string[]>([]), phoneVerification = ref<boolean | undefined>(), capabilityError = ref('')
+// Names the step-up method on Approve; the server makes the actual choice.
+const stepupMethod = ref('Passkey or sign-in')
 const trimCursors = ref<KeyTrimCursors>({}), nextKeyTrims = ref<KeyTrimCursors>({})
 const trimState = computed(() => filter.value === 'open' ? 'pending' : 'decided')
 let sources: DeskSources = emptySources(), generation = 0, alive = true
@@ -174,14 +177,17 @@ async function revoke(item: DeskItem): Promise<DeskItem> {
   revoked.value = new Set(revoked.value).add(item.id)
   return { ...item, delivery: 'The grant was revoked. The original decision stays in history.' }
 }
-async function decide(item: DeskItem, draft: DeskDraft, requestId: string) {
+async function decide(item: DeskItem, draft: DeskDraft, requestId: string, signal?: AbortSignal) {
   const identity = owner.value
   const declineBlockedTrim = item.kind === 'key_trim' && draft.optionId === 'decline' && item.keyTrim?.state === 'pending' && item.unavailable === item.keyTrim.blocked_reason
   if (!allowed(item) || (item.unavailable && !declineBlockedTrim)) throw new Error('This action is no longer available to this person.')
   if (item.expiresAt && Date.parse(item.expiresAt) <= Date.now()) throw new Error('This request expired.')
   if (item.kind === 'approval' && phoneVerification.value === undefined) throw new Error(capabilityError.value || 'Approval verification availability is still being checked.')
-  const result = await commitDesk(item, draft, sources, requestId, phoneVerification.value === true, adapters)
+  const result = await commitDesk(item, draft, sources, requestId, phoneVerification.value === true, { ...adapters, stepup: { signal } })
   if (!alive || identity !== owner.value) throw new Error('The signed-in person changed. Reopen the desk.')
+  // First decision wins: someone else's outcome is shown, never as recorded by this person.
+  const elsewhere = result.stepup && settledElsewhere(result.stepup, session.identity?.principal.id ?? '')
+  if (elsewhere) { recorded(result); throw new Error(elsewhere) }
   return result
 }
 function recorded(item: DeskItem) {
@@ -198,9 +204,9 @@ watch(owner, () => {
   sources = emptySources(); adapters = makeAdapters(); filter.value = route.query.view === 'decided' ? 'decided' : 'open'; outcomeFilter.value = ''; pages.value = { open: 1, answered: 1 }
   trimCursors.value = {}; nextKeyTrims.value = {}
   currentRead = undefined
-  phoneVerification.value = undefined; capabilityError.value = ''
+  phoneVerification.value = undefined; capabilityError.value = ''; stepupMethod.value = 'Passkey or sign-in'
   const identity = owner.value
-  void phoneVerificationAvailable().then(available => { if (alive && identity === owner.value) phoneVerification.value = available })
+  void phoneCapability().then(capability => { if (alive && identity === owner.value) { phoneVerification.value = capability.available; stepupMethod.value = capability.passkeys ? 'Passkey' : 'Sign in again' } })
     .catch(() => { if (alive && identity === owner.value) capabilityError.value = 'Approval verification availability could not be confirmed. Refresh the page before deciding.' })
   void refresh()
 }, { immediate: true, flush: 'sync' })
@@ -226,7 +232,7 @@ onBeforeUnmount(() => { alive = false; generation++; stopAccess(); clearInterval
     <p class="readiness">Handover-question import is awaiting a verified source contract. Answers to existing questions keep their verified successor route.</p>
     <p class="chore-line">Sign-ins and account setup remain in <RouterLink to="/agents">Agents</RouterLink>.</p>
     <p v-if="opened && fresh.length" class="arrival-line">{{ fresh.length }} new item{{ fresh.length === 1 ? '' : 's' }} waiting for the next round.</p>
-    <DecisionDeskMemo v-if="opened" :key="`${owner}:${memoRound}`" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :pending-rule-ids="items.filter(row => row.kind === 'rule' && !row.decided).map(row => row.id.slice(2))" :allowed="allowed" :decide="decide" :can-revoke="canRevoke" :revoke="revoke" :edit-rule="editRule" @recorded="recorded" @close="opened = false; ruleEdit = undefined" />
+    <DecisionDeskMemo v-if="opened" :key="`${owner}:${memoRound}`" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :pending-rule-ids="items.filter(row => row.kind === 'rule' && !row.decided).map(row => row.id.slice(2))" :allowed="allowed" :decide="decide" :stepup-method="stepupMethod" :can-revoke="canRevoke" :revoke="revoke" :edit-rule="editRule" @recorded="recorded" @close="opened = false; ruleEdit = undefined" />
     <DoctrineProposalDialog v-if="ruleEdit" :key="owner" :source="ruleEdit.source" :file="ruleEdit.file" :rule="ruleEdit.rule" :draft="ruleEdit.draft" @close="ruleEdit = undefined" @saved="editedRule" />
   </main>
 </template>
