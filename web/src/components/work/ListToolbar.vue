@@ -1,14 +1,17 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { DIMENSION_BY_KEY, DIMENSIONS, activeDimensions, dateLabel, excluded, fieldLabel, included, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import { DIMENSION_BY_KEY, DIMENSIONS, GROUPS, activeDimensions, dateLabel, excluded, fieldLabel, included, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
 import { TICKET_GRAPH_FILTERS } from '../../lib/ticketGraphRenderer'
-import { plural, type SortKey } from '../../lib/work'
+import type { SortKey } from '../../lib/work'
+import { menuPanelWidth } from '../../lib/menuColumns'
 import AppIcon from '../AppIcon.vue'
 import ProjectTabs from './ProjectTabs.vue'
 import { TICKET_VIEWS, KNOWLEDGE_VIEWS, type TicketView } from './projectNavigation'
 import DateMenu from './DateMenu.vue'
+import DisplayMenu from './DisplayMenu.vue'
 import DisplayPanel from './DisplayPanel.vue'
+import HeaderRoomyChoice from './HeaderRoomyChoice.vue'
 import FacetMenu from './FacetMenu.vue'
 import FilterMenu from './FilterMenu.vue'
 import FloatingPanel from './FloatingPanel.vue'
@@ -43,6 +46,8 @@ const props = defineProps<{
   headerGraph?: boolean
   settingsTarget?: string
   projectHeader?: boolean
+  // The project header is collapsed: Display moves into the toolbar and carries what the header hid.
+  collapsedHeader?: boolean
   attention?: { owner: string; filters: AttentionFilters; group: AttentionGrouping; facets: { projects: AttentionFacet[]; assignees: AttentionFacet[] }; truncated: boolean; locale: string }
 }>()
 const emit = defineEmits<{
@@ -82,6 +87,12 @@ onMounted(() => {
   resize = new ResizeObserver(([entry]) => { narrow.value = entry.contentRect.width < 940 })
   resize.observe(root.value)
 })
+// Windows this narrow (and phones) show the collapsed header's Display menu as a sheet.
+const sheetMode = ref(window.innerWidth <= 900)
+const menuColumns = ref(1)
+const onWindowResize = () => { sheetMode.value = window.innerWidth <= 900 }
+onMounted(() => window.addEventListener('resize', onWindowResize))
+onBeforeUnmount(() => window.removeEventListener('resize', onWindowResize))
 const input = ref<HTMLInputElement>()
 const filterButton = ref<HTMLButtonElement>()
 const open = ref<{ dimension: Dimension; anchor: HTMLElement } | null>(null)
@@ -142,7 +153,16 @@ const activeFilterCount = computed(() => active.value.length + (!graph.value && 
 const groupWord = computed(() => props.filters.group === 'tag' ? 'label' : props.filters.group)
 const displayLabel = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `Grouped by ${groupWord.value}`)
 watch(() => props.view, () => { open.value = null; menuAnchor.value = null; dateAnchor.value = null; displayAnchor.value = null; hideAnchor.value = null })
-const displayText = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `By ${groupWord.value}`)
+// Every label the collapsed trigger can show. The button is as wide as the longest,
+// so choosing a grouping never resizes it or the New button beside it.
+function displayPhrase(group: GroupBy) { return group === 'none' ? 'Display' : `By ${group === 'tag' ? 'label' : group}` }
+const displayWords = GROUPS.map(option => displayPhrase(option.value))
+const displayText = computed(() => props.view === 'outline' ? 'Display' : displayPhrase(props.filters.group))
+// The collapsed header's menu replaces the plain Display panel; the attention host keeps its own.
+const collapsedMenu = computed(() => !!props.collapsedHeader && !props.attention)
+const displayOn = computed(() => props.view === 'list' && props.filters.group !== 'none')
+// Folding or unfolding the header moves the Display button: its popovers anchor to the old place.
+watch(() => props.collapsedHeader, () => { displayAnchor.value = null; hideAnchor.value = null })
 
 function title(dimension: Dimension) { return DIMENSION_BY_KEY.get(dimension)!.title }
 function openMenu(dimension: Dimension, anchor: HTMLElement) {
@@ -182,6 +202,8 @@ function closeDisplay(restore: boolean) {
   displayAnchor.value = null
   if (restore) anchor?.focus()
 }
+// The gear in the collapsed menu: Hide's choices open where the Display button is, once the menu has closed.
+function openHideFromMenu() { const anchor = displayAnchor.value; closeDisplay(false); hideAnchor.value = anchor }
 function closeDate(restore: boolean) {
   const anchor = dateAnchor.value
   dateAnchor.value = null
@@ -209,8 +231,8 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
       :selected="view === 'knowledge' ? knowledgeView ?? 'entries' : view"
       :tips="view !== 'knowledge'"
       :label="view === 'knowledge' ? 'Knowledge views' : 'Ticket views'" @select="value => emit('view', value)" />
-    <span v-if="view !== 'knowledge'" class="count-live">
-      <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ attention ? `${total} ${attentionWord('suggestions', 'Vorschläge')}` : plural(total, 'ticket') }}</template></span>
+    <span v-if="attention" class="count-live">
+      <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ `${total} ${attentionWord('suggestions', 'Vorschläge')}` }}</template></span>
     </span>
     <span v-if="view !== 'knowledge'" class="phone-break" aria-hidden="true" />
     <template v-if="view !== 'knowledge'">
@@ -268,12 +290,19 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
     ><AppIcon :name="filters.showClosed ? 'eye' : 'eye-off'" :size="14" /><HideLabel :states="filters.hideStates" /></button>
     <button type="button" class="hide-gear" aria-label="Choose what Hide hides" data-tip="Choose what Hide hides" aria-haspopup="dialog" :aria-expanded="!!hideAnchor" @click="hideAnchor = hideAnchor ? null : ($event.currentTarget as HTMLElement)"><AppIcon name="gear" :size="14" /></button>
     </div>
-    <button v-if="!graph" type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row and header height, and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
+    <button v-if="!graph" type="button" class="btn sm display-btn" :class="{ on: displayOn }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row and header height, and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
       <AppIcon name="layers" :size="13" /><span class="display-label">{{ attention ? attention.group === 'project' ? attentionWord('By project', 'Nach Projekt') : attention.group === 'kind' ? attentionWord('By kind', 'Nach Art') : attentionWord('Display', 'Anzeige') : displayText }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
     </div>
     </Teleport>
+    <!-- Collapsed header: Display sits beside New. The other densities keep its place free, as an
+         inert twin of the same size, so folding or unfolding the header moves nothing in this row. -->
+    <div v-if="settingsTarget && !attention" class="collapsed-display" :class="{ reserved: !collapsedHeader }" :inert="!collapsedHeader" :aria-hidden="collapsedHeader ? undefined : 'true'">
+      <button type="button" class="btn sm display-btn" :class="{ on: displayOn }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor && collapsedHeader" :aria-label="`Display: ${displayLabel}`" data-tip="Sections, saved views, Hide closed, grouping, sort, row height and columns" :tabindex="collapsedHeader ? undefined : -1" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
+        <AppIcon name="layers" :size="13" /><span class="display-label"><span class="display-current">{{ displayText }}</span><span class="display-sizer" aria-hidden="true"><span v-for="word in displayWords" :key="word">{{ word }}</span></span></span><AppIcon name="chevron" :size="12" class="facet-chevron" />
+      </button>
+    </div>
     <button v-if="!graph && !attention" type="button" class="btn primary new-btn" :aria-label="createLabel" aria-keyshortcuts="n" :data-tip="`${createLabel} · n`" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
     <button v-if="!attention" type="button" class="btn filters-btn" :class="{ on: filterCount }" aria-label="Filters" aria-haspopup="dialog" data-tip="Filters and display options" @click="emit('openSheet')">
       <AppIcon name="sliders" :size="14" /><span class="filters-label">Filters</span><span v-if="filterCount" class="facet-count mono">{{ filterCount }}</span>
@@ -298,17 +327,34 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
     <FloatingPanel v-if="hideAnchor" :anchor="hideAnchor" :width="288" align="end" label="What Hide hides" cycle @close="closeHide">
       <HideOptions :states="filters.hideStates" :summary="summary" :show-closed="filters.showClosed" @change="states => emit('hideStates', states)" />
     </FloatingPanel>
-    <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="320" :tallest="760" align="end" label="Display options" @close="closeDisplay">
-      <DisplayPanel
-        :attention-group="attention?.group" :locale="attention?.locale" @attention-group="value => emit('attentionGroup', value)"
-        :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns" :grouped="view === 'list' && filters.group !== 'none'"
-        :header-graph="headerGraph" :project-header="projectHeader"
-        @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
-        @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
-        @header-graph="value => emit('headerGraph', value)"
-        @expand-all="emit('expandAll'); closeDisplay(false)" @collapse-all="emit('collapseAll'); closeDisplay(false)"
-        @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')"
-      />
+    <FloatingPanel
+      v-if="displayAnchor" :anchor="displayAnchor" :width="collapsedMenu ? menuPanelWidth(menuColumns) : 320" :tallest="collapsedMenu ? 4000 : 760" align="end" label="Display options"
+      :cycle="collapsedMenu" :sheet="collapsedMenu && sheetMode" @close="closeDisplay"
+    >
+      <DisplayMenu :plain="!collapsedMenu" :anchor="displayAnchor" :sheet="sheetMode" @columns="count => menuColumns = count" @done="closeDisplay(true)">
+        <template #nav><slot name="header-nav" :anchor="displayAnchor!" :close="closeDisplay" /></template>
+        <template #hide>
+          <div class="menu-hide">
+            <label class="switch menu-switch" :data-tip="hideNames">
+              <input type="checkbox" :aria-label="hideName === 'Hide' ? `Hide ${hideNames}` : hideName" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
+              <HideLabel :states="filters.hideStates" />
+            </label>
+            <button type="button" class="menu-gear" aria-label="Choose what Hide hides" data-tip="Choose what Hide hides" aria-haspopup="dialog" @click="openHideFromMenu"><AppIcon name="gear" :size="14" /></button>
+          </div>
+        </template>
+        <DisplayPanel
+          v-if="!graph"
+          :attention-group="attention?.group" :locale="attention?.locale" @attention-group="value => emit('attentionGroup', value)"
+          :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns" :grouped="view === 'list' && filters.group !== 'none'"
+          :header-graph="headerGraph" :project-header="projectHeader" :sheet="collapsedMenu && sheetMode" :stable-sort="collapsedMenu"
+          @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
+          @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
+          @header-graph="value => emit('headerGraph', value)"
+          @expand-all="emit('expandAll'); closeDisplay(false)" @collapse-all="emit('collapseAll'); closeDisplay(false)"
+          @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')"
+        />
+        <HeaderRoomyChoice v-else />
+      </DisplayMenu>
     </FloatingPanel>
   </div>
 </template>
@@ -435,9 +481,38 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
   .new-btn { order: 3; }
 }
 @media (pointer: coarse) and (min-width: 601px) {
-  .facet-control, .facet-btn, .facet-x, .clear-all, .new-btn { min-height: 44px; }
+  .facet-control, .facet-btn, .facet-x, .clear-all, .new-btn, .collapsed-display .display-btn { min-height: 44px; }
   .facet-x { min-width: 44px; }
 }
+
+/* Collapsed project header (AEON-1028): Display sits beside New and carries what the header hid.
+   In the other densities the same button waits there inert and unseen, so folding or unfolding
+   the header moves nothing in this row. It stays on every window width, where the Display button
+   of the header's own bar is hidden below 900px. */
+.collapsed-display { order: 4; display: flex; align-items: center; flex: none; }
+.collapsed-display.reserved { visibility: hidden; pointer-events: none; }
+.collapsed-display .display-btn { display: inline-flex; }
+/* As wide as the longest grouping label, so "Display" and "By assignee" share one footprint. */
+.collapsed-display .display-label { display: inline-grid; }
+.collapsed-display .display-current, .collapsed-display .display-sizer { grid-area: 1 / 1; }
+.collapsed-display .display-current { white-space: nowrap; }
+.collapsed-display .display-sizer { visibility: hidden; display: grid; }
+.collapsed-display .display-sizer > span { grid-area: 1 / 1; white-space: nowrap; }
+@container toolbar (max-width: 1000px) { .collapsed-display .display-label { display: none; } }
+/* On tablets Filters shares the row: Display still sits right against New. */
+@media (min-width: 601px) and (max-width: 900px) { .collapsed-display { order: 5; } .new-btn { order: 6; } }
+@media (max-width: 600px) {
+  .collapsed-display { order: 3; }
+  .collapsed-display .display-btn { width: 44px; height: 44px; padding: 0; justify-content: center; }
+  .collapsed-display .display-label, .collapsed-display .facet-chevron { display: none; }
+}
+/* The collapsed menu's Hide closed row: the switch and the gear to Hide's choices. */
+.menu-hide { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; }
+.menu-switch { min-height: 34px; font-size: 13px; }
+.menu-gear { display: grid; place-items: center; flex: none; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); }
+.menu-gear:hover { background: var(--row-hover); color: var(--ink); }
+.menu-gear:focus-visible { box-shadow: var(--focus-ring); }
+@media (pointer: coarse), (max-width: 900px) { .menu-hide, .menu-switch { min-height: 44px; } .menu-gear { width: 44px; height: 44px; } }
 
 /* The attention host keeps its three facets and Display on every screen. */
 .toolbar.attention { flex-wrap: wrap; gap: 8px 10px; padding: 9px 0; }

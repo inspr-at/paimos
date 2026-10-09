@@ -440,11 +440,8 @@ const gate = () => { let open!: () => void; const passed = new Promise<void>(res
 
 test('a list still on its way when the person changes is never shown to the next person', async ({ page }) => {
   await setup(page)
-  const previous = gate(), next = gate(), permissions = gate(), sessions = gate()
+  const previous = gate(), next = gate(), permissions = gate()
   let switched = false, olaAsked = 0, anyAsked = 0, permissionsAsked = false
-  // The page asks for the waiting list while its first load is still reading sessions. Holding
-  // the sessions here makes that order certain on any machine, instead of a matter of speed.
-  await page.route('**/api/harness-sessions*', async route => { await sessions.passed; await route.fallback() })
   // Whoever asks before Ola signs in gets the previous person's list, held until released.
   await page.route(PENDING, async route => {
     anyAsked++
@@ -453,14 +450,23 @@ test('a list still on its way when the person changes is never shown to the next
     await (forOla ? next : previous).passed
     await route.fulfill({ json: { requests: [forOla ? request('r-next', 'pending', { host: 'Ola’s Mac' }) : request('r-previous', 'pending', { host: 'Previous person’s Mac' })] } }).catch(() => undefined)
   })
+  // The session list is not mounted until the first frame's project grants arrive.
+  // Hold that session read until the pending attach read is observed, which is the
+  // slow-CI order: the identity switch must not replace the grant read that paints the row.
+  let releaseSessions!: () => void
+  const sessionsHeld = new Promise<void>(resolve => { releaseSessions = resolve })
+  await page.route('**/api/harness-sessions*', async route => {
+    await sessionsHeld
+    await route.fallback()
+  })
   await page.goto('/agents')
   await expect.poll(() => anyAsked).toBeGreaterThanOrEqual(1)
   // The first paint's permission reads finish before the next person's are held.
   // Session rows appear only after those reads. Arming the hold earlier swallows
   // them, the page stays on Loading, and the click below never finds a row.
-  sessions.open()
-  const sessionState = page.locator('[data-row^="s:"] .c-state').first()
-  await expect(sessionState).toBeVisible()
+  releaseSessions()
+  const stateCell = page.locator('[data-row^="s:"] .c-state').first()
+  await expect(stateCell).toBeVisible()
   // Ola signs in to another workspace; the next navigation refreshes the session. Her
   // permissions are slow, so the old answer lands while nobody is allowed yet, and the
   // new list is slow too: the old rows must not show in between.
@@ -473,7 +479,7 @@ test('a list still on its way when the person changes is never shown to the next
     value.workspace.permissions = [...value.workspace.permissions, 'account.manage']
     await route.fulfill({ json: value })
   })
-  await sessionState.click()
+  await stateCell.click()
   await expect(page).toHaveURL(/\/agents\/.+/)
   await expect.poll(() => permissionsAsked).toBe(true)
   previous.open()
