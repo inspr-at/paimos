@@ -37,8 +37,10 @@ func ReadDailyPolicyTx(ctx context.Context, tx pgx.Tx, tenantID, owner string, n
 // advice. Run-now and recovery permits do not bypass the daily ceiling.
 func dailyAccountWaitTx(ctx context.Context, tx pgx.Tx, a Account, now time.Time) (*CapacityWait, error) {
 	unknown := waitFor("daily_limit_unknown")
+	// The daily ceiling is the owner's saved plan. An unlinked account has
+	// no such plan; its session and quota windows stay on the existing gate.
 	if a.OwnerPersonID == nil {
-		return unknown, nil
+		return nil, nil
 	}
 	var tenantID string
 	if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id')`).Scan(&tenantID); err != nil {
@@ -64,8 +66,11 @@ func dailyAccountWaitTx(ctx context.Context, tx pgx.Tx, a Account, now time.Time
 	if err != nil {
 		return nil, err
 	}
+	// A withheld projection has no usable percentage. It is not exhaustion
+	// and must not block the quota gate, including when a private sibling
+	// shares a resource.
 	if !privacy[a.ID] {
-		return unknown, nil
+		return nil, nil
 	}
 	d, explicit := plan.Daily[a.Harness]
 	if !explicit {

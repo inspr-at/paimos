@@ -185,9 +185,20 @@ func dailyAccountTx(ctx context.Context, tx pgx.Tx, a Account, item agentplan.Da
 	}
 	w := dailyWindow(windows)
 	if w == nil {
+		// A long window without its precise percent is not "no reading".
+		if unreadableDailyWindow(windows) {
+			item.Freshness = "stale"
+		}
 		return item, d, nil
 	}
 	item.UsedPct, item.ResetsAt, item.ReadAt = w.UsedPercent, &w.ResetsAt, w.ReadAt
+	// A sample from before this link belongs to the previous binding. It is
+	// not today's percentage and must not become a missing-limit refusal.
+	if a.LinkedAt != nil && w.ReadAt != nil && w.ReadAt.Before(*a.LinkedAt) {
+		item.UsedPct, item.ReadAt, item.ResetsAt = nil, nil, nil
+		item.Freshness = "unknown"
+		return item, d, nil
+	}
 	item.Freshness = "stale"
 	if !now.Before(w.ResetsAt) {
 		item.Freshness = "expired"
@@ -226,20 +237,34 @@ func legacyDaily(u usagePolicy) agentplan.DailySettings {
 	return d
 }
 
+func longDailyWindow(w *overviewWindow) bool {
+	return w.Kind == "weekly" || w.Kind == "monthly" || strings.Contains(w.Bucket, "weekly") || strings.Contains(w.Bucket, "monthly")
+}
+
+// dailyWindow is the subscription percentage. A 5h session window is a quota
+// hold, not the daily ceiling, even when it is the only vendor sample.
 func dailyWindow(windows []overviewWindow) *overviewWindow {
 	var chosen *overviewWindow
 	for i := range windows {
 		w := &windows[i]
-		if w.Source != "vendor_reported" || w.UsedPercent == nil || w.ReadAt == nil {
+		if w.Source != "vendor_reported" || w.UsedPercent == nil || w.ReadAt == nil || !longDailyWindow(w) {
 			continue
 		}
-		long := w.Kind == "weekly" || w.Kind == "monthly" || strings.Contains(w.Bucket, "weekly") || strings.Contains(w.Bucket, "monthly")
-		chosenLong := chosen != nil && (chosen.Kind == "weekly" || chosen.Kind == "monthly" || strings.Contains(chosen.Bucket, "weekly") || strings.Contains(chosen.Bucket, "monthly"))
-		if chosen == nil || long && !chosenLong || long == chosenLong && w.ResetsAt.After(chosen.ResetsAt) {
+		if chosen == nil || w.ResetsAt.After(chosen.ResetsAt) {
 			chosen = w
 		}
 	}
 	return chosen
+}
+
+func unreadableDailyWindow(windows []overviewWindow) bool {
+	for i := range windows {
+		w := &windows[i]
+		if w.Source == "vendor_reported" && longDailyWindow(w) && (w.UsedPercent == nil || w.ReadAt == nil) {
+			return true
+		}
+	}
+	return false
 }
 
 func dailyBaselineTx(ctx context.Context, tx pgx.Tx, a Account, w overviewWindow, tenantID, owner string, start, now time.Time) (*float64, error) {

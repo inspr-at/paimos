@@ -116,6 +116,15 @@ func TestDailyAdmissionRechecksCurrentPlanAtReservationAndClaim(t *testing.T) {
 	setPlan(t, []byte(`{"total":5,"daily":{"codex":{"pace":{"mode":"pace","points_per_day":0},"boost_today":null,"at_limit":"ladder"}}}`))
 	check(t, false, "daily_limit_unknown")
 	save(t)
+	// Risk: a fresh sample from before the current link was refused as a
+	// partial daily reading. It is the previous binding, not today's ceiling.
+	if _, err := adminPool.Exec(ctx, `UPDATE agent_accounts SET linked_at=$2 WHERE id=$1`, account.ID, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	check(t, false, "")
+	if _, err := adminPool.Exec(ctx, `UPDATE agent_accounts SET linked_at=$2 WHERE id=$1`, account.ID, start.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 	ctx = context.WithValue(ctx, clockKey{}, now.Add(2*time.Minute+time.Nanosecond))
 	now = now.Add(2*time.Minute + time.Nanosecond)
 	check(t, false, "daily_limit_unknown")
