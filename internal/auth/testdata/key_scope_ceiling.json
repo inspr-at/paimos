@@ -97,6 +97,7 @@
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"account.probe"},
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"account.read"},
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"account.route"},
+    {"agent_grantable":false,"grantable_at":["workspace"],"key":"account.use.manage"},
     {"agent_grantable":true,"grantable_at":["workspace"],"key":"agents.plan.read"},
     {"agent_grantable":false,"grantable_at":["workspace","project"],"key":"approvals.decide"},
     {"agent_grantable":false,"grantable_at":["workspace","project"],"key":"approvals.decide_high"},
@@ -253,17 +254,6 @@
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"views.write"},
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"work_orders.assign"},
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"work_orders.read"},
-    {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"work_orders.write"},
-    {
-      "key": "account.use.manage",
-      "group": "Account",
-      "description": "Manage account use contexts and rules",
-      "risk": "high",
-      "grantable_at": [
-        "workspace"
-      ],
-      "agent_grantable": false,
-      "owner_workstation_grantable": false
-    }
+    {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"work_orders.write"}
   ]
 }
