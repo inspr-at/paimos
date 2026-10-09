@@ -48,3 +48,18 @@ Migration 1307 creates the RLS-protected native table and widens only the two
 1092 phone-kind checks to admit `stepup`, preserving all older writer values.
 The exact-byte classifier exception covers those CHECK replacements and
 requires the coordinator's normal review and release gates.
+
+Validation on the assigned worker branch covered the full affected Go suites
+(step-up, authentication, phone approvals, Decision Desk, authorization,
+agent pairing, DSAR and reporter contract). Final targeted regressions also
+covered minimal custom roles and request ownership across project sessions.
+Migration tests proved transactional rollback, forced RLS and acceptance of
+both legacy and new phone kinds. `ci-static.mjs --merge-main` passed all 41
+checks with no skips on the final code commit.
+
+The checksum-verified published native server from `v261009095632.0.0` passed
+the standard migration compatibility HTTP probe before and after candidate
+migrations against an isolated PostgreSQL 18 fixture. Docker was unavailable
+on the test host, so the image-based compatibility gate remains for
+coordinator CI. Cross-family review, merge and release remain coordinator
+responsibilities; the worker did not push or deploy.
