@@ -233,13 +233,25 @@ func (m *Module) situationLimits(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var out modelprefs.SituationLimits
+	language := r.URL.Query().Get("lang")
+	if language != "" && language != "en" && language != "de" {
+		writePreferenceError(w, prefFail(400, "invalid_language"))
+		return
+	}
+	var out struct {
+		modelprefs.SituationLimits
+		Words []modelprefs.SituationWords `json:"words"`
+	}
 	err := m.readSnapshot(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		if _, err := currentModelReader(r, tx, p); err != nil {
 			return err
 		}
 		var err error
-		out, err = modelprefs.LoadSituationLimits(r.Context(), tx)
+		out.SituationLimits, err = modelprefs.LoadSituationLimits(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		out.Words, err = modelprefs.LoadSituationWords(r.Context(), tx, language)
 		return err
 	})
 	if err != nil {

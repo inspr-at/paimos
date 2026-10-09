@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { reactive } from 'vue'
 import { deferred, flush, setupSource } from './record-source'
+import { displayLanguage } from '../src/lib/displayLanguage'
 import * as identity from '../src/lib/identityScope'
 const first = { account_id: 'owned-a', posture: 'balanced', source: 'person', floor_percent: 20, own_floor_percent: 20, revision: 3, binding_revision: 2, can_set_posture: true, can_set_floor: false, boost_percent: 0, boost_until: null }
 const scopes: { stop: () => void }[] = []
@@ -13,7 +14,7 @@ function setup(options: { read?: ReturnType<typeof vi.fn>; write?: ReturnType<ty
   const view = setupSource('components/agents/BoostToday.vue', {}, {
     'vue-router': { useRoute: () => ({ query: {} }) }, '../../stores/session': { useSession: () => session },
     '../../lib/authz': { can: () => true, onAccessChange: () => () => {} }, '../../lib/identityScope': identity,
-    '../../lib/accountUsage': { getUsageOverview: read, putAccountBoost: write },
+    '../../lib/displayLanguage': { displayLanguage }, '../../lib/accountUsage': { getUsageOverview: read, putAccountBoost: write },
     '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },
   })
   scopes.push(view)

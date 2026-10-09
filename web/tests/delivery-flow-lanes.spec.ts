@@ -322,13 +322,12 @@ for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'],
     await page.setViewportSize({ width, height: width === 400 ? 900 : 1100 })
     await setup(page, { theme, lang })
     await page.goto('/p/AEON/delivery?view=flow')
-    const de = lang === 'de'
     const zoom = page.getByTestId('flow-bar').getByRole('radiogroup', { name: 'Zoom' })
     await expect(lanes(page).locator('.ln-lane')).toHaveCount(6)
-    // Phone: Live opens at 20 min.
+    // Phone: Live opens at 20 min. A de-AT profile still uses the English app language (AEON-998).
     await expect.poll(() => windowText(page)).toBe(width === 400 ? '20:12 – 20:32' : '19:55 – 20:40')
     const guard = await controlStability(page, {
-      fit: zoom.getByRole('radio', { name: de ? 'Alles' : 'Fit all' }), z60: zoom.getByRole('radio', { name: '1 h' }),
+      fit: zoom.getByRole('radio', { name: 'Fit all' }), z60: zoom.getByRole('radio', { name: '1 h' }),
       follow: page.getByTestId('flow-follow'), readout: page.getByTestId('flow-readout'), overview: overview(page), lanes: lanes(page),
     })
     await guard.check(() => zoom.getByRole('radio', { name: '1 h' }).click())

@@ -142,7 +142,6 @@ for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'],
   test(`Flow modes at ${width} ${theme} ${lang} keep controls still`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 400 ? 2600 : 1500 })
     await setup(page, { theme, lang, level: width === 400 ? 'simple' : theme === 'dark' ? 'expert' : 'simple' })
-    const de = lang === 'de'
     for (const mode of ['live', 'replay', 'compare'] as const) {
       await page.goto(`/p/AEON/delivery?view=flow${mode === 'live' ? '' : `&mode=${mode}`}`)
       await expect(page.getByTestId('flow-moment')).toBeVisible()
@@ -155,7 +154,7 @@ for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'],
       await guard.check(async () => { await lanes(page).focus(); await page.keyboard.press('End') })
       await guard.check(() => page.getByTestId('flow-follow').click())
       guard.done()
-      if (mode === 'compare') await expect(page.getByTestId('flow-moment-head')).toContainText(de ? /das Arion-Ziel war nach 24 min live/i : /the Arion target was live after 24 min/i)
+      if (mode === 'compare') await expect(page.getByTestId('flow-moment-head')).toContainText(/the Arion target was live after 24 min/i)
       await page.mouse.move(0, 0)
       await page.locator('.fl').evaluate(el => el.scrollIntoView({ block: 'start' }))
       await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-994-p6-modes/flow-${mode}-${width}-${theme}-${lang}.png`) })
@@ -170,10 +169,8 @@ for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'],
 for (const lang of ['en', 'de'] as const) {
   test(`a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (${lang})`, async ({ page }) => {
     test.setTimeout(120_000)
-    const de = lang === 'de'
-    const copy = de
-      ? { level: 'Detailgrad', expert: 'Experte', warning: 'Zeitraum und Detailgrad konnten nicht gespeichert werden. Die Auswahl bleibt auf dieser Seite.', retry: 'Erneut speichern', now: 'Jetzt 20:25 · live' }
-      : { level: 'Level of detail', expert: 'Expert', warning: 'The window and level could not be saved. This choice stays on this page.', retry: 'Save again', now: 'Now 20:25 · live' }
+    // AEON-998: a de-AT profile still uses the one English app language.
+    const copy = { level: 'Level of detail', expert: 'Expert', warning: 'The window and level could not be saved. This choice stays on this page.', retry: 'Save again', now: 'Now 20:25 · live' }
     let reject = true
     for (const width of [1440, 400]) for (const scenario of ['recorded', 'example', 'loading'] as const) {
       await page.setViewportSize({ width, height: width === 400 ? 2000 : 1300 })

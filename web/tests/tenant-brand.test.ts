@@ -54,13 +54,13 @@ test('picked files are typed by their extension when the browser leaves them unt
   assert.equal(logoProblem({ name: 'a.png', type: 'image/png', size: 1000 }), '')
 })
 
-test('SVG removal notice names attributes and uses the profile language', () => {
+test('SVG removal notice names attributes and follows the app language for German profiles', () => {
   const settings = { cleaned: true, svg_cleanup: { removed_attribute_count: 3, removed_attributes: ['role', 'aria-label', 'data-name'], removed_element_count: 0 } }
   assert.equal(logoCleanupMessage(settings, 'en-GB'), 'Removed 3 non-drawing attributes (role, aria-label, data-name).')
-  assert.equal(logoCleanupMessage(settings, 'de-AT'), '3 nicht zeichnende Attribute entfernt (role, aria-label, data-name).')
+  assert.equal(logoCleanupMessage(settings, 'de-AT'), 'Removed 3 non-drawing attributes (role, aria-label, data-name).')
   assert.equal(logoCleanupMessage({ cleaned: false }), '')
   assert.equal(logoCleanupMessage({ cleaned: true }), 'Saved. SVG comments were removed.')
-  assert.equal(logoCleanupMessage({ cleaned: true }, 'de'), 'Gespeichert. SVG-Kommentare wurden entfernt.')
+  assert.equal(logoCleanupMessage({ cleaned: true }, 'de'), 'Saved. SVG comments were removed.')
   assert.equal(logoCleanupMessage({ cleaned: true, svg_cleanup: { removed_attribute_count: 1, removed_attributes: ['role'], removed_element_count: 0 } }), 'Removed 1 non-drawing attribute (role).')
-  assert.equal(logoCleanupMessage({ cleaned: true, svg_cleanup: { removed_attribute_count: 0, removed_attributes: [], removed_element_count: 2 } }, 'de'), 'Gespeichert. Nicht zeichnende SVG-Metadaten wurden entfernt.')
+  assert.equal(logoCleanupMessage({ cleaned: true, svg_cleanup: { removed_attribute_count: 0, removed_attributes: [], removed_element_count: 2 } }, 'de'), 'Saved. Non-drawing SVG metadata was removed.')
 })

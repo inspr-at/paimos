@@ -6,7 +6,8 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { command, root } from './collect.mjs'
 import { boundedText, inputMetadata, readInput, inputBounds } from './inputs.mjs'
-import { reverseDependants, webGraph, impactRisk, validImpactPaths, manifestPromotions, tierManifestPattern } from './core.mjs'
+import { reverseDependants, webGraph, graphIncomplete, goImpact, browserDataInput, impactRisk, validImpactPaths, manifestPromotions, tierManifestPattern } from './core.mjs'
+import { browserImpact, nightlyBrowserMap } from './browser-impact.mjs'
 
 export function changedPaths(event, env=process.env, { fetchBase=false, exec=command }={}) {
   if (!['pull_request','merge_group'].includes(event)) return undefined
@@ -68,7 +69,16 @@ export function sourceTree(checkout=root, { bounds=inputBounds, read=readInput }
     for(const directory of ['internal','cmd','scripts']) visit(directory,go,file=>file.endsWith('.go'),true)
     visit('web/tests',webTests,file=>/\.(?:ts|mjs|js)$/.test(file),true)
     for(const {file,into,metadata} of files)into.set(file,read(metadata,bounds.fileBytes))
-    tree={complete:true,go,webTests:new Map([...webTests].map(([file,text])=>[file.slice(4),text]))}
+    const imports={}
+    for(const [file,text] of go) {
+      const owner=file.slice(0,file.lastIndexOf('/'))
+      imports[owner]??=[]
+      for(const match of text.matchAll(/["`]github\.com\/inspr-at\/paimos\/([^"`]+)["`]/g)) {
+        if(match[1].includes('\\'))throw new Error('escaped local Go import')
+        if(!imports[owner].includes(match[1]))imports[owner].push(match[1])
+      }
+    }
+    tree={complete:true,go,imports,webTests:new Map([...webTests].map(([file,text])=>[file.slice(4),text]))}
   } catch(error) {
     // Discard every partial result; no consumer rule may use a truncated tree.
     tree={complete:false,reason:error.message,go:new Map(),webTests:new Map()}
@@ -101,23 +111,31 @@ export function promotionsBetween(base,{cwd=root,exec=command,baseDirectory}={})
   } catch { return undefined }
 }
 
-export function schedulingDecision(event,paths,exists,{affectedLane,graph,checkout=root,base,tree,promotions,readFile}={}) {
+export function schedulingDecision(event,paths,exists,{affectedLane,graph,checkout=root,base,tree,promotions,readFile,tests:suppliedTests,imports,browserMap,baseTree}={}) {
   exists??=path=>existsSync(resolve(checkout,path))
   const full=reason=>({mode:'full',layout:'full',reason})
   if(event!=='pull_request'||!Array.isArray(paths)) return full('full event or missing diff')
   if(!validImpactPaths(paths))return full('invalid or oversized impact diff')
+  const browserData=paths.find(browserDataInput)
+  if(browserData)return full(`browser CSS, asset or data input: ${browserData}`)
   const webChanges=paths.filter(path=>path.startsWith('web/')).map(path=>path.slice(4))
   const on=affectedLane==='on'
-  if(webChanges.length&&on) graph??=webGraph(resolve(root,'web'))
-  if(on) {
+  if(webChanges.length) graph??=webGraph(resolve(root,'web'))
+  const goChanges=paths.some(path=>/^(?:internal|cmd)\//.test(path)&&!path.endsWith('.md'))
+  if(on||goChanges) {
     tree??=sourceTree(checkout)
     if(promotions===undefined&&paths.some(path=>tierManifestPattern.test(path))) promotions=promotionsBetween(base,{cwd:checkout})
   }
-  const manifests=on?manifestsAt(file=>existsSync(resolve(checkout,file))?readFileSync(resolve(checkout,file),'utf8'):undefined):{}
-  const tests=on?Object.values(manifests).flatMap(manifest=>manifest.tests??[]):[]
+  const manifests=on||goChanges||webChanges.length?manifestsAt(file=>boundedText(root,file)):{}
+  const tests=suppliedTests??Object.values(manifests).flatMap(manifest=>manifest.tests??[])
   const risk=impactRisk(paths,{event,affectedLane,webImports:graph,tree,promotions,tests,
     readFile:readFile??(path=>exists(path)?boundedText(checkout,path):undefined)})
   if(risk.full)return full(risk.reasons.join('; ')||'full event or uncertain impact')
+  if(goChanges||risk.goSeeds.size) {
+    if(tree?.complete===false)return full(`incomplete Go consumer scan: ${tree.reason}`)
+    const go=goImpact(tests,paths,imports??tree?.imports,risk.goSeeds)
+    if(go.full)return full(`Go reverse dependencies exceed 300 extra cases (${go.extra})`)
+  }
   for(const path of paths) {
     if(risk.handled.has(path))continue
     if(/^(?:docs\/|README(?:\.|$)|LICENSE(?:\.|$)|CHANGELOG(?:\.|$))/.test(path))continue
@@ -127,13 +145,16 @@ export function schedulingDecision(event,paths,exists,{affectedLane,graph,checko
   const webSeeds=[...risk.webSeeds]
   if(webChanges.length||webSeeds.length) {
     graph??=webGraph(resolve(root,'web'))
-    const impacted=reverseDependants(new Set([...webChanges.filter(file=>!risk.handled.has(`web/${file}`)),...webSeeds]),graph)
-    if(on&&webChanges.some(file=>!risk.handled.has(`web/${file}`)&&!Object.hasOwn(graph,file)))return full('missing trusted web dependency metadata')
+    if(graph[graphIncomplete])return full(`incomplete web dependency graph: ${graph[graphIncomplete]}`)
+    const changed=[...webChanges.filter(file=>!risk.handled.has(`web/${file}`)),...webSeeds]
+    const coverage=browserImpact(changed,graph,browserMap,baseTree)
+    if(coverage.full)return full(coverage.reason)
+    const impacted=new Set([...reverseDependants(new Set(changed),graph),...coverage.specs])
+    if(webChanges.some(file=>!risk.handled.has(`web/${file}`)&&!Object.hasOwn(graph,file)))return full('missing trusted web dependency metadata')
     if(webChanges.some(file=>file.startsWith('src/'))&&![...impacted].some(file=>/^tests\/.*\.(?:spec|test)\.ts$/.test(file)))return full('web module has no mapped test importer')
     // Large mapped fan-outs use the old full layout too. The tier selector
     // still records the exact essential/changed union within those runners.
-    const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8'))
-    if(manifest.tests.filter(row=>row.kind==='browser'&&impacted.has(row.file)).length>300)return full('browser fan-out exceeds 300 cases')
+    if(tests.filter(row=>row.kind==='browser'&&impacted.has(row.file)).length>300)return full('browser fan-out exceeds 300 cases')
   }
   return {mode:'essential',layout:risk.layout,reason:risk.reasons.join('; ')||'essential plus changed area and reverse dependencies'}
 }
@@ -164,7 +185,7 @@ export function trustedSchedulingDecision(base, paths, env=process.env, {cwd=roo
   execFileSync('tar',['-x','-C',directory],{input:archive,timeout:30_000,maxBuffer:2*1024*1024})
   const output=execFileSync(process.execPath,[resolve(directory,'scripts/test-tiers/diff.mjs'),'--trusted-paths'],
     {cwd:directory,encoding:'utf8',timeout:30_000,maxBuffer:2*1024*1024,
-      env:{...env,GITHUB_OUTPUT:'',GITHUB_STEP_SUMMARY:'',AEON_TIER_PATHS:JSON.stringify(paths),AEON_TIER_CHECKOUT:cwd}})
+      env:{...env,GITHUB_OUTPUT:'',GITHUB_STEP_SUMMARY:'',AEON_TIER_PATHS:JSON.stringify(paths),AEON_TIER_CHECKOUT:cwd,AEON_TIER_BASE:base}})
   const decision=JSON.parse(output)
   if(!['full','essential'].includes(decision.mode)||typeof decision.reason!=='string')throw new Error('Invalid trusted planner decision')
   // Pre-adoption base planners report no layout; that is the full layout.
@@ -180,7 +201,11 @@ export function main(env=process.env) {
     if(env.GITHUB_EVENT_NAME==='pull_request'&&env.CI_AFFECTED_LANE==='on'&&Array.isArray(paths)) {
       const payload=JSON.parse(readFileSync(env.GITHUB_EVENT_PATH,'utf8'))
       decision=trustedSchedulingDecision(payload.pull_request?.base?.sha,paths,env)
-    } else decision=schedulingDecision(env.GITHUB_EVENT_NAME,paths)
+    } else {
+      const catalogue=manifestsAt(file=>boundedText(root,file)).web?.tests??[]
+      const coverage=paths?.some(path=>path.startsWith('web/src/'))?nightlyBrowserMap(root,eventBase(env),catalogue):{}
+      decision=schedulingDecision(env.GITHUB_EVENT_NAME,paths,undefined,coverage)
+    }
   } catch { decision={mode:'full',layout:'full',reason:'trusted affected classification unavailable'} }
   const {mode,reason}=decision
   const layout=mode==='full'?'full':decision.layout??'full'
@@ -200,8 +225,10 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
       // the candidate checkout supplies the changed files and head manifests.
       const checkout=process.env.AEON_TIER_CHECKOUT
       const promotions=paths.some(path=>tierManifestPattern.test(path))?promotionsBetween(undefined,{cwd:checkout,baseDirectory:root}):undefined
+      const catalogue=manifestsAt(file=>boundedText(root,file)).web?.tests??[]
+      const coverage=paths.some(path=>path.startsWith('web/src/'))?nightlyBrowserMap(checkout,process.env.AEON_TIER_BASE,catalogue):{}
       console.log(JSON.stringify(schedulingDecision(process.env.GITHUB_EVENT_NAME,paths,
-        path=>existsSync(resolve(checkout,path)),{affectedLane:process.env.CI_AFFECTED_LANE,checkout,promotions})))
+        path=>existsSync(resolve(checkout,path)),{affectedLane:process.env.CI_AFFECTED_LANE,checkout,promotions,...coverage})))
     } else process.exitCode=main()
   } catch(error) { console.error(error.message);process.exitCode=1 }
 }

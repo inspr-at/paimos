@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { displayLanguage } from '../lib/displayLanguage'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import '../styles/settings.css'
@@ -8,7 +9,6 @@ import AppIcon from '../components/AppIcon.vue'
 import BizIcon, { type BizIconName } from '../components/business/BizIcon.vue'
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId, type SettingsSection } from '../lib/settings'
 import { useSession } from '../stores/session'
-import { useProfile } from '../stores/profile'
 import { textForKinds } from '../lib/workKindsCopy'
 import { doctrineInbox } from '../lib/doctrineInbox'
 import { scopeOwner } from '../lib/identityScope'
@@ -38,9 +38,8 @@ const ModelsSection = defineAsyncComponent(() => import('../components/settings/
 const route = useRoute()
 const router = useRouter()
 const session = useSession()
-const profile = useProfile()
-const kindsText = computed(() => textForKinds(profile.profile?.principal_id === session.identity?.principal.id && /^de\b/i.test(profile.profile?.locale ?? '')))
-const german = computed(() => route.query.lang === 'de' || document.documentElement.lang.startsWith('de'))
+const kindsText = computed(() => textForKinds(displayLanguage() === 'de'))
+const german = computed(() => displayLanguage() === 'de')
 const modelText = (en: string, de: string) => german.value ? de : en
 const sectionLabel = (section: SettingsSection) => section.id === 'kinds' ? kindsText.value('title') : section.id === 'models' ? modelText('Models', 'Modelle') : section.label
 const sectionSummary = (section: SettingsSection) => section.id === 'kinds' ? kindsText.value('summary') : section.id === 'models' ? modelText('Which model does what', 'Welches Modell was macht') : section.summary

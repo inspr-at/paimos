@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { displayLanguage } from './displayLanguage.ts'
 import type { NodeRecurrence } from './api'
 import { ruleParts, type RecurrenceTrigger } from './recurrences'
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const daysDE = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag']
 const codes = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
-export const recurringWord = (locale: string) => locale.toLowerCase().startsWith('de') ? 'Wiederkehrend' : 'Recurring'
+export const recurringWord = (locale: string) => displayLanguage(locale) === 'de' ? 'Wiederkehrend' : 'Recurring'
 
 export function recurrenceSchedule(trigger: RecurrenceTrigger, locale = 'en'): string {
-  const de = locale.toLowerCase().startsWith('de')
+  const de = displayLanguage(locale) === 'de'
   if (trigger.kind === 'event') return de ? 'nach jeder Veröffentlichung' : 'after every release'
   const rule = ruleParts(trigger.rrule)
   if (rule.FREQ === 'DAILY') return de ? 'jeden Tag' : 'every day'
@@ -34,5 +35,5 @@ export function recurrenceSchedule(trigger: RecurrenceTrigger, locale = 'en'): s
 }
 
 export function recurrenceMarkerLabel(item: NodeRecurrence, locale = 'en'): string {
-  return `${recurringWord(locale)} · ${recurrenceSchedule(item.trigger, locale)} · ${locale.toLowerCase().startsWith('de') ? `Nr. ${item.number}` : `#${item.number}`}`
+  return `${recurringWord(locale)} · ${recurrenceSchedule(item.trigger, locale)} · ${displayLanguage(locale) === 'de' ? `Nr. ${item.number}` : `#${item.number}`}`
 }

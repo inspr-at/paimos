@@ -404,7 +404,7 @@ test('a link with anything but nine digits opens nothing', async ({ page }) => {
   await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
-test('German pairing guidance still only prefills the approval code', async ({ browser }) => {
+test('a de-AT browser still shows English pairing guidance and only prefills the approval code', async ({ browser }) => {
   const page = await browser.newPage({ locale: 'de-AT' })
   try {
     await setup(page)
@@ -417,12 +417,12 @@ test('German pairing guidance still only prefills the approval code', async ({ b
     await page.goto('/agents#attach=123456789')
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: 'Enter the code from your terminal' })).toBeVisible()
-    await expect(dialog).toContainText('Verknüpfe jede laufende Sitzung separat mit ihrem Ticket.')
-    await expect(dialog.getByLabel('Verknüpfungscode')).toHaveValue('123 456 789')
+    await expect(dialog).toContainText('Link each running session separately to its ticket.')
+    await expect(dialog.getByLabel('Attach code')).toHaveValue('123 456 789')
     await expect.poll(() => new URL(page.url()).hash).toBe('')
     expect(sent).toEqual([])
     await dialog.getByRole('button', { name: /Find request/ }).click()
-    await expect(dialog).toContainText('Computer gekoppelt · Diese Sitzung ist noch nicht verknüpft')
+    await expect(dialog).toContainText('Computer paired · This session not yet linked')
     expect(sent).toHaveLength(1)
   } finally { await page.close() }
 })

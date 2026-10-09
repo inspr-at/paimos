@@ -6,6 +6,7 @@ import { parse as parseSFC } from '@vue/compiler-sfc'
 import { NodeTypes, parse as parseTemplate, type AttributeNode, type DirectiveNode, type ElementNode, type TemplateChildNode } from '@vue/compiler-dom'
 import { createScope, scopeOwner } from '../src/lib/identityScope'
 import * as kinds from '../src/lib/workKinds'
+import { displayLanguage } from '../src/lib/displayLanguage'
 import { textForKinds } from '../src/lib/workKindsCopy'
 import { deferred, flush, setupSource, sourceModule, sourceText } from './record-source'
 
@@ -27,7 +28,7 @@ function setup(overrides: Partial<typeof kinds> = {}) {
       const scope = createScope(() => owner.value)
       const stop = watch(owner, () => scope.reset(), { flush: 'sync' }); onScopeDispose(() => { stop(); scope.dispose() })
       return { ...scope, owner }
-    } }, '../../lib/toast': { toast, dismiss: vi.fn() }, '../../lib/workKindsCopy': { textForKinds }, '../../lib/workKinds': api,
+    } }, '../../lib/toast': { toast, dismiss: vi.fn() }, '../../lib/displayLanguage': { displayLanguage }, '../../lib/workKindsCopy': { textForKinds }, '../../lib/workKinds': api,
   })
   stops.push(component.stop)
   return { state: component.state, api, session, grants, toast }
@@ -49,7 +50,7 @@ it('paginates with explicit bounds and reports truncation instead of a complete 
     const cursor = Number(new URL(path, 'http://localhost').searchParams.get('cursor') ?? 0)
     return Response.json({ items: [kind(`kind-${cursor}`)], next_cursor: String(cursor + 1) })
   })
-  const client = sourceModule<typeof kinds>('lib/workKinds.ts', { './api.ts': { api, APIError: Error } })
+  const client = sourceModule<typeof kinds>('lib/workKinds.ts', { './api.ts': { api, APIError: Error }, './displayLanguage.ts': { displayLanguage } })
   const result = await client.listWorkKinds(new AbortController().signal)
   expect(api).toHaveBeenCalledTimes(16); expect(result.truncated).toBe(true); expect(result.items).toHaveLength(16)
   expect(api.mock.calls[1]![0]).toContain('cursor=1')
@@ -216,9 +217,27 @@ it('kinds of work links to the integrated Models board and preserves the legacy 
 
 it('bounds response bytes before JSON decoding and rejects repeated pagination cursors', async () => {
   const api = vi.fn(async () => new Response('x'.repeat(1024 * 1024 + 1)))
-  const client = sourceModule<typeof kinds>('lib/workKinds.ts', { './api.ts': { api, APIError: Error } })
+  const client = sourceModule<typeof kinds>('lib/workKinds.ts', { './api.ts': { api, APIError: Error }, './displayLanguage.ts': { displayLanguage } })
   await expect(client.listWorkKinds(new AbortController().signal)).rejects.toThrow('Response is too large')
   api.mockImplementation(async () => Response.json({ items: [kind()], next_cursor: 'same-cursor' }))
   await expect(client.listWorkKinds(new AbortController().signal)).rejects.toThrow('Invalid kinds cursor')
   expect(api).toHaveBeenCalledTimes(3)
+})
+
+// Risk: a German profile changes only the card, or saving its English wording loses German words.
+it.each(['de-AT', 'en-GB'])('Kinds of work follows the app policy for a %s profile and preserves both languages through save and Undo', async locale => {
+  const german = { label: 'UI-Design', hint: 'Freigegebene Bildschirme.', examples: ['Ein Bildschirm'] }
+  const bilingual = kind('design', { words_de: german })
+  const { state, session, api, toast } = setup({ listWorkKinds: vi.fn(async () => ({ items: [bilingual], truncated: false })), updateKind: vi.fn(async (_id, words) => kind('design', words)) })
+  Object.assign(session, { profile: { locale } })
+  await flush()
+  expect(state.german.value).toBe(false)
+  expect(state.t.value('title')).toBe('Kinds of work')
+  expect(state.t.value('definitionsNote')).toContain('First build')
+  state.edit(state.kinds.value[0]); state.save(words); await flush()
+  expect(api.updateKind).toHaveBeenCalledWith('design', { ...words, words_de: german }, expect.any(AbortSignal))
+  expect(state.kinds.value[0].words_de).toEqual(german)
+  api.listWorkKinds.mockResolvedValueOnce({ items: [state.kinds.value[0]], truncated: false })
+  toast.mock.calls[0]![1].action.run(); await flush()
+  expect(api.updateKind).toHaveBeenLastCalledWith('design', kinds.kindWords(bilingual), expect.any(AbortSignal))
 })

@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { displayLanguage } from '../../lib/displayLanguage'
 import { capacityWaitText } from '../../lib/capacityWait'
 import { brand } from '../../lib/brand'
 import { getNode } from '../../lib/api'
@@ -10,7 +11,6 @@ import { RUN_OUTCOME, approvalRun, cost, elapsed, runDuration, runModel, scopeLa
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
-import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -63,9 +63,8 @@ const emit = defineEmits<{ close: []; control: [view: SessionView, kind: Session
 watch(() => props.view?.session.id, () => { actionsAnchor.value = null; composing.value = false })
 const agents = useAgents()
 const auth = useSession()
-const profile = useProfile()
 const capability = computed(() => s.value ? chatCapability(s.value) : 'between')
-const capText = computed(() => capabilityWords[profile.profile?.locale.startsWith('de') ? 'de' : 'en'][capability.value])
+const capText = computed(() => capabilityWords[displayLanguage()][capability.value])
 const root = ref<HTMLElement>()
 const thread = ref<HTMLElement>()
 const recovery = ref<{ open: () => void }>()
