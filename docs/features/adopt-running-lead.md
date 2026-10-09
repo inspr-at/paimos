@@ -33,9 +33,17 @@ still require their existing live gates. Existing bound leads use ordinary
 succession, and paused intents need explicit restart. Adoption never launches,
 restarts, stops or reparents a session or worker.
 
+While the selection is unclaimed (`adoption_pending`), the card and the detail
+panel offer **Cancel** and do not offer Pause or Resume. Cancel clears only
+the selected session. The session keeps running: nothing is paused, stopped
+or reparented. Pausing that reason is rejected. After cancel, **Start lead**
+or another adoption can proceed. A claimed generation still offers cooperative
+pause.
+
 Unmanaged leads show **Unmanaged: steering limited to messages and pause**.
-Their card and detail panel offer cooperative pause, with no Start, Stop,
-Cancel start or Resume control for their process. A stopped unmanaged session
-continues from the session itself. Lead decisions and the queue remain visible.
-The audit records `lead.adoption_requested` and `lead.claim_checked` without
-private proof values.
+Their card and detail panel offer cooperative pause once a generation is
+claimed, with no Start, Stop, Cancel start or Resume control for their
+process. A stopped unmanaged session continues from the session itself. Lead
+decisions and the queue remain visible. The audit records
+`lead.adoption_requested`, `lead.adoption_cancelled` and `lead.claim_checked`
+without private proof values.

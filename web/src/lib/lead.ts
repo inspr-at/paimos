@@ -45,6 +45,8 @@ export const pauseLead = (id: string, revision: number, generation: number) => l
 export interface LeadCandidate { id: string; display_label: string | null; harness: string; host: string; management_mode: string; reported_at: string }
 export const readLeadCandidates = (id: string, cursor?: string) => leadRequest<{ items: LeadCandidate[]; next_cursor: string | null }>(`${project(id)}/lead/candidates?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
 export const adoptLead = (id: string, revision: number, sessionId: string) => leadRequest<ProjectLead>(`${project(id)}/lead/adopt`, 'POST', { expected_revision: revision, session_id: sessionId })
+/** Drops only an unclaimed selection. The running session is not paused or stopped. */
+export const cancelLeadAdoption = (id: string, revision: number) => leadRequest<ProjectLead>(`${project(id)}/lead/adopt/cancel`, 'POST', { expected_revision: revision })
 export const unmanagedLeadCopy = 'Unmanaged: steering limited to messages and pause'
 export const readLeadSettings = (id: string) => leadRequest<LeadSettings>(`${project(id)}/lead-settings`)
 /** Revision-checked; only the owning person may narrow the project's hosts. */
@@ -106,7 +108,7 @@ export function setLeadWords(names?: { singular: string; plural: string } | null
 }
 
 // ---------- State copy ----------
-export type LeadAction = 'start' | 'cancel' | 'pause' | 'resume' | 'dial' | 'computers' | 'none'
+export type LeadAction = 'start' | 'cancel' | 'cancel_adoption' | 'pause' | 'resume' | 'dial' | 'computers' | 'none'
 export interface LeadBandModel {
   state: LeadState; tone: 'live' | 'wait' | 'warn' | 'rest'; busy: boolean
   title: string; status: string; detail: string; now: string; foot: string; action: LeadAction; actionLabel: string
@@ -151,6 +153,18 @@ export function leadBand(lead: ProjectLead | null, projectKey: string, queued: n
     status: queued === null ? 'The queue can’t be read right now' : queued ? `${queued} queued work ${queued === 1 ? 'item waits' : 'items wait'} for one` : 'Nothing is queued yet',
     detail: '', now: '', foot: 'One per project. Host, accounts and models come from Settings; nothing to fill in.', action: 'start', actionLabel: `Start ${w.l}`,
   }
+  // An unclaimed adoption has no generation to pause. Cancel clears the choice
+  // only; the session keeps running. A cleared row can start or adopt again.
+  if (lead.reason === 'adoption_pending') {
+    const copy = waitCopy(lead.reason)
+    return { state: lead.state, tone: 'wait', busy: true, title: name, status: copy.status, detail: '', now: copy.now,
+      foot: 'Nothing is lost while it waits; the queue keeps its order.', action: 'cancel_adoption', actionLabel: 'Cancel' }
+  }
+  if (lead.reason === 'selection_cleared' && !lead.session_id) {
+    return { state: lead.state, tone: 'wait', busy: false, title: name, status: 'No session selected', detail: '',
+      now: 'The previous choice was cleared. That session kept running. Start a lead or adopt another running session.',
+      foot: checks, action: 'start', actionLabel: `Start ${w.l}` }
+  }
   switch (lead.state) {
     case 'starting': return { state: lead.state, tone: 'live', busy: true, title: name, status: 'Starting', detail: '', now: 'Reading the queue and the project. Nothing has started yet.', foot: checks, action: 'pause', actionLabel: 'Cancel start' }
     case 'working': return { state: lead.state, tone: 'live', busy: true, title: name, status: 'Working', detail: '', now: '', foot: checks, action: 'pause', actionLabel: 'Pause…' }
@@ -173,8 +187,8 @@ export function leadBand(lead: ProjectLead | null, projectKey: string, queued: n
   return leadBand(null, projectKey, queued, w)
 }
 /** Resume is a restart through admission and is only possible after a confirmed stop. */
-export const canResume = (lead: ProjectLead | null) => !!lead && lead.state === 'paused' && !lead.process_active
-export const canPause = (lead: ProjectLead | null) => !!lead && lead.revision > 0 && ['starting', 'working', 'waiting_for_room'].includes(lead.state)
+export const canResume = (lead: ProjectLead | null) => !!lead && lead.state === 'paused' && !lead.process_active && lead.reason !== 'adoption_pending'
+export const canPause = (lead: ProjectLead | null) => !!lead && lead.revision > 0 && lead.reason !== 'adoption_pending' && ['starting', 'working', 'waiting_for_room'].includes(lead.state)
 
 // ---------- The line ----------
 export type StationId = 'queued' | 'working' | 'gate' | 'merged'

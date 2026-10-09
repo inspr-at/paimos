@@ -8010,6 +8010,8 @@
     ,
     {"kind":"browser","file":"tests/knowledge.spec.ts","name":"the palette finds knowledge by its words and leads to the tab and the search","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"cancelling an unclaimed adoption clears only the selection","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"candidate errors and rejected confirmations remain visible with no false adoption","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -13075,6 +13077,8 @@
     {"kind":"node","file":"tests/lead.test.ts","name":"a parent queue reports queued, existing and skipped leaves and what remains","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"a ticket has exactly one current step on its way to Merged","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"an unclaimed adoption offers Cancel and neither Pause nor Resume","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"every lifecycle state has one fitting action","tier":"ESSENTIAL"}
     ,

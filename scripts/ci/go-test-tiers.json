@@ -5818,6 +5818,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadReportingCadenceAndBoundaries","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadUnclaimedAdoptionRejectsPauseAndCancelClearsSelection","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestProvenanceReportsReplaceOnlyTheKindsTheyCarry","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProvenanceVisibilityIdempotencyAndTamper","tier":"GATED-FULL"}

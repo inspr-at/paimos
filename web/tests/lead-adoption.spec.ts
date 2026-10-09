@@ -42,6 +42,22 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
     expect(writes).toEqual([{ expected_revision: 0, session_id: LEAD_SESSION }])
     expect(state.calls.filter(call => call.method === 'POST' && call.path === '/api/projects/p-pharos/lead')).toHaveLength(0)
     await page.screenshot({ path: info.outputPath(`pending-${width}-${theme}.png`) })
+    await expect(card.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible()
+    await expect(card.getByRole('button', { name: 'Pause…', exact: true })).toHaveCount(0)
+    await expect(card.getByRole('button', { name: 'Resume', exact: true })).toHaveCount(0)
+    await card.getByRole('button', { name: 'PHAROS lead: open details' }).click()
+    const pendingPanel = page.locator('.lead-panel')
+    await expect(pendingPanel.locator('[data-act="pause"]')).toHaveCount(0)
+    await expect(pendingPanel.locator('[data-act="resume"]')).toHaveCount(0)
+    const cancelAdoption = pendingPanel.locator('[data-act="cancel-adoption"]')
+    await expect(cancelAdoption).toBeVisible()
+    await page.screenshot({ path: info.outputPath(`pending-panel-${width}-${theme}.png`) })
+    const closePending = pendingPanel.getByRole('button', { name: 'Close details' })
+    await expectStableControls({ controls: { close: closePending, cancel: cancelAdoption }, scrollAreas: { body: pendingPanel.locator('.pane-body') }, interactions: [
+      { name: 'read the pending adoption without moving Cancel', run: async () => { await pendingPanel.locator('.pane-body').evaluate(el => { el.scrollTop = el.scrollHeight }) } },
+    ] })
+    await closePending.click()
+    await expect(pendingPanel).toHaveCount(0)
     // The server suite proves the lease transition. Feed its resulting snapshot
     // to the card and retain the existing session ID/context, queue and history.
     state.leads['p-pharos'] = { ...state.leads['p-pharos']!, revision: 2, generation: 1, state: 'working', reason: '' }
@@ -80,4 +96,44 @@ test('candidate errors and rejected confirmations remain visible with no false a
   await card.getByRole('radio').click(); await card.getByRole('button', { name: 'Confirm adoption' }).click()
   await expect(card).toContainText('The selected coordinator is no longer reporting')
   expect(state.leads['p-pharos']?.state).toBe('none')
+})
+
+test('cancelling an unclaimed adoption clears only the selection', async ({ page }) => {
+  const { state } = await mockLeadFlow(page, { lead: 'none', queue: [] })
+  const cancels: unknown[] = []
+  const pauses: string[] = []
+  await page.route('**/api/projects/p-pharos/lead/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/candidates')) return route.fulfill({ json: { items: [{ id: LEAD_SESSION, display_label: 'AEON-LEAD', host: 'mbp2607', harness: 'codex', management_mode: 'unmanaged', reported_at: new Date().toISOString() }], next_cursor: null } })
+    if (path.endsWith('/adopt/cancel')) {
+      cancels.push(route.request().postDataJSON())
+      const current = state.leads['p-pharos']!
+      state.leads['p-pharos'] = { ...current, revision: current.revision + 1, session_id: null, reason: 'selection_cleared', state: 'waiting_for_room', generation: 0, process_active: false }
+      return route.fulfill({ json: state.leads['p-pharos'] })
+    }
+    if (path.endsWith('/pause')) { pauses.push(route.request().method()); return route.fulfill({ status: 500, json: { error: 'pause must not run' } }) }
+    if (!path.endsWith('/adopt')) return route.fallback()
+    const body = route.request().postDataJSON()
+    state.leads['p-pharos'] = { project_id: 'p-pharos', revision: 1, generation: 0, session_id: body.session_id, state: 'waiting_for_room', reason: 'adoption_pending', process_active: true }
+    return route.fulfill({ json: state.leads['p-pharos'] })
+  })
+  await page.goto('/p/PHAROS')
+  const card = page.locator('section.lead')
+  await card.getByRole('button', { name: 'Adopt a running session' }).click()
+  await card.getByRole('radio').click()
+  await card.getByRole('button', { name: 'Confirm adoption' }).click()
+  await expect(card).toContainText('Adoption confirmed · waiting for session proof')
+  await card.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect.poll(() => cancels).toEqual([{ expected_revision: 1 }])
+  expect(pauses).toEqual([])
+  expect(state.calls.filter(call => call.method === 'POST' && call.path.endsWith('/pause'))).toEqual([])
+  await expect(card).toContainText('No session selected')
+  await expect(card).toContainText('The previous choice was cleared. That session kept running.')
+  await card.getByRole('button', { name: 'Start lead', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: 'Start lead for PHAROS' })
+  await expect(sheet).toBeVisible()
+  await expect(sheet).not.toContainText('already has')
+  await sheet.locator('[data-act="start"]').click()
+  await expect.poll(() => state.calls.filter(call => call.method === 'POST' && call.path === '/api/projects/p-pharos/lead')).toHaveLength(1)
+  expect(pauses).toEqual([])
 })

@@ -355,6 +355,9 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			return nil, workorders.Fail(409, "eligible owned reporting root coordinator required")
 		}
 	}
+	if l.Reason == selectionCleared {
+		return nil, workorders.Fail(409, "explicit start request required after cancelled adoption")
+	}
 	before := l
 	var predecessor *Session
 	if l.SessionID != nil && *l.SessionID != s.ID {
@@ -479,6 +482,11 @@ func (m *Module) pauseLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		if !leaseProof(s, r, p) {
 			return nil, workorders.Fail(403, "current lead worker proof required")
 		}
+	}
+	// An unclaimed adoption has no generation to checkpoint. Reject before
+	// cooperative pause or the lead-state write, so the live process is untouched.
+	if l.Reason == adoptionPending {
+		return nil, workorders.Fail(409, "unclaimed adoption cannot be paused")
 	}
 	before := l
 	reason := "handover_pending"

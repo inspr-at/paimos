@@ -77,6 +77,7 @@ func init() {
 		"POST /api/projects/{projectId}/lead":                                                            "harness.control",
 		"GET /api/projects/{projectId}/lead/candidates":                                                  "harness.read",
 		"POST /api/projects/{projectId}/lead/adopt":                                                      "harness.control",
+		"POST /api/projects/{projectId}/lead/adopt/cancel":                                               "harness.control",
 		"POST /api/projects/{projectId}/lead/claim":                                                      "harness.worker",
 		"POST /api/projects/{projectId}/lead/pause":                                                      "harness.control|harness.worker",
 		"POST /api/projects/{projectId}/lead/yield":                                                      "harness.worker",

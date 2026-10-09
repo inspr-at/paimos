@@ -18,6 +18,10 @@ import (
 // Selection grants no worker authority. Only the selected generation's lease
 // can finish this transition; ordinary launch/dispatch admission stays closed.
 const adoptionPending = "adoption_pending"
+
+// selectionCleared is an unclaimed adoption whose session choice was cancelled.
+// It grants no generation. Claim stays closed until an explicit start or a new adoption.
+const selectionCleared = "selection_cleared"
 const adoptEligibleSQL = `role='coordinator' AND parent_id IS NULL
  AND stopped_at IS NULL AND archived_at IS NULL AND phase NOT IN ('stopping','stopped')
  AND NOT coalesce(pause_record->>'state' IN ('requested','planned','paused','resume_requested'),false)
@@ -159,6 +163,53 @@ func (m *Module) adoptLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		return nil, err
 	}
 	if err = workorders.Record(ctx, tx, p, id, "lead.adoption_requested", before, l); err != nil {
+		return nil, err
+	}
+	return projectLead(ctx, tx, p, l)
+}
+
+// cancelLeadAdoption clears only the unclaimed session selection. It does not
+// pause, stop or reparent the harness session, and it takes no session lock.
+func (m *Module) cancelLeadAdoption(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	var in struct {
+		Revision *int64 `json:"expected_revision"`
+	}
+	if err := workorders.Decode(r, &in); err != nil {
+		return nil, err
+	}
+	if in.Revision == nil || *in.Revision < 0 {
+		return nil, workorders.Fail(400, "valid revision required")
+	}
+	ctx, id := r.Context(), r.PathValue("projectId")
+	if err := leadFence(ctx, tx, id); err != nil {
+		return nil, err
+	}
+	owner, err := adoptionOwner(ctx, tx, p, id)
+	if err != nil {
+		return nil, err
+	}
+	l, err := loadLead(ctx, tx, id, true)
+	if err != nil {
+		return nil, err
+	}
+	if l.Revision != *in.Revision {
+		return nil, workorders.Fail(409, "lead revision conflict")
+	}
+	if l.owner != owner {
+		return nil, workorders.Fail(403, "lead owner required; explicit ownership handoff required")
+	}
+	if l.Reason != adoptionPending || l.Generation != 0 || l.SessionID == nil {
+		return nil, workorders.Fail(409, "unclaimed adoption required")
+	}
+	before := l
+	l, err = scanLead(tx.QueryRow(ctx, `UPDATE project_leads SET session_id=NULL,state='waiting_for_room',reason=$2,dispatch_key_id=NULL,revision=revision+1,updated_at=clock_timestamp() WHERE project_id=$1 AND reason=$3 AND generation=0 AND session_id IS NOT NULL RETURNING `+leadColumns, id, selectionCleared, adoptionPending))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, workorders.Fail(409, "unclaimed adoption required")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err = workorders.Record(ctx, tx, p, id, "lead.adoption_cancelled", before, l); err != nil {
 		return nil, err
 	}
 	return projectLead(ctx, tx, p, l)

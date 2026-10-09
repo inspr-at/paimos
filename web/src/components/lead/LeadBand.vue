@@ -70,6 +70,7 @@ const action = computed(() => {
   switch (b.action) {
     case 'start': return { label: b.actionLabel, icon: 'play' as const, primary: true, disabled: !mayStart.value, tip: mayStart.value ? `One per project. Starts nothing until the ${w.l} picks up queued work.` : `Starting a ${w.l} needs permission to run agents in this project` }
     case 'cancel': return { label: b.actionLabel, icon: null, primary: false, disabled: !mayControl.value || !canPause(l), tip: 'Nothing has started yet. Queued work stays queued.' }
+    case 'cancel_adoption': return { label: b.actionLabel, icon: null, primary: false, disabled: !mayStart.value, tip: 'Clears this choice. The session keeps running.' }
     case 'pause': return { label: b.actionLabel, icon: b.state === 'starting' ? null : 'pause' as const, primary: false, disabled: !mayControl.value || !canPause(l), tip: mayControl.value ? 'Stops new work now; running workers finish their step' : 'Only its owner can pause it' }
     case 'resume': return { label: b.actionLabel, icon: 'play' as const, primary: true, disabled: !mayStart.value || !canResume(l), tip: canResume(l) ? `Restarts the ${w.l} through the usual start checks` : `Waits until the ${w.l}’s session has stopped` }
     case 'dial': return { label: b.actionLabel, icon: 'gauge' as const, primary: false, disabled: false, tip: 'The dial and its limits on the Agents page' }
@@ -81,18 +82,19 @@ async function act(event: MouseEvent) {
   const from = event.currentTarget as HTMLElement, a = band.value.action
   if (action.value?.disabled) return
   if (a === 'start') openStartLead([props.projectId], from)
+  else if (a === 'cancel_adoption') await control('cancel-adoption')
   else if (a === 'pause' && (unmanaged.value || band.value.state !== 'starting')) openLeadPause(props.projectId, from)
   else if (a === 'pause' || a === 'cancel') await control('cancel')
   else if (a === 'resume') await control('resume')
   else if (a === 'dial') void router.push('/agents')
   else if (a === 'computers') void router.push({ path: '/agents', hash: '#ac-title' })
 }
-async function control(kind: 'cancel' | 'resume') {
+async function control(kind: 'cancel' | 'resume' | 'cancel-adoption') {
   const project = props.projectId, who = session.identity?.principal.id
   try {
-    const next = kind === 'resume' ? await leads.start(project) : await leads.pause(project)
+    const next = kind === 'resume' ? await leads.start(project) : kind === 'cancel-adoption' ? await leads.cancelAdoption(project) : await leads.pause(project)
     if (!next || project !== props.projectId || who !== session.identity?.principal.id) return
-    toast(kind === 'resume' ? `${props.projectKey} ${w.l} restarting` : 'Start cancelled', { timeout: 5200 })
+    toast(kind === 'resume' ? `${props.projectKey} ${w.l} restarting` : kind === 'cancel-adoption' ? 'Adoption cancelled' : 'Start cancelled', { timeout: 5200 })
   } catch (e) {
     if (project === props.projectId) toast(e instanceof Error ? e.message : 'The lead did not change.', { tone: 'error' })
   }

@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router'
 import { api } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { canPause, canResume, checksSummary, decisionLine, LEAD_WORDS, unmanagedLeadCopy, startChecks } from '../../lib/lead'
-import { closeLeadPanel, leadOverlay, openLeadPause } from '../../lib/leadOverlay'
+import { closeLeadPanel, leadOverlay, openLeadPause, openStartLead } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
 import { usePoller } from '../../lib/usePolledData'
 import { useLeadSummary } from '../../lib/useLeadSummary'
@@ -19,7 +19,7 @@ import LeadBot from './LeadBot.vue'
 
 // The one detailed home of a lead (the ticket panel pattern): Right now,
 // Workers, Next up, Before every start and Recent. Long content scrolls in the
-// body; Pause or Resume stays in the pinned footer.
+// body; Cancel, Start, Pause or Resume stays in the pinned footer.
 const props = defineProps<{ projectId: string; projectKey: string; routeKey: string }>()
 const w = LEAD_WORDS
 const leads = useProjectLeads(), queue = useWorkQueue(), session = useSession(), router = useRouter()
@@ -77,6 +77,13 @@ const next = computed(() => (queued.value ?? []).filter(item => !item.target_age
 const href = (key: string) => `/p/${encodeURIComponent(props.routeKey)}/${encodeURIComponent(key)}`
 const harnessName = (h: string) => ({ codex: 'Codex', claude: 'Claude', cursor: 'Cursor', grok: 'Grok', pi: 'Pi', gemini: 'Gemini', opencode: 'OpenCode' } as Record<string, string>)[h] ?? h
 
+async function cancelAdoption() {
+  const project = props.projectId, who = session.identity?.principal.id
+  try {
+    const result = await leads.cancelAdoption(project)
+    if (result && project === props.projectId && who === session.identity?.principal.id) toast('Adoption cancelled', { timeout: 5200 })
+  } catch (e) { if (project === props.projectId) toast(e instanceof Error ? e.message : 'The adoption was not cancelled.', { tone: 'error' }) }
+}
 async function resume() {
   const project = props.projectId, who = session.identity?.principal.id
   try {
@@ -161,7 +168,15 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
       </section>
     </div>
     <footer class="pane-foot">
-      <p v-if="unmanaged && lead?.state === 'paused'">{{ unmanagedLeadCopy }}. Continue from the session itself.</p>
+      <template v-if="lead?.reason === 'adoption_pending'">
+        <p>Clears this choice. The session keeps running.</p>
+        <button type="button" class="btn" data-act="cancel-adoption" :aria-disabled="!mayStart || leads.busy[projectId]" @click="mayStart && !leads.busy[projectId] && cancelAdoption()">Cancel</button>
+      </template>
+      <template v-else-if="lead?.reason === 'selection_cleared' && !lead.session_id">
+        <p>The previous choice was cleared. Start a lead or adopt another running session.</p>
+        <button type="button" class="btn primary" data-act="start" :aria-disabled="!mayStart || leads.busy[projectId]" @click="mayStart && !leads.busy[projectId] && openStartLead([projectId], $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="15" />Start {{ w.l }}</button>
+      </template>
+      <p v-else-if="unmanaged && lead?.state === 'paused'">{{ unmanagedLeadCopy }}. Continue from the session itself.</p>
       <template v-else-if="lead?.state === 'paused'">
         <p>{{ canResume(lead) ? 'Restarts through the usual start checks.' : 'Resume waits until its session has stopped.' }}</p>
         <button type="button" class="btn primary" data-act="resume" :aria-disabled="!mayStart || !canResume(lead) || leads.busy[projectId]" @click="mayStart && canResume(lead) && resume()"><AppIcon name="play" :size="15" />Resume</button>
