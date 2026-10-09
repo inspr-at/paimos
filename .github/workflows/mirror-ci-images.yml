@@ -5,6 +5,9 @@ name: Mirror CI images
 
 on:
   workflow_dispatch:
+  # TEMPORARY (OPS-287): seed the mirror from this branch once; removed in the next commit.
+  push:
+    branches: [ops/ops-287-ci-mirror]
   schedule:
     - cron: '17 4 * * 1'
 
