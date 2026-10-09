@@ -56,6 +56,25 @@ func githubRunBody(id int64, attempt int, workflow, event, branch, head string, 
 		"created_at": created, "run_started_at": created.Add(time.Minute), "updated_at": created.Add(time.Minute + wall), "check_suite_id": suite, "pull_requests": []any{}}
 }
 
+// githubJobsBody is a GitHub jobs list of one attempt: the five required checks,
+// each waiting waitSeconds for a runner, and one skipped job that "started" much
+// later (a skipped job has no wait). A conclusion "-" leaves that required job out.
+func githubJobsBody(created time.Time, waitSeconds int, conclusions map[string]string) map[string]any {
+	jobs := []any{}
+	for _, name := range defaultRequiredChecks {
+		conclusion := "success"
+		if v, ok := conclusions[name]; ok {
+			conclusion = v
+		}
+		if conclusion == "-" {
+			continue
+		}
+		jobs = append(jobs, map[string]any{"name": name, "conclusion": conclusion, "created_at": created, "started_at": created.Add(time.Duration(waitSeconds) * time.Second)})
+	}
+	jobs = append(jobs, map[string]any{"name": "go-test (1)", "conclusion": "skipped", "created_at": created, "started_at": created.Add(time.Hour)})
+	return map[string]any{"total_count": len(jobs), "jobs": jobs}
+}
+
 func metricCounts(t *testing.T, f *fixture) (runs, pulls, marks int) {
 	t.Helper()
 	f.tx(t, func(tx pgx.Tx) error {
@@ -126,7 +145,7 @@ func TestDeliveryMetricsWebhookRecordsEachEventKind(t *testing.T) {
 
 	var out DeliveryMetrics
 	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/metrics", nil, 200, &out)
-	if out.Source == nil || out.Source.CoveredSince == nil || !out.Source.CoveredSince.Equal(f.at) || len(out.Metrics) != 12 {
+	if out.Source == nil || out.Source.CoveredSince == nil || !out.Source.CoveredSince.Equal(f.at) || len(out.Metrics) != 20 {
 		t.Fatalf("metrics source: %+v (%d metrics)", out.Source, len(out.Metrics))
 	}
 	wall := metricByKey(t, out.Metrics, "pr_ci_wall")
@@ -161,6 +180,8 @@ func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
 				githubRunBody(600, 1, defaultCIWorkflow, "merge_group", "gh-readonly-queue/main/pr-7-"+strings.Repeat("a", 40), strings.Repeat("a", 40), day.Add(time.Hour), 14*time.Minute, "success", 0), rerun}}, nil
 		case path == "/actions/runs/601/attempts/1":
 			return githubRunBody(601, 1, defaultCIWorkflow, "pull_request", "work/a", strings.Repeat("1", 40), day.Add(time.Hour), 8*time.Minute, "failure", 0), nil
+		case strings.HasPrefix(path, "/actions/runs/") && strings.HasSuffix(path, "/attempts/1/jobs?per_page=100&page=1"):
+			return githubJobsBody(day.Add(time.Hour), 30, nil), nil
 		case path == nightly:
 			return map[string]any{"total_count": 1, "workflow_runs": []any{githubRunBody(602, 1, defaultNightlyWorkflow, "schedule", "main", strings.Repeat("2", 40), day.Add(3*time.Hour), 40*time.Minute, "failure", 0)}}, nil
 		case strings.HasPrefix(path, "/actions/workflows/"):
@@ -198,8 +219,18 @@ func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
 	}
 	failOn = ""
 	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
-	if step.State != "done" || step.Phase != "done" {
+	// The runs and pulls are in, but two first attempts still lack their jobs:
+	// the backfill is not done until the jobs pass has read them.
+	if step.State != "running" || step.Phase != "jobs" {
 		t.Fatalf("resumed step: %+v", step)
+	}
+	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
+	if step.Phase != "jobs" || step.Jobs != 2 {
+		t.Fatalf("jobs step: %+v", step)
+	}
+	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
+	if step.State != "done" || step.Phase != "done" {
+		t.Fatalf("finished backfill: %+v", step)
 	}
 	runs, pulls, _ := metricCounts(t, f)
 	if runs != 4 || pulls != 1 || runsBefore > runs {

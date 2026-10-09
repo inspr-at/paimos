@@ -454,7 +454,22 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 		result.Day = &day
 	}
 	if next.Phase == "done" {
+		// The runs and pulls are in. The backfill is done when no run lacks its
+		// job facts either; until then the next steps are the jobs pass.
 		result.State = "done"
+		var pending []int64
+		err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+			var err error
+			pending, err = jobWorklistTx(r.Context(), tx, source, now, 1)
+			return err
+		})
+		if err != nil {
+			respondError(w, err)
+			return
+		}
+		if len(pending) > 0 {
+			result.State, result.Phase = "running", "jobs"
+		}
 	}
 	httpapi.WriteJSON(w, 200, result)
 }
@@ -609,11 +624,33 @@ const (
 // A run whose jobs GitHub could not return is tried again after an hour, so a
 // few persistent failures never block the rest; its window stays partial and
 // says so. Authority is checked again in the write transaction.
+// jobWorklistTx lists the attempt-1 runs of the CI workflow that still lack job
+// facts, newest first. A run whose read failed waits an hour before its next try.
+func jobWorklistTx(ctx context.Context, tx pgx.Tx, source *metricSourceRow, now time.Time, limit int) ([]int64, error) {
+	from := windowSpan(now, metricLongDays, true).first.Add(-metricSlack)
+	rows, err := tx.Query(ctx, `SELECT run_id FROM delivery_metric_runs
+		WHERE repository=$1 AND attempt=1 AND jobs_read_at IS NULL AND event IN ('pull_request','merge_group') AND completed_at>=$2
+		AND regexp_replace(workflow_path,'^.*/','')=$3 AND (jobs_failed_at IS NULL OR jobs_failed_at<$4)
+		ORDER BY completed_at DESC LIMIT $5`, source.Repository, from, path.Base(source.CIWorkflow), now.Add(-jobFillRetry), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err = rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project string, source *metricSourceRow, reader metricsReader, cursor *backfillCursor, now time.Time) (BackfillResult, error) {
 	result := BackfillResult{State: "running", Since: cursor.Since, Phase: "jobs", Truncated: cursor.Truncated}
 	var runs []int64
 	var required []string
-	from := windowSpan(now, metricLongDays, true).first.Add(-metricSlack)
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := requireMetrics(ctx, tx, p, "delivery.manage", project); err != nil {
 			return err
@@ -622,22 +659,8 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 		if required, err = requiredChecksTx(ctx, tx, []string{project}); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT run_id FROM delivery_metric_runs
-			WHERE repository=$1 AND attempt=1 AND jobs_read_at IS NULL AND event IN ('pull_request','merge_group') AND completed_at>=$2
-			AND regexp_replace(workflow_path,'^.*/','')=$3 AND (jobs_failed_at IS NULL OR jobs_failed_at<$4)
-			ORDER BY completed_at DESC LIMIT $5`, source.Repository, from, path.Base(source.CIWorkflow), now.Add(-jobFillRetry), jobFillBudget)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var id int64
-			if err = rows.Scan(&id); err != nil {
-				return err
-			}
-			runs = append(runs, id)
-		}
-		return rows.Err()
+		runs, err = jobWorklistTx(ctx, tx, source, now, jobFillBudget)
+		return err
 	})
 	if err != nil {
 		return result, err
