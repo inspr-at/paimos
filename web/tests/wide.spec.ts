@@ -18,7 +18,7 @@ test.describe('wide lists', () => {
     await expect(rows(page)).toHaveCount(5)
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Updated'])
     await page.setViewportSize({ width: 2560, height: 1440 })
-    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Epic', 'Release', 'Tags', 'Created', 'Updated'])
+    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Epic', 'Release', 'Tags', 'Estimate', 'Suggested release', 'Created', 'Updated'])
     const row = (key: string) => rows(page).filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
     await expect(row('PHAROS-11').locator('.c-epic')).toHaveText('Guarded multi-cloud provisioning')
     await expect(row('PHAROS-11').locator('.c-release')).toHaveText('—')
@@ -29,6 +29,9 @@ test.describe('wide lists', () => {
     await expect(row('PHAROS-13').locator('.parent-chip')).toHaveText('PHAROS-12')
     await expect(row('PHAROS-11').locator('.parent-chip')).toHaveCount(0)
     await expect(row('PHAROS-14').locator('.c-epic')).toHaveText('—')
+    // The additional planning columns take space too; at 2800px there is
+    // enough room to exercise the original 960px Title target unchanged.
+    await page.setViewportSize({ width: 2800, height: 1440 })
     // Title stops near 960px; the spare width goes to the text columns beside it.
     const title = (await page.locator('thead th.c-title').boundingBox())!
     expect(title.width).toBeGreaterThan(900)
@@ -37,7 +40,7 @@ test.describe('wide lists', () => {
     // The page has no width cap; the gutter grows to 48px.
     const table = (await page.locator('.table-card').boundingBox())!
     expect(table.x).toBeGreaterThanOrEqual(46)
-    expect(table.x + table.width).toBeGreaterThan(2560 - 70)
+    expect(table.x + table.width).toBeGreaterThan(2800 - 70)
     // Title resizes too: its width becomes the target, and is saved.
     const handle = page.getByRole('separator', { name: 'Resize Title column' })
     const box = (await handle.boundingBox())!
@@ -60,7 +63,14 @@ test.describe('wide lists', () => {
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Assignee', 'Updated'])
     // Alt+Up moves Updated before Assignee (past the planning columns, AEON-329).
     await menu.getByRole('checkbox', { name: 'Updated' }).focus()
-    for (let i = 0; i < 11; i++) await page.keyboard.press('Alt+ArrowUp')
+    const order = () => menu.getByRole('list', { name: 'Columns', exact: true }).getByRole('checkbox').evaluateAll(inputs => inputs.map(input => input.getAttribute('aria-label')))
+    const initial = await order(), from = initial.indexOf('Updated'), target = initial.indexOf('Assignee')
+    expect(from - target).toBeGreaterThan(0)
+    expect(from - target).toBeLessThanOrEqual(30)
+    for (let i = 0; i < from - target; i++) {
+      await page.keyboard.press('Alt+ArrowUp')
+      await expect.poll(async () => (await order()).indexOf('Updated')).toBe(from - i - 1)
+    }
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Updated', 'Assignee'])
     await menu.getByRole('checkbox', { name: 'Estimate' }).check()
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Updated', 'Assignee', 'Estimate'])
@@ -153,7 +163,8 @@ test.describe('edit mode', () => {
     await form.getByRole('button', { name: 'Status Backlog' }).focus()
     await page.keyboard.press('ArrowDown')
     await expect(page.getByRole('menu', { name: 'Status of PHAROS-12' })).toBeVisible()
-    await page.keyboard.press('4')
+    await expect(page.getByRole('menu', { name: 'Status of PHAROS-12' }).getByRole('menuitemradio', { name: 'In progress', exact: true }).locator('.digit')).toHaveText('5')
+    await page.keyboard.press('5')
     await expect(form.getByRole('button', { name: 'Status In progress' })).toBeFocused()
     await form.getByRole('button', { name: 'Assignee Unassigned' }).click()
     await page.getByRole('textbox', { name: 'Find assignee' }).fill('mira')
@@ -234,14 +245,15 @@ test.describe('back trail', () => {
     await ws.getByRole('button', { name: /PHAROS-11/ }).first().click()
     await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
     await expect(trail.getByRole('button')).toHaveText(['PHAROS-12', 'PHAROS-10'])
-    // A narrow panel keeps the last step and shows that there is more.
+    // A narrow panel keeps the destination in Back's accessible name; the
+    // text trail folds. Keyboard Back must still traverse that exact step.
     await page.setViewportSize({ width: 1280, height: 800 })
-    await expect(trail.getByRole('button')).toHaveText(['PHAROS-10'])
-    await expect(trail.locator('.trail-more')).toBeVisible()
-    await page.setViewportSize({ width: 1920, height: 1080 })
+    await expect(trail).toBeHidden()
+    await expect(ws.getByRole('button', { name: 'Back to PHAROS-10', exact: true })).toBeVisible()
     await ws.focus()
     await page.keyboard.press('Alt+ArrowLeft')
     await expect(page).toHaveURL('/p/PHAROS/PHAROS-10')
+    await page.setViewportSize({ width: 1920, height: 1080 })
     await ws.getByRole('button', { name: 'Back to PHAROS-12' }).click()
     await expect(page).toHaveURL('/p/PHAROS/PHAROS-12')
     await expect(ws.getByRole('navigation', { name: 'Followed tickets' })).toHaveCount(0)
