@@ -182,7 +182,8 @@ const focusKey = computed(() => {
   for (const [si, set] of sets.value.entries()) for (const lane of set.lanes) { if (i++ === focusLane.value) return `${si}:${lane}` }
   return null
 })
-const ctx = computed(() => props.data ? { data: props.data, level: props.level, lang: props.lang, text: text.value } : null)
+const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
+const ctx = computed(() => props.data ? { data: props.data, level: props.level, lang: props.lang, text: text.value, timeZone: viewerZone } : null)
 const moment = computed(() => ctx.value ? momentOf({ ...ctx.value, sets: sets.value, T: timeline.T, selected: selected.value }) : null)
 const head = computed(() => ctx.value ? headOf(props.mode, { ...ctx.value, reduced: reduced.value }) : null)
 const rows = computed(() => ctx.value && props.mode === 'live' ? flightRows(ctx.value) : [])

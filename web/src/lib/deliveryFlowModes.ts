@@ -15,7 +15,7 @@ import { OUTCOME_PLAIN, WAIT_OBJECT } from './deliveryFlowWords'
 export type FlowMode = 'live' | 'replay' | 'compare'
 export const FLOW_MODES: readonly FlowMode[] = ['live', 'replay', 'compare']
 export interface Part { text: string; strong?: boolean }
-interface Ctx { data: FlowData; level: FlowLevel; lang: DeliveryLanguage; text: FlowText }
+interface Ctx { data: FlowData; level: FlowLevel; lang: DeliveryLanguage; text: FlowText; timeZone?: string }
 
 const dec = (value: number, lang: DeliveryLanguage) => lang === 'de' ? String(value).replace('.', ',') : String(value)
 /** Minutes as a number: one decimal below 10, whole above. */
@@ -315,7 +315,7 @@ export interface ReleaseRecord { title: string; rows: RecordRow[] }
 function attemptWords(attempt: RecordedAttempt, ctx: Ctx): string {
   const { level, lang, text } = ctx, expert = level === 'expert'
   const parts: string[] = []
-  if (attempt.open) parts.push(put(text.rec.running, { t: timeLabel({ origin: attempt.startAt }, 0) }), put(text.rec.soFar, { m: fmtMin(attempt.minutes, lang) }))
+  if (attempt.open) parts.push(put(text.rec.running, { t: timeLabel({ origin: attempt.startAt }, 0, ctx.timeZone) }), put(text.rec.soFar, { m: fmtMin(attempt.minutes, lang) }))
   else {
     parts.push(minutesText(attempt.minutes))
     if (attempt.outcome) parts.push(expert ? attempt.outcome : pick(pair(OUTCOME_PLAIN[attempt.outcome]), lang))

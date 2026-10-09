@@ -771,15 +771,27 @@ it('the record always has its four rows: a fact nobody reported says so, and not
 })
 
 it('a catalogue still running reads as elapsed time, and a second run names the latest', () => {
-  const running = releaseRun({ ended_at: null, pct_done: 40 }, [])
-  running.steps = running.steps.filter(s => s.step_key !== 'catalogue')
-  running.steps.push({ ...running.steps[0]!, id: 's-cat-open', step_key: 'catalogue', started_at: at(1), ended_at: null, outcome: null, side: false })
-  const rec = recordedRuns(asList({ ...running, now: at(10), at: at(10) }), { extendOpen: true })
-  const live = liveData(rec)!
-  const liveRun = rec.runs[0]!
-  const open = recordOf(liveRun, { data: live, level: 'simple', lang: 'en', text: en })!.rows[0]!
-  // 20:01 is minute 1 of the 18:00 UTC test clock (Vienna time); minute 10 is now.
-  expect(open.value).toBe('running since 20:01 · 9 min so far')
+  const openValue = (timeZone?: string) => {
+    const running = releaseRun({ ended_at: null, pct_done: 40 }, [])
+    running.steps = running.steps.filter(s => s.step_key !== 'catalogue')
+    running.steps.push({ ...running.steps[0]!, id: 's-cat-open', step_key: 'catalogue', started_at: at(1), ended_at: null, outcome: null, side: false })
+    const rec = recordedRuns(asList({ ...running, now: at(10), at: at(10) }), { extendOpen: true })
+    const live = liveData(rec)!
+    return recordOf(rec.runs[0]!, { data: live, level: 'simple', lang: 'en', text: en, timeZone })!.rows[0]!.value
+  }
+  // Host zone is New York, not Vienna and not UTC. Minute 1 of the 18:00 UTC clock is
+  // 20:01 in Vienna, 18:01 in UTC and 14:01 on the host; minute 10 is now (9 min so far).
+  const prior = process.env.TZ
+  process.env.TZ = 'America/New_York'
+  try {
+    expect(openValue('Europe/Vienna')).toBe('running since 20:01 · 9 min so far')
+    expect(openValue('UTC')).toBe('running since 18:01 · 9 min so far')
+    expect(openValue('America/New_York')).toBe('running since 14:01 · 9 min so far')
+    expect(openValue()).toBe('running since 14:01 · 9 min so far')
+  } finally {
+    if (prior === undefined) delete process.env.TZ
+    else process.env.TZ = prior
+  }
 
   const twice = releaseRun({}, [{ ...releaseRun().steps[2]!, id: 's-cat-2', round: 2, started_at: at(30), ended_at: at(41), outcome: 'red' }])
   const { main, ctx } = recordCtx(twice)
