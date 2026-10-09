@@ -220,6 +220,8 @@ func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatu
 				v.ProfilePermissions = true
 			} else if s.harnessFailed[a.ID] {
 				status, reason = "blocked", "harness_failed"
+			} else if s.probeFailureReasons[a.ID] == agentsetup.UnsettledPreviousRun {
+				status, reason = "blocked", agentsetup.UnsettledPreviousRun
 			} else if s.loginRequired[a.ID] {
 				status, reason = "login_required", "login_required"
 				v.LoginRequired = true
@@ -396,6 +398,18 @@ func (s *Supervisor) freezeOnError(account string) {
 	s.mu.Unlock()
 }
 
+func (s *Supervisor) freezePreviousRun(account string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.blockedAccounts[account] = true
+	delete(s.probePendingSince, account)
+	if s.probeFailureReasons == nil {
+		s.probeFailureReasons = map[string]string{}
+	}
+	s.probeFailureReasons[account] = agentsetup.UnsettledPreviousRun
+	delete(s.probeReasonDetails, account)
+}
+
 // handleRunError fences dispatch on uncertain delivery or authority loss, but
 // stops the exact owned child only for a confirmed telemetry protocol failure.
 // Keep rejected evidence durable: observing exit does not settle server usage.
@@ -524,9 +538,16 @@ func (s *Supervisor) settlePending(ctx context.Context) error {
 	var failures []error
 	for _, e := range entries {
 		e.mu.Lock()
-		err := s.flushReports(ctx, e)
+		err := s.reconcileOldSettlement(ctx, e)
+		if err == nil {
+			err = s.flushReports(ctx, e)
+		}
+		account := e.record.AccountID
 		e.mu.Unlock()
 		s.handleRunError(e, err)
+		if err != nil && s.hasUnresolvedOldClaim(account) {
+			s.freezePreviousRun(account)
+		}
 		failures = append(failures, err)
 	}
 	return errors.Join(failures...)

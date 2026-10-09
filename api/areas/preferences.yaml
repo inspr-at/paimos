@@ -34,6 +34,10 @@ paths:
         is the exact updated_at from GET /agents/plan (null means no saved plan).
         The check and save are atomic across linked aliases; a stale revision
         returns 409 without changing the plan. Omission preserves legacy writes.
+        Daily settings are validated strictly; active Boost today must end at
+        the canonical person's next local midnight and requires account.manage
+        plus ownership and visible usage for every affected account. A write
+        omitting daily preserves existing daily settings for older dial clients.
       requestBody:
         required: true
         content:

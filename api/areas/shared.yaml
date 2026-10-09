@@ -69,6 +69,7 @@ components:
         account_id: {type: [string, 'null'], format: uuid}
         requested_account_id: {type: [string, 'null'], format: uuid, description: The optional account choice pinned at creation; account_id remains null until a reservation succeeds.}
         status: {type: string, enum: [queued, starting, running, waiting, completed, failed, cancelled, ownership_lost]}
+        reservations_settled: {type: boolean, description: 'Present on run detail reads. True only when the run has at least one reservation and every reservation is settled with recorded actual usage and settlement time. Missing or false never proves accounting settlement; terminal run status and matching ownership are also required for local reconciliation.'}
         requested_model: {type: [string, 'null']}
         effective_model: {type: [string, 'null']}
         outcome: {type: [string, 'null'], enum: [completed, failed, cancelled, ownership_lost, null]}

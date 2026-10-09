@@ -4,6 +4,7 @@ package views
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -29,6 +31,7 @@ const maxPreferenceBytes = 16 << 10
 
 var preferenceKey = regexp.MustCompile(`^[a-z][a-z0-9_.:-]{0,127}$`)
 var errAgentsPlanChanged = errors.New("agents plan changed")
+var errAgentsDailyInvalid = agentplan.ErrDailyWrite
 
 type preference struct {
 	Key       string          `json:"key"`
@@ -87,6 +90,9 @@ func (m *Module) getPreference(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) putPreference(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	p, ok := tenant.PrincipalFrom(r.Context())
 	if !ok {
 		httpapi.WriteError(w, http.StatusUnauthorized, "authentication required")
@@ -150,14 +156,53 @@ func (m *Module) putPreference(w http.ResponseWriter, r *http.Request) {
 			if err := authz.RequireTx(r.Context(), tx, p, "views.write", authz.Scope{}); err != nil {
 				return err
 			}
+			previous := agentplan.Default()
 			if len(in.ExpectedUpdatedAt) > 0 {
-				_, currentAt, err := readAgentsPlanPreference(r.Context(), tx, p.TenantID, owner)
+				previousRaw, currentAt, err := readAgentsPlanPreference(r.Context(), tx, p.TenantID, owner)
 				if err != nil {
 					return err
 				}
 				if (expectedAt == nil) != (currentAt == nil) || expectedAt != nil && !expectedAt.Equal(*currentAt) {
 					return errAgentsPlanChanged
 				}
+				previous, _, err = agentplan.Decode(previousRaw)
+				if err != nil {
+					return err
+				}
+			} else {
+				previous.Daily, err = agentplan.ReadDailyForWriteTx(ctx, tx, p.TenantID, owner)
+				if err != nil {
+					return err
+				}
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(trimmed, &fields); err != nil {
+				return err
+			}
+			if _, present := fields["daily"]; !present && previous.Daily != nil {
+				daily, err := json.Marshal(previous.Daily)
+				if err != nil {
+					return err
+				}
+				fields["daily"] = daily
+				trimmed, err = json.Marshal(fields)
+				if err != nil {
+					return err
+				}
+				if len(trimmed) > maxPreferenceBytes {
+					return errAgentsDailyInvalid
+				}
+			}
+			next, _, err := agentplan.Decode(trimmed)
+			if err != nil {
+				return errAgentsDailyInvalid
+			}
+			var now time.Time
+			if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
+				return err
+			}
+			if err := agentaccounts.ValidateDailyWriteTx(ctx, tx, p, owner, next, previous, now); err != nil {
+				return err
 			}
 		}
 		var value []byte
@@ -190,6 +235,10 @@ func (m *Module) putPreference(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, errAgentsPlanChanged) {
 		httpapi.WriteError(w, http.StatusConflict, "agents plan changed; re-read before saving")
+		return
+	}
+	if errors.Is(err, errAgentsDailyInvalid) {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid daily plan settings")
 		return
 	}
 	if errors.Is(err, authz.ErrForbidden) {

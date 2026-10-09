@@ -27,6 +27,7 @@ import (
 )
 
 type Run struct {
+	ReservationsSettled       *bool   `json:"reservations_settled,omitempty"`
 	RecoveryBrief             string  `json:"recovery_brief,omitempty"`
 	RecoveryTier              string  `json:"recovery_service_tier,omitempty"`
 	RecoveryLabel             *string `json:"recovery_display_label,omitempty"`
@@ -244,6 +245,16 @@ func (m *module) get(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error
 	if p.Kind == tenant.Agent && v.AgentID != p.ID {
 		return nil, workorders.Fail(403, "run belongs to another agent")
 	}
+	// Read accounting beside the authorized run, never infer it from terminal
+	// status alone. An empty or released reservation set is not settlement.
+	var settled bool
+	if err := tx.QueryRow(r.Context(), `SELECT
+ EXISTS(SELECT 1 FROM account_reservations WHERE tenant_id=$1 AND run_id=$2)
+ AND NOT EXISTS(SELECT 1 FROM account_reservations WHERE tenant_id=$1 AND run_id=$2
+   AND (state<>'settled' OR actual_units IS NULL OR settled_at IS NULL))`, p.TenantID, v.ID).Scan(&settled); err != nil {
+		return nil, err
+	}
+	v.ReservationsSettled = &settled
 	if v.Status == "queued" && v.Purpose == "managed" {
 		if v.QueueNodeID == nil || v.QueueTargetAgentID != nil || v.QueueRoutedAt != nil {
 			v.Wait, err = agentaccounts.WaitForRun(r.Context(), tx, v.ID)
