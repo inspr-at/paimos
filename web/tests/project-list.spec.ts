@@ -31,7 +31,8 @@ test('the list asks for open work in the project and shows every column', async 
   await expect(row(page, 'PHAROS-13').locator('.parent-chip')).toHaveText('PHAROS-12')
   await expect(row(page, 'PHAROS-14').locator('.parent-chip')).toHaveCount(0)
   await expect(row(page, 'PHAROS-11').locator('time')).toHaveText('1h ago')
-  await expect(page.getByRole('toolbar').getByText('5 tickets')).toBeVisible()
+  // The count lives in the footer (footer-summary.spec.ts); the toolbar no longer repeats it.
+  await expect(page.getByRole('toolbar').getByText('5 tickets')).toHaveCount(0)
   expect(await page.locator('thead th').first().evaluate(el => getComputedStyle(el).position)).toBe('sticky')
   expect(errors).toEqual([])
 })

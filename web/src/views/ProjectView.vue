@@ -60,6 +60,7 @@ import StatusMenu from '../components/work/StatusMenu.vue'
 import TicketTable from '../components/work/TicketTable.vue'
 import TicketWorkspace from '../components/work/TicketWorkspace.vue'
 import ViewBar from '../components/work/ViewBar.vue'
+import HeaderNavMenu from '../components/work/HeaderNavMenu.vue'
 import SaveViewPanel from '../components/work/SaveViewPanel.vue'
 import BulkBar from '../components/work/BulkBar.vue'
 import LiveUpdatesChip from '../components/work/LiveUpdatesChip.vue'
@@ -1801,7 +1802,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <div v-if="!settingsActive && !deliveryActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
         <ListToolbar
           ref="toolbar" :summary="project" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
-          :facet-loading="facetLoading" :settings-target="ticketsHeader ? '#project-view-settings' : undefined" :project-header="ticketsHeader"
+          :facet-loading="facetLoading" :settings-target="ticketsHeader ? '#project-view-settings' : undefined" :project-header="ticketsHeader" :collapsed-header="ticketsHeader && headerDensity === 'collapsed'"
           @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
           @show-closed="manualShowClosed" @hide-states="setHideStates" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
           @open-sheet="filterSheet?.open()" @need-options="needOptions" @create="startCreate()"
@@ -1809,7 +1810,17 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
           @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
           :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
           :header-graph="headerGraph" @header-graph="setHeaderGraph"
-        />
+        >
+          <!-- Collapsed header: the sections and saved views it hides, at the top of the Display menu. -->
+          <template #header-nav="{ anchor, close }">
+            <HeaderNavMenu
+              :sections="projectSections" :section="section" :attention="{ path: '/tickets', query: { view: 'needs-attention', project_id: project.id } }"
+              :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :me="me?.id ?? null" :href-for="hrefFor" :can-save-new="canSaveView && !activeView"
+              @section="id => { close(false); setSection(id) }" @attention="close(false)" @view="id => { close(true); openView(id) }"
+              @view-menu="close(false); viewBar?.openMenuFor(anchor)" @save-as="close(false); startSave(anchor)"
+            />
+          </template>
+        </ListToolbar>
         <div v-if="selectable && (sequence.length || picking)" class="phone-pick" :class="{ on: picking }">
           <p v-if="picking" class="phone-pick-status">
             <span aria-live="polite"><b class="mono">{{ selected.size.toLocaleString('en-GB') }}</b> selected</span>
@@ -1888,7 +1899,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="manualShowClosed" @hide-states="setHideStates" @group="setGroup" @date="setDate"
-        @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el ?? anchor)"
+        @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el?.offsetParent ? viewBar.$el : anchor)"
       />
       <SaveViewPanel
         v-if="savePanel" :key="`${savePanel.mode}-${savePanel.view?.id ?? 'new'}`" :anchor="savePanel.anchor" :mode="savePanel.mode" :name="savePanel.name" :project-title="project.title"

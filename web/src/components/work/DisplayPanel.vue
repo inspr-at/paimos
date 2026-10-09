@@ -49,7 +49,7 @@ const emit = defineEmits<{
       </div>
     </template>
     <template v-else>
-    <template v-if="view === 'list'">
+    <div v-if="view === 'list'" class="block">
       <p class="eyebrow">Group by</p>
       <div class="group-grid" role="radiogroup" aria-label="Group by">
         <button
@@ -61,14 +61,14 @@ const emit = defineEmits<{
         <button type="button" class="btn sm" :disabled="!grouped" @click="emit('expandGroups')"><AppIcon name="expand-all" :size="13" />Expand groups</button>
         <button type="button" class="btn sm" :disabled="!grouped" @click="emit('collapseGroups')"><AppIcon name="collapse-all" :size="13" />Collapse groups</button>
       </div>
-    </template>
-    <template v-else>
+    </div>
+    <div v-else class="block">
       <p class="eyebrow">Outline</p>
       <div class="pair">
         <button type="button" class="btn sm" data-autofocus @click="emit('expandAll')"><AppIcon name="expand-all" :size="13" />Expand all</button>
         <button type="button" class="btn sm" @click="emit('collapseAll')"><AppIcon name="collapse-all" :size="13" />Collapse all</button>
       </div>
-    </template>
+    </div>
     <SortEditor class="section" :sort="filters.sort" :stable="sheet" @change="keys => emit('sort', keys)" />
     <div class="section">
       <p class="eyebrow">Row height</p>
@@ -105,6 +105,8 @@ const emit = defineEmits<{
 .model-choice { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--ink-2); font-size: 12.5px; }
 .model-choice .seg { display: grid; grid-template-columns: repeat(2, 1fr); min-width: 116px; }
 .display-panel { display: grid; gap: 8px; padding: 6px 8px 8px; }
+/* One block, so the collapsed header's multi-column menu never cuts it in two. */
+.block { display: grid; gap: 8px; }
 .group-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 3px; border-radius: 12px; background: var(--seg-bg); }
 .attention-groups { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .attention-groups .group-option { height: 36px; }
