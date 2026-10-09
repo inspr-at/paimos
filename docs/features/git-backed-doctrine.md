@@ -41,8 +41,8 @@ repository on both sides (even with different case) fail startup before
 credential files are read. The configured source visibility and the App
 installation's reported visibility must match the public/private boundary; visibility changes are refused before writes.
 
-For an Augmentoring private-only deployment, set the public variable to an
-empty string and the private variable to `augmentoring-team/agm-doctrine`.
+For an Example Business private-only deployment, set the public variable to an
+empty string and the private variable to `example-business-team/agm-doctrine`.
 Public sources such as `inspr-at/inspr-modules` remain readable and indexable,
 but accept no proposals from this deployment, even with an App grant.
 

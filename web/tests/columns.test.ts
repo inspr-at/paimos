@@ -129,7 +129,7 @@ test('release and tags read the classic fields', () => {
   assert.equal(releaseLabel({ release: '1.10.0' }), '1.10.0')
   assert.equal(releaseLabel({ release: null }), '')
   assert.equal(releaseLabel(undefined), '')
-  assert.deepEqual(tagList({ tags: [{ id: 16, name: 'CUSTOMERPORTAL', color: 'blue' }, 'hsb8', { name: ' ' }, 7] }), [{ name: 'CUSTOMERPORTAL', color: 'blue' }, { name: 'hsb8', color: '' }])
+  assert.deepEqual(tagList({ tags: [{ id: 16, name: 'CUSTOMERPORTAL', color: 'blue' }, 'worker-8', { name: ' ' }, 7] }), [{ name: 'CUSTOMERPORTAL', color: 'blue' }, { name: 'worker-8', color: '' }])
   assert.deepEqual(tagList({ tags: null }), [])
 })
 

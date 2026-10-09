@@ -33,7 +33,7 @@ export interface CapacityOptions {
   unmeasured?: boolean
   /** Online Codex Spare has not received its first quota reading. */
   unreadCodex?: boolean
-  /** mbp2607's setup reports login_required (computer-wide, not per account). */
+  /** build-7's setup reports login_required (computer-wide, not per account). */
   computerLogin?: boolean
   /**
    * The one-time plan card: 'first' has no saved schedule yet, 'new' a release 11
@@ -61,21 +61,21 @@ export interface CapacityOptions {
 
 export function capacityWorld(options: CapacityOptions = {}) {
   const accts: Acct[] = [
-    { id: ACCOUNTS.spare, label: 'Spare', harness: 'codex', host: 'mbp2607', plan: 'Pro', windows: [{ kind: 'weekly', used: 91, usedToday: 2, budget: 6, reset: '2026-09-30T16:02:00Z', start: '2026-09-23T16:02:00Z', source: 'harness', readMin: 9, plan: 'Pro' }] },
-    { id: ACCOUNTS.main, label: 'Main', harness: 'codex', host: 'mbp2607', plan: 'Pro', windows: [{ kind: 'weekly', used: 58, usedToday: 3, budget: 15, reset: '2026-10-02T07:14:00Z', start: '2026-09-25T07:14:00Z', source: 'harness', readMin: 2, plan: 'Pro' }] },
+    { id: ACCOUNTS.spare, label: 'Spare', harness: 'codex', host: 'build-7', plan: 'Pro', windows: [{ kind: 'weekly', used: 91, usedToday: 2, budget: 6, reset: '2026-09-30T16:02:00Z', start: '2026-09-23T16:02:00Z', source: 'harness', readMin: 9, plan: 'Pro' }] },
+    { id: ACCOUNTS.main, label: 'Main', harness: 'codex', host: 'build-7', plan: 'Pro', windows: [{ kind: 'weekly', used: 58, usedToday: 3, budget: 15, reset: '2026-10-02T07:14:00Z', start: '2026-09-25T07:14:00Z', source: 'harness', readMin: 2, plan: 'Pro' }] },
     { id: ACCOUNTS.studio, label: 'Studio', harness: 'codex', host: 'studio', plan: 'Pro', windows: [{ kind: 'weekly', used: 22, usedToday: 0, budget: 0, reset: '2026-10-05T05:40:00Z', start: '2026-09-28T05:40:00Z', source: 'agentd', readMin: 180, plan: 'Pro' }] },
-    { id: ACCOUNTS.claude, label: 'markus', harness: 'claude', host: 'mbp2607', plan: 'Max', windows: [
+    { id: ACCOUNTS.claude, label: 'markus', harness: 'claude', host: 'build-7', plan: 'Max', windows: [
       { kind: 'weekly', used: 63, usedToday: 4, budget: 10, reset: '2026-10-04T09:00:00Z', start: '2026-09-27T09:00:00Z', source: 'harness', readMin: 6, finish: '2026-10-02T20:00:00Z', plan: 'Max' },
       { kind: '5h', used: 40, usedToday: 0, budget: 60, reset: '2026-09-29T14:40:00Z', start: '2026-09-29T09:40:00Z', source: 'harness', readMin: 6, plan: 'Max' },
     ] },
-    { id: ACCOUNTS.grok, label: 'markus', harness: 'grok', host: 'mbp2607', plan: 'SuperGrok Heavy', ...(options.unavailable ? { probe: false, failure: 'unavailable' } : {}), windows: [{ kind: 'weekly', used: 0, usedToday: 0, budget: 13, reset: '2026-10-06T11:10:00Z', start: '2026-09-29T11:10:00Z', source: 'agentd', readMin: options.stale ? 400 : 12, finish: '2026-10-06T11:10:00Z' }] },
+    { id: ACCOUNTS.grok, label: 'markus', harness: 'grok', host: 'build-7', plan: 'SuperGrok Heavy', ...(options.unavailable ? { probe: false, failure: 'unavailable' } : {}), windows: [{ kind: 'weekly', used: 0, usedToday: 0, budget: 13, reset: '2026-10-06T11:10:00Z', start: '2026-09-29T11:10:00Z', source: 'agentd', readMin: options.stale ? 400 : 12, finish: '2026-10-06T11:10:00Z' }] },
   ]
   if (options.unmeasured) accts.find(a => a.id === ACCOUNTS.studio)!.windows = []
   if (options.unreadCodex) accts.find(a => a.id === ACCOUNTS.spare)!.windows = []
   if (options.clash) accts.find(a => a.id === ACCOUNTS.studio)!.label = 'Main'
-  if (options.apiKey) accts.push({ id: ACCOUNTS.pi, label: 'OpenRouter key', harness: 'pi', host: 'mbp2607', plan: '', windows: [] })
-  if (!options.noCursor) accts.push({ id: ACCOUNTS.cursor, label: 'markus', harness: 'cursor', host: 'mbp2607', plan: 'Pro', state: options.signin ? 'unavailable' : 'available', probe: !options.signin, ...(options.signin ? { failure: 'auth_failed' } : {}), windows: [{ kind: 'monthly', used: 43, usedToday: 7, budget: 6, reset: '2026-10-14T07:00:00Z', start: '2026-09-14T07:00:00Z', source: 'estimate', readMin: options.signin ? 2 * 24 * 60 : 20 }] })
-  if (options.unread) accts.push({ id: uuid(7), label: options.longNames ? 'Pi on the home server waiting for its first run' : 'Pi on hsb1', harness: 'pi', host: 'mbp2607', plan: '', windows: [] })
+  if (options.apiKey) accts.push({ id: ACCOUNTS.pi, label: 'OpenRouter key', harness: 'pi', host: 'build-7', plan: '', windows: [] })
+  if (!options.noCursor) accts.push({ id: ACCOUNTS.cursor, label: 'markus', harness: 'cursor', host: 'build-7', plan: 'Pro', state: options.signin ? 'unavailable' : 'available', probe: !options.signin, ...(options.signin ? { failure: 'auth_failed' } : {}), windows: [{ kind: 'monthly', used: 43, usedToday: 7, budget: 6, reset: '2026-10-14T07:00:00Z', start: '2026-09-14T07:00:00Z', source: 'estimate', readMin: options.signin ? 2 * 24 * 60 : 20 }] })
+  if (options.unread) accts.push({ id: uuid(7), label: options.longNames ? 'Pi on the home server waiting for its first run' : 'Pi on worker-1', harness: 'pi', host: 'build-7', plan: '', windows: [] })
   if (options.longNames) {
     const labels: Record<string, string> = {
       [ACCOUNTS.spare]: 'Spare workstation account for the Tuesday release train',
@@ -85,7 +85,7 @@ export function capacityWorld(options: CapacityOptions = {}) {
       [ACCOUNTS.grok]: 'markus on the studio SuperGrok Heavy seat',
       [ACCOUNTS.cursor]: 'markus on the Cursor Business seat for reviews',
     }
-    const hosts: Record<string, string> = { mbp2607: 'mbp2607-markus-primary', studio: 'graz-studio-rack-07' }
+    const hosts: Record<string, string> = { build-7: 'build-7-markus-primary', studio: 'graz-studio-rack-07' }
     for (const a of accts) {
       if (labels[a.id]) a.label = labels[a.id]
       a.hostLabel = hosts[a.host] ?? a.host
@@ -216,8 +216,8 @@ export function capacityWorld(options: CapacityOptions = {}) {
   })))
   const writes: { path: string; method: string; body: unknown }[] = []
   const computers = [
-    pairingView({ state: 'redeemed', computer_id: MBP, computer_name: 'mbp2607', computer_state: 'connected', setup_state: options.computerLogin ? 'login_required' : 'connected', connectivity: 'online', last_seen_at: minutesAgo(0.2),
-      enrollments: accts.filter(a => a.host === 'mbp2607').map(a => pairingEnrollment(a.id, `${a.harness}-${a.label}`, a.harness, a.label)) }),
+    pairingView({ state: 'redeemed', computer_id: MBP, computer_name: 'build-7', computer_state: 'connected', setup_state: options.computerLogin ? 'login_required' : 'connected', connectivity: 'online', last_seen_at: minutesAgo(0.2),
+      enrollments: accts.filter(a => a.host === 'build-7').map(a => pairingEnrollment(a.id, `${a.harness}-${a.label}`, a.harness, a.label)) }),
     pairingView({ state: 'redeemed', request_id: 'e0000000-0000-4000-8000-000000000002', computer_id: STUDIO, computer_name: 'studio', computer_state: 'connected', setup_state: 'connected', connectivity: 'offline', last_seen_at: minutesAgo(180),
       enrollments: accts.filter(a => a.host === 'studio').map(a => pairingEnrollment(a.id, `${a.harness}-${a.label}`, a.harness, a.label)) }),
   ]

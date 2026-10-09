@@ -122,7 +122,7 @@ func TestINSPRProfileBundleSources(t *testing.T) {
 	}
 	// No company, register or tax data rides in the profile.
 	raw := strings.ToLower(string(bundle.Profile))
-	for _, forbidden := range []string{"augmentoring", "gmbh", "iban", "firmenbuch", "@"} {
+	for _, forbidden := range []string{"example-business", "gmbh", "iban", "firmenbuch", "@"} {
 		if strings.Contains(raw, forbidden) {
 			t.Errorf("profile.json carries company-specific text %q", forbidden)
 		}

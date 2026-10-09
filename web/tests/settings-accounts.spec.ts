@@ -76,11 +76,11 @@ test('quota pool additions name every member and removals confirm the remaining 
   })
   await open(page)
   const detail = await details(page, ACCOUNTS.main)
-  const pool = detail.getByRole('button', { name: 'Pool with Spare · mbp2607', exact: true })
+  const pool = detail.getByRole('button', { name: 'Pool with Spare · build-7', exact: true })
   await pool.click()
   const confirm = page.getByRole('dialog', { name: 'Same login — pool them?' })
-  await expect(confirm).toContainText('Main · mbp2607')
-  await expect(confirm).toContainText('Spare · mbp2607')
+  await expect(confirm).toContainText('Main · build-7')
+  await expect(confirm).toContainText('Spare · build-7')
   await confirm.getByRole('button', { name: 'Cancel' }).click()
   expect(writes).toEqual([])
   await pool.click()
@@ -88,7 +88,7 @@ test('quota pool additions name every member and removals confirm the remaining 
   await expect.poll(() => writes.length).toBe(1)
   expect(writes[0]).toEqual({ account_ids: [ACCOUNTS.main, ACCOUNTS.spare], quota_fingerprint: fingerprint, confirmed: true })
   await expect(detail.getByRole('button', { name: 'Stop sharing quota' })).toBeVisible()
-  await expect(detail).toContainText('Shared with Spare · mbp2607')
+  await expect(detail).toContainText('Shared with Spare · build-7')
   await expect(detail.getByRole('button', { name: 'Pool with Studio · studio' })).toBeVisible()
   await expect(pool).toHaveCount(0)
   const captureDialog = async (name: string) => {
@@ -108,7 +108,7 @@ test('quota pool additions name every member and removals confirm the remaining 
 
   // Confirm the third account, keeping Spare in both the dialog and the write.
   await detail.getByRole('button', { name: 'Pool with Studio · studio' }).click()
-  await expect(confirm.locator('.points li')).toHaveText(['Main · mbp2607', 'Spare · mbp2607', 'Studio · studio'])
+  await expect(confirm.locator('.points li')).toHaveText(['Main · build-7', 'Spare · build-7', 'Studio · studio'])
   await captureDialog('quota-dialog-add')
   await confirm.getByRole('button', { name: 'Cancel' }).click()
   expect(writes).toHaveLength(1)
@@ -116,17 +116,17 @@ test('quota pool additions name every member and removals confirm the remaining 
   await confirm.getByRole('button', { name: 'Pool accounts' }).click()
   await expect.poll(() => writes.length).toBe(2)
   expect(writes[1]).toEqual({ account_ids: [ACCOUNTS.main, ACCOUNTS.spare, ACCOUNTS.studio], quota_fingerprint: fingerprint, confirmed: true })
-  await expect(detail).toContainText('Shared with Spare · mbp2607, Studio · studio')
+  await expect(detail).toContainText('Shared with Spare · build-7, Studio · studio')
   await expect(detail.getByRole('button', { name: /^Pool with/ })).toHaveCount(0)
 
-  await detail.getByRole('button', { name: 'Remove Spare · mbp2607 from pool', exact: true }).click()
-  const remove = page.getByRole('dialog', { name: 'Remove Spare · mbp2607 from pool?' })
-  await expect(remove).toContainText('Spare · mbp2607 will use its own readings and limits.')
-  await expect(remove.locator('.points li')).toHaveText(['Main · mbp2607', 'Studio · studio'])
+  await detail.getByRole('button', { name: 'Remove Spare · build-7 from pool', exact: true }).click()
+  const remove = page.getByRole('dialog', { name: 'Remove Spare · build-7 from pool?' })
+  await expect(remove).toContainText('Spare · build-7 will use its own readings and limits.')
+  await expect(remove.locator('.points li')).toHaveText(['Main · build-7', 'Studio · studio'])
   await captureDialog('quota-dialog-remove')
   await remove.getByRole('button', { name: 'Cancel' }).click()
   expect(writes).toHaveLength(2)
-  await detail.getByRole('button', { name: 'Remove Spare · mbp2607 from pool', exact: true }).click()
+  await detail.getByRole('button', { name: 'Remove Spare · build-7 from pool', exact: true }).click()
   await remove.getByRole('button', { name: 'Remove from pool', exact: true }).click()
   await expect.poll(() => writes.length).toBe(3)
   expect(writes[2]).toEqual({ account_ids: [ACCOUNTS.main, ACCOUNTS.studio], quota_fingerprint: fingerprint, confirmed: true })
@@ -163,24 +163,24 @@ test('an unpooled account joins every existing member and can leave them sharing
   })
   await open(page)
   const detail = await details(page, ACCOUNTS.studio)
-  await detail.getByRole('button', { name: 'Pool with Main · mbp2607', exact: true }).click()
+  await detail.getByRole('button', { name: 'Pool with Main · build-7', exact: true }).click()
   const confirm = page.getByRole('dialog', { name: 'Same login — pool them?' })
-  await expect(confirm.locator('.points li')).toHaveText(['Studio · studio', 'Spare · mbp2607', 'Main · mbp2607'])
+  await expect(confirm.locator('.points li')).toHaveText(['Studio · studio', 'Spare · build-7', 'Main · build-7'])
   await confirm.getByRole('button', { name: 'Pool accounts' }).click()
   await expect.poll(() => writes.length).toBe(1)
   expect(writes[0]).toEqual({ account_ids: [ACCOUNTS.studio, ACCOUNTS.spare, ACCOUNTS.main], quota_fingerprint: fingerprint, confirmed: true })
-  await expect(detail).toContainText('Shared with Spare · mbp2607, Main · mbp2607')
+  await expect(detail).toContainText('Shared with Spare · build-7, Main · build-7')
 
   await detail.getByRole('button', { name: 'Stop sharing quota' }).click()
   const stop = page.getByRole('dialog', { name: 'Stop sharing quota?' })
   await expect(stop).toContainText('These accounts will keep sharing quota:')
-  await expect(stop.locator('.points li')).toHaveText(['Spare · mbp2607', 'Main · mbp2607'])
+  await expect(stop.locator('.points li')).toHaveText(['Spare · build-7', 'Main · build-7'])
   await stop.getByRole('button', { name: 'Stop sharing', exact: true }).click()
   await expect.poll(() => writes.length).toBe(2)
   expect(writes[1]).toEqual({ account_ids: [ACCOUNTS.spare, ACCOUNTS.main], quota_fingerprint: fingerprint, confirmed: true })
   await expect(detail.getByRole('button', { name: 'Stop sharing quota' })).toHaveCount(0)
   const main = await details(page, ACCOUNTS.main)
-  await expect(main).toContainText('Shared with Spare · mbp2607')
+  await expect(main).toContainText('Shared with Spare · build-7')
   await expect(main.getByRole('button', { name: 'Pool with Studio · studio', exact: true })).toBeVisible()
   expect(errors).toEqual([])
 })
@@ -199,7 +199,7 @@ test('accounts are a list by vendor with how each is read, and no allowance form
   await open(page)
   await show(page, ACCOUNTS.main)
   await expect(card(page).locator('.group-head')).toHaveText(['Codex1 account'])
-  await expect(row(page, ACCOUNTS.main).locator('.chip.host')).toHaveText('mbp2607')
+  await expect(row(page, ACCOUNTS.main).locator('.chip.host')).toHaveText('build-7')
   await expect(row(page, ACCOUNTS.main)).toContainText('Reads every 5 min')
   await expect(row(page, ACCOUNTS.main).locator('.state')).toHaveCount(0)
   await expect(row(page, ACCOUNTS.main).getByRole('switch', { name: 'Agents may use it · Main' })).toHaveAttribute('aria-checked', 'true')
@@ -226,7 +226,7 @@ test('a row opens its detail: windows with source and freshness, and the last th
     'Weekly37% left · resets Sun 11:00 · Claude reported · 6 min ago',
     '5-hour60% left · resets 16:40 · Claude reported · 6 min ago',
   ])
-  await expect(detail.locator('.readings li')).toHaveText(['13:56 63% used Claude reported', '13:34 62% read on mbp2607', '09:01 61% read on mbp2607'])
+  await expect(detail.locator('.readings li')).toHaveText(['13:56 63% used Claude reported', '13:34 62% read on build-7', '09:01 61% read on build-7'])
   // The row itself toggles too; the detail closes.
   await row(page, ACCOUNTS.claude).locator('.reads').click()
   await expect(detail).toHaveCount(0)
@@ -410,7 +410,7 @@ for (const [width, mode] of [[1600, 'dock'], [1100, 'side'], [390, 'sheet']] as 
     await expect(page.locator(`.settings-frame.mode-${mode}`)).toHaveCount(1)
     const confirmations = [
       { open: row(page, ACCOUNTS.main).getByRole('switch', { name: 'Agents may use it · Main' }), name: 'Drain Main?', confirm: 'Drain account' },
-      { open: detail.getByRole('button', { name: 'Pool with Spare · mbp2607', exact: true }), name: 'Same login — pool them?', confirm: 'Pool accounts' },
+      { open: detail.getByRole('button', { name: 'Pool with Spare · build-7', exact: true }), name: 'Same login — pool them?', confirm: 'Pool accounts' },
     ]
     for (const c of confirmations) {
       await c.open.click()

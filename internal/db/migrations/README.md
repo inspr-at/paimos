@@ -193,7 +193,7 @@ schema change.
 
 Conversion validation at `e6a8d1c19`: the dump proof passed for all 27 exception
 records and 37 original cases; all 38 migration tests passed. The full
-`internal/db` suite passed on mbp2606, and the locked remote
+`internal/db` suite passed on build-6, and the locked remote
 `ci-static --merge-main` run passed all 40 checks with zero skips. The local
 static/planner regressions (294 tests) and ownership audit (33 tests) also
 passed. No origin push, deployment or worker-run review gate was performed.
@@ -496,7 +496,7 @@ The first authz attempt preceded creation of its maintenance database; the
 subsequent package run passes, and that worker-owned database is now removed.
 Evidence: `tmp/aeon619-merge-main/summary.json`, `preservation.json` and retained
 logs. Main's release metadata and presentation pin are retained. No feature
-changes were authored. mbp2606 was not accessed under the explicit hold; no
+changes were authored. build-6 was not accessed under the explicit hold; no
 ticket status change, push or deployment ran. Consolidated approval and release
 remain coordinator work.
 
@@ -549,7 +549,7 @@ migration. Independent preservation checks retained 23 branch and
 cases are explicitly NIGHTLY, with post-gate provenance so the tier regression
 continues checking every legacy classification.
 
-Approved remote validation on mbp2606 passed all eleven affected Go packages
+Approved remote validation on build-6 passed all eleven affected Go packages
 (including OpenAPI reporter-contract checks), 26 migration-checker tests, the
 241-migration guard against `v261003095616.0.0`, 33 tier tests, web typecheck,
 lint and build, and 27 focused web tests across three files. The guard's missing

@@ -70,11 +70,11 @@ Read-only commands run against the approved offload host (no credential contents
 or resolved environments were read or printed):
 
 ```sh
-ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local \
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@build-6.local \
   'hostname; command -v gemini; command -v opencode; command -v node; command -v go'
-ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local \
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@build-6.local \
   'ls /Users/mba/.local/bin /Users/mba/.nix-profile/bin /opt/homebrew/bin /usr/local/bin 2>/dev/null | rg "^(gemini|opencode|node|npm|go|aeon.*)$"; test -d /Users/mba/.gemini && echo gemini-profile-present; test -d /Users/mba/.local/share/opencode && echo opencode-profile-present; test -d /Users/mba/.config/opencode && echo opencode-config-present; sysctl -n vm.loadavg'
-ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local bash -s <<'REMOTE'
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@build-6.local bash -s <<'REMOTE'
 for vendor_root in /Users/* /Users/mba/.local/share /Users/mba/.config /Users/mba/.nix-profile/lib/node_modules /opt/homebrew/lib/node_modules /usr/local/lib/node_modules /Users/mba/.opencode/bin; do
   test -d "$vendor_root" && printf 'directory %s\n' "$vendor_root"
 done
@@ -88,7 +88,7 @@ exit 0
 REMOTE
 ```
 
-Observed: `mbp2606` answered; Node exists at `/Users/mba/.nix-profile/bin/node`.
+Observed: `build-6` answered; Node exists at `/Users/mba/.nix-profile/bin/node`.
 Neither vendor was found on that SSH session's PATH or at the enumerated executable
 paths; none of the enumerated vendor profile directories existed. These checks do
 not inventory every installation or another person's account. No install or login
@@ -793,7 +793,7 @@ with OS-user lookup as fallback. The previous environment removed USER even
 though OPS's successful minimal-shell check included it. Synthetic probes now
 prove that this context survives both probe and SDK launch; those tests fail
 against the prior implementation. This establishes the environment difference,
-not a confirmed cause on mbp2607: no real pairing, vendor login or Keychain was
+not a confirmed cause on build-7: no real pairing, vendor login or Keychain was
 accessed by the worker. `authMethod: "claude.ai"` was already accepted. Bounded,
 duplicate-free JSON must confirm loggedIn and the approved email; a different
 email or API-key login still fails closed, now with its own value-free detail.
@@ -1143,7 +1143,7 @@ requirements remain unchanged.
 
 #### Daemon regression execution evidence (AEON-478, fix round 5)
 
-Executed on 2026-10-03 on the approved writable mbp2606 test runner, using
+Executed on 2026-10-03 on the approved writable build-6 test runner, using
 `remote-test.sh`, its isolated Postgres database and uncached Go tests
 (`-count=1 -v`). The current implementation is
 `b5ce64725b2b3433100a44040441c4c66ad4cdc3`, which merges readiness parent

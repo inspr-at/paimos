@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-782: the Agents page's status line for Accounts and computers. The words
 // are the design's ("All 3 ready · 2 computers online", "2 of 3 ready · Claude
-// needs verifying on mbp2607 · +1") and the count is honest: an account is ready
+// needs verifying on build-7 · +1") and the count is honest: an account is ready
 // only with a connected sign-in that says Ready and nothing to verify. A missing
 // report and a revoked snapshot are not ready. An old report on an offline
 // computer is not a fault, and a transient hold is not a request for action.
@@ -12,8 +12,8 @@ import { glanceItems, glanceSummary, onlineComputers, signinStatus } from '../sr
 
 function door(id: string, over: Record<string, unknown> = {}) {
   return {
-    id, name: id, host: 'mbp2607', harness: 'claude', state: 'live', primary: null, five: null, schedule: null, plan: '',
-    limitingReset: '', awaitingReading: false, fingerprint: '', groupId: '', groupName: '', hosts: ['mbp2607'], sameQuotaAs: '',
+    id, name: id, host: 'build-7', harness: 'claude', state: 'live', primary: null, five: null, schedule: null, plan: '',
+    limitingReset: '', awaitingReading: false, fingerprint: '', groupId: '', groupName: '', hosts: ['build-7'], sameQuotaAs: '',
     ...over,
   }
 }
@@ -38,7 +38,7 @@ function account(harness: string, computers: PairingView[], remaining?: number):
 }
 
 describe('the status line', () => {
-  const mbp = computer('mbp2607', { claude: 'ready', codex: 'ready' }), studio = computer('mbp2606', { codex: 'ready', cursor: 'ready' })
+  const mbp = computer('build-7', { claude: 'ready', codex: 'ready' }), studio = computer('build-6', { codex: 'ready', cursor: 'ready' })
   const calm = [account('claude', [mbp, studio]), account('codex', [mbp, studio], 60), account('cursor', [mbp, studio])]
 
   it('says all ready with the computers online when nothing blocks agents', () => {
@@ -48,24 +48,24 @@ describe('the status line', () => {
   })
 
   it('names the first thing that blocks agents and counts the rest, so the line is the whole answer', () => {
-    const expired = computer('mbp2607', { claude: 'ready', codex: 'ready' })
+    const expired = computer('build-7', { claude: 'ready', codex: 'ready' })
     Object.assign(expired.enrollments[0]!, { verification_state: 'expired', verification_expired_ready: false })
     const accounts = [account('claude', [expired, studio]), account('codex', [expired, studio], 9), account('cursor', [expired, studio])]
     const items = glanceItems(accounts, [expired, studio], LOW, NOW)
-    expect(items.map(i => i.name)).toEqual(['Claude needs verifying on mbp2607', 'Codex is low: 9% left this week'])
-    expect(glanceSummary(accounts, [expired, studio], items, NOW)).toMatchObject({ tone: 'warn', text: '2 of 3 ready · Claude needs verifying on mbp2607 · +1' })
+    expect(items.map(i => i.name)).toEqual(['Claude needs verifying on build-7', 'Codex is low: 9% left this week'])
+    expect(glanceSummary(accounts, [expired, studio], items, NOW)).toMatchObject({ tone: 'warn', text: '2 of 3 ready · Claude needs verifying on build-7 · +1' })
   })
 
   it('does not call a computer that stopped reporting broken, and does not ask for action while a repin settles', () => {
-    const offline = computer('mbp2607', { claude: 'blocked' }, { connectivity: 'offline', harness_details: { claude: { state: 'blocked', reason: 'dependency_invalid' } } } as never)
-    const settling = computer('mbp2606', { codex: 'blocked' }, { harness_details: { codex: { state: 'blocked', reason: 'repin_pending' } } } as never)
+    const offline = computer('build-7', { claude: 'blocked' }, { connectivity: 'offline', harness_details: { claude: { state: 'blocked', reason: 'dependency_invalid' } } } as never)
+    const settling = computer('build-6', { codex: 'blocked' }, { harness_details: { codex: { state: 'blocked', reason: 'repin_pending' } } } as never)
     const accounts = [account('claude', [offline]), account('codex', [settling])]
     expect(glanceItems(accounts, [offline, settling], LOW, NOW)).toEqual([])
     expect(glanceSummary(accounts, [offline, settling], [], NOW)).toMatchObject({ tone: 'warn', text: '0 of 2 ready · 2 not ready' })
   })
 
   it('does not count a draining account or an account on Hold as ready', () => {
-    const mbp = computer('mbp2607', { claude: 'ready' })
+    const mbp = computer('build-7', { claude: 'ready' })
     // A draining account is projected as paused while its sign-in can still say Ready.
     const draining = account('claude', [mbp])
     draining.rows = [door('a-claude', { state: 'paused' })] as never
@@ -79,8 +79,8 @@ describe('the status line', () => {
   })
 
   it('keeps a shared login as one account, ready when one door still is', () => {
-    const mbp = computer('mbp2607', { claude: 'ready' })
-    const studio = computer('mbp2606', { claude: 'ready' })
+    const mbp = computer('build-7', { claude: 'ready' })
+    const studio = computer('build-6', { claude: 'ready' })
     mbp.enrollments[0]!.account_id = 'door-1'
     studio.enrollments[0]!.account_id = 'door-2'
     const signins = [
@@ -100,15 +100,15 @@ describe('the status line', () => {
   })
 
   it('lists a profile-permissions block in Needs you', () => {
-    const mbp = computer('mbp2607', { pi: 'blocked' }, { harness_details: { pi: { state: 'blocked', reason: 'profile_permissions' } } } as never)
+    const mbp = computer('build-7', { pi: 'blocked' }, { harness_details: { pi: { state: 'blocked', reason: 'profile_permissions' } } } as never)
     const accounts = [account('pi', [mbp])]
     const items = glanceItems(accounts, [mbp], LOW, NOW)
-    expect(items).toEqual([expect.objectContaining({ kind: 'attention', name: 'Pi needs attention on mbp2607', detail: 'Profile permissions need repair' })])
-    expect(glanceSummary(accounts, [mbp], items, NOW).text).toBe('0 of 1 ready · Pi needs attention on mbp2607')
+    expect(items).toEqual([expect.objectContaining({ kind: 'attention', name: 'Pi needs attention on build-7', detail: 'Profile permissions need repair' })])
+    expect(glanceSummary(accounts, [mbp], items, NOW).text).toBe('0 of 1 ready · Pi needs attention on build-7')
   })
 
   it('does not treat a missing sign-in report as ready', () => {
-    const quiet = computer('mbp2607', {}, {
+    const quiet = computer('build-7', {}, {
       enrollments: [{ account_id: 'a-claude', harness: 'claude', label: 'claude', state: 'connected', verification_state: 'completed' }],
     })
     const missing = account('claude', [quiet])
@@ -120,7 +120,7 @@ describe('the status line', () => {
   })
 
   it('does not treat a revoked computer snapshot as ready', () => {
-    const revoked = computer('mbp2607', { claude: 'ready' }, { computer_state: 'revoked' })
+    const revoked = computer('build-7', { claude: 'ready' }, { computer_state: 'revoked' })
     const gone = account('claude', [revoked])
     gone.rows = [door('a-claude')] as never
     expect(signinStatus(revoked, 'a-claude')).toBe('Blocked')
@@ -129,7 +129,7 @@ describe('the status line', () => {
   })
 
   it('does not treat a revoked enrollment snapshot as ready', () => {
-    const live = computer('mbp2607', { claude: 'ready' })
+    const live = computer('build-7', { claude: 'ready' })
     live.enrollments[0]!.state = 'revoked'
     const blocked = account('claude', [live])
     blocked.rows = [door('a-claude')] as never
@@ -139,7 +139,7 @@ describe('the status line', () => {
   })
 
   it('rejects an estimated quota, a reading older than ten minutes, and a window that already reset', () => {
-    const mbp = computer('mbp2607', { codex: 'ready' })
+    const mbp = computer('build-7', { codex: 'ready' })
     const estimated = account('codex', [mbp], 2)
     estimated.windows[0]!.reading.source = 'estimate'
     expect(glanceItems([estimated], [mbp], LOW, NOW).map(item => item.kind)).not.toContain('quota')

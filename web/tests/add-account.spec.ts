@@ -99,7 +99,7 @@ test('the steps name the machine, the known sign-in, and a path-proof add-harnes
   await expect(panel).toBeVisible()
   await expect(open).toHaveAttribute('aria-expanded', 'true')
   await expect(page.getByText(CALM)).toHaveCount(1)
-  await expect(page.getByRole('combobox', { name: 'Machine' }).locator('option')).toHaveText(['mbp2607', 'studio'])
+  await expect(page.getByRole('combobox', { name: 'Machine' }).locator('option')).toHaveText(['build-7', 'studio'])
   const harness = page.getByRole('combobox', { name: 'Harness' })
   await expect(harness.locator('option')).toHaveText(['Pi', 'Gemini CLI', 'OpenCode', 'Another Codex account', 'Another Claude account', 'Another Grok account', 'Another Cursor account'])
   await expect(page.getByRole('combobox', { name: 'Installed with' }).locator('option')).toHaveText(['Homebrew', 'Nix profile', 'Direct download'])
@@ -109,7 +109,7 @@ test('the steps name the machine, the known sign-in, and a path-proof add-harnes
   await page.getByRole('combobox', { name: 'Machine' }).selectOption({ label: 'studio' })
   await expect(harness.locator('option').first()).toHaveText('Claude')
   await expect(page.getByLabel('Sign-in command')).toHaveValue('claude /login')
-  await page.getByRole('combobox', { name: 'Machine' }).selectOption({ label: 'mbp2607' })
+  await page.getByRole('combobox', { name: 'Machine' }).selectOption({ label: 'build-7' })
 
   await harness.selectOption({ label: 'Gemini CLI' })
   await expect(page.getByLabel('Sign-in command')).toHaveValue('gemini')

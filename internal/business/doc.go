@@ -115,10 +115,10 @@
 //
 // Second-tenant bootstrap is an operator-only CLI and ordinary tenant-admin
 // API sequence, not a migration that seeds a business tenant automatically:
-//  1. paimos tenant create --slug augmentoring --name Augmentoring
-//  2. paimos tenant principal bind-oidc --tenant augmentoring --issuer <issuer>
+//  1. paimos tenant create --slug example-business --name Example Business
+//  2. paimos tenant principal bind-oidc --tenant example-business --issuer <issuer>
 //     --subject <operator-subject> --name <name> --role admin
-//  3. GET /auth/login?tenant=augmentoring, then GET /me; the signed OIDC state
+//  3. GET /auth/login?tenant=example-business, then GET /me; the signed OIDC state
 //     fixes the tenant and issuer+subject must resolve to the mapped principal.
 //  4. GET /plugins to obtain the four compiled manifest digests. PUT
 //     /plugins/business_costs/installation,
@@ -132,7 +132,7 @@
 //     short_prefix, icon, allowed_child_kinds and field_schema. Imported
 //     cost_unit already present is reused, never rekeyed.
 //  6. For a customer who will approve an offer, provision a tenant person
-//     with paimos tenant principal bind-oidc --tenant augmentoring --issuer
+//     with paimos tenant principal bind-oidc --tenant example-business --issuer
 //     <issuer> --subject <customer-subject> --name <name> --role customer;
 //     create a contact node via POST /nodes and a contact_for organisation
 //     link via POST /relations, then POST /crm/contacts/{contactId}/principals.
@@ -149,8 +149,8 @@
 // auditable bootstrap actor established in that target tenant transaction.
 //
 // PMA import is design only. Extend importer.Source with an explicit source
-// instance identifier and a pm-augmentoring adapter using the same read-only
-// snapshot contract; --tenant augmentoring selects the target. Preserve each
+// instance identifier and a pm-example-business adapter using the same read-only
+// snapshot contract; --tenant example-business selects the target. Preserve each
 // classic key exactly and namespace idempotency by tenant and source instance,
 // so an identical numeric source ID from PPM and PMA cannot merge records.
 // Map PMA cost_unit issues to the tenant cost_unit kind and retain all fetched
@@ -158,7 +158,7 @@
 // PPM importer does. Dry-run reports unmapped and skipped records without
 // writes; live import uses db.InTenant, event append and per-tenant/source
 // advisory lock. It must reject a mismatched source ID on rerun. Reading or
-// running pm-augmentoring is an operator trust-context gate: this contract
+// running pm-example-business is an operator trust-context gate: this contract
 // worker does not access it, and execution waits for Markus's explicit
 // instruction with source access and target tenant confirmed. No business-
 // owned code is copied into this public repository.

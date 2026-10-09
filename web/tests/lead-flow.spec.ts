@@ -32,10 +32,10 @@ for (const width of [1440, 390]) for (const look of ['light', 'dark'] as const) 
     const start = sheet.locator('[data-act="start"]'), cancel = sheet.locator('[data-act="cancel"]'), change = sheet.locator('[data-act="host"]')
     await expectStableControls({ controls: { start, cancel, change }, interactions: [
       { name: 'reveal hosts', run: async () => { await change.click(); await expect(sheet.getByRole('radiogroup', { name: 'Host' })).toBeVisible() } },
-      { name: 'pick a fixed host', run: async () => { await sheet.getByRole('radio', { name: /mbp2607/ }).click(); await expect(sheet.locator('.choice-note')).toContainText('stays on mbp2607') } },
-      { name: 'a removed host explains itself in the reserved slot', run: async () => { await sheet.getByRole('radio', { name: /mbp2606/ }).dispatchEvent('click'); await expect(sheet.locator('.choice-note')).toContainText('being removed') } },
+      { name: 'pick a fixed host', run: async () => { await sheet.getByRole('radio', { name: /build-7/ }).click(); await expect(sheet.locator('.choice-note')).toContainText('stays on build-7') } },
+      { name: 'a removed host explains itself in the reserved slot', run: async () => { await sheet.getByRole('radio', { name: /build-6/ }).dispatchEvent('click'); await expect(sheet.locator('.choice-note')).toContainText('being removed') } },
     ] })
-    await expect(sheet.getByRole('radio', { name: /mbp2607/ })).toHaveAttribute('aria-checked', 'true')
+    await expect(sheet.getByRole('radio', { name: /build-7/ })).toHaveAttribute('aria-checked', 'true')
     await page.screenshot({ path: info.outputPath(`start-sheet-${width}-${look}.png`) })
     if (look === 'light') expect((await new AxeBuilder({ page }).include('dialog.lead-sheet').analyze()).violations).toEqual([])
     await page.keyboard.press(submit)

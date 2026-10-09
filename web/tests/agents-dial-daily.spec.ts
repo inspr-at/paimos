@@ -171,7 +171,7 @@ test('AEON-1036: the Accounts tile names what blocks a harness and offers Verify
   })
   await page.goto('/agents')
   const tile = dial(page).locator('.wt-acc'), claude = tile.locator('[data-info-harness="claude"]')
-  await expect(claude).toContainText('needs verifying on mbp2607')
+  await expect(claude).toContainText('needs verifying on build-7')
   await expect(tile.locator('[data-info-harness="codex"]')).not.toContainText('verifying')
   const verify = claude.locator('.verify-button')
   await expect(verify).toBeVisible()
@@ -188,7 +188,7 @@ test('AEON-1036: without the right to manage accounts the Accounts tile names th
   await page.setViewportSize({ width: 1440, height: 1000 })
   await setup(page, { example: 'pace', manage: false, dial: { info_open: true }, capacityEdit: capacity => { claudeNeedsVerifying(capacity) } })
   await page.goto('/agents')
-  await expect(dial(page).locator('.wt-acc [data-info-harness="claude"]')).toContainText('needs verifying on mbp2607')
+  await expect(dial(page).locator('.wt-acc [data-info-harness="claude"]')).toContainText('needs verifying on build-7')
   await expect(dial(page).locator('.wt-acc').getByRole('button', { name: 'Verify again' })).toHaveCount(0)
 })
 

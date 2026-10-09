@@ -12,7 +12,7 @@ import (
 )
 
 func greenPreflight(sha string) preflightResult {
-	local := localPreflight{Schema: 1, Kind: "local", SHA: sha, Base: strings.Repeat("a", 40), Runner: "mbp2606", Status: "passed"}
+	local := localPreflight{Schema: 1, Kind: "local", SHA: sha, Base: strings.Repeat("a", 40), Runner: "build-6", Status: "passed"}
 	for _, id := range []string{"static", "go-strict", "go-packages", "web-unit", "web-strict"} {
 		local.Checks = append(local.Checks, preflightCheck{id, "passed"})
 	}
@@ -47,6 +47,10 @@ func TestPreflightAdmissionMissingRedStaleAndLookupFailure(t *testing.T) {
 		change       func(*preflightResult)
 	}{
 		{"green", "", func(*preflightResult) {}},
+		{"another declared runner", "", func(r *preflightResult) { r.Local.Runner = "build-linux" }},
+		{"missing declared runner", "preflight_invalid", func(r *preflightResult) { r.Local.Runner = "" }},
+		{"oversized declared runner", "preflight_invalid", func(r *preflightResult) { r.Local.Runner = strings.Repeat("r", 129) }},
+		{"malformed declared runner", "preflight_invalid", func(r *preflightResult) { r.Local.Runner = "build mac" }},
 		{"local red", "preflight_local_red", func(r *preflightResult) {
 			r.Local.Checks[0].Status = "failed"
 			r.Local.Status = "failed"
@@ -56,7 +60,7 @@ func TestPreflightAdmissionMissingRedStaleAndLookupFailure(t *testing.T) {
 		{"stale SHA", "preflight_stale_sha", func(r *preflightResult) { r.Local.SHA = strings.Repeat("c", 40) }},
 		{"stale attempt", "preflight_invalid", func(r *preflightResult) { r.Browsers[0].Attempt = 1 }},
 		{"partial groups", "preflight_invalid", func(r *preflightResult) { r.Browsers = r.Browsers[1:] }},
-		{"wrong runner", "preflight_invalid", func(r *preflightResult) { r.Browsers[0].Runner = "mbp2606" }},
+		{"wrong runner", "preflight_invalid", func(r *preflightResult) { r.Browsers[0].Runner = "build-6" }},
 		{"contradictory green", "preflight_invalid", func(r *preflightResult) { r.Local.Checks[0].Status = "failed" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1,0 +1,7 @@
+[
+  {
+    "path": "internal/releasehistory/data/product-notes.json",
+    "sha256": "43faac061d1b4d5ab573b8c34095a26a91b5aa17b5a642b9ed2dbb1006e1fc3d",
+    "reason": "Published release-note history retains its original text. Review any history update before refreshing this digest."
+  }
+]

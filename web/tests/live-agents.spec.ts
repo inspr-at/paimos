@@ -47,8 +47,8 @@ function busyAgents(): LiveAgentMock[] {
     liveAgent({ project_id: 'p-aeon', session_id: 's-coord', principal_id: COORD, name: 'aeon-coordinator', role: 'coordinator', harness: 'claude' }, 140),
     liveAgent({ project_id: 'p-aeon', session_id: 's-camy', principal_id: CAMY, name: 'camy', harness: 'codex', ticket: { id: 'n-a184', key: 'AEON-184', title: 'Live agents on project cards and rows', project_id: 'p-aeon' } }, 4),
     liveAgent({ project_id: 'p-janus', session_id: 's-janus', principal_id: '77777777-7777-4777-8777-777777777777', name: 'janus-session', phase: 'starting', activity: 'unknown' }, 0.5),
-    liveAgent({ project_id: 'p-ops', session_id: 's-ops', principal_id: OPS, name: 'ops', ticket: { id: 'n-o1', key: 'OPS-212', title: 'Rotate the backup keys on csb1', project_id: 'p-ops' } }, 42),
-    liveAgent({ project_id: 'p-ops', session_id: 's-ops2', principal_id: '88888888-8888-4888-8888-888888888888', name: 'pharos-session', harness: 'claude', ticket: { id: 'n-o2', key: 'OPS-219', title: 'Nightly check for hsb2', project_id: 'p-ops' } }, 8),
+    liveAgent({ project_id: 'p-ops', session_id: 's-ops', principal_id: OPS, name: 'ops', ticket: { id: 'n-o1', key: 'OPS-212', title: 'Rotate the backup keys on prod-1', project_id: 'p-ops' } }, 42),
+    liveAgent({ project_id: 'p-ops', session_id: 's-ops2', principal_id: '88888888-8888-4888-8888-888888888888', name: 'pharos-session', harness: 'claude', ticket: { id: 'n-o2', key: 'OPS-219', title: 'Nightly check for worker-2', project_id: 'p-ops' } }, 8),
     liveAgent({ project_id: 'p-ops', session_id: 's-ops3', principal_id: '99999999-9999-4999-8999-999999999999', name: 'grok-scout', harness: 'grok', ticket: { id: 'n-o3', key: 'OPS-220', title: 'Disk usage report', project_id: 'p-ops' } }, 2),
   ]
 }

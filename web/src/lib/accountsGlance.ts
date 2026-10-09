@@ -159,7 +159,7 @@ function accountReady(account: OverviewAccount, now: number): boolean {
 export interface GlanceSummary { tone: 'ok' | 'warn'; text: string; ready: number; total: number; more: number }
 /**
  * The status line: "All 3 ready · 2 computers online", or "2 of 3 ready ·
- * Claude needs verifying on mbp2607 · +1" naming the first thing and counting
+ * Claude needs verifying on build-7 · +1" naming the first thing and counting
  * the rest. The count is connected Ready sign-ins that the readiness projection still allows.
  */
 export function glanceSummary(accounts: OverviewAccount[], computers: PairingView[], items: GlanceItem[], now: number): GlanceSummary {

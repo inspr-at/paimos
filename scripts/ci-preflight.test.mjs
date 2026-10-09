@@ -12,14 +12,14 @@ import { preflightMetrics } from './ci-preflight-report.mjs';
 import { measurementCauses, measurementErrorCause, measurementCofailures } from './test-tiers/measurement-causes.mjs';
 
 const sha = 'b'.repeat(40), base = 'a'.repeat(40);
-const greenLocal = () => ({ schema: 1, kind: 'local', sha, base_sha: base, runner_class: 'mbp2606',
+const greenLocal = () => ({ schema: 1, kind: 'local', sha, base_sha: base, runner_class: 'build-mac',
   checks: ['static', 'go-strict', 'go-packages', 'web-unit', 'web-strict'].map(id => ({ id, status: 'passed' })), status: 'passed' });
 
 test('preflight binds each command to the SHA and never turns failure, skip or tree changes green', async () => {
   // Risk: stale or partially executed local results authorize a new PR head.
   let binds = 0;
   const commands = [];
-  const options = { sha, base, root: '/unused', runner: 'mbp2606.local' };
+  const options = { sha, base, root: '/unused', runner: 'build-mac.local', expectedRunner: 'build-mac' };
   const dependencies = { bind: () => { binds++; }, verifyBase: () => {}, diff: () => ['internal/delivery/shipping.go'],
     execute: (bin, args) => { commands.push([bin, args]); return true; } };
   const green = await preflight(options, dependencies);
@@ -37,7 +37,16 @@ test('preflight binds each command to the SHA and never turns failure, skip or t
   assert.equal(changed.status, 'failed');
   assert.equal(changed.checks[0].status, 'failed');
   assert(changed.checks.slice(1).every(row => row.status === 'not_run'));
-  await assert.rejects(preflight({ ...options, runner: 'daily-driver' }, dependencies), /requires_mbp2606/);
+  for (const runner of ['build-mac', 'build-linux']) {
+    const receipt = await preflight({ ...options, runner, expectedRunner: runner }, dependencies);
+    assert.equal(receipt.runner_class, runner);
+    assert.equal(validLocal(receipt, sha), true);
+  }
+  for (const expectedRunner of ['', 'build mac', 'r'.repeat(129)]) {
+    await assert.rejects(preflight({ ...options, expectedRunner }, dependencies), /requires_configured_runner/);
+    assert.equal(validLocal({ ...greenLocal(), runner_class: expectedRunner }, sha), false);
+  }
+  await assert.rejects(preflight({ ...options, runner: 'daily-driver' }, dependencies), /requires_configured_runner/);
   assert.deepEqual(goPackages(['go.mod']), ['./...']);
   assert.deepEqual(goPackages(['web/src/App.vue']), []);
   assert.throws(() => testEnvironment({}), /test_database_required/);

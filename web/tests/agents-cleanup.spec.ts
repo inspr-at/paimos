@@ -35,9 +35,9 @@ function computers() {
   })
   // Three revoked pairings of the same computer from one morning.
   const revoked = [1, 2, 3].map(n => pairingView({
-    request_id: id(n), state: 'revoked', computer_id: id(10 + n), computer_state: 'revoked', computer_name: 'mbp2607', revision: 3,
+    request_id: id(n), state: 'revoked', computer_id: id(10 + n), computer_state: 'revoked', computer_name: 'build-7', revision: 3,
     setup_state: 'connected', last_seen_at: new Date(NOW - n * 3_600_000).toISOString(),
-    enrollments: [{ ...pairingEnrollment(id(20 + n), `claude-${n}`, 'claude', 'admin@augmentoring.com'), state: 'revoked' }],
+    enrollments: [{ ...pairingEnrollment(id(20 + n), `claude-${n}`, 'claude', 'admin@example.com'), state: 'revoked' }],
   }))
   return [live, ...revoked]
 }

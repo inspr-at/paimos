@@ -71,10 +71,10 @@ test('Needs you appears only when something waits, with the sign-in and its comm
   await open(page)
   const needs = page.getByRole('region', { name: 'Needs you' })
   await expect(needs).toBeVisible()
-  const signin = needs.getByRole('listitem', { name: 'Cursor needs a new sign-in on mbp2607' })
+  const signin = needs.getByRole('listitem', { name: 'Cursor needs a new sign-in on build-7' })
   await expect(signin).toContainText('Run cursor-agent login there · agents skip this account until then')
   await signin.getByRole('button', { name: 'Copy command' }).click()
-  await expect(page.getByText('Copied: cursor-agent login — run it on mbp2607.')).toBeVisible()
+  await expect(page.getByText('Copied: cursor-agent login — run it on build-7.')).toBeVisible()
 })
 
 // AEON-299 review 2: a computer-wide login flag or a check that could not run
