@@ -468,6 +468,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedServeFromRootWorkingDirectory","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedServeRestartsWithUnconfirmedLedgerIntent","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedSyncTombstoneProbesAndFailureDiagnostics","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPendingOrFailedClaudeRepinKeepsPollingAndRetries","tier":"GATED-FULL"}
@@ -487,6 +489,8 @@
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestReleaseExistingDraftGuardFailsClosed","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestReleaseHomebrewTapBumpUsesEnvironmentSecrets","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestReleaseNativeRehearsalChecksVersionAndLedgerCapability","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestReleaseSignsDarwinAgentdBeforeChecksums","tier":"GATED-FULL"}
     ,
@@ -1790,6 +1794,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerCachedRouteReleaseAfterRestartReacquiresOneSlot","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerConflictReleasesOnlyIndependentlyObsoleteAttempt","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerCrashBeforeIntentAndUnreachableRecovery","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerDamagedLedgerRestartWaitsForEveryMember","tier":"ESSENTIAL"}
@@ -1819,6 +1825,10 @@
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerRemovedServiceRebuildRequiresOwnerExitProof","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerRouteCommitCrashOwnerOnlyReplay","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerUnconfirmedIntentAllowsOtherLoginDispatch","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerUnconfirmedIntentDoesNotStopLaterReconciliation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSlowManagedControlCannotRestartBudgetAfterLock","tier":"GATED-FULL"}
     ,

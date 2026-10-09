@@ -29,6 +29,8 @@ type ledgerFixtureAPI struct {
 	enrollmentErr       error
 	enrollmentCommitted bool
 	routeErr            error
+	routeErrByRun       map[string]error
+	runsByID            map[string]Run
 	routeCommitted      bool
 	routeCalls          int
 	offered             [][]string
@@ -53,9 +55,18 @@ func (a *ledgerFixtureAPI) EnrollLedger(_ context.Context, generation string) er
 	return nil
 }
 func (a *ledgerFixtureAPI) SetLedgerGeneration(generation string) { a.ledgerGeneration = generation }
+func (a *ledgerFixtureAPI) GetRun(ctx context.Context, id string) (Run, error) {
+	if run, ok := a.runsByID[id]; ok {
+		return run, nil
+	}
+	return a.fakeAPI.GetRun(ctx, id)
+}
 func (a *ledgerFixtureAPI) Route(ctx context.Context, runID, daemon string, ids []string, units map[string]int64) (Route, error) {
 	a.routeCalls++
 	a.routeCommitted = true
+	if err := a.routeErrByRun[runID]; err != nil {
+		return Route{}, err
+	}
 	a.offered = append(a.offered, slices.Clone(ids))
 	if a.barrier != nil {
 		a.once.Do(func() { close(a.barrier); <-a.release })
@@ -73,6 +84,140 @@ func (a *ledgerFixtureAPI) Route(ctx context.Context, runID, daemon string, ids 
 		}
 	}
 	return route, err
+}
+
+// Risk: a routine refusal for one durable intent freezes other logins and
+// suppresses probes. Its hold must survive while an independent run launches.
+func TestSharedLedgerUnconfirmedIntentAllowsOtherLoginDispatch(t *testing.T) {
+	for _, refusal := range []int{409, 403, 404, 503} {
+		t.Run(http.StatusText(refusal), func(t *testing.T) {
+			s, a, _ := testSupervisor(t)
+			api, config := enableLedgerFixture(t, s, a)
+			s.accounts = append(s.accounts, EnrolledAccount{ID: "B", Key: "other", Harness: Codex, VerifiedIdentity: "login-B"})
+			s.probedAccounts["account"] = true
+			a.run.RequestedAccountID = "account"
+			api.routeErrByRun = map[string]error{a.run.ID: &client.StatusError{Status: refusal, Message: "fixture unconfirmed route"}}
+			if err := s.StartRun(t.Context(), a.run); err == nil {
+				t.Fatal("initial refusal reported success")
+			}
+			intent := s.journal.Snapshot()[0]
+			api.runsByID = map[string]Run{a.run.ID: a.run}
+			var reasons []string
+			s.pollDiagnostic = func(reason string) { reasons = append(reasons, reason) }
+			if err := s.RefreshLedger(t.Context(), config); err != nil {
+				t.Fatal("one intent blocked ledger refresh", err)
+			}
+			a.run.ID, a.run.RequestedAccountID = "other-run", "B"
+			if err := s.PollOnce(t.Context()); err != nil {
+				t.Fatal("one intent blocked probes or other-login dispatch", err)
+			}
+			data, _, err := s.ledger.Snapshot()
+			if err != nil || len(data.Groups) != 2 || data.Groups[intent.LedgerGroup].State != "pending" || !reflect.DeepEqual(data.Groups[intent.LedgerGroup].Holds, []agentsetup.LedgerLogin{intent.RouteCandidates[0].Login}) {
+				t.Fatal("unconfirmed intent lost its slot or login hold", data, err)
+			}
+			if got := s.runs[intent.RunID].record; !reflect.DeepEqual(got, intent) {
+				t.Fatal("refusal changed private evidence", got)
+			}
+			other := s.runs["other-run"]
+			other.mu.Lock()
+			launched := other.record.AccountID == "B" && other.record.LaunchState == launchAttempted && other.process != nil
+			other.mu.Unlock()
+			if !launched || !s.probedAccounts["B"] || !slices.Equal(api.offered[len(api.offered)-1], []string{"B"}) || !slices.Equal(reasons, []string{"ledger_route_unconfirmed"}) {
+				t.Fatal("independent login did not dispatch with one bounded diagnostic", launched, api.offered, reasons)
+			}
+		})
+	}
+}
+
+// Risk: reconciliation returns on the first refusal and never confirms a
+// later intent. Both holds must remain, with only the confirmed one narrowed.
+func TestSharedLedgerUnconfirmedIntentDoesNotStopLaterReconciliation(t *testing.T) {
+	s, a, _ := testSupervisor(t)
+	api, config := enableLedgerFixture(t, s, a)
+	s.accounts = append(s.accounts, EnrolledAccount{ID: "B", Key: "other", Harness: Codex, VerifiedIdentity: "login-B"})
+	for i, account := range []string{"account", "B"} {
+		gid, err := agentsetup.LedgerID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		subset, err := s.ledger.Acquire(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, gid, s.ledgerCandidates([]string{account}, s.ledgerBinding.Generation))
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := []string{"a-stuck", "b-confirmable"}[i]
+		r := Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: id, WorkOrderID: "order", Generation: s.generation, ExecutionMode: "managed", State: "route_pending", LaunchState: launchRoutePending, LedgerGroup: gid, LedgerGeneration: s.ledgerBinding.Generation, RouteCandidates: subset}
+		if err := s.journal.Put(r); err != nil {
+			t.Fatal(err)
+		}
+		s.runs[id] = &owned{record: r}
+	}
+	api.routeErrByRun = map[string]error{"a-stuck": &client.StatusError{Status: 409}}
+	if err := s.RefreshLedger(t.Context(), config); err != nil {
+		t.Fatal("one intent stopped reconciliation", err)
+	}
+	if api.routeCalls != 2 || s.runs["a-stuck"].record.State != "route_pending" || s.runs["b-confirmable"].record.State != "claim_pending" || s.runs["b-confirmable"].record.ClaimRoute == nil {
+		t.Fatal("later intent was not reconciled", s.journal.Snapshot(), api.routeCalls)
+	}
+}
+
+// Risk: only terminal conflicts are released, or a mismatched run read releases
+// someone else's evidence. Confirm obsolete attempts independently, then restart.
+func TestSharedLedgerConflictReleasesOnlyIndependentlyObsoleteAttempt(t *testing.T) {
+	for _, observed := range []Run{
+		{Status: "starting"}, {Status: "running"}, {Status: "waiting"},
+		{Status: "completed"}, {Status: "failed"}, {Status: "cancelled"},
+		{Status: "queued", AccountID: "elsewhere"},
+		{Status: "queued"}, {Status: ""},
+		{Status: "completed", ID: "foreign-run"},
+		{Status: "completed", WorkOrderID: "foreign-order"},
+		{Status: "completed", AgentPrincipalID: "foreign-agent"},
+	} {
+		t.Run(observed.Status+"/"+observed.AccountID+observed.ID+observed.WorkOrderID+observed.AgentPrincipalID, func(t *testing.T) {
+			s, a, _ := testSupervisor(t)
+			api, config := enableLedgerFixture(t, s, a)
+			s.probedAccounts["account"] = true
+			api.routeErr = &client.StatusError{Status: 409}
+			if err := s.StartRun(t.Context(), a.run); err == nil {
+				t.Fatal("initial refusal reported success")
+			}
+			run := a.run
+			run.Status, run.AccountID = observed.Status, observed.AccountID
+			if observed.ID != "" {
+				run.ID = observed.ID
+			}
+			if observed.WorkOrderID != "" {
+				run.WorkOrderID = observed.WorkOrderID
+			}
+			if observed.AgentPrincipalID != "" {
+				run.AgentPrincipalID = observed.AgentPrincipalID
+			}
+			api.runsByID = map[string]Run{a.run.ID: run}
+			if err := s.RefreshLedger(t.Context(), config); err != nil {
+				t.Fatal("per-intent conflict blocked refresh", err)
+			}
+			obsolete := run.ID == a.run.ID && run.WorkOrderID == a.run.WorkOrderID && run.AgentPrincipalID == a.run.AgentPrincipalID && run.Status != "" && (run.Status != "queued" || run.AccountID != "")
+			data, _, err := s.ledger.Snapshot()
+			got := s.journal.Snapshot()[0]
+			if err != nil {
+				t.Fatal(err)
+			}
+			if obsolete {
+				if len(data.Groups) != 0 || got.LedgerGroup != "" || len(got.RouteCandidates) != 0 || !noLocalProcess(got) || got.ClaimRoute != nil || got.State == "route_pending" {
+					t.Fatal("confirmed obsolete intent retained a slot or invented launch evidence", got, data)
+				}
+			} else if len(data.Groups) != 1 || got.LedgerGroup == "" || got.State != "route_pending" || len(got.RouteCandidates) != 1 {
+				t.Fatal("unconfirmed or foreign read released evidence", got, data)
+			}
+			s = restartSharedLedgerFixture(t, s, api)
+			if err := s.RefreshLedger(t.Context(), config); err != nil {
+				t.Fatal("restart rejected durable disposition", err)
+			}
+			data, _, err = s.ledger.Snapshot()
+			if err != nil || (len(data.Groups) == 0) != obsolete {
+				t.Fatal("restart changed confirmed occupancy", data, err)
+			}
+		})
+	}
 }
 func enableLedgerFixture(t *testing.T, s *Supervisor, a *fakeAPI) (*ledgerFixtureAPI, LedgerConfig) {
 	t.Helper()
