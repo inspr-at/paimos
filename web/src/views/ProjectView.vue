@@ -80,6 +80,7 @@ import { filtersFromQuery as knowledgeFiltersFrom, filtersToQuery as knowledgeQu
 import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
 
 const RecurringWorkCard = defineAsyncComponent(() => import('../components/recurrences/RecurringWorkCard.vue'))
+const ProjectWorkContextCard = defineAsyncComponent(() => import('../components/settings/ProjectWorkContextCard.vue'))
 // Knowledge loads with its tab, not with every project page.
 const KnowledgeTab = defineAsyncComponent(() => import('../components/knowledge/KnowledgeTab.vue'))
 const KnowledgeEntryPage = defineAsyncComponent(() => import('../components/knowledge/KnowledgeEntryPage.vue'))
@@ -1836,7 +1837,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         </div>
       </div>
 
-      <RecurringWorkCard v-if="settingsActive" :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" />
+      <template v-if="settingsActive">
+        <RecurringWorkCard :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" />
+        <ProjectWorkContextCard :key="project.id" :project="{ id: project.id, title: project.title }" />
+      </template>
       <DeliveryView v-else-if="deliveryActive" :key="`${project.id}/${me?.id ?? ''}`" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" />
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"

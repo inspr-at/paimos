@@ -12,6 +12,8 @@ export interface MockProfile {
 export interface Write { method: string; path: string; body: unknown }
 export interface RegistryWorld {
   profiles: MockProfile[]; permissions: string[]
+  /** AEON-1054: Auto-update is the account matrix's New model versions rule and sends this revision. */
+  accountUseRevision: number
   settings: { agent_reports_enabled: boolean; auto_add_profiles: boolean; api_enabled: boolean; interval_minutes: number }
   lastRun: string | null; writes: Write[]; reads: string[]
   /** What the next POST /models/refresh answers: success with new lines, a 429 or a 500. `added` counts profiles. `acceptedModels` lists distinct models the server accepted. */
@@ -52,7 +54,7 @@ export function registryProfiles(): MockProfile[] {
 }
 export function registryWorld(over: Partial<RegistryWorld> = {}): RegistryWorld {
   return {
-    profiles: registryProfiles(), permissions: ['models.read', 'models.manage', 'models.refresh'],
+    profiles: registryProfiles(), permissions: ['models.read', 'models.manage', 'models.refresh', 'account.use.manage'], accountUseRevision: 7,
     settings: { agent_reports_enabled: true, auto_add_profiles: true, api_enabled: true, interval_minutes: 360 }, lastRun: '2026-10-09T04:12:00Z', writes: [], reads: [],
     check: { status: 200 }, failPut: false, conflictPut: false, failSettings: false, failUsage: false, failRetireAfter: null, failList: false, gateRetire: null, gateUsage: null, usageRevision: 'r1',
     usage: { used_by: [], incomplete: false }, ...over,
@@ -65,6 +67,7 @@ export async function mockRegistry(page: Page, world: RegistryWorld, options: { 
   const decode = (value: string) => decodeURIComponent(value)
   const sameLine = (profile: MockProfile, harness: string, model: string) => profile.harness === harness && profile.model === model && !profile.retired
   if (options.permissions !== false) await page.route('**/api/me/permissions*', route => route.fulfill({ json: { workspace: { id: 'registry-tenant', role: 'admin', permissions: world.permissions }, project: null } }))
+  await page.route('**/api/account-use?*', route => route.fulfill({ json: { rules: { new_accounts: 'ask', new_contexts: 'ask', new_projects: 'default', new_models: world.settings.auto_add_profiles ? 'allow' : 'shipped_only', revision: world.accountUseRevision, enforced_at: null, confirmation_required: false, confirmed_at: null }, accounts: [], contexts: [], cells: [], next_account: null, next_context: null, running_outside: [], running_outside_truncated: false } }))
   await page.route('**/api/work-kinds*', route => route.fulfill({ json: { items: [{ id: 'k1', slug: 'backend', label: 'Backend build', hint: '', position: 1, examples: [], labels: [], ticket_count: 0 }], next_cursor: null } }))
   await page.route(/\/api\/models(\/.*)?(\?.*)?$/, async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname.replace(/^\/api/, ''), method = request.method()
@@ -86,7 +89,10 @@ export async function mockRegistry(page: Page, world: RegistryWorld, options: { 
     }
     if (path === '/models/refresh/settings' && method === 'PUT') {
       if (world.failSettings) return route.fulfill({ status: 500, json: { error: 'settings failed' } })
-      world.settings = body
+      const { account_use_revision: revision, ...stored } = body as typeof world.settings & { account_use_revision?: number }
+      if (stored.auto_add_profiles !== world.settings.auto_add_profiles && revision !== world.accountUseRevision) return route.fulfill({ status: 409, json: { error: 'account_use_revision_conflict' } })
+      if (revision !== undefined) world.accountUseRevision++
+      world.settings = stored
       return route.fulfill({ json: world.settings })
     }
     const line = /^\/models\/lines\/([^/]+)\/([^/]+)(\/usage)?$/.exec(path)

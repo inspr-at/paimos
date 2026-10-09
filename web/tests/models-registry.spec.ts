@@ -68,7 +68,8 @@ test('auto-update writes the whole settings object and a failed save puts the sw
   await expect(auto).not.toBeChecked()
   await expect(card(page).locator('[data-reg-when]')).toHaveText(/^Off · last checked /)
   // The settings the page does not show (agent reports, discovery, interval) keep their values.
-  expect(world.writes.at(-1)).toEqual({ method: 'PUT', path: '/models/refresh/settings', body: { agent_reports_enabled: true, auto_add_profiles: false, api_enabled: true, interval_minutes: 360 } })
+  // AEON-1054: Auto-update is the New model versions rule; it carries the matrix revision.
+  expect(world.writes.at(-1)).toEqual({ method: 'PUT', path: '/models/refresh/settings', body: { agent_reports_enabled: true, auto_add_profiles: false, api_enabled: true, interval_minutes: 360, account_use_revision: 7 } })
   world.failSettings = true
   await auto.click()
   await expect(card(page).getByRole('alert')).toHaveText('Auto-update could not be changed. Try again.')
@@ -77,6 +78,23 @@ test('auto-update writes the whole settings object and a failed save puts the sw
   await auto.click()
   await expect(auto).toBeChecked()
   await expect(card(page).getByRole('alert')).toHaveCount(0)
+  expect(world.settings.auto_add_profiles).toBe(true)
+})
+
+test('auto-update without account.use.manage is shown but cannot change; a competing rule change says nothing was saved', async ({ page }) => {
+  const world = await setup(page, { permissions: ['models.read', 'models.manage', 'models.refresh'] })
+  const auto = card(page).getByRole('switch', { name: 'Auto-update' })
+  await expect(auto).toBeChecked()
+  await expect(auto).toBeDisabled()
+  expect(world.writes.filter(w => w.path === '/models/refresh/settings')).toEqual([])
+  world.permissions.push('account.use.manage')
+  await page.reload()
+  await expect(auto).toBeEnabled()
+  // Another person changes the rule between the revision read and the save.
+  await page.route('**/api/account-use?*', route => route.fulfill({ json: { rules: { new_accounts: 'ask', new_contexts: 'ask', new_projects: 'default', new_models: 'allow', revision: world.accountUseRevision - 1, enforced_at: null, confirmation_required: false, confirmed_at: null }, accounts: [], contexts: [], cells: [], next_account: null, next_context: null, running_outside: [], running_outside_truncated: false } }))
+  await auto.click()
+  await expect(card(page).getByRole('alert')).toHaveText('Someone changed the New model versions rule meanwhile. Nothing was saved; try again.')
+  await expect(auto).toBeChecked()
   expect(world.settings.auto_add_profiles).toBe(true)
 })
 

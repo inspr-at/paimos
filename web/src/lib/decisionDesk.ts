@@ -58,7 +58,7 @@ export function submitModifier(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' 
 }
 
 export interface DeskProjectionItem {
-  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'key_trim' | 'stepup'; project_id?: string
+  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'key_trim' | 'stepup' | 'account_matrix'; project_id?: string
   revision: number; title: string; created_at: string; expires_at?: string; held: boolean; href: string; source: string
 }
 export interface DeskProjection {
