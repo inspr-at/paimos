@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Coordinator: PLAYWRIGHT_PORT=5835 WT1_SCREENSHOT_DIR=<scratchpad> npm test -- agents-worker-tree.spec.ts agents-hierarchy.spec.ts
-import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
@@ -215,14 +214,20 @@ test('a live-line count and the menu History open a folded Sessions section with
   const sessions = page.getByRole('region', { name: 'Sessions' })
   const toggle = sessions.locator('.fs-head > .fs-tog')
   await expect(toggle).toHaveAttribute('aria-expanded', 'false')
-  await page.getByRole('group', { name: 'Live sessions' }).getByRole('button', { name: /^\d+ working\./ }).click()
+  await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ Working\./ }).click()
+  // State counts now filter; the cursor selects the first match while focus
+  // stays on the control. ArrowUp reaches that row without another pointer.
+  await page.keyboard.press('ArrowUp')
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')
   await expect(sessions.locator('.row[data-state="working"]').first()).toBeFocused()
+  await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ Working\./ }).click()
   await toggle.click()
   await expect(toggle).toHaveAttribute('aria-expanded', 'false')
 
-  await page.locator('.agents-page .page-head').getByRole('button', { name: 'More agent actions', exact: true }).click()
-  await page.getByRole('menu').getByRole('menuitem').filter({ hasText: 'History' }).click()
+  // History moved into the Sessions head. Reveal the section for this visit
+  // through its state count, then enter History without a fold preference write.
+  await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ Working\./ }).click()
+  await sessions.getByRole('button', { name: 'Show history: every ended or removed session', exact: true }).click()
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')
   await expect(sessions.locator('#sessions-title')).toHaveText('History')
   await expect(sessions.locator('.fs-body')).not.toHaveAttribute('inert', /.*/)
@@ -251,7 +256,10 @@ test('a live-line count keeps Sessions open when the section preference lands af
   const target = sessions.locator('.row[data-state="working"]').first()
   // Before the read, Sessions shows open, so the jump needs no fold change to reach the row.
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')
-  await page.getByRole('group', { name: 'Live sessions' }).getByRole('button', { name: /^\d+ working\./ }).click()
+  await page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /^\d+ Working\./ }).click()
+  // State counts now filter; the cursor selects the first match while focus
+  // stays on the control. ArrowUp reaches that row without another pointer.
+  await page.keyboard.press('ArrowUp')
   await expect(target).toBeFocused()
   const read = page.waitForResponse(r => r.request().method() === 'GET' && new URL(r.url()).pathname === '/api/preferences/ui.agents.sections')
   release()
@@ -280,7 +288,6 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(row(page, id(100))).toBeVisible()
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
       const dir = process.env.WT1_SCREENSHOT_DIR ?? testInfo.outputDir
-      mkdirSync(dir, { recursive: true })
       for (const state of ['live', 'history']) {
         if (state === 'history') await history(page).click()
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)

@@ -62,9 +62,17 @@ test('card and header count open, blocked and unknown work at 390 and 1600', asy
     await expect(stats.locator('.pct')).toHaveText('20%')
     await expect(stats.locator('.progress-line')).toHaveAttribute('data-tip', '2 of 10 done · 1 cancelled')
     await expect(stats.getByRole('button', { name: 'Filter open tickets: 5', exact: true })).toHaveAttribute('data-tip', 'Show only open tickets; click again to clear')
-    const statsBox = (await stats.boundingBox())!
-    expect(statsBox.x).toBeGreaterThanOrEqual(0)
-    expect(statsBox.x + statsBox.width).toBeLessThanOrEqual(width + 1)
+    // On phones the stats wrapper uses display:contents; check both actual
+    // rendered islands rather than treating its absent CSS box as a frame.
+    const islands = stats.locator('.project-status-counts, .progress-line')
+    await expect(islands).toHaveCount(2)
+    for (const island of await islands.all()) {
+      const statsBox = (await island.boundingBox())!
+      expect(statsBox.width).toBeGreaterThan(0)
+      expect(statsBox.height).toBeGreaterThan(0)
+      expect(statsBox.x).toBeGreaterThanOrEqual(0)
+      expect(statsBox.x + statsBox.width).toBeLessThanOrEqual(width + 1)
+    }
     await expect(stats.getByRole('button', { name: 'Filter open tickets: 5', exact: true })).toBeInViewport()
     await page.screenshot({ path: test.info().outputPath(`header-${width}.png`), fullPage: false })
   }
