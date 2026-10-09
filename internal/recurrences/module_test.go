@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -198,6 +199,128 @@ func TestManualReceiptsOverlapProvenanceAndQueue(t *testing.T) {
 	f.call(f.p, "PUT", "/api/recurrences/"+r.ID, body, 200)
 	if replay := f.manual(r.ID, "first"); *replay.NodeID != *first.NodeID {
 		t.Fatal("template edit invalidated key")
+	}
+}
+
+// Risk: recurring work loses release copy or silently bypasses the Done gate.
+func TestRecurrenceReleaseCopySurvivesEditsAndDoneGate(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		hidden             *bool
+		legacy, incomplete bool
+	}{
+		{name: "legacy", legacy: true},
+		{name: "hidden by default"},
+		{name: "explicit hidden", hidden: new(true)},
+		{name: "explicit visible", hidden: new(false)},
+		{name: "incomplete hidden", hidden: new(true), incomplete: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setup(t)
+			mux := http.NewServeMux()
+			f.m.Mount(mux)
+			nodes.New(f.d.App, nil).Mount(mux)
+			f.handler = mux
+			in := f.input()
+			in.OverlapPolicy = "create"
+			in.Template.HideFromReleaseNotes = tc.hidden
+			if !tc.legacy {
+				in.Template.PillEN, in.Template.PillDE = "Clear release notes", "Verständliche Release Notes"
+				in.Template.BenefitEN, in.Template.BenefitDE = "Tickets explain the benefit.", "Tickets erklären den Nutzen."
+				if tc.incomplete {
+					in.Template.BenefitDE = ""
+				}
+			}
+			r := f.create(in)
+			checkTemplate := func(got Template, want Template) {
+				t.Helper()
+				if got.PillEN != want.PillEN || got.PillDE != want.PillDE || got.BenefitEN != want.BenefitEN || got.BenefitDE != want.BenefitDE || got.HideFromReleaseNotes == nil || *got.HideFromReleaseNotes != (want.HideFromReleaseNotes == nil || *want.HideFromReleaseNotes) {
+					t.Fatalf("release copy changed: got %+v, want %+v", got, want)
+				}
+			}
+			checkTemplate(r.Template, in.Template)
+			checkTemplate(f.get(r.ID).Template, in.Template)
+			runAndComplete := func(key string, want Template) {
+				t.Helper()
+				o := f.manual(r.ID, key)
+				if o.Outcome != "created" || o.NodeID == nil {
+					t.Fatalf("occurrence %+v", o)
+				}
+				var before struct {
+					State  string
+					Fields map[string]any
+				}
+				if err := json.Unmarshal(f.call(f.p, "GET", "/api/nodes/"+*o.NodeID, nil, 200), &before); err != nil {
+					t.Fatal(err)
+				}
+				if before.Fields["hide_from_release_notes"] != (want.HideFromReleaseNotes == nil || *want.HideFromReleaseNotes) {
+					t.Fatalf("visibility changed: %v", before.Fields)
+				}
+				for field, value := range map[string]string{"pill_en": want.PillEN, "pill_de": want.PillDE, "benefit_en": want.BenefitEN, "benefit_de": want.BenefitDE} {
+					if got, present := before.Fields[field]; value != "" && got != render(value, o.Number, o.ScheduledAt, r.Trigger, "", "") || value == "" && present {
+						t.Fatalf("%s changed: %v", field, before.Fields)
+					}
+				}
+				status := http.StatusOK
+				if tc.legacy || tc.incomplete {
+					status = http.StatusUnprocessableEntity
+				}
+				raw := f.call(f.p, "PATCH", "/api/nodes/"+*o.NodeID, map[string]string{"state": "done"}, status)
+				if status == http.StatusUnprocessableEntity {
+					if !strings.Contains(string(raw), `"code":"benefit_required"`) || !strings.Contains(string(raw), "benefit_de") {
+						t.Fatalf("wrong Done rejection: %s", raw)
+					}
+					var after struct{ State string }
+					if err := json.Unmarshal(f.call(f.p, "GET", "/api/nodes/"+*o.NodeID, nil, 200), &after); err != nil || after.State != before.State {
+						t.Fatalf("rejected Done changed state: %+v, %v", after, err)
+					}
+				} else {
+					var after struct {
+						State  string
+						Fields map[string]any
+					}
+					if err := json.Unmarshal(raw, &after); err != nil || after.State != "done" || after.Fields["hide_from_release_notes"] != before.Fields["hide_from_release_notes"] {
+						t.Fatalf("Done did not retain visibility: %s, %v", raw, err)
+					}
+				}
+			}
+			if tc.legacy {
+				// Old persisted JSON has neither copy fields nor the new flag.
+				f.tx(func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE recurrences SET template=template-'hide_from_release_notes' WHERE id=$1`, r.ID)
+					return err
+				})
+			}
+			runAndComplete("before edit", in.Template)
+			current := f.get(r.ID)
+			edited := current.Input
+			if !tc.legacy {
+				edited.Template.BenefitEN = "Occurrence {{occurrence}} keeps the benefit on {{date}}."
+			}
+			if tc.name == "explicit visible" {
+				edited.Template.HideFromReleaseNotes = new(true)
+			} else if tc.name == "explicit hidden" {
+				edited.Template.HideFromReleaseNotes = new(false)
+			}
+			body := struct {
+				Input
+				ExpectedRevision int64 `json:"expected_revision"`
+			}{edited, current.Revision}
+			f.call(f.p, "PUT", "/api/recurrences/"+r.ID, body, 200)
+			checkTemplate(f.get(r.ID).Template, edited.Template)
+			runAndComplete("after edit", edited.Template)
+			if tc.name == "hidden by default" {
+				// Expansion must not write release copy beyond the advertised bound.
+				current = f.get(r.ID)
+				edited = current.Input
+				edited.Template.BenefitEN = strings.Repeat("a", 4096-len("{{date}}")) + "{{date}}"
+				body.Input, body.ExpectedRevision = edited, current.Revision
+				f.call(f.p, "PUT", "/api/recurrences/"+r.ID, body, 200)
+				if o := f.manual(r.ID, "oversized rendering"); o.Outcome != "skipped" || o.NodeID != nil || o.Reason != "rendered_template_invalid" {
+					t.Fatalf("oversized copy was not refused: %+v", o)
+				}
+			}
+		})
 	}
 }
 func TestCatchUpReplicaRaceRestartAndPause(t *testing.T) {
