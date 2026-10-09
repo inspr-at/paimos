@@ -114,3 +114,7 @@ Ownership, test-tier/shard checks, typecheck, lint and push pointer validation
 passed. The locked static gate passed all 41 checks without skips. No origin
 push, deployment or worker-run model review was performed; the coordinator
 retains those gates and the separate desk UI package's integration.
+
+The command-package suite also passed after OpenAPI generation in its temporary
+remote checkout. The final static run on `34d537a7e` passed all 41 checks with
+no skips (exit 0); the final handover commit adds only this validation record.
