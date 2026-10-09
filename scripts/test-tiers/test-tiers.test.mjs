@@ -19,6 +19,7 @@ import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import './manifests.test.mjs'
 import './tiers-merge-driver.test.mjs'
 import '../merge-drivers/merge-drivers.test.mjs'
+import './slow-owners.test.mjs'
 
 const g=(pkg,name,tier='NIGHTLY')=>({kind:'go',package:pkg,name,tier,active:true})
 const w=(file,name,tier='NIGHTLY')=>({kind:'node',file,name,tier})
@@ -1432,8 +1433,9 @@ test('committed allowlists preserve classifications, helpers and reviewed AEON-5
   }
   for(const helper of ['TestFakeVendorProcess','TestNoOutboundServerHelper'])assert.equal(go.tests.find(row=>row.name===helper).tier,'ESSENTIAL')
   const known=JSON.parse(readFileSync(new URL('../ci/known-flaky.json',import.meta.url)))
-  const guards=web.tests.filter(row=>row.file==='tests/no-shift.spec.ts'&&known.entries.some(entry=>entry.key===key(row)))
-  assert.deepEqual(guards.map(key).sort(),known.entries.filter(entry=>entry.key.startsWith('browser:tests/no-shift.spec.ts:')).map(entry=>entry.key).sort())
+  const guardFiles=new Set(['tests/no-shift.spec.ts','tests/no-shift-agents.spec.ts','tests/no-shift-dialogs.spec.ts'])
+  const guards=web.tests.filter(row=>guardFiles.has(row.file)&&known.entries.some(entry=>entry.key===key(row)))
+  assert.deepEqual(guards.map(key).sort(),known.entries.filter(entry=>[...guardFiles].some(file=>entry.key.startsWith(`browser:${file}:`))).map(entry=>entry.key).sort())
   assert.ok(guards.every(row=>row.tier==='GATED-FULL'))
   assert.ok(go.tests.some(row=>row.tags?.includes('delete-candidate')))
   assert.ok(go.tests.some(row=>row.lane==='timing'))

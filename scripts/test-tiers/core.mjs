@@ -321,10 +321,32 @@ export function measuredWeights(manifest, rows) {
   return weights
 }
 
-export function shard(rows, index, count, weights = {}, { firstShardLast = false } = {}) {
+// Split only explicitly measured Go owners. Unknown/new cases retain an
+// average-case estimate and still execute; overhead is charged to each launch.
+export function splitOwner(rows, timing, limit) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 64) throw new Error('Invalid split shard limit')
+  const split = timing?.split
+  if (!split || split.count !== 2 || !Number.isFinite(split.overheadSeconds) || split.overheadSeconds < 0 ||
+      !split.caseSeconds || typeof split.caseSeconds !== 'object' || Array.isArray(split.caseSeconds) ||
+      !Number.isFinite(timing.seconds) || timing.seconds <= 0 || !Number.isSafeInteger(timing.selectedTests) || timing.selectedTests < 1 ||
+      Object.entries(split.caseSeconds).some(([name, seconds]) => !/^(?:Test|Fuzz)\w+$/.test(name) || !Number.isFinite(seconds) || seconds < 0))
+    throw new Error('Invalid measured owner split')
+  if (rows.some(row => row.kind !== 'go' || row.package !== rows[0].package) || new Set(rows.map(key)).size !== rows.length)
+    throw new Error('Owner split requires unique cases in one Go package')
+  const estimate = Math.max(0, timing.seconds - split.overheadSeconds) / timing.selectedTests
+  const cost = row => split.caseSeconds[row.name] ?? estimate
+  const parts = Array.from({ length: Math.min(split.count, limit, rows.length) }, () => ({ rows: [], weight: split.overheadSeconds }))
+  for (const row of [...rows].sort((a, b) => cost(b) - cost(a) || key(a).localeCompare(key(b)))) {
+    const part = parts.reduce((a, b) => b.weight < a.weight || (b.weight === a.weight && b.rows.length < a.rows.length) ? b : a)
+    part.rows.push(row)
+    part.weight += cost(row)
+  }
+  return parts
+}
+
+export function shard(rows, index, count, weights = {}, { firstShardLast = false, ownerTimings = {} } = {}) {
   if (!Number.isInteger(count) || count < 1 || count > 64 || !Number.isInteger(index) || index < 1 || index > count) throw new Error('Invalid shard i/N')
-  // Keep packages/files together to avoid compiling or launching a server for
-  // each individual test. Measured tier costs override historical/count estimates.
+  // Keep owners together except for explicitly measured package splits.
   const groups = new Map()
   for (const row of rows) {
     const owner = row.kind === 'go' ? row.package : row.file
@@ -335,13 +357,21 @@ export function shard(rows, index, count, weights = {}, { firstShardLast = false
   // Unit shard 1 also runs workflow and browser-supervisor regressions. Give
   // equally loaded peers first choice without inventing a hosted overhead cost.
   const preference = firstShardLast ? [...bins.slice(1), bins[0]] : bins
-  for (const [owner, entries] of [...groups].sort(([a,ar],[b,br]) => (weights[b] ?? br.length)-(weights[a] ?? ar.length) || a.localeCompare(b))) {
+  const batches = [...groups].flatMap(([owner, entries]) => ownerTimings[owner]?.split && entries[0].lane !== 'timing'
+    ? splitOwner(entries, ownerTimings[owner], count).map((part, i) => ({ ...part, owner, part: i }))
+    : [{ owner, rows: entries, weight: weights[owner] ?? entries.length, part: 0 }])
+  const assigned = new Map()
+  for (const { owner, rows: entries, weight, part } of batches.sort((a, b) => b.weight - a.weight || a.owner.localeCompare(b.owner) || a.part - b.part)) {
     // Zero-duration owners still need a shard. On equal loads prefer fewer
     // owners, then retain shard order for a deterministic final tie-break.
-    const bin = preference.reduce((a,b) => b.weight < a.weight || (b.weight === a.weight && b.owners < a.owners) ? b : a)
+    // Two halves of a package must use different shards, even if one bin is
+    // still cheapest after placing the first half.
+    const used = assigned.get(owner) ?? new Set()
+    const bin = preference.filter(bin => !used.has(bin)).reduce((a,b) => b.weight < a.weight || (b.weight === a.weight && b.owners < a.owners) ? b : a)
+    used.add(bin); assigned.set(owner, used)
     bin.rows.push(...entries)
     bin.owners++
-    bin.weight += weights[owner] ?? entries.length
+    bin.weight += weight
   }
   return bins[index-1].rows
 }
