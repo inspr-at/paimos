@@ -8228,6 +8228,34 @@
     ,
     {"kind":"browser","file":"tests/knowledge.spec.ts","name":"the palette finds knowledge by its words and leads to the tab and the search","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"keyboard: Tab reaches Start lead and the fold, folded details leave the tab order","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"motion › folding animates the card’s height and nothing else","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"on a phone the fold and Start lead are 44 px targets that do not overlap","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"reduced motion › folding shows no animation at all","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"stability › folding never moves a control at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"stability › folding never moves a control at 400","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card folds to one line with Start lead at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card folds to one line with Start lead at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card folds to one line with Start lead at 400 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card folds to one line with Start lead at 400 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card, open or folded, keeps one card gap above the section bar at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card, open or folded, keeps one card gap above the section bar at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card, open or folded, keeps one card gap above the section bar at 400","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the fold is remembered for this person and project, and a lead clears it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -15003,6 +15031,24 @@
     {"kind":"vitest","file":"tests/key-trim.unit.test.ts","name":"routes approve, decline and restore through protected native CAS endpoints","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/key-trim.unit.test.ts","name":"shows source evidence without assuming unknown scopes are unused and requires manage rights","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"stored shape > keeps ids only, once each, and at most MAX_FOLDED (the oldest fold goes first)","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > a project that gets a lead forgets its fold, and the card opens the next time it has none","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > another person never sees this person's fold, and gets their own once their preference is read","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > moves only for a person’s own toggle, never for a stored fold, another project or reduced motion","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > shows nothing until the preference is read, and a fold made then cannot overwrite the others","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > signed out: nothing folds, nothing is written and nothing waits to move","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > starts open, folds one project and remembers it for that person and project only","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > the transition end settles only the fold’s own height transition","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/lead-card-fold.unit.test.ts","name":"the fold of the \"No lead\" card > unfolding removes only that project from the stored list","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/ledger.unit.test.ts","name":"a row with no version never replaces one that has it; the other way round it does","tier":"GATED-FULL"}
     ,
