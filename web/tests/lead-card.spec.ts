@@ -92,7 +92,7 @@ test('the fold is remembered for this person and project, and a lead clears it',
   await page.keyboard.press(submit)
   await expect(sheet).toHaveCount(0)
   expect(state.calls.find(c => c.method === 'POST' && c.path === '/api/projects/p-pharos/lead')?.body).toEqual({ expected_revision: 0 })
-  await expect(card(page)).toContainText('Requested · waiting for its session')
+  await expect(card(page)).toContainText('Requested · waiting for a runtime')
   await expect(fold(page)).toHaveCount(0)
   await expect.poll(() => data.preferences[KEY]).toEqual({ collapsed: [] })
   // The lead ends (the project has none again): the card is open, as it was never folded.

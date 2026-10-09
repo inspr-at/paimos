@@ -10,6 +10,7 @@ export type LeadState = 'none' | 'starting' | 'working' | 'waiting_for_room' | '
 export interface ProjectLead {
   project_id: string; revision: number; generation: number; session_id: string | null
   state: LeadState; reason: string; process_active: boolean
+  automatic_launch_enabled?: boolean
 }
 export type GateKind = 'dial' | 'harness' | 'account_room' | 'host_load'
 export type DecisionStage = 'queue' | 'admission' | 'review' | 'release_handoff'
@@ -24,7 +25,7 @@ export interface LeadDecision {
 interface DecisionPage { items: LeadDecision[]; next_after: number | null }
 export interface LeadOverride { allowed_host_ids?: string[] | null; allowed_account_ids?: string[] | null; work_kind_id?: string | null; bucket?: 'normal' | 'complex' | null; recovery?: { max_attempts: number; agent_hours: number } | null }
 export interface LeadSettings {
-  revision: number; details_redacted: boolean; automatic_launch_enabled: false
+  revision: number; details_redacted: boolean; automatic_launch_enabled: boolean
   owner_person_id: string | null; overrides?: LeadOverride; effective?: LeadOverride
   model_selector?: { cell?: { mode: string; family?: string; line?: string; effort?: string; harness?: string }; set_by?: string } | null
   wait_reason?: 'acceptance_pending' | 'owner_unavailable' | 'selector_unavailable'
@@ -113,6 +114,10 @@ export interface LeadBandModel {
   state: LeadState; tone: 'live' | 'wait' | 'warn' | 'rest'; busy: boolean
   title: string; status: string; detail: string; now: string; foot: string; action: LeadAction; actionLabel: string
 }
+export const LEAD_LAUNCH_OFF = 'Automatic launch is not enabled for this workspace yet.'
+/** Omitted/unknown policy is unavailable, including on older servers. */
+export const canLaunchLead = (lead: ProjectLead | null | undefined) => lead?.automatic_launch_enabled === true
+export const leadLaunchReason = (lead: ProjectLead | null | undefined) => lead?.automatic_launch_enabled === false ? LEAD_LAUNCH_OFF : 'Automatic launch availability could not be read.'
 const GATE_WORD: Record<string, string> = { dial: 'the dial', harness: 'a harness limit', account: 'account room', host: 'host load' }
 export function waitCopy(reason: string): { status: string; now: string; action: LeadAction } {
   const gate = /^(dial|harness|account|host)_(full|unavailable)$/.exec(reason)
@@ -126,8 +131,10 @@ export function waitCopy(reason: string): { status: string; now: string; action:
   }
   switch (reason) {
     case 'adoption_pending': return { status: 'Adoption confirmed · waiting for session proof', now: 'The selected session keeps running. Its agent must prove its existing lease with harness lead claim; no restart is needed.', action: 'none' }
-    case 'awaiting_generation': return { status: 'Requested · waiting for its session', now: 'Nothing runs yet. It starts when a lead session on one of your computers takes over; queued work keeps its order.', action: 'none' }
-    case 'start_checks_unavailable': return { status: 'Waiting · start checks can’t be read', now: 'Before every start PAIMOS checks the dial, harness limits, account room and host load. One of them can’t be read, so nothing new starts.', action: 'dial' }
+    case 'awaiting_generation': return { status: 'Requested · waiting for a runtime', now: 'Waiting for a runtime to start the lead. No session has claimed it yet; queued work keeps its order.', action: 'none' }
+    case 'automatic_launch_disabled': return { status: 'Requested · waiting for a runtime', now: `Waiting for a runtime to start the lead. ${LEAD_LAUNCH_OFF} Queued work stays queued.`, action: 'none' }
+    case 'runtime_pickup_timeout': return { status: 'Nothing picked this up', now: 'No runtime claimed this start within 5 minutes. Queued work stays queued. Cancel this start to request another.', action: 'none' }
+    case 'start_checks_unavailable': case 'admission_unavailable': return { status: 'Waiting · the admission adapter can’t be read', now: 'The admission adapter is unavailable, so nothing new starts. No individual check failure could be identified.', action: 'none' }
     case 'generation_unavailable': return { status: 'Waiting · its session stopped reporting', now: 'Its session hasn’t reported for a while. Nothing new starts until it reports again or stops.', action: 'none' }
     case 'project_turn_wait': return { status: 'Waiting for its turn', now: 'Other projects have waited longer. It gets the next turn within the dial; nothing is lost.', action: 'none' }
     case 'work_not_eligible': return { status: 'Waiting · no queued work is ready', now: 'Queued work needs an estimate, acceptance criteria or a free blocker before it can start.', action: 'none' }
@@ -169,15 +176,20 @@ export function leadBand(lead: ProjectLead | null, projectKey: string, queued: n
     case 'starting': return { state: lead.state, tone: 'live', busy: true, title: name, status: 'Starting', detail: '', now: 'Reading the queue and the project. Nothing has started yet.', foot: checks, action: 'pause', actionLabel: 'Cancel start' }
     case 'working': return { state: lead.state, tone: 'live', busy: true, title: name, status: 'Working', detail: '', now: '', foot: checks, action: 'pause', actionLabel: 'Pause…' }
     case 'waiting_for_room': {
-      const copy = waitCopy(lead.reason)
-      return { state: lead.state, tone: 'wait', busy: !!lead.session_id, title: name, status: copy.status, detail: '', now: copy.now,
-        foot: lead.session_id ? 'Nothing is lost while it waits; the queue keeps its order.' : checks,
-        action: lead.session_id ? copy.action : 'cancel', actionLabel: lead.session_id ? (copy.action === 'computers' ? 'Check computers' : copy.action === 'dial' ? 'Open dial' : '') : 'Cancel start' }
+      // Old first-insert rows never attempted checks. Match the server's read
+      // repair, also when viewing an older server during the rollout.
+      const fresh = lead.reason === 'start_checks_unavailable' && lead.revision === 1 && lead.generation === 0 && !lead.session_id
+      const unclaimed = fresh || lead.reason === 'awaiting_generation'
+      const copy = waitCopy(unclaimed && lead.automatic_launch_enabled === false ? 'automatic_launch_disabled' : fresh ? 'awaiting_generation' : lead.reason)
+      const running = !!lead.session_id && lead.process_active
+      return { state: lead.state, tone: 'wait', busy: running, title: name, status: copy.status, detail: '', now: copy.now,
+        foot: running ? 'Nothing is lost while it waits; the queue keeps its order.' : checks,
+        action: running ? copy.action : 'cancel', actionLabel: running ? (copy.action === 'computers' ? 'Check computers' : copy.action === 'dial' ? 'Open dial' : '') : 'Cancel start' }
     }
     case 'paused': {
       const copy = pausedCopy(lead, w)
       return { state: lead.state, tone: 'rest', busy: false, title: name, status: copy.status, detail: '', now: copy.now,
-        foot: lead.process_active ? 'Resume becomes available once its session has stopped.' : `Resume restarts the ${w.l} through the usual start checks.`,
+        foot: lead.process_active ? 'Resume becomes available once its session has stopped.' : canLaunchLead(lead) ? `Resume restarts the ${w.l} through the usual start checks.` : leadLaunchReason(lead),
         action: 'resume', actionLabel: 'Resume' }
     }
     case 'cannot_start': return { state: lead.state, tone: 'warn', busy: false, title: name, status: 'Can’t start new work',

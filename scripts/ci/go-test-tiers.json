@@ -552,6 +552,8 @@
     ,
     {"kind":"go","package":"internal/accountprivacy","name":"TestRedactionNormalizesRevokedOverview","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/accountprivacy","name":"TestResetPrivacyMasksCreditsPlanAndAudit","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/activity","name":"TestAuthorsSayWhetherTheyHaveAPicture","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/activity","name":"TestCommentLifecycleAuthorizationIsolationAndConcurrency","tier":"ESSENTIAL"}
@@ -871,6 +873,20 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestRequestedAccountNarrowsEnrollmentWithoutFallback","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestReservedRunRechecksFence","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetAutomaticCaptureTimingAuditAndPace","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetFinalFenceRejectsConcurrentRevocation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetPolicyReportingOwnershipRevisionAndPrivacy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetProbeBetweenPrepareAndExecuteCancelsAndRetries","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetUndoPreVendorFailureRestoresSucceeded","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetUnknownOutcomeAndFinalAuthorization","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResetUseAuditCountConfirmationAndVendorUndo","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestResidencyEvidenceDefaultsAndExpires","tier":"GATED-FULL"}
     ,
@@ -3830,6 +3846,8 @@
     ,
     {"kind":"go","package":"internal/capacity","name":"TestReserveValidationAndJSON","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/capacity","name":"TestResetPlanVendorFreshnessTimingAndRaisedPace","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/capacity","name":"TestRunwayReserveDST","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/capacity","name":"TestRunwayReserveDesignCases","tier":"GATED-FULL"}
@@ -5078,6 +5096,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestReadinessMigrationPreservesOldAccountAndAllowanceWrites","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestResetMigrationExpansionRollbackOldWriterAndRLS","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestRoadmapPublicationMigrationPreservesCustomSchema","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestRowVersionInstallationBoundsLockWaitAndRetries","tier":"GATED-FULL"}
@@ -5730,6 +5750,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestLateSettingCompletionUnderSkewStillReleasesTheNextControl","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestLeadAdmissionFailureRedactsAndNamesCheck","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestLeadDecisionClosedVocabulary","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestLeadDecisionFrozenGateEvidence","tier":"GATED-FULL"}
@@ -5896,6 +5918,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadCompetingStartsClaimsAndRevocation","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadLegacyUnclaimedStartStaysCancellable","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadLifecycleAndExplicitMigration","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadLostContactDoesNotPermitSuccession","tier":"ESSENTIAL"}
@@ -5905,6 +5929,8 @@
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadReportingCadenceAndBoundaries","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadUnclaimedAdoptionRejectsPauseAndCancelClearsSelection","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadWaitProjection","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProvenanceReportsReplaceOnlyTheKindsTheyCarry","tier":"GATED-FULL"}
     ,
@@ -6693,6 +6719,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestCommandTemplates","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestDailyReviewKeepsReviewQualifiedAccounts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestDefaultRefreshNoNetworkAndOneAuditPerRun","tier":"GATED-FULL"}
     ,

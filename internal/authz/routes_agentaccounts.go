@@ -5,6 +5,9 @@ package authz
 // Route and scope declarations for agentaccounts.
 func init() {
 	registerRoutes("agentaccounts", map[string]string{
+		"PUT /api/agent-accounts/{accountId}/reset-policy":               "account.manage",
+		"POST /api/agent-accounts/{accountId}/resets/use":                "account.manage",
+		"POST /api/agent-accounts/{accountId}/resets/{actionId}/undo":    "account.manage",
 		"DELETE /api/agent-accounts/groups/{id}":                         "account.manage",
 		"DELETE /api/agent-accounts/pins":                                "run.create",
 		"DELETE /api/agent-accounts/{accountId}/windows/{windowId}":      "account.manage",

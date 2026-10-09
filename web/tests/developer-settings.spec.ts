@@ -37,7 +37,7 @@ for(const width of [390,1024,1440]) for(const theme of ['light','dark'] as const
   const expert=page.getByRole('switch',{name:'Start agents manually (expert)',exact:true})
   await expect(reserved).toBeVisible();await expect(expert).toBeVisible()
   await expect(page.getByRole('switch',{name:'Show the flow controls (not yet tested end to end)'})).toHaveCount(0)
-  await expect(page.getByRole('switch')).toHaveCount(2)
+  await expect(page.getByRole('switch')).toHaveCount(3)
   const settings=await controlStability(page,{reserved,expert})
   await settings.check(async()=>{await reserved.check();await expect.poll(()=>data.preferences['developer-ui']?.show_reserved_versions).toBe(true);await expect.poll(()=>data.preferences['developer-ui']?.show_flow_controls).toBe(true);await expect(reserved).toBeEnabled();await expect(expert).not.toBeChecked()})
   await settings.check(async()=>{await reserved.uncheck();await expect.poll(()=>data.preferences['developer-ui']?.show_reserved_versions).toBe(false);await expect.poll(()=>data.preferences['developer-ui']?.show_flow_controls).toBe(true);await expect(reserved).toBeEnabled();await expect(expert).not.toBeChecked()});settings.done()

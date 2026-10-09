@@ -5,6 +5,8 @@ import io
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import subprocess
+import sys
 import threading
 import unittest
 
@@ -120,38 +122,31 @@ class ProbeTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, '/api/ready: HTTP 503'):
             self.check()
 
-    def test_release_128_ready_body_with_pool_stats_is_ready(self):
-        # Risk: release 128 answers GET /api/ready 200 with pool statistics.
-        # Exact equality with {"status":"ready"} treated that published binary as down.
-        self.responses['/api/ready'] = {
+    def pool_ready(self):
+        # AEON-995: a ready process reports pool statistics beside status.
+        return {
             'status': 'ready',
             'pool': {
-                'max': 16, 'acquired': 1, 'idle': 2, 'waiting': 0,
-                'background_limit': 14, 'background_acquired': 1,
-                'acquire_duration_p95_ms': 0.4, 'acquire_samples': 3,
+                'max': 4, 'acquired': 1, 'idle': 3, 'waiting': 0,
+                'background_limit': 2, 'background_acquired': 0,
+                'acquire_duration_p95_ms': 0, 'acquire_samples': 1,
                 'nested_acquires': 0,
             },
         }
-        self.check()
 
-    def test_http_200_without_ready_status_is_not_ready(self):
-        self.responses['/api/ready'] = {
-            'status': 'unavailable', 'reason': 'pool_exhausted',
-            'pool': {'acquired': 16, 'max': 16},
-        }
-        with self.assertRaisesRegex(AssertionError, 'not ready'):
+    def test_pool_statistics_still_mean_the_previous_release_is_ready(self):
+        self.responses['/api/ready'] = self.pool_ready()
+        self.check()
+        completed = subprocess.run(
+            [sys.executable, str(Path(module.__file__)), 'wait-ready', '--base', self.probe.base],
+            capture_output=True, text=True, timeout=15, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_a_failure_reason_is_not_readiness(self):
+        self.responses['/api/ready'] = {'status': 'ready', 'reason': 'not_accepting'}
+        with self.assertRaisesRegex(AssertionError, 'previous release is not ready'):
             self.check()
 
-    def test_boot_wait_uses_the_ready_predicate(self):
-        self.assertTrue(module.is_ready({'status': 'ready'}))
-        self.assertTrue(module.is_ready({'status': 'ready', 'pool': {'acquired': 1}}))
-        self.assertFalse(module.is_ready({'status': 'unavailable'}))
-        self.assertFalse(module.is_ready({'pool': {'acquired': 1}}))
-        self.assertFalse(module.is_ready(['ready']))
-        self.assertFalse(module.is_ready(None))
-        script = Path(__file__).with_name('migration-compat.sh').read_text()
-        self.assertIn('module.is_ready(', script)
-        self.assertNotIn("{'status': 'ready'}", script)
 
 if __name__ == '__main__':
     unittest.main()

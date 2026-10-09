@@ -6,7 +6,7 @@ import { onAccessChange } from '../lib/authz'
 import { APIError, getNode } from '../lib/api'
 import { getSession } from '../lib/agentRows'
 import type { Question } from '../lib/decisionDeskApi'
-import { adoptLead, cancelLeadAdoption, emptyFold, foldDecisions, pauseLead, readLead, readLeadDecisions, readLeadSettings, readOpenQuestions, startLead, type DecisionFold, type LeadDecision, type LeadSettings, type ProjectLead } from '../lib/lead'
+import { adoptLead, cancelLeadAdoption, canLaunchLead, emptyFold, foldDecisions, leadLaunchReason, pauseLead, readLead, readLeadDecisions, readLeadSettings, readOpenQuestions, startLead, type DecisionFold, type LeadDecision, type LeadSettings, type ProjectLead } from '../lib/lead'
 import { useAgents } from './agents'
 
 // AEON-741: read projections of each project's lead. The server decides state;
@@ -160,7 +160,10 @@ export const useProjectLeads = defineStore('projectLeads', () => {
       if (started === epoch) { busy[id] = false; invalidate(); void load(id) }
     }
   }
-  const start = (id: string) => write(id, lead => startLead(id, lead.revision))
+  const start = (id: string) => write(id, lead => {
+    if (!canLaunchLead(lead)) throw new Error(leadLaunchReason(lead))
+    return startLead(id, lead.revision)
+  })
   const adopt = (id: string, revision: number, sessionId: string) => write(id, lead => {
     if (lead.revision !== revision) throw new Error('The lead changed. Reopen adoption and confirm again.')
     return adoptLead(id, revision, sessionId)

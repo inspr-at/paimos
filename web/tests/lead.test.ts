@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  atGate, canPause, canResume, checksSummary, decisionLine, LEAD_WORDS, leadBand, leadLine, leadWords, mergedToday, modelByRole, pluralWord, setLeadWords, startChecks, ticketSteps, waitCopy,
+  atGate, canLaunchLead, canPause, canResume, checksSummary, decisionLine, LEAD_WORDS, leadBand, leadLaunchReason, leadLine, leadWords, mergedToday, modelByRole, pluralWord, setLeadWords, startChecks, ticketSteps, waitCopy,
   type LeadDecision, type ProjectLead,
 } from '../src/lib/lead.ts'
 import { parentQueueSummary, type ParentQueueSnapshot } from '../src/lib/workQueue.ts'
@@ -48,7 +48,7 @@ test('every lifecycle state has one fitting action', () => {
   assert.equal(leadBand(lead({ state: 'starting' }), 'AEON', 2).actionLabel, 'Cancel start')
   const requested = leadBand(lead({ state: 'waiting_for_room', reason: 'awaiting_generation', session_id: null, generation: 0 }), 'AEON', 2)
   assert.equal(requested.action, 'cancel')
-  assert.match(requested.status, /waiting for its session/)
+  assert.match(requested.status, /waiting for a runtime/)
   assert.equal(leadBand(lead({ state: 'waiting_for_room', reason: 'dial_full' }), 'AEON', 2).action, 'dial')
   assert.equal(leadBand(lead({ state: 'waiting_for_room', reason: 'host_unavailable' }), 'AEON', 2).action, 'computers')
   assert.equal(leadBand(lead({ state: 'paused', reason: 'process_stopped', process_active: false }), 'AEON', 2).action, 'resume')
@@ -61,6 +61,27 @@ test('unreadable gates mean WAIT, never a start', () => {
   assert.match(waitCopy('harness_full').status, /a harness limit is full/)
   assert.match(waitCopy('start_checks_unavailable').now, /nothing new starts/)
   assert.match(waitCopy('something_new').status, /Waiting for room/)
+})
+
+test('AEON-1038: unclaimed starts and launch-off policy never invent admission failures', () => {
+  const fresh = lead({ state: 'waiting_for_room', reason: 'awaiting_generation', revision: 1, generation: 0, session_id: null, process_active: false, automatic_launch_enabled: false })
+  for (const reason of ['awaiting_generation', 'automatic_launch_disabled', 'start_checks_unavailable']) {
+    const band = leadBand({ ...fresh, reason }, 'AIT', 0)
+    assert.match(band.status, /waiting for a runtime/)
+    assert.match(band.now, /Automatic launch is not enabled/)
+    assert.equal(band.actionLabel, 'Cancel start')
+    assert.equal(band.busy, false)
+    assert.ok(startChecks({ ...fresh, reason }, [], null).every(check => check.state === 'unknown'))
+  }
+  assert.match(leadBand({ ...fresh, reason: 'host_unavailable', revision: 2 }, 'AIT', 0).status, /host load can’t be read/)
+  assert.match(leadBand({ ...fresh, reason: 'runtime_pickup_timeout', automatic_launch_enabled: true }, 'AIT', 0).status, /Nothing picked this up/)
+  assert.equal(leadBand({ ...fresh, reason: 'runtime_pickup_timeout', session_id: 'stopped-predecessor', automatic_launch_enabled: true }, 'AIT', 0).actionLabel, 'Cancel start')
+  assert.equal(canLaunchLead(fresh), false)
+  assert.equal(canLaunchLead(lead()), false)
+  assert.equal(canLaunchLead(null), false)
+  assert.equal(canLaunchLead({ ...fresh, automatic_launch_enabled: true }), true)
+  assert.match(leadLaunchReason(fresh), /not enabled/)
+  assert.match(leadLaunchReason(lead()), /could not be read/)
 })
 
 test('an unclaimed adoption offers Cancel and neither Pause nor Resume', () => {

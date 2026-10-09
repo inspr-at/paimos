@@ -142,6 +142,7 @@ type DailyAccount struct {
 	Routable           bool       `json:"routable"`
 	DetailsRedacted    bool       `json:"details_redacted"`
 	CanEdit            bool       `json:"can_edit"`
+	ResetPacePoints    float64    `json:"-"`
 	NoDailyLimit       bool       `json:"no_daily_limit,omitempty"`
 	TodayPointsAllowed *float64   `json:"-"`
 	OverPacePoints     *float64   `json:"-"`
@@ -184,7 +185,11 @@ func ApplyDaily(a *DailyAccount, d DailySettings, defaultPoints int, now time.Ti
 		points = *d.Pace.PointsPerDay
 	}
 	base := *a.StartOfDayUsedPct
-	limit := base + float64(points)
+	if math.IsNaN(a.ResetPacePoints) || math.IsInf(a.ResetPacePoints, 0) || a.ResetPacePoints < 0 || a.ResetPacePoints > 50 {
+		return errors.New("invalid reset pace")
+	}
+	effectivePoints := min(50, float64(points)+a.ResetPacePoints)
+	limit := base + effectivePoints
 	if d.Pace.Mode == "everything" {
 		limit = 100
 	}
@@ -195,7 +200,7 @@ func ApplyDaily(a *DailyAccount, d DailySettings, defaultPoints int, now time.Ti
 	a.TodayPointsAllowed = Number(max(0, *a.LimitUsedPct-base))
 	a.OverPacePoints = Number(0)
 	if d.Pace.Mode == "pace" {
-		a.OverPacePoints = Number(max(0, *a.UsedPct-base-float64(points)))
+		a.OverPacePoints = Number(max(0, *a.UsedPct-base-effectivePoints))
 	}
 	return nil
 }
