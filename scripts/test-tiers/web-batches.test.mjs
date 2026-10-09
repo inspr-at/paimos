@@ -38,23 +38,25 @@ test('AEON-1023 browser collector invokes only native browser lists and retains 
 
 test('AEON-1023 compatible policies share a launch; conflicting configs/projects/env/flags/host rules remain isolated', () => {
   const rows = [row('a', 'a'), row('b', 'b'), row('c', 'c'), row('d', 'd')]
-  const policy = { groups: [group('a', { env: { SHOTS_A: '${RUNNER_TEMP}/a' } }),
-    group('b', { flags: ['--workers=2', '--trace=retain-on-failure'], env: { SHOTS_B: '${RUNNER_TEMP}/b' } }),
-    group('c', { env: { SHOTS_A: '${RUNNER_TEMP}/other' } }),
+  const policy = { groups: [group('a', { env: { AEON_DESK_SHOTS: '${RUNNER_TEMP}/a' } }),
+    group('b', { flags: ['--workers=2', '--trace=retain-on-failure'], env: { RELEASE_LIST_SHOTS: '${RUNNER_TEMP}/b' } }),
+    group('c', { env: { AEON_DESK_SHOTS: '${RUNNER_TEMP}/other' } }),
     group('d', { flags: ['--timeout=5000'] })] }
   const batches = browserBatches(rows, policy)
   assert.deepEqual(batches.map(batch => batch.groups), [['a', 'b'], ['c'], ['d']])
-  assert.deepEqual(batches[0].env, { SHOTS_A: '${RUNNER_TEMP}/a', SHOTS_B: '${RUNNER_TEMP}/b' })
+  assert.deepEqual(batches[0].env, { AEON_DESK_SHOTS: '${RUNNER_TEMP}/a', RELEASE_LIST_SHOTS: '${RUNNER_TEMP}/b' })
   assert.deepEqual(batches[0].flags, ['--trace=retain-on-failure'])
   assert.deepEqual(batches.flatMap(batch => batch.rows).map(key).sort(), rows.map(key).sort())
   for (const different of [{ config: 'playwright.perf.config.ts' }, { project: 'chromium' }, { hostedOnly: false },
-    { flags: ['--trace=on'] }]) {
+    { flags: ['--trace=on'] }, { env: { REGISTRATION_MODE: 'enabled' } }]) {
     const second = { ...rows[1], config: different.config ?? rows[1].config, project: different.project ?? '' }
     assert.equal(browserBatches([rows[0], second], { groups: [group('a'), group('b', different)] }).length, 2)
   }
   assert.throws(() => browserBatches(rows, { groups: [group('a')] }), /Missing browser policy owner/)
   assert.throws(() => browserBatches([rows[0]], { groups: [group('a'), group('duplicate', { specs: [{ file: rows[0].file }] })] }), /Duplicate browser policy owner/)
   assert.throws(() => browserBatches([rows[0]], { groups: [group('a', { config: 'playwright.perf.config.ts' })] }), /Browser launch policy mismatch/)
+  assert.equal(browserBatches(rows.slice(0, 2), { groups: [group('a', { env: { MODE: 'x', OTHER: 'y' } }),
+    group('b', { env: { OTHER: 'y', MODE: 'x' } })] }).length, 1, 'identical execution policy is order-independent')
 })
 
 test('AEON-1023 browser-only discovery preserves full/catalogue/changed-area decisions and every shard case', async () => {

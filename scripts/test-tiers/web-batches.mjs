@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { key } from './core.mjs'
 
+// These manifest-owned values locate output artifacts only. Unknown environment
+// keys are execution policy, including absence versus presence, and must match.
+const artifactVariables = new Set(['AEON_SCREENSHOTS_DIR', 'RELEASE_LIST_SHOTS', 'ATTACH_DISCOVERABLE_SHOTS',
+  'ATTACH_SHOTS', 'AEON_RECURRENCE_SHOTS', 'AEON_DESK_SHOTS', 'AEON_521A_SHOTS', 'AGENT_ACTIVITY_SHOTS', 'STATUS_AUTOPILOT_SHOTS'])
+
 function launchFlags(flags) {
   const kept = []
   let trace = false
@@ -32,7 +37,9 @@ export function browserBatches(rows, policy) {
       assigned.add(key(row))
     }
     const launch = launchFlags(group.flags)
-    const signature = JSON.stringify([group.config, group.project ?? null, group.hostedOnly ?? null, launch.flags])
+    const executionEnv = Object.entries(group.env).filter(([name]) => !artifactVariables.has(name))
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+    const signature = JSON.stringify([group.config, group.project ?? null, group.hostedOnly ?? null, launch.flags, executionEnv])
     let batch = batches.find(candidate => candidate.signature === signature &&
       Object.entries(group.env).every(([name, value]) => !Object.hasOwn(candidate.env, name) || candidate.env[name] === value))
     if (!batch) {

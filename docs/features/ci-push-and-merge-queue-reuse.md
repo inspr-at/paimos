@@ -3,11 +3,12 @@
 AEON-1023 reduces browser shard discovery and launch overhead. Tier browser
 jobs collect only the native Playwright catalogue. Unit classifications remain
 planner metadata so that source-impact decisions retain their existing
-semantics; strict web setup and unit jobs still discover the complete web
-catalogue. Case selection, shard weights, required checks and retry limits are
+semantics; web setup, strict classification and unit jobs still discover the
+complete web catalogue. Case selection, shard weights, required checks and retry limits are
 unchanged. Compatible groups share a supervised Playwright execution and Vite
 server: config, project, remaining flags and host restriction must match, and
-environment values must not conflict. Screenshot variables are combined and
+execution environment must match, including presence versus absence. The
+known screenshot output variables are combined when their values do not conflict, and
 failure tracing is retained when any contributing group requests it. The tier
 runner still forces one worker and disables automatic retries. Conflicting
 policies and the separate performance config keep their own execution.
@@ -33,6 +34,19 @@ seven-day outcome: compare actual per-shard residuals, runner minutes and
 first-attempt results with the pre-change run, and post on AEON-1023 after
 deployment. The reference Arion W2 full run `37815054461` has web shards
 4.8–12.8 minutes, 99.7 minutes in selected-UI steps and 71.7 summed case minutes.
+
+Validation on mbp2606 (2026-10-09, code commit `d75181f6b`) passed all 40
+`ci-static --merge-main` checks without skips. Native collection compared the
+same 3,979 browser registrations and the same 1,721 selected cases in 111 specs
+across all twelve full shards. Planned execution launches changed from 84 to
+13: one UI execution per shard, with an additional performance execution on
+shard 8. One sequential discovery sample measured full collection at 24.50 s
+and browser-only collection at 1.49 s; native selection-list checks summed to
+21.04 s before and 3.89 s after. These measurements cover discovery, exclude
+browser cases and server startup, and establish no end-to-end latency claim.
+Actual browser execution set equality and the requested before/after runtime
+overhead sample remain a coordinator handoff: the remote browser launcher is
+closed pending OPS-247, and this worker is not authorised to push or deploy.
 
 Main-push reuse keeps its existing `CI_TREE_REUSE` semantics: unless set to
 `off`, a successful full merge-group run at the **same commit SHA** can replace

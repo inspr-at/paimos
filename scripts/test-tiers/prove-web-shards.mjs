@@ -25,6 +25,20 @@ export function proveWebShards({ count = 12, all = false, env = process.env } = 
         JSON.stringify(sorted(left)) !== JSON.stringify(sorted(right))) throw new Error(`Web shard set equality failed: ${label}`)
   }
   same(before.tests.filter(row => row.kind === 'browser'), after.tests, 'catalogue')
+  const plannerComparisons = []
+  for (const options of [
+    { event: 'pull_request', paths: ['web/tests/clip-tip.spec.ts'] },
+    { event: 'pull_request', paths: ['web/tests/tree.test.ts'], affectedLane: 'on' },
+    { event: 'pull_request', paths: ['web/src/tree-drop.ts'], affectedLane: 'on' },
+    { event: 'pull_request', paths: ['docs/features/ci-push-and-merge-queue-reuse.md'] },
+  ]) {
+    const oldPlan = plan('web', { ...options, inventory: before })
+    const newPlan = plan('web', { ...options, inventory: after })
+    same(oldPlan.tests, newPlan.tests, `planner ${options.paths.join(',')}`)
+    for (const field of ['full', 'layout', 'scope', 'reason', 'deferredBrowserCases'])
+      if (oldPlan[field] !== newPlan[field]) throw new Error(`Web planner decision changed: ${field}`)
+    plannerComparisons.push({ ...options, cases: newPlan.tests.length, full: newPlan.full, scope: newPlan.scope })
+  }
   const policy = loadManifest(), shards = [], beforeRun = [], afterRun = []
   const nativeRows = (group, rows, catalogue, label) => {
     const stem = resolve(evidence, `web-shard-proof-${label}-${group.id}`), path = `${stem}.txt`
@@ -73,7 +87,7 @@ export function proveWebShards({ count = 12, all = false, env = process.env } = 
   const report = { version: 1, proof: 'native-collection-set-equality', casesExecuted: false, all,
     catalogueCases: after.tests.length, selectedCases: afterRun.length,
     selectedSpecs: new Set(afterRun.map(row => row.file)).size, count,
-    beforeCollectSeconds, afterCollectSeconds, shards,
+    beforeCollectSeconds, afterCollectSeconds, plannerComparisons, shards,
     note: 'Full native inventory versus browser-only inventory; exact old/new native test-list identities across every shard. Times cover discovery only; use actual webShardTiming for execution overhead.' }
   saveJSON(resolve(evidence, 'web-shard-set-equality.json'), report)
   return report
