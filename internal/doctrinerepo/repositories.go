@@ -37,8 +37,7 @@ func Parse(public, private string) (Pair, error) {
 	if !valid(private) {
 		return Pair{}, fmt.Errorf("AEON_DOCTRINE_PRIVATE_REPOSITORY must be owner/repository; a private quotation boundary is required")
 	}
-	public, private = strings.ToLower(public), strings.ToLower(private)
-	if public == private {
+	if strings.EqualFold(public, private) {
 		return Pair{}, fmt.Errorf("AEON_DOCTRINE_PUBLIC_REPOSITORY and AEON_DOCTRINE_PRIVATE_REPOSITORY must be different")
 	}
 	return Pair{public: public, private: private}, nil

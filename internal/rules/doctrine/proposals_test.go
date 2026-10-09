@@ -365,7 +365,7 @@ func newProposalFixtureWithRepositories(t *testing.T, configured *doctrinerepo.P
 // R11/R14: changing the deployment boundary must neither publish to a read-only
 // public pack nor bypass identity, quotation, credential or person-only gates.
 func TestDeploymentDoctrineRepositoryBoundary(t *testing.T) {
-	for _, public := range []string{"", "library-team/shared-doctrine"} {
+	for _, public := range []string{"", "library-team/Shared-Doctrine"} {
 		name := "private only"
 		if public != "" {
 			name = "custom pair"

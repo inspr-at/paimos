@@ -36,8 +36,9 @@ can read and index:
   defaults to `inspr-at/inspr-doctrine-private`. An explicitly empty value is
   invalid: public publication always needs a private quotation boundary.
 
-Names are normalized to lowercase. Malformed names and the same repository
-on both sides fail startup before credential files are read. The configured
+Use GitHub's canonical owner/repository spelling. Malformed names and the same
+repository on both sides (even with different case) fail startup before
+credential files are read. The configured
 source visibility and the App installation's reported visibility must match
 the public/private boundary; visibility changes are refused before writes.
 
