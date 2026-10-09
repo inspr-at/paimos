@@ -86,10 +86,13 @@ pair for each writable doctrine repo. Missing, invalid or revoked grants return
 refresh and approval operations recheck the grant. App configuration and tenant
 settings cannot grant access to a key by themselves. Every GitHub request,
 including PR writes, is pinned to `https://api.github.com` and refuses redirects.
-The App installation must select exactly `inspr-at/inspr-modules` and
-`inspr-at/inspr-doctrine-private`, with contents + pull requests write (and
-implicit metadata read). Each minted token is narrowed to the proposal
-repository alone and checked against that exact scope and live repository
+The App installation must select the deployment-configured doctrine
+repositories, with contents + pull requests write (and implicit metadata read).
+Unset `AEON_DOCTRINE_PUBLIC_REPOSITORY` and `AEON_DOCTRINE_PRIVATE_REPOSITORY`
+retain `inspr-at/inspr-modules` and `inspr-at/inspr-doctrine-private`; an
+explicitly empty public variable supports a private-only deployment. See
+[deployment repository policy](git-backed-doctrine.md#deployment-proposal-repositories-aeon-1043).
+Each minted token is narrowed to the proposal repository alone and checked against that exact scope and live repository
 visibility. Installation tokens are revoked after use (including validation
 failures), with bounded cancellation-independent cleanup via GitHub’s
 [revocation endpoint](https://docs.github.com/en/rest/apps/installations#revoke-an-installation-access-token).

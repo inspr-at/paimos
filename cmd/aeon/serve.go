@@ -359,6 +359,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	startWorker(func() { phoneMod.Run(workerCtx) })
 	pairingMod.SetAttachedMessages(attachedMessages)
 	doctrineMod := doctrine.New(pool, doctrine.Options{
+		Repositories:      cfg.DoctrineRepositories,
 		CredentialsDir:    cfg.DoctrineCredentialsDir,
 		GuardKey:          cfg.DoctrineGuardKey,
 		BinaryAllowlist:   cfg.DoctrineBinaryAllowlist,

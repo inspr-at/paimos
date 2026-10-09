@@ -43,6 +43,7 @@ export interface DoctrineFile {
 export interface DoctrineSkip { path: string; reason: string }
 export type DoctrineState = 'ready' | 'not_indexed' | 'failed'
 export interface DoctrineSource {
+  proposals_enabled?: boolean
   id: string
   repository: string
   visibility: 'public' | 'private'

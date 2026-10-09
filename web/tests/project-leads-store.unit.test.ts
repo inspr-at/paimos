@@ -92,6 +92,44 @@ it('a newer read never yields to an older revision answered later', async () => 
   expect(leads.view(P).lead).toMatchObject({ state: 'paused', revision: 6 })
 })
 
+it('AEON-1040: removal sends the confirmed revision and older reads cannot resurrect the lead', async () => {
+  const leads = useProjectLeads()
+  const unstarted = lead({ state: 'paused', session_id: null, generation: 0, process_active: false })
+  const none = lead({ state: 'none', revision: 0, session_id: null, generation: 0, process_active: false })
+  http.handler = routes({ lead: () => unstarted })
+  await leads.loadLead(P)
+  await expect(leads.remove(P, 3)).rejects.toThrow('The lead changed')
+  expect(http.paths.filter(path => path.startsWith('DELETE '))).toEqual([])
+  const older = deferred<ProjectLead>()
+  let reads = 0
+  http.handler = routes({ lead: (_path, init) => {
+    if (init?.method === 'DELETE') {
+      expect(JSON.parse(String(init.body))).toEqual({ expected_revision: 4 })
+      return none
+    }
+    return ++reads === 1 ? older.promise : none
+  } })
+  const reading = leads.loadLead(P)
+  expect(await leads.remove(P, 4)).toMatchObject({ state: 'none', revision: 0 })
+  older.resolve(unstarted)
+  await reading; await settle()
+  expect(leads.view(P).lead).toMatchObject({ state: 'none', revision: 0 })
+  expect(http.paths.filter(path => path.startsWith('DELETE '))).toEqual([`DELETE /projects/${P}/lead`])
+})
+
+it('AEON-1040: a fresh external removal clears the card and outranks an older overlapping read', async () => {
+  const leads = useProjectLeads()
+  await leads.loadLead(P)
+  const older = deferred<ProjectLead>()
+  http.handler = routes({ lead: () => older.promise })
+  const reading = leads.loadLead(P)
+  http.handler = routes({ lead: () => lead({ state: 'none', revision: 0, session_id: null, generation: 0, process_active: false }) })
+  await leads.loadLead(P)
+  older.resolve(lead())
+  await reading
+  expect(leads.view(P).lead).toMatchObject({ state: 'none', revision: 0 })
+})
+
 it('gate and merged totals cover every generation and survive trimming the retained history', async () => {
   const leads = useProjectLeads()
   const history = [decision(1, 'review', 'requested', 'n-gate'), decision(2, 'release_handoff', 'handoff', 'n-merged'),

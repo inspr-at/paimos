@@ -141,6 +141,7 @@
   ],
   "routes": {
     "DELETE /api/me/leaving-at": "harness.control",
+    "DELETE /api/projects/{projectId}/lead": "harness.control",
     "GET /api/harness-sessions": "harness.read",
     "GET /api/harness-sessions/live": "nodes.read",
     "GET /api/me/agent-pause-settings": "harness.read",

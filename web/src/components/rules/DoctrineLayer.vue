@@ -111,7 +111,7 @@ onMounted(load)
         <button v-if="canManage" type="button" class="link" :disabled="!!reading" @click="reread(source)">{{ reading === source.id ? 'Reading…' : 'Try again' }}</button>
       </p>
       <div v-if="source.files.length" class="files">
-        <DoctrineFileCard v-for="file in source.files" :key="file.path" :file="file" :can-propose="canPropose && ['inspr-at/inspr-modules', 'inspr-at/inspr-doctrine-private'].includes(source.repository)" @propose="rule => proposing = { source, file, rule }" />
+        <DoctrineFileCard v-for="file in source.files" :key="file.path" :file="file" :can-propose="canPropose && source.proposals_enabled === true" @propose="rule => proposing = { source, file, rule }" />
       </div>
     </div>
 

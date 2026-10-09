@@ -61,12 +61,12 @@ func TestPublicationCredentialGuard(t *testing.T) {
 	for _, repo := range []string{publicRepository, privateRepository} {
 		for name, text := range publicationCredentialForms() {
 			t.Run(repo+"/"+name, func(t *testing.T) {
-				requireCredentialRefusal(t, guardPublic(repo, text))
-				requireCredentialRefusal(t, guardPublic(repo, fullwidth(text)))
-				requireCredentialRefusal(t, guardPublic(repo, strings.Join(strings.Split(text, ""), "\u200b")))
+				requireCredentialRefusal(t, New(nil, Options{}).guardPublic(repo, text))
+				requireCredentialRefusal(t, New(nil, Options{}).guardPublic(repo, fullwidth(text)))
+				requireCredentialRefusal(t, New(nil, Options{}).guardPublic(repo, strings.Join(strings.Split(text, ""), "\u200b")))
 				// Latin capital beta survives the public Latin check and NFKC.
 				// Keep its existing coverage beside the small-capital forms.
-				requireCredentialRefusal(t, guardPublic(repo, strings.ReplaceAll(text, "B", "\ua7b4")))
+				requireCredentialRefusal(t, New(nil, Options{}).guardPublic(repo, strings.ReplaceAll(text, "B", "\ua7b4")))
 			})
 		}
 	}
@@ -84,13 +84,13 @@ func TestPublicationCredentialProse(t *testing.T) {
 			"Run tests before merging. Prüfen vor der Freigabe.",
 			"Use an AKIA prefix, a PEM BEGIN header or an eyJ prefix as format names.",
 		} {
-			if err := guardPublic(repo, text); err != nil {
+			if err := New(nil, Options{}).guardPublic(repo, text); err != nil {
 				t.Errorf("ordinary prose fixture %d refused: %v", i, err)
 			}
 		}
 	}
 	// Keep the existing confusable/skeleton defense in the private route too.
-	requireCredentialRefusal(t, guardPublic(privateRepository, "pаssword="+strings.Repeat("A9", 10)))
+	requireCredentialRefusal(t, New(nil, Options{}).guardPublic(privateRepository, "pаssword="+strings.Repeat("A9", 10)))
 }
 
 func TestPublicationCredentialsInUnchangedBlobs(t *testing.T) {
@@ -114,7 +114,7 @@ func TestPublicationCredentialsInUnchangedBlobs(t *testing.T) {
 				rule := Render(repo, fixtureCommit, repo == privateRepository, files)[0].Rules[0]
 				in := ProposalInput{Path: path, RuleKey: rule.Key, RuleSHA: rule.SHA256, Source: strings.Replace(rule.Source, "Run tests.", "Run tests before merging.", 1), Explanation: "Clarify validation."}
 				in.TLDR.EN = "Validate before merging."
-				_, err := editRule(Source{Repository: repo, Commit: fixtureCommit}, files, in)
+				_, err := New(nil, Options{}).editRule(Source{Repository: repo, Commit: fixtureCommit}, files, in)
 				requireCredentialRefusal(t, err)
 			})
 		}

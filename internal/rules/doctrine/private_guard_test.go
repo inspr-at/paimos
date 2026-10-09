@@ -537,7 +537,7 @@ func checkDoctrineGuard(t *testing.T, pubDocs, privDocs map[string]string) {
 	identity, nonLatin := 0, 0
 	for _, view := range views {
 		for _, rule := range view.Rules {
-			err := guardPublic(publicRepository, rule.Source)
+			err := New(nil, Options{}).guardPublic(publicRepository, rule.Source)
 			if err == nil {
 				continue
 			}
@@ -610,7 +610,7 @@ func checkDoctrineGuard(t *testing.T, pubDocs, privDocs map[string]string) {
 				}
 				n++
 				text := attack.fn(rule.Text)
-				if guardPublic(publicRepository, text) == nil && !corpus.quotes(allow, text) {
+				if New(nil, Options{}).guardPublic(publicRepository, text) == nil && !corpus.quotes(allow, text) {
 					pass++
 				}
 			}

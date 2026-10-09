@@ -506,6 +506,11 @@ func TestProjectLeadOpenAPIContract(t *testing.T) {
 				t.Fatal("lead writes lost revision contract")
 			}
 		}
+		remove := paths[prefix+"/projects/{projectId}/lead"].(map[string]any)["delete"].(map[string]any)
+		body := remove["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+		if body["additionalProperties"] != false || body["required"].([]any)[0] != "expected_revision" {
+			t.Fatal("lead removal lost its strict revision contract")
+		}
 		lead := doc["components"].(map[string]any)["schemas"].(map[string]any)["ProjectLead"].(map[string]any)
 		properties := lead["properties"].(map[string]any)
 		if len(properties["state"].(map[string]any)["enum"].([]any)) != 6 {
@@ -861,9 +866,21 @@ func TestProjectLeadUnclaimedAdoptionRejectsPauseAndCancelClearsSelection(t *tes
 		expect(t, w, 200)
 		cleared = decode(t, w)
 		started := startLead(t, f, int(cleared["revision"].(float64)))
-		if started["reason"] != "automatic_launch_disabled" || started["automatic_launch_enabled"] != false || started["session_id"] != nil || started["state"] != "waiting_for_room" {
+		if started["reason"] != "automatic_launch_disabled" || started["automatic_launch_enabled"] != false || started["session_id"] != nil || started["generation"] != float64(0) || started["state"] != "waiting_for_room" || started["revision"].(float64) <= cleared["revision"].(float64) {
 			t.Fatalf("explicit start after cancel failed: %v", started)
 		}
+		// The read projection reports launch policy; the stored intent remains an
+		// explicit ordinary start, so cancellation does not fence its later claim.
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			var reason string
+			if err := tx.QueryRow(t.Context(), `SELECT reason FROM project_leads WHERE project_id=$1`, f.project).Scan(&reason); err != nil {
+				return err
+			}
+			if reason != "awaiting_generation" {
+				t.Fatal("explicit start retained the cancelled adoption reason")
+			}
+			return nil
+		})
 		if harnessShape(t, f, session, child) != before {
 			t.Fatal("start after cancel touched the original session")
 		}

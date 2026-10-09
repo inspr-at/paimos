@@ -286,6 +286,16 @@ export function when(iso: string | number, now: number, timezone?: string): stri
   if (diff > 1 && diff < 6) return `${WD[p.wd]} ${hm}`
   return `${WD[p.wd]} ${p.d} ${MO[p.m]}`
 }
+/** The day alone, for credits and plans: "today", "tomorrow", "Fri", "6 Nov". */
+export function dayLabel(iso: string, now: number, timezone?: string): string {
+  const p = parts(Date.parse(iso), timezone), diff = dayNumber(p) - dayNumber(parts(now, timezone))
+  return diff === 0 ? 'today' : diff === 1 ? 'tomorrow' : diff > 1 && diff < 6 ? WD[p.wd]! : `${p.d} ${MO[p.m]}`
+}
+/** The wall-clock time alone: "18:00". */
+export function clockLabel(iso: string, timezone?: string): string {
+  const p = parts(Date.parse(iso), timezone)
+  return `${pad(p.h)}:${pad(p.mi)}`
+}
 export function whenFull(iso: string, timezone?: string): string {
   const p = parts(Date.parse(iso), timezone)
   return `${WD[p.wd]} ${p.d} ${MO[p.m]} ${pad(p.h)}:${pad(p.mi)}`

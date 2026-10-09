@@ -627,8 +627,8 @@ func (m *Module) submitInbox(r *http.Request, actor tenant.Principal) (any, erro
 		if source, err = getSource(ctx, tx, p.SourceID, false); err != nil {
 			return err
 		}
-		if !writableSource(source) {
-			return fail(422, "unsupported_repository", "Only the public and private INSPR doctrine repositories accept proposals; their visibility must match.")
+		if !m.writableSource(source) {
+			return fail(422, "unsupported_repository", "Only the deployment-configured doctrine repositories accept proposals; their visibility must match.")
 		}
 		if source.CredentialRef != "" {
 			if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
@@ -638,7 +638,7 @@ func (m *Module) submitInbox(r *http.Request, actor tenant.Principal) (any, erro
 		if files, err = cachedFiles(ctx, tx, source); err != nil {
 			return err
 		}
-		if source.Repository == publicRepository {
+		if m.repositories.IsPublic(source.Repository) {
 			guard, err = m.privateGuard(ctx, tx, actor)
 		}
 		return err
@@ -660,7 +660,7 @@ func (m *Module) submitInbox(r *http.Request, actor tenant.Principal) (any, erro
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
-	_, old, next, err := editRuleViews(source, files, in)
+	_, old, next, err := m.editRuleViews(source, files, in)
 	if err != nil {
 		if f := (*failure)(nil); errors.As(err, &f) && f.Code == "stale_rule" && !edited {
 			return nil, fail(409, "stale_rule", "The rule changed since this proposal. Edit it against the current rule, then propose.")

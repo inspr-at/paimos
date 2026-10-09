@@ -25,9 +25,6 @@ import (
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
-const publicRepository = "inspr-at/inspr-modules"
-const privateRepository = "inspr-at/inspr-doctrine-private"
-
 // AppConfig is host policy, never tenant-editable. No key material or tokens.
 // GateLogin is the independent repository gate that attests CI + cross-family
 // review in a PR review; this App has no permission to manufacture that gate.
@@ -55,7 +52,7 @@ func (m *Module) appClient(ctx context.Context, tenantID, repository string) (*G
 	}
 	// Host configuration alone cannot grant access to the App key. Use the same
 	// operator-owned tenant/repository policy as credential-backed reads.
-	if tenantID != a.TenantID || (repository != publicRepository && repository != privateRepository) {
+	if tenantID != a.TenantID || !m.repositories.IsPublic(repository) && !m.repositories.IsPrivate(repository) {
 		return nil, ErrCredential
 	}
 	if err := m.credentials.authorize(a.KeyRef, tenantID, repository); err != nil {
@@ -154,7 +151,7 @@ func (m *Module) appClient(ctx context.Context, tenantID, repository string) (*G
 		if _, ok := allowed[r.FullName]; !ok {
 			return nil, gitFail("the App token includes an unapproved repository")
 		}
-		if r.Private == nil || *r.Private != (r.FullName == privateRepository) {
+		if r.Private == nil || *r.Private != m.repositories.IsPrivate(r.FullName) {
 			return nil, gitFail("the doctrine repository visibility does not match its public/private boundary")
 		}
 		allowed[r.FullName] = true
