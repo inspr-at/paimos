@@ -452,15 +452,16 @@ test.describe('phones', () => {
       await page.emulateMedia({ colorScheme: 'light' })
       await signIn(page, 'admin', { business })
       await page.goto(path)
-      await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('link')).toHaveCount(business ? 3 : 2)
+      await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('link')).toHaveCount(3)
       if (ticket) {
         const key = page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')
         await expect(key).toHaveText('PHAROS-11')
         await expect.poll(() => key.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
       } else await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
       const moon = page.getByRole('button', { name: 'Switch to dark theme' })
-      // Only three places beside a ticket key leave no room for it at these widths.
-      if (business && ticket) {
+      // Projects, Decision Desk and Agents keep three touch targets. Business
+      // remains in the app menu; a ticket key leaves no room for the moon.
+      if (ticket) {
         await expect(moon).toBeHidden()
         // It truly would not fit: the free room is less than a button and its gap.
         const room = await page.evaluate(() => {
@@ -516,7 +517,7 @@ test.describe('phones', () => {
     const key = page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')
     await expect.poll(() => key.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
   })
-  for (const [width, business] of [[390, false], [440, true], [1600, true]] as const) {
+  for (const [width, business] of [[440, false], [440, true], [1600, true]] as const) {
     test(`the moon stays in the header at ${width}${business ? ' with three places' : ''}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 844 })
       await page.emulateMedia({ colorScheme: 'light' })

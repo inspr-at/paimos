@@ -799,7 +799,10 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 .history-head { position: relative; display: flex; justify-content: center; align-items: center; min-height: 44px; margin-bottom: 12px; font-size: 12px; color: var(--ink-3); }
 .earlier { border: 0; background: transparent; color: var(--teal-ink); min-height: 44px; padding: 0 10px; font: inherit; font-weight: 600; }
 .history-error { position: absolute; top: 100%; left: 0; right: 0; z-index: 1; background: var(--surface-raised); color: var(--danger); box-shadow: var(--shadow-pop); padding: 8px; }
-.chat-stop { background: var(--ink); color: var(--surface-raised); min-height: 44px; }
+/* Keep the stacked button/keycap tints light enough for 4.5:1 danger text in both themes, including hover (AEON-1062). */
+.chat-stop { min-height: 44px; border-color: var(--danger-line); background: color-mix(in srgb, var(--danger) 4%, transparent); color: var(--danger); box-shadow: none; }
+.chat-stop:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 6%, transparent); box-shadow: none; }
+.chat-stop .keycap { color: inherit; background: color-mix(in srgb, currentColor 4%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 34%, transparent); }
 .jump svg { flex: none; }
 .jump.labelled { padding: 0 12px 0 14px; color: var(--teal-ink); }
 .jump-count { font-size: 12.5px; font-weight: 650; white-space: nowrap; }

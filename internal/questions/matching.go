@@ -45,7 +45,7 @@ func liveAsker(ctx context.Context, tx pgx.Tx, p tenant.Principal) (tenant.Princ
 	return p, nil
 }
 
-// The caller holds tenant -> tree locks and has checked ask/read permissions.
+// The caller holds tenant -> tree -> pairing locks and has checked ask/read permissions.
 // Exact fingerprints include ticket scope, context and every option field. An
 // Source-linked and requirement/doctrine inputs have no fingerprint. Anyway
 // bypasses the incoming lookup; a subsequently approved Always may be reused.

@@ -75,7 +75,7 @@ func TestCLIAdditionalRootTranscripts(t *testing.T) {
 					_, _ = w.Write([]byte(`{"version":"260925100000.0.0","scheme":"inspr-calendar-v2","brand":{"wordmark":"PAIMOS AEON","product":"PAIMOS"}}`))
 				case r.URL.Path == "/api/me":
 					_, _ = w.Write([]byte(`{"principal":{"name":"worker"}}`))
-				case r.URL.Path == "/api/kinds":
+				case r.URL.Path == "/api/kinds" && r.Method == http.MethodGet:
 					_, _ = w.Write([]byte(`{"items":[{"id":"project-kind","slug":"project"},{"id":"ticket-kind","slug":"ticket"},{"id":"tag-kind","slug":"tag"}]}`))
 				case r.URL.Path == "/api/nodes" && r.Method == "GET" && r.URL.Query().Get("kind_id") == "project-kind":
 					_, _ = w.Write([]byte(`{"items":[{"id":"` + rootProjectID + `","key":"AEON-1","kind_id":"project-kind","title":"AEON","state":"active","fields":{"project_key":"AEON"}}]}`))

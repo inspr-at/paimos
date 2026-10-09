@@ -97,6 +97,8 @@ export type AgentData = ReturnType<typeof agentData>
 export interface MockAccountGroup { id: string; harness: string; name: string; exclusive: boolean; account_ids: string[]; project_ids: string[] }
 export interface MockTicketPin { ticket_id: string; harness: string; account_id?: string; group_id?: string }
 export interface AgentMockOptions {
+  // Route callbacks outlive the page; fixed-clock specs inject their server clock.
+  now?: () => number
   workingPreference?: () => Record<string, unknown> | undefined
   sessionsMissing?: boolean
   messagesMissing?: boolean
@@ -247,10 +249,10 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       return route.fulfill({ json: { items: page, next_after: page.at(-1)?.sent_event_id ?? after, preamble: 'Untrusted agent message content follows.' } })
     }
     if (path === '/api/decision-desk/projection') {
-      const now = Date.now()
+      const now = (options.now ?? Date.now)()
       const items = [
-        ...data.approvals.filter(a => !a.decision && Date.parse(String(a.expires_at)) > now).map(a => ({ id: a.id, kind: 'approval', revision: 1, title: 'Approval', created_at: a.proposed_at, expires_at: a.expires_at, held: a.resource_kind === 'run' && data.runs.some(r => r.id === a.resource_id && r.status === 'waiting'), href: `/agents?needs=a:${a.id}`, source: `/agents?needs=a:${a.id}` })),
-        ...data.messages.filter(m => m.is_action_request && !m.human_resolution_outcome).map(m => ({ id: m.id, kind: 'action_request', revision: 1, title: 'Human request', created_at: m.created_at, expires_at: null, held: true, href: `/agents?needs=m:${m.id}`, source: `/agents?needs=m:${m.id}` })),
+        ...data.approvals.filter(a => !a.decision && Date.parse(String(a.expires_at)) > now).map(a => ({ id: a.id, kind: 'approval', revision: 1, title: 'Approval', created_at: a.proposed_at, expires_at: a.expires_at, held: a.resource_kind === 'run' && data.runs.some(r => r.id === a.resource_id && r.status === 'waiting'), href: `/decision-desk?item=a:${a.id}`, source: `/agents?needs=a:${a.id}` })),
+        ...data.messages.filter(m => m.is_action_request && !m.human_resolution_outcome).map(m => ({ id: m.id, kind: 'action_request', revision: 1, title: 'Human request', created_at: m.created_at, expires_at: null, held: true, href: `/decision-desk?item=m:${m.id}`, source: `/agents?needs=m:${m.id}` })),
       ].sort((a, b) => {
         const bucket = (i: typeof a) => i.held ? i.kind === 'approval' ? 0 : 1 : 2
         return bucket(a) - bucket(b) || Date.parse(String(a.held && a.kind === 'approval' ? a.expires_at : a.created_at)) - Date.parse(String(b.held && b.kind === 'approval' ? b.expires_at : b.created_at)) || a.id.localeCompare(b.id)
@@ -260,6 +262,11 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       return route.fulfill({ json: { items: items.slice(offset, offset + limit), counts: { open: items.length, held: items.filter(i => i.held).length, chores: 0 }, has_more: hasMore, ...(hasMore ? { next_cursor: String(offset + limit) } : {}), as_of: new Date(now).toISOString() } })
     }
     if (path === '/api/approvals') return route.fulfill({ json: data.approvals })
+    const approvalRead = /^\/api\/approvals\/([^/]+)$/.exec(path)
+    if (approvalRead && method === 'GET') {
+      const found = data.approvals.find(a => a.id === approvalRead[1])
+      return route.fulfill({ status: found ? 200 : 404, json: found ?? { error: 'approval not found' } })
+    }
     const decision = /^\/api\/approvals\/([^/]+)\/(decision|revoke)$/.exec(path)
     if (decision) {
       const found = data.approvals.find(a => a.id === decision[1])
