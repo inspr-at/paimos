@@ -45,6 +45,12 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		// Retain only these fixture profiles so pre-seeded aliases of the same
+		// model/version cannot turn selection into a UUID tie.
+		if _, err := tx.Exec(ctx, `UPDATE model_profiles SET enabled=false WHERE harness IN ('codex','claude') AND id<>ALL($1::uuid[])`, []string{pin.ID, next.ID, claudePin.ID, claude.ID}); err != nil {
+			return err
+		}
+
 		var runner string
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Daily models runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
 			return err

@@ -77,7 +77,7 @@ func TestDailyStartDecisionsFailClosedAndRespectLadderOrWait(t *testing.T) {
 	}
 	// Guard clients receive the wire projection; a no-limit API account must
 	// survive round-trip without relying on a Go-only discriminator.
-	s := Snapshot{Plan: Default(), DailyUntil: end, DailyState: map[string]DailyState{"cursor": {State: "no_limit", Accounts: []DailyAccount{{AccountID: "api", NoDailyLimit: true}}}}}
+	s := Snapshot{Plan: Default(), DailyUntil: end, DailyState: map[string]DailyState{"cursor": {State: "on_pace", Accounts: []DailyAccount{{AccountID: "subscription"}, {AccountID: "api", NoDailyLimit: true}}}}}
 	raw, err := json.Marshal(s)
 	if err != nil {
 		t.Fatal(err)

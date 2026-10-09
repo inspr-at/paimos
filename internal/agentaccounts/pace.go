@@ -5,11 +5,13 @@ package agentaccounts
 import (
 	"math"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/agentplan"
 )
 
 // ProbeFreshness is the oldest successful owner-daemon probe that can still
 // accept a new reservation.
-const ProbeFreshness = 2 * time.Minute
+const ProbeFreshness = agentplan.DailyFreshness
 
 func elapsedFraction(now, start, end time.Time) float64 {
 	span := end.Sub(start)

@@ -45,8 +45,10 @@ recompute Boost, floors or midnight locally. Require `freshness: fresh`,
 `read_at` no later than now and no older than two minutes, and `resets_at`
 after now. Require numeric `used_pct` and `limit_used_pct` in 0–100. Unknown
 or redacted doors do not prove either headroom or measured exhaustion. A fresh
-door below its limit provides daily room. A `no_limit` state denotes visible
-API-billed doors, which have no percentage numbers. Once the day ends, fetch a
+door below its limit provides daily room. An account with `no_daily_limit: true` is a visible API-billed door with no
+percentage ceiling; absence means false. A whole-harness `no_limit` state also
+denotes visible API-billed doors. This discriminant remains explicit when
+subscription and API doors share a harness. Once the day ends, fetch a
 new plan. Used and left are display pairs, not two independent limits.
 
 When all eligible doors are measured exhausted, `daily[harness].at_limit`

@@ -98,6 +98,21 @@ func TestDailyAdmissionRechecksCurrentPlanAtReservationAndClaim(t *testing.T) {
 	settings.BoostToday.LimitUsedPct = 60
 	save(t)
 	check(t, true, "")
+	settings.BoostToday.Until = now
+	save(t)
+	if err := db.InTenant(ctx, appPool, owner.TenantID, func(tx pgx.Tx) error {
+		out, err := ReadDailyPolicyTx(ctx, tx, owner.TenantID, owner.ID, now)
+		if err != nil {
+			return err
+		}
+		if out.Daily["codex"].BoostToday != nil {
+			t.Fatal("expired explicit boost survived projection")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	check(t, true, "")
 	setPlan(t, []byte(`{"total":5,"daily":{"codex":{"pace":{"mode":"pace","points_per_day":0},"boost_today":null,"at_limit":"ladder"}}}`))
 	check(t, false, "daily_limit_unknown")
 	save(t)
