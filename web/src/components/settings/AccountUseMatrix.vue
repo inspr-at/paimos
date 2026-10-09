@@ -277,7 +277,7 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
                 <div class="row-head">
                   <input type="checkbox" class="tri" :data-r="ri + 1" :data-c="0" :checked="rowState(a.id, columns, set) === 'all'" :indeterminate="rowState(a.id, columns, set) === 'some'" :aria-label="`${accountName(a)} in every context`" @change="bulkRow($event, a.id)" />
                   <HarnessMark :harness="a.harness" />
-                  <span class="who"><b v-clip-tip>{{ accountName(a) }}</b><small v-clip-tip>{{ sub(a) }}</small></span>
+                  <span class="who"><b>{{ accountName(a) }}</b><small>{{ sub(a) }}</small></span>
                 </div>
               </th>
               <td v-for="(c, ci) in columns" :key="c.id">
@@ -348,8 +348,11 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
 .grid .corner { width: 34%; min-width: 220px; padding: 6px 10px; font: 500 11px var(--mono); color: var(--ink-3); }
 .col-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 54px; padding: 6px 4px 6px 10px; }
 .col-name, .who { display: grid; min-width: 0; }
-.col-name b, .who b { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.col-name small, .who small { font-size: 11.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-name b, .who b { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+/* Headings wrap to two lines; the clip-tip shows anything longer. */
+.col-name b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.col-name small { font-size: 11.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.who small { font-size: 11.5px; color: var(--ink-3); overflow-wrap: anywhere; }
 .row-head { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 10px; min-height: 52px; padding: 6px 10px; }
 .cell { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 52px; cursor: pointer; border-radius: var(--radius-row); }
 .cell:hover { background: var(--row-hover); }
