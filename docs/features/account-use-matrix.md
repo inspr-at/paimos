@@ -30,3 +30,14 @@ Matrix UI, all Go selection filters, model activation and daemon enrolment are
 separate slices of the same release. This core alone is not a complete release
 of the account matrix. Exact-byte migration-policy records are review artifacts
 and require the coordinator's review and previous-image compatibility gate.
+
+For the capability sweep, run the whole Go suite with
+`AEON_TEST_ACCOUNT_USE_ACTIVATED=1` and the usual disposable test database URL.
+The shared fixture template explicitly preserves the previous all-allowed
+policy and activates it; policy-specific and pre-expansion migration fixtures
+retain their production defaults so their before-activation assertions remain
+meaningful. No production predicate, permission or audit is disabled.
+The previous-image harness also checks activated empty and populated pools.
+Older handlers sanitize database errors, so each refused request must produce
+the exact `0A000` message from `aeon_enter_principal` in the disposable
+Postgres log. Generic HTTP errors alone cannot pass that gate.

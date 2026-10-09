@@ -32,7 +32,7 @@ func setup(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{d: dbtest.Open(t), p: tenant.Principal{Kind: tenant.Person}}
 	ctx := dbtest.Seed(t.Context())
-	if err := f.d.App.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('matrix','Matrix') RETURNING id::text`).Scan(&f.p.TenantID); err != nil {
+	if err := f.d.App.QueryRow(ctx, `WITH policy AS MATERIALIZED (SELECT set_config('aeon.test_account_use_defaults','production',true)) INSERT INTO tenants(slug,name) SELECT 'matrix','Matrix' FROM policy RETURNING id::text`).Scan(&f.p.TenantID); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.InTenant(ctx, f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
