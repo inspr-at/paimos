@@ -53,6 +53,7 @@ const subtitle = computed(() => {
   return [band.value.status, s && lead.value?.state === 'working' ? `since ${time(s.since)}` : '', s?.model].filter(Boolean).join(' · ')
 })
 const nowCopy = computed(() => {
+  if (unmanaged.value && lead.value?.state === 'paused') return 'Continue from the session itself; PAIMOS cannot restart an unmanaged process.'
   if (lead.value?.state === 'working') {
     const room = dial.value ? Math.max(0, dial.value.total - dial.value.running) : null
     const activity = leadSession.value?.current_activity?.text || leadSession.value?.activity_note
@@ -66,7 +67,10 @@ const reported = computed(() => {
   const seconds = Math.max(0, Math.round((now.value - new Date(s.heartbeat_at).getTime()) / 1000))
   return seconds < 90 ? `Reported ${seconds} seconds ago` : `Reported ${Math.round(seconds / 60)} minutes ago`
 })
-const unmanaged = computed(() => (leadSession.value?.management_mode ?? view.value?.principal?.management) === 'unmanaged')
+const unmanaged = computed(() => {
+  const principal = view.value?.principal
+  return (leadSession.value?.management_mode ?? (principal?.session === lead.value?.session_id ? principal?.management : undefined)) === 'unmanaged'
+})
 const checks = computed(() => startChecks(lead.value, decisions.value, dial.value))
 const recent = computed(() => [...decisions.value].reverse().slice(0, 6).map(d => ({ id: d.event_id, at: time(d.recorded_at), text: decisionLine(d, id => keyOf(id) ?? 'a ticket') })))
 const next = computed(() => (queued.value ?? []).filter(item => !item.target_agent_id).slice(0, 3))
@@ -157,7 +161,7 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
       </section>
     </div>
     <footer class="pane-foot">
-      <p v-if="unmanaged && lead?.state === 'paused'">{{ unmanagedLeadCopy }}. Continue from the running session.</p>
+      <p v-if="unmanaged && lead?.state === 'paused'">{{ unmanagedLeadCopy }}. Continue from the session itself.</p>
       <template v-else-if="lead?.state === 'paused'">
         <p>{{ canResume(lead) ? 'Restarts through the usual start checks.' : 'Resume waits until its session has stopped.' }}</p>
         <button type="button" class="btn primary" data-act="resume" :aria-disabled="!mayStart || !canResume(lead) || leads.busy[projectId]" @click="mayStart && canResume(lead) && resume()"><AppIcon name="play" :size="15" />Resume</button>

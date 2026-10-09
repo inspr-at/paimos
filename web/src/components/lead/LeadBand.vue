@@ -58,7 +58,10 @@ const nowLine = computed(() => {
   if (lead.value?.state === 'working') return leadSession.value?.current_activity?.text || leadSession.value?.activity_note || ''
   return band.value.now
 })
-const unmanaged = computed(() => (leadSession.value?.management_mode ?? leads.views[props.projectId]?.principal?.management) === 'unmanaged')
+const unmanaged = computed(() => {
+  const principal = leads.views[props.projectId]?.principal
+  return (leadSession.value?.management_mode ?? (principal?.session === lead.value?.session_id ? principal?.management : undefined)) === 'unmanaged'
+})
 // Primary action: disabled with its reason rather than hidden, so the slot never moves.
 const action = computed(() => {
   const b = band.value, l = lead.value
@@ -130,11 +133,12 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
       </div>
     </div>
 
-    <LeadAdoption v-if="mayStart && lead && !lead.session_id && lead.state !== 'paused'" :key="`${viewer}:${projectId}`" :project-id="projectId" :revision="lead.revision" />
+    <LeadAdoption v-if="band.state !== 'none' && mayStart && lead && !lead.session_id && lead.state !== 'paused'" :key="`${viewer}:${projectId}`" :project-id="projectId" :revision="lead.revision" />
     <p v-if="unmanaged" class="lead-now small" data-unmanaged>{{ unmanagedLeadCopy }}</p>
     <!-- The fold hides only the details; the head and Start lead stay where they are. -->
     <div v-if="band.state === 'none'" id="lead-fold" class="lead-fold" :inert="folded || undefined" @transitionend="settleFold" @transitioncancel="settleFold">
       <div class="lead-fold-inner">
+        <LeadAdoption v-if="mayStart && lead" :key="`${viewer}:${projectId}`" :project-id="projectId" :revision="lead.revision" />
         <ul class="empty-lead">
           <li><AppIcon name="queue" :size="14" /><span>Picks up what people queue, in their order, and sizes each item.</span></li>
           <li><AppIcon name="agent" :size="14" /><span>Chooses harness, model and thinking by role, and starts workers within your dial.</span></li>

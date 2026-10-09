@@ -659,20 +659,23 @@ func TestProjectLeadAdoptionRejectsChangedEligibility(t *testing.T) {
 				case "unowned":
 					q = "UPDATE harness_sessions SET owner_principal_id=NULL WHERE id=$1"
 				case "other_owner":
-					_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','other')`, f.person.TenantID, f.foreign.ID)
+					otherOwner := uid()
+					_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','other')`, f.person.TenantID, otherOwner)
 					if err != nil {
 						return err
 					}
-					_, err = tx.Exec(t.Context(), `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, session, f.foreign.ID)
+					_, err = tx.Exec(t.Context(), `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, session, otherOwner)
 					return err
 				case "stale":
 					q = "UPDATE harness_sessions SET heartbeat_at=clock_timestamp()-interval '3 minutes' WHERE id=$1"
 				case "future":
 					q = "UPDATE harness_sessions SET heartbeat_at=clock_timestamp()+interval '1 minute' WHERE id=$1"
 				case "archived":
-					q = "UPDATE harness_sessions SET archived_at=clock_timestamp() WHERE id=$1"
+					q = `UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp(),archived_at=clock_timestamp(),
+						recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest='fixture'::bytea,
+						recovery_actor_id=agent_principal_id,recovery_reason='fixture' WHERE id=$1`
 				case "stopped":
-					q = "UPDATE harness_sessions SET stopped_at=clock_timestamp(),stop_reason='stopped' WHERE id=$1"
+					q = "UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp(),stop_reason='stopped' WHERE id=$1"
 				case "pausing":
 					q = `UPDATE harness_sessions SET pause_record='{"state":"requested"}' WHERE id=$1`
 				case "revoked":
@@ -682,9 +685,11 @@ func TestProjectLeadAdoptionRejectsChangedEligibility(t *testing.T) {
 				_, err := tx.Exec(t.Context(), q, session)
 				return err
 			})
-			w := f.call(f.person, "POST", base+"/lead/adopt", map[string]any{"expected_revision": 0, "session_id": session}, "")
+			var w *httptest.ResponseRecorder
 			if confirmed {
 				w = f.call(f.agent, "POST", base+"/lead/claim", map[string]any{"expected_revision": 1, "session_id": session}, lease)
+			} else {
+				w = f.call(f.person, "POST", base+"/lead/adopt", map[string]any{"expected_revision": 0, "session_id": session}, "")
 			}
 			if strings.HasPrefix(mode, "revoked") {
 				expect(t, w, 403)

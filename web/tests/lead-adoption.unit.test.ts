@@ -70,7 +70,7 @@ it('an unmanaged lead card offers cooperative pause and hides restart controls a
       '../../lib/leadCardFold': { useLeadCardFold: () => ({ ready: ref(true), collapsed: ref(false), moving: ref(false) }) },
       '../../lib/leadOverlay': {}, '../../lib/toast': {}, '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },
       '../../lib/useLeadSummary': { useLeadSummary: () => summary },
-      '../../stores/projectLeads': { useProjectLeads: () => ({ views: { project: { principal: { management: 'unmanaged' } } }, busy: {}, load() {} }) },
+      '../../stores/projectLeads': { useProjectLeads: () => ({ views: { project: { principal: { session: 'running', management: 'unmanaged' } } }, busy: {}, load() {} }) },
       '../../stores/session': { useSession: () => ({ identity: { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } } }) },
       '../../stores/workQueue': { useWorkQueue: () => ({ load() {} }) },
     }, { projectId: 'project', projectKey: 'AEON', routeKey: 'AEON' })
