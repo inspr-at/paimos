@@ -43,12 +43,12 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; manage?: b
     return route.fulfill({ json: value })
   })
   const data = agentData({
-    me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' },
+    now: NOW, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' },
     tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' },
     nodes: { 'p-pharos': { key: 'PHAROS', title: 'Pharos' }, 'n-2': { key: 'PHAROS-12', title: 'PDF worker image' } },
   })
   data.runs.splice(0); data.approvals.splice(0); data.messages.splice(0)
-  await mockAgents(page, data)
+  await mockAgents(page, data, { now: () => NOW + (options.paused ? 60_000 : 0) })
   await page.route('**/api/me/leaving-at', route => route.fulfill({ json: { deadline_at: null, request_id: null, hosts: 'all', stop_in_flight: false, owner_principal_id: me.id, items: [] } }))
   await page.route('**/api/nodes/p-pharos', route => route.fulfill({ json: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' } }))
   await page.route('**/api/nodes/n-2', route => route.fulfill({ json: { id: 'n-2', key: 'PHAROS-12', title: 'PDF worker image' } }))

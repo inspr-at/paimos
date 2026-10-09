@@ -14696,6 +14696,8 @@
     ,
     {"kind":"vitest","file":"tests/agents-fixture-clock.unit.test.ts","name":"serves a projection after the browser has ended without evaluating the page","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/agents-fixture-clock.unit.test.ts","name":"uses the injected projection clock for approval membership, counts and as_of","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/agents-live.unit.test.ts","name":"a failed refresh preserves the last successful timestamp and recovers on the next read","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-live.unit.test.ts","name":"a live hint during a slow fetch does not stack another read","tier":"GATED-FULL"}
@@ -15029,6 +15031,8 @@
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"keeps invalid native tier revision 9007199254740992 unavailable","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"keeps invalid native tier revision null unavailable","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"turns an account_matrix projection row into a settings link-out without a source warning","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-project.unit.test.ts","name":"Decision Desk project identity > keeps the canonical run approval project and resolves run approval history through its work order","tier":"GATED-FULL"}
     ,

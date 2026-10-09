@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDecisionDesk } from '../../stores/decisionDesk'
 import { useProjects } from '../../stores/projects'
 import { useSession } from '../../stores/session'
-import { deskItemID, deskProject, projectColor, type DeskProjectionItem } from '../../lib/decisionDesk'
+import { deskItemID, deskLinkOut, deskProject, projectColor, type DeskProjectionItem } from '../../lib/decisionDesk'
 import { getDoctrineInbox } from '../../lib/doctrine'
 import { readDoctrineProjects } from '../../lib/decisionDeskApi'
 import AppIcon from '../AppIcon.vue'
@@ -69,10 +69,10 @@ const incomplete = computed(() => !!desk.projection && (desk.projection.has_more
     <div v-for="group in groups" :key="group.label" class="desk-group">
       <p class="group-title">{{ group.label }}<small>{{ group.note }}</small></p>
       <ul :aria-label="group.label">
-        <li v-for="item in group.items" :key="deskItemID(item)" class="desk-item">
+        <li v-for="item in group.items" :key="deskItemID(item)" class="desk-line">
           <AppIcon name="chevron-right" :size="14" />
           <a v-if="item.project?.href" class="row-project" :href="item.project.href" target="_blank" rel="noopener" :style="{ '--pc': projectColor(item.project) }" :title="`Open ${item.project.name} in a new tab`" data-testid="agents-desk-project"><i aria-hidden="true" /><span>{{ item.project.name }}</span></a>
-          <RouterLink :to="{ path: '/decision-desk', query: { item: deskItemID(item) } }" class="row-open">{{ item.title }}</RouterLink>
+          <RouterLink :to="deskLinkOut(item) || { path: '/decision-desk', query: { item: deskItemID(item) } }" class="desk-item" :data-testid="`agents-desk-item-${deskItemID(item)}`">{{ item.title }}</RouterLink>
         </li>
       </ul>
     </div>
@@ -86,9 +86,9 @@ const incomplete = computed(() => !!desk.projection && (desk.projection.has_more
 <style scoped>
 .desk-panel { overflow: hidden; }.desk-panel.waiting { background: var(--gold-wash); }
 .card-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 16px 20px; }h2 { margin: 0; font-size: 15px; font-weight: 600; }.desk-count { min-inline-size: 3ch; font: 600 12px var(--mono); font-variant-numeric: tabular-nums; }.card-head .btn { margin-left: auto; }
-.desk-group { border-top: 1px solid var(--line); }.group-title { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0; padding: 12px 20px 6px; font-size: 12px; font-weight: 600; }.group-title small { font-size: 11px; font-weight: 400; color: var(--ink-3); }ul { list-style: none; padding: 0; margin: 0; }.desk-item { position: relative; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 12px 20px; color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }.desk-item svg { flex: none; }.desk-item:hover { background: var(--row-hover); }
+.desk-group { border-top: 1px solid var(--line); }.group-title { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0; padding: 12px 20px 6px; font-size: 12px; font-weight: 600; }.group-title small { font-size: 11px; font-weight: 400; color: var(--ink-3); }ul { list-style: none; padding: 0; margin: 0; }.desk-line { position: relative; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 12px 20px; color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }.desk-line svg { flex: none; }.desk-line:hover { background: var(--row-hover); }
 /* The whole row opens the item; the project link sits above that target. */
-.row-open { min-width: 0; color: inherit; text-decoration: none; }.row-open::after { content: ''; position: absolute; inset: 0; }.row-open:focus-visible { outline: 0; }.desk-item:has(.row-open:focus-visible) { outline: 2px solid var(--teal); outline-offset: -2px; }
+.desk-item { min-width: 0; color: inherit; text-decoration: none; }.desk-item::after { content: ''; position: absolute; inset: 0; }.desk-item:focus-visible { outline: 0; }.desk-line:has(.desk-item:focus-visible) { outline: 2px solid var(--teal); outline-offset: -2px; }
 .row-project { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 6px; flex: none; max-width: 40%; color: var(--pc); font-size: 12px; font-weight: 650; text-decoration: none; white-space: nowrap; }.row-project span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }.row-project:hover { text-decoration: underline; text-underline-offset: 3px; }.row-project i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--pc); }.desk-status { padding: 0 20px; font-size: 12px; color: var(--ink-3); }footer { display: flex; border-top: 1px solid var(--line); padding: 12px 20px; }footer a { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 12px; color: var(--ink-2); text-decoration: none; }
-@media (max-width: 720px) { .card-head { padding: 14px; }.card-head .btn { min-height: 44px; }.group-title { padding-inline: 14px; }.desk-item { padding-inline: 14px; }footer { padding-inline: 14px; }footer a { min-height: 44px; } }
+@media (max-width: 720px) { .card-head { padding: 14px; }.card-head .btn { min-height: 44px; }.group-title { padding-inline: 14px; }.desk-line { padding-inline: 14px; }footer { padding-inline: 14px; }footer a { min-height: 44px; } }
 </style>

@@ -236,6 +236,9 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		}
 		prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:", "doctrine": "r:", "tier_request": "t:", "key_trim": "k:", "stepup": "s:"}[i.Kind]
 		i.Href = "/decision-desk?item=" + prefix + i.ID
+		if i.Kind == "account_matrix" {
+			i.Href = "/settings/accounts#account-use"
+		}
 		if i.Kind == "key_trim" || i.Kind == "stepup" {
 			i.Href = "/decision-desk?needs=" + prefix + i.ID
 		}

@@ -7,7 +7,7 @@ import { sha256FirstByte } from './avatar.ts'
 import type { StepupRequest } from './stepup'
 // P6 presentation model. Wire contracts live in decisionDeskApi.ts.
 export type DeskOutcome = 'once' | 'always' | 'requirement' | 'doctrine'
-export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' | 'tier' | 'key_trim' | 'stepup'
+export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' | 'tier' | 'key_trim' | 'stepup' | 'account_matrix'
 // Outside the server option-ID alphabet, so an agent option cannot collide.
 export const CUSTOM_ANSWER = '@custom'
 export interface DeskChoice { id: string; title: string; description: string; answer: string; field?: boolean; unavailable?: string }
@@ -26,11 +26,11 @@ export interface DeskItem {
   revision: number; createdAt: string; expiresAt?: string; held: boolean; decided: boolean
   answer?: string; optionId?: string; reason?: string; delivery?: string; fromRecord?: string
   outcomes?: DeskOutcomeAvailability[]; doctrine?: DeskDoctrineTarget; outcomeEffects?: DeskOutcomeEffect[]
-  unavailable?: string; prUrl?: string; source?: string; keyTrim?: KeyTrimProposal; approval?: Approval; rule?: DoctrineInboxItem; stepup?: StepupRequest
+  unavailable?: string; prUrl?: string; source?: string; linkOut?: string; keyTrim?: KeyTrimProposal; approval?: Approval; rule?: DoctrineInboxItem; stepup?: StepupRequest
 }
 export interface DeskDraft { optionId: string; answer: string; reason: string; outcome: DeskOutcome; dirty: boolean }
 export const outcomeLabels: Record<DeskOutcome, string> = { once: 'Once', always: 'Always', requirement: 'Requirement', doctrine: 'Doctrine' }
-export const kindLabels: Record<DeskKind, string> = { question: 'Question', handover: 'Handover question', approval: 'Approval', action: 'Action request', rule: 'Rule change', tier: 'Tier request', key_trim: 'Key trim approval', stepup: 'Step-up approval' }
+export const kindLabels: Record<DeskKind, string> = { question: 'Question', handover: 'Handover question', approval: 'Approval', action: 'Action request', rule: 'Rule change', tier: 'Tier request', key_trim: 'Key trim approval', stepup: 'Step-up approval', account_matrix: 'Account matrix' }
 export function draftFor(item: DeskItem): DeskDraft {
   const protectedChoice = item.kind === 'approval' || item.kind === 'tier' || item.kind === 'key_trim' || item.kind === 'stepup'
   return { optionId: item.optionId ?? (protectedChoice ? '' : item.recommended ?? item.choices[0]?.id ?? ''), answer: item.answer ?? '', reason: item.reason ?? '', outcome: item.outcome, dirty: false }
@@ -93,7 +93,7 @@ export function submitModifier(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' 
 }
 
 export interface DeskProjectionItem {
-  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup'; project_id?: string
+  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix'; project_id?: string
   revision: number; title: string; created_at: string; expires_at?: string; held: boolean; can_decide?: boolean; href: string; source: string
 }
 export interface DeskProjection {
@@ -102,8 +102,13 @@ export interface DeskProjection {
 }
 
 export function deskItemID(item: Pick<DeskProjectionItem, 'kind' | 'id'>): string {
-  const prefix = { question: 'q', approval: 'a', action_request: 'm', doctrine: 'r', tier_request: 't', key_trim: 'k', stepup: 's' }[item.kind]
+  const prefix = { question: 'q', approval: 'a', action_request: 'm', doctrine: 'r', tier_request: 't', key_trim: 'k', stepup: 's', account_matrix: 'u' }[item.kind]
   return `${prefix}:${item.id}`
+}
+// Link-out rows are decided on their own settings page, never in the memo.
+// Only a known in-app settings path is followed; anything else stays inert.
+export function deskLinkOut(item: Pick<DeskProjectionItem, 'kind' | 'href'>): string {
+  return item.kind === 'account_matrix' && typeof item.href === 'string' && /^\/settings\/[a-z0-9-]{1,40}(#[a-z0-9-]{1,40})?$/.test(item.href) ? item.href : ''
 }
 // Compatibility links are data, never a selector or a destination to execute.
 export function deskLinkItem(value: unknown): string {
