@@ -197,16 +197,16 @@ func TestSharedLedgerConflictReleasesOnlyIndependentlyObsoleteAttempt(t *testing
 			}
 			obsolete := run.ID == a.run.ID && run.WorkOrderID == a.run.WorkOrderID && run.AgentPrincipalID == a.run.AgentPrincipalID && run.Status != "" && (run.Status != "queued" || run.AccountID != "")
 			data, _, err := s.ledger.Snapshot()
-			got := s.journal.Snapshot()[0]
 			if err != nil {
 				t.Fatal(err)
 			}
+			records := s.journal.Snapshot()
 			if obsolete {
-				if len(data.Groups) != 0 || got.LedgerGroup != "" || len(got.RouteCandidates) != 0 || !noLocalProcess(got) || got.ClaimRoute != nil || got.State == "route_pending" {
-					t.Fatal("confirmed obsolete intent retained a slot or invented launch evidence", got, data)
+				if len(data.Groups) != 0 || len(records) != 0 || s.runs[a.run.ID] != nil {
+					t.Fatal("confirmed obsolete intent retained a slot or private evidence", records, data)
 				}
-			} else if len(data.Groups) != 1 || got.LedgerGroup == "" || got.State != "route_pending" || len(got.RouteCandidates) != 1 {
-				t.Fatal("unconfirmed or foreign read released evidence", got, data)
+			} else if len(data.Groups) != 1 || len(records) != 1 || records[0].LedgerGroup == "" || records[0].State != "route_pending" || len(records[0].RouteCandidates) != 1 {
+				t.Fatal("unconfirmed or foreign read released evidence", records, data)
 			}
 			s = restartSharedLedgerFixture(t, s, api)
 			if err := s.RefreshLedger(t.Context(), config); err != nil {
