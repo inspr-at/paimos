@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/delivery
+paths:
+  /projects/{projectId}/delivery/merge-backfill:
+    post:
+      operationId: backfillMergedTicketStatus
+      description: 'Preview up to 100 supplied PR numbers using the existing GitHub App. Requires delivery.manage and current nodes.write in this project. Default dry-run returns ticket revisions and gate refusals without changing tickets. Apply requires the same caller, request and persisted preview_event_id; stale previews return 409. The complete bounded open-PR inventory and worker/human/completion gates are rechecked. Delivered requires frozen published membership in release_id after the merge. Successful application and refusals are audit logged and replay safe; refusal creates an informational Needs You proposal. No GitHub write, key scope or release approval is granted.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [pull_requests]
+              properties:
+                pull_requests: {type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: {type: integer, format: int64, minimum: 1}}
+                apply: {type: boolean, default: false}
+                preview_event_id: {type: integer, format: int64, minimum: 1}
+                target: {type: string, enum: [done, delivered], default: done}
+                release_id: {type: string, format: uuid}
+      responses:
+        '200':
+          description: 'Preview or committed result, including per-ticket refusals.'
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [preview_event_id, applied, items, not_merged]
+                properties:
+                  preview_event_id: {type: integer, format: int64}
+                  applied: {type: boolean}
+                  not_merged: {type: array, maxItems: 100, items: {type: integer, format: int64}}
+                  items:
+                    type: array
+                    maxItems: 100
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [ticket_node_id, key, project_id, pull_request, merge_sha, head_sha, merged_at, revision, from, to, result]
+                      properties:
+                        ticket_node_id: {type: string, format: uuid}
+                        key: {type: string}
+                        project_id: {type: [string, 'null'], format: uuid}
+                        pull_request: {type: integer, format: int64}
+                        merge_sha: {type: string}
+                        head_sha: {type: string}
+                        merged_at: {type: string, format: date-time}
+                        revision: {type: string, format: date-time}
+                        from: {type: string}
+                        to: {type: string, enum: [done, delivered]}
+                        result: {type: string, enum: [ready, refused, already_complete, already_applied, applied]}
+                        reason: {type: string}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '500': {$ref: '#/components/responses/Error'}
+        '502': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+components:

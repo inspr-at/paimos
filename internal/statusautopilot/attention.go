@@ -284,6 +284,9 @@ func (m *Module) prepareAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 		item.Unavailable = "Parent statuses follow their children."
 	}
 	switch item.To {
+	case "merge_refused":
+		item.Applicable = false
+		item.Unavailable = "Fix the named gate on the ticket, then retry the merge observation."
 	case "triage_list":
 		item.To = "backlog"
 	case "cancel_suggested":

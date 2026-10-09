@@ -113,7 +113,8 @@
     "PUT /api/projects/{projectId}/delivery-shipping/settings": "delivery_ship.manage",
     "PUT /api/projects/{projectId}/delivery/metrics/source": "delivery.manage",
     "PUT /api/projects/{projectId}/routing-settings": "delivery.manage",
-    "PUT /api/settings/delivery": "delivery.manage"
+    "PUT /api/settings/delivery": "delivery.manage",
+    "POST /api/projects/{projectId}/delivery/merge-backfill": "delivery.manage"
   },
   "words": {
     "resources": {
