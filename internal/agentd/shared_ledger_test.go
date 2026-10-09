@@ -855,3 +855,55 @@ func TestSharedLedgerDamagedLedgerRestartWaitsForEveryMember(t *testing.T) {
 		})
 	}
 }
+
+// Risk: a released cached route survives a restart as a second, permanent
+// machine slot. Independent queued/unbound state invalidates only that route;
+// the new attempt keeps the explicit pin and retains the old claim provenance.
+func TestSharedLedgerCachedRouteReleaseAfterRestartReacquiresOneSlot(t *testing.T) {
+	s, a, _ := testSupervisor(t)
+	api, config := enableLedgerFixture(t, s, a)
+	gid, err := agentsetup.LedgerID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	subset, err := s.ledger.Acquire(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, gid, s.ledgerCandidates([]string{"account"}, s.ledgerBinding.Generation))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ledger.Claimed(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, gid, subset[0].Login); err != nil {
+		t.Fatal(err)
+	}
+	route, err := a.Route(t.Context(), a.run.ID, s.daemonID, []string{"account"}, s.estimates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: a.run.ID, WorkOrderID: a.run.WorkOrderID, Generation: s.generation, ExecutionMode: "managed", AccountID: route.AccountID, State: "claim_pending", LaunchState: launchPrepared, ClaimRoute: &route, LedgerGroup: gid, LedgerGeneration: s.ledgerBinding.Generation, RouteCandidates: subset}
+	if err = s.journal.Put(r); err != nil {
+		t.Fatal(err)
+	}
+	s.runs[r.RunID] = &owned{record: r}
+	s = restartSharedLedgerFixture(t, s, api)
+	if err = s.EnableLedger(t.Context(), config); err != nil {
+		t.Fatal(err)
+	}
+	a.run.AccountID = ""
+	a.run.RequestedAccountID = "account"
+	if err = s.reconcileUnlaunched(t.Context(), s.runs[r.RunID]); err != nil {
+		t.Fatal("confirmed release could not retire the cached hold", err)
+	}
+	got := s.journal.Snapshot()[0]
+	data, _, err := s.ledger.Snapshot()
+	if err != nil || !got.RouteReleased || got.LedgerGroup != "" || got.Generation != r.Generation || len(data.Groups) != 0 || s.hasUnresolvedOldClaim("account") {
+		t.Fatal("confirmed release retained a slot or changed claim evidence", got, data, err)
+	}
+	s.probedAccounts["account"] = true
+	api.routeErr = errors.New("fixture new route response lost")
+	if err = s.StartRun(t.Context(), a.run); !errors.Is(err, api.routeErr) {
+		t.Fatal("fresh pinned attempt could not reacquire", err)
+	}
+	got = s.journal.Snapshot()[0]
+	data, _, err = s.ledger.Snapshot()
+	if err != nil || got.LedgerGroup == gid || got.LedgerGroup == "" || got.LaunchState != launchRoutePending || len(data.Groups) != 1 || api.routeCalls != 1 || !slices.Equal(api.offered[0], []string{"account"}) {
+		t.Fatal("cached-route retry lost its pin or occupied two slots", got, data, err)
+	}
+}

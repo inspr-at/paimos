@@ -1788,6 +1788,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSettlementReadTimeoutDoesNotAbortLivePoll","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerCachedRouteReleaseAfterRestartReacquiresOneSlot","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerCrashBeforeIntentAndUnreachableRecovery","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSharedLedgerDamagedLedgerRestartWaitsForEveryMember","tier":"ESSENTIAL"}

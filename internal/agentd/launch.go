@@ -123,12 +123,19 @@ func (s *Supervisor) reconcileUnlaunched(ctx context.Context, entry *owned) erro
 	if run.ID != record.RunID || run.WorkOrderID != record.WorkOrderID || run.AgentPrincipalID != record.PrincipalID {
 		return ErrScope
 	}
-	if run.Status == "queued" && run.AccountID == "" && record.ExecutionMode == "managed" && record.Generation == s.generation {
+	if run.Status == "queued" && run.AccountID == "" && record.ExecutionMode == "managed" && (record.Generation == s.generation || s.ledger != nil) {
 		// A server-observed release invalidates the route, never launch evidence.
 		// Keep the prior binding until a new validated route is durably stored.
 		entry.mu.Lock()
 		defer entry.mu.Unlock()
 		next := entry.record
+		if s.ledger != nil {
+			if err := s.releaseLedger(next); err != nil {
+				return err
+			}
+			next.LedgerGroup, next.LedgerGeneration = "", ""
+			next.RouteCandidates = nil
+		}
 		next.RouteReleased = true
 		if err := s.journal.Put(next); err != nil {
 			return err
@@ -195,7 +202,7 @@ func (s *Supervisor) hasUnresolvedOldClaim(account string) bool {
 		// Exit proves process ownership, not server settlement. Preserve the
 		// claim's authority until its outbox and disputed usage are reconciled.
 		pending := r.AccountID == account && r.Generation != s.generation &&
-			(len(r.Pending) > 0 || r.SettlementGap || r.LaunchState == launchPrepared && r.State == "claim_pending")
+			(len(r.Pending) > 0 || r.SettlementGap || r.LaunchState == launchPrepared && r.State == "claim_pending" && (!r.RouteReleased || s.ledger == nil))
 		entry.mu.Unlock()
 		if pending {
 			return true
