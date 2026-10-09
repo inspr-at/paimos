@@ -589,8 +589,14 @@ func backfillAccountModelSuccessors(ctx context.Context, tx pgx.Tx) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	// Production migrates with a plain context (no principal, no service
+	// visibility). The audit insert and its retry check touch workspace events
+	// (node_id NULL), which the events SELECT policy shows only to system code,
+	// so the backfill runs as system code over workspace rows (release 127
+	// incident: RLS 42501 on csb1, AEON P0).
+	sys := NoProjects(ctx, "migration 1296: account successor audit")
 	for _, id := range ids {
-		if err := enterTenant(ctx, tx, id); err != nil {
+		if err := enterTenant(sys, tx, id); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `SELECT aeon_backfill_account_model_successors()`); err != nil {
