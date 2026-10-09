@@ -38,6 +38,27 @@ the read fails (no old numbers stay on screen), and a plain sentence when no rep
 is linked yet or the linked repository has no data. Words follow the person's profile
 language (English or German).
 
+**Numbers · Simple** is the default level and reads the same answer. A summary card
+says how many of the numbers with an Arion target are on target, names the closest one
+and the biggest gap, counts the changes against the window before (better, worse,
+steady, without a comparison) and says how to read the small charts. Below it the ten
+numbers sit in three plain sections along the path: making a change ready (PR checks,
+green on the first try, time until green, review), getting it merged (PR opened to
+merged, one merge-queue run, queue tries per change, conflicts solved by script) and
+shipping it (release to live, the full test run each night).
+
+Each Simple tile has a plain name, the value in its own unit with "lower/higher is
+better", a verdict against the target as shape and word (on target up to 1×, close up
+to 1.5×, far off beyond; "no data yet" or "not loaded" instead of a verdict when there
+is nothing to judge), a small chart with the target zone shaded green, an arrow marked
+"better" and hatched days no source covers, the change against the window before, one
+sentence with this window's numbers and Arion's wish, and the source or "Partial" with
+its coverage. Merge rounds count the scripted share (target 80 %, the server's "≤ 20 %
+by a model" turned around). **Learn** keeps the proper terms (p50, p90, wall time,
+flake) and the Expert name: hover or keyboard focus shows it, a click or Enter pins it,
+Esc closes it and leaves focus on the button. Below the sections the technical words
+are explained simply.
+
 **Flow** (A Lanes) shows who worked and who waited, one lane per actor (you, LEAD,
 OPS, Reviewer, Builder, Checks). A wait sits in the lane of whoever is awaited, repeats
 are rose, an incident is its own red band, and dotted connectors mark hand-overs. Rows
@@ -95,6 +116,3 @@ second, took, usual, target, outcome, round, waits for, source) or the incident.
 avatar, the PAIMOS Orbit agent cube carrying the run's parcel, stands at the playhead on
 the main run's current step, with a clock badge while waiting and a red one during an
 incident.
-
-Simple Numbers (summary, plain sections and small charts) follows in a later package
-of AEON-994; until then Simple shows the Expert numbers.
