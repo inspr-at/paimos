@@ -292,6 +292,51 @@ func TestAccountUseCreationRulesAndDatabaseFences(t *testing.T) {
 			return nil
 		})
 	})
+	t.Run("creation stays scoped with privileged multi-tenant fixtures", func(t *testing.T) {
+		f := setup(t)
+		f.rules(t, accountuse.RuleValues{"allow", "allow", "default", "allow"})
+		var other string
+		if err := f.d.App.QueryRow(t.Context(), `WITH policy AS MATERIALIZED (SELECT set_config('aeon.test_account_use_defaults','production',true)) INSERT INTO tenants(slug,name) SELECT 'other','Other' FROM policy RETURNING id::text`).Scan(&other); err != nil {
+			t.Fatal(err)
+		}
+		tx, err := f.d.Admin.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(context.Background())
+		sharedID := "11111111-1111-4111-8111-111111111111"
+		for _, tid := range []string{f.p.TenantID, other} {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title) SELECT $1,$2,id,'PRJ-1','Project' FROM node_kinds WHERE tenant_id=$1 AND slug='project'`, tid, sharedID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label) SELECT $1,$2,'shared','codex','fixture',id,'Fixture' FROM principals WHERE tenant_id=$1 AND kind='agent' AND name='System' AND roles @> '{system}'`, tid, sharedID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := tx.Commit(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		var projects, allowed int
+		if err := f.d.Admin.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM project_work_contexts WHERE project_id=$1),(SELECT count(*) FROM account_use_cells WHERE account_id=$1)`, sharedID).Scan(&projects, &allowed); err != nil {
+			t.Fatal(err)
+		}
+		if projects != 2 || allowed != 1 {
+			t.Fatal("creation crossed tenant boundaries")
+		}
+		for i, tid := range []string{f.p.TenantID, other} {
+			want := "allow"
+			if i == 1 {
+				want = "ask"
+			}
+			var rule string
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT after->>'rule' FROM events WHERE tenant_id=$1 AND type='account_use.changed' AND after->>'account_id'=$2`, tid, sharedID).Scan(&rule); err != nil {
+				t.Fatal(err)
+			}
+			if rule != want {
+				t.Fatal("deferred creation audit borrowed another tenant's rule")
+			}
+		}
+	})
 }
 
 // Risk: bulk/Undo races silently overwrite another decision, or defaults

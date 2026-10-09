@@ -261,7 +261,7 @@ BEGIN
         SELECT NEW.tenant_id,NEW.id,c.id,'rule',NEW.registered_by_principal_id
         FROM work_contexts c CROSS JOIN account_use_rules r
         WHERE c.tenant_id=NEW.tenant_id AND r.tenant_id=NEW.tenant_id AND c.kind<>'holding' AND c.archived_at IS NULL AND c.new_accounts_override IS NULL AND r.new_accounts='allow';
-    PERFORM set_config('aeon.account_use_account_'||replace(NEW.id::text,'-',''),
+    PERFORM set_config('aeon.account_use_account_'||replace(NEW.tenant_id::text,'-','')||'_'||replace(NEW.id::text,'-',''),
         (SELECT jsonb_build_object('account_id',NEW.id,'rule',new_accounts,'rule_revision',revision)::text FROM account_use_rules WHERE tenant_id=NEW.tenant_id),true);
     RETURN NEW;
 END $$;
@@ -272,7 +272,7 @@ CREATE FUNCTION aeon_account_use_account_audit() RETURNS trigger LANGUAGE plpgsq
 BEGIN
     INSERT INTO events(tenant_id,actor_principal_id,type,after)
         VALUES(NEW.tenant_id,NEW.registered_by_principal_id,'account_use.changed',
-               current_setting('aeon.account_use_account_'||replace(NEW.id::text,'-',''))::jsonb);
+               current_setting('aeon.account_use_account_'||replace(NEW.tenant_id::text,'-','')||'_'||replace(NEW.id::text,'-',''))::jsonb);
     RETURN NULL;
 END $$;
 -- Audit at transaction end: legacy writers may still lock additional rows.
@@ -285,7 +285,7 @@ BEGIN
         INSERT INTO project_work_contexts(tenant_id,project_id,context_id)
             SELECT NEW.tenant_id,NEW.id,c.id FROM work_contexts c CROSS JOIN account_use_rules r
             WHERE c.tenant_id=NEW.tenant_id AND r.tenant_id=NEW.tenant_id AND c.kind=r.new_projects;
-        PERFORM set_config('aeon.account_use_project_'||replace(NEW.id::text,'-',''),
+        PERFORM set_config('aeon.account_use_project_'||replace(NEW.tenant_id::text,'-','')||'_'||replace(NEW.id::text,'-',''),
             (SELECT jsonb_build_object('project_id',NEW.id,'context_id',m.context_id,'rule',r.new_projects,'rule_revision',r.revision)::text
              FROM project_work_contexts m CROSS JOIN account_use_rules r WHERE m.tenant_id=NEW.tenant_id AND r.tenant_id=NEW.tenant_id AND m.project_id=NEW.id),true);
     END IF;
@@ -301,12 +301,13 @@ BEGIN
         SELECT id INTO STRICT actor FROM principals WHERE tenant_id=NEW.tenant_id AND kind='agent' AND name='System' AND roles @> ARRAY['system']::text[];
         INSERT INTO events(tenant_id,actor_principal_id,type,node_id,after)
             VALUES(NEW.tenant_id,actor,'work_context.project_set',NEW.id,
-                current_setting('aeon.account_use_project_'||replace(NEW.id::text,'-',''))::jsonb);
+                current_setting('aeon.account_use_project_'||replace(NEW.tenant_id::text,'-','')||'_'||replace(NEW.id::text,'-',''))::jsonb);
     END IF;
     RETURN NULL;
 END $$;
 CREATE CONSTRAINT TRIGGER nodes_use_audit AFTER INSERT ON nodes
-    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION aeon_account_use_project_audit();
+    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.project_id=NEW.id)
+    EXECUTE FUNCTION aeon_account_use_project_audit();
 
 CREATE FUNCTION aeon_account_use_refresh_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE mirror boolean;
