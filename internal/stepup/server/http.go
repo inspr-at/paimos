@@ -47,6 +47,9 @@ func respond(w http.ResponseWriter, status int, value any, err error) {
 	httpapi.WriteJSON(w, status, value)
 }
 func decode(w http.ResponseWriter, r *http.Request, out any) error {
+	if err := httpapi.BufferRequestBody(w, r, 96<<10); err != nil {
+		return fault(400, "invalid or incomplete request")
+	}
 	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 96<<10))
 	d.DisallowUnknownFields()
 	if d.Decode(out) != nil || d.Decode(new(any)) != io.EOF {
