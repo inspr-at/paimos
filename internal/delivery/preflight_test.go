@@ -51,6 +51,7 @@ func TestPreflightAdmissionMissingRedStaleAndLookupFailure(t *testing.T) {
 		{"missing declared runner", "preflight_invalid", func(r *preflightResult) { r.Local.Runner = "" }},
 		{"oversized declared runner", "preflight_invalid", func(r *preflightResult) { r.Local.Runner = strings.Repeat("r", 129) }},
 		{"malformed declared runner", "preflight_invalid", func(r *preflightResult) { r.Local.Runner = "build mac" }},
+		{"newline declared runner", "preflight_invalid", func(r *preflightResult) { r.Local.Runner = "build-mac\n" }},
 		{"local red", "preflight_local_red", func(r *preflightResult) {
 			r.Local.Checks[0].Status = "failed"
 			r.Local.Status = "failed"

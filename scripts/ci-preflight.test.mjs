@@ -42,7 +42,7 @@ test('preflight binds each command to the SHA and never turns failure, skip or t
     assert.equal(receipt.runner_class, runner);
     assert.equal(validLocal(receipt, sha), true);
   }
-  for (const expectedRunner of ['', 'build mac', 'r'.repeat(129)]) {
+  for (const expectedRunner of ['', 'build mac', 'build-mac\n', 'r'.repeat(129)]) {
     await assert.rejects(preflight({ ...options, expectedRunner }, dependencies), /requires_configured_runner/);
     assert.equal(validLocal({ ...greenLocal(), runner_class: expectedRunner }, sha), false);
   }

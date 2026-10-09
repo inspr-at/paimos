@@ -6,7 +6,8 @@ export const localChecks = ['static', 'go-strict', 'go-packages', 'web-unit', 'w
 // that planner is available, preflight always uses CI's full 12-shard layout.
 export const browserGroups = Array.from({ length: 12 }, (_, i) => `browser-${i + 1}`);
 export const shaPattern = /^[a-f0-9]{40}$/;
-export const runnerLabelPattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+// JS's bare $ also accepts a final newline; require the absolute string end.
+export const runnerLabelPattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$(?![\s\S])/;
 export const maxResultBytes = 32 * 1024;
 export function readResult(path) {
   if (statSync(path).size > maxResultBytes) throw new Error('preflight_result_oversized');
