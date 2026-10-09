@@ -102,4 +102,11 @@ func TestDailyHarnessSummaryAndUnknownUsage(t *testing.T) {
 	if out.State != "no_limit" {
 		t.Fatal("payg daily cap invented")
 	}
+	missing := DailyAccount{UsedPct: Number(42), FloorPct: Number(20)}
+	if err := ApplyDaily(&missing, DefaultDaily(), 10, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if missing.LeftPct == nil || *missing.LeftPct != 58 || missing.LimitUsedPct != nil {
+		t.Fatal("missing daily baseline lost known left percentage or invented headroom")
+	}
 }

@@ -164,7 +164,14 @@ func ApplyDaily(a *DailyAccount, d DailySettings, defaultPoints int, now time.Ti
 	if defaultPoints < 1 || defaultPoints > 50 {
 		return errors.New("invalid daily default")
 	}
-	if a.UsedPct == nil || a.StartOfDayUsedPct == nil || a.FloorPct == nil {
+	if a.UsedPct == nil {
+		return nil
+	}
+	if !percent(*a.UsedPct) {
+		return errors.New("invalid daily usage")
+	}
+	a.LeftPct = Number(100 - *a.UsedPct)
+	if a.StartOfDayUsedPct == nil || a.FloorPct == nil {
 		return nil
 	}
 	if !percent(*a.UsedPct) || !percent(*a.StartOfDayUsedPct) || !percent(*a.FloorPct) || *a.UsedPct < *a.StartOfDayUsedPct {
@@ -183,7 +190,6 @@ func ApplyDaily(a *DailyAccount, d DailySettings, defaultPoints int, now time.Ti
 		limit = b.LimitUsedPct
 	}
 	a.LimitUsedPct = Number(min(100-*a.FloorPct, limit))
-	a.LeftPct = Number(100 - *a.UsedPct)
 	a.TodayPointsAllowed = Number(max(0, *a.LimitUsedPct-base))
 	a.OverPacePoints = Number(0)
 	if d.Pace.Mode == "pace" {

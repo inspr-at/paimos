@@ -76,7 +76,7 @@ func TestAgentsDailyWritesRevisionLegacyPreservationAndFailClosed(t *testing.T) 
 	if !agentplan.SameDaily(state.Daily["codex"], dsettings) || state.PrincipalID != owner.ID {
 		t.Fatal("canonical daily save lost")
 	}
-	save(owner, agentplan.Plan{Total: 0, Daily: map[string]agentplan.DailySettings{}}, nil, 409)
+	save(owner, agentplan.Plan{Total: 0, Limits: map[string]agentplan.Limit{}, Daily: map[string]agentplan.DailySettings{}}, nil, 409)
 	if !agentplan.SameDaily(read().Daily["codex"], dsettings) {
 		t.Fatal("stale save changed daily")
 	}
@@ -87,7 +87,7 @@ func TestAgentsDailyWritesRevisionLegacyPreservationAndFailClosed(t *testing.T) 
 	}
 	bad := dsettings
 	bad.BoostToday = &agentplan.DailyBoost{LimitUsedPct: 60, EnteredAs: "used", Until: end.Add(time.Hour)}
-	save(owner, agentplan.Plan{Total: 6, Daily: map[string]agentplan.DailySettings{"codex": bad}}, latest.UpdatedAt, 400)
+	save(owner, agentplan.Plan{Total: 6, Limits: map[string]agentplan.Limit{}, Daily: map[string]agentplan.DailySettings{"codex": bad}}, latest.UpdatedAt, 400)
 	if !read().UpdatedAt.Equal(*latest.UpdatedAt) {
 		t.Fatal("invalid expiry advanced revision")
 	}
@@ -96,6 +96,17 @@ func TestAgentsDailyWritesRevisionLegacyPreservationAndFailClosed(t *testing.T) 
 	agent.KeyCreatorID = owner.ID
 	agent.Scopes = []string{agentplan.ReadScope}
 	save(agent, plan, latest.UpdatedAt, 403)
+	limited := tenant.Principal{TenantID: tid, Kind: tenant.Person}
+	must(d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Only plan writer') RETURNING id::text`, tid).Scan(&limited.ID))
+	var role string
+	must(d.Admin.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'daily_plan_only','Only plan') RETURNING id::text`, tid).Scan(&role))
+	_, err = d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'views.write'),($1,$2,'agents.plan.read')`, tid, role)
+	must(err)
+	_, err = d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, tid, limited.ID, role)
+	must(err)
+	save(limited, plan, nil, 403)
+	withoutBoost := agentplan.DefaultDaily()
+	save(limited, agentplan.Plan{Total: 5, Limits: map[string]agentplan.Limit{}, Daily: map[string]agentplan.DailySettings{"codex": withoutBoost}}, nil, 200)
 	// Malformed persisted daily fails closed, rather than applying defaults.
 	_, err = d.Admin.Exec(ctx, `UPDATE user_preferences SET value='{"total":5,"daily":{"codex":{"pace":{"mode":"pace","points_per_day":0},"boost_today":null,"at_limit":"ladder"}}}' WHERE tenant_id=$1 AND principal_id=$2 AND key='agents.working'`, tid, owner.ID)
 	must(err)

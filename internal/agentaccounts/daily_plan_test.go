@@ -4,10 +4,12 @@ package agentaccounts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentplan"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -44,11 +46,11 @@ func TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy(t *testing.T) {
 		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", encoded(t, map[string]any{"account_key": spec.key, "harness": spec.harness, "daemon_id": "daily-daemon", "label": spec.key, "max_parallel_runs": 2}), 201, &a)
 		ownFixtureAccount(t, owner, &a)
 		err := db.InTenant(dbtest.Seed(ctx), appPool, owner.TenantID, func(tx pgx.Tx) error {
-			if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET linked_at=$2,last_probe_at=$3,last_probe_ok=true,usage_floor_percent=20,billing_mode=CASE WHEN harness='cursor' THEN 'api' ELSE billing_mode END WHERE id=$1`, a.ID, start.Add(-time.Hour), now); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET linked_at=$2,last_probe_at=$3,last_probe_ok=true,last_daemon_generation='daily-generation',usage_floor_percent=20,billing_mode=CASE WHEN harness='cursor' THEN 'api' ELSE billing_mode END WHERE id=$1`, a.ID, start.Add(-time.Hour), now); err != nil {
 				return err
 			}
 			if spec.key == "private" {
-				_, err := tx.Exec(ctx, `UPDATE agent_accounts SET quota_pool_fingerprint='shared-private' WHERE id=$1`, a.ID)
+				_, err := tx.Exec(ctx, `UPDATE agent_accounts SET quota_pool_fingerprint=repeat('f',64) WHERE id=$1`, a.ID)
 				return err
 			}
 			if spec.key == "cursor" {
@@ -60,9 +62,9 @@ func TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy(t *testing.T) {
 				}
 			}
 			readings := []capacity.Reading{
-				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: spec.baseline - 1, ResetsAt: end.Add(6 * 24 * time.Hour), ReadAt: start.Add(-time.Minute), Source: "harness"},
-				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: spec.baseline, ResetsAt: end.Add(6 * 24 * time.Hour), ReadAt: start.Add(time.Minute), Source: "harness"},
-				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: spec.used, ResetsAt: end.Add(6 * 24 * time.Hour), ReadAt: now, Source: "harness"},
+				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: spec.baseline - 1, ResetsAt: end.Add(5 * 24 * time.Hour), ReadAt: start.Add(-time.Minute), Source: "harness"},
+				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: spec.baseline, ResetsAt: end.Add(5 * 24 * time.Hour), ReadAt: start.Add(time.Minute), Source: "harness"},
+				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: spec.used, ResetsAt: end.Add(5 * 24 * time.Hour), ReadAt: now, Source: "harness"},
 				{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 99, ResetsAt: now.Add(time.Hour), ReadAt: now, Source: "harness"},
 			}
 			return ingestReadings(ctx, tx, runner, a.ID, readings)
@@ -76,7 +78,7 @@ func TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy(t *testing.T) {
 	var peer Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"peer","harness":"codex","daemon_id":"daily-daemon","label":"Peer"}`, 201, &peer)
 	ownFixtureAccount(t, other, &peer)
-	if _, err := adminPool.Exec(ctx, `UPDATE agent_accounts SET quota_pool_fingerprint='shared-private' WHERE id=$1`, peer.ID); err != nil {
+	if _, err := adminPool.Exec(ctx, `UPDATE agent_accounts SET quota_pool_fingerprint=repeat('f',64) WHERE id=$1`, peer.ID); err != nil {
 		t.Fatal(err)
 	}
 	read := func(p tenant.Principal, at time.Time) agentplan.Snapshot {
@@ -117,6 +119,16 @@ func TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy(t *testing.T) {
 	}
 	if out.DailyState["cursor"].State != "no_limit" {
 		t.Fatal("payg acquired daily limit")
+	}
+	// Boost ownership is rechecked in the write transaction and cannot expose
+	// or change a private peer's shared allowance through an owned door.
+	boost := agentplan.DefaultDaily()
+	boost.BoostToday = &agentplan.DailyBoost{LimitUsedPct: 80, EnteredAs: "used", Until: end}
+	err = db.InTenant(dbtest.Seed(ctx), appPool, owner.TenantID, func(tx pgx.Tx) error {
+		return ValidateDailyWriteTx(ctx, tx, owner, owner.ID, agentplan.Plan{Daily: map[string]agentplan.DailySettings{"codex": boost}}, agentplan.Default(), now)
+	})
+	if !errors.Is(err, authz.ErrForbidden) {
+		t.Fatalf("private-quota boost rejection: %v", err)
 	}
 	// A key creator reads exactly its owner's daily facts, never the daemon's.
 	reader := owner
