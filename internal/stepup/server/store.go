@@ -168,12 +168,16 @@ func (m *Module) Create(ctx context.Context, p tenant.Principal, in Create) (App
 			return err
 		}
 		if in.SessionID != "" {
-			var owned bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE tenant_id=$1 AND id=$2 AND agent_principal_id=$3 AND project_id IS NOT DISTINCT FROM $4::uuid)`, p.TenantID, in.SessionID, p.ID, nullable(project)).Scan(&owned); err != nil {
+			var sessionProject string
+			err := tx.QueryRow(ctx, `SELECT project_id::text FROM harness_sessions WHERE tenant_id=$1 AND id=$2 AND agent_principal_id=$3`, p.TenantID, in.SessionID, p.ID).Scan(&sessionProject)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fault(403, "session does not belong to this request")
+			}
+			if err != nil {
 				return err
 			}
-			if !owned {
-				return fault(403, "session does not belong to this request")
+			if err := authz.RequireTx(ctx, tx, p, "nodes.read", authz.Scope{ProjectID: sessionProject}); err != nil {
+				return err
 			}
 		}
 		before, after, err := target.Snapshot(ctx, tx, p, payload)

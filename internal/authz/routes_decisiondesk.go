@@ -5,6 +5,6 @@ package authz
 // Route and scope declarations for decisiondesk.
 func init() {
 	registerRoutes("decisiondesk", map[string]string{
-		"GET /api/decision-desk/projection": "profile.read",
+		"GET /api/decision-desk/projection": "profile.read|settings.manage",
 	})
 }

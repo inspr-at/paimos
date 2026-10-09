@@ -188,6 +188,19 @@ func TestStepupOwnershipBoundsAndCurrentAuthority(t *testing.T) {
 	requireStatus(t, err, 400)
 	_, err = f.m.Create(t.Context(), f.agent, Create{Payload: json.RawMessage(`{"kind":"feature","padding":"` + strings.Repeat("x", payloadLimit) + `"}`), BeforeHash: r.BeforeHash})
 	requireStatus(t, err, 400)
+	var project, session string
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Session project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.agent.TenantID).Scan(&project); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest) VALUES($1,$2,$3,'codex','fixture','unmanaged','worker',decode(repeat('00',32),'hex'),decode(repeat('00',32),'hex')) RETURNING id::text`, f.agent.TenantID, project, f.agent.ID).Scan(&session); err != nil {
+		t.Fatal(err)
+	}
+	linked, err := f.m.Create(t.Context(), f.agent, Create{Payload: r.Payload, BeforeHash: r.BeforeHash, SessionID: session})
+	if err != nil || linked.SessionID == nil || *linked.SessionID != session || linked.ProjectID != nil {
+		t.Fatalf("workspace request lost its own project session: %v", err)
+	}
+	_, err = f.m.Create(t.Context(), f.otherAgent, Create{Payload: r.Payload, BeforeHash: r.BeforeHash, SessionID: session})
+	requireStatus(t, err, 403)
 	wrong := input(r)
 	wrong.Digest = strings.Repeat("0", 64)
 	_, err = f.m.Decide(t.Context(), f.person, r.ID, wrong, "decline", nil)

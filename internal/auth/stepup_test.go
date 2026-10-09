@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/decisiondesk"
 	"github.com/inspr-at/paimos/internal/phoneapprovals"
 	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -27,6 +28,7 @@ func TestStepupOIDCFallbackUsesExistingIdentityAndFreshVerifiedAuthTime(t *testi
 			mod := newMod(t, Config{Env: envDev, OIDCIssuer: issuer.issuer, OIDCClientID: "aeon-public", BootstrapTenantSlug: "inspr", BootstrapAdminEmail: "admin@example.com"})
 			mux := http.NewServeMux()
 			mod.Mount(mux)
+			decisiondesk.New(appPool).Mount(mux)
 			native := stepup.New(appPool, phoneapprovals.New(appPool, nil, "http://localhost", nil, nil), "")
 			native.Reauthenticate = mod.BeginStepUp
 			mod.StepUp = native
@@ -71,6 +73,10 @@ func TestStepupOIDCFallbackUsesExistingIdentityAndFreshVerifiedAuthTime(t *testi
 			}
 			if _, err := adminPool.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE tenant_id=$1 AND principal_id IN (SELECT p.id FROM principals p JOIN identities i ON i.id=p.identity_id WHERE p.tenant_id=$1 AND i.subject='owner-subject') AND scope_type='workspace'`, tid, roleID); err != nil {
 				t.Fatal(err)
+			}
+			status, deskBody, _ := do(t, c, "GET", app.URL+"/api/decision-desk/projection", "", nil)
+			if status != 200 || !strings.Contains(string(deskBody), request.ID) {
+				t.Fatalf("target-only role cannot reach its desk request: %d", status)
 			}
 			// Mount a native module at this test origin; no configuration credential
 			// changes or additional OIDC client are needed.
