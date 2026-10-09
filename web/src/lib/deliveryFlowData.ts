@@ -18,12 +18,16 @@ export interface ApiStep {
   side: boolean; source: 'github_app' | 'paimos' | 'ops_rollout'; norm: { p50_min: number | null; p90_min: number | null; arion_min: number | null }
 }
 export interface ApiIncident { id: string; item_id: string; started_at: string; ended_at: string | null; severity: 'degraded' | 'down'; summary: string; recovery_step_ids: string[] }
+export type RollbackClass = 'digest_safe' | 'restore_required'
 export interface ApiItem {
   id: string; kind: 'release' | 'change'; ref: string; title: string; prs: number[]; started_at: string | null; ended_at: string | null
   pct_done: number; current_step_id: string | null
   eta: { p50_at: string | null; p90_at: string | null; basis: 'history' | 'ops' | 'none'; reason: string | null }
   target: { minutes: number; from_step: string; source: string } | null
   next_human_gate: { principal_id: string | null; what: string } | null
+  /** The release record (AEON-1022): null until a rollout record reports it. A server older than this field omits both. */
+  qualification_evidence?: string | null
+  rollback_class?: RollbackClass | null
 }
 export interface ApiFlow { project_id: string; now: string; at: string; from: string; to: string; items: ApiItem[]; steps: ApiStep[]; incidents: ApiIncident[]; truncated: boolean }
 export interface ApiRun { project_id: string; now: string; at: string; item: ApiItem; steps: ApiStep[]; incidents: ApiIncident[]; truncated: boolean }
@@ -72,7 +76,7 @@ export function laneOf(actor: ApiActor, key: string): Lane {
   if (/review|gate/.test(label)) return 'review'
   if (/build/.test(label)) return 'build'
   if (/check|\bci\b|queue/.test(label)) return 'ci'
-  const byKey: Record<string, Lane> = { build: 'build', merge_round: 'build', review: 'review', copy_gate: 'review', pin_gate: 'review', h: 'review', ci: 'ci', queue: 'ci', a: 'ci', c: 'ci', f: 'ci', i: 'ci', hold: 'lead' }
+  const byKey: Record<string, Lane> = { build: 'build', merge_round: 'build', review: 'review', copy_gate: 'review', pin_gate: 'review', h: 'review', ci: 'ci', queue: 'ci', a: 'ci', c: 'ci', f: 'ci', i: 'ci', rehearsal: 'ci', catalogue: 'ci', hold: 'lead' }
   return byKey[key] ?? 'ops'
 }
 /** The short tag on bars and the avatar: a release label, or a ticket number. */
@@ -137,7 +141,7 @@ export function recordedRuns(answer: { now: string; items: ApiItem[]; steps: Api
       facts: {
         kind: item.kind, ref: item.ref, started: item.started_at ? at(item.started_at) : null, ended, pct: item.pct_done, currentStepId: item.current_step_id,
         eta: { p50: item.eta.p50_at ? at(item.eta.p50_at) : null, p90: item.eta.p90_at ? at(item.eta.p90_at) : null, basis: item.eta.basis, reason: item.eta.reason },
-        gate,
+        gate, record: { evidence: item.qualification_evidence ?? null, rollback: item.rollback_class ?? null },
       },
     })
   }
@@ -177,12 +181,18 @@ export function replayData(run: FlowRun, origin: number, now: number | null): Fl
 }
 
 // ---------- Compare: a release against the Arion target, aligned at step a ----------
-/** The release path a to l as Arion defines it (arion.md § 4), in minutes: 24 in all. */
+/**
+ * The release path a to l as Project Arion v5 § 4b plans it today ("v5 now"), in minutes: 60.6 in all,
+ * without the wait for a person (W). The rehearsal and the catalogue run inside segment a (the merge-group
+ * run is the longest of the suite, the rehearsal and the catalogue), so they are not segments of their own.
+ * § 4b gives h and i as one segment of 6 (model review, pin CI, merge); i is the measured pin-CI p50 of
+ * 1.1 (§ 1b), h the rest. When the catalogue is the pole, a release's own step a runs past 15.4.
+ */
 export const ARION_PATH: readonly (readonly [key: string, minutes: number, lane: Lane, en: string, de: string])[] = [
-  ['a', 3, 'ci', 'Through the queue', 'Durch die Queue'], ['b', 0.5, 'ops', 'Version tagged', 'Version getaggt'], ['c', 6, 'ci', 'Release built', 'Release gebaut'],
-  ['d', 0.5, 'ops', 'Draft inspected', 'Entwurf geprüft'], ['e', 2, 'ops', 'Agent app tested', 'Agent-App getestet'], ['f', 1, 'ci', 'Published', 'Veröffentlicht'],
-  ['g', 0.5, 'ops', 'Server update prepared', 'Server-Update vorbereitet'], ['h', 1, 'review', 'Reviewed by rule', 'Per Regel geprüft'], ['i', 3, 'ci', 'Config checked', 'Konfiguration geprüft'],
-  ['j', 0.5, 'ops', 'Database backed up', 'Datenbank gesichert'], ['k', 3, 'ops', 'Server switched', 'Server umgestellt'], ['l', 3, 'ops', 'Checked live', 'Live geprüft'],
+  ['a', 15.4, 'ci', 'Through the queue', 'Durch die Queue'], ['b', 0.5, 'ops', 'Version tagged', 'Version getaggt'], ['c', 12.2, 'ci', 'Release built', 'Release gebaut'],
+  ['d', 0.5, 'ops', 'Draft inspected', 'Entwurf geprüft'], ['e', 10, 'ops', 'Agent app tested', 'Agent-App getestet'], ['f', 1.5, 'ci', 'Published', 'Veröffentlicht'],
+  ['g', 0.5, 'ops', 'Server update prepared', 'Server-Update vorbereitet'], ['h', 4.9, 'review', 'Server update reviewed', 'Server-Update geprüft'], ['i', 1.1, 'ci', 'Server config checked and merged', 'Server-Konfiguration geprüft und gemergt'],
+  ['j', 3, 'ops', 'Database backed up', 'Datenbank gesichert'], ['k', 6, 'ops', 'Server switched', 'Server umgestellt'], ['l', 5, 'ops', 'Checked live', 'Live geprüft'],
 ]
 export const ARION_MINUTES = ARION_PATH.reduce((sum, step) => sum + step[1], 0)
 /** The target run on a relative axis; scaled when the release names another target length. */

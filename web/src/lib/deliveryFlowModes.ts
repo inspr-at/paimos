@@ -250,6 +250,66 @@ export function wentOf(run: FlowRun, ctx: Omit<Ctx, 'data'>): Went {
   return { key: run.id, title: pick(run.title, lang), note, parts, items }
 }
 
+// ---------- The release record (AEON-1022) ----------
+/** The ticket a qualification evidence reference starts with (AEON-487/comment/…), when it names one. */
+export const evidenceTicket = (evidence: string): { key: string; rest: string } | null => {
+  const m = /^([A-Za-z][A-Za-z0-9]*-\d+)(\/.*)?$/.exec(evidence)
+  return m ? { key: m[1]!, rest: m[2] ?? '' } : null
+}
+export interface RecordRow {
+  key: 'catalogue' | 'rehearsal' | 'evidence' | 'rollback'; term: string; value: string
+  /** Nothing was reported: the row says so instead of leaving a gap or a default. */
+  missing: boolean
+  /** The evidence reference split into the ticket it starts with and the rest of the path. */
+  ticket?: { key: string; rest: string }
+}
+export interface ReleaseRecord { title: string; rows: RecordRow[] }
+
+/** The latest attempt of a recorded step in words: how long it took (or is taking), its outcome, the usual length, how many runs. */
+function attemptWords(run: FlowRun, key: string, ctx: Ctx): string | null {
+  const { data, level, lang, text } = ctx, expert = level === 'expert'
+  const attempts = run.steps.filter(s => s.stepKey === key && s.kind !== 'wait').sort((a, b) => a.start - b.start)
+  const last = attempts.at(-1)
+  if (!last) return null
+  const f = last.facts, norm = f?.norm
+  const parts: string[] = []
+  if (f?.open === true) {
+    // An open step's end is the expected one: elapsed time stops at now.
+    parts.push(put(text.rec.running, { t: timeLabel(data, last.start) }), put(text.rec.soFar, { m: fmtMin(Math.max(0, Math.min(last.end, data.now ?? last.end) - last.start), lang) }))
+  } else {
+    parts.push(minutesText(last.end - last.start))
+    if (f?.outcome) parts.push(expert ? f.outcome : pick(pair(OUTCOME_PLAIN[f.outcome]), lang))
+  }
+  if (norm?.p50 != null) parts.push(expert ? `p50 ${fmtMin(norm.p50, lang)}${norm.p90 != null ? ` · p90 ${fmtMin(norm.p90, lang)}` : ''}` : put(text.rec.usually, { m: fmtMin(norm.p50, lang) }))
+  if (attempts.length > 1) parts.push(put(text.rec.runs, { n: attempts.length }))
+  return parts.join(' · ')
+}
+
+/**
+ * What a rollout record reported about a release besides its steps: the full test run (catalogue), the
+ * rehearsal, the qualification evidence and the rollback class. Always the same four rows, so the panel does
+ * not change shape as facts arrive; a fact nobody reported reads "not recorded". Null for a change, for the
+ * Arion target and for example data, which have no record to report.
+ */
+export function recordOf(run: FlowRun, ctx: Ctx): ReleaseRecord | null {
+  const record = run.facts?.record
+  if (run.isTarget || run.facts?.kind !== 'release' || !record) return null
+  const { level, text } = ctx, terms = text.rec.terms[level]
+  const timed = (key: 'catalogue' | 'rehearsal'): RecordRow => {
+    const value = attemptWords(run, key, ctx)
+    return { key, term: terms[key], value: value ?? text.rec.none, missing: value == null }
+  }
+  const ticket = record.evidence ? evidenceTicket(record.evidence) : null
+  return {
+    title: text.rec.title,
+    rows: [
+      timed('catalogue'), timed('rehearsal'),
+      { key: 'evidence', term: terms.evidence, value: record.evidence ?? text.rec.none, missing: record.evidence == null, ...(ticket ? { ticket } : {}) },
+      { key: 'rollback', term: terms.rollback, value: record.rollback ? text.rec.rollback[level][record.rollback] : text.rec.none, missing: record.rollback == null },
+    ],
+  }
+}
+
 // ---------- The headline above the card ----------
 export interface Head { big: Part[]; small: string }
 export function headOf(mode: FlowMode, ctx: Ctx & { reduced: boolean }): Head {

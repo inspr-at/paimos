@@ -14,6 +14,7 @@ import FlowLanes from './FlowLanes.vue'
 import FlowOverview from './FlowOverview.vue'
 import InFlightTable from './InFlightTable.vue'
 import MomentPanel from './MomentPanel.vue'
+import ReleaseRecord from './ReleaseRecord.vue'
 import TimeWent from './TimeWent.vue'
 import type { DeliveryLanguage } from '../../lib/delivery'
 import {
@@ -21,7 +22,7 @@ import {
   type FlowData, type FlowLevel, type LaneItem,
 } from '../../lib/deliveryFlow'
 import {
-  autoplayOnce, clockOf, createPlayer, flightRows, FLOW_MODES, headOf, momentOf, reducedMotionQuery, takeAutoplay, wentOf,
+  autoplayOnce, clockOf, createPlayer, flightRows, FLOW_MODES, headOf, momentOf, recordOf, reducedMotionQuery, takeAutoplay, wentOf,
   type FlowMode, type Frames,
 } from '../../lib/deliveryFlowModes'
 import { flowText, hintParts, TIMES } from '../../lib/deliveryFlowText'
@@ -185,6 +186,8 @@ const moment = computed(() => ctx.value ? momentOf({ ...ctx.value, sets: sets.va
 const head = computed(() => ctx.value ? headOf(props.mode, { ...ctx.value, reduced: reduced.value }) : null)
 const rows = computed(() => ctx.value && props.mode === 'live' ? flightRows(ctx.value) : [])
 const went = computed(() => ctx.value && props.mode !== 'live' ? sets.value.map(set => wentOf(set.main, ctx.value!)) : [])
+// The release on screen is the first set's run (the headline's): its record sits under the card in every mode.
+const releaseRecord = computed(() => ctx.value && sets.value[0] ? recordOf(sets.value[0].main, ctx.value) : null)
 const emptyText = computed(() => {
   const t = text.value
   return props.empty === 'live' ? [t.nothingLive, t.nothingLiveB] : props.empty === 'release' ? [t.noRelease, ''] : [t.noRuns, '']
@@ -291,6 +294,7 @@ const emptyText = computed(() => {
     </div>
 
     <p v-if="data && truncated" class="fl-note" role="status">{{ text.truncated }}</p>
+    <ReleaseRecord v-if="data && releaseRecord" :record="releaseRecord" />
     <InFlightTable v-if="data && mode === 'live'" :rows="rows" :level="level" :text="text" />
     <TimeWent v-else-if="data && went.length" :runs="went" :text="text" />
   </div>

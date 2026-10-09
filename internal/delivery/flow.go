@@ -13,8 +13,10 @@ import (
 
 // Delivery Flow (AEON-1004): runs are releases and changes; every step names
 // who works on it or what it waits for. Sources are the OPS rollout record
-// (release steps a–l), PAIMOS rounds, review gates and holds, and GitHub App
-// workflow runs (CI and merge queue). Payloads carry timing facts only.
+// (release steps a–l, the exact-SHA rehearsal and the full test catalogue),
+// PAIMOS rounds, review gates and holds, and GitHub App workflow runs (CI and
+// merge queue). Payloads carry timing facts only; a release also carries the
+// reference to its qualification evidence and its rollback class (AEON-1022).
 
 type FlowActor struct {
 	Type        string  `json:"type"`
@@ -77,6 +79,12 @@ type FlowItem struct {
 	ETA           FlowETA     `json:"eta"`
 	Target        *FlowTarget `json:"target"`
 	NextHumanGate *FlowGate   `json:"next_human_gate"`
+	// QualificationEvidence is the reference the rollout record names for the
+	// hands-on native qualification (for example AEON-487/comment/qualification);
+	// RollbackClass is digest_safe or restore_required. Both are null until a
+	// record reports them: an absent fact is never filled in by a default.
+	QualificationEvidence *string `json:"qualification_evidence"`
+	RollbackClass         *string `json:"rollback_class"`
 }
 
 type FlowIncident struct {
@@ -112,13 +120,16 @@ type DeliveryFlowRun struct {
 }
 
 var (
-	flowStepKeys    = []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "copy_gate", "pin_gate", "build", "review", "ci", "queue", "merge_round", "hold", "mitigation", "switch", "live_check"}
+	flowStepKeys    = []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "copy_gate", "pin_gate", "build", "review", "ci", "queue", "merge_round", "hold", "mitigation", "switch", "live_check", "rehearsal", "catalogue"}
 	flowStepKinds   = []string{"work", "wait", "rework", "recovery"}
 	flowActorTypes  = []string{"person", "agent", "ci", "queue"}
 	flowOutcomes    = []string{"ok", "changes", "red", "flaky", "degraded", "green"}
 	flowWaitReasons = []string{"reviewer", "queue", "dependency", "human_gate", "rerun", "release_train"}
 	// The critical path whose completion share is pct_done. A release is the
 	// Arion release path a → l; a change is built, reviewed, checked and merged.
+	// The rehearsal and the catalogue run inside segments a and b (Arion v5
+	// §4b), so they are recorded and drawn but are not phases of their own:
+	// a catalogue that is the pole shows as the long step, not as 1/13 done.
 	releasePath = []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"}
 	changePath  = []string{"build", "review", "ci", "queue"}
 	// Arion's per-step targets where the plan names one (minutes).
@@ -128,7 +139,10 @@ var (
 const (
 	flowHistoryDays    = 30
 	flowHistoryMinimum = 3
-	releaseTargetMin   = 24
+	// releaseTargetMin is the Arion v5 §4b release path a → l, rounded: 60.6
+	// minutes today without the wait for a person. A rollout record can carry
+	// its own target.
+	releaseTargetMin = 61
 )
 
 // flowID derives a stable row id, so replays converge on the same rows and
@@ -200,6 +214,8 @@ type flowItemRow struct {
 	Target                        *FlowTarget
 	Gate                          *FlowGate
 	OpsP50, OpsP90                *time.Time
+	QualificationEvidence         *string
+	RollbackClass                 *string
 }
 
 // endedBy reports whether t is set and not after at.
@@ -212,7 +228,8 @@ func endedBy(t *time.Time, at time.Time) bool {
 // finished steps. A thin history yields basis "none" with the reason; it is
 // never extrapolated from fewer than flowHistoryMinimum runs.
 func flowItemView(row flowItemRow, steps []FlowStep, h flowHistory, at time.Time) FlowItem {
-	out := FlowItem{ID: row.ID, Kind: row.Kind, Ref: row.Ref, Title: row.Title, PRs: row.PRs, StartedAt: row.Started, EndedAt: row.Ended, Target: row.Target}
+	out := FlowItem{ID: row.ID, Kind: row.Kind, Ref: row.Ref, Title: row.Title, PRs: row.PRs, StartedAt: row.Started, EndedAt: row.Ended, Target: row.Target,
+		QualificationEvidence: row.QualificationEvidence, RollbackClass: row.RollbackClass}
 	if out.PRs == nil {
 		out.PRs = []int64{}
 	}

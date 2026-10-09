@@ -29,6 +29,11 @@ const (
 var (
 	flowRelease   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
 	flowReportKey = regexp.MustCompile(`^[A-Za-z0-9._:/+-]{1,120}$`)
+	// flowEvidenceRef is the reference shape scripts/verify-live.mjs already
+	// requires of qualification.evidence: a ticket path, never a URL.
+	flowEvidenceRef = regexp.MustCompile(`^[A-Za-z0-9._/#-]{1,200}$`)
+	// The rollback classes of Arion v5 §3b.
+	flowRollbackClasses = []string{"digest_safe", "restore_required"}
 )
 
 func (m *Module) mountFlow(mux *http.ServeMux) {
@@ -230,8 +235,9 @@ func (m *Module) getFlowRun(w http.ResponseWriter, r *http.Request) {
 }
 
 // rolloutInput is the coordinator's aeon.rollout.v1 record with the flow
-// extension. Other rollout fields (digests, pin, observation, qualification)
-// are accepted and ignored: nothing outside these fields is stored.
+// extension. Other rollout fields (digests, pin, observation, the rest of the
+// qualification) are accepted and ignored: nothing outside these fields is
+// stored.
 type rolloutInput struct {
 	Schema        string            `json:"schema"`
 	Direction     string            `json:"direction"`
@@ -248,6 +254,15 @@ type rolloutInput struct {
 	ETA           *rolloutETA       `json:"eta"`
 	Steps         []json.RawMessage `json:"steps"`
 	Incidents     []json.RawMessage `json:"incidents"`
+	// Qualification is the record's hands-on qualification object; only its
+	// evidence reference is stored. RollbackClass is the class computed for
+	// the release (Arion v5 §3b).
+	Qualification *rolloutQualification `json:"qualification"`
+	RollbackClass *string               `json:"rollback_class"`
+}
+
+type rolloutQualification struct {
+	Evidence *string `json:"evidence"`
 }
 
 type rolloutTarget struct {
@@ -385,6 +400,18 @@ func parseRollout(in rolloutInput, project string, now time.Time) (flowBatch, er
 	case "", "in_progress", "failed":
 	default:
 		return bad("outcome must be in_progress, live, success or failed")
+	}
+	if q := in.Qualification; q != nil && q.Evidence != nil {
+		if !flowEvidenceRef.MatchString(*q.Evidence) || !flowText(*q.Evidence, 200) {
+			return bad("invalid qualification evidence reference")
+		}
+		item.QualificationEvidence = q.Evidence
+	}
+	if c := in.RollbackClass; c != nil {
+		if !validFlowEnum(flowRollbackClasses, *c) {
+			return bad("rollback_class must be digest_safe or restore_required")
+		}
+		item.RollbackClass = c
 	}
 	if g := in.NextHumanGate; g != nil {
 		if g.What == "" || !flowText(g.What, 120) || g.PrincipalID != nil && !workorders.UUID(*g.PrincipalID) {

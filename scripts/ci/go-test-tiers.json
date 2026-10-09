@@ -5194,6 +5194,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowNormsSeparateWaitsAndNeedHistory","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowOpenCatalogueIsTheCurrentStepNotAPhase","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowParkEpisodesStayDistinct","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowParkReplayAtOneTimestamp","tier":"ESSENTIAL"}
@@ -5204,11 +5206,17 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowReworkReopensCompletedPhase","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRolloutAcceptsCatalogueRehearsalAndReleaseFacts","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRolloutIngestIsIdempotentAndRead","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRolloutRecordsCatalogueRehearsalQualificationAndRollbackClass","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRolloutValidation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowRunsMapToChecksQueueAndFlakes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowStepKeyCheckKeepsGuardingAfterWidening","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowStreamRevokesDuringBacklog","tier":"ESSENTIAL"}
     ,

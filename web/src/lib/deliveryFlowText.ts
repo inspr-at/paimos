@@ -36,8 +36,20 @@ const EN = {
   clickSeg: 'Click a step for its details.', noInc: 'No incident at this moment.', incOn: 'Incident active', soFarMin: '{m} min so far', ends: 'ends {t}', liveAfter: 'live after +{d}',
   ongoing: 'still going',
   terms: { started: 'Start', took: 'Took', elapsed: 'So far', expectedEnd: 'Expected end', outcome: 'Outcome', round: 'Round', waitsFor: 'Waits for', step: 'Step', actor: 'Actor', startEnd: `Start ${TO} end`, duration: 'Duration', source: 'Source' },
-  sources: { github_app: 'GitHub App', paimos: 'PAIMOS', ops_rollout: 'OPS rollout record', arion: 'Arion target (arion.md § 4)' } as Record<string, string>,
+  sources: { github_app: 'GitHub App', paimos: 'PAIMOS', ops_rollout: 'OPS rollout record', arion: 'Arion target (Project Arion v5, § 4b)' } as Record<string, string>,
   kindWords: { work: 'work', wait: 'wait', rework: 'rework' } as Record<string, string>, incidentWord: 'incident', sideWord: 'alongside',
+  // The release record under the card (AEON-1022): what a rollout reported besides the steps.
+  rec: {
+    title: 'Release record', none: 'not recorded', running: 'running since {t}', soFar: '{m} min so far', runs: '{n} runs', usually: 'usually {m} min',
+    terms: {
+      simple: { catalogue: 'Full test run', rehearsal: 'Release rehearsal', evidence: 'Agent app test evidence', rollback: 'If it goes wrong' },
+      expert: { catalogue: 'Catalogue', rehearsal: 'Rehearsal', evidence: 'Qualification evidence', rollback: 'Rollback class' },
+    },
+    rollback: {
+      simple: { digest_safe: 'The previous version can be restarted as it is', restore_required: 'Needs the approved restore of the backup' },
+      expert: { digest_safe: 'digest-safe', restore_required: 'restore-required' },
+    },
+  },
   actors: {
     expert: { you: 'Markus', lead: 'LEAD', ops: 'OPS', review: 'Reviewer', build: 'Builder', ci: 'CI & queue' },
     simple: { you: 'You', lead: 'LEAD (agent)', ops: 'OPS (agent)', review: 'Reviewer (agent)', build: 'Builder (agent)', ci: 'Checks (machines)' },
@@ -73,8 +85,19 @@ const DE: FlowText = {
   clickSeg: 'Einen Schritt anklicken für Details.', noInc: 'Gerade keine Störung.', incOn: 'Störung aktiv', soFarMin: '{m} min bisher', ends: 'Ende {t}', liveAfter: 'live nach +{d}',
   ongoing: 'läuft noch',
   terms: { started: 'Start', took: 'Dauer', elapsed: 'Bisher', expectedEnd: 'Erwartetes Ende', outcome: 'Ergebnis', round: 'Runde', waitsFor: 'Wartet auf', step: 'Schritt', actor: 'Akteur', startEnd: `Start ${TO} Ende`, duration: 'Dauer', source: 'Quelle' },
-  sources: { github_app: 'GitHub-App', paimos: 'PAIMOS', ops_rollout: 'OPS-Rollout-Eintrag', arion: 'Arion-Ziel (arion.md § 4)' },
+  sources: { github_app: 'GitHub-App', paimos: 'PAIMOS', ops_rollout: 'OPS-Rollout-Eintrag', arion: 'Arion-Ziel (Project Arion v5, § 4b)' },
   kindWords: { work: 'Arbeit', wait: 'Warten', rework: 'Nacharbeit' }, incidentWord: 'Störung', sideWord: 'nebenher',
+  rec: {
+    title: 'Release-Nachweise', none: 'nicht erfasst', running: 'läuft seit {t}', soFar: '{m} min bisher', runs: '{n} Läufe', usually: 'üblich {m} min',
+    terms: {
+      simple: { catalogue: 'Vollständiger Testlauf', rehearsal: 'Probelauf des Releases', evidence: 'Nachweis zum Test der Agent-App', rollback: 'Wenn etwas schiefgeht' },
+      expert: { catalogue: 'Katalog', rehearsal: 'Probelauf', evidence: 'Qualifizierungs-Nachweis', rollback: 'Rollback-Klasse' },
+    },
+    rollback: {
+      simple: { digest_safe: 'Die vorige Version lässt sich unverändert neu starten', restore_required: 'Braucht die freigegebene Wiederherstellung aus dem Backup' },
+      expert: { digest_safe: 'digest-safe', restore_required: 'restore-required' },
+    },
+  },
   actors: {
     expert: { you: 'Markus', lead: 'LEAD', ops: 'OPS', review: 'Reviewer', build: 'Builder', ci: 'CI & Queue' },
     simple: { you: 'Du', lead: 'LEAD (Agent)', ops: 'OPS (Agent)', review: 'Reviewer (Agent)', build: 'Builder (Agent)', ci: 'Checks (Maschinen)' },

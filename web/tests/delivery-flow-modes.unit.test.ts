@@ -16,10 +16,10 @@ vi.mock('../src/lib/api.ts', () => ({
 }))
 import * as flow from '../src/lib/deliveryFlow'
 import { createTimeline, criticalPath, laneModel, refreshTimeline, resetTimeline, runEnd, timeLabel, type FlowData } from '../src/lib/deliveryFlow'
-import { arionTarget, ARION_MINUTES, compareData, liveData, recordedRuns, replayData, type ApiFlow, type ApiItem, type ApiRun, type ApiStep } from '../src/lib/deliveryFlowData'
+import { arionTarget, ARION_MINUTES, ARION_PATH, compareData, liveData, recordedRuns, replayData, type ApiFlow, type ApiItem, type ApiRun, type ApiStep } from '../src/lib/deliveryFlowData'
 import { EXAMPLE_NOW, exampleCompare, exampleLive, exampleReplay } from '../src/lib/deliveryFlowExample'
 import * as modes from '../src/lib/deliveryFlowModes'
-import { autoplayOnce, createPlayer, flightRows, headOf, momentOf, PLAY_MS, wentOf, type Frames } from '../src/lib/deliveryFlowModes'
+import { autoplayOnce, createPlayer, flightRows, headOf, momentOf, PLAY_MS, recordOf, wentOf, type Frames } from '../src/lib/deliveryFlowModes'
 import { useDeliveryFlow } from '../src/lib/useDeliveryFlow'
 import * as words from '../src/lib/deliveryFlowText'
 import { flowText } from '../src/lib/deliveryFlowText'
@@ -91,7 +91,9 @@ it('Compare races a release from its step a against the Arion target on one rela
   expect(data.sets[0]!.lanes.slice(0, 3)).toEqual(['review', 'ops', 'ci'])
   expect(criticalPath(data.sets[0]!.main)[0]!.start).toBe(0)
   expect(runEnd(data.sets[1]!.main)).toBeCloseTo(ARION_MINUTES)
-  expect(ARION_MINUTES).toBe(24)
+  // Project Arion v5 § 4b, "v5 now": 15.4 + 0.5 + 12.2 + 0.5 + 10 + 1.5 + 0.5 + (4.9 + 1.1 = the 6 of h–i) + 3 + 6 + 5.
+  expect(ARION_PATH.map(([key, minutes]) => `${key} ${minutes}`).join(', ')).toBe('a 15.4, b 0.5, c 12.2, d 0.5, e 10, f 1.5, g 0.5, h 4.9, i 1.1, j 3, k 6, l 5')
+  expect(ARION_MINUTES).toBeCloseTo(60.6)
   expect(arionTarget('de', 12).steps.at(-1)!.end).toBeCloseTo(12)
   // A run without a step a cannot race.
   expect(compareData(recordedRuns(answer(), { extendOpen: false }).runs[1]!, arionTarget('en'))).toBeNull()
@@ -278,10 +280,10 @@ it('Compare calls an unfinished release elapsed so far, not live', () => {
   const sets = laneModel(open)
   const ctx = { data: open, sets, level: 'simple' as const, lang: 'en' as const, text: en, reduced: true }
   const big = headOf('compare', ctx).big.map(part => part.text).join('')
-  expect(big).toBe('Release 126 vs. the Arion target, 10 min so far instead of 24 min')
+  expect(big).toBe('Release 126 vs. the Arion target, 10 min so far instead of 1 h 01')
   expect(big).not.toContain('queue to live')
   const de = headOf('compare', { ...ctx, lang: 'de', text: flowText('de') }).big.map(part => part.text).join('')
-  expect(de).toBe('Release 126 gegen das Arion-Ziel, 10 min bisher statt 24 min')
+  expect(de).toBe('Release 126 gegen das Arion-Ziel, 10 min bisher statt 1 h 01')
   expect(headOf('compare', { ...ctx, level: 'expert' }).small).toBe('a → l so far: 10 min.')
   const end = runEnd(open.sets[0]!.main)
   expect(end).toBe(10)
@@ -292,7 +294,7 @@ it('Compare calls an unfinished release elapsed so far, not live', () => {
   // A recorded end still says the release went live. Ten minutes is the same length either way.
   const done = compareData(recordedRuns(release(10), { extendOpen: false }).runs[0]!, arionTarget('en'))!
   const doneBig = headOf('compare', { data: done, level: 'simple', lang: 'en', text: en, reduced: true }).big.map(part => part.text).join('')
-  expect(doneBig).toContain('queue to live: 10 min instead of 24 min')
+  expect(doneBig).toContain('queue to live: 10 min instead of 1 h 01')
   const donePanel = momentOf({ data: done, sets: laneModel(done), T: 10, selected: null, level: 'simple', lang: 'en', text: en })
   expect(donePanel.lines.filter(line => line.kind === 'done').map(line => line.label)).toEqual(['live after +10 min'])
 })
@@ -330,7 +332,7 @@ function flowView(): Vue.Component {
   const stub = (tag: string) => ({ __esModule: true, default: { inheritAttrs: true, render: () => Vue.h(tag) } })
   const modules: Record<string, unknown> = {
     vue: Vue, '../AppIcon.vue': stub('icon'), './FlowLanes.vue': stub('lanes'), './FlowOverview.vue': stub('overview'),
-    './InFlightTable.vue': stub('inflight'), './MomentPanel.vue': stub('moment'), './TimeWent.vue': stub('went'),
+    './InFlightTable.vue': stub('inflight'), './MomentPanel.vue': stub('moment'), './ReleaseRecord.vue': stub('record'), './TimeWent.vue': stub('went'),
     '../../lib/deliveryFlow': flow, '../../lib/deliveryFlowModes': modes, '../../lib/deliveryFlowText': words,
   }
   const source = readFileSync(new URL('../src/components/delivery/FlowView.vue', import.meta.url), 'utf8')
@@ -419,16 +421,17 @@ it('Compare shows two lane sets on one relative axis and says when the target wa
   await Vue.nextTick()
   const sets = view.stubNode('lanes').props.sets as flow.LaneSet[]
   expect(sets.map(s => s.title?.en)).toEqual(['Release 126 (a → l)', 'Arion target'])
-  expect(textOf(view.byTest('flow-head')!)).toMatch(/^Release 126 vs\. the Arion target, queue to live: 1 h 10 instead of 24 min/)
+  expect(textOf(view.byTest('flow-head')!)).toMatch(/^Release 126 vs\. the Arion target, queue to live: 1 h 10 instead of 1 h 01/)
   const t = view.timeline()
   expect([t.v0, t.v1]).toEqual([t.r0, t.r1])
   expect(textOf(view.byTest('flow-clock')!)).toBe('+0 min')
-  t.follow = false; t.T = 30
+  // 1 h 05 is past the target's end (1 h 01) and inside the release's 1 h 10.
+  t.follow = false; t.T = 65
   await Vue.nextTick()
   const moment = view.stubNode('moment').props.moment as modes.Moment
-  expect(moment.sentence).toMatch(/the Arion target was live after 24 min\.$/)
-  expect(moment.lines.find(l => l.kind === 'done')!.label).toBe('live after +24 min')
-  expect(textOf(view.byTest('flow-clock')!)).toBe('+30 min · target reached')
+  expect(moment.sentence).toMatch(/the Arion target was live after 1 h 01\.$/)
+  expect(moment.lines.find(l => l.kind === 'done')!.label).toBe('live after +1 h 01')
+  expect(textOf(view.byTest('flow-clock')!)).toBe('+1 h 05 · target reached')
   expect((view.stubNode('went').props.runs as modes.Went[]).map(w => w.title)).toEqual(['Release 126 (a → l)', 'Arion target'])
 })
 
@@ -503,6 +506,8 @@ it('Compare lanes leave an open release without a finish line or a completed ava
   const paint = async (ended: number | null) => {
     const data = compareData(recordedRuns(release(ended), { extendOpen: false }).runs[0]!, arionTarget('en'))!
     const view = mountLanes(data)
+    // Compare fits the whole range (FlowView.reset does the same), so the target's end at 1 h 01 is inside the window.
+    flow.fitAll(view.timeline)
     await Vue.nextTick()
     const nodes = view.nodes()
     expect(nodes.some(el => el.tag === 'svg')).toBe(true)
@@ -676,4 +681,171 @@ it('the run picker stays mounted through loading and errors', async () => {
   expect(view.byTest('flow-pick')).toBe(pick)
   expect(textOf(view.byTest('flow-pick')!)).toContain('Release 126')
   expect(view.byTest('flow-empty')).toBeUndefined()
+})
+
+// ---------- The release record (AEON-1022) ----------
+// The run as GET /delivery/flow/runs/{itemId} returns it for the rollout record of release 127: the
+// merge-group run with the rehearsal alongside and the full test catalogue as the pole, the qualification
+// evidence reference and the rollback class.
+function releaseRun(over: Partial<ApiItem> = {}, extra: ApiStep[] = []): ApiRun {
+  const base = answer()
+  const step = (id: string, key: string, who: ReturnType<typeof actor>, from: number, to: number | null, more: Record<string, unknown> = {}): ApiStep => ({
+    id, item_id: 'r127', step_key: key, round: 1, kind: 'work', actor: who, started_at: at(from), ended_at: to == null ? null : at(to),
+    outcome: null, wait_reason: null, waits_for: null, side: false, source: 'ops_rollout', norm: norm(), ...more,
+  }) as ApiStep
+  const item: ApiItem = {
+    ...base.items[0]!, id: 'r127', ref: '127', started_at: at(0), ended_at: at(75), pct_done: 100, current_step_id: null,
+    eta: { p50_at: null, p90_at: null, basis: 'none', reason: null }, target: { minutes: 61, from_step: 'a', source: 'Arion' }, next_human_gate: null,
+    qualification_evidence: 'AEON-487/comment/native-qualification', rollback_class: 'digest_safe', ...over,
+  }
+  return {
+    project_id: 'p', now: at(80), at: at(80), item, incidents: [], truncated: false,
+    steps: [
+      step('s-a', 'a', actor('ci', 'Checks'), 0, 16, { outcome: 'green' }),
+      step('s-reh', 'rehearsal', actor('ci', 'Checks'), 0, 11, { outcome: 'green', side: true }),
+      step('s-cat', 'catalogue', actor('ci', 'Checks'), 1, 23, { outcome: 'green', norm: { p50_min: 21, p90_min: 24, arion_min: null } }),
+      step('s-b', 'b', actor('agent', 'OPS'), 23, 24),
+      ...extra,
+    ],
+  }
+}
+// recordedRuns reads the list shape; a single run is the same answer with one item.
+const asList = (run: ApiRun): ApiFlow => ({ project_id: run.project_id, now: run.now, at: run.at, from: run.now, to: run.now, items: [run.item], steps: run.steps, incidents: run.incidents, truncated: run.truncated })
+const recordCtx = (run: ApiRun, lang: 'en' | 'de' = 'en', level: 'simple' | 'expert' = 'simple') => {
+  const rec = recordedRuns(asList(run), { extendOpen: false }), main = rec.runs[0]!
+  return { main, ctx: { data: replayData(main, rec.origin, null)!, level, lang, text: flowText(lang) } }
+}
+
+it('an ingested release record shows the catalogue timing, the rehearsal, the qualification link and the rollback class', () => {
+  const { main, ctx } = recordCtx(releaseRun())
+  // The new steps are drawn in the checks lane with their own words; the rehearsal runs alongside.
+  const catalogue = main.steps.find(s => s.stepKey === 'catalogue')!, rehearsal = main.steps.find(s => s.stepKey === 'rehearsal')!
+  expect([catalogue.lane, catalogue.end - catalogue.start, catalogue.simple.en, catalogue.expert.en]).toEqual(['ci', 22, 'Full test run: green', 'Catalogue · green'])
+  expect([rehearsal.lane, rehearsal.side, rehearsal.simple.de]).toEqual(['ci', true, 'Probelauf des Releases: grün'])
+  expect(main.facts!.record).toEqual({ evidence: 'AEON-487/comment/native-qualification', rollback: 'digest_safe' })
+
+  const simple = recordOf(main, ctx)!
+  expect(simple.title).toBe('Release record')
+  expect(simple.rows.map(r => [r.term, r.value, r.missing])).toEqual([
+    ['Full test run', '22 min · green · usually 21 min', false],
+    ['Release rehearsal', '11 min · green', false],
+    ['Agent app test evidence', 'AEON-487/comment/native-qualification', false],
+    ['If it goes wrong', 'The previous version can be restarted as it is', false],
+  ])
+  expect(simple.rows[2]!.ticket).toEqual({ key: 'AEON-487', rest: '/comment/native-qualification' })
+
+  const expert = recordOf(main, { ...ctx, level: 'expert' })!
+  expect(expert.rows.map(r => [r.term, r.value])).toEqual([
+    ['Catalogue', '22 min · green · p50 21 · p90 24'], ['Rehearsal', '11 min · green'],
+    ['Qualification evidence', 'AEON-487/comment/native-qualification'], ['Rollback class', 'digest-safe'],
+  ])
+  const german = recordOf(main, { ...ctx, lang: 'de', text: flowText('de') })!
+  expect(german.rows.map(r => [r.term, r.value])).toEqual([
+    ['Vollständiger Testlauf', '22 min · grün · üblich 21 min'], ['Probelauf des Releases', '11 min · grün'],
+    ['Nachweis zum Test der Agent-App', 'AEON-487/comment/native-qualification'], ['Wenn etwas schiefgeht', 'Die vorige Version lässt sich unverändert neu starten'],
+  ])
+  const restore = recordCtx(releaseRun({ rollback_class: 'restore_required' }))
+  expect(recordOf(restore.main, restore.ctx)!.rows[3]!.value).toBe('Needs the approved restore of the backup')
+})
+
+it('the record always has its four rows: a fact nobody reported says so, and nothing is filled in', () => {
+  // A run from a server that predates the fields, recorded before the catalogue was reported.
+  const old = releaseRun()
+  delete (old.item as Partial<ApiItem>).qualification_evidence
+  delete (old.item as Partial<ApiItem>).rollback_class
+  old.steps = old.steps.filter(s => s.step_key !== 'catalogue' && s.step_key !== 'rehearsal')
+  for (const lang of ['en', 'de'] as const) {
+    const { main, ctx } = recordCtx(old, lang)
+    const record = recordOf(main, ctx)!
+    expect(record.rows.map(r => r.key)).toEqual(['catalogue', 'rehearsal', 'evidence', 'rollback'])
+    expect(record.rows.every(r => r.missing && r.value === flowText(lang).rec.none && !r.ticket)).toBe(true)
+  }
+  // Evidence that does not start with a ticket key is shown whole and links nowhere.
+  const other = recordCtx(releaseRun({ qualification_evidence: 'kit/2026-10-09/run-3' }))
+  const row = recordOf(other.main, other.ctx)!.rows[2]!
+  expect([row.value, row.ticket, row.missing]).toEqual(['kit/2026-10-09/run-3', undefined, false])
+})
+
+it('a catalogue still running reads as elapsed time, and a second run names the latest', () => {
+  const running = releaseRun({ ended_at: null, pct_done: 40 }, [])
+  running.steps = running.steps.filter(s => s.step_key !== 'catalogue')
+  running.steps.push({ ...running.steps[0]!, id: 's-cat-open', step_key: 'catalogue', started_at: at(1), ended_at: null, outcome: null, side: false })
+  const rec = recordedRuns(asList({ ...running, now: at(10), at: at(10) }), { extendOpen: true })
+  const live = liveData(rec)!
+  const liveRun = rec.runs[0]!
+  const open = recordOf(liveRun, { data: live, level: 'simple', lang: 'en', text: en })!.rows[0]!
+  // 20:01 is minute 1 of the 18:00 UTC test clock (Vienna time); minute 10 is now.
+  expect(open.value).toBe('running since 20:01 · 9 min so far')
+
+  const twice = releaseRun({}, [{ ...releaseRun().steps[2]!, id: 's-cat-2', round: 2, started_at: at(30), ended_at: at(41), outcome: 'red' }])
+  const { main, ctx } = recordCtx(twice)
+  // The latest attempt (by start) is the one named; both count.
+  expect(recordOf(main, ctx)!.rows[0]!.value).toMatch(/^11 min · failed · usually 21 min · 2 runs$/)
+})
+
+it('only a release with a reported record has one', () => {
+  expect(recordOf(arionTarget('en'), { data: exampleReplay('r126')!, level: 'simple', lang: 'en', text: en })).toBeNull()
+  const example = exampleReplay('r126')!, change = exampleReplay('c991')!
+  expect(recordOf(example.sets[0]!.main, { data: example, level: 'simple', lang: 'en', text: en })).toBeNull()
+  expect(recordOf(change.sets[0]!.main, { data: change, level: 'simple', lang: 'en', text: en })).toBeNull()
+  const changes = recordedRuns(answer(), { extendOpen: false }).runs.find(r => r.id === 'c')!
+  expect(changes.facts!.record).toEqual({ evidence: null, rollback: null })
+  expect(recordOf(changes, { data: liveData(recordedRuns(answer(), { extendOpen: true }))!, level: 'simple', lang: 'en', text: en })).toBeNull()
+})
+
+let recordCompiled: Vue.Component | null = null
+function releaseRecordView(): Vue.Component {
+  if (recordCompiled) return recordCompiled
+  const ticketLink = { __esModule: true, default: { props: ['ticketKey', 'variant'], render(this: { ticketKey: string }) { return Vue.h('a', { class: 'ticket-link', 'data-key': this.ticketKey }, this.ticketKey) } } }
+  const modules: Record<string, unknown> = { vue: Vue, '../releases/TicketLink.vue': ticketLink }
+  const source = readFileSync(new URL('../src/components/delivery/ReleaseRecord.vue', import.meta.url), 'utf8')
+  const { content } = compileScript(parse(source).descriptor, { id: 'release-record-test', inlineTemplate: true })
+  const { outputText } = ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
+  const exports: { default?: Vue.Component } = {}
+  new Function('require', 'exports', outputText)((id: string) => { if (!(id in modules)) throw new Error(`Unexpected dependency ${id}`); return modules[id] }, exports)
+  return recordCompiled = exports.default!
+}
+
+it('the release record panel shows the timing and the evidence as a ticket link, and keeps four rows when facts are missing', () => {
+  const mountRecord = (run: ApiRun) => {
+    const { main, ctx } = recordCtx(run)
+    const app = renderer.createApp({ render: () => Vue.h(releaseRecordView(), { record: recordOf(main, ctx)! }) })
+    const root = node('root'); apps.push(app); app.mount(root)
+    return { root, row: (key: string) => all(root).find(el => el.props['data-testid'] === `flow-record-${key}`)! }
+  }
+  const full = mountRecord(releaseRun())
+  expect(textOf(all(full.root).find(el => el.tag === 'h3')!)).toBe('Release record')
+  expect(textOf(full.row('catalogue'))).toBe('22 min · green · usually 21 min')
+  expect(textOf(full.row('rehearsal'))).toBe('11 min · green')
+  // The reference starts with the ticket it names: that part is the ticket link, the rest stays text.
+  const link = all(full.row('evidence')).find(el => el.tag === 'a')!
+  expect([link.props['data-key'], textOf(full.row('evidence'))]).toEqual(['AEON-487', 'AEON-487/comment/native-qualification'])
+  expect(textOf(all(full.row('evidence')).find(el => el.props.class === 'rest')!)).toBe('/comment/native-qualification')
+  expect(textOf(full.row('rollback'))).toBe('The previous version can be restarted as it is')
+  expect(all(full.root).filter(el => el.tag === 'dd')).toHaveLength(4)
+
+  const bare = releaseRun({ qualification_evidence: null, rollback_class: null })
+  bare.steps = bare.steps.filter(s => s.step_key !== 'catalogue')
+  const empty = mountRecord(bare)
+  expect(all(empty.root).filter(el => el.tag === 'dd')).toHaveLength(4)
+  expect(['catalogue', 'evidence', 'rollback'].map(key => [textOf(empty.row(key)), empty.row(key).props.class])).toEqual([['not recorded', 'mu'], ['not recorded', 'mu'], ['not recorded', 'mu']])
+  expect(all(empty.row('evidence')).some(el => el.tag === 'a')).toBe(false)
+})
+
+it('the flow view hands the first run\'s release record to the panel, in every mode, and none for a change or an example', async () => {
+  const rec = recordedRuns(asList(releaseRun()), { extendOpen: false })
+  const replay = mount({ data: replayData(rec.runs[0]!, rec.origin, null), dataKey: 'replay|r127', mode: 'replay' })
+  await Vue.nextTick()
+  const record = replay.stubNode('record').props.record as modes.ReleaseRecord
+  expect(record.rows.map(r => r.key)).toEqual(['catalogue', 'rehearsal', 'evidence', 'rollback'])
+  expect(record.rows[0]!.value).toBe('22 min · green · usually 21 min')
+  const compare = mount({ data: compareData(rec.runs[0]!, arionTarget('en')), dataKey: 'compare|r127', mode: 'compare' })
+  await Vue.nextTick()
+  expect((compare.stubNode('record').props.record as modes.ReleaseRecord).rows[2]!.value).toBe('AEON-487/comment/native-qualification')
+  const example = mount({ data: exampleReplay('r126'), dataKey: 'replay|example', mode: 'replay' })
+  await Vue.nextTick()
+  expect(example.stubNode('record')).toBeUndefined()
+  const change = mount({ data: exampleReplay('c991'), dataKey: 'replay|c991', mode: 'replay' })
+  await Vue.nextTick()
+  expect(change.stubNode('record')).toBeUndefined()
 })

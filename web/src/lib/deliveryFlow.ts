@@ -37,6 +37,8 @@ export interface RunFacts {
   pct: number | null; currentStepId: string | null
   eta: { p50: number | null; p90: number | null; basis: 'history' | 'ops' | 'none'; reason: string | null }
   gate: string | null
+  /** The release record a rollout reported (AEON-1022); absent on example data and the Arion target. */
+  record?: { evidence: string | null; rollback: 'digest_safe' | 'restore_required' | null }
 }
 export interface FlowRun {
   id: string; tag: string; title: Words; steps: FlowStep[]
