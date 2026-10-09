@@ -46,13 +46,14 @@ const connectedStream = (page: Page) => page.addInitScript(() => {
 })
 
 // Long German names, a shared view and a filtered list: the longest realistic bar.
-async function open(page: Page, width: number, theme = 'light', height = 900, url = '/p/PHAROS?status=new,backlog,open,blocked,in_progress&type=ticket') {
+async function open(page: Page, width: number, theme = 'light', height = 900, url = '/p/PHAROS?status=new,backlog,open,blocked,in_progress&type=ticket', extraViews = 0) {
   await connectedStream(page)
   await page.setViewportSize({ width, height })
   const data = fixtures()
   data.preferences.theme = { choice: theme }
   data.preferences['list:display'] = { density: 'comfortable', headerGraph: false }
   data.views.push(mockView({ id: VIEW, name: 'Laufende Betriebsprüfung und Berechtigungsverwaltung', shared: true }))
+  for (let i = 0; i < extraViews; i++) data.views.push(mockView({ id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(i).padStart(12, '0')}`, name: `Saved view ${String(i + 1).padStart(2, '0')} Betriebsprüfung` }))
   await mockWork(page, data)
   await page.goto(url)
   await expect(projectPage(page)).toHaveClass(/header-compact/)
@@ -381,6 +382,45 @@ test.describe('collapsed header: the menu never scrolls', () => {
     expect((await menu(page).boundingBox())!.width).toBeLessThan(400)
   })
 
+  test('keeps sort actions and the other blocks still when a sort key is added or removed (±0.5px)', async ({ page }) => {
+    await open(page, 1440)
+    await fold(page, 1440)
+    await openMenu(page)
+    const add = menu(page).getByRole('button', { name: 'Add sort key' })
+    const sections = menu(page).getByRole('navigation', { name: 'Project sections' })
+    const group = menu(page).getByRole('radiogroup', { name: 'Group by' })
+    await expectStableControls({
+      controls: {
+        add, sections, tickets: sections.getByRole('button', { name: 'Tickets' }),
+        all: menu(page).getByRole('link', { name: 'All tickets' }),
+        hide: menu(page).getByRole('checkbox', { name: /^Hide / }),
+        group, status: group.getByRole('radio', { name: 'Status', exact: true }),
+        rows: menu(page).getByRole('radiogroup', { name: 'Row height' }),
+        columns: menu(page).getByRole('list', { name: 'Columns' }),
+        effort: menu(page).getByRole('radiogroup', { name: 'Effort meter' }),
+      },
+      interactions: [
+        { name: 'add a sort key', run: async () => { await add.click(); await expect(menu(page).getByRole('combobox', { name: 'Sort key 1' })).toBeVisible() } },
+        { name: 'add another sort key', run: async () => { await add.click(); await expect(menu(page).getByRole('combobox', { name: 'Sort key 2' })).toBeVisible() } },
+        { name: 'remove the second sort key', run: async () => { await menu(page).locator('[data-sort-row="1"]').getByRole('button', { name: /^Remove / }).click(); await expect(menu(page).getByRole('combobox', { name: 'Sort key 2' })).toHaveCount(0) } },
+        { name: 'remove the first sort key', run: async () => { await menu(page).getByRole('button', { name: /^Remove / }).click(); await expect(menu(page).getByRole('combobox', { name: 'Sort key 1' })).toHaveCount(0) } },
+      ],
+    })
+  })
+
+  test('lets a couple dozen saved views flow across columns without the panel scrolling', async ({ page }) => {
+    await open(page, 1440, 'light', 900, '/p/PHAROS?status=new,backlog,open,blocked,in_progress&type=ticket', 24)
+    await fold(page, 1440)
+    await openMenu(page)
+    const rows = menu(page).locator('nav[aria-label="Saved views"] .row')
+    await expect(rows).toHaveCount(26)
+    const intact = await rows.evaluateAll(els => els.every(el => el.getClientRects().length === 1 && el.getBoundingClientRect().height <= 40 && el.getBoundingClientRect().height >= 28))
+    expect(intact, 'each saved-view row stays whole').toBe(true)
+    const columnsUsed = await rows.evaluateAll(els => new Set(els.map(el => Math.round(el.getBoundingClientRect().left / 80))).size)
+    expect(columnsUsed, 'rows flow into more than one column').toBeGreaterThan(1)
+    await noScroll(page, '24 saved views at 1440×900')
+  })
+
   test('recounts its columns when the window changes height while open', async ({ page }) => {
     await open(page, 1440, 'light', 2400)
     await fold(page, 1440)
@@ -486,12 +526,20 @@ test.describe('folding and unfolding the header', () => {
     await open(page, 1440)
     await fold(page, 1440)
     const bar = toolbar(page)
+    const trigger = display(page)
+    const controls = { views: bar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), status: bar.locator('.facet-control[data-dim="status"]'), trigger, new: create(page) }
     await expectStableControls({
-      // Display itself is left out: its label says the grouping ("By type"), as it always has, so the button's own width follows the choice.
-      controls: { views: bar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), status: bar.locator('.facet-control[data-dim="status"]'), new: create(page) },
+      controls,
+      interactions: [{ name: 'open the menu', run: () => openMenu(page) }],
+    })
+    // Every grouping label, including the long ones ("By assignee"). The trigger's footprint is the widest of them.
+    const labels = await menu(page).getByRole('radiogroup', { name: 'Group by' }).getByRole('radio').evaluateAll(els => els.map(el => el.textContent?.trim() ?? '').filter(Boolean))
+    expect(labels, 'every grouping is offered').toEqual(['None', 'Status', 'Assignee', 'Priority', 'Project', 'Type', 'Epic', 'Label'])
+    const group = menu(page).getByRole('radiogroup', { name: 'Group by' })
+    await expectStableControls({
+      controls,
       interactions: [
-        { name: 'open the menu', run: () => openMenu(page) },
-        { name: 'choose a grouping', run: async () => { await menu(page).getByRole('radio', { name: 'Type', exact: true }).click(); await expect(page).toHaveURL(/group=type/) } },
+        ...labels.map(label => ({ name: `group by ${label}`, run: async () => { await group.getByRole('radio', { name: label, exact: true }).click(); await expect(group.getByRole('radio', { name: label, exact: true })).toHaveAttribute('aria-checked', 'true') } })),
         { name: 'switch Hide closed', run: async () => { await menu(page).getByRole('checkbox', { name: /^Hide / }).uncheck(); await expect(page).toHaveURL(/closed=1/) } },
         { name: 'close the menu', run: async () => { await page.keyboard.press('Escape'); await expect(menu(page)).toBeHidden() } },
       ],

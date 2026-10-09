@@ -76,8 +76,13 @@ const tip = (view: SavedView) => view.shared && !mine(view) ? 'Shared with the p
 .nav-item[aria-current="page"] { color: var(--teal-ink); background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--line); }
 .nav-item:focus-visible, .view-row:focus-visible, .row-action:focus-visible { box-shadow: var(--focus-ring); }
 .nav-views .eyebrow { margin: 0 0 4px 2px; }
-/* One track as wide as the column, so a long view name clips instead of widening the menu. */
+/* One track as wide as the column, so a long view name clips instead of widening the menu.
+   In the collapsed header's desktop menu this component's own display would keep the
+   list one block (scoped rules beat the menu). There the rows join its columns; the
+   sheet keeps the list whole and scrolls. */
 .rows { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; margin: 0; padding: 0; list-style: none; }
+:global(.display-menu:not(.as-sheet)) .nav-views,
+:global(.display-menu:not(.as-sheet)) .rows { display: contents; }
 .row { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
 .view-row { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; height: 34px; padding: 0 10px; border-radius: 8px; color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none; }
 @media (hover: hover) { .view-row:hover { color: var(--ink); background: var(--row-hover); } }

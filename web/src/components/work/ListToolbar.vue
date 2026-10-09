@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { DIMENSION_BY_KEY, DIMENSIONS, activeDimensions, dateLabel, excluded, fieldLabel, included, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import { DIMENSION_BY_KEY, DIMENSIONS, GROUPS, activeDimensions, dateLabel, excluded, fieldLabel, included, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
 import { TICKET_GRAPH_FILTERS } from '../../lib/ticketGraphRenderer'
 import type { SortKey } from '../../lib/work'
 import { menuPanelWidth } from '../../lib/menuColumns'
@@ -153,7 +153,11 @@ const activeFilterCount = computed(() => active.value.length + (!graph.value && 
 const groupWord = computed(() => props.filters.group === 'tag' ? 'label' : props.filters.group)
 const displayLabel = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `Grouped by ${groupWord.value}`)
 watch(() => props.view, () => { open.value = null; menuAnchor.value = null; dateAnchor.value = null; displayAnchor.value = null; hideAnchor.value = null })
-const displayText = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `By ${groupWord.value}`)
+// Every label the collapsed trigger can show. The button is as wide as the longest,
+// so choosing a grouping never resizes it or the New button beside it.
+function displayPhrase(group: GroupBy) { return group === 'none' ? 'Display' : `By ${group === 'tag' ? 'label' : group}` }
+const displayWords = GROUPS.map(option => displayPhrase(option.value))
+const displayText = computed(() => props.view === 'outline' ? 'Display' : displayPhrase(props.filters.group))
 // The collapsed header's menu replaces the plain Display panel; the attention host keeps its own.
 const collapsedMenu = computed(() => !!props.collapsedHeader && !props.attention)
 const displayOn = computed(() => props.view === 'list' && props.filters.group !== 'none')
@@ -296,7 +300,7 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
          inert twin of the same size, so folding or unfolding the header moves nothing in this row. -->
     <div v-if="settingsTarget && !attention" class="collapsed-display" :class="{ reserved: !collapsedHeader }" :inert="!collapsedHeader" :aria-hidden="collapsedHeader ? undefined : 'true'">
       <button type="button" class="btn sm display-btn" :class="{ on: displayOn }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor && collapsedHeader" :aria-label="`Display: ${displayLabel}`" data-tip="Sections, saved views, Hide closed, grouping, sort, row height and columns" :tabindex="collapsedHeader ? undefined : -1" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
-        <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayText }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
+        <AppIcon name="layers" :size="13" /><span class="display-label"><span class="display-current">{{ displayText }}</span><span class="display-sizer" aria-hidden="true"><span v-for="word in displayWords" :key="word">{{ word }}</span></span></span><AppIcon name="chevron" :size="12" class="facet-chevron" />
       </button>
     </div>
     <button v-if="!graph && !attention" type="button" class="btn primary new-btn" :aria-label="createLabel" aria-keyshortcuts="n" :data-tip="`${createLabel} · n`" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
@@ -342,7 +346,7 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
           v-if="!graph"
           :attention-group="attention?.group" :locale="attention?.locale" @attention-group="value => emit('attentionGroup', value)"
           :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns" :grouped="view === 'list' && filters.group !== 'none'"
-          :header-graph="headerGraph" :project-header="projectHeader" :sheet="collapsedMenu && sheetMode"
+          :header-graph="headerGraph" :project-header="projectHeader" :sheet="collapsedMenu && sheetMode" :stable-sort="collapsedMenu"
           @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
           @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
           @header-graph="value => emit('headerGraph', value)"
@@ -488,6 +492,13 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
 .collapsed-display { order: 4; display: flex; align-items: center; flex: none; }
 .collapsed-display.reserved { visibility: hidden; pointer-events: none; }
 .collapsed-display .display-btn { display: inline-flex; }
+/* As wide as the longest grouping label, so "Display" and "By assignee" share one footprint. */
+.collapsed-display .display-label { display: inline-grid; }
+.collapsed-display .display-current, .collapsed-display .display-sizer { grid-area: 1 / 1; }
+.collapsed-display .display-current { white-space: nowrap; }
+.collapsed-display .display-sizer { visibility: hidden; display: grid; }
+.collapsed-display .display-sizer > span { grid-area: 1 / 1; white-space: nowrap; }
+@container toolbar (max-width: 1000px) { .collapsed-display .display-label { display: none; } }
 /* On tablets Filters shares the row: Display still sits right against New. */
 @media (min-width: 601px) and (max-width: 900px) { .collapsed-display { order: 5; } .new-btn { order: 6; } }
 @media (max-width: 600px) {

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { isSettingsField } from '../../lib/settingsOverlays'
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 // A popover anchored to a trigger. It is teleported to <body> so table cells
 // and sticky toolbars never clip it; it flips above the trigger near the
 // bottom edge, closes on Escape, outside clicks and scroll that moves its trigger, and hands
@@ -107,6 +107,9 @@ function keydown(event: KeyboardEvent) {
   }
 }
 const onResize = () => place()
+// The collapsed Display menu widens after it counts columns. Place again once that
+// width arrives: the resize that caused the recount already placed the narrower menu.
+watch(() => props.width, () => place(true))
 onMounted(async () => {
   await nextTick()
   place()

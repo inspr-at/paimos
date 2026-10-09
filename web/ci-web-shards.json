@@ -702,7 +702,7 @@
         ,
         {"file":"tests/add-account.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/aeon-1028-projheader.spec.ts","listedTests":39,"weightSeconds":86.560976,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/aeon-1028-projheader.spec.ts","listedTests":41,"weightSeconds":91,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,

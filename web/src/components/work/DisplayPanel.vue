@@ -23,6 +23,8 @@ defineProps<{
   projectHeader?: boolean
   attentionGroup?: AttentionGrouping
   locale?: string
+  // Collapsed header: the add action stays above the key list, on the desktop as in the sheet.
+  stableSort?: boolean
 }>()
 // The header graph is on until a person turns it off. Callers that omit the
 // prop keep that default so the switch does not flash off.
@@ -69,7 +71,7 @@ const emit = defineEmits<{
         <button type="button" class="btn sm" @click="emit('collapseAll')"><AppIcon name="collapse-all" :size="13" />Collapse all</button>
       </div>
     </div>
-    <SortEditor class="section" :sort="filters.sort" :stable="sheet" @change="keys => emit('sort', keys)" />
+    <SortEditor class="section" :sort="filters.sort" :stable="sheet || stableSort" @change="keys => emit('sort', keys)" />
     <div class="section">
       <p class="eyebrow">Row height</p>
       <div class="seg wide" role="radiogroup" aria-label="Row height">

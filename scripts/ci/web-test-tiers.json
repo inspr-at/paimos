@@ -98,6 +98,10 @@
     ,
     "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
     ,
+    "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › keeps sort actions and the other blocks still when a sort key is added or removed (±0.5px)"
+    ,
+    "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › lets a couple dozen saved views flow across columns without the panel scrolling"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -4699,6 +4703,10 @@
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › flows into columns at 1440×900 and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › is a full-height sheet on a phone, with its title and Done pinned","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › keeps sort actions and the other blocks still when a sort key is added or removed (±0.5px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › lets a couple dozen saved views flow across columns without the panel scrolling","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › lets the long column list break between rows only when the window is too short for whole blocks","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
