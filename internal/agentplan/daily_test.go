@@ -110,3 +110,24 @@ func TestDailyHarnessSummaryAndUnknownUsage(t *testing.T) {
 		t.Fatal("missing daily baseline lost known left percentage or invented headroom")
 	}
 }
+
+// Risk: a later sample below the first local-day baseline aborts the allowance
+// instead of publishing the restated reading with no negative consumption.
+func TestApplyDailyKeepsDecliningUsedPercent(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	a := DailyAccount{AccountID: "down", UsedPct: Number(40), StartOfDayUsedPct: Number(60), FloorPct: Number(20), Freshness: "fresh", Routable: true}
+	if err := ApplyDaily(&a, DefaultDaily(), 10, now); err != nil {
+		t.Fatal(err)
+	}
+	if a.UsedPct == nil || a.LeftPct == nil || a.LimitUsedPct == nil || a.TodayPointsAllowed == nil || a.OverPacePoints == nil || *a.UsedPct != 40 || *a.LeftPct != 60 || *a.LimitUsedPct != 70 || *a.TodayPointsAllowed != 10 || *a.OverPacePoints != 0 {
+		t.Fatalf("declining reading lost used, left, or limit: %+v", a)
+	}
+	out := SummarizeDaily([]DailyAccount{a})
+	if out.TodayPointsUsed == nil || *out.TodayPointsUsed != 0 || out.State != "on_pace" {
+		t.Fatalf("today consumption not clamped at zero: %+v", out)
+	}
+	invalid := DailyAccount{UsedPct: Number(101), StartOfDayUsedPct: Number(60), FloorPct: Number(20)}
+	if err := ApplyDaily(&invalid, DefaultDaily(), 10, now); err == nil {
+		t.Fatal("invalid percent accepted")
+	}
+}

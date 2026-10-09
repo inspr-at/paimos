@@ -173,3 +173,69 @@ func TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy(t *testing.T) {
 		}
 	}
 }
+
+// Risk: one restated weekly percent below the first local-day sample turns
+// GET /api/agents/plan into a 500 and drops every other harness.
+func TestDailyPlanReadKeepsDecliningWeeklyPercent(t *testing.T) {
+	reset(t)
+	owner := makePrincipal(t, "daily-decline", "person", "Owner", []string{"admin"})
+	runner := addPrincipal(t, owner.TenantID, "agent", "Runner", nil)
+	token := issueKey(t, runner, []string{"account.manage", "account.probe"})
+	mod := accountsMod()
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	ctx := context.WithValue(t.Context(), clockKey{}, now)
+	start, end, err := agentplan.LocalDay(now, "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	weeklyReset := end.Add(5 * 24 * time.Hour)
+	var declining, healthy Account
+	for _, spec := range []struct {
+		key, harness   string
+		baseline, used float64
+		dst            *Account
+	}{
+		{"down", "codex", 60, 40, &declining},
+		{"steady", "claude", 40, 42, &healthy},
+	} {
+		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", encoded(t, map[string]any{"account_key": spec.key, "harness": spec.harness, "daemon_id": "daily-daemon", "label": spec.key, "max_parallel_runs": 2}), 201, spec.dst)
+		ownFixtureAccount(t, owner, spec.dst)
+		err := db.InTenant(dbtest.Seed(ctx), appPool, owner.TenantID, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET linked_at=$2,last_probe_at=$3,last_probe_ok=true,last_daemon_generation='daily-generation',usage_floor_percent=20 WHERE id=$1`, spec.dst.ID, start.Add(-time.Hour), now); err != nil {
+				return err
+			}
+			return ingestReadings(ctx, tx, runner, spec.dst.ID, []capacity.Reading{
+				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: 10, ResetsAt: weeklyReset, ReadAt: start.Add(-time.Minute), Source: "harness"},
+				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: spec.baseline, ResetsAt: weeklyReset, ReadAt: start.Add(time.Minute), Source: "harness"},
+				{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: spec.used, ResetsAt: weeklyReset, ReadAt: now, Source: "harness"},
+			})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out agentplan.Snapshot
+	if err := db.InTenant(dbtest.Seed(ctx), appPool, owner.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = ReadPlanTx(ctx, tx, owner)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var down agentplan.DailyAccount
+	found := false
+	for _, a := range out.DailyState["codex"].Accounts {
+		if a.AccountID == declining.ID {
+			down, found = a, true
+		}
+	}
+	if !found || down.UsedPct == nil || down.LeftPct == nil || down.StartOfDayUsedPct == nil || down.LimitUsedPct == nil || *down.UsedPct != 40 || *down.LeftPct != 60 || *down.StartOfDayUsedPct != 60 || *down.LimitUsedPct != 70 {
+		t.Fatalf("declining weekly reading lost: %+v", down)
+	}
+	if out.DailyState["codex"].TodayPointsUsed == nil || *out.DailyState["codex"].TodayPointsUsed != 0 {
+		t.Fatalf("today consumption not clamped: %+v", out.DailyState["codex"])
+	}
+	if len(out.DailyState["claude"].Accounts) != 1 || out.DailyState["claude"].Accounts[0].AccountID != healthy.ID {
+		t.Fatal("declining account dropped the other harness")
+	}
+}

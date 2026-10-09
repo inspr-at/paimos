@@ -174,7 +174,9 @@ func ApplyDaily(a *DailyAccount, d DailySettings, defaultPoints int, now time.Ti
 	if a.StartOfDayUsedPct == nil || a.FloorPct == nil {
 		return nil
 	}
-	if !percent(*a.UsedPct) || !percent(*a.StartOfDayUsedPct) || !percent(*a.FloorPct) || *a.UsedPct < *a.StartOfDayUsedPct {
+	// A later sample may restate the same reset downward. Keep the reading and
+	// treat today's consumption as zero rather than failing the whole plan.
+	if !percent(*a.UsedPct) || !percent(*a.StartOfDayUsedPct) || !percent(*a.FloorPct) {
 		return errors.New("invalid daily usage")
 	}
 	points := defaultPoints

@@ -696,6 +696,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestDailyPlanAccountWindowsLocalMidnightMigrationAndPrivacy","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestDailyPlanReadKeepsDecliningWeeklyPercent","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestDenialAdmissionInterleavings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestExpiredCapacityHasNoStartFence","tier":"GATED-FULL"}
@@ -2349,6 +2351,8 @@
     {"kind":"go","package":"internal/agentpairing","name":"TestWatchSettingChangeDoesNotAffectActiveModeA","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestWorkstationLockOrderNegativeControls","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/agentplan","name":"TestApplyDailyKeepsDecliningUsedPercent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentplan","name":"TestCanStart","tier":"GATED-FULL"}
     ,
@@ -9026,11 +9030,15 @@
     ,
     {"kind":"go","package":"internal/views","name":"TestAgentsDailyWritesRevisionLegacyPreservationAndFailClosed","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/views","name":"TestAgentsPlanKeepsFutureBoostAfterTimezoneChange","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/views","name":"TestAgentsPlanLinkedPersonReadWriteAndConflicts","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/views","name":"TestAgentsPlanPrivateOwnershipValidationAndCounts","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/views","name":"TestAgentsPlanRevisionCheckedSaves","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/views","name":"TestAgentsPlanStays200WhenWeeklyPercentDeclines","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/views","name":"TestLegacyViewsMigrationScopeEventsAndRestore","tier":"ESSENTIAL"}
     ,

@@ -64,11 +64,11 @@ func PopulateDailyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, out *ag
 	out.Daily = map[string]agentplan.DailySettings{}
 	out.DailyState = map[string]agentplan.DailyState{}
 	for h, d := range saved {
+		// A timezone change can leave a previously accepted boost before a
+		// different local midnight. Keep it until that stored instant; the
+		// write path still requires the current midnight.
 		if d.BoostToday != nil && !now.Before(d.BoostToday.Until) {
 			d.BoostToday = nil
-		}
-		if d.BoostToday != nil && !d.BoostToday.Until.Equal(end) {
-			return errors.New("invalid stored boost midnight")
 		}
 		out.Daily[h] = d
 	}
