@@ -9,6 +9,8 @@ withdraw. The first outcome is final.
 The server adds a native `stepup` source to the Decision Desk projection.
 Pending requests hold work and sort with held approvals by expiry. The
 request API supplies before/after snapshots and method-bearing decided history.
+Desk visibility checks only registered target permissions, retaining workspace
+and project coverage within the existing 1000-project limit.
 The desk and phone UI extensions are separate delivery packages.
 
 The first typed mutation is a shipped feature override, requiring
@@ -63,3 +65,14 @@ migrations against an isolated PostgreSQL 18 fixture. Docker was unavailable
 on the test host, so the image-based compatibility gate remains for
 coordinator CI. Cross-family review, merge and release remain coordinator
 responsibilities; the worker did not push or deploy.
+
+Fix round 2 adds a regression at 1000 projects covering owners, minimal
+workspace target-permission holders and denied project-bound readers. It
+fails against the original `debe5427f` production code: the owner's desk query
+carried 162 permission entries and 6,282,560 bytes. Registered target coverage
+now carries only `settings.manage` and stays below 64 KiB for that fixture.
+The affected remote Go suites, reporter contract and migration rollback/legacy
+kind regression passed on `3c1ab48f2`; the locked static check passed all 41
+checks with no skips. The remote runner used the host's installed Go 1.26.3
+after the Nix shell hit a missing derivation, and generated the OpenAPI output
+before contract tests. The non-blocking review findings remain follow-up work.
