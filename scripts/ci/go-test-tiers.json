@@ -6748,6 +6748,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardSetupAtomicPreviewApplyUndo","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestBoardSkipsAccountlessHarnessForRunnableSuccessor","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardTemplateDryRunPreservesOwnOrdersAndResetsAtomically","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardUsagePosturePersonPreconditionAndRevision","tier":"ESSENTIAL"}
@@ -6823,6 +6825,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestEscalationAreaPolicy","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestEscalationRouteGrantsAndLocks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestEscalationSkipsAccountlessHarnessForRunnableSuccessor","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestEscalationUnknownAdmissionWaits","tier":"ESSENTIAL"}
     ,

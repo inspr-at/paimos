@@ -9,6 +9,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentplan"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -131,6 +132,120 @@ func TestResolverProjectDailyCapsAndContextLadder(t *testing.T) {
 				return nil
 			})
 		})
+	}
+}
+
+// Risk: an accountless first board line stops selection before a later line
+// with an allowed account, leaving dispatch with an unlaunchable preview.
+func TestBoardSkipsAccountlessHarnessForRunnableSuccessor(t *testing.T) {
+	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+		ctx := t.Context()
+		now, err := dbNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		account, successor := accountlessSuccessorFixture(t, tx, p, now)
+		var board string
+		if err := tx.QueryRow(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,template,thinking,usage,set_by) VALUES($1,'workspace','balanced','max','balanced',$2) RETURNING id::text`, p.TenantID, p.ID).Scan(&board); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,effort,set_by) VALUES($1,$2,'backend','first',ARRAY['anthropic:opus','openai:astra'],'xhigh',$3)`, p.TenantID, board, p.ID); err != nil {
+			return err
+		}
+		out, err := resolveBoardWork(ctx, tx, p, WorkQuery{Role: "build", Area: "backend"}, now, nil)
+		if err != nil {
+			return err
+		}
+		if out == nil {
+			t.Fatal("fixture did not adopt the board")
+		}
+		assertRunnableSuccessor(t, *out, account, successor, "no qualified account with available capacity")
+		if out.Trace.CardIndex != 2 {
+			t.Fatalf("board did not continue to the second line: %+v", out.Trace)
+		}
+		return nil
+	})
+}
+
+// Risk: an accountless stronger route hides the next qualified escalation
+// route instead of letting it proceed to live admission.
+func TestEscalationSkipsAccountlessHarnessForRunnableSuccessor(t *testing.T) {
+	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+		ctx := t.Context()
+		now, err := dbNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		account, successor := accountlessSuccessorFixture(t, tx, p, now)
+		if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes WHERE role='build-hard'`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,profile_id,position) SELECT $1,'build-hard',id,CASE slug WHEN 'claude-opus-xhigh' THEN 0 ELSE 1 END FROM model_profiles WHERE slug IN ('claude-opus-xhigh','codex-astra-xhigh')`, p.TenantID); err != nil {
+			return err
+		}
+		out, err := ResolveEscalation(ctx, tx, p, WorkQuery{Role: "build", Area: "backend"}, nil, now)
+		if err != nil {
+			return err
+		}
+		assertRunnableSuccessor(t, out, account, successor, "no qualified account; wait for live admission")
+		if len(out.Ladder) != 2 {
+			t.Fatalf("fixture did not exercise the two-route ladder: %+v", out.Ladder)
+		}
+		return nil
+	})
+}
+
+func accountlessSuccessorFixture(t *testing.T, tx pgx.Tx, p tenant.Principal, now time.Time) (account, profile string) {
+	t.Helper()
+	ctx := t.Context()
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='codex-astra-xhigh'`).Scan(&profile); err != nil {
+		t.Fatal(err)
+	}
+	var runner string
+	if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Successor runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,allowed_model_profile_ids) VALUES($1,'successor-codex','codex','successor-runner',$2,'Successor',$3,true,'generation',$4,ARRAY[$5::uuid]) RETURNING id::text`, p.TenantID, runner, now, p.ID, profile).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO account_use_cells(tenant_id,account_id,context_id,source,set_by) SELECT $1,$2,id,'person',$3 FROM work_contexts WHERE kind='default' ON CONFLICT DO NOTHING`, p.TenantID, account, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model,capacity_kind,capacity_source,capacity_read_at) VALUES($1,$2,$3::timestamptz-interval '1 hour',$3::timestamptz+interval '1 day','requests',1000,'unrestricted','5h','agentd',$3)`, p.TenantID, account, now); err != nil {
+		t.Fatal(err)
+	}
+	schedule := capacity.DefaultSchedule()
+	schedule.Override = "sprint"
+	schedule.Reserve = capacity.ReserveOff
+	raw, err := json.Marshal(schedule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, account, raw); err != nil {
+		t.Fatal(err)
+	}
+	return account, profile
+}
+
+func assertRunnableSuccessor(t *testing.T, out WorkResolution, account, profile, reason string) {
+	t.Helper()
+	if out.Profile == nil || out.Profile.ID != profile || out.Preview || out.CommandTemplate == "" || out.OwnerRequired || out.Trace.Blocked != "" || !slices.Equal(out.Trace.QualifyingAccountIDs, []string{account}) {
+		t.Fatalf("accountless harness prevented runnable successor: %+v", out)
+	}
+	if len(out.Ladder) < 2 || out.Ladder[0].Selected || !slices.Contains(out.Ladder[0].SkipReasons, reason) {
+		t.Fatalf("accountless first route was not skipped for missing capacity: %+v", out.Ladder)
+	}
+	selected := 0
+	for _, candidate := range out.Ladder {
+		if candidate.Selected {
+			selected++
+			if candidate.ProfileID != profile || len(candidate.SkipReasons) != 0 {
+				t.Fatalf("selected route was not the qualified successor: %+v", candidate)
+			}
+		}
+	}
+	if selected != 1 {
+		t.Fatalf("expected one selected successor, got %d: %+v", selected, out.Ladder)
 	}
 }
 
