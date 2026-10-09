@@ -794,6 +794,8 @@
         ,
         {"file":"tests/decision-text.spec.ts","listedTests":36,"weightSeconds":79.902439,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/delivery-arion-v5.spec.ts","listedTests":14,"weightSeconds":20,"weightSource":"aeon-1016-estimate"}
+        ,
         {"file":"tests/delivery-flow-lanes.spec.ts","listedTests":11,"weightSeconds":12,"weightSource":"aeon-1005-estimate"}
         ,
         {"file":"tests/delivery-flow-modes.spec.ts","listedTests":11,"weightSeconds":20,"weightSource":"aeon-1006-estimate"}
