@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/doctrinerepo"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -37,6 +39,7 @@ import (
 // GuardKey is the server secret for per-tenant HMAC of the private quotation
 // guard. It is copied, never logged, and never written to the database.
 type Options struct {
+	Repositories      *doctrinerepo.Pair
 	CredentialsDir    string
 	Client            *http.Client
 	App               AppConfig
@@ -52,6 +55,8 @@ type Module struct {
 	credentials       Credentials
 	client            *http.Client
 	app               AppConfig
+	repositories      doctrinerepo.Pair
+	privateIdentity   *regexp.Regexp
 	guardMaster       []byte
 	binaryAllowlist   map[string]string
 	analysis          AnalysisPolicy
@@ -68,7 +73,11 @@ func New(pool *pgxpool.Pool, opts Options) *Module {
 	if len(opts.GuardKey) >= 32 {
 		key = append([]byte(nil), opts.GuardKey...)
 	}
-	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client, app: opts.App, guardMaster: key, binaryAllowlist: maps.Clone(opts.BinaryAllowlist), analysis: opts.Analysis.defaults(), analysisLearnings: opts.AnalysisLearnings}
+	repositories := doctrinerepo.Default()
+	if opts.Repositories != nil {
+		repositories = *opts.Repositories
+	}
+	return &Module{repositories: repositories, privateIdentity: privateRepositoryIdentity(repositories.Private()), pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client, app: opts.App, guardMaster: key, binaryAllowlist: maps.Clone(opts.BinaryAllowlist), analysis: opts.Analysis.defaults(), analysisLearnings: opts.AnalysisLearnings}
 }
 
 func (m *Module) guardKey(tenantID string) []byte {
@@ -558,7 +567,7 @@ func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
 	// Resolving main is an index operation, never a prerequisite fetched on a
 	// refusing proposal. A failed refresh removes the exemption cache only.
 	var main *publicMainSnapshot
-	if fetchErr == nil && s.Repository == publicRepository && s.Visibility == "public" {
+	if fetchErr == nil && m.repositories.IsPublic(s.Repository) && s.Visibility == "public" {
 		main = m.readPublicMain(ctx, p.TenantID, s)
 	}
 	err := m.tx(ctx, p, "settings.manage", func(tx pgx.Tx) error {
@@ -617,7 +626,7 @@ func (m *Module) fetch(ctx context.Context, tenantID string, s Source) ([]File, 
 	}
 	// The visible index follows the configured paths. The quotation guard does
 	// not: a public proposal is checked against every file at the pin.
-	if s.Repository != privateRepository || s.Visibility != "private" || len(m.guardMaster) < 32 {
+	if !m.repositories.IsPrivate(s.Repository) || s.Visibility != "private" || len(m.guardMaster) < 32 {
 		return files, skipped, nil, nil
 	}
 	corpus, err := readPrivateCorpus(ctx, reader, s.Repository, s.Commit, m.guardKey(tenantID), m.binaryAllowlist)
@@ -673,7 +682,7 @@ func (m *Module) ensureTenantGuard(ctx context.Context, tenantID string) error {
 		}
 		key := m.guardKey(tenantID)
 		for _, s := range sources {
-			if s.Repository != privateRepository || s.Visibility != "private" || s.IndexedAt == nil || s.CredentialRef == "" {
+			if !m.repositories.IsPrivate(s.Repository) || s.Visibility != "private" || s.IndexedAt == nil || s.CredentialRef == "" {
 				continue
 			}
 			raw, err := loadGuardCorpus(ctx, tx, s)
@@ -707,7 +716,7 @@ func (m *Module) rebuildGuard(ctx context.Context, tenantID, id string) error {
 	}); err != nil {
 		return err
 	}
-	if s.Repository != privateRepository || s.Visibility != "private" || s.IndexedAt == nil || s.CredentialRef == "" {
+	if !m.repositories.IsPrivate(s.Repository) || s.Visibility != "private" || s.IndexedAt == nil || s.CredentialRef == "" {
 		return nil
 	}
 	reader, err := m.reader(tenantID, s.Repository, s.CredentialRef)

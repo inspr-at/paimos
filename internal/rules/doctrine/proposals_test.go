@@ -22,13 +22,18 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/doctrinerepo"
 )
+
+const publicRepository = doctrinerepo.DefaultPublic
+const privateRepository = doctrinerepo.DefaultPrivate
 
 // A fake forge, including installation exchange, PRs, the independent gate,
 // merge and the owning repo's asynchronous release receiver. Never GitHub.
 type proposalForge struct {
 	t               *testing.T
 	reader          *fakeGitHub
+	repositories    doctrinerepo.Pair
 	key             *rsa.PrivateKey
 	writes          int
 	trees           int
@@ -99,13 +104,20 @@ func (f *proposalForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Permissions  map[string]string `json:"permissions"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&request)
-		if (len(request.Repositories) != 1 || (request.Repositories[0] != "inspr-modules" && request.Repositories[0] != "inspr-doctrine-private")) || len(request.Permissions) != 2 || request.Permissions["contents"] != "write" || request.Permissions["pull_requests"] != "write" {
+		repo := ""
+		if len(request.Repositories) == 1 {
+			for _, allowed := range []string{f.repositories.Public(), f.repositories.Private()} {
+				if allowed != "" && request.Repositories[0] == strings.SplitN(allowed, "/", 2)[1] {
+					repo = allowed
+				}
+			}
+		}
+		if repo == "" || len(request.Permissions) != 2 || request.Permissions["contents"] != "write" || request.Permissions["pull_requests"] != "write" {
 			f.t.Error("token was not narrowly scoped")
 			w.WriteHeader(400)
 			return
 		}
-		repo := "inspr-at/" + request.Repositories[0]
-		private := repo == privateRepository
+		private := f.repositories.IsPrivate(repo)
 		if f.wrongVisibility {
 			private = !private
 		}
@@ -196,7 +208,7 @@ func (f *proposalForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		send(map[string]any{"object": map[string]string{"sha": f.refs[repo+"refs/heads/"+strings.TrimPrefix(suffix, "/git/ref/heads/")]}})
 	case suffix == "/pulls" && r.Method == "GET":
 		var out = []pull{}
-		head := strings.TrimPrefix(r.URL.Query().Get("head"), "inspr-at:")
+		head := strings.TrimPrefix(r.URL.Query().Get("head"), parts[0]+":")
 		if pr, ok := f.pulls[repo+head]; ok {
 			out = append(out, pr)
 		}
@@ -310,11 +322,22 @@ func (f *proposalForge) green() {
 	f.reviews = []gateReview{review}
 }
 func newProposalFixture(t *testing.T) (doctrineFixture, *proposalForge, *Module) {
+	return newProposalFixtureWithRepositories(t, nil)
+}
+
+func newProposalFixtureWithRepositories(t *testing.T, configured *doctrinerepo.Pair) (doctrineFixture, *proposalForge, *Module) {
+	t.Helper()
+	repositories := doctrinerepo.Default()
+	if configured != nil {
+		repositories = *configured
+	}
 	d := dbtest.Open(t)
 	reader, _ := newFakeGitHub(t)
-	reader.commit(publicRepository, fixtureCommit, fixtureFiles(), "main")
-	reader.commit(privateRepository, fixtureCommit, fixtureFiles(), "main")
-	reader.commit(publicRepository, privateSHA, fixtureFiles(), "refs/tags/v26.9.29.1")
+	if repositories.Public() != "" {
+		reader.commit(repositories.Public(), fixtureCommit, fixtureFiles(), "main")
+		reader.commit(repositories.Public(), privateSHA, fixtureFiles(), "refs/tags/v26.9.29.1")
+	}
+	reader.commit(repositories.Private(), fixtureCommit, fixtureFiles(), "main")
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal("generate test key")
@@ -324,7 +347,7 @@ func newProposalFixture(t *testing.T) (doctrineFixture, *proposalForge, *Module)
 	if err = os.WriteFile(filepath.Join(dir, "app-key"), raw, 0600); err != nil {
 		t.Fatal("write test key")
 	}
-	forge := &proposalForge{t: t, reader: reader, key: key, refs: map[string]string{}, pulls: map[string]pull{}, protected: true}
+	forge := &proposalForge{t: t, repositories: repositories, reader: reader, key: key, refs: map[string]string{}, pulls: map[string]pull{}, protected: true}
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Scheme != "https" || r.URL.Host != "api.github.com" {
 			t.Fatal("proposal request left the fixed GitHub origin")
@@ -333,10 +356,124 @@ func newProposalFixture(t *testing.T) (doctrineFixture, *proposalForge, *Module)
 		forge.ServeHTTP(w, r)
 		return w.Result(), nil
 	})}
-	m := New(d.App, Options{CredentialsDir: dir, Client: client, GuardKey: testGuardMaster(), App: AppConfig{ID: "8", InstallationID: "9", KeyRef: "app-key", GateLogin: "independent-gate[bot]", DCOAcknowledged: true}})
+	m := New(d.App, Options{Repositories: configured, CredentialsDir: dir, Client: client, GuardKey: testGuardMaster(), App: AppConfig{ID: "8", InstallationID: "9", KeyRef: "app-key", GateLogin: "independent-gate[bot]", DCOAcknowledged: true}})
 	mux := http.NewServeMux()
 	m.Mount(mux)
 	return doctrineFixture{t: t, d: d, mux: mux, fake: reader}, forge, m
+}
+
+// R11/R14: changing the deployment boundary must neither publish to a read-only
+// public pack nor bypass identity, quotation, credential or person-only gates.
+func TestDeploymentDoctrineRepositoryBoundary(t *testing.T) {
+	for _, public := range []string{"", "library-team/shared-doctrine"} {
+		name := "private only"
+		if public != "" {
+			name = "custom pair"
+		}
+		t.Run(name, func(t *testing.T) {
+			pair, err := doctrinerepo.Parse(public, "augmentoring-team/agm-doctrine")
+			if err != nil {
+				t.Fatal(err)
+			}
+			f, forge, m := newProposalFixtureWithRepositories(t, &pair)
+			tid := f.tenant("configured-doctrine")
+			m.app.TenantID = tid
+			owner := f.principal(tid, "person", "owner", "admin", nil, "")
+			agent := f.principal(tid, "agent", "builder", "admin", []string{"rules.read", "rules.write"}, owner.ID)
+			allowCredential(t, m.credentials.Dir, "app-key", tid, pair.Private())
+			private := seedPrivateGuard(t, f, m, owner)
+			file, rule := ruleWith(t, &private, guardRule)
+			in := ProposalInput{RequestID: "10430000-0000-4000-8000-000000000001", SourceID: private.ID, Path: file.Path, RuleKey: rule.Key, RuleSHA: rule.SHA256, Source: strings.Replace(rule.Source, "keeps seven", "keeps eight", 1), Explanation: "Private operator@example.test context."}
+			in.TLDR.EN = "Retain private planning notebooks."
+			refusal := func(input ProposalInput, code string) {
+				t.Helper()
+				before := forge.calls
+				var got failure
+				if err := json.Unmarshal(f.call(owner, "POST", "/api/rules/doctrine/proposals", input, 422), &got); err != nil || got.Code != code || forge.calls != before {
+					t.Fatalf("expected %s before any GitHub call", code)
+				}
+			}
+			bad := in
+			bad.Explanation = "token=" + strings.Repeat("A9", 16)
+			refusal(bad, "credential_text")
+			before := forge.calls
+			otherID := f.tenant("configured-other")
+			allowCredential(t, m.credentials.Dir, "app-key", otherID, pair.Private())
+			if g, err := m.appClient(t.Context(), otherID, pair.Private()); g != nil || !errors.Is(err, ErrCredential) || forge.calls != before {
+				t.Fatal("repository grant enabled a second writer tenant")
+			}
+			allowCredential(t, m.credentials.Dir, "app-key", tid, pair.Private())
+			forge.wrongVisibility = true
+			f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 422)
+			forge.wrongVisibility = false
+			if forge.writes != 0 || forge.revocations != 1 {
+				t.Fatal("private repository becoming public was not refused and revoked")
+			}
+			// Public INSPR packs remain readable in either deployment, with no
+			// draft or PR authority even if an operator grants the App access.
+			f.fake.commit(publicRepository, fixtureCommit, fixtureFiles(), "main")
+			readOnly := find(f.layer(owner, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: publicRepository, Visibility: "public", Ref: "main"}), publicRepository)
+			if readOnly == nil || readOnly.State != "ready" {
+				t.Fatal("read-only public packs were not indexed")
+			}
+			publicFile, publicRule := ruleWith(t, readOnly, "Small commits.")
+			readOnlyInput := ProposalInput{RequestID: "10430000-0000-4000-8000-000000000002", SourceID: readOnly.ID, Path: publicFile.Path, RuleKey: publicRule.Key, RuleSHA: publicRule.SHA256, Source: strings.Replace(publicRule.Source, "Small commits.", "Small reviewed commits.", 1), Explanation: "Keep review focused."}
+			readOnlyInput.TLDR.EN = "Keep commits small."
+			allowCredential(t, m.credentials.Dir, "app-key", tid, publicRepository)
+			refusal(readOnlyInput, "unsupported_repository")
+			readOnlyDraft := InboxInput{RequestID: readOnlyInput.RequestID, SourceID: readOnly.ID, Path: publicFile.Path, RuleKey: publicRule.Key, RuleSHA: publicRule.SHA256, Source: readOnlyInput.Source, Why: readOnlyInput.Explanation, TLDR: &inboxTLDR{EN: readOnlyInput.TLDR.EN}}
+			before = forge.calls
+			if got := f.call(agent, "POST", "/api/rules/doctrine/inbox", readOnlyDraft, 422); !strings.Contains(string(got), "unsupported_repository") || forge.calls != before {
+				t.Fatal("agent draft reached the read-only public repository")
+			}
+			allowCredential(t, m.credentials.Dir, "app-key", tid, pair.Private())
+			if public != "" {
+				pub := find(f.layer(owner, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: public, Visibility: "public", Ref: "main"}), public)
+				pubFile, pubRule := ruleWith(t, pub, "Small commits.")
+				publicInput := readOnlyInput
+				publicInput.SourceID, publicInput.Path, publicInput.RuleKey, publicInput.RuleSHA = pub.ID, pubFile.Path, pubRule.Key, pubRule.SHA256
+				bad = publicInput
+				bad.Explanation = "Contact operator@example.test"
+				refusal(bad, "public_identity")
+				bad.Explanation = "See augmentoring-team/agm-doctrine"
+				refusal(bad, "public_identity")
+				bad = publicInput
+				bad.Explanation = guardRule
+				refusal(bad, "private_doctrine")
+				// An unindexed public pin cannot silently turn off the guard.
+				f.call(owner, "DELETE", "/api/rules/doctrine/sources/"+private.ID, nil, 200)
+				refusal(publicInput, "private_index_unavailable")
+				private = seedPrivateGuard(t, f, m, owner)
+				in.SourceID = private.ID
+				allowCredential(t, m.credentials.Dir, "app-key", tid, public)
+				f.call(owner, "POST", "/api/rules/doctrine/proposals", publicInput, 200)
+				allowCredential(t, m.credentials.Dir, "app-key", tid, pair.Private())
+			}
+			// The agent saves a draft locally; a person sends it to the custom
+			// private repository through the same publication and App checks.
+			var proposal Proposal
+			draft := InboxInput{RequestID: in.RequestID, SourceID: in.SourceID, Path: in.Path, RuleKey: in.RuleKey, RuleSHA: in.RuleSHA, Source: in.Source, Why: in.Explanation, TLDR: &inboxTLDR{EN: in.TLDR.EN}}
+			before = forge.calls
+			if err := json.Unmarshal(f.call(agent, "POST", "/api/rules/doctrine/inbox", draft, 200), &proposal); err != nil || !proposal.Inbox || proposal.PRNumber != 0 || forge.calls != before {
+				t.Fatal("agent private draft published or failed")
+			}
+			path := "/api/rules/doctrine/inbox/" + proposal.ID + "/pull-request"
+			f.call(agent, "POST", path, nil, 403)
+			if err := json.Unmarshal(f.call(owner, "POST", path, nil, 200), &proposal); err != nil || proposal.Repository != pair.Private() || proposal.PRNumber == 0 || !strings.Contains(proposal.PRURL, "/agm-doctrine/") {
+				t.Fatal("person did not publish to the configured private repository")
+			}
+			approve := "/api/rules/doctrine/proposals/" + proposal.ID + "/approve"
+			f.call(owner, "POST", approve, map[string]string{"head_sha": proposal.HeadSHA}, 409)
+			if forge.mergeCalls != 0 {
+				t.Fatal("configured repository bypassed the independent gate")
+			}
+			forge.green()
+			f.call(owner, "POST", approve, map[string]string{"head_sha": proposal.HeadSHA}, 200)
+			if forge.mergeCalls != 1 || forge.dispatches != 1 {
+				t.Fatal("configured private proposal did not reach its gated release dispatch")
+			}
+		})
+	}
 }
 
 func TestAppCredentialRequiresTenantRepositoryGrant(t *testing.T) {
@@ -571,22 +708,22 @@ func TestProposalRoundTripAndSafety(t *testing.T) {
 
 func TestPublicGuardAndRuleEdit(t *testing.T) {
 	for _, text := range []string{"markus@", "a.barta.cm", "~/.inspr/secrets", "hsb1", "csb9", "mbp2606", "agm1", "dsc8", "imac0", "pm.barta", "paimos.agm", "hs.barta", "operator@example.test", "inspr-doctrine-private"} {
-		if guardPublic(publicRepository, text) == nil {
+		if New(nil, Options{}).guardPublic(publicRepository, text) == nil {
 			t.Errorf("guard missed fixture %q", text)
 		}
-		if guardPublic(privateRepository, text) != nil {
+		if New(nil, Options{}).guardPublic(privateRepository, text) != nil {
 			t.Error("private routing rejected identity")
 		}
 	}
 	for _, repo := range []string{publicRepository, privateRepository} {
 		for _, text := range []string{"token=abcdefghijklmnop", "-----BEGIN RSA PRIVATE KEY-----", "github_pat_syntheticFixtureOnly"} {
-			if guardPublic(repo, text) == nil {
+			if New(nil, Options{}).guardPublic(repo, text) == nil {
 				t.Fatal("credential-shaped text accepted for publication")
 			}
 		}
 	}
 	for _, text := range []string{"PPMAPIKEY", "PAIMOS_API_KEY", "Run tests before merging.", "markus-barta"} {
-		if guardPublic(publicRepository, text) != nil {
+		if New(nil, Options{}).guardPublic(publicRepository, text) != nil {
 			t.Errorf("public interface rejected %q", text)
 		}
 	}
@@ -603,7 +740,7 @@ func TestPublicGuardAndRuleEdit(t *testing.T) {
 	}
 	in := ProposalInput{Path: "docs/AGENTS-KERNEL.md", RuleKey: rule.Key, RuleSHA: rule.SHA256, Source: strings.Replace(rule.Source, "Why:", "Reason:", 1), Explanation: "Private edit"}
 	in.TLDR.EN = "A private operator@example.test explanation"
-	result, err := editRule(s, files, in)
+	result, err := New(nil, Options{}).editRule(s, files, in)
 	if err != nil || !strings.Contains(result[SidecarPath(in.Path)], in.TLDR.EN) {
 		t.Fatalf("private edit %v", err)
 	}
@@ -612,7 +749,7 @@ func TestPublicGuardAndRuleEdit(t *testing.T) {
 	}
 	s.Repository = publicRepository
 	s.Visibility = "public"
-	if _, err = editRule(s, files, in); err == nil {
+	if _, err = New(nil, Options{}).editRule(s, files, in); err == nil {
 		t.Fatal("public edit accepted private TLDR")
 	}
 }
@@ -746,13 +883,13 @@ func TestEditRejectsAmbiguousKeysAndMultipleSidecarDocuments(t *testing.T) {
 	rule := rules[0]
 	in := ProposalInput{Path: path, RuleKey: rule.Key, RuleSHA: rule.SHA256, Source: rule.Source, Explanation: "Clarify."}
 	in.TLDR.EN = "One line."
-	if _, err := editRule(s, files, in); err == nil {
+	if _, err := New(nil, Options{}).editRule(s, files, in); err == nil {
 		t.Fatal("an ambiguous key would overwrite another rule's TLDR")
 	}
 	files = []File{{Path: path, Content: []byte(fixtureKernel)}, {Path: SidecarPath(path), Content: []byte(fixtureSidecar + "\n---\nrules: {}\n")}}
 	rule = Render(s.Repository, s.Commit, false, files)[0].Rules[0]
 	in.RuleKey, in.RuleSHA, in.Source = rule.Key, rule.SHA256, rule.Source
-	if _, err := editRule(s, files, in); err == nil {
+	if _, err := New(nil, Options{}).editRule(s, files, in); err == nil {
 		t.Fatal("a second YAML document would have been silently discarded")
 	}
 }

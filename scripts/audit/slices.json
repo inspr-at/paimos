@@ -138,6 +138,7 @@
       "title": "Rules, doctrine and knowledge",
       "paths": [
         "internal/rules/**",
+        "internal/doctrinerepo/**",
         "internal/rulesimport/**",
         "internal/rulescompare/**",
         "internal/knowledge/**",
