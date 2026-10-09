@@ -192,6 +192,11 @@ func TestStepupSessionResultIsAtomicAndBound(t *testing.T) {
 				// First-use System creation must not acquire the audit counter
 				// before the inbox/FK writes. Inspect actual PostgreSQL locks,
 				// including those acquired inside SQL functions and triggers.
+				// Preserve the seeded actor and its audit, but force first use of
+				// the named System sender in this decision transaction.
+				if _, err := f.d.Admin.Exec(t.Context(), `UPDATE principals SET name='Existing System fixture' WHERE tenant_id=$1 AND name='System' AND roles @> ARRAY['system']::text[]`, f.agent.TenantID); err != nil {
+					t.Fatal(err)
+				}
 				var systemCount int
 				if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM principals WHERE tenant_id=$1 AND name='System' AND roles @> ARRAY['system']::text[]`, f.agent.TenantID).Scan(&systemCount); err != nil || systemCount != 0 {
 					t.Fatalf("fixture must exercise first-use System creation: %d %v", systemCount, err)
