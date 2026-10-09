@@ -391,6 +391,112 @@ it('Compare shows two lane sets on one relative axis and says when the target wa
   expect((view.stubNode('went').props.runs as modes.Went[]).map(w => w.title)).toEqual(['Release 126 (a → l)', 'Arion target'])
 })
 
+// The FlowView tests above stub the lanes. This mounts the real component: an open
+// release used to draw a finish line and a completed avatar even with ended_at null.
+type LaneNode = { tag: string; text: string; props: Record<string, unknown>; children: LaneNode[]; parent: LaneNode | null; clientWidth: number }
+const laneNode = (tag: string, text = ''): LaneNode => ({ tag, text, props: {}, children: [], parent: null, clientWidth: 960 })
+function detachLane(el: LaneNode) { if (el.parent) el.parent.children.splice(el.parent.children.indexOf(el), 1); el.parent = null }
+const laneRenderer = Vue.createRenderer<LaneNode, LaneNode>({
+  createElement: tag => laneNode(tag), createText: text => laneNode('#text', text), createComment: () => laneNode('#comment'),
+  setText: (el, text) => { el.text = text }, setElementText: (el, text) => { el.children = []; el.text = text },
+  parentNode: el => el.parent, nextSibling: el => el.parent?.children[el.parent.children.indexOf(el) + 1] ?? null,
+  patchProp: (el, key, _old, value) => { el.props[key] = value }, remove: detachLane,
+  insert: (child, parent, anchor) => {
+    detachLane(child); child.parent = parent
+    const i = anchor ? parent.children.indexOf(anchor) : -1
+    if (i < 0) parent.children.push(child); else parent.children.splice(i, 0, child)
+  },
+})
+const laneWalk = (el: LaneNode): LaneNode[] => [el, ...el.children.flatMap(laneWalk)]
+const laneWords = (el: LaneNode): string => el.text + el.children.map(laneWords).join('')
+function classText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value.map(classText).filter(Boolean).join(' ')
+  if (value && typeof value === 'object') return Object.entries(value as Record<string, unknown>).filter(([, on]) => on).map(([key]) => key).join(' ')
+  return ''
+}
+let lanesCompiled: Vue.Component | null = null
+function flowLanes(): Vue.Component {
+  if (lanesCompiled) return lanesCompiled
+  const stub = { __esModule: true, default: { inheritAttrs: true, props: ['name', 'size'], render: () => Vue.h('icon') } }
+  const modules: Record<string, unknown> = { vue: Vue, '../AppIcon.vue': stub, '../../lib/deliveryFlow': flow }
+  const source = readFileSync(new URL('../src/components/delivery/FlowLanes.vue', import.meta.url), 'utf8')
+  const { content } = compileScript(parse(source).descriptor, { id: 'flow-lanes-test', inlineTemplate: true, templateOptions: { compilerOptions: { hoistStatic: false } } })
+  const { outputText } = ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
+  const exports: { default?: Vue.Component } = {}
+  new Function('require', 'exports', outputText)((id: string) => { if (!(id in modules)) throw new Error(`Unexpected dependency ${id}`); return modules[id] }, exports)
+  return lanesCompiled = exports.default!
+}
+function mountLanes(data: FlowData) {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  vi.stubGlobal('document', {
+    body: { appendChild() {} }, fonts: { ready: Promise.resolve() },
+    createElementNS: () => ({ isConnected: false, style: {}, textContent: '', setAttribute() {}, appendChild() {}, remove() {}, getComputedTextLength: () => 0 }),
+  })
+  const sets = laneModel(data), timeline = createTimeline()
+  resetTimeline(timeline, data, { narrow: false })
+  const app = laneRenderer.createApp({ render: () => Vue.h(flowLanes(), { data, sets, timeline, selected: null, level: 'simple', lang: 'en', text: en }) })
+  const root = laneNode('root'); apps.push(app); app.mount(root)
+  return { timeline, nodes: () => laneWalk(root) }
+}
+const finishClasses = (nodes: LaneNode[]) => nodes.map(el => classText(el.props.class).trim().replace(/\s+/g, ' ')).filter(cls => cls.split(' ').includes('fl-finish'))
+function avatarNode(nodes: LaneNode[], tag: string) {
+  const found = nodes.filter(el => el.props['data-testid'] === 'flow-avatar' && laneWords(el).includes(tag))
+  expect(found, tag).toHaveLength(1)
+  return found[0]!
+}
+const translateX = (el: LaneNode) => {
+  const match = /^translate\(([-\d.]+)/.exec(String(el.props.transform))
+  expect(match, String(el.props.transform)).toBeTruthy()
+  return Number(match![1])
+}
+
+it('Compare lanes leave an open release without a finish line or a completed avatar', async () => {
+  // Ten recorded minutes of step a. ended_at null means the release has not gone live.
+  const release = (ended: number | null): ApiFlow => ({
+    ...answer(),
+    items: [{ ...answer().items[0]!, id: 'open', ended_at: ended == null ? null : at(ended) }],
+    steps: [{ ...answer().steps[0]!, id: 'sa', item_id: 'open', started_at: at(0), ended_at: at(10) }],
+    incidents: [],
+  })
+  const paint = async (ended: number | null) => {
+    const data = compareData(recordedRuns(release(ended), { extendOpen: false }).runs[0]!, arionTarget('en'))!
+    const view = mountLanes(data)
+    await Vue.nextTick()
+    const nodes = view.nodes()
+    expect(nodes.some(el => el.tag === 'svg')).toBe(true)
+    expect(nodes.some(el => classText(el.props.class).includes('fl-seg'))).toBe(true)
+    expect(nodes.filter(el => classText(el.props.class).split(' ').includes('fl-ttl')).map(laneWords)).toEqual(['Release 126 (a → l)', 'Arion target'])
+    return { data, view }
+  }
+  const open = await paint(null)
+  const recordedEnd = runEnd(open.data.sets[0]!.main)
+  expect(recordedEnd).toBe(10)
+  open.view.timeline.T = recordedEnd
+  await Vue.nextTick()
+  let nodes = open.view.nodes()
+  expect(finishClasses(nodes)).toEqual(['fl-finish tgt'])
+  expect(classText(avatarNode(nodes, '126').props.class)).not.toContain('done')
+  expect(classText(avatarNode(nodes, 'Target').props.class)).not.toContain('done')
+  // Past the recorded minutes the open figure stays with the playhead. Only the target has arrived.
+  open.view.timeline.T = open.data.play[1]
+  await Vue.nextTick()
+  nodes = open.view.nodes()
+  expect(finishClasses(nodes)).toEqual(['fl-finish tgt'])
+  const releaseAvatar = avatarNode(nodes, '126'), targetAvatar = avatarNode(nodes, 'Target')
+  expect(classText(releaseAvatar.props.class)).toBe('fl-av')
+  expect(classText(targetAvatar.props.class)).toContain('done')
+  expect(translateX(releaseAvatar)).toBeCloseTo(translateX(targetAvatar))
+  // A recorded end still finishes that release, and leaves the target unfinished until its own end.
+  const ended = await paint(10)
+  ended.view.timeline.T = 10
+  await Vue.nextTick()
+  nodes = ended.view.nodes()
+  expect(finishClasses(nodes)).toEqual(['fl-finish', 'fl-finish tgt'])
+  expect(classText(avatarNode(nodes, '126').props.class)).toContain('done')
+  expect(classText(avatarNode(nodes, 'Target').props.class)).not.toContain('done')
+})
+
 it('the example replays release 126 final and the changes so far', () => {
   const release = exampleReplay('r126')!, change = exampleReplay('c991')!
   expect(release.now).toBeNull()

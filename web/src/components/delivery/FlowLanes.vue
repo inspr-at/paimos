@@ -7,13 +7,13 @@
 // space or a sideways wheel pans; ⌘/Ctrl+wheel zooms around the pointer. Package 6
 // adds the avatar: the PAIMOS Orbit agent cube carrying the run's parcel, at the
 // playhead on the main run's current step (a clock badge while waiting, a red one in
-// an incident); in Compare it stops at its finish line.
+// an incident); in Compare it stops at a finish line only for the target or a run that has ended.
 import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import type { DeliveryLanguage } from '../../lib/delivery'
 import {
   CHAR_W, criticalPath, fitLabel, keyInput, laneFrame, minutesText, pick, placeIncidentCaption, rowPieces, runEnd, setTime, setWindow, stepAt, tickStep, timeLabel, wheelInput,
-  type FlowData, type FlowLevel, type FlowStep, type LaneItem, type LaneSet, type Timeline,
+  type FlowData, type FlowLevel, type FlowRun, type FlowStep, type LaneItem, type LaneSet, type Timeline,
 } from '../../lib/deliveryFlow'
 import type { FlowText } from '../../lib/deliveryFlowText'
 
@@ -95,6 +95,8 @@ const geo = computed(() => {
 })
 const rel = computed(() => props.data.origin == null)
 const live = computed(() => props.data.now != null)
+/** Compare's finish line and completed avatar: the target, or a run with a recorded end. An open release's last minute is elapsed time. */
+const arrived = (run: FlowRun) => !!run.isTarget || run.facts?.ended != null
 const at = (m: number) => timeLabel(props.data, m)
 const words = (step: FlowStep) => pick(props.level === 'simple' ? step.simple : step.expert, props.lang)
 const actor = (lane: string) => (narrow.value ? props.text.actors.short : props.text.actors[props.level])[lane as 'you']
@@ -174,7 +176,7 @@ const layout = computed(() => {
       const tx = g.X(target.start), tw = g.X(target.start + target.minutes) - tx
       targets.push({ key: `${si}:t`, x: tx, w: tw, label: `${props.text.target} ${minutesText(target.minutes)}`, lx: Math.max(g.x0 + 4, tx + tw + 5) })
     }
-    if (rel.value && path.length) finishes.push({ key: `${si}:f`, x: g.X(Math.max(...path.map(s => s.end))), y0: top - 2, y1: bottom + 2, target: !!set.main.isTarget })
+    if (rel.value && path.length && arrived(set.main)) finishes.push({ key: `${si}:f`, x: g.X(Math.max(...path.map(s => s.end))), y0: top - 2, y1: bottom + 2, target: !!set.main.isTarget })
     y += 24
   })
   return { rowH, lanes, pieces, titles, incidents, incidentLabels, connectors, targets, finishes }
@@ -214,7 +216,7 @@ const playhead = computed(() => {
   const label = at(props.timeline.T), w = label.length * 6.6 + 26, hit = coarse || narrow.value ? 44 : 14
   return { x: xp, label, w, hit, y: LANES_H - AX - 19 }
 })
-// The avatar of each set's main run, at the playhead (or at its finish line once done).
+// The avatar of each set's main run, at the playhead, or at its finish line once the target or a recorded end is reached.
 const avatars = computed(() => {
   const g = geo.value, T = props.timeline.T, out: { key: string; x: number; y: number; tag: string; pill: boolean; waiting: boolean; incident: boolean; done: boolean }[] = []
   const xp = g.X(T)
@@ -224,7 +226,7 @@ const avatars = computed(() => {
     if (!s || T < path[0]!.start - 1e-6) return
     const piece = layout.value.pieces.find(p => p.item?.step === s || p.items?.some(i => i.step === s))
     if (!piece) return
-    const end = runEnd(set.main), done = rel.value && T >= end, inc = set.main.incident
+    const end = runEnd(set.main), done = rel.value && arrived(set.main) && T >= end, inc = set.main.incident
     out.push({
       key: `${si}`, x: done ? g.X(end) : xp, y: piece.kind === 'cluster' ? piece.y - 1 : piece.y + 1, tag: set.main.tag, pill: !live.value,
       waiting: !done && s.kind === 'wait', incident: !done && !!inc && T >= inc.start && T < inc.end, done,

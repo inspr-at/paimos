@@ -14598,6 +14598,8 @@
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Compare calls an unfinished release elapsed so far, not live","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Compare lanes leave an open release without a finish line or a completed avatar","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Compare races a release from its step a against the Arion target on one relative axis","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Compare shows two lane sets on one relative axis and says when the target was live","tier":"ESSENTIAL"}
