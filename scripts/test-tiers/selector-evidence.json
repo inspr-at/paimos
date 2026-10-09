@@ -1511,5 +1511,38 @@
       "expectedFailureKey": "browser:tests/delivery-numbers.spec.ts:window, level and view switches keep every control still and are the person’s own"
     }
   ],
-  "prBody": "Go dependency fan-out over 300 extra cases now runs the full gate. Browser source selection requires complete per-spec V8 observations for the exact base tree, merged with imports; missing, stale, partial, new/renamed, CSS, asset and data inputs use the full browser layout. D3 remains A (CI_AFFECTED_LANE is unchanged).\n\nBaseline: Arion v5 W2 (2026-10-05 00:00–2026-10-09 04:00 UTC): first-attempt green 62.3% (266/427), required-check green 65.8%, PR CI p50 16.1 min, queue p50 15.4 min, 90 inferred ejections for 151 merged PRs.\n\nInstrumentation: nightly browser shards record V8 coverage with parsed-script observations retained across navigation; existing measurement artifacts contain completeness, exact tree, run and attempt plus per-case source identities. The planner verifies the full catalogue from successful exact-base nightly artifacts. Bounded fetches/scans and unobserved targets keep the full fallback; plan output records the fallback reason. This is dependency metadata, not reuse of test passes.\n\nCorrectness: focused tests cover the importing + non-importing navigation/HTML case (zero misses), Go/browser cap boundaries, new/unmapped/stale inputs, partial/failed/skipped/duplicate observations, scan bounds and symlinks. Recorded failure 37868981358 and all 80 historical change lists remain replayed. The attached selector-evidence.json compares 20 recent merged PRs (#425 through #410) before/after with zero omitted cases; all 20 already used full mode. Required static validation is reported at handoff.\n\nExisting test expectations for unsafe narrowing now assert the entire gate. Consumer-reader selection assertions remain exercised on bounded dependency fixtures; no application assertion or test was removed, loosened or skipped. New selector tests run in the existing fixed go-static regression lane. All new source files are owned by audit slice S7 (scripts/**).\n\nFollow-up owner: aeon-lead-claude (AEON-1014/AEON-1019 coordinator), to post the 7-day Delivery outcome on AEON-1019 after deployment: first-attempt green, inferred ejections, planner fallbacks/map completeness, and nightly coverage overhead. The coordinator owns cross-family review, PR publication and release gates."
+  "prBody": "Go dependency fan-out over 300 extra cases now runs the full gate. Browser source selection requires complete per-spec V8 observations for the exact base tree, merged with imports; missing, stale, partial, new/renamed, CSS, asset and data inputs use the full browser layout. D3 remains A (CI_AFFECTED_LANE is unchanged).\n\nBaseline: Arion v5 W2 (2026-10-05 00:00–2026-10-09 04:00 UTC): first-attempt green 62.3% (266/427), required-check green 65.8%, PR CI p50 16.1 min, queue p50 15.4 min, 90 inferred ejections for 151 merged PRs.\n\nInstrumentation: nightly browser shards record V8 coverage with parsed-script observations retained across navigation; existing measurement artifacts contain completeness, exact tree, run and attempt plus per-case source identities. The planner verifies the full catalogue from successful exact-base nightly artifacts. Bounded fetches/scans and unobserved targets keep the full fallback; plan output records the fallback reason. This is dependency metadata, not reuse of test passes.\n\nCorrectness: focused tests cover the importing + non-importing navigation/HTML case (zero misses), Go/browser cap boundaries, new/unmapped/stale inputs, partial/failed/skipped/duplicate observations, scan bounds and symlinks. Recorded failure 37868981358 and all 80 historical change lists remain replayed. The attached selector-evidence.json compares 20 recent merged PRs (#425 through #410) before/after with zero omitted cases; all 20 already used full mode. Approved remote static validation on mbp2606 exits 0: 40 checks passed, zero optional skips. Nine focused selector/coverage regressions pass. Playwright native bootstrap/listing passes; one targeted runtime check was refused by another live host-wide browser lock, with no bypass.\n\nExisting test expectations for unsafe narrowing now assert the entire gate. Consumer-reader selection assertions remain exercised on bounded dependency fixtures; no application assertion or test was removed, loosened or skipped. New selector tests run in the existing fixed go-static regression lane. All new source files are owned by audit slice S7 (scripts/**).\n\nFollow-up owner: aeon-lead-claude (AEON-1014/AEON-1019 coordinator), to post the 7-day Delivery outcome on AEON-1019 after deployment: first-attempt green, inferred ejections, planner fallbacks/map completeness, and nightly coverage overhead. The coordinator owns cross-family review, PR publication and release gates.\n\nWorkflow handoff: OPS owns ci.yml. The tier planner and tier runners currently have contents-only permissions and no GH_TOKEN for nightly-artifact reads. OPS must expose the existing read authority before hosted map-based source narrowing can activate; until then the full browser fallback is the intended behavior. No new credential or PR-mode change is requested. The first complete nightly map is verified after the coordinator publishes this change.",
+  "validation": {
+    "source_commit": "d158e40d0",
+    "remote_static": {
+      "runner": "mbp2606",
+      "command": "node scripts/ci-static.mjs --merge-main",
+      "exit_code": 0,
+      "passed": 40,
+      "optional_skipped": 0,
+      "seconds": 140.55
+    },
+    "focused_selector_and_coverage_regressions": {
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0
+    },
+    "replay": {
+      "recorded_changes": 80,
+      "recorded_CI_failure_cases": 1,
+      "misses": 0,
+      "recent_PR_comparisons": 20,
+      "omitted_cases": 0
+    },
+    "playwright_bootstrap": {
+      "spec": "tests/settings-shared.spec.ts",
+      "native_list_exit_code": 0,
+      "runtime": "refused by another live host-wide browser-suite lock; no lock bypass or signalling"
+    },
+    "workflow_transport_follow_up": {
+      "owner": "OPS / AEON coordinator",
+      "reason": "tier-plan and tier runners currently have contents-only permissions and no GH_TOKEN for nightly artifact reads; exposing the existing read authority is outside this worker write set",
+      "current_behavior": "full browser layout whenever artifact evidence is inaccessible; CI_AFFECTED_LANE remains unchanged"
+    }
+  }
 }
