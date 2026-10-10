@@ -6,7 +6,7 @@ set -euo pipefail
 # OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
 pgvector_image="${PGVECTOR_IMAGE:-ghcr.io/inspr-at/paimos-ci/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11}"
 
-for tool in docker python3 go; do
+for tool in docker python3 go git; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
 tag="${1:?usage: bash scripts/migration-compat.sh vYYMMDDhhmmss.0.0 sha256:DIGEST}"
@@ -107,12 +107,20 @@ start_image "$image_id"
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 echo "Previous release reads passed: $tag on the candidate schema"
 
+# Verify the pinned source remains below the capability floor before either
+# lane activates its policy, even when both lanes use the same image.
+floor_entry="$(git show "$floor_tag:internal/db/visibility.go")"
+[[ "$floor_entry" == *"func enterTenant("* && "$floor_entry" != *"aeon.account_use_capable"* ]] || {
+  echo 'Pinned rollback image must predate the account-use capability' >&2; exit 1;
+}
+
 # Verify the immutable pre-capability binary and its seeded reads before
 # activation. Exact SQLSTATE/entry, empty/populated pool and background-write
 # refusal assertions remain mandatory in the separate disposable database.
 if [[ "$probe_mode" = account-use-floor ]]; then
   python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
 else
+  python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db" --release-tag "$tag"
   # Use a fresh disposable database for the negative fixture. A capable latest
   # release must never be made to look incapable, or counted as a refusal.
   cleanup
@@ -122,11 +130,12 @@ else
 fi
 floor_image_id="$(docker image ls --quiet --no-trunc "$floor_image" | sort -u)"
 [[ "$floor_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable rollback boundary image ID' >&2; exit 1; }
+echo "Account-use rollback floor passed: $floor_tag on the candidate schema"
 echo "Account-use rollback boundary passed: $floor_tag on the candidate schema"
-echo "Migration compatibility passed: latest-release reads and below-floor account-use boundary"
+echo "Migration compatibility passed: latest-release reads and account-use probes, and below-floor account-use boundary"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations. Account-use refusal boundary %s; registry image ghcr.io/inspr-at/aeon@%s; loaded image %s passed the activated legacy probes.\n' \
-    "$previous_tag" "$previous_image" "$previous_image_id" "$floor_tag" "$floor_digest" "$floor_image_id" >> "$GITHUB_STEP_SUMMARY"
-  printf 'Rollback fixture %s; registry image %s; loaded image %s verified activated empty/populated pools refuse below-floor binaries.\n' \
+  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations and passed account-use probes.\n' \
+    "$previous_tag" "$previous_image" "$previous_image_id" >> "$GITHUB_STEP_SUMMARY"
+  printf 'Rollback fixture %s; registry image %s; loaded image %s passed non-activated reads and verified activated empty/populated pools refuse below-floor binaries.\n' \
     "$floor_tag" "$floor_image" "$floor_image_id" >> "$GITHUB_STEP_SUMMARY"
 fi
