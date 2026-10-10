@@ -353,8 +353,8 @@ func mergeOwnerCandidate(ctx context.Context, tx pgx.Tx, tid string, project *st
 	return nil, nil
 }
 
-// prepareMergeTx records the merge time with leaf completion, retaining other
-// fields and human checks.
+// prepareMergeTx records merge evidence for leaf completion and already-Done
+// leaves, retaining other fields and human checks.
 // Receipt lookup and writes share the tenant/tree fence. Events are returned
 // for the caller to append after the whole batch's resource locks and writes.
 func prepareMergeTx(ctx context.Context, tx pgx.Tx, tid, repo string, e *mergeEntry) (*events.Change, error) {
@@ -370,18 +370,28 @@ func prepareMergeTx(ctx context.Context, tx pgx.Tx, tid, repo string, e *mergeEn
 	if e.Result == "refused" {
 		return nil, nil
 	}
-	if ticketbenefits.Completed(e.category) && !(e.category == "done" && e.To == "delivered") {
+	alreadyDone := e.category == "done" && e.To != "delivered"
+	if ticketbenefits.Completed(e.category) && e.category != "done" {
 		e.Result = "already_complete"
 		return nil, nil
 	}
 	var after json.RawMessage
-	if err := tx.QueryRow(ctx, `UPDATE nodes SET state=$2,fields=jsonb_set(fields,'{merged_at}',to_jsonb($3::text)),status_autopilot='{}',updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING to_jsonb(nodes)`, e.Ticket, e.To, e.MergedAt.UTC().Format(time.RFC3339Nano)).Scan(&after); err != nil {
-		return nil, err
+	if alreadyDone {
+		// This is an evidence write, not another completion. Keep the exact
+		// configured Done state and all existing marks under the same fence.
+		if err := tx.QueryRow(ctx, `UPDATE nodes SET fields=jsonb_set(fields,'{merged_at}',to_jsonb($2::text)),updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING to_jsonb(nodes)`, e.Ticket, e.MergedAt.UTC().Format(time.RFC3339Nano)).Scan(&after); err != nil {
+			return nil, err
+		}
+		e.Result = "already_complete"
+	} else {
+		if err := tx.QueryRow(ctx, `UPDATE nodes SET state=$2,fields=jsonb_set(fields,'{merged_at}',to_jsonb($3::text)),status_autopilot='{}',updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING to_jsonb(nodes)`, e.Ticket, e.To, e.MergedAt.UTC().Format(time.RFC3339Nano)).Scan(&after); err != nil {
+			return nil, err
+		}
+		e.Result = "applied"
 	}
 	if _, err := tx.Exec(ctx, `UPDATE status_autopilot_proposals SET status='applied' WHERE node_id=$1 AND rule='merge_refused' AND anchor LIKE $2`, e.Ticket, identity+"/%"); err != nil {
 		return nil, err
 	}
-	e.Result = "applied"
 	meta, _ := json.Marshal(map[string]any{"job": "merge-done", "repository": repo, "pull_request": e.PR, "merge_sha": e.SHA, "head_sha": e.Head, "merged_at": e.MergedAt, "merge_identity": identity})
 	return &events.Change{Type: "delivery.merge_done", NodeID: &e.Ticket, Before: e.before, After: after, Metadata: meta}, nil
 }
