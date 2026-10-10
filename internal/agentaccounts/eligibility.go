@@ -4,6 +4,8 @@ package agentaccounts
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -34,6 +36,10 @@ func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time, projectIDs .
 	if err != nil {
 		return nil, err
 	}
+	advice, err := routingAdvice(ctx, tx, accounts, "", runRow{Purpose: "managed"}, now)
+	if err != nil {
+		return nil, err
+	}
 	out := map[string]HarnessHealth{}
 	for _, account := range accounts {
 		health := out[account.Harness]
@@ -45,17 +51,54 @@ func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time, projectIDs .
 		}
 		if account.State == "available" && probeFresh(account, now) && used[account.ID] < account.MaxParallel {
 			health.Available++
-			windows, wait, err := admission(ctx, tx, account, account.Windows, now, used[account.ID], runRow{Purpose: "managed"}, false)
-			if err != nil {
-				return nil, err
-			}
-			if wait == nil && windowWait(windows, now) == nil {
-				health.Dispatchable++
+		}
+		// The same routing projection is exposed by Settings and the Agents
+		// overview. Unknown quota is not converted into an exhausted allowance.
+		route := advice[account.ID]
+		if route.Wait == nil && route.AvailableSlots > 0 && route.Rank > 0 {
+			health.Dispatchable++
+		} else if route.Wait != nil {
+			reason := ModelWaitReason(account.Harness, route.Wait)
+			if !slices.Contains(health.Reasons, reason) {
+				health.Reasons = append(health.Reasons, reason)
 			}
 		}
 		out[account.Harness] = health
 	}
 	return out, nil
+}
+
+// ModelWaitReason describes the actual admission gate without account identity
+// or raw codes. A named reset is retained rather than guessed from missing quota.
+func ModelWaitReason(harness string, wait *CapacityWait) string {
+	name := map[string]string{"codex": "Codex", "claude": "Claude", "cursor": "Cursor", "grok": "Grok", "gemini": "Gemini", "pi": "Pi", "opencode": "OpenCode"}[harness]
+	if name == "" {
+		name = "Model"
+	}
+	cause := map[string]string{
+		"allowance":           "account is at its allowance or floor",
+		"vendor":              "account reported a vendor limit",
+		"reading":             "account needs a quota reading to check its saved floor",
+		"schedule":            "account is outside its scheduled hours",
+		"reserve":             "account capacity is kept for its owner",
+		"hold":                "account is on hold",
+		"offline":             "account has no recent successful sign-in check",
+		"sign_in":             "account needs signing in",
+		"state":               "account is paused",
+		"capacity":            "account has no free agent slots",
+		"approval":            "account needs approval for agent use",
+		"models":              "account has no allowed model",
+		"daily_limit":         "account is at its daily cap",
+		"daily_limit_unknown": "account's daily cap could not be checked",
+	}[wait.Code]
+	if cause == "" {
+		cause = "account cannot take new work right now"
+	}
+	until := ""
+	if wait.Until != nil {
+		until = " until " + wait.Until.UTC().Format(time.RFC3339)
+	}
+	return fmt.Sprintf("%s %s%s", name, cause, until)
 }
 
 func probeFresh(account Account, now time.Time) bool {

@@ -11,7 +11,7 @@ import { can, myPermissions } from '../../lib/authz'
 import { overviewAccounts, sharedByComputers, type OverviewAccount, type SignInReference } from '../../lib/accountsOverview'
 import { computerRemoval, describeEnrollmentStatus, describeComputerStatus, disconnectComputer, disconnectEnrollment, pairingPermissions, platformCaption, removeComputer, type PairingView } from '../../lib/agentPairing'
 import { machinesForAdd } from '../../lib/addAccount'
-import { isProblemSignin, quotaWindowWarns } from '../../lib/accountsGlance'
+import { isProblemSignin, signinStatus, quotaWindowWarns } from '../../lib/accountsGlance'
 import { hostCapacityReason } from '../../lib/hostCapacity'
 import { daysSummary, holdOptions, ownOverride, overrideDone, poolOfRow, reserveLevel, timeLabel, when, type CapacityWindow, type HoldOption, type Override, type PoolView } from '../../lib/capacity'
 import { toast } from '../../lib/toast'
@@ -65,11 +65,7 @@ watch(selectedKey, () => { menuOpen.value = false; renameOpen.value = false; bus
 watch([computer, account], () => { if (selected.value && !computer.value && !account.value) open.value = false })
 function computerState(c: PairingView) { return c.computer_state === 'revoked' ? `Removed${c.local_cleanup === 'pending' ? ' · cleanup pending' : ''}` : describeComputerStatus(c).stateLabel }
 function status(c: PairingView, id: string) {
-  const e = c.enrollments.find(e => e.account_id === id)
-  if (!e) return ''
-  if (c.computer_state === 'revoked' || e.state === 'revoked') return 'Blocked'
-  if (c.computer_state === 'draining' || e.state === 'draining') return 'Draining'
-  return describeEnrollmentStatus(c, e) || 'Not reported'
+  return signinStatus(c, id, capacity.rows.find(row => row.id === id), agents.now)
 }
 function references(a: OverviewAccount, c: PairingView) { return a.signins.filter(s => s.computer.computer_id === c.computer_id) }
 function mayVerify(s: SignInReference) { return manage.value && s.enrollment.can_verify === true && s.computer.computer_state === 'connected' && s.enrollment.state === 'connected' && s.computer.verification_capabilities?.[s.enrollment.harness]?.supported === true }

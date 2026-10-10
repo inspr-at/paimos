@@ -15,7 +15,7 @@ const isHarness = (value: string): value is Harness => (HARNESS_ORDER as string[
 export interface RegistryProfile {
   id: string; slug: string; version: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean; created_at: string
   display_name?: string; short_name?: string; model_version?: string; note?: string
-  source?: 'auto' | 'manual'; retire_at?: string | null; retired?: boolean; effort_level?: number | null; provider?: string
+  source?: 'auto' | 'manual'; origin?: 'shipped' | 'provider' | 'harness' | 'manual'; retire_at?: string | null; retired?: boolean; effort_level?: number | null; provider?: string
 }
 export interface RefreshSettings { agent_reports_enabled: boolean; auto_add_profiles: boolean; api_enabled: boolean; interval_minutes: number }
 export interface DiscoverySourceResult { state?: string; seen?: number; vendor?: string; account_id?: string }
@@ -72,7 +72,7 @@ export const restoreProfile = (id: string, signal?: AbortSignal) => request<{ pr
 // ---------- lines ----------
 
 export interface RegistryLine {
-  key: string; harness: Harness; model: string; name: string; displayName: string; note: string; efforts: string[]; route: string; source: 'auto' | 'manual'
+  key: string; harness: Harness; model: string; name: string; displayName: string; note: string; efforts: string[]; route: string; source: 'auto' | 'manual'; origin?: RegistryProfile['origin']
   enabled: boolean; isNew: boolean; retireAt: string | null; took: { at: string; was: string } | null; profileIds: string[]
 }
 export const lineKey = (harness: string, model: string) => `${harness}\u0000${model}`
@@ -111,7 +111,7 @@ export function buildLines(profiles: RegistryProfile[]): RegistryLine[] {
     const seen = new Set<string>()
     const enabled = group.some(profile => profile.enabled), source = group.some(profile => profile.source === 'manual') ? 'manual' : 'auto'
     lines.push({
-      key, harness, model: first.model, source, enabled, retireAt: retiring,
+      key, harness, model: first.model, source, origin: first.origin, enabled, retireAt: retiring,
       name: fullModelName({ ...first, label: first.model }),
       displayName: first.display_name || first.model,
       note: group.find(profile => profile.note)?.note ?? '',
@@ -172,7 +172,7 @@ export function takenText(line: RegistryLine, now = new Date()): string {
 }
 export function metaParts(line: RegistryLine, now = new Date()): string[] {
   const label = routeLabel(line.route)
-  return [HARNESS_NAME[line.harness], ...(label && label !== HARNESS_NAME[line.harness] ? [label] : []), line.model, line.source === 'auto' ? 'Auto-discovered' : 'Added by hand', ...(line.took ? [takenText(line, now)] : [])]
+  return [HARNESS_NAME[line.harness], ...(label && label !== HARNESS_NAME[line.harness] ? [label] : []), line.model, ({ shipped: 'Shipped', provider: 'From provider', harness: 'From harness', manual: 'Added by hand' }[line.origin ?? (line.source === 'manual' ? 'manual' : 'harness')]), ...(line.took ? [takenText(line, now)] : [])]
 }
 
 // ---------- the inline form ----------

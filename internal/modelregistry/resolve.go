@@ -175,6 +175,8 @@ func loadLadderSnapshot(ctx context.Context, tx pgx.Tx, role string, limit int) 
 			if step.Profile.Harness == "gemini" {
 				step.Profile.EffortLevel = harnesslaunch.GeminiEffortLevel(step.Profile.Effort)
 			}
+			step.Profile.Origin = profileOrigin(step.Profile, step.Profile.Source)
+			step.Profile.Source = profileSource(step.Profile.Source)
 			out = append(out, *step)
 		}
 	}
@@ -231,10 +233,12 @@ func skipReasons(step ladderStep, role roleDef, q resolveQuery, now time.Time, h
 	if h.Accounts > 0 && h.ContextDenied == h.Accounts {
 		reasons = append(reasons, agentaccounts.ContextSkipReason)
 	} else if h.Accounts > 0 {
-		if h.Available == 0 {
-			reasons = append(reasons, "account availability")
-		} else if h.Dispatchable == 0 {
-			reasons = append(reasons, "allowance")
+		if h.Dispatchable == 0 {
+			if len(h.Reasons) > 0 {
+				reasons = append(reasons, h.Reasons...)
+			} else {
+				reasons = append(reasons, "No account has a free agent slot")
+			}
 		}
 	}
 	if reasons == nil {

@@ -598,6 +598,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "inbox.read", true
 		}
 		return "inbox.send", true
+	case "model-preferences":
+		if read {
+			return "models.read", true
+		}
 	case "models":
 		if r.Method == http.MethodPost && len(parts) == 2 {
 			if parts[1] == "refresh" {

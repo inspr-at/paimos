@@ -363,7 +363,7 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 		t.Fatalf("account: %v", err)
 	}
 	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
-	if scout.Profile == nil || scout.Profile.ID != haiku.ID || scout.Ladder[0].SkipReasons[0] != "account availability" {
+	if scout.Profile == nil || scout.Profile.ID != haiku.ID || scout.Ladder[0].SkipReasons[0] != "Codex account has no recent successful sign-in check" {
 		t.Fatalf("stale probe %+v", scout)
 	}
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
@@ -383,7 +383,7 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 		t.Fatalf("window: %v", err)
 	}
 	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
-	if scout.Profile == nil || scout.Profile.ID != haiku.ID || scout.Ladder[0].SkipReasons[0] != "allowance" {
+	if scout.Profile == nil || scout.Profile.ID != haiku.ID || !strings.HasPrefix(scout.Ladder[0].SkipReasons[0], "Codex account is at its allowance or floor until ") {
 		t.Fatalf("full allowance %+v", scout)
 	}
 	other := makePrincipal(t, "beta", "person", "Bea", []string{"admin"})

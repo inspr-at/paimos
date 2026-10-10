@@ -193,7 +193,7 @@ func (m *Module) editLine(w http.ResponseWriter, r *http.Request) {
 			return fail(409, "replacement model already has active profiles")
 		}
 		family := harnesslaunch.ModelFamily(h, nextModel)
-		source := before[0].Source
+		source := before[0].Origin
 		out.Profiles = []Profile{}
 		for i, e := range in.Efforts {
 			// Known efforts keep the shared scale; novel native names use their

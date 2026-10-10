@@ -93,7 +93,7 @@ func TestCoordinatorKeysThroughRealHandlers(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		scopes []string
-	}{{"historical", authz.CoordinatorBaseScopes}, {"current", authz.CoordinatorKeyScopes}} {
+	}{{"workstation-agents", authz.CoordinatorBaseScopes}, {"aeon-coordinator", authz.CoordinatorKeyScopes}} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, humanCreator := range []bool{false, true} {
 				name, actor := tc.name+"-operator", tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}
@@ -115,6 +115,9 @@ func TestCoordinatorKeysThroughRealHandlers(t *testing.T) {
 				}
 				call(t, key.Token, http.MethodGet, "/api/models/resolve?role=build-hard", http.StatusOK)
 				call(t, key.Token, http.MethodGet, "/api/models", http.StatusOK)
+				for _, path := range []string{"/api/model-preferences", "/api/model-preferences/board", "/api/model-preferences/simple"} {
+					call(t, key.Token, http.MethodGet, path, http.StatusOK)
+				}
 				paths := []string{
 					"/api/rules/layers",
 					"/api/rules/sets?layer_id=" + layer.ID,
@@ -137,6 +140,7 @@ func TestCoordinatorKeysThroughRealHandlers(t *testing.T) {
 				}
 				call(t, key.Token, http.MethodPost, "/api/rules/layers", http.StatusForbidden)
 				call(t, key.Token, http.MethodPost, "/api/models", http.StatusForbidden)
+				call(t, key.Token, http.MethodPut, "/api/model-preferences", http.StatusForbidden)
 				// Stored scopes remain intact. The next real request must observe
 				// removal of all live bindings for either kind of coordinator key.
 				if _, err := adminPool.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, tenantID, key.PrincipalID); err != nil {
@@ -144,6 +148,7 @@ func TestCoordinatorKeysThroughRealHandlers(t *testing.T) {
 				}
 				call(t, key.Token, http.MethodGet, "/api/models/resolve?role=build-hard", http.StatusForbidden)
 				call(t, key.Token, http.MethodGet, "/api/models", http.StatusForbidden)
+				call(t, key.Token, http.MethodGet, "/api/model-preferences/simple", http.StatusForbidden)
 				call(t, key.Token, http.MethodGet, "/api/rules/layers", http.StatusForbidden)
 				// A different, narrower live role is not a coordinator binding.
 				if _, err := adminPool.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, tenantID, key.PrincipalID, nodeReaderRole); err != nil {

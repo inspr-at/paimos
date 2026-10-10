@@ -97,7 +97,7 @@ func TestMinimalModelSourceAndNoteOwnership(t *testing.T) {
 		t.Fatal("oversized note", status)
 	}
 	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
-	if profileBySlug(profiles, "codex-6-1-sol-high").Source != "auto" {
+	if profileBySlug(profiles, "codex-6-1-sol-high").Source != "auto" || profileBySlug(profiles, "codex-6-1-sol-high").Origin != "shipped" {
 		t.Fatal("seed source")
 	}
 }
@@ -691,3 +691,75 @@ func TestMinimalOmittedKindFollowsDefaultAndKeepsStoredTail(t *testing.T) {
 	}
 }
 func ptrInt(n int) *int { return &n }
+
+// Risk (AEON-1146 / AEON-990): missing quota stops every harness, or a real
+// vendor limit suppresses a healthy sibling and repeats once per effort/stage.
+func TestModelAllowanceUnknownAndMeasuredLimit(t *testing.T) {
+	admin, _ := boardFixture(t)
+	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	opus := profileBySlug(profiles, "claude-opus-xhigh")
+	sol := profileBySlug(profiles, "codex-6-1-sol-xhigh")
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"anthropic:opus", "openai:sol"}, "not": []string{}, "revision": 0}, ""), 200)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		now, err := dbNow(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		reset := now.Add(time.Hour)
+		schedule := capacity.DefaultSchedule("UTC")
+		schedule.Override, schedule.OverrideUntil, schedule.Reserve = "sprint", &reset, capacity.ReserveOff
+		raw, err := json.Marshal(schedule)
+		if err != nil {
+			return err
+		}
+		ids := map[string]string{}
+		for _, h := range []string{"claude", "codex"} {
+			var id string
+			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,state,last_probe_at,last_probe_ok,last_daemon_generation,owner_person_id) VALUES($1,$2,$2,'fixture',$3,$2,'available',$4,true,'fixture',$3) RETURNING id::text`, admin.TenantID, h, admin.ID, now).Scan(&id); err != nil {
+				return err
+			}
+			ids[h] = id
+			if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, admin.TenantID, admin.ID, id, raw); err != nil {
+				return err
+			}
+		}
+		query := WorkQuery{Role: "build", Column: "other", Area: "other", Situation: "first", WorkspaceOnly: true, ExplicitBoard: true}
+		unknown, err := resolveBoardWork(t.Context(), tx, admin, query, now, nil)
+		if err != nil {
+			return err
+		}
+		if unknown == nil || unknown.Profile == nil || unknown.Profile.ID != opus.ID || len(unknown.Ladder[0].SkipReasons) != 0 {
+			t.Fatalf("unknown quota must select top Claude profile: %+v", unknown)
+		}
+		used := 14.0
+		for _, amount := range []float64{used, 100} {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','',10080,$3,$4,$5,'harness') ON CONFLICT(tenant_id,account_id,window_kind,bucket,read_at,source,phase) DO UPDATE SET used_percent=EXCLUDED.used_percent`, admin.TenantID, ids["claude"], amount, reset, now); err != nil {
+				return err
+			}
+			out, err := resolveBoardWork(t.Context(), tx, admin, query, now, nil)
+			if err != nil {
+				return err
+			}
+			if amount < 100 {
+				if out.Profile == nil || out.Profile.ID != opus.ID {
+					t.Fatalf("under-limit Claude must be eligible: %+v", out)
+				}
+			} else {
+				if out.Profile == nil || out.Profile.ID != sol.ID {
+					t.Fatalf("only exhausted account's routes must be skipped: %+v", out)
+				}
+				reasons := []string{}
+				for _, step := range out.Ladder {
+					if step.ProfileID == opus.ID {
+						reasons = append(reasons, step.SkipReasons...)
+					}
+				}
+				text := joinReasons(reasons)
+				if !strings.Contains(text, "Claude account reported a vendor limit until "+reset.UTC().Format(time.RFC3339)) || strings.Contains(text, ";") {
+					t.Fatalf("one human sentence with reset required: %q", text)
+				}
+			}
+		}
+		return nil
+	})
+}

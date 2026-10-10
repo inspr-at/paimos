@@ -52,8 +52,10 @@ describe('registry lines', () => {
   })
   it('describes a line as harness, route (when it adds something), id, source and what was taken on', () => {
     const [codex, cursor] = [buildLines([sol('high', 3)])[0]!, buildLines([profile({ harness: 'cursor', model: 'composer-2.5', effort: 'default', family: 'cursor' })])[0]!]
-    expect(metaParts(codex)).toEqual(['Codex', 'OpenAI', 'gpt-6.1-sol', 'Auto-discovered'])
-    expect(metaParts(cursor)).toEqual(['Cursor', 'composer-2.5', 'Auto-discovered'])
+    expect(metaParts(codex)).toEqual(['Codex', 'OpenAI', 'gpt-6.1-sol', 'From harness'])
+    expect(metaParts(cursor)).toEqual(['Cursor', 'composer-2.5', 'From harness'])
+    expect(metaParts({ ...codex, origin: 'shipped' }).at(-1)).toBe('Shipped')
+    expect(metaParts({ ...codex, origin: 'provider' }).at(-1)).toBe('From provider')
   })
 })
 

@@ -878,6 +878,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRankDrainGrantAndStaleProbe","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestReadinessAndHarnessHealthShareRoutingSignal","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestReadinessCheckGenerationAndRelinkInvalidate","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestReadinessCheckOwnerCoalescingGapAndAudit","tier":"GATED-FULL"}
@@ -7199,6 +7201,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalSimpleReadPreservesFirstAndFallback","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalThinkingWriteKeepsNativeEffort","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelAllowanceUnknownAndMeasuredLimit","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelKeyMatchesAliasesAndAPIIDs","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,

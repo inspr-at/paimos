@@ -36,6 +36,7 @@ func (d Display) FullName() string { return strings.TrimSpace(d.DisplayName + " 
 // Profile is one immutable model pin.
 type Profile struct {
 	Source   string     `json:"source"`
+	Origin   string     `json:"origin"`
 	Note     string     `json:"note"`
 	RetireAt *time.Time `json:"retire_at"`
 	Retired  bool       `json:"retired"`
@@ -168,10 +169,13 @@ func insertActivatedProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	if in.ModelVersion != "" {
 		overrides["model_version"] = in.ModelVersion
 	}
+	if cause == modelactivation.ShippedCatalog {
+		in.Source = "shipped"
+	}
 	stored, err := modelactivation.Activate(ctx, tx, p, modelactivation.Pin{
 		Slug: in.Slug, Version: in.Version, Harness: in.Harness, Family: in.Family,
 		Model: in.Model, Effort: in.Effort, Tier: in.Tier, Enabled: enabled,
-		DisplayOverrides: overrides, Source: profileSource(in.Source), Note: in.Note,
+		DisplayOverrides: overrides, Source: in.Source, Note: in.Note,
 		RegisteredEffortLevel: in.RegisteredEffortLevel, Permission: "models.manage",
 	}, cause)
 	out = Profile{ID: stored.ID, Slug: stored.Slug, Version: stored.Version, Harness: stored.Harness,
@@ -186,6 +190,7 @@ func insertActivatedProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 		out.EffortLevel = harnesslaunch.GeminiEffortLevel(out.Effort)
 	}
 	out.Source, out.Note = profileSource(in.Source), in.Note
+	out.Origin = profileOrigin(out, in.Source)
 	if in.RegisteredEffortLevel != nil {
 		out.EffortLevel = in.RegisteredEffortLevel
 	}
@@ -251,9 +256,11 @@ func readProfiles(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]
 	out := []Profile{}
 	for rows.Next() {
 		var profile Profile
-		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider, &profile.Source, &profile.Note, &profile.RetireAt, &profile.Retired); err != nil {
+		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider, &profile.Origin, &profile.Note, &profile.RetireAt, &profile.Retired); err != nil {
 			return nil, err
 		}
+		profile.Source = profileSource(profile.Origin)
+		profile.Origin = profileOrigin(profile, profile.Origin)
 		if profile.Harness == "gemini" {
 			profile.EffortLevel = harnesslaunch.GeminiEffortLevel(profile.Effort)
 		}
@@ -547,4 +554,19 @@ func flushCatalogChanges(ctx context.Context, tx pgx.Tx, p tenant.Principal, cha
 		}
 	}
 	return nil
+}
+
+// Origin preserves the legacy auto/manual ceiling while exposing provenance.
+// Later working observations cannot relabel an immutable shipped pin.
+func profileOrigin(p Profile, stored string) string {
+	switch stored {
+	case "manual", "shipped", "provider", "harness":
+		return stored
+	}
+	for _, cp := range catalogProfiles() {
+		if cp.Slug == p.Slug && cp.Harness == p.Harness && cp.Model == p.Model && cp.Effort == p.Effort {
+			return "shipped"
+		}
+	}
+	return "harness"
 }

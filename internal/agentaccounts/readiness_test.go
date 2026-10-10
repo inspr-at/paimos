@@ -928,3 +928,48 @@ func TestBRestartHeartbeatSurvivesOldCheckFence(t *testing.T) {
 	}
 	callStatus(t, later, &f.runner, f.token, "POST", path+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g2", Available: true, Readiness: &ReadinessReport{CheckID: c.ID, BindingRevision: ptrRevision(0), Result: "success"}}), 200, nil)
 }
+
+// Risk: resolver health and the account pages disagree about unknown usage,
+// fresh room, genuine exhaustion or a saved floor without numeric evidence.
+func TestReadinessAndHarnessHealthShareRoutingSignal(t *testing.T) {
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "readiness-health", now)
+	for _, amount := range []float64{-1, 14, 100} {
+		if amount >= 0 {
+			readAt := now
+			if amount < 100 {
+				readAt = now.Add(-time.Minute)
+			}
+			f.report(t, amount, readAt, now.Add(time.Hour))
+		}
+		page := f.capacity(t)
+		err := db.InTenant(tenant.WithPrincipal(t.Context(), f.admin), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+			health, err := HarnessHealthAt(t.Context(), tx, now)
+			if err != nil {
+				return err
+			}
+			a, err := getAccount(t.Context(), tx, f.account.ID)
+			if err != nil {
+				return err
+			}
+			projection, err := loadReadiness(t.Context(), tx, a, now, 0)
+			if err != nil {
+				return err
+			}
+			ready := page.Routing.Wait == nil && page.Routing.AvailableSlots > 0
+			if (health["codex"].Dispatchable > 0) != ready || projection.CanTry != ready {
+				t.Fatalf("usage=%v page=%+v health=%+v readiness=%+v", amount, page.Routing, health, projection)
+			}
+			if amount < 100 && !ready {
+				t.Fatalf("unknown or under-limit account blocked: %+v", health)
+			}
+			if amount == 100 && (ready || len(health["codex"].Reasons) != 1 || !strings.Contains(health["codex"].Reasons[0], "until "+now.Add(time.Hour).Format(time.RFC3339))) {
+				t.Fatalf("exhaustion lacks one reset sentence: %+v", health)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
