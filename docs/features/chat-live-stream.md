@@ -2,6 +2,8 @@
 
 # Chat live stream and final outbox
 
+The server setting `AEON_CHAT_ENABLED` defaults to `false`; set it to `true` to enable chat routes (only `true` or `false` are accepted; unset or empty means off).
+
 The opt-in chat module adds `GET /api/chat-threads/{id}/live`. Two viewers of
 the same person's conversation receive the same normalized agent updates.
 Every frame and heartbeat checks current participant and project access.
