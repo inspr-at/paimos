@@ -92,6 +92,25 @@ func (b Broker) SettleTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 	if !workorders.UUID(grantID) || !key(in.EventKey) || !in.Usage.valid() || !pin(in.EvidenceDigest) {
 		return Grant{}, workorders.Fail(400, "invalid_settlement")
 	}
+	// Personal routine rows are absent from the daemon's ordinary projection.
+	// This exact run/grant reconciliation retains tenant RLS and checks current
+	// reporter authority under the shared fences before any ledger mutation.
+	var visibility, system string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.visible_projects',true),''),coalesce(current_setting('aeon.system',true),'')`).Scan(&visibility, &system); err != nil {
+		return Grant{}, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`); err != nil {
+		return Grant{}, err
+	}
+	g, err := b.settleTx(ctx, tx, p, runID, grantID, in)
+	if err != nil {
+		return Grant{}, err // caller must roll back every error
+	}
+	_, err = tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.system',$2,true)`, visibility, system)
+	return g, err
+}
+
+func (b Broker) settleTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID, grantID string, in Settlement) (Grant, error) {
 	r, err := begin(ctx, tx, p, runID)
 	if err != nil {
 		return Grant{}, err

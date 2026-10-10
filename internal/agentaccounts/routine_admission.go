@@ -70,7 +70,10 @@ func requireRoutineCapacityInputs(ctx context.Context, tx pgx.Tx, owner, runID, 
 		maximum int
 	}{
 		{`SELECT count(*) FROM (SELECT 1 FROM agent_accounts LIMIT 1025) x`, 1024},
-		{`SELECT count(*) FROM (SELECT 1 FROM account_allowance_windows WHERE removed_at IS NULL AND NOT capacity_retired LIMIT 4097) x`, 4096},
+		// Match the complete readAccountWindows/lockAccountWindows projection:
+		// retired history still carries holds, and live rules retain their
+		// removed source windows. Refuse before materializing or locking rows.
+		{`SELECT count(*) FROM (SELECT 1 FROM account_allowance_windows w WHERE w.removed_at IS NULL OR EXISTS (SELECT 1 FROM account_limit_rules l WHERE l.tenant_id=w.tenant_id AND l.from_window_id=w.id AND l.removed_at IS NULL) LIMIT 4097) x`, 4096},
 	} {
 		var count int
 		if err := tx.QueryRow(ctx, bound.query).Scan(&count); err != nil {

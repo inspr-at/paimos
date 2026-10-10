@@ -36,24 +36,32 @@ func routineParent(ctx context.Context, tx pgx.Tx, parent *string) (string, erro
 
 func routineParentInternal(ctx context.Context, tx pgx.Tx, parent string) (string, error) {
 	var enabled bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_budget_balances b JOIN routine_runs r ON r.tenant_id=b.tenant_id AND r.id=b.run_id JOIN nodes n ON n.project_id=r.output_project_id WHERE n.id=$1)`, parent).Scan(&enabled); err != nil {
+	// The frozen output project is not necessarily the subtree's current
+	// project after a move. Only an empty tenant ledger can skip ancestry.
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_budget_balances)`).Scan(&enabled); err != nil {
 		return "", err
 	}
 	if !enabled {
 		return "", nil
 	}
 	var run *string
-	var truncated bool
+	var truncated, moved bool
 	err := tx.QueryRow(ctx, `WITH RECURSIVE ancestors AS (
- SELECT id,parent_id,1 AS depth FROM nodes WHERE id=$1 AND deleted_at IS NULL
- UNION ALL SELECT n.id,n.parent_id,a.depth+1 FROM ancestors a JOIN nodes n ON n.id=a.parent_id WHERE a.depth<64 AND n.deleted_at IS NULL
- ) SELECT (SELECT r.id::text FROM ancestors a JOIN routine_runs r ON r.work_node_id=a.id JOIN routine_budget_balances b ON b.run_id=r.id ORDER BY a.depth LIMIT 1),
- EXISTS(SELECT 1 FROM ancestors WHERE depth=64 AND parent_id IS NOT NULL)`, parent).Scan(&run, &truncated)
+ SELECT tenant_id,id,parent_id,1 AS depth FROM nodes WHERE id=$1 AND deleted_at IS NULL
+ UNION ALL SELECT n.tenant_id,n.id,n.parent_id,a.depth+1 FROM ancestors a JOIN nodes n ON n.tenant_id=a.tenant_id AND n.id=a.parent_id WHERE a.depth<64 AND n.deleted_at IS NULL
+ ), lineage AS (
+ SELECT r.tenant_id,r.id,r.output_project_id FROM ancestors a JOIN routine_runs r ON r.tenant_id=a.tenant_id AND r.work_node_id=a.id JOIN routine_budget_balances b ON b.tenant_id=r.tenant_id AND b.run_id=r.id ORDER BY a.depth LIMIT 1
+ ) SELECT (SELECT id::text FROM lineage),
+ EXISTS(SELECT 1 FROM ancestors WHERE depth=64 AND parent_id IS NOT NULL),
+ EXISTS(SELECT 1 FROM lineage r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=$1 WHERE n.project_id IS DISTINCT FROM r.output_project_id)`, parent).Scan(&run, &truncated, &moved)
 	if err != nil {
 		return "", err
 	}
 	if truncated {
 		return "", Fail(409, "routine_ancestry_incomplete")
+	}
+	if moved {
+		return "", Fail(409, "routine_order_outside_lineage")
 	}
 	if run == nil {
 		return "", nil
