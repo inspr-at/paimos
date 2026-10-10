@@ -39,6 +39,7 @@ type Remote struct {
 	// Host capacity is negotiated from the server's own computer view; see
 	// hostCapacitySupported. now is injectable for tests.
 	hostCapacitySupport   int8
+	hostUnattendedSupport bool
 	hostCapacityCheckedAt time.Time
 	now                   func() time.Time
 }

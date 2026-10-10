@@ -600,7 +600,7 @@ paths:
   /agent-pairing/self/capacity:
     post:
       operationId: reportHostCapacity
-      description: Paired runtime run.claim required. Reports bounded, content-free host signals and returns current start admission. Server time determines freshness. Does not stop running agents. Activity is accepted only with owner opt-in.
+      description: 'Paired runtime run.claim required. Reports bounded, content-free host signals and returns current start admission. Server time determines freshness. Does not stop running agents. Activity is accepted only with owner opt-in. Optional unattended signals require unattended-v1 in the own computer server_capabilities. Unattended readiness is report-only and never changes ordinary run admission.'
       requestBody:
         required: true
         content:
@@ -849,6 +849,26 @@ components:
         power: {type: string, enum: [unknown, plugged_in, battery]}
         thermal: {type: string, enum: [unknown, normal, hot]}
         input_active: {type: [boolean, 'null']}
+        unattended: {$ref: '#/components/schemas/UnattendedSignals'}
+    UnattendedSignals:
+      type: object
+      additionalProperties: false
+      required: [login_session, idle_sleep, filevault]
+      description: 'Read-only Mac observations. Unknown probes stay unknown. No account names, UIDs, raw command output, credentials or host configuration writes.'
+      properties:
+        login_session: {type: string, enum: [unknown, ready, required], description: 'Ready means the daemon user owns the console session. Required includes the login window or another console user.'}
+        idle_sleep: {type: string, enum: [unknown, enabled, disabled], description: 'Current power profile only. Disabled is not a guarantee against lid, manual sleep, restart or power loss.'}
+        filevault: {type: string, enum: [unknown, on, off], description: 'Encryption status only. Never a request to disable FileVault or configure automatic login.'}
+    UnattendedView:
+      type: object
+      required: [status, reason, message, after_reboot_reason, after_reboot_message]
+      description: 'Report-only readiness for future routine dispatch. Ready is a recent observation, never an execution grant. Freshness is at most one minute using the enclosing reported_at and server time. Stale reports cannot distinguish sleep, reboot, awaiting login or network failure. Re-read inside final routine claim under the pairing mutation fence alongside all existing owner, account and runtime gates.'
+      properties:
+        status: {type: string, enum: [ready, wait]}
+        reason: {type: string, maxLength: 64, description: 'Empty only when ready. Stable unattended_* wait code.'}
+        message: {type: string, maxLength: 256}
+        after_reboot_reason: {type: string, maxLength: 64, description: 'Separate from current readiness. Mac LaunchAgents need a user login after reboot, with FileVault unlock when enabled.'}
+        after_reboot_message: {type: string, maxLength: 256}
     HostCapacityView:
       type: object
       required: [policy, running, queued, reason, load_limit, history]
@@ -860,6 +880,7 @@ components:
         queued: {type: integer, minimum: 0}
         reason: {type: string, description: Empty means allowed; otherwise the reason new starts wait.}
         load_limit: {type: number, minimum: 0}
+        unattended: {$ref: '#/components/schemas/UnattendedView'}
         history:
           type: array
           maxItems: 60
