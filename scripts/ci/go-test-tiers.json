@@ -1014,6 +1014,10 @@
     ,
     {"kind":"go","package":"internal/agentcompat","name":"TestSupportedWindow","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestACPChatOwnedTurnsAndRefusals","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestACPChatQueuedDeliveryExactlyOnceAndControlsPass","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestACPFailureAndVerificationFences","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestACPFailureReportsPreserveHistoricalContract","tier":"GATED-FULL"}

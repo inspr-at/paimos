@@ -51,28 +51,39 @@ func grokVariant(variant string) (grokSpec, error) {
 
 type grokProcess struct {
 	*wireProcess
-	proxy       *grokProxy
-	scratch     string
-	scratchInfo os.FileInfo
-	binding     GrokBinding
-	authBefore  grokAuthSnapshot
-	promptDone  chan error
-	mu          sync.Mutex
-	answer      strings.Builder
-	events      int
-	sessionID   string
-	model       string
-	observe     func(AdapterEvent)
-	usage       grokUsageTracker
-	violation   atomic.Bool
-	cleanOnce   sync.Once
+	conversation *acpProcess // Only ordinary owned inbox runs retain the session.
+	proxy        *grokProxy
+	scratch      string
+	scratchInfo  os.FileInfo
+	binding      GrokBinding
+	authBefore   grokAuthSnapshot
+	promptDone   chan error
+	mu           sync.Mutex
+	answer       strings.Builder
+	events       int
+	sessionID    string
+	model        string
+	observe      func(AdapterEvent)
+	usage        grokUsageTracker
+	violation    atomic.Bool
+	cleanOnce    sync.Once
 }
 
-func (p *grokProcess) Evidence() string                              { p.mu.Lock(); defer p.mu.Unlock(); return p.answer.String() }
-func (p *grokProcess) Control(context.Context, string, string) error { return ErrUnsupported }
-func (p *grokProcess) Stop(ctx context.Context) error                { p.proxy.stop(); return p.wireProcess.Stop(ctx) }
+func (p *grokProcess) Evidence() string { p.mu.Lock(); defer p.mu.Unlock(); return p.answer.String() }
+func (p *grokProcess) Control(ctx context.Context, op, text string) error {
+	if p.conversation == nil {
+		return ErrUnsupported
+	}
+	return p.conversation.Control(ctx, op, text)
+}
+func (p *grokProcess) Stop(ctx context.Context) error { p.proxy.stop(); return p.wireProcess.Stop(ctx) }
 func (p *grokProcess) Wait() error {
-	err := <-p.promptDone
+	var err error
+	if p.conversation != nil {
+		err = p.conversation.Wait()
+	} else {
+		err = <-p.promptDone
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	_ = p.Stop(ctx)
 	cancel()
@@ -172,6 +183,25 @@ func (a *GrokAdapter) startNative(ctx context.Context, r StartRequest, b GrokBin
 	}
 	p.limitVendor = Grok
 	gp := &grokProcess{wireProcess: p, proxy: proxy, scratch: scratch, scratchInfo: info, binding: b, authBefore: before, promptDone: make(chan error, 1), model: grokModel, observe: observe}
+	if r.InboxEnabled {
+		gp.conversation = &acpProcess{wireProcess: p, harness: Grok, model: grokModel, persistent: true, done: make(chan struct{}), idleTimeout: 10 * time.Minute, turnTimeout: 180 * time.Second}
+		gp.conversation.beforePrompt = func() error {
+			if gp.violation.Load() || proxy.violation.Load() || verifyGrokAssets(scratch) != nil || verifyGrokAuthUnchanged(b.AuthPath, b.PrincipalSHA256, before) != nil {
+				return errors.New("native Grok confinement or account changed")
+			}
+			gp.mu.Lock()
+			gp.answer.Reset()
+			gp.events = 0
+			gp.mu.Unlock()
+			return nil
+		}
+		gp.conversation.turnComplete = func() error {
+			if gp.Evidence() == "" || gp.violation.Load() || proxy.violation.Load() {
+				return errors.New("native Grok turn did not complete")
+			}
+			return nil
+		}
+	}
 	p.setOnEvent(gp.onEvent)
 	fail := func(e error) (Process, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -232,11 +262,26 @@ func (a *GrokAdapter) startNative(ctx context.Context, r StartRequest, b GrokBin
 	gp.mu.Lock()
 	gp.sessionID = session.SessionID
 	gp.mu.Unlock()
+	p.eventMu.Lock()
+	p.sessionID = session.SessionID
+	p.eventMu.Unlock()
 	if spec.digest == "" {
 		return fail(errors.New("native Grok binary unavailable"))
 	}
 	observe(AdapterEvent{Kind: "status", EffectiveModel: grokModel, ModelEvidence: "vendor_reported"})
+	if gp.conversation != nil {
+		gp.conversation.mu.Lock()
+		_, err = gp.conversation.promptLocked(op, r.Prompt)
+		gp.conversation.mu.Unlock()
+		if err != nil {
+			return fail(err)
+		}
+		started = true
+		return gp, nil
+	}
 	started = true
+	u := chatState("running")
+	observe(AdapterEvent{Chat: &u})
 	go func() {
 		turnCtx, turnCancel := context.WithTimeout(context.Background(), 180*time.Second)
 		defer turnCancel()
@@ -246,6 +291,10 @@ func (a *GrokAdapter) startNative(ctx context.Context, r StartRequest, b GrokBin
 		}
 		if e == nil && (json.Unmarshal(raw, &result) != nil || result.StopReason != "end_turn" || gp.Evidence() == "") {
 			e = errors.New("native Grok turn did not complete")
+		}
+		if e == nil {
+			u := chatState("idle")
+			observe(AdapterEvent{Chat: &u})
 		}
 		gp.promptDone <- e
 	}()
@@ -258,8 +307,20 @@ func (p *grokProcess) onEvent(raw json.RawMessage) {
 		Params json.RawMessage `json:"params"`
 		ID     json.RawMessage `json:"id"`
 	}
-	if json.Unmarshal(raw, &frame) != nil || len(frame.ID) > 0 {
+	if json.Unmarshal(raw, &frame) != nil {
 		p.violation.Store(true)
+		return
+	}
+	if len(frame.ID) > 0 && frame.Method == "" && p.conversation != nil {
+		p.conversation.event(raw)
+		return
+	}
+	if len(frame.ID) > 0 {
+		if frame.Method == "session/request_permission" && p.wireProcess != nil {
+			p.observeACPChat(raw)
+		}
+		p.violation.Store(true)
+		p.stopViolation()
 		return
 	}
 	if frame.Method == "_x.ai/mcp/servers_updated" {
@@ -295,12 +356,26 @@ func (p *grokProcess) onEvent(raw json.RawMessage) {
 		if json.Unmarshal(frame.Params, &params) == nil && sessionID != "" && params.SessionID == sessionID {
 			switch params.Update.Kind {
 			case "agent_message_chunk":
+				if p.conversation != nil {
+					p.conversation.mu.Lock()
+					active := p.conversation.turn != nil && !p.conversation.closed
+					p.conversation.mu.Unlock()
+					if !active {
+						p.chatDropped.Add(1)
+						return
+					}
+				}
 				if params.Update.Content.Type == "text" {
 					p.mu.Lock()
 					p.events++
 					if p.events <= 2048 && p.answer.Len()+len(params.Update.Content.Text) <= 64<<10 {
 						_, _ = p.answer.WriteString(params.Update.Content.Text)
 						p.mu.Unlock()
+						if p.conversation != nil {
+							p.conversation.event(raw)
+						} else if p.wireProcess != nil {
+							p.observeACPChat(raw)
+						}
 						return
 					}
 					p.mu.Unlock()
@@ -318,6 +393,10 @@ func (p *grokProcess) onEvent(raw json.RawMessage) {
 		}
 	}
 	p.violation.Store(true)
+	p.stopViolation()
+}
+
+func (p *grokProcess) stopViolation() {
 	if p.wireProcess != nil {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
