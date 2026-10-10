@@ -2094,11 +2094,14 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 			entry.mu.Lock()
 			queued := entry.queueInput && control.Kind == "steer"
 			busy := entry.harness.Activity == "busy"
+			_, attempted := entry.record.Controls[control.ID]
 			entry.mu.Unlock()
 			expired := !control.deadline.IsZero() && time.Until(control.deadline) <= 0
-			if queued && busy && !expired {
+			if queued && busy && !expired && !attempted {
 				// Keep the original authorization and let interrupt/stop controls
 				// pass waiting input. An idle wake revisits this same control.
+				// An attempted write can settle from its replay receipt while busy
+				// without touching the child or waiting for that new turn to end.
 				index++
 				continue
 			}
