@@ -126,7 +126,6 @@ watch(draft, value => {
 onBeforeUnmount(() => { clearTimeout(timer); resize?.disconnect() })
 
 const graph = computed(() => props.view === 'graph')
-const dimensions = computed(() => DIMENSIONS.filter(d => !graph.value || TICKET_GRAPH_FILTERS.includes(d.key)))
 // Keep the trigger's geometry and labels until its popover closes. Actual
 // options still read live filters, including selections/exclusions made now.
 const presented = ref(props.filters)
