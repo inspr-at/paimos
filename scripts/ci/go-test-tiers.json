@@ -6734,6 +6734,8 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestRoutineIdleFallbackAndReconnectScheduling","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineSharedListenerRoutesHintsAndReleasesConnection","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestSendDoesNotWaitForTargetWriterAfterEvent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestSessionBoundSendNeedsNoTarget","tier":"GATED-FULL"}

@@ -166,12 +166,21 @@ func TestRoutineDispatcherSharesListenerAcrossTenants(t *testing.T) {
 	}
 	countListeners := func(want int) {
 		t.Helper()
-		var count int
-		if err := w.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND query=$1`, "LISTEN "+routineChannel).Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		if count != want {
-			t.Fatalf("dedicated routine listeners=%d want=%d for %d tenant loops", count, want, len(tenants))
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer cancel()
+		for {
+			var count int
+			if err := w.db.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND query=$1`, "LISTEN "+routineChannel).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count == want {
+				return
+			}
+			if want != 0 {
+				t.Fatalf("dedicated routine listeners=%d want=%d for %d tenant loops", count, want, len(tenants))
+			}
+			// Client Close can return before PostgreSQL removes its backend;
+			// observe that removal rather than assuming server scheduling.
 		}
 	}
 	for _, tenantID := range tenants {
@@ -217,6 +226,108 @@ func TestRoutineDispatcherSharesListenerAcrossTenants(t *testing.T) {
 	}
 	countListeners(0)
 	t.Logf("dedicated listeners for %d idle tenants: before=%d after=1; after cancellation=0", len(tenants), len(tenants))
+}
+
+// Risk: sharing LISTEN must not wake a different tenant, accumulate hint bursts,
+// or close the connection when only one tenant stops. Listener barriers prove
+// routing and shutdown without a database or freely running fallback timers.
+func TestRoutineSharedListenerRoutesHintsAndReleasesConnection(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	hints := make(chan *pgconn.Notification)
+	entered := make(chan struct{})
+	listener := &routineFixtureListener{next: func(ctx context.Context) (*pgconn.Notification, error) {
+		select {
+		case entered <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		select {
+		case n := <-hints:
+			return n, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}}
+	var connections atomic.Int32
+	listen := func(context.Context) (routineListener, error) {
+		connections.Add(1)
+		return listener, nil
+	}
+	d := &RoutineDispatcher{}
+	var subs []*routineSubscription
+	t.Cleanup(func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		for _, sub := range subs {
+			if err := sub.Close(closeCtx); err != nil {
+				t.Errorf("subscription shutdown: %v", err)
+			}
+		}
+	})
+	for _, tenantID := range []string{"a", "b", "c"} {
+		sub, err := d.subscribeRoutine(ctx, tenantID, listen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		subs = append(subs, sub.(*routineSubscription))
+	}
+	awaitListener := func() {
+		t.Helper()
+		select {
+		case <-entered:
+		case <-ctx.Done():
+			t.Fatal("shared listener did not reach the notification barrier")
+		}
+	}
+	awaitListener()
+	for _, n := range []*pgconn.Notification{
+		{Channel: "aeon_events", Payload: `{"tenant_id":"a"}`},
+		{Channel: routineChannel, Payload: `{"tenant_id":"unknown"}`},
+		{Channel: routineChannel, Payload: `invalid`},
+		{Channel: routineChannel, Payload: `{"tenant_id":""}`},
+		{Channel: routineChannel, Payload: `{"tenant_id":"b"}`},
+		{Channel: routineChannel, Payload: `{"tenant_id":"b"}`},
+	} {
+		select {
+		case hints <- n:
+		case <-ctx.Done():
+			t.Fatal("shared listener did not accept the hint")
+		}
+		awaitListener() // The previous hint has been routed before assertions.
+	}
+	if len(subs[0].wake) != 0 || len(subs[1].wake) != 1 || len(subs[2].wake) != 0 {
+		t.Fatal("hints crossed tenant boundaries or failed to coalesce")
+	}
+	if err := waitRoutine(ctx, subs[1], "b", time.Hour); err != nil {
+		t.Fatalf("matching tenant did not wake: %v", err)
+	}
+	for i, sub := range subs {
+		if err := sub.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+		wantClosed := 0
+		if i == len(subs)-1 {
+			wantClosed = 1
+		}
+		if listener.closed != wantClosed || connections.Load() != 1 {
+			t.Fatalf("after closing tenant %d: connections=%d closed=%d wantClosed=%d", i, connections.Load(), listener.closed, wantClosed)
+		}
+	}
+	// A later run on the same dispatcher must start a new listener after the
+	// old connection has closed, rather than inheriting a cancelled lifetime.
+	sub, err := d.subscribeRoutine(ctx, "restart", listen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subs = append(subs, sub.(*routineSubscription))
+	awaitListener()
+	if err := sub.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if connections.Load() != 2 || listener.closed != 2 {
+		t.Fatalf("restart connections=%d closed=%d", connections.Load(), listener.closed)
+	}
 }
 
 // Risk: an empty or disconnected queue must not keep querying at 250 ms;
@@ -325,7 +436,9 @@ func routineTestRunner(t *testing.T, d *RoutineDispatcher, tenantID string) (<-c
 	steps := make(chan routineWaitStep)
 	done := make(chan error, 1)
 	go func() {
-		done <- runRoutine(ctx, tenantID, d.dispatchOne, d.listenRoutine, func(ctx context.Context, listener routineListener, tenant string, delay time.Duration) error {
+		done <- runRoutine(ctx, tenantID, d.dispatchOne, func(ctx context.Context) (routineListener, error) {
+			return d.subscribeRoutine(ctx, tenantID, d.listenRoutine)
+		}, func(ctx context.Context, listener routineListener, tenant string, delay time.Duration) error {
 			step := routineWaitStep{delay: delay, resume: make(chan string)}
 			select {
 			case steps <- step:

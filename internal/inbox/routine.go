@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -30,6 +31,12 @@ import (
 type RoutineDispatcher struct {
 	m      *messaging
 	client *http.Client
+
+	listenerMu     sync.Mutex
+	subscribers    map[string]map[*routineSubscription]struct{}
+	listenerCancel context.CancelFunc
+	listenerReady  chan struct{}
+	listenerDone   chan struct{}
 }
 
 func NewRoutineDispatcher(pool *pgxpool.Pool, key []byte) (*RoutineDispatcher, error) {
@@ -41,7 +48,9 @@ func NewRoutineDispatcher(pool *pgxpool.Pool, key []byte) (*RoutineDispatcher, e
 }
 
 func (d *RoutineDispatcher) Run(ctx context.Context, tenantID string) error {
-	return runRoutine(ctx, tenantID, d.dispatchOne, d.listenRoutine, waitRoutine)
+	return runRoutine(ctx, tenantID, d.dispatchOne, func(ctx context.Context) (routineListener, error) {
+		return d.subscribeRoutine(ctx, tenantID, d.listenRoutine)
+	}, waitRoutine)
 }
 
 const routineFallback = 5 * time.Second
@@ -50,6 +59,162 @@ const routineChannel = "aeon_routine_deliveries"
 type routineListener interface {
 	WaitForNotification(context.Context) (*pgconn.Notification, error)
 	Close(context.Context) error
+}
+
+// Tenant loops retain buffered wake subscriptions, not database connections.
+// The shared listener lives until the final subscription closes; cancellation
+// of one tenant cannot disconnect the other tenants.
+type routineSubscription struct {
+	d        *RoutineDispatcher
+	tenantID string
+	wake     chan *pgconn.Notification
+}
+
+func (s *routineSubscription) WaitForNotification(ctx context.Context) (*pgconn.Notification, error) {
+	select {
+	case n := <-s.wake:
+		return n, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (s *routineSubscription) Close(ctx context.Context) error {
+	d := s.d
+	d.listenerMu.Lock()
+	if group := d.subscribers[s.tenantID]; group != nil {
+		delete(group, s)
+		if len(group) == 0 {
+			delete(d.subscribers, s.tenantID)
+		}
+	}
+	var done chan struct{}
+	if len(d.subscribers) == 0 && d.listenerCancel != nil {
+		d.listenerCancel()
+		done = d.listenerDone
+	}
+	d.listenerMu.Unlock()
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func (d *RoutineDispatcher) subscribeRoutine(ctx context.Context, tenantID string, listen func(context.Context) (routineListener, error)) (routineListener, error) {
+	for ctx.Err() == nil {
+		d.listenerMu.Lock()
+		// A new run must not open a second connection while the last run's
+		// cancelled listener is still closing.
+		if d.listenerDone != nil && len(d.subscribers) == 0 {
+			done := d.listenerDone
+			d.listenerMu.Unlock()
+			select {
+			case <-done:
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		if d.subscribers == nil {
+			d.subscribers = make(map[string]map[*routineSubscription]struct{})
+		}
+		if d.subscribers[tenantID] == nil {
+			d.subscribers[tenantID] = make(map[*routineSubscription]struct{})
+		}
+		s := &routineSubscription{d: d, tenantID: tenantID, wake: make(chan *pgconn.Notification, 1)}
+		d.subscribers[tenantID][s] = struct{}{}
+		if d.listenerDone == nil {
+			listenerCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+			d.listenerCancel = cancel
+			d.listenerReady = make(chan struct{})
+			d.listenerDone = make(chan struct{})
+			go d.runRoutineListener(listenerCtx, d.listenerReady, d.listenerDone, listen)
+		}
+		ready := d.listenerReady
+		d.listenerMu.Unlock()
+		// Establish LISTEN (or observe its failure) before the initial scan.
+		// Hints arriving while that scan runs stay buffered on the subscription.
+		select {
+		case <-ready:
+			return s, nil
+		case <-ctx.Done():
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = s.Close(closeCtx)
+			cancel()
+			return nil, ctx.Err()
+		}
+	}
+	return nil, ctx.Err()
+}
+
+func (d *RoutineDispatcher) wakeRoutine(tenantID string, n *pgconn.Notification) {
+	d.listenerMu.Lock()
+	defer d.listenerMu.Unlock()
+	for id, group := range d.subscribers {
+		if tenantID != "" && id != tenantID {
+			continue
+		}
+		hint := n
+		if hint == nil {
+			payload, _ := json.Marshal(map[string]string{"tenant_id": id})
+			hint = &pgconn.Notification{Channel: routineChannel, Payload: string(payload)}
+		}
+		for s := range group {
+			select {
+			case s.wake <- hint:
+			default: // Coalesce hints; every wake scans durable state.
+			}
+		}
+	}
+}
+
+func (d *RoutineDispatcher) runRoutineListener(ctx context.Context, ready, done chan struct{}, listen func(context.Context) (routineListener, error)) {
+	defer func() {
+		d.listenerMu.Lock()
+		d.listenerCancel, d.listenerReady, d.listenerDone = nil, nil, nil
+		close(done)
+		d.listenerMu.Unlock()
+	}()
+	first := true
+	for ctx.Err() == nil {
+		listener, err := listen(ctx)
+		if first {
+			close(ready)
+			first = false
+		} else if err == nil {
+			d.wakeRoutine("", nil) // Rescan every tenant after reconnect.
+		}
+		if err == nil {
+			for ctx.Err() == nil {
+				var n *pgconn.Notification
+				n, err = listener.WaitForNotification(ctx)
+				if err != nil {
+					break
+				}
+				if n.Channel == routineChannel {
+					if id := notificationTenant(n.Payload); id != "" {
+						d.wakeRoutine(id, n)
+					}
+				}
+			}
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = listener.Close(closeCtx)
+			cancel()
+			if ctx.Err() == nil {
+				d.wakeRoutine("", nil) // Recover durable work on disconnect.
+			}
+		}
+		// Failed connections and lifetime renewal both back off; tenants keep
+		// their independent durable deadline timers while LISTEN is offline.
+		_ = waitRoutine(ctx, nil, "", routineFallback)
+	}
+	if first {
+		close(ready)
+	}
 }
 
 // Subscribe before every startup/reconnect scan. Hints are transaction-bound
