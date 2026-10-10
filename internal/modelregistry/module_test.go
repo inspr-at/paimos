@@ -115,7 +115,7 @@ func call(t *testing.T, p *tenant.Principal, method, path, body string) (int, []
 	mux := http.NewServeMux()
 	// Legacy invariants remain tested during the read-only transition. Real
 	// public retirement is covered separately with Module.Mount.
-	module := &Module{pool: appPool}
+	module := &Module{pool: appPool, discovery: fixtureCatalogClient(t, nil)}
 	if strings.HasPrefix(path, "/api/model-preferences/levels/") {
 		module.mount(mux, module.writePreferences)
 	} else {
@@ -161,6 +161,12 @@ func call(t *testing.T, p *tenant.Principal, method, path, body string) (int, []
 
 func decode[T any](t *testing.T, p *tenant.Principal, method, path, body string, want int) T {
 	t.Helper()
+	if p != nil && want >= 200 && want < 300 && (strings.HasPrefix(path, "/api/models") || strings.HasPrefix(path, "/api/model-preferences")) && !strings.HasPrefix(path, "/api/models/catalog") {
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error { return legacyCatalogFixture(t.Context(), tx, *p) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	status, raw := call(t, p, method, path, body)
 	if status != want {
 		t.Fatalf("%s %s status %d, want %d: %s", method, path, status, want, raw)

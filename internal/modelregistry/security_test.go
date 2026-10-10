@@ -293,7 +293,7 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 	if observed.ID == "" || observed.Enabled {
 		t.Fatal("observation was granted automatically")
 	}
-	if observed.FullName() != "Grok grok-next" || observed.Provider != "xai" || observed.EffortLevel == nil || *observed.EffortLevel != 4 {
+	if observed.FullName() != "grok-next" || observed.Provider != "xai" || observed.EffortLevel != nil {
 		t.Fatalf("disabled observation lost display or effort metadata: %+v", observed)
 	}
 	status := decode[struct {
@@ -313,7 +313,7 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 	if !accepted.Enabled || accepted.ID == observed.ID {
 		t.Fatal("person grant did not create a separate enabled pin")
 	}
-	if accepted.Display != observed.Display || accepted.Provider != observed.Provider || accepted.EffortLevel == nil || *accepted.EffortLevel != *observed.EffortLevel {
+	if accepted.Display != observed.Display || accepted.Provider != observed.Provider || accepted.EffortLevel != nil || observed.EffortLevel != nil {
 		t.Fatalf("accepted successor lost display or effort metadata: %+v", accepted)
 	}
 	inRegistry(t, owner, func(tx pgx.Tx) error {

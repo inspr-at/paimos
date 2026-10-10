@@ -199,7 +199,7 @@ func TestCatalogNewPinsKeepUnknownAndLegacyMetadataReadable(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "catalog-compatible", "person", "Owner", []string{"admin"})
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		pin, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: "unknown-native", Version: "1", Harness: "claude", Family: "anthropic", Model: "claude-opus-5", Effort: "ultra", Tier: "strong"})
+		pin, err := insertActivatedProfile(t.Context(), tx, p, profileWrite{Slug: "unknown-native", Version: "1", Harness: "claude", Family: "anthropic", Model: "claude-opus-5", Effort: "ultra", Tier: "strong"}, true, "")
 		if err != nil {
 			return err
 		}
@@ -207,7 +207,7 @@ func TestCatalogNewPinsKeepUnknownAndLegacyMetadataReadable(t *testing.T) {
 			t.Fatalf("new metadata invented: %+v", pin)
 		}
 		level := 3
-		old, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: "legacy-pin", Version: "2", Harness: "codex", Family: "openai", Model: "gpt-6-sol", Effort: "high", Tier: "strong", RegisteredEffortLevel: &level, Display: Display{DisplayName: "Stored Sol", ShortName: "Sol", ModelVersion: "6"}})
+		old, err := insertActivatedProfile(t.Context(), tx, p, profileWrite{Slug: "legacy-pin", Version: "2", Harness: "codex", Family: "openai", Model: "gpt-6-sol", Effort: "high", Tier: "strong", RegisteredEffortLevel: &level, Display: Display{DisplayName: "Stored Sol", ShortName: "Sol", ModelVersion: "6"}}, true, "")
 		if err != nil {
 			return err
 		}
