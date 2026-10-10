@@ -754,6 +754,7 @@ func TestWorkLifecycleStaleHolds(t *testing.T) {
 		want                  string
 	}{
 		{name: "young orphan", age: 1, want: "rejected"},
+		{name: "historical closure before new run", age: 1, reason: "historical_completed", ticketOnly: true, want: "rejected"},
 		{name: "revoked run authority", age: 3, want: "forbidden"},
 		{name: "old orphan", age: 3, want: "completed"},
 		{name: "old run young uncertain session", age: 3, reason: "heartbeat_lost", want: "rejected"},
@@ -796,6 +797,10 @@ func TestWorkLifecycleStaleHolds(t *testing.T) {
 				if sid != "" {
 					sessionAge := 1
 					reason := c.reason
+					if reason == "historical_completed" {
+						sessionAge = 3
+						reason = "completed"
+					}
 					if reason == "expired" {
 						sessionAge = 3
 						reason = "heartbeat_lost"

@@ -3,7 +3,7 @@
   "exceptions": [
     {
       "file": "1330_stale_work_holds.sql",
-      "sha256": "d41aa002b545c5a550cb5dd8b0f751aa1fb71d01fa499558a2a1af639e39d3d0",
+      "sha256": "8797c05145ed0513920a3eeb9acf7d69e5c1c75b4b2d0d3e7a830bb5be3a4043",
       "ticket": "AEON-1103",
       "reason": "Reserved migration 1330 adds invoker helpers and replaces only the released busy/cancel functions to expire four named uncertain closures after two hours and expose bounded visible holder IDs, labels and ages. The immutable confirmed-exit predicate, binding guards, lead succession, writer admission, escalation, RLS, ownership, leases and accounting evidence remain intact. No stored row, table, column or historical event changes. CREATE OR REPLACE FUNCTION is outside the conservative expand-safe allowlist. This exact-byte draft is a coordinator review artifact; independent review and previous-binary compatibility gates remain required before merge or release. It grants no acceptance, push or deployment authority."
     }

@@ -23,7 +23,8 @@ $$;
 -- Only the person's graceful lifecycle action may settle an orphaned run.
 -- A bound live/unconfirmed generation always blocks. Recent telemetry blocks
 -- even after an old closure; confirmed/released sessions with no later report
--- permit immediate settlement. No generation or daemon proof is fabricated.
+-- permit immediate settlement only if closure follows this run's start.
+-- Historical ticket closures cannot release a newer run. No proof is fabricated.
 CREATE FUNCTION aeon_work_run_releasable(p_run uuid,p_now timestamptz DEFAULT now())
 RETURNS boolean LANGUAGE sql STABLE AS $$
  WITH candidate AS (
@@ -37,7 +38,7 @@ RETURNS boolean LANGUAGE sql STABLE AS $$
    WHERE NOT aeon_work_session_released(s.stopped_at,s.stop_reason,s.heartbeat_at,p_now))
   AND (greatest(r.created_at,r.started_at,
     (SELECT t.at FROM run_telemetry t WHERE t.run_id=r.id ORDER BY t.sequence DESC LIMIT 1))<=p_now-interval '2 hours'
-   OR (EXISTS(SELECT 1 FROM sessions)
+   OR (EXISTS(SELECT 1 FROM sessions s WHERE s.stopped_at>=greatest(r.created_at,r.started_at))
     AND NOT EXISTS(SELECT 1 FROM run_telemetry t WHERE t.run_id=r.id
      AND t.at>(SELECT max(s.stopped_at) FROM sessions s))))
  FROM candidate r),false);

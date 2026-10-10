@@ -64,6 +64,7 @@ A person's existing graceful work action also settles a stale active run when
 all bound session holds have released, or when no generation is bound and the
 last run activity is at least two hours old. Run creation, start and the latest
 telemetry count as activity; fresh telemetry after closure keeps the hold.
+A closure predating the run cannot release a new orphaned run immediately.
 The write rechecks `run.create` and `work_orders.write` under the access/tree
 fence, marks the run `ownership_lost`, and records `run.stale_hold_released`
 with the action ID. It preserves daemon ownership, launch uncertainty and all
