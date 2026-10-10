@@ -159,6 +159,13 @@ func TestRoutinePreparationPreservesAuthorityCriteriaAndPickup(t *testing.T) {
 	if _, err := agentruns.DraftRoutineCriteria(*missing.Candidate, criteria); err != nil {
 		t.Fatal(err)
 	}
+	err := db.InTenant(tenant.WithPrincipal(t.Context(), f.person), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		return agentruns.RequireRoutinePreparationTx(t.Context(), tx, f.person, input, *missing.Candidate, runtime)
+	})
+	var criteriaRefusal *workorders.Error
+	if !errors.As(err, &criteriaRefusal) || criteriaRefusal.Status != 409 || criteriaRefusal.Message != "criteria_wait" {
+		t.Fatalf("missing criteria passed the final write guard: %v", err)
+	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_set(fields,'{acceptance_criteria}','["Keep accepted criteria"]'),body=repeat('a',65537),updated_at=clock_timestamp() WHERE id=$1`, *first.NodeID)
 		return err
@@ -194,7 +201,7 @@ func TestRoutinePreparationPreservesAuthorityCriteriaAndPickup(t *testing.T) {
 	// Restrict visibility to the output project; even the closed hidden source
 	// remains unavailable, without exposing its identity in the returned reason.
 	visibility := "{" + project + "}"
-	err := db.InTenant(tenant.WithPrincipal(t.Context(), f.person), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(tenant.WithPrincipal(t.Context(), f.person), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.visible_projects',$1,true)`, visibility); err != nil {
 			return err
 		}
@@ -217,6 +224,35 @@ func TestRoutinePreparationPreservesAuthorityCriteriaAndPickup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Too many relation edges is an incomplete scan even if all are closed.
+	var extraBlockers []string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		rows, err := tx.Query(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state,parent_id) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Closed dependency','done',$2 FROM node_kinds k CROSS JOIN generate_series(1,64) WHERE k.slug='work' RETURNING id::text`, f.person.TenantID, hiddenProject)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			extraBlockers = append(extraBlockers, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) SELECT $1,unnest($2::uuid[]),$3,'blocks'`, f.person.TenantID, extraBlockers, *first.NodeID)
+		return err
+	})
+	if got := prepare(); !got.Partial || got.Candidate != nil || got.WaitReason != "blocker_scan_partial" {
+		t.Fatalf("blocker scan exceeded budget: %+v", got)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `DELETE FROM node_relations WHERE source_node_id=ANY($1::uuid[]) AND target_node_id=$2`, extraBlockers, *first.NodeID)
+		return err
+	})
 	// An injected expired deadline proves the explicit incomplete result.
 	expired, cancel := context.WithDeadline(tenant.WithPrincipal(t.Context(), f.person), time.Unix(0, 0))
 	defer cancel()

@@ -40,18 +40,20 @@ func BlockingTx(ctx context.Context, tx pgx.Tx, nodeID string) (string, error) {
 	if len(sources) > limit {
 		return "blocker_scan_partial", nil
 	}
-	for _, id := range sources {
-		var resolved bool
-		err := tx.QueryRow(ctx, `SELECT deleted_at IS NOT NULL OR aeon_work_status_category(n.state,k.field_schema) IN ('done','delivered','accepted','cancelled','archived') FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1`, id).Scan(&resolved)
-		if err == pgx.ErrNoRows {
-			return "blocker_unavailable", nil
-		}
-		if err != nil {
-			return "", err
-		}
-		if !resolved {
-			return "dependency_wait", nil
-		}
+	if len(sources) == 0 {
+		return "", nil
+	}
+	var visible int
+	var resolved bool
+	err = tx.QueryRow(ctx, `SELECT count(*),coalesce(bool_and(aeon_work_status_category(n.state,k.field_schema) IN ('done','delivered','accepted','cancelled','archived')),false) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL`, sources).Scan(&visible, &resolved)
+	if err != nil {
+		return "", err
+	}
+	if visible != len(sources) {
+		return "blocker_unavailable", nil
+	}
+	if !resolved {
+		return "dependency_wait", nil
 	}
 	return "", nil
 }

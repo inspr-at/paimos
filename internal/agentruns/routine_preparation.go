@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -122,7 +123,7 @@ func PrepareRoutineWorkTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in
  WHERE rr.recurrence_id=$1 AND rr.definition_revision=$2 AND rr.execute_consent
  AND rr.consent_revision=$2 AND rr.execution_principal_id=$3 AND rr.output_project_id=n.project_id
  AND n.project_id=$4 AND n.parent_id=rr.output_parent_id AND n.fields->>'recurrence_id'=$1::text
- AND rr.state='pending' AND (q.queue_target_agent_id IS NULL OR $5::uuid IS NULL OR q.queue_target_agent_id=$5)
+ AND rr.state='pending' AND q.queue_routed_at IS NULL AND (q.queue_target_agent_id IS NULL OR $5::uuid IS NULL OR q.queue_target_agent_id=$5)
  ORDER BY (q.queue_target_agent_id IS NOT NULL) DESC,q.queue_position,q.id LIMIT $6`, in.RecurrenceID, in.DefinitionRevision, identity, project, optional(in.TargetAgentID), in.CandidateLimit+1)
 	if err != nil {
 		return out, err
@@ -220,7 +221,7 @@ func DraftRoutineCriteria(work RoutinePreparedWork, criteria []string) (RoutineC
 	bytes := 0
 	for _, criterion := range criteria {
 		bytes += len(criterion)
-		if len(criterion) == 0 || len(criterion) > 4096 || bytes > 16384 {
+		if strings.TrimSpace(criterion) == "" || len(criterion) > 4096 || bytes > 16384 {
 			return out, workorders.Fail(400, "criteria_draft_limit")
 		}
 	}
