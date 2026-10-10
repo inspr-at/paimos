@@ -253,6 +253,14 @@ func TestStatusAutopilotFullAccessAgentReadAllowlist(t *testing.T) {
 	key := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "autopilot-reader", "full_access": true}))
 	var project string
 	if err := db.InTenant(dbtest.Seed(t.Context()), m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		// Full access changes the key ceiling; the principal still needs a
+		// read-capable role. Keep that grant explicit in this route fixture.
+		if _, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, key.PrincipalID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE tenant_id=$1 AND key='member'`, owner.TenantID, key.PrincipalID); err != nil {
+			return err
+		}
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,'AUTO-1','Autopilot','open' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, owner.TenantID).Scan(&project)
 	}); err != nil {
 		t.Fatal(err)
