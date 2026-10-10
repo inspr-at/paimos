@@ -195,17 +195,17 @@ func (m *Module) editLine(w http.ResponseWriter, r *http.Request) {
 		family := harnesslaunch.ModelFamily(h, nextModel)
 		source := before[0].Source
 		out.Profiles = []Profile{}
-		for i, e := range in.Efforts {
-			// Known efforts keep the shared scale; novel native names use their
-			// explicitly ordered registration, bounded to the scale's endpoints.
+		for _, e := range in.Efforts {
+			// Retain explicit historical scale metadata only for the exact
+			// existing effort. New native names acquire no invented number.
 			var scale *int
-			if err := tx.QueryRow(ctx, `SELECT aeon_model_effort_level($1,$2)::integer`, family, e).Scan(&scale); err != nil {
-				return err
+			for _, old := range before {
+				if old.Effort == e {
+					scale = old.EffortLevel
+					break
+				}
 			}
-			if scale == nil {
-				v := min(i, 5)
-				scale = &v
-			}
+
 			sum := sha256.Sum256([]byte(h + "/" + nextModel + "/" + e))
 			pin := profileWrite{Display: Display{DisplayName: strings.TrimSpace(in.DisplayName), ShortName: strings.TrimSpace(in.DisplayName)}, Slug: "edited-" + h + "-" + hex.EncodeToString(sum[:12]), Version: now.UTC().Format("20060102T150405.000000000"), Harness: h, Family: family, Model: nextModel, Effort: e, Tier: before[0].Tier, Note: strings.TrimSpace(in.Note), Source: source, RegisteredEffortLevel: scale}
 			if err := validateProfile(pin); err != nil {

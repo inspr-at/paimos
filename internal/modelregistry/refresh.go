@@ -142,6 +142,7 @@ func (m *Module) refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 const maxRefreshObservations = 200
+const discoveryCredentialsSQL = `SELECT tenant_id,account_id,vendor,ciphertext FROM model_discovery_credentials UNION ALL SELECT tenant_id,account_id,vendor,ciphertext FROM model_catalog_credentials`
 
 type discoveryInput struct {
 	DiscoverySource
@@ -149,9 +150,9 @@ type discoveryInput struct {
 }
 
 type discoveredSource struct {
-	input discoveryInput
-	ids   []string
-	fresh bool
+	input   discoveryInput
+	catalog ProviderCatalog
+	fresh   bool
 }
 
 // Reserve before making network calls. Only short catalog transactions hold
@@ -211,7 +212,7 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 			return fail(429, "model refresh interval has not elapsed")
 		}
 		if cfg.APIEnabled {
-			rows, err := tx.Query(ctx, `SELECT DISTINCT ON (c.vendor) c.account_id::text,c.vendor,c.ciphertext FROM model_discovery_credentials c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE a.state='available' ORDER BY c.vendor,c.account_id`)
+			rows, err := tx.Query(ctx, `SELECT DISTINCT ON (c.vendor) c.account_id::text,c.vendor,c.ciphertext FROM (`+discoveryCredentialsSQL+`) c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE a.state='available' ORDER BY c.vendor,c.account_id`)
 			if err != nil {
 				return err
 			}
@@ -227,6 +228,10 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 				return err
 			}
 		}
+		for _, source := range publicCatalogSources {
+			inputs = append(inputs, discoveryInput{DiscoverySource: DiscoverySource{Vendor: source}})
+		}
+
 		_, err = tx.Exec(ctx, `UPDATE model_refresh_settings SET last_run_at=$1,last_manual_run_at=CASE WHEN $2 THEN $1 ELSE last_manual_run_at END`, out.At, !scheduled && p.Kind == tenant.Person)
 		reserved = err == nil
 		return err
@@ -248,15 +253,21 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 		var allowed bool
 		// A person may disable discovery or revoke a key while a preceding
 		// vendor is responding. Recheck before starting the next vendor.
-		err := m.in(fetchCtx, p.TenantID, func(tx pgx.Tx) error {
-			return tx.QueryRow(fetchCtx, `SELECT api_enabled AND EXISTS(SELECT 1 FROM model_discovery_credentials c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE c.account_id=$1 AND c.vendor=$2 AND c.ciphertext=$3 AND a.state='available') FROM model_refresh_settings`, input.AccountID, input.Vendor, input.cipher).Scan(&allowed)
-		})
-		if err == nil && allowed && fetchCtx.Err() == nil {
-			key, err := linkvault.Decrypt(m.vaultKey, p.TenantID, "models/"+input.AccountID+"/"+input.Vendor, input.cipher)
-			if err == nil {
-				result.ids, err = listVendorModels(fetchCtx, client, input.Vendor, key)
-				result.fresh = err == nil
+		var err error
+		key := ""
+		if input.AccountID == "" {
+			allowed = true
+		} else {
+			err = m.in(fetchCtx, p.TenantID, func(tx pgx.Tx) error {
+				return tx.QueryRow(fetchCtx, `SELECT api_enabled AND EXISTS(SELECT 1 FROM (`+discoveryCredentialsSQL+`) c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE c.account_id=$1 AND c.vendor=$2 AND c.ciphertext=$3 AND a.state='available') FROM model_refresh_settings`, input.AccountID, input.Vendor, input.cipher).Scan(&allowed)
+			})
+			if err == nil && allowed {
+				key, err = linkvault.Decrypt(m.vaultKey, p.TenantID, "models/"+input.AccountID+"/"+input.Vendor, input.cipher)
 			}
+		}
+		if err == nil && allowed && fetchCtx.Err() == nil {
+			result.catalog, err = fetchProviderCatalog(fetchCtx, client, input.Vendor, key, out.At)
+			result.fresh = err == nil
 		}
 		fetched = append(fetched, result)
 	}
@@ -289,13 +300,24 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 			input := fetched.input
 			result := SourceResult{DiscoverySource: input.DiscoverySource, State: "stale"}
 			// Do not publish results from a revoked key/account or disabled job.
-			var valid bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_discovery_credentials c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE c.account_id=$1 AND c.vendor=$2 AND c.ciphertext=$3 AND a.state='available')`, input.AccountID, input.Vendor, input.cipher).Scan(&valid); err != nil {
-				return err
+			valid := input.AccountID == ""
+			if input.AccountID != "" {
+				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM (`+discoveryCredentialsSQL+`) c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE c.account_id=$1 AND c.vendor=$2 AND c.ciphertext=$3 AND a.state='available')`, input.AccountID, input.Vendor, input.cipher).Scan(&valid); err != nil {
+					return err
+				}
 			}
-			if cfg.APIEnabled && valid && fetched.fresh {
-				observations := discoveryObservations(input.Vendor, out.At.UTC().Format(time.RFC3339Nano)+"/"+input.AccountID, fetched.ids)
-				result.State, result.Seen = "fresh", len(fetched.ids)
+			if (input.AccountID == "" || cfg.APIEnabled) && valid && fetched.fresh {
+				if err := RecordCatalogFacts(ctx, tx, p.TenantID, fetched.catalog.Facts); err != nil {
+					return err
+				}
+				observations := catalogObservations(fetched.catalog, out.At.UTC().Format(time.RFC3339Nano)+"/"+input.Vendor+"/"+input.AccountID)
+				models := map[string]bool{}
+				for _, f := range fetched.catalog.Facts {
+					if f.Fact == "model_id" {
+						models[f.Provider+"/"+f.ModelID+"/"+f.Route] = true
+					}
+				}
+				result.State, result.Seen = "fresh", len(models)
 				if cfg.AutoAddProfiles {
 					var limited bool
 					var err error
@@ -399,10 +421,7 @@ func (m *Module) putSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, fail(400, "interval_minutes must be from 60 to 43200"))
 		return
 	}
-	if in.APIEnabled && len(m.vaultKey) == 0 {
-		writeErr(w, fail(503, "model discovery vault unavailable"))
-		return
-	}
+
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) (err error) {
 		if err := db.LockTree(r.Context(), tx, p.TenantID); err != nil {
 			return err
@@ -514,11 +533,14 @@ func (m *Module) putCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("accountId")
-	if !uuidRE.MatchString(id) || vendorURLs[in.Vendor] == "" || len(in.Key) > 4096 || strings.ContainsAny(in.Key, "\r\n\x00") {
+	if !uuidRE.MatchString(id) || !slices.Contains([]string{"openai", "xai", "anthropic", "openrouter", "google"}, in.Vendor) || len(in.Key) > 4096 || strings.ContainsAny(in.Key, "\r\n\x00") {
 		writeErr(w, fail(400, "invalid discovery credential"))
 		return
 	}
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		if err := preferenceFence(r.Context(), tx, p); err != nil {
+			return err
+		}
 		if err := catalogLock(r.Context(), tx); err != nil {
 			return err
 		}
@@ -532,12 +554,16 @@ func (m *Module) putCredential(w http.ResponseWriter, r *http.Request) {
 			}
 			return err
 		}
-		expected := map[string]string{"openai": "codex", "xai": "grok", "anthropic": "claude", "openrouter": "pi"}[in.Vendor]
+		expected := map[string]string{"openai": "codex", "xai": "grok", "anthropic": "claude", "openrouter": "pi", "google": "gemini"}[in.Vendor]
 		if harness != expected {
 			return fail(400, "vendor must match account harness")
 		}
+		table := "model_discovery_credentials"
+		if in.Vendor == "google" {
+			table = "model_catalog_credentials"
+		}
 		if in.Key == "" {
-			if _, err := tx.Exec(r.Context(), `DELETE FROM model_discovery_credentials WHERE account_id=$1`, id); err != nil {
+			if _, err := tx.Exec(r.Context(), `DELETE FROM `+table+` WHERE account_id=$1`, id); err != nil {
 				return err
 			}
 		} else {
@@ -545,7 +571,7 @@ func (m *Module) putCredential(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			if _, err := tx.Exec(r.Context(), `INSERT INTO model_discovery_credentials(tenant_id,account_id,vendor,ciphertext) VALUES($1,$2,$3,$4) ON CONFLICT(tenant_id,account_id) DO UPDATE SET vendor=EXCLUDED.vendor,ciphertext=EXCLUDED.ciphertext`, p.TenantID, id, in.Vendor, cipher); err != nil {
+			if _, err := tx.Exec(r.Context(), `INSERT INTO `+table+`(tenant_id,account_id,vendor,ciphertext) VALUES($1,$2,$3,$4) ON CONFLICT(tenant_id,account_id) DO UPDATE SET vendor=EXCLUDED.vendor,ciphertext=EXCLUDED.ciphertext`, p.TenantID, id, in.Vendor, cipher); err != nil {
 				return err
 			}
 		}
@@ -590,7 +616,7 @@ func (m *Module) refreshStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		out["last_run_at"] = at
 		out["last_result"] = raw
-		rows, err := tx.Query(r.Context(), `SELECT account_id::text,vendor FROM model_discovery_credentials ORDER BY vendor,account_id`)
+		rows, err := tx.Query(r.Context(), `SELECT account_id::text,vendor FROM (`+discoveryCredentialsSQL+`) credentials ORDER BY vendor,account_id`)
 		if err != nil {
 			return err
 		}
@@ -609,6 +635,7 @@ func (m *Module) refreshStatus(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		out["sources"] = sources
+		out["public_sources"] = publicCatalogSources
 		rows, err = tx.Query(r.Context(), `SELECT jsonb_build_object('harness',o.harness,'model',o.model,'effort',o.effort,'last_seen_at',o.last_seen_at,'last_working_at',o.last_working_at,'last_failing_at',o.last_failing_at,'failures',o.failures,'suppressed_until',o.suppressed_until,'source',o.source,'pending',NOT EXISTS(SELECT 1 FROM model_profiles p WHERE p.harness=o.harness AND p.model=o.model AND p.effort=o.effort AND p.enabled)) FROM model_observations o ORDER BY o.last_seen_at DESC,o.harness,o.model,o.effort LIMIT 500`)
 		if err != nil {
 			return err

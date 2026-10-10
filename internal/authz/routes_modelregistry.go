@@ -19,6 +19,7 @@ func init() {
 		"GET /api/model-preferences/simple":                          "models.read",
 		"GET /api/model-preferences/situations":                      "models.read",
 		"GET /api/model-rules":                                       "models.read",
+		"GET /api/models/catalog":                                    "models.read",
 		"GET /api/models":                                            "models.read",
 		"GET /api/models/lines/{harness}/{model}/usage":              "models.read",
 		"GET /api/models/refresh":                                    "models.read",

@@ -83,6 +83,7 @@ func (m *Module) mount(mux *http.ServeMux, legacy http.HandlerFunc) {
 	mux.HandleFunc("POST /api/models/reports", m.reports)
 	mux.HandleFunc("PUT /api/models/refresh/settings", m.putSettings)
 	mux.HandleFunc("PUT /api/models/refresh/credentials/{accountId}", m.putCredential)
+	mux.HandleFunc("GET /api/models/catalog", m.catalog)
 	mux.HandleFunc("GET /api/models", m.list)
 	mux.HandleFunc("POST /api/models", m.create)
 	mux.HandleFunc("PUT /api/models/routes", m.replace)

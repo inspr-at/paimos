@@ -85,70 +85,28 @@ func writeEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, eventType st
 }
 
 func prepareCatalogDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]events.Change, error) {
-	var n int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles`).Scan(&n); err != nil {
-		return nil, err
-	}
-	if n > 0 {
-		changes, err := prepareAdditionalCatalog(ctx, tx, p)
-		if err != nil {
-			return nil, err
-		}
-		upgraded, err := prepareCatalogUpgrade(ctx, tx, p)
-		return append(changes, upgraded...), err
-	}
 	if err := catalogLock(ctx, tx); err != nil {
 		return nil, err
 	}
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles`).Scan(&n); err != nil {
+	var version string
+	err := tx.QueryRow(ctx, `SELECT catalog_version FROM model_refresh_settings`).Scan(&version)
+	if err != nil && err != pgx.ErrNoRows {
 		return nil, err
 	}
-	if n > 0 {
-		changes, err := prepareAdditionalCatalog(ctx, tx, p)
-		if err != nil {
-			return nil, err
-		}
-		upgraded, err := prepareCatalogUpgrade(ctx, tx, p)
-		return append(changes, upgraded...), err
+	if version == CatalogVersion {
+		return nil, nil
 	}
-	profiles := catalogProfiles()
-	ids := make(map[string]string, len(profiles))
-	disabled := make(map[string]bool, len(profiles))
-	seeded := make([]Profile, 0, len(profiles))
-	for _, profile := range profiles {
-		row, err := insertActivatedProfile(ctx, tx, p, profileWrite{
-			Slug: profile.Slug, Version: profile.Version, Harness: profile.Harness,
-			Family: profile.Family, Model: profile.Model, Effort: profile.Effort, Tier: profile.Tier,
-		}, true, modelactivation.ShippedCatalog)
-		if err != nil {
-			return nil, err
-		}
-		ids[profile.Slug] = row.ID
-		disabled[profile.Slug] = !row.Enabled
-		seeded = append(seeded, row)
-	}
-	routes := make([]Route, 0)
-	for _, route := range defaultRoutes(profiles) {
-		id := ids[route.Slug]
-		if id == "" {
-			return nil, fail(http.StatusInternalServerError, "catalog route is missing its profile")
-		}
-		if disabled[route.Slug] {
-			continue
-		}
-		stored := Route{Role: route.Role, Priority: route.Priority, ProfileID: id, State: "available"}
-		if err := insertRoute(ctx, tx, p.TenantID, stored); err != nil {
-			return nil, err
-		}
-		routes = append(routes, stored)
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,$2) ON CONFLICT (tenant_id) DO UPDATE SET catalog_version=EXCLUDED.catalog_version`, p.TenantID, CatalogVersion); err != nil {
+	if err := bootstrapCatalogFacts(ctx, tx, p.TenantID); err != nil {
 		return nil, err
 	}
-	return []events.Change{{Type: evSeeded, After: struct {
-		Profiles []Profile `json:"profiles"`
-		Routes   []Route   `json:"routes"`
-	}{seeded, routes}}}, nil
+	if _, err := tx.Exec(ctx, `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,$2) ON CONFLICT(tenant_id) DO UPDATE SET catalog_version=EXCLUDED.catalog_version`, p.TenantID, CatalogVersion); err != nil {
+		return nil, err
+	}
+	event := "model.catalog_upgraded"
+	if err == pgx.ErrNoRows {
+		event = evSeeded
+	}
+	return []events.Change{{Type: event, After: map[string]any{"version": CatalogVersion, "bootstrap": "ids_only"}}}, nil
 }
 
 // Discovery records a pin without granting it to wildcard accounts.
@@ -182,9 +140,7 @@ func insertActivatedProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 			FROM model_profile_display WHERE tenant_id=$1::uuid AND profile_id=$2::uuid`, p.TenantID, out.ID).
 			Scan(&out.DisplayName, &out.ShortName, &out.ModelVersion, &out.EffortLevel, &out.Provider)
 	}
-	if out.Harness == "gemini" {
-		out.EffortLevel = harnesslaunch.GeminiEffortLevel(out.Effort)
-	}
+
 	out.Source, out.Note = profileSource(in.Source), in.Note
 	if in.RegisteredEffortLevel != nil {
 		out.EffortLevel = in.RegisteredEffortLevel
@@ -254,9 +210,7 @@ func readProfiles(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]
 		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider, &profile.Source, &profile.Note, &profile.RetireAt, &profile.Retired); err != nil {
 			return nil, err
 		}
-		if profile.Harness == "gemini" {
-			profile.EffortLevel = harnesslaunch.GeminiEffortLevel(profile.Effort)
-		}
+
 		out = append(out, profile)
 	}
 	return out, rows.Err()

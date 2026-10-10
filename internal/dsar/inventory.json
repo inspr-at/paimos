@@ -720,6 +720,38 @@
       "table": "inbox_messages"
     },
     {
+      "table": "model_catalog_credentials",
+      "classification": "secret",
+      "columns": {
+        "tenant_id": "metadata",
+        "account_id": "metadata",
+        "vendor": "metadata",
+        "ciphertext": "secret"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      }
+    },
+    {
+      "table": "model_catalog_facts",
+      "classification": "metadata",
+      "columns": {
+        "tenant_id": "metadata",
+        "provider": "metadata",
+        "model_id": "metadata",
+        "route": "metadata",
+        "fact": "metadata",
+        "value": "metadata",
+        "source": "metadata",
+        "source_kind": "metadata",
+        "field_path": "metadata",
+        "fetched_at": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      }
+    },
+    {
       "classification": "review",
       "columns": {
         "audit": "review",
