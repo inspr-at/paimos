@@ -20,7 +20,7 @@ import (
 
 // Risks: queue/assignment acting as a grant, fabricated evaluation granting a
 // write, and owner revocation between admission and the final mutation. Uses
-// synthetic qualification and a PostgreSQL barrier before the final fence.
+// synthetic qualification and a PostgreSQL barrier at the final access fence.
 func TestRoutineActionGrantRejectsUnverifiedAndRevokedOwner(t *testing.T) {
 	f, in, q, reader := consentFixture(t)
 	enableConsentProject(t, f, q, reader)
@@ -66,8 +66,24 @@ func TestRoutineActionGrantRejectsUnverifiedAndRevokedOwner(t *testing.T) {
 	if !strings.Contains(string(held), "guardrail_evaluation_required") {
 		t.Fatalf("missing evaluation was not held: %s", held)
 	}
-	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "SELECT set_config('aeon.account_use_capable'") })
-	install(New(pool).WithExecutionRuntime(reader))
+	var retainedOwner string
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Retained owner') RETURNING id::text`, f.p.TenantID).Scan(&retainedOwner)
+	})
+	dbtest.BindRole(t, f.d, f.p.TenantID, retainedOwner, "owner")
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	holder, err := f.d.App.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback(t.Context())
+	if _, err := holder.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true),set_config('aeon.visible_projects','*',true)`, f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.LockTenant(ctx, holder, f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
 	raw, _ := json.Marshal(request)
 	response := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
@@ -76,15 +92,15 @@ func TestRoutineActionGrantRejectsUnverifiedAndRevokedOwner(t *testing.T) {
 		f.handler.ServeHTTP(out, req)
 		response <- out
 	}()
-	barrier.Wait(t, ctx)
-	f.tx(func(tx pgx.Tx) error {
-		if err := db.LockTenant(ctx, tx, f.p.TenantID); err != nil {
-			return err
-		}
-		_, err := tx.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, f.p.ID)
-		return err
-	})
-	barrier.Release()
+	dbtest.WaitForLock(t, ctx, f.d, holder.Conn().PgConn().PID(), "transactionid")
+	// Visibility was read before this change; final RequireTx must read the live
+	// binding after its real access-fence wait. Keep read access and another owner.
+	if _, err := holder.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='viewer') WHERE principal_id=$1`, f.p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
 	out := dbtest.Await(t, ctx, response)
 	if out.Code != 403 || !strings.Contains(out.Body.String(), "permission") {
 		t.Fatalf("revocation failed or wrong reason: %d %s", out.Code, out.Body.String())

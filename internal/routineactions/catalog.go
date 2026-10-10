@@ -160,7 +160,12 @@ func (b *Broker) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
 	if err != nil {
-		httpapi.WriteError(w, 413, "action_body_too_large")
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			httpapi.WriteError(w, 413, "action_body_too_large")
+		} else {
+			httpapi.WriteError(w, 400, "invalid_action_body")
+		}
 		return
 	}
 	var in Request
@@ -360,10 +365,11 @@ func applyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Binding, in R
 func requireTarget(ctx context.Context, tx pgx.Tx, b Binding, in Request) error {
 	var project string
 	var revision time.Time
-	var inScope bool
+	var inScope, withinLimits bool
 	err := tx.QueryRow(ctx, `SELECT coalesce(n.project_id,n.id)::text,n.updated_at,
+ (octet_length(n.body)<=32768 AND octet_length(n.title)<=500 AND octet_length(n.fields::text)<=65536),
  EXISTS(WITH RECURSIVE ancestors(id,parent_id,depth) AS (SELECT id,parent_id,0 FROM nodes WHERE id=n.id UNION ALL SELECT p.id,p.parent_id,a.depth+1 FROM nodes p JOIN ancestors a ON p.id=a.parent_id WHERE a.depth<128 AND p.deleted_at IS NULL) SELECT 1 FROM ancestors WHERE id=$2)
- FROM nodes n WHERE n.id=$1 AND n.deleted_at IS NULL FOR NO KEY UPDATE`, in.TargetID, b.ParentID).Scan(&project, &revision, &inScope)
+ FROM nodes n WHERE n.id=$1 AND n.deleted_at IS NULL FOR NO KEY UPDATE`, in.TargetID, b.ParentID).Scan(&project, &revision, &withinLimits, &inScope)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return workorders.Fail(404, "action_target_not_found")
 	}
@@ -375,6 +381,9 @@ func requireTarget(ctx context.Context, tx pgx.Tx, b Binding, in Request) error 
 	}
 	if revision.UnixMicro() != in.ExpectedRevision {
 		return workorders.Fail(409, "target_revision_changed")
+	}
+	if (in.Kind == "work.update" || in.Kind == "knowledge.write" && in.TargetID != in.ProjectID) && !withinLimits {
+		return workorders.Fail(409, "target_payload_limit_exceeded")
 	}
 	if in.Kind != "knowledge.write" && !inScope {
 		return workorders.Fail(403, "target_outside_run_scope")

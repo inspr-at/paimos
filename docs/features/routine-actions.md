@@ -10,7 +10,8 @@ microseconds. Creation targets a parent; knowledge creation targets the output
 project. Work targets must remain inside the run's frozen output subtree.
 Knowledge updates keep their type and slug and cannot edit the assignment's
 source entries. Knowledge creation records a proposed entry. Work status
-updates retain the ordinary leaf and benefit checks; queued terminal changes
+updates refuse parent status even while the legacy parent-status feature is off,
+and retain the ordinary leaf and benefit checks; queued terminal changes
 must pass through the existing pipeline.
 
 Requests are limited to 64 KiB, titles to 500 UTF-8 bytes and bodies to 32 KiB.

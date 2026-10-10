@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -246,6 +248,19 @@ func TestRoutineActionCatalogueClosedAndBounded(t *testing.T) {
 	v.WorkUpdate = &WorkUpdate{Body: new(string)}
 	if v.Validate() == nil {
 		t.Fatal("accepted mixed payload")
+	}
+	mux := http.NewServeMux()
+	New(nil, nil).Mount(mux)
+	for _, tc := range []struct {
+		body   string
+		status int
+	}{{`{"command":"deploy"}`, 400}, {strings.Repeat("x", MaxBodyBytes+1), 413}, {`{} {}`, 400}} {
+		req := httptest.NewRequest("POST", "/api/routine-runs/10000000-0000-4000-8000-000000000004/actions", strings.NewReader(tc.body)).WithContext(tenant.WithPrincipal(t.Context(), tenant.Principal{ID: in.AttemptID, TenantID: in.ProjectID, Kind: tenant.Person}))
+		out := httptest.NewRecorder()
+		mux.ServeHTTP(out, req)
+		if out.Code != tc.status {
+			t.Fatalf("body boundary: %d %s want %d", out.Code, out.Body.String(), tc.status)
+		}
 	}
 	v = in
 	v.ActionKey = "occurrence"

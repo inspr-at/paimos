@@ -44,6 +44,13 @@ func WriteRoutineTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project,
 			entry, err = createTx(ctx, tx, p, in, &pending)
 		}
 	} else {
+		var links int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM node_relations WHERE source_node_id=$1 OR target_node_id=$1 LIMIT 257) bounded`, target).Scan(&links); err != nil {
+			return "", 0, nil, err
+		}
+		if links > 256 {
+			return "", 0, nil, workorders.Fail(409, "knowledge_link_limit_exceeded")
+		}
 		var current Entry
 		current, err = loadEntry(ctx, tx, p.TenantID, target, false)
 		if err == nil && (current.Type != typ || current.Slug != slug) {
