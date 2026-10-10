@@ -22,13 +22,14 @@ db="aeon-compat-db-$suffix"
 app="aeon-compat-app-$suffix"
 network="aeon-compat-$suffix"
 image="ghcr.io/inspr-at/aeon@$digest"
-# AEON-1051's entry refusal applies to binaries below the account-use floor.
-# Release 129 and later advertise that capability, so keep the last published
-# below-floor image as a separate immutable counterexample. Its release body
-# records this digest and source commit 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
-# The latest release still runs every ordinary compatibility read below.
-rollback_tag="v261009095632.0.0"
-rollback_digest="sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c"
+# AEON-1051's activated refusal gate needs a binary below the capability floor.
+# Release 129 and later advertise that capability. Keep testing the latest
+# release's read compatibility and retain the last pre-capability release
+# separately as an immutable counterexample.
+# Published release v261009095632.0.0, source 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
+legacy_tag=v261009095632.0.0
+legacy_digest=sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
+legacy_image="ghcr.io/inspr-at/aeon@$legacy_digest"
 cleanup() {
   docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
@@ -38,12 +39,11 @@ cleanup() {
 trap cleanup EXIT
 
 pull_previous() {
-  local selected_tag="${1:-$tag}" selected_image="${2:-$image}"
-  echo "Previous published release: $selected_tag"
-  echo "Previous registry image: $selected_image"
-  docker pull --platform linux/amd64 "$selected_image"
+  echo "Previous published release: $tag"
+  echo "Previous registry image: $image"
+  docker pull --platform linux/amd64 "$image"
   # Pull the release-note digest, then resolve its local config ID for boots.
-  image_id="$(docker image ls --quiet --no-trunc "$selected_image" | sort -u)"
+  image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
   [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
   echo "Previous image: $image_id"
 }
@@ -69,7 +69,7 @@ CREATE DATABASE aeon OWNER aeon;
 CREATE EXTENSION vector;
 SQL
 
-start_previous() {
+start_image() {
   local selected_image="$1"
   docker run -d --name "$app" --network "$network" --platform linux/amd64 \
     --memory 256m -p 127.0.0.1::8080 \
@@ -81,7 +81,7 @@ start_previous() {
   python3 scripts/migration-compat-probe.py wait-ready --base "$base"
 }
 
-start_previous "$image_id"
+start_image "$image_id"
 python3 scripts/migration-compat-probe.py seed --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 docker stop --time 30 "$app" >/dev/null
 docker container rm "$app" >/dev/null
@@ -91,35 +91,37 @@ docker container rm "$app" >/dev/null
 db_address="$(docker port "$db" 5432/tcp)"
 AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=disable" \
   GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
-start_previous "$image_id"
+start_image "$image_id"
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 echo "Previous release reads passed: $tag on the candidate schema"
 
+# Verify the immutable pre-capability binary and the seeded reads before
+# activation. The existing exact SQLSTATE/entry, empty/populated pool and
+# background-write refusal assertions remain mandatory for that binary.
 # Verify the pinned source remains below the capability floor before any
 # activated refusal probe, even when the ordinary release is the same image.
-legacy_entry="$(git show "$rollback_tag:internal/db/visibility.go")"
+legacy_entry="$(git show "$legacy_tag:internal/db/visibility.go")"
 [[ "$legacy_entry" == *"func enterTenant("* && "$legacy_entry" != *"aeon.account_use_capable"* ]] || {
   echo 'Pinned rollback image must predate the account-use capability' >&2; exit 1;
 }
-rollback_image="ghcr.io/inspr-at/aeon@$rollback_digest"
-rollback_image_id="$image_id"
-if [[ "$digest" != "$rollback_digest" ]]; then
+legacy_image_id="$previous_image_id"
+if [[ "$digest" != "$legacy_digest" ]]; then
+  echo "Account-use rollback fixture: $legacy_tag; image: $legacy_image"
+  docker pull --platform linux/amd64 "$legacy_image"
+  legacy_image_id="$(docker image ls --quiet --no-trunc "$legacy_image" | sort -u)"
+  [[ "$legacy_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable legacy image ID' >&2; exit 1; }
   docker stop --time 30 "$app" >/dev/null
   docker container rm "$app" >/dev/null
-  echo "Account-use rollback boundary release: $rollback_tag"
-  pull_previous "$rollback_tag" "$rollback_image"
-  rollback_image_id="$image_id"
-  start_previous "$rollback_image_id"
-  # Prove the below-floor image and fixture work before activation too.
-  python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${rollback_tag#v}"
+  start_image "$legacy_image_id"
+  python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}"
 fi
-python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${rollback_tag#v}" --database-container "$db"
-echo "Account-use rollback floor passed: $rollback_tag on the candidate schema"
-echo "Account-use rollback boundary passed: $rollback_tag on the candidate schema"
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}" --database-container "$db"
+echo "Account-use rollback floor passed: $legacy_tag on the candidate schema"
+echo "Account-use rollback boundary passed: $legacy_tag on the candidate schema"
 echo "Migration compatibility passed: latest-release reads and below-floor account-use boundary"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
     "$previous_tag" "$previous_image" "$previous_image_id" >> "$GITHUB_STEP_SUMMARY"
-  printf 'Rollback-floor release %s; registry image %s; loaded image %s passed non-activated reads and every activated empty/populated account-use refusal.\n' \
-    "$rollback_tag" "$rollback_image" "$rollback_image_id" >> "$GITHUB_STEP_SUMMARY"
+  printf 'Rollback fixture %s; registry image %s; loaded image %s passed non-activated reads and verified activated empty/populated pools refuse below-floor binaries.\n' \
+    "$legacy_tag" "$legacy_image" "$legacy_image_id" >> "$GITHUB_STEP_SUMMARY"
 fi

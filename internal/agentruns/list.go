@@ -86,6 +86,7 @@ func (m *module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		out.NextCursor = &next
 	}
 	rows.Close()
+	waitIDs := make([]string, 0, len(out.Items))
 	for i := range out.Items {
 		if out.Items[i].Status == "failed" {
 			out.Items[i].Wait, err = vendorWait(r.Context(), tx, out.Items[i])
@@ -97,10 +98,16 @@ func (m *module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 			continue
 		}
 		if out.Items[i].QueueNodeID == nil || out.Items[i].QueueTargetAgentID != nil || out.Items[i].QueueRoutedAt != nil {
-			out.Items[i].Wait, err = agentaccounts.WaitForRun(r.Context(), tx, out.Items[i].ID)
+			waitIDs = append(waitIDs, out.Items[i].ID)
 		}
-		if err != nil {
-			return nil, err
+	}
+	waits, err := agentaccounts.WaitForRuns(r.Context(), tx, waitIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out.Items {
+		if wait, ok := waits[out.Items[i].ID]; ok {
+			out.Items[i].Wait = wait
 		}
 	}
 	return out, nil
