@@ -3,7 +3,7 @@
 import { displayLanguage } from '../../lib/displayLanguage'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { APIError } from '../../lib/api'
-import { cancelSessionMessage, messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
+import { cancelSessionMessage, chatThreadForSession, chatThreadMessages, markChatSeen, messageStatuses, sendChatMessage, type MessageStatus, type ProjectMessage } from '../../lib/agents'
 import { readSessionMarker, writeSessionMarker } from '../../lib/agentRows'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
@@ -12,6 +12,8 @@ import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import SessionRequests from './SessionRequests.vue'
+import ChatLiveBlock from './ChatLiveBlock.vue'
+import { applyLiveFrame, chatFinals, chatSeenIds, chatSeenMark, chatSent, followChatLive, liveQueue, liveWorking, offeredSteer, rebaseTurn, sessionReadMark, settleStop, settled, type LiveSource, type LiveTurn, type SendTransport } from './chatLive'
 import { collapseMessages } from './sessionMessages'
 import { advanceReceipt, chatCapability, isQueuedMessage, chatSendLevel, chatWords, awaitsInboxHook, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
 
@@ -30,16 +32,29 @@ const localSends = ref<ProjectMessage[]>([])
 // A late failure for A must not leave B looking busy (S8-013).
 const sending = computed(() => localSends.value.some(message => message.optimistic && !message.send_failed && message.recipient_session_id === s.value.id))
 const statuses = ref<Record<string, MessageStatus>>({})
+// Saved chat-native messages of the bound chat thread (AEON-1071): the agent's
+// replies and the viewer's replies to them. They are stored only there, never
+// in the project message list.
+const chatMessages = ref<ProjectMessage[]>([])
+let chatThread = ''
+// The bound thread's saved history has been read once. Before that a turn has
+// no baseline: an older saved reply arriving late must not end it.
+let chatBaseline = false
 const messages = computed(() => {
   if (!me.value) return []
-  const server = agents.thread(s.value)
+  const project = agents.thread(s.value)
+  const stored = new Set(project.map(message => message.id))
+  const chat = chatMessages.value.filter(message => (message.sender_session_id === s.value.id || message.recipient_session_id === s.value.id) && !stored.has(message.id))
+  const server = [...project, ...chat].sort((a, b) => a.sent_event_id - b.sent_event_id)
   const known = new Set(server.map(message => message.id))
   return [...server, ...localSends.value.filter(message => !known.has(message.id))]
 })
 const address = computed(() => agents.addressOf(s.value.agent_principal_id))
 // A registered address is sent when one exists. Otherwise the recipient is the session's principal.
 const recipient = computed(() => address.value || s.value.agent_principal_id)
-const working = computed(() => s.value.activity === 'busy')
+// A live turn proves the agent is working before the session row catches up.
+const liveTurn = ref<LiveTurn | null>(null)
+const working = computed(() => s.value.activity === 'busy' || liveWorking(liveTurn.value))
 const capability = computed(() => chatCapability(s.value))
 const atPrompt = computed(() => capability.value === 'between' && awaitsInboxHook(s.value))
 const uncertain = ref<Set<string>>(new Set())
@@ -57,8 +72,17 @@ const threadMessages = computed(() => {
 })
 const current = computed(() => collapseMessages(threadMessages.value))
 const ended = computed(() => s.value.phase === 'stopped' || !!s.value.stopped_at || !!s.value.archived_at)
-const canSteer = computed(() => working.value && ['native', 'next'].includes(capability.value) && s.value.advertised_capabilities.includes('steer'))
-const alternative = computed(() => capability.value === 'next' ? words.value.next : words.value.now)
+// The steer slot stays in place for the whole session, enabled only while
+// the agent works, so a turn starting or ending never moves the composer.
+const steerAdvertised = computed(() => s.value.advertised_capabilities.includes('steer'))
+const steerOffered = computed(() => !!offeredSteer(capability.value, steerAdvertised.value, 'managed'))
+// The next send's transport decides what the slot offers. A reply to a
+// chat-native message goes to the chat outbox, consumed only between turns:
+// the slot then says so instead of offering a send mode nothing would honour.
+const transport = computed<SendTransport>(() => !editing.value && replyTo.value?.chat_thread ? 'chat' : 'managed')
+const steerMode = computed(() => offeredSteer(capability.value, steerAdvertised.value, transport.value))
+const canSteer = computed(() => working.value && !!steerMode.value)
+const alternative = computed(() => steerMode.value === 'next' ? words.value.next : words.value.now)
 const primaryLabel = computed(() => editing.value ? words.value.save : working.value && capability.value !== 'between' ? words.value.after : words.value.send)
 // Unmanaged sessions take rename/model requests next to the composer (AEON-225).
 const unmanaged = computed(() => s.value.management_mode === 'unmanaged')
@@ -67,11 +91,11 @@ const unmanaged = computed(() => s.value.management_mode === 'unmanaged')
 // The id swap can land after the read that already contains it, so both the
 // thread watch and deliver drop it.
 function forgetSettled() {
-  const known = new Set(agents.thread(s.value).map(message => message.id))
+  const known = new Set([...agents.thread(s.value), ...chatMessages.value].map(message => message.id))
   const next = localSends.value.filter(message => !known.has(message.id))
   if (next.length !== localSends.value.length) localSends.value = next
 }
-watch(() => agents.thread(s.value).map(message => message.id).join(), forgetSettled)
+watch(() => [...agents.thread(s.value), ...chatMessages.value].map(message => message.id).join(), forgetSettled)
 const draft = ref('')
 const editing = ref<ProjectMessage | null>(null)
 const queueBusy = ref(false)
@@ -85,8 +109,13 @@ const replyTo = ref<ProjectMessage | null>(null)
 const sendError = ref('')
 const historyLoading = ref(false)
 const historyError = ref('')
-const canStop = computed(() => !ended.value && s.value.activity === 'busy' && !props.interruptBlock)
-function stop() { if (props.active && canStop.value) emit('interrupt') }
+const canStop = computed(() => !ended.value && working.value && !props.interruptBlock)
+function stop() {
+  if (!props.active || !canStop.value) return
+  const before = agents.controls[s.value.id]?.id
+  emit('interrupt')
+  if (liveWorking(liveTurn.value)) markStopping(before)
+}
 function chatKeys(event: KeyboardEvent) {
   if (!props.active || event.key !== 'Escape' || event.repeat || event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
   if (document.querySelector('dialog[open], .floating, .ticket-peek-host')) return
@@ -108,17 +137,64 @@ const unread = computed(() => me.value ? unreadGroups(current.value, me.value, m
 const newFrom = ref<string>()
 const newCount = ref(0)
 watch(() => unread.value.length, n => emit('unread', n), { immediate: true })
-function markRead(event: number, id: string) {
+function markRead(event: number, id: string, rows: readonly string[] = [id]) {
   if (holdingMarker()) return
   if (!me.value || !id || !Number.isFinite(event)) return
   if (!mark.value || mark.value.event < event) mark.value = saveReadMark(me.value, s.value.id, event, id)
   if (!person.value || !mark.value) return
+  // A chat-native post is evidence for its thread's read marker only.
+  const seenBefore = seenPending.size
+  if (chatThread) { seenThread = chatThread; for (const seenId of chatSeenIds(messages.value, current.value, rows)) seenPending.add(seenId) }
+  const before = pending?.event ?? -1
+  queueSessionMark(mark.value)
+  // A repeated look at the same post must not postpone a flush that is already waiting.
+  if (flushTimer === undefined || (pending?.event ?? -1) > before || seenPending.size > seenBefore) arm()
+}
+// The furthest event the session's read marker holds, once read this visit.
+let serverEvent: number | undefined
+// The local watermark reaches the session marker only through a loaded
+// project message. A cached mark on reopening may name a message that is not
+// loaded yet, so every thread load tries again.
+function reconcileMark() {
+  const local = mark.value
+  if (!person.value || !local?.id || serverEvent === undefined) return
+  const session = sessionReadMark(local, messages.value)
+  if (!session || session.event <= serverEvent || (pending && pending.event >= session.event)) return
   boundProject = s.value.project_id
   boundSession = s.value.id
-  const before = pending?.event ?? -1
-  pending = queueReadMark(pending, mark.value)
-  // A repeated look at the same post must not postpone a flush that is already waiting.
-  if (flushTimer === undefined || (pending?.event ?? -1) > before) arm()
+  pending = queueReadMark(pending, session)
+  arm()
+}
+watch(() => agents.thread(s.value).map(message => message.id).join(), () => reconcileMark())
+// The session's read marker names only its project messages.
+function queueSessionMark(next: ReadMark) {
+  const session = sessionReadMark(next, messages.value)
+  if (!session) return
+  boundProject = s.value.project_id
+  boundSession = s.value.id
+  pending = queueReadMark(pending, session)
+}
+// Chat-native posts seen on screen, waiting for the same trailing flush.
+const seenPending = new Set<string>()
+let seenThread = ''
+let seenSending = false
+async function flushSeen() {
+  if (seenSending || !seenPending.size || !seenThread || !person.value) return
+  const thread = seenThread, ids = [...seenPending].slice(0, 100)
+  seenSending = true
+  try {
+    await markChatSeen(thread, ids)
+    for (const id of ids) seenPending.delete(id)
+    if (thread === chatThread) chatMessages.value = chatMessages.value.map(message => ids.includes(message.id) ? { ...message, chat_seen: true } : message)
+    if (seenPending.size) arm()
+  } catch { /* They stay queued for the next flush. */ }
+  finally { seenSending = false }
+}
+// A thread change sends what the old thread saw, then starts empty.
+function leaveChatThread(next = '') {
+  void flushSeen()
+  seenPending.clear(); seenThread = ''
+  chatThread = next
 }
 // One trailing timer. Hide and unmount flush immediately. A failed send stays
 // in `pending` and leaves on the next flush, with no toast.
@@ -140,7 +216,7 @@ let anchorTop = 0
 let placeChain: Promise<void> = Promise.resolve()
 const holdingMarker = () => markerHold !== 0 && markerHold === readGeneration
 function arm() {
-  if (!pending || !person.value) return
+  if ((!pending && !seenPending.size) || !person.value) return
   if (flushTimer !== undefined) clearTimeout(flushTimer)
   flushTimer = setTimeout(() => { flushTimer = undefined; void flush() }, readMarkFlushDelay)
 }
@@ -158,6 +234,7 @@ async function sendMark(projectId: string, sessionId: string, viewer: string, ge
   const response = await writeSessionMarker(projectId, sessionId, { last_read_message_id: next.id, last_read_event_id: next.event })
   if (!response.ok || generation !== readGeneration || s.value.id !== sessionId) return response.ok && generation === readGeneration
   const remote = markerFromServer(await response.json())
+  serverEvent = Math.max(serverEvent ?? -1, next.event, remote?.event ?? -1)
   if (remote && s.value.id === sessionId && (!mark.value || remote.event > mark.value.event)) {
     mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
   }
@@ -165,6 +242,7 @@ async function sendMark(projectId: string, sessionId: string, viewer: string, ge
 }
 async function flush() {
   if (flushTimer !== undefined) { clearTimeout(flushTimer); flushTimer = undefined }
+  void flushSeen()
   if (!person.value || !pending) return
   if (markSending) { flushAgain = true; return }
   const next = pending
@@ -202,6 +280,7 @@ async function pullReadMark(projectId: string, sessionId: string, viewer: string
       return
     }
     const remote = markerFromServer(await response.json())
+    serverEvent = Math.max(serverEvent ?? -1, remote?.event ?? -1)
     const advanced = !!(remote && preferReadMark(mark.value, remote) === remote)
     if (advanced && remote) mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
     const waiting = awaitingServerPlacement && generation === readGeneration
@@ -217,12 +296,7 @@ async function pullReadMark(projectId: string, sessionId: string, viewer: string
     }
     // The reader left the provisional bottom before the marker arrived.
     if (held && entered && placed && userMoved) observe()
-    const current = mark.value
-    if (!person.value || !current?.id || (remote && current.event <= remote.event)) return
-    boundProject = projectId
-    boundSession = sessionId
-    pending = queueReadMark(pending, current)
-    arm()
+    reconcileMark()
   } catch {
     // Offline: the local watermark stands, and a provisional landing may observe.
     releaseMarkerHold(generation)
@@ -462,13 +536,17 @@ function observe() {
     if (!props.active || document.visibilityState !== 'visible') return
     const rootHeight = el.clientHeight
     let best: { event: number; id: string } | undefined
+    // Every qualifying row is read evidence for its chat-native posts; the
+    // newest one moves the watermark.
+    const rows: string[] = []
     for (const entry of entries) {
       if (!entry.isIntersecting || (entry.intersectionRatio < 0.6 && entry.intersectionRect.height < rootHeight * 0.5)) continue
       const target = entry.target as HTMLElement
       const event = Number(target.dataset.event)
+      if (target.dataset.id) rows.push(target.dataset.id)
       if (!best || event > best.event) best = { event, id: target.dataset.id ?? '' }
     }
-    if (best) markRead(best.event, best.id)
+    if (best) markRead(best.event, best.id, rows)
   }, { root: el, threshold: [0, 0.6, 1] })
   el.querySelectorAll<HTMLElement>('.msg[data-event]').forEach(node => seen!.observe(node))
 }
@@ -504,13 +582,14 @@ onBeforeUnmount(() => {
 // every send that still has no terminal receipt.
 // Session-bound sends from the loaded thread. Receipts, not memory, decide
 // which of them still wait on the inbox hook, so a reload matches the server.
-const boundHookIds = computed(() => sessionBoundSends(messages.value, s.value.id, me.value))
+// Chat-native inputs have no project receipt; the status route cannot answer for them.
+const boundHookIds = computed(() => sessionBoundSends(messages.value.filter(message => !message.chat_thread), s.value.id, me.value))
 let statusFlight: Promise<void> | undefined
 let statusAgain = false
 function refreshReceipts() {
   if (!props.active || !me.value) return
   if (statusFlight) { statusAgain = true; return }
-  const visible = current.value.filter(m => m.sender_principal_id === me.value).slice(-30).map(m => m.id)
+  const visible = current.value.filter(m => m.sender_principal_id === me.value && !m.chat_thread).slice(-30).map(m => m.id)
   const batches = receiptQueryBatches(boundHookIds.value, visible, statuses.value)
   if (!batches.length) return
   const session = s.value.id, viewer = me.value, generation = readGeneration
@@ -548,6 +627,7 @@ watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
   if (leftover && person.value && before?.[0] === viewer && leftoverSession && leftoverSession !== id) void sendMark(leftoverProject, leftoverSession, viewer, generation - 1, leftover).catch(() => undefined)
   const local = viewer ? loadReadMark(viewer, id) : null
   mark.value = local
+  serverEvent = undefined
   statuses.value = {}
   entered = false; loaded = false; newFrom.value = undefined; distance.value = 0; stick = true
   userMoved = false
@@ -557,6 +637,7 @@ watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
   markerHold = viewer && person.value && !local ? generation : 0
   seen?.disconnect()
   draft.value = ''; replyTo.value = null; editing.value = null; queueBusy.value = false; uncertain.value = new Set(); queuedIds.value = new Set(); sendError.value = ''; localSends.value = []
+  chatMessages.value = []; leaveChatThread(); chatBaseline = false
   historyLoading.value = false; historyError.value = ''; paging = false
   const projectId = s.value.project_id
   boundProject = projectId
@@ -566,13 +647,131 @@ watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
   if (viewer) await refresh()
   if (generation !== readGeneration || s.value.id !== id) return
   loaded = true
+  // Without a viewer this runs during setup, before the live state exists.
+  if (viewer) startLive()
   if (props.active) await enter()
   refreshReceipts()
 }, { immediate: true })
 // Message hints refresh the open thread immediately; session reads retain the
 // periodic recovery path. The store coalesces bursts with a trailing read.
-watch([() => agents.threadPulse, () => agents.sessionsUpdatedAt], () => { if (loaded && props.active) void refresh().then(refreshReceipts) })
+watch([() => agents.threadPulse, () => agents.sessionsUpdatedAt], () => { if (loaded && props.active) { void refresh().then(refreshReceipts); refreshChat() } })
 watch(() => props.active, active => { if (active && loaded) void refresh().then(refreshReceipts) })
+
+// ---------- Live turn (AEON-1071, transcript policy A) ----------
+// Deltas and tool activity render in place, batched per animation frame. They
+// stay in this view's memory only; a reload shows final messages alone.
+const agentMessages = computed(() => new Set(messages.value.filter(message => message.sender_principal_id === s.value.agent_principal_id).map(message => message.id)))
+const latestAgentMessage = computed(() => {
+  for (let i = messages.value.length - 1; i >= 0; i--) if (messages.value[i]!.sender_principal_id === s.value.agent_principal_id) return messages.value[i]!.id
+  return ''
+})
+let liveDropped: number | undefined
+let liveGeneration = 0
+let follower: ReturnType<typeof followChatLive> | undefined
+let stopTimer: ReturnType<typeof setTimeout> | undefined
+let stopBefore: string | undefined
+let stopIssued = false
+let chatFlight = false
+let chatAgain = false
+function applyLiveFrames(frames: string[]) {
+  let turn = liveTurn.value, hint = false
+  const at = Date.now()
+  for (const data of frames) {
+    const applied = applyLiveFrame(turn, data, at, chatBaseline ? latestAgentMessage.value : undefined, liveDropped)
+    turn = applied.turn
+    if (applied.dropped !== undefined) liveDropped = applied.dropped
+    if (applied.hint) hint = true
+  }
+  liveTurn.value = turn
+  if (hint && loaded) { void refresh().then(refreshReceipts); refreshChat() }
+}
+const liveFrames = liveQueue(applyLiveFrames, { schedule: run => requestAnimationFrame(run), cancel: handle => cancelAnimationFrame(handle) })
+function resetLive() {
+  liveFrames.clear()
+  if (stopTimer !== undefined) { clearTimeout(stopTimer); stopTimer = undefined }
+  liveDropped = undefined; liveTurn.value = null
+}
+// Saved replies come from the bound chat thread's newest page. A failed read
+// leaves the live block in place; the next hint or session read retries.
+function refreshChat() {
+  const thread = chatThread
+  if (!thread || !me.value) return
+  if (chatFlight) { chatAgain = true; return }
+  chatFlight = true
+  const session = s.value.id, agent = s.value.agent_principal_id, viewer = me.value, generation = liveGeneration
+  void chatThreadMessages(thread).then(page => {
+    if (chatThread !== thread || s.value.id !== session || me.value !== viewer || liveGeneration !== generation) return
+    const merged = new Map(chatMessages.value.map(message => [message.id, message]))
+    for (const message of chatFinals(page.items, agent, session, viewer, props.view.name, thread)) merged.set(message.id, message)
+    chatMessages.value = [...merged.values()].sort((a, b) => a.sent_event_id - b.sent_event_id).slice(-200)
+    if (!chatBaseline) { chatBaseline = true; liveTurn.value = rebaseTurn(liveTurn.value, latestAgentMessage.value) }
+    adoptChatSeen()
+  }).catch(() => { /* The live block stays until a read succeeds. */ }).finally(() => {
+    chatFlight = false
+    if (chatAgain) { chatAgain = false; refreshChat() }
+  })
+}
+// The thread's read marker is the other devices' evidence for chat-native
+// posts. The furthest one seen advances this view's watermark.
+function adoptChatSeen() {
+  const seen = chatSeenMark(messages.value)
+  if (!seen || !me.value || (mark.value && mark.value.event >= seen.event)) return
+  mark.value = saveReadMark(me.value, s.value.id, seen.event, seen.id)
+  if (entered) syncDivider()
+}
+function withdrawStop() { liveTurn.value = settleStop(liveTurn.value, 'withdrawn') }
+// "Stopping" holds only while an interrupt is on record; "You stopped this
+// turn" needs it applied. A refused one, or none within five seconds,
+// withdraws the claim, even when the turn ended meanwhile.
+function markStopping(before: string | undefined) {
+  const turn = liveTurn.value
+  if (!turn) return
+  liveTurn.value = { ...turn, stop: 'requested' }
+  stopBefore = before; stopIssued = false
+  if (stopTimer !== undefined) clearTimeout(stopTimer)
+  stopTimer = setTimeout(() => { stopTimer = undefined; if (!stopIssued) withdrawStop() }, 5000)
+}
+watch(() => agents.controls[s.value.id], control => {
+  if (!control || control.kind !== 'interrupt' || control.id === stopBefore) return
+  stopIssued = true
+  if (control.state !== 'completed') return
+  liveTurn.value = settleStop(liveTurn.value, control.outcome === 'applied' ? 'applied' : 'withdrawn')
+})
+watch([liveTurn, latestAgentMessage, agentMessages], ([turn, latest, ids]) => { if (settled(turn, latest, ids)) liveTurn.value = null })
+const openLive = (url: string) => typeof EventSource === 'undefined' ? null : new EventSource(url, { withCredentials: true }) as unknown as LiveSource
+// One stream per open chat tab and person; it ends with the session. It
+// starts after the first thread read, so a turn knows which agent message
+// preceded it.
+function startLive() {
+  follower?.stop(); follower = undefined
+  resetLive()
+  if (!loaded || !me.value || !person.value || !props.active || ended.value || !s.value.id) return
+  const generation = ++liveGeneration
+  follower = followChatLive(s.value.id, {
+    frame: data => { if (generation === liveGeneration) liveFrames.push(data) },
+    resync: () => {
+      if (generation !== liveGeneration) return
+      resetLive()
+      if (loaded) { void refresh().then(refreshReceipts); refreshChat() }
+    },
+    thread: id => {
+      if (generation !== liveGeneration) return
+      if (id !== chatThread) { leaveChatThread(id); chatBaseline = false }
+      refreshChat()
+    },
+    attached: () => {},
+  }, { lookup: chatThreadForSession, open: openLive })
+}
+watch([() => me.value, () => s.value.id, () => props.active, ended], startLive)
+// A session without a live thread so far may get one when a turn starts.
+watch(() => s.value.activity, activity => { if (activity === 'busy') follower?.retry() })
+// Streaming grows only at the bottom; keep a pinned reader on the latest line.
+watch(() => liveTurn.value && `${liveTurn.value.text.length}:${liveTurn.value.tools.length}:${liveTurn.value.state}:${liveTurn.value.ended}`, async () => {
+  await nextTick()
+  if (props.active && entered && stick && !paging) keepBottom()
+  else onScroll()
+})
+onBeforeUnmount(() => { liveGeneration++; follower?.stop(); resetLive() })
 
 // ---------- Composer ----------
 const composeBlock = computed(() => {
@@ -590,6 +789,18 @@ async function deliver(local: ProjectMessage) {
   const stillHere = () => generation === readGeneration && session.id === s.value.id && viewer === me.value
   local.send_failed = false
   try {
+    if (local.chat_thread) {
+      // A reply to a chat-native message stays in its chat thread; the project
+      // message route would refuse the parent. The client ID keeps a retry idempotent.
+      const thread = local.chat_thread
+      const result = await sendChatMessage(thread, { client_message_id: local.client_id ?? local.id, body: local.body, ...(local.reply_to ? { reply_to: local.reply_to } : {}) })
+      if (!stillHere()) return
+      const sent = chatSent(result.message, viewer, session.agent_principal_id, session.id, thread, local.created_at ?? new Date().toISOString())
+      if (thread === chatThread) chatMessages.value = [...chatMessages.value.filter(message => message.id !== sent.id), sent].sort((a, b) => a.sent_event_id - b.sent_event_id)
+      localSends.value = localSends.value.map(message => message.client_id === local.client_id ? { ...sent, client_id: local.client_id } : message)
+      forgetSettled()
+      return
+    }
     const accepted = await agents.send(session, recipient.value, local.body, local.delivery_level, local.reply_to ?? undefined, local.client_id, local.resend_of)
     if (!stillHere()) return
     if (local.queue_pending) queuedIds.value = new Set([...queuedIds.value, accepted.id])
@@ -608,11 +819,14 @@ async function send(level: 'simple' | 'steer' = 'simple', source?: ProjectMessag
   if (editing.value && !source) return saveEdit()
   if (localSends.value.length >= 100) { toast(words.value.pendingLimit); return false }
   const clientId = crypto.randomUUID()
+  // The parent's origin decides the route: a chat-native parent keeps the reply in its thread.
+  const chat = source ? source.chat_thread : replyTo.value?.chat_thread
   const local: ProjectMessage = {
-    id: clientId, client_id: clientId, optimistic: true, queue_pending: source?.queue_pending ?? (working.value || atPrompt.value), resend_of: source?.id, body, sender_principal_id: me.value,
+    id: clientId, client_id: clientId, optimistic: true, queue_pending: chat ? false : source?.queue_pending ?? (working.value || atPrompt.value), resend_of: chat ? undefined : source?.id, body, sender_principal_id: me.value,
     recipient_principal_id: s.value.agent_principal_id, recipient_session_id: s.value.id, to: recipient.value,
     sent_event_id: Number.MAX_SAFE_INTEGER, is_action_request: false, expects_reply: false,
-    delivery_level: level, reply_to: source ? source.reply_to : replyTo.value?.id, status: 'accepted', reply_obligation: 'none', created_at: new Date().toISOString(),
+    delivery_level: chat ? 'simple' : level, reply_to: source ? source.reply_to : replyTo.value?.id, status: 'accepted', reply_obligation: 'none', created_at: new Date().toISOString(),
+    ...(chat ? { chat_thread: chat } : {}),
   }
   if (local.queue_pending) queuedIds.value = new Set([...queuedIds.value, local.id])
   localSends.value = [...localSends.value, local]
@@ -681,14 +895,14 @@ async function saveEdit(): Promise<boolean> {
 }
 async function stopAndSend() {
   if (!canStop.value || !draft.value.trim() || editing.value || queueBusy.value || offline.value) return
-  const view = props.view, generation = readGeneration, body = draft.value.trim(), parent = replyTo.value?.id
+  const view = props.view, generation = readGeneration, body = draft.value.trim(), parent = replyTo.value?.id, chat = replyTo.value?.chat_thread
   queueBusy.value = true
   try {
     await agents.control(view, 'interrupt')
     if (generation !== readGeneration || view.session.id !== s.value.id) return
     queueBusy.value = false
     // After-turn delivery waits for the explicit interrupt to end the turn.
-    const enqueued = await send('simple', { body, reply_to: parent, queue_pending: true } as ProjectMessage)
+    const enqueued = await send('simple', { body, reply_to: parent, queue_pending: true, chat_thread: chat } as ProjectMessage)
     if (generation !== readGeneration || view.session.id !== s.value.id) return
     if (enqueued && draft.value.trim() === body) { draft.value = ''; replyTo.value = null }
   } catch {
@@ -725,9 +939,10 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
           <span v-if="historyError" class="history-error" role="alert">{{ historyError }}</span>
         </div>
         <div v-if="noPermission" class="empty-state"><AppIcon name="lock" :size="32" /><h3>{{ words.noPermissionTitle }}</h3><p>{{ words.noPermission }}</p></div>
-        <div v-else-if="agents.threadState(s) === 'ready' && !messages.length" class="empty-state"><AppIcon name="agent" :size="32" /><h3>{{ words.emptyTitle }} {{ view.name }}</h3><p>{{ words.emptyBody }}</p><div class="suggestions"><button v-for="text in [words.suggest1, words.suggest2, words.suggest3]" :key="text" type="button" :disabled="!canWrite || ended" @click="suggest(text)">{{ text }}</button></div></div>
+        <div v-else-if="agents.threadState(s) === 'ready' && !messages.length && !liveTurn" class="empty-state"><AppIcon name="agent" :size="32" /><h3>{{ words.emptyTitle }} {{ view.name }}</h3><p>{{ words.emptyBody }}</p><div class="suggestions"><button v-for="text in [words.suggest1, words.suggest2, words.suggest3]" :key="text" type="button" :disabled="!canWrite || ended" @click="suggest(text)">{{ text }}</button></div></div>
         <SessionMessages v-else :messages="threadMessages" :principal-id="s.agent_principal_id" :session-id="s.id" :now="now"
           :can-reply="canWrite && !composeBlock" :new-from="newFrom" :new-count="newCount" :statuses="statuses" :queued-ids="queuedIds" @reply="reply" @retry="retry" />
+        <ChatLiveBlock v-if="liveTurn && !noPermission" :turn="liveTurn" :name="view.name" :now="now" :can-stop="canStop" />
       </div>
         <p v-if="editing" class="replying" role="status"><AppIcon name="edit" :size="13" /><span>{{ words.editing }}</span><button type="button" class="icon-btn sm flat" :aria-label="words.cancel" @click="editing = null"><AppIcon name="close" :size="12" /></button></p>
         <p v-else-if="replyTo" class="replying"><span :title="replyTo.body">{{ words.replying }} “{{ replyTo.body }}”</span><button type="button" class="icon-btn sm flat" :aria-label="words.cancelReply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
@@ -761,12 +976,13 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
         <textarea :id="`compose-${s.id}`" ref="textarea" v-model="draft" class="field" rows="2" :placeholder="`${words.placeholder} ${view.name}`" :disabled="!canWrite" @keydown="composerKeys" @focus="toBottom(true)" />
         <p v-if="capability === 'abort'" class="gemini-note">{{ words.geminiNote }}</p>
         <p v-if="sendError" class="send-error" role="alert"><AppIcon name="alert" :size="12" />{{ sendError }}</p>
-        <div class="compose-row">
+        <div class="compose-row" :class="{ steering: steerOffered }">
           <span class="compose-hint"><KeyCap k="shift" /><KeyCap k="enter" />{{ words.newline }}</span>
-          <button v-if="canSteer" type="button" class="btn sm steer-send" :aria-label="alternative" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || offline" @click="send('steer')"><AppIcon name="bolt" :size="13" />{{ alternative }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
+          <button v-if="steerMode" type="button" class="btn sm steer-send" :aria-label="alternative" :aria-busy="sending" :data-tip="canSteer ? undefined : words.steerIdle" :disabled="!canSteer || !draft.trim() || !canWrite || queueBusy || !!editing || offline" @click="send('steer')"><AppIcon name="bolt" :size="13" />{{ alternative }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
+          <span v-else-if="steerOffered" class="steer-note" role="status">{{ words.chatBetween }}</span>
           <button v-if="capability === 'abort' && working" type="button" class="btn sm stop-send" :aria-label="words.stopSend" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || !canStop || offline" @click="stopAndSend"><AppIcon name="alert" :size="13" />{{ words.stopSend }}</button>
           <button type="submit" class="btn sm primary send" :aria-label="primaryLabel" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || offline"><AppIcon name="send" :size="13" /><span class="send-label"><span>{{ primaryLabel }}</span><span aria-hidden="true" class="label-size">{{ words.after }}</span></span><KeyCap k="enter" /></button>
-          <button v-if="s.management_mode === 'managed' && s.advertised_capabilities.includes('interrupt')" type="button" class="btn sm chat-stop" :aria-label="words.stop" :data-tip="canStop ? words.stopTip : interruptBlock || words.stopTip" :disabled="!canStop" @click="stop"><AppIcon name="stop" :size="13" /><span>{{ words.stop }}</span><KeyCap k="Esc" /></button>
+          <button type="button" class="btn sm chat-stop" :aria-label="words.stop" :data-tip="canStop ? words.stopTip : interruptBlock || words.stopTip" :disabled="!canStop" @click="stop"><AppIcon name="stop" :size="13" /><span>{{ words.stop }}</span><KeyCap k="Esc" /></button>
         </div>
       </form>
     </footer>
@@ -791,6 +1007,8 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 .send-label > span { grid-area: 1 / 1; }
 .label-size { visibility: hidden; }
 .gemini-note { font-size: 12px; color: var(--ink-2); }
+/* Shrinks and wraps inside the action row instead of pushing the actions to a new line. */
+.steer-note { flex: 1 1 0; min-width: 0; font-size: 12px; line-height: 1.3; text-align: right; color: var(--ink-3); overflow-wrap: anywhere; }
 .stop-send { color: var(--warn-ink); background: var(--gold-wash); }
 .session-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .thread-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -812,10 +1030,16 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 .jump-enter-from, .jump-leave-to { opacity: 0; transform: translate(-50%, 6px); }
 @media (prefers-reduced-motion: reduce) { .jump-enter-active, .jump-leave-active { transition: none; } }
 .composer { flex-shrink: 0; padding: 10px 14px 12px; border-top: 1px solid var(--line); background: var(--surface-raised-2); border-radius: 0 0 var(--radius) var(--radius); }
-.compose { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+.compose { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; container-type: inline-size; }
 .compose textarea { width: 100%; min-width: 0; min-height: 56px; height: 64px; resize: none; padding: 9px 11px; font: inherit; font-size: 13.5px; line-height: 1.45; }
 .compose-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
 .compose-hint { margin-left: auto; display: inline-flex; gap: 2px; }
+/* With the steer action always present, a narrow panel drops the new-line hint
+   so Stop stays on the action row (AEON-1071). */
+@container (max-width: 640px) {
+  .compose-row.steering .compose-hint { display: none; }
+  .compose-row.steering .compose-hint + * { margin-left: auto; }
+}
 .compose-block { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); padding: 6px 2px; overflow-wrap: anywhere; }
 .compose-block svg { flex: none; }
 .replying { position: absolute; bottom: 12px; left: 14px; right: 14px; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 10px; border-radius: 8px; background: var(--code-bg); font-size: 12px; color: var(--ink-2); }
@@ -832,6 +1056,8 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
   .compose-row .steer-send, .stop-send { min-height: 44px; }
   .compose-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
   .compose-row .send { margin-left: 0; }
-  .compose-row .steer-send, .compose-row .stop-send { grid-column: 1 / -1; }
+  .compose-row .steer-send, .compose-row .stop-send, .compose-row .steer-note { grid-column: 1 / -1; }
+  /* The note holds the steer action's row, so the field never moves. */
+  .compose-row .steer-note { display: flex; align-items: center; min-height: 44px; }
 }
 </style>
