@@ -17,13 +17,38 @@ func routineParent(ctx context.Context, tx pgx.Tx, parent *string) (string, erro
 	if parent == nil {
 		return "", nil
 	}
+	// A hidden personal ledger still restricts descendants visible in its
+	// output project. This bounded internal decision never returns ledger rows.
+	var visibility, system string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.visible_projects',true),''),coalesce(current_setting('aeon.system',true),'')`).Scan(&visibility, &system); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`); err != nil {
+		return "", err
+	}
+	run, err := routineParentInternal(ctx, tx, *parent)
+	if err != nil {
+		return "", err // caller rolls back every error
+	}
+	_, err = tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.system',$2,true)`, visibility, system)
+	return run, err
+}
+
+func routineParentInternal(ctx context.Context, tx pgx.Tx, parent string) (string, error) {
+	var enabled bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_budget_balances b JOIN routine_runs r ON r.tenant_id=b.tenant_id AND r.id=b.run_id JOIN nodes n ON n.project_id=r.output_project_id WHERE n.id=$1)`, parent).Scan(&enabled); err != nil {
+		return "", err
+	}
+	if !enabled {
+		return "", nil
+	}
 	var run *string
 	var truncated bool
 	err := tx.QueryRow(ctx, `WITH RECURSIVE ancestors AS (
  SELECT id,parent_id,1 AS depth FROM nodes WHERE id=$1 AND deleted_at IS NULL
  UNION ALL SELECT n.id,n.parent_id,a.depth+1 FROM ancestors a JOIN nodes n ON n.id=a.parent_id WHERE a.depth<64 AND n.deleted_at IS NULL
  ) SELECT (SELECT r.id::text FROM ancestors a JOIN routine_runs r ON r.work_node_id=a.id JOIN routine_budget_balances b ON b.run_id=r.id ORDER BY a.depth LIMIT 1),
- EXISTS(SELECT 1 FROM ancestors WHERE depth=64 AND parent_id IS NOT NULL)`, *parent).Scan(&run, &truncated)
+ EXISTS(SELECT 1 FROM ancestors WHERE depth=64 AND parent_id IS NOT NULL)`, parent).Scan(&run, &truncated)
 	if err != nil {
 		return "", err
 	}

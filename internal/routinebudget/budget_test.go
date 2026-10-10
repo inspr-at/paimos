@@ -421,6 +421,15 @@ func TestRoutineBudgetAdmissionAndOwnership(t *testing.T) {
 		return err
 	}))
 	other := tenant.Principal{ID: administrator, TenantID: f.owner.TenantID, Kind: tenant.Person}
+	// Hidden personal receipts must still prevent an ordinary visible-project
+	// writer from creating a child that omits the shared run binding.
+	wantError(t, db.InTenant(tenant.WithPrincipal(t.Context(), other), f.d.App, other.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockCurrentTree(t.Context(), tx); err != nil {
+			return err
+		}
+		_, _, err := workorders.CreateDeferred(t.Context(), tx, other, workorders.CreateInput{Parent: &f.work, Title: "Unbound personal child", Criteria: []string{"Verify"}})
+		return err
+	}), "routine_child_binding_required")
 	for _, table := range []string{"routine_budget_balances", "routine_budget_grants", "routine_budget_settlements", "routine_budget_orders"} {
 		var retained int
 		must(t, f.d.Admin.QueryRow(t.Context(), "SELECT count(*) FROM "+table).Scan(&retained))
