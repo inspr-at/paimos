@@ -8646,6 +8646,20 @@
     ,
     {"kind":"go","package":"internal/reviewgate","name":"TestParseFinalVerdict","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetAdmissionAndOwnership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetAdmissionBoundsHistoricalWindows","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetCheckedArithmeticAndModes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetConcurrentCeilingsAndSettlement","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetDaemonSettlementKeepsLedgerPrivate","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetMovedRootKeepsChildBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetUnknownRetainsSlotAndChildBinding","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/routineguard","name":"TestGuardrailFloorScopeEvidenceAndBoundedCheckpoints","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/rules","name":"TestAccessChangesStillTakeConflictingTenantFence","tier":"GATED-FULL"}

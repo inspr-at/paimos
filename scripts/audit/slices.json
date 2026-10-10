@@ -249,7 +249,8 @@
         "internal/recurrences/consent_test.go",
         "internal/routineguard/**",
         "internal/recurrences/runs.go",
-        "internal/recurrences/runs_test.go"
+        "internal/recurrences/runs_test.go",
+        "internal/routinebudget/**"
       ]
     },
     {
