@@ -10,6 +10,9 @@ import { commitDesk, loadDesk, nativeTierAdapter } from '../src/lib/decisionDesk
 import type { HarnessSession } from '../src/lib/agents'
 
 vi.mock('../src/stores/decisionDesk', () => ({ useDecisionDesk: vi.fn() }))
+// The panel resolves row projects (AEON-1057); no project or person is needed here.
+vi.mock('../src/stores/session', () => ({ useSession: () => ({ identity: null, authenticationCurrent: () => true }) }))
+vi.mock('../src/stores/projects', () => ({ useProjects: () => ({ byId: () => undefined, load: async () => {} }) }))
 afterEach(() => vi.unstubAllGlobals())
 
 const ownership = { daemon_id: 'daemon', generation: 'generation', process_id: 'process', root_pid: 123, group_id: 123, started_at: '2026-10-03T10:00:00Z' }

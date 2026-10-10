@@ -174,7 +174,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		if err = authz.RequireTx(r.Context(), tx, current, "models.manage", authz.Scope{}); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id',true),0))`); err != nil {
+		if err := catalogLock(r.Context(), tx); err != nil {
 			return err
 		}
 
