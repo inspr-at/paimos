@@ -857,7 +857,7 @@ components:
       description: 'Read-only Mac observations. Unknown probes stay unknown. No account names, UIDs, raw command output, credentials or host configuration writes.'
       properties:
         login_session: {type: string, enum: [unknown, ready, required], description: 'Ready means the daemon user owns the console session. Required includes the login window or another console user.'}
-        idle_sleep: {type: string, enum: [unknown, enabled, disabled], description: 'Current power profile only. Disabled is not a guarantee against lid, manual sleep, restart or power loss.'}
+        idle_sleep: {type: string, enum: [unknown, enabled, disabled], description: 'Current power profile only. Enabled is an informational risk on an awake, logged-in Mac, not a wait reason. Agentd requests temporary idle-sleep protection during active runs. Neither setting guarantees against lid, manual sleep, restart or power loss.'}
         filevault: {type: string, enum: [unknown, on, off], description: 'Encryption status only. Never a request to disable FileVault or configure automatic login.'}
     UnattendedView:
       type: object

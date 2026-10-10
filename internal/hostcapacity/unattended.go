@@ -54,20 +54,21 @@ func EvaluateUnattended(platform, state string, s *UnattendedSignals, at *time.T
 	case at == nil:
 		v.Reason, v.Message = "unattended_unreported", "No unattended host report has been received."
 	case at.After(now) || now.Sub(*at) > time.Minute:
-		v.Reason, v.Message = "unattended_host_unreachable", "No recent host report; the Mac may be asleep, restarting, waiting for login or unreachable."
+		v.Reason, v.Message = "unattended_host_unreachable", "The Mac may be asleep, lid closed or waiting for login; no recent host report. Restart or network loss can also prevent reports."
 	case s == nil || s.Validate() != nil:
 		v.Reason, v.Message = "unattended_signals_unknown", "Unattended host signals are missing or unreadable; update agentd if needed."
 	case s.LoginSession == "required":
-		v.Reason, v.Message = "unattended_login_required", "The daemon user needs an active Mac login session."
+		v.Reason, v.Message = "unattended_login_required", "Waiting for login: the daemon user needs an active Mac login session."
 	case s.LoginSession != "ready":
 		v.Reason, v.Message = "unattended_login_unknown", "The daemon user's Mac login session could not be confirmed."
-	case s.IdleSleep == "enabled":
-		v.Reason, v.Message = "unattended_sleep_enabled", "System idle sleep is enabled for the current power profile."
-	case s.IdleSleep != "disabled":
+	case s.IdleSleep == "unknown":
 		v.Reason, v.Message = "unattended_sleep_unknown", "System idle sleep settings could not be read."
 	default:
 		v.Status = "ready"
 		v.Message = "Recent report confirms a user login and disabled system idle sleep; manual sleep, lid closure and restart can still interrupt work."
+		if s.IdleSleep == "enabled" {
+			v.Message = "Recent report confirms a user login; idle sleep is enabled. Agentd requests idle-sleep protection only during active runs; manual sleep, lid closure and restart can still interrupt work."
+		}
 	}
 	return v
 }

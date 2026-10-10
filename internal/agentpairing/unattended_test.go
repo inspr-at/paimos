@@ -82,6 +82,10 @@ func TestUnattendedReportOnlyFreshnessOwnershipAndClaimSeam(t *testing.T) {
 	if got := read(f.tenantID, actor.ID); got.Reason != "unattended_host_unreachable" || got.Status != "wait" || !strings.Contains(got.Message, "asleep, lid closed or waiting for login") {
 		t.Fatal("stale report remained available", got)
 	}
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &listed)
+	if listed.HostCapacity.Unattended.Reason != "unattended_host_unreachable" || !strings.Contains(listed.HostCapacity.Unattended.Message, "asleep, lid closed or waiting for login") {
+		t.Fatal("Agents page DTO lost plain stale-host wording")
+	}
 	// An old daemon replaces the complete sample; it cannot keep prior ready
 	// signals alive merely by refreshing the enclosing capacity receipt.
 	signals.Unattended = nil
@@ -95,6 +99,15 @@ func TestUnattendedReportOnlyFreshnessOwnershipAndClaimSeam(t *testing.T) {
 	retryErrorCode(t, f.call("POST", "/api/agent-pairing/self/capacity", signals, false, key, 400), "invalid_request")
 	if got := read(f.tenantID, actor.ID); got.Reason != "unattended_signals_unknown" {
 		t.Fatal("invalid report changed stored signals", got)
+	}
+	signals.Unattended = &hostcapacity.UnattendedSignals{LoginSession: "required", IdleSleep: "enabled", FileVault: "on"}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/self/capacity", signals, false, key, 200), &report)
+	if report.Unattended.Status != "wait" || report.Unattended.Reason != "unattended_login_required" || !strings.Contains(report.Unattended.Message, "Waiting for login") {
+		t.Fatal("missing plain waiting-for-login state", report.Unattended)
+	}
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &listed)
+	if *listed.HostCapacity.Unattended != *report.Unattended || read(f.tenantID, actor.ID) != *report.Unattended {
+		t.Fatal("login wait lost between capacity, Agents page DTO and claim seam")
 	}
 	other := newFixtureInTenant(t, f.db, "unattended-other")
 	if got := read(other.tenantID, actor.ID); got.Reason != "unattended_computer_unknown" {

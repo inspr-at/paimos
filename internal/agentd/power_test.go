@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -76,11 +75,7 @@ func powerSupervisor(t *testing.T, lifetime context.Context) (*Supervisor, *fake
 	power := &fakeRunPower{releaseDone: make(chan struct{}, 4)}
 	adapter := &powerRunAdapter{fakeAdapter: &fakeAdapter{proc: &fakeProcess{stopped: make(chan struct{})}}, power: power, t: t}
 	config := Config{API: api, StateRoot: state, DaemonID: "daemon", Workspace: root, Adapters: []Adapter{adapter}, EstimatedUnits: map[string]int64{"requests": 1}, Accounts: []EnrolledAccount{{ID: "account", Key: "local", Harness: Codex}}}
-	// Optional only for the red run against e25b6f33, whose Config has no power
-	// seam. The adapter still runs and asserts the missing sleep protection.
-	if field := reflect.ValueOf(&config).Elem().FieldByName("Power"); field.IsValid() {
-		field.Set(reflect.ValueOf(power))
-	}
+	config.Power = power
 	s, err := NewSupervisor(lifetime, config)
 	if err != nil {
 		t.Fatal(err)
@@ -122,11 +117,12 @@ func TestRunIdleSleepAssertionLifecycle(t *testing.T) {
 			adapter.power.check(t, 1, 0)
 			entry := s.runs[api.run.ID]
 			if outcome == "cancelled" {
-				entry.mu.Lock()
-				entry.stopRequested = true
-				entry.mu.Unlock()
+				if _, err := s.Control(t.Context(), ControlRequest{TenantID: s.TenantID(), PrincipalID: s.PrincipalID(), RunID: api.run.ID, Generation: s.Generation(), CorrelationID: "cancel", Operation: "stop"}); err != nil {
+					t.Fatal("cancel control failed", err)
+				}
+			} else {
+				_ = adapter.proc.Stop(t.Context())
 			}
-			_ = adapter.proc.Stop(t.Context())
 			<-entry.monitorDone
 			adapter.power.check(t, 1, 1)
 			api.mu.Lock()

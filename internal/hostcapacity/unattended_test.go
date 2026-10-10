@@ -69,6 +69,9 @@ func TestUnattendedReadinessFreshnessAndRebootConstraints(t *testing.T) {
 			if tc.reason == "unattended_host_unreachable" && !strings.Contains(v.Message, "asleep, lid closed or waiting for login") {
 				t.Fatal("unreachable Mac lost plain sleep/login wording", v)
 			}
+			if tc.reason == "unattended_login_required" && !strings.Contains(v.Message, "Waiting for login") {
+				t.Fatal("missing plain waiting-for-login wording", v)
+			}
 			// Ordinary admission ignores unattended readiness, even when the
 			// new report tells future routine dispatch to wait.
 			if reason, _ := Evaluate(Default(), &Signals{Unattended: tc.signals}, tc.at, 0, now); reason != "" {

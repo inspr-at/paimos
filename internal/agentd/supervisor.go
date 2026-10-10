@@ -35,6 +35,7 @@ import (
 )
 
 type Config struct {
+	Power             Power
 	UsageProbes       usageprobe.Probe
 	StepUps           *StepUpManager
 	MaxTokens         int64
@@ -158,6 +159,7 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	power                  Power
 	ledger                 *agentsetup.SharedLedger
 	ledgerBinding          ledgerBinding
 	ledgerRequired         bool
@@ -407,8 +409,12 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if c.UsageProbes == nil {
 		c.UsageProbes = usageprobe.Client{}
 	}
+	if c.Power == nil {
+		c.Power = systemPower{}
+	}
 	s := &Supervisor{usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
+		power:             c.Power,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic, verificationDiagnostic: c.VerificationDiagnostic}
 	if _, err := state.Read("ledger-member.json", 8192); err == nil {
 		s.ledgerRequired = true
@@ -1442,10 +1448,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	// The accepted duration includes startup, before the monitor exists.
 	runCtx, cancelRun := context.WithTimeout(s.lifetime, duration)
 	startCtx, cancelStart := context.WithDeadline(ctx, launchedAt.Add(duration))
+	releasePower := s.holdRunPower()
 	proc, err := adapter.Start(startCtx, StartRequest{Lifetime: runCtx, TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
 		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, ServiceTier: entry.harness.ServiceTier, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
 	cancelStart()
 	if err != nil {
+		releasePower()
 		cancelRun()
 		entry.chat.close()
 		s.verificationDiagnosticFor(run.ID, run.AccountID, run.Purpose, "ownership_lost", "start_unconfirmed")
@@ -1515,7 +1523,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if binder, ok := proc.(interface{ bindLifetime(context.Context) }); ok {
 		binder.bindLifetime(s.lifetime)
 	}
-	go s.monitor(entry)
+	go s.monitor(entry, releasePower)
 	entry.mu.Lock()
 	entry.harnessWake = make(chan struct{}, 1)
 	entry.mu.Unlock()
@@ -1746,7 +1754,8 @@ func validHarnessValue(value string, limit int) bool {
 		!strings.ContainsFunc(value, unicode.IsControl)
 }
 
-func (s *Supervisor) monitor(entry *owned) {
+func (s *Supervisor) monitor(entry *owned, releasePower func()) {
+	defer releasePower()
 	entry.mu.Lock()
 	proc := entry.process
 	done := entry.monitorDone
@@ -1759,6 +1768,8 @@ func (s *Supervisor) monitor(entry *owned) {
 	}
 	defer entry.tools.Close()
 	err := proc.Wait()
+	// Release at child exit, before any potentially slow report settlement.
+	releasePower()
 	entry.chat.close()
 	entry.mu.Lock()
 	entry.record.BudgetStopReason = entry.budgetStopReason()

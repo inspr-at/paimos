@@ -24,10 +24,24 @@ console user conservatively produces `unattended_login_required`.
 Computer views and capacity responses expose `host_capacity.unattended`, with
 `status`, stable `reason`, a human-readable `message`, `after_reboot_reason` and
 `after_reboot_message`. A connected Mac is currently `ready` only with a report
-received within one minute, a confirmed login session and disabled system idle
-sleep in the current power profile. This remains an observation: manual sleep,
-lid closure, switching power profiles, restart and power loss can interrupt work.
+received within one minute, a confirmed login session and readable system idle
+sleep settings in the current power profile. Enabled idle sleep is an
+informational risk in `message`, not a WAIT reason: routines can use a Mac while
+it is awake without changing its owner's sleep settings. This remains an
+observation: manual sleep, lid closure, switching power profiles, restart and
+power loss can interrupt work.
 Unsupported platforms and missing evidence are `wait`, never assumed ready.
+
+Agentd requests a temporary `PreventUserIdleSystemSleep` assertion immediately
+before starting an owned run. It releases the assertion on startup failure,
+child exit (including failure or cancellation), and daemon shutdown. Draining
+keeps protection while the daemon still owns the active child. The assertion is
+tied to the daemon process, so a crash also releases it. Mac builds with cgo use
+IOPMLib directly; no-cgo Mac builds use the fixed system `caffeinate -i -w` helper
+watching the daemon PID. Other platforms perform no power action. Failures to
+acquire protection are logged; ordinary run admission remains unchanged.
+This [idle-sleep assertion](https://developer.apple.com/documentation/iokit/kiopmassertiontypepreventuseridlesystemsleep)
+leaves display sleep, manual sleep and lid closure under the owner's control.
 
 Reboot recovery is separate. Mac user LaunchAgents need login after reboot;
 enabled FileVault adds an unlock requirement. FileVault does not by itself
@@ -39,9 +53,10 @@ accounts will become ready automatically.
 
 The server's receipt time controls freshness; the daemon supplies no timestamp.
 After sleep or reboot it cannot report until it resumes. An old receipt produces
-`unattended_host_unreachable`, explaining that the Mac may be asleep, restarting,
-waiting for login or unreachable. The product does not infer the precise cause
-from silence. A fresh report restores readiness only if the actual observations
+`unattended_host_unreachable`, explaining that the Mac may be "asleep, lid closed
+or waiting for login"; restart or network loss can also prevent reports. The
+product does not infer the precise cause from silence. A fresh report restores
+readiness only if the actual observations
 qualify it. Capacity policy remains independent, including its existing off mode.
 
 Routines slices S11/S13/S14 consume
@@ -56,6 +71,7 @@ wait and exclude waiting hosts from available capacity. This ticket provides the
 evidence and seam; those slices own dispatch integration and routine UI.
 
 Validation covers read-only probe failures, login and system-sleep distinctions,
+fake-power assertion acquisition and release around run and daemon lifetimes,
 injected-clock freshness, reboot constraints, compatibility negotiation and
 rollback, server persistence, ordinary claim compatibility, and tenant/principal
 isolation and revocation.
