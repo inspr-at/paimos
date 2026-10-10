@@ -134,6 +134,10 @@ func TestPublishedNoteSnapshotIgnoresLaterTicketEdits(t *testing.T) {
 			if before.Code != 200 || !strings.Contains(before.Body.String(), "Know what changed.") || strings.Contains(before.Body.String(), `"frozen": true`) {
 				t.Fatalf("live preview: %d %s", before.Code, before.Body.String())
 			}
+			previewNotes, err := releasehistory.NotesFromSnapshot(before.Body.Bytes(), "260928120000.0.0", "test")
+			if err != nil || previewNotes.Hidden != 1 || len(previewNotes.Items) != 1 || previewNotes.Items[0].ID != visible || previewNotes.Fallback != "" {
+				t.Fatalf("live preview included marked work: %+v %v", previewNotes, err)
+			}
 			var stored int
 			f.tx(func(tx pgx.Tx) error {
 				return tx.QueryRow(t.Context(), `SELECT count(*) FROM journey_release_note_snapshots WHERE release_node_id=$1`, f.release).Scan(&stored)
@@ -159,8 +163,16 @@ func TestPublishedNoteSnapshotIgnoresLaterTicketEdits(t *testing.T) {
 			})
 			afterEdit := strings.Replace(edited, "Edited before publication.", "Edited after publication.", 1)
 			afterEdit = strings.Replace(afterEdit, `"tags":[{"name":"bug"}],`, "", 1)
+			if flag == "hide_from_release_notes" {
+				afterEdit = strings.Replace(afterEdit, `"hide_from_release_notes":false`, `"hide_from_release_notes":true`, 1)
+			} else {
+				afterEdit = strings.Replace(afterEdit, `{`, `{"no_release_needed":true,`, 1)
+			}
 			f.tx(func(tx pgx.Tx) error {
-				_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, visible, afterEdit)
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, visible, afterEdit); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, hidden, strings.Replace(hiddenFields, `"`+flag+`":true`, `"`+flag+`":false`, 1))
 				return err
 			})
 			frozen := f.request(f.person, http.MethodGet, path, "")
@@ -220,6 +232,67 @@ func TestPublishedNoteSnapshotIgnoresLaterTicketEdits(t *testing.T) {
 				t.Fatalf("created published: %d %s", got.Code, got.Body.String())
 			}
 
+		})
+	}
+	for _, unavailable := range []string{"deleted", "non_work"} {
+		t.Run("no_release_needed/"+unavailable, func(t *testing.T) {
+			f := ticketSetup(t)
+			visible := f.existing("ticket", f.project, "Shown", "open")
+			content := f.existing("ticket", f.project, "Unavailable content", "open")
+			membershipOK(t, f.addExisting([]string{visible, content}, 1, false))
+			f.tx(func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"pill_en":"Software change","pill_de":"Softwareänderung","benefit_en":"Visible software benefit.","benefit_de":"Sichtbarer Software-Nutzen."}'::jsonb WHERE id=$1`, visible); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"no_release_needed":true,"hide_from_release_notes":false,"benefit_en":"Content benefit must not leak.","private_other_field":"not exported"}'::jsonb WHERE id=$1`, content); err != nil {
+					return err
+				}
+				if unavailable == "deleted" {
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=statement_timestamp() WHERE id=$1`, content)
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET kind_id=(SELECT id FROM node_kinds WHERE tenant_id=$2 AND slug='memory') WHERE id=$1`, content, f.person.TenantID)
+				return err
+			})
+			path := "/api/projects/" + f.project + "/releases/" + f.release + "/note-snapshot"
+			check := func(frozen bool) {
+				t.Helper()
+				response := f.request(f.person, http.MethodGet, path, "")
+				if response.Code != http.StatusOK {
+					t.Fatalf("snapshot: %d %s", response.Code, response.Body.String())
+				}
+				var snapshot releasehistory.NoteSnapshot
+				if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
+					t.Fatal(err)
+				}
+				if snapshot.Frozen != frozen || len(snapshot.Tickets) != 2 || snapshot.Tickets[1].ID != content || snapshot.Tickets[1].Unavailable == "" {
+					t.Fatalf("unavailable member was not retained: %+v", snapshot)
+				}
+				var fields map[string]any
+				if err := json.Unmarshal(snapshot.Tickets[1].Fields, &fields); err != nil {
+					t.Fatal(err)
+				}
+				if len(fields) != 2 || fields["no_release_needed"] != true || fields["hide_from_release_notes"] != false {
+					t.Fatalf("unavailable member flags: %s", snapshot.Tickets[1].Fields)
+				}
+				notes, err := releasehistory.NotesFromSnapshot(response.Body.Bytes(), "260928120000.0.0", "test")
+				if err != nil || notes.Hidden != 1 || len(notes.Items) != 1 || notes.Items[0].ID != visible || len(notes.Gaps) != 1 {
+					t.Fatalf("unavailable content included in notes or gaps: %+v %v", notes, err)
+				}
+				if strings.Contains(response.Body.String(), "private_other_field") || strings.Contains(string(mustNotes(t, notes)), content) {
+					t.Fatal("unavailable content leaked into release notes")
+				}
+			}
+			check(false)
+			f.tx(func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released', released_at=statement_timestamp() WHERE release_node_id=$1`, f.release)
+				return err
+			})
+			f.tx(func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"no_release_needed":false}'::jsonb WHERE id=$1`, content)
+				return err
+			})
+			check(true)
 		})
 	}
 }
