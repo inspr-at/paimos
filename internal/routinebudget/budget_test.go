@@ -314,6 +314,17 @@ func TestRoutineBudgetUnknownRetainsSlotAndChildBinding(t *testing.T) {
 		}
 		return agentaccounts.ValidateReservedCapacity(t.Context(), tx, in.AgentRunID, in.AccountID, f.broker.StartCheck(f.agent))
 	}))
+	// Reparenting cannot turn an already-bound routine order into an ordinary
+	// claim. The first validation acquires all fences before the fixture move.
+	wantError(t, f.tx(func(tx pgx.Tx) error {
+		if err := agentaccounts.ValidateReservedCapacity(t.Context(), tx, in.AgentRunID, in.AccountID, f.broker.StartCheck(f.agent)); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=(SELECT work_order_id FROM agent_runs WHERE id=$1)`, in.AgentRunID, f.parent); err != nil {
+			return err
+		}
+		return agentaccounts.ValidateReservedCapacity(t.Context(), tx, in.AgentRunID, in.AccountID, f.broker.StartCheck(f.agent))
+	}), "routine_order_outside_lineage")
 	unknown := settlement("lost-exit", Amount{})
 	unknown.ExitConfirmed = false
 	must(t, f.tx(func(tx pgx.Tx) error {

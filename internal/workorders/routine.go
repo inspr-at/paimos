@@ -145,13 +145,19 @@ func guardRoutineRun(ctx context.Context, tx pgx.Tx, agentRunID string) (bool, e
 		return false, err
 	}
 	run, err := routineParent(ctx, tx, parent)
-	if err != nil || run == "" {
+	if err != nil {
 		return false, err
 	}
 	var bound string
 	err = tx.QueryRow(ctx, `SELECT run_id::text FROM routine_budget_orders WHERE work_order_id=$1`, order).Scan(&bound)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && bound != run {
+	if errors.Is(err, pgx.ErrNoRows) {
+		if run == "" {
+			return false, nil
+		}
 		return false, Fail(409, "routine_child_binding_required")
+	}
+	if err == nil && (run == "" || bound != run) {
+		return false, Fail(409, "routine_order_outside_lineage")
 	}
 	return true, err
 }
