@@ -27,6 +27,25 @@ func TestUnattendedMissingPlatformPreservesLegacyPairing(t *testing.T) {
 			f.approve(p, "one_per_harness")
 			v := f.redeem(p)
 			key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+			// A later added harness retains its own qualified request metadata;
+			// only the computer's original legacy request lacks platform evidence.
+			q := f.propose("codex")
+			q.id = uuid(t, f.db)
+			q.request["request_id"] = q.id
+			q.request["existing_computer_id"] = *v.ComputerID
+			q.request["existing_lifecycle_secret"] = p.lifecycle
+			f.submit(q)
+			f.approve(q, "one_per_harness")
+			added := f.redeem(q)
+			var enrollment agentpairing.Enrollment
+			for _, e := range added.Enrollments {
+				if e.Harness == "codex" {
+					enrollment = e
+				}
+			}
+			if enrollment.VerificationRunID == nil {
+				t.Fatal("fixture needs a qualified added-harness verification")
+			}
 			signals := hostcapacity.Signals{Cores: 8, MemoryPressure: "unknown", Power: "unknown", Thermal: "unknown", Unattended: &hostcapacity.UnattendedSignals{LoginSession: "ready", IdleSleep: "disabled", FileVault: "off"}}
 			f.call("POST", "/api/agent-pairing/self/capacity", signals, false, key, 200)
 			if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_requests SET details=(details-'platform') || $2::jsonb WHERE id=$1`, p.id, tc.patch); err != nil {
@@ -58,7 +77,7 @@ func TestUnattendedMissingPlatformPreservesLegacyPairing(t *testing.T) {
 				if unattended != *capacity.Unattended {
 					t.Fatal("claim seam disagrees with legacy host advisory", unattended)
 				}
-				return agentpairing.RunFence(t.Context(), tx, v.Enrollments[0].AccountID, *v.Enrollments[0].VerificationRunID, true)
+				return agentpairing.RunFence(t.Context(), tx, enrollment.AccountID, *enrollment.VerificationRunID, true)
 			})
 			if err != nil {
 				t.Fatal("legacy capacity/claim failed", err)
