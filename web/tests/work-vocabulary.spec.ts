@@ -184,7 +184,7 @@ for (const width of sizes) for (const theme of ['light', 'dark']) for (const cus
 // saved levels come back in the order sent, levels[0] being the top level.
 for (const width of sizes) for (const theme of ['light', 'dark']) {
   test(`work vocabulary reads top-down with an icon picker ${width} ${theme}`, async ({ page }) => {
-    const shots = 'test-results/aeon-996-vocabui'
+    const shots = 'test-results/aeon-1142-vocabicons'
     await mkdir(shots, { recursive: true }); await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const data = fixtures(); data.preferences.theme = { choice: theme }
     await mockWork(page, data, { admin: true })
@@ -221,29 +221,58 @@ for (const width of sizes) for (const theme of ['light', 'dark']) {
       actions: card.getByLabel('Vocabulary actions'), save: card.getByRole('button', { name: /Save names/ }),
       top: card.getByLabel('Top level', { exact: true }), topIcon: picker('Top level'), level2Icon: picker('Level 2'), level3: card.getByLabel('Level 3', { exact: true }), clickedRow: rows.nth(1),
     })
+    // AEON-1142: a searchable grid of about 100 icons, Default first, in a popover that keeps its size.
     await guard.check(() => picker('Level 2').click())
-    const list = page.getByRole('listbox', { name: 'Level 2 icon' })
-    await expect(list.getByRole('option')).toHaveCount(9)
-    expect(await list.getByRole('option').evaluateAll(options => options.map(option => option.querySelector('svg')!.getBoundingClientRect().width))).toEqual(Array(9).fill(16))
-    const box = (await page.getByRole('dialog', { name: 'Choose level 2 icon' }).boundingBox())!
+    const dialog = page.getByRole('dialog', { name: 'Choose level 2 icon' }), list = dialog.getByRole('listbox', { name: 'Level 2 icon' })
+    const search = dialog.getByRole('searchbox', { name: 'Find an icon' }), options = list.getByRole('option')
+    await expect(options).toHaveCount(101)
+    await expect(search).toBeFocused()
+    expect(await options.evaluateAll(cells => cells.slice(0, 12).map(cell => [cell.getBoundingClientRect().width, cell.getBoundingClientRect().height, cell.querySelector('svg')!.getBoundingClientRect().width]))).toEqual(Array(12).fill([44, 44, 18]))
+    const box = (await dialog.boundingBox())!
     expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(width)
-    // The choice opens on the current icon; arrows move, Home and End jump.
-    const option = (name: string) => list.getByRole('option', { name: new RegExp(`^${name}`) })
-    await expect(option('Default')).toBeFocused()
-    const optionGuard = await controlStability(page, { first: option('Default'), last: option('Box'), listbox: list })
-    await optionGuard.check(() => page.keyboard.press('ArrowDown')); await expect(option('Ticket')).toBeFocused()
-    await optionGuard.check(() => page.keyboard.press('End')); await expect(option('Box')).toBeFocused()
-    await optionGuard.check(() => page.keyboard.press('Home')); await expect(option('Default')).toBeFocused()
-    await optionGuard.check(() => option('Epic').hover()); optionGuard.done()
-    await page.screenshot({ path: `${shots}/picker-${width}-${theme}.png`, fullPage: true })
-    await guard.check(async () => { await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter') })
+    expect(await list.evaluate(el => el.scrollWidth - el.clientWidth), 'grid fits its width').toBeLessThanOrEqual(0)
+    // Whole rows only: the grid shows five rows and scrolls the rest.
+    expect(await list.evaluate(el => el.clientHeight)).toBe(220)
+    const option = (name: string) => list.getByRole('option', { name, exact: true })
+    const sizeGuard = await controlStability(page, { dialog, search, well: dialog.locator('.well'), caption: dialog.locator('.caption') })
+    await expect(dialog.locator('.caption')).toHaveText('Default (Layers)')
+    await sizeGuard.check(() => option('Rocket').hover()); await expect(dialog.locator('.caption')).toHaveText('Rocket')
+    // Searching narrows the grid without moving or resizing anything.
+    await sizeGuard.check(() => search.fill('rock')); await expect(options).toHaveCount(1)
+    await sizeGuard.check(() => search.fill('zzz')); await expect(list).toBeHidden()
+    await expect(dialog.getByRole('status')).toHaveText('No icon matches “zzz”. Try a word like goal, bug or team.')
+    await sizeGuard.check(() => search.fill('git')); await expect(options.first()).toHaveAccessibleName('Branch')
+    await sizeGuard.check(() => search.fill('rock')); sizeGuard.done()
+    await page.screenshot({ path: `${shots}/picker-search-${width}-${theme}.png`, fullPage: true })
+    // ArrowDown enters the grid; Enter chooses and returns to the trigger.
+    await search.press('ArrowDown'); await expect(option('Rocket')).toBeFocused()
+    await guard.check(() => page.keyboard.press('Enter'))
     await expect(list).toBeHidden()
-    await expect(picker('Level 2')).toHaveAccessibleName('Level 2 icon: Ticket'); await expect(picker('Level 2')).toBeFocused()
-    // Esc closes the choice without changing it and returns to the trigger.
-    await guard.check(async () => { await picker('Level 2').press('ArrowDown'); await expect(list).toBeVisible(); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Escape') })
+    await expect(picker('Level 2')).toHaveAccessibleName('Level 2 icon: Rocket'); await expect(picker('Level 2')).toBeFocused()
+    // Reopened, the grid starts on the chosen icon; arrows move in two dimensions.
+    await picker('Level 2').press('ArrowDown'); await expect(search).toBeFocused(); await expect(search).toHaveValue('')
+    await search.press('ArrowDown'); await expect(option('Rocket')).toBeFocused()
+    await expect(list.locator('[aria-selected=true]')).toHaveAccessibleName('Rocket')
+    const names = await options.evaluateAll(cells => cells.map(cell => cell.getAttribute('aria-label')!))
+    const columns = await options.evaluateAll(cells => cells.filter(cell => cell.offsetTop === cells[0].offsetTop).length)
+    expect(columns).toBeGreaterThanOrEqual(7)
+    const at = names.indexOf('Rocket')
+    const keyGuard = await controlStability(page, { dialog, search, first: options.first(), chosen: option('Rocket'), last: options.last() })
+    await keyGuard.check(() => page.keyboard.press('ArrowRight')); await expect(option(names[at + 1])).toBeFocused()
+    await keyGuard.check(() => page.keyboard.press('ArrowDown')); await expect(option(names[at + 1 + columns])).toBeFocused()
+    await keyGuard.check(() => page.keyboard.press('Home')); await expect(option('Default (Layers)')).toBeFocused()
+    await keyGuard.check(() => page.keyboard.press('ArrowUp')); await expect(search).toBeFocused()
+    await keyGuard.check(() => page.keyboard.press('ArrowDown')); await expect(option('Rocket')).toBeFocused()
+    await keyGuard.check(() => page.keyboard.press('End')); await expect(option(names[names.length - 1])).toBeFocused(); keyGuard.done()
+    // Typing in the grid continues the search.
+    await page.keyboard.type('trop'); await expect(search).toBeFocused(); await expect(search).toHaveValue('trop')
+    await expect(options).toHaveCount(1); await expect(options.first()).toHaveAccessibleName('Trophy')
+    // Esc leaves the search field, the next Esc closes without changing the choice.
+    await page.keyboard.press('Escape'); await expect(list).toBeVisible(); await expect(search).not.toBeFocused()
+    await guard.check(() => page.keyboard.press('Escape'))
     await expect(list).toBeHidden()
-    await expect(picker('Level 2')).toHaveAccessibleName('Level 2 icon: Ticket'); await expect(picker('Level 2')).toBeFocused()
-    await guard.check(() => picker('Top level').click()); await page.getByRole('option', { name: 'Default Epic', exact: true }).click()
+    await expect(picker('Level 2')).toHaveAccessibleName('Level 2 icon: Rocket'); await expect(picker('Level 2')).toBeFocused()
+    await guard.check(() => picker('Top level').click()); await page.getByRole('option', { name: 'Default (Epic)', exact: true }).click()
     await expect(picker('Top level')).toHaveAccessibleName('Top level icon: Default')
     guard.done()
     await expect(card.locator('.preview')).toContainText('Arbeitsvorhaben / Teilprojekt / Geschichte')
@@ -257,7 +286,7 @@ for (const width of sizes) for (const theme of ['light', 'dark']) {
     await card.getByRole('button', { name: /Save names/ }).click()
     await expect(card.getByRole('status')).toContainText('Workspace names saved')
     expect(puts).toHaveLength(1)
-    expect(puts[0].levels).toEqual([{ name: 'Arbeitsvorhaben', icon: '' }, { name: 'Teilprojekt', icon: 'ticket' }, { name: 'Geschichte', icon: 'layers' }, { name: 'Aufgabe', icon: '' }])
+    expect(puts[0].levels).toEqual([{ name: 'Arbeitsvorhaben', icon: '' }, { name: 'Teilprojekt', icon: 'rocket' }, { name: 'Geschichte', icon: 'layers' }, { name: 'Aufgabe', icon: '' }])
     expect(puts[0].leaf).toEqual({ name: 'Arbeitsschritt mit ausführlicher deutscher Beschreibung', icon: 'check' })
     // Tall enough for the whole card, so the preview below the rows is in the picture.
     await page.setViewportSize({ width, height: 1400 }); await card.scrollIntoViewIfNeeded()

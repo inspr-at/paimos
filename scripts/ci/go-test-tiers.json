@@ -5468,6 +5468,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestWorkTreeTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestWorkVocabularyDefaultsSeedNewWorkspacesOnly","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/dbtest","name":"TestCleanupBudgetAndReporting","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/dbtest","name":"TestClonesKeepTemplateMigrations","tier":"ESSENTIAL"}
@@ -7695,6 +7697,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestWorkCausalUndoAgentOrdinaryEditPreservesProtectedFields","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkCausalUndoProtectedTransitions","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkIconsMatchTheContractEnum","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleBackgroundCompletionAndRevocation","tier":"GATED-FULL"}
     ,
