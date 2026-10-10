@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
+import { controlStability } from './control-stability'
 
 const palette = (page: Page) => page.getByRole('dialog', { name: 'Search and commands' })
 const group = (page: Page, name: string) => palette(page).getByRole('group', { name }).getByRole('option')
@@ -79,6 +81,127 @@ test('a key prefix finds the exact key first and skips the word search', async (
   expect(nodeQueries(calls).at(-1)?.query.get('sort')).toBe('key')
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-13')
+})
+
+// Risk: knowledge keys open the wrong record, escape project scope, or get
+// replaced by an obsolete result while the next query is still debouncing.
+test('knowledge keys open visible scoped entries and superseded responses stay discarded', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 })
+  const errors = watchErrors(page)
+  const workCalls = await mockWork(page, fixtures())
+  const world = knowledgeWorld()
+  const guideline = world.entries.find(entry => entry.id === 'k-aeon-cutover')!
+  Object.assign(guideline, { key: 'GUI-22', slug: 'paimos-agent-platform-core', title: 'Paimos agent platform core' })
+  const runbook = world.entries.find(entry => entry.id === 'k-deploy')!
+  runbook.key = 'RUN-40'
+  const invisible = { ...guideline, id: 'k-invisible', key: 'GUI-99', slug: 'private-platform-core', title: 'Private platform core', project: 'p-pharos' }
+  world.entries.push(invisible)
+  // Retain the invisible fixture, while the API supplies only authorized entries.
+  const calls = await mockKnowledge(page, { ...world, entries: world.entries.filter(entry => entry.id !== invisible.id) })
+  const searchedKnowledge = () => calls.filter(call => call.path === '/api/knowledge' && call.query.has('q'))
+  await page.goto('/p/AEON')
+  await expect(rows(page)).toHaveCount(1)
+  await page.keyboard.press('Control+k')
+  const input = palette(page).getByRole('combobox')
+  const guard = await controlStability(page, { search: input, scope: palette(page).getByRole('button', { name: 'Search everywhere, not only in AEON', exact: true }) })
+  await guard.check(async () => {
+    await input.fill('GUI-22')
+    await expect(group(page, 'Knowledge')).toHaveText([/Paimos agent platform core.*guideline\/paimos-agent-platform-core/])
+  })
+  const resultGuard = await controlStability(page, { search: input, entry: group(page, 'Knowledge').first() })
+  await resultGuard.check(() => group(page, 'Knowledge').first().hover())
+  resultGuard.done(); guard.done()
+  expect(searchedKnowledge().at(-1)?.query.get('project_id')).toBe('p-aeon')
+  expect(searchedKnowledge().at(-1)?.query.get('limit')).toBe('8')
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL('/p/AEON/knowledge/guideline/paimos-agent-platform-core')
+  await expect(page.getByRole('heading', { level: 1, name: guideline.title })).toBeVisible()
+
+  await page.keyboard.press('Control+k')
+  await input.fill('platform core')
+  await expect(group(page, 'Knowledge')).toHaveText([/Paimos agent platform core/])
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('heading', { level: 1, name: guideline.title })).toBeVisible()
+  await page.keyboard.press('Control+k')
+  await input.fill('RUN-40')
+  await expect(palette(page)).toContainText('Nothing matches “RUN-40” in AEON.')
+  expect(searchedKnowledge().at(-1)?.query.get('project_id')).toBe('p-aeon')
+  await input.fill('')
+  await input.press('Backspace')
+  await expect(palette(page).locator('.scope-chip')).toHaveCount(0)
+  await input.fill('RUN-40')
+  await expect(group(page, 'Knowledge')).toHaveText([/Deploy a release to production.*runbook\/deploy-release.*PHAROS/])
+  expect(searchedKnowledge().at(-1)?.query.has('project_id')).toBe(false)
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL('/p/PHAROS/knowledge/runbook/deploy-release')
+  await expect(page.getByRole('heading', { level: 1, name: runbook.title })).toBeVisible()
+  await page.keyboard.press('Control+k')
+  await input.fill('PHAROS-13')
+  await expect(group(page, 'Tickets').first()).toContainText('PHAROS-13')
+  expect(searches(workCalls)).not.toContain('PHAROS-13')
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-13')
+  await expect(page.getByRole('complementary', { name: 'Ticket details' })).toContainText('Run the disposable Hetzner end-to-end check')
+  await page.keyboard.press('Control+k')
+  await input.fill('GUI-99')
+  await expect(palette(page)).toContainText('Nothing matches “GUI-99” in PHAROS.')
+  expect(searchedKnowledge().at(-1)?.query.get('project_id')).toBe(invisible.project)
+  expect(world.entries).toContain(invisible)
+
+  await page.goto('/')
+  // Let the old response arrive even after cancellation, to exercise the stale
+  // response guard rather than relying on the browser to drop it.
+  await page.evaluate(() => {
+    const fetch = window.fetch.bind(window)
+    const state = window as typeof window & { consumedKnowledge: number }
+    state.consumedKnowledge = 0
+    window.fetch = async (resource, init) => {
+      const url = new URL(resource instanceof Request ? resource.url : String(resource), location.href)
+      const old = url.pathname === '/api/knowledge' && url.searchParams.get('q') === 'GUI-22'
+      const response = await fetch(resource, old ? { ...init, signal: undefined } : init)
+      if (old) {
+        const json = response.json.bind(response)
+        response.json = async () => { const body = await json(); state.consumedKnowledge++; return body }
+      }
+      return response
+    }
+  })
+  const clockStart = new Date('2026-10-09T20:00:00Z')
+  await page.clock.install({ time: clockStart })
+  await page.clock.pauseAt(new Date(clockStart.getTime() + 1000))
+  await page.keyboard.press('Control+k')
+  for (const releaseDuringDebounce of [true, false]) {
+    let release!: () => void, started!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const arrived = new Promise<void>(resolve => { started = resolve })
+    await page.route(url => url.pathname === '/api/knowledge' && url.searchParams.get('q') === 'GUI-22', async route => {
+      started()
+      await held
+      await route.fallback()
+    }, { times: 1 })
+    try {
+      await input.fill('GUI-22')
+      await page.clock.runFor(120)
+      await arrived
+      await input.fill('RUN-40')
+      if (!releaseDuringDebounce) {
+        await page.clock.runFor(120)
+        await expect(group(page, 'Knowledge')).toHaveText([/Deploy a release to production/])
+      }
+      const consumed = await page.evaluate(() => (window as typeof window & { consumedKnowledge: number }).consumedKnowledge)
+      release()
+      await expect.poll(() => page.evaluate(() => (window as typeof window & { consumedKnowledge: number }).consumedKnowledge)).toBe(consumed + 1)
+      await page.clock.runFor(1)
+      if (releaseDuringDebounce) {
+        await expect(group(page, 'Knowledge')).toHaveCount(0)
+        await expect(palette(page).locator('.skeleton-lines')).toBeVisible()
+        await page.clock.runFor(120)
+      }
+      await expect(group(page, 'Knowledge')).toHaveText([/Deploy a release to production/])
+      await expect(input).toHaveValue('RUN-40')
+    } finally { release() }
+  }
+  expect(errors).toEqual([])
 })
 
 test('a bare project key offers the project first', async ({ page }) => {
