@@ -78,6 +78,22 @@ func TestLongTicketHistoryUsesBoundedSuccessivePages(t *testing.T) {
 	if decoded.Watermark < 1 {
 		t.Fatal("no history watermark")
 	}
+	// The complete candidate type set must remain eligible for the partial
+	// paging index when main adds new activity types. Disabling sequential
+	// scans proves eligibility independently of this fixture's estimated cost.
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `SET LOCAL enable_seqscan=off`); err != nil {
+			return err
+		}
+		var plan []byte
+		if err := tx.QueryRow(t.Context(), `EXPLAIN (FORMAT JSON) `+timelineCandidatesSQL, f.p.TenantID, f.node, decoded.Watermark, decoded.At, decoded.ID, 65).Scan(&plan); err != nil {
+			return err
+		}
+		if !strings.Contains(string(plan), `"Index Name": "events_activity_page"`) {
+			t.Fatal("activity candidate types cannot use the paging index")
+		}
+		return nil
+	})
 	if _, err := json.Marshal(second); err != nil {
 		t.Fatal(err)
 	}

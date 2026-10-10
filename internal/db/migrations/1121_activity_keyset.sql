@@ -15,7 +15,7 @@ LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
  ELSE coalesce(doc->'fields'->'classic'->>'source_id','') END
 $$;
 CREATE INDEX events_activity_page ON events(tenant_id,node_id,aeon_activity_at(type,after,at) DESC,id DESC)
- WHERE type IN ('import.comment','import.history','import.node_created','node.created','node.updated','node.moved','node.kind_changed','comment.created','status_autopilot.changed','status_autopilot.undone','status_autopilot.skipped');
+ WHERE type IN ('import.comment','import.history','import.node_created','node.created','node.updated','node.moved','node.kind_changed','comment.created','status_autopilot.changed','status_autopilot.undone','status_autopilot.skipped','status_autopilot.derived','status_autopilot.retained','status_autopilot.causal_undo');
 CREATE INDEX events_activity_comment_revision ON events(tenant_id,node_id,(after->>'comment_id'),id DESC)
  WHERE type IN ('comment.updated','comment.deleted');
 CREATE INDEX events_activity_import_comment ON events(tenant_id,node_id,aeon_activity_source(type,after),(coalesce(nullif(after->'record'->>'id',''),id::text)),id)
