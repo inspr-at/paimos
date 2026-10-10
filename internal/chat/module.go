@@ -29,15 +29,21 @@ import (
 
 type Options struct{ Enabled bool }
 type Module struct {
-	pool    *pgxpool.Pool
-	enabled bool
-	live    liveRelay
+	pool       *pgxpool.Pool
+	enabled    bool
+	live       liveRelay
+	liveChecks chan struct{}
 }
 
 // New ships disabled. Enabling supplies identity, participant history and
 // authenticated live/final outbox routes. It never wakes or launches an agent.
 func New(pool *pgxpool.Pool, options ...Options) *Module {
 	m := &Module{pool: pool}
+	checks := 4
+	if pool != nil {
+		checks = max(1, min(checks, int(pool.Config().MaxConns-db.ForegroundReserve)))
+	}
+	m.liveChecks = make(chan struct{}, checks)
 	if len(options) > 0 {
 		m.enabled = options[0].Enabled
 	}

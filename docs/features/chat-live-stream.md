@@ -5,17 +5,28 @@
 The opt-in chat module adds `GET /api/chat-threads/{id}/live`. Two viewers of
 the same person's conversation receive the same normalized agent updates.
 Every frame and heartbeat checks current participant and project access.
+At most four live authorization checks run concurrently (fewer with a small
+database pool). Their read snapshots end before any socket write; slow viewers
+hold no database connection or tenant write fence.
 Interim text and tool activity stay in bounded RAM; they never enter the
 database, audit events, telemetry or logs.
 
 Reconnect with `Last-Event-ID` or `after`. Replay resumes strictly after that
 caller/thread-scoped cursor. Each conversation holds at most 64 frames and
-256 KiB; the server admits at most 256 buffers, 256 viewers and four viewers
-per conversation. Idle buffers expire after two minutes on subsequent relay
-activity. Restart or a replay gap returns HTTP 409 before streaming, or sends
-`resync` and closes an existing stream. Reload final history before reconnecting
+256 KiB; the server admits at most 256 buffers and 256 viewers, with at most
+64 buffers and 64 viewers per tenant and four viewers per conversation.
+Capacity pressure evicts the oldest buffer without viewers, within the tenant
+when its own cap is reached. Active buffers are retained. Body-free final,
+receipt and read-marker hints do not allocate a missing buffer. Idle buffers
+expire after two minutes on subsequent relay activity. Restart or a replay gap
+returns HTTP 409 before streaming, or sends `resync` and closes an existing
+stream. Reload final history before reconnecting
 without a cursor. Streams rotate after five minutes; writes have a three-second
-deadline. Replay is a transient convenience, not a durable transcript.
+deadline. Replay from a superseded, stopped or stale session sends
+`resync` with reason `binding_changed` and a cursor beyond the obsolete frame,
+then closes without its content. Reload final history before a fresh live
+subscription. A viewer losing access closes silently. Replay is a transient
+convenience, not a durable transcript.
 
 The existing external worker lease and exact current binding authorize
 `POST /api/chat-deliveries/live`, which accepts the S1 normalized event DTO.
@@ -55,6 +66,13 @@ idempotency, bounded outbox pages, monotonic receipts and active-viewer access
 revocation. `TestChatLiveFiftyThreadsRemainBounded` concurrently floods 50 RAM
 relay threads, checks frame/byte/subscription bounds and proves idle cleanup
 with an injected clock.
+`TestChatLiveFiftyHTTPViewersReleaseDatabaseBeforeWrite` holds 50 HTTP handlers
+at transport barriers while a tenant mutation and acquisition of all 16 pool
+connections complete. `TestChatLiveTenantCapacityAndIdleEviction` checks tenant
+quotas, idle eviction and body-free hints. The handover, stopped-session and
+expired-heartbeat cases in `TestChatLiveObsoleteBindingReplayRequestsResync`
+require explicit resync without obsolete content. These three regressions
+fail against the unchanged pre-fix production code at `7d8d1952`.
 
 The affected `internal/chat`, `internal/agentd`, `internal/authz` and
 `internal/reportercontract` packages passed on the approved remote test lane.

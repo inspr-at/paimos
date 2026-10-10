@@ -51,12 +51,21 @@ func boundedLimit(r *http.Request, maximum, fallback int) (int, error) {
 	return value, nil
 }
 func participant(r *http.Request, tx pgx.Tx, p tenant.Principal) (historyCursor, error) {
+	if !workorders.UUID(r.PathValue("id")) {
+		return historyCursor{}, unavailable()
+	}
+	if err := accessFence(r.Context(), tx, p); err != nil {
+		return historyCursor{}, err
+	}
+	return participantRead(r, tx, p)
+}
+
+// Live reads use a short snapshot without taking the access-change write
+// fence. Mutations and durable history keep participant's existing fence.
+func participantRead(r *http.Request, tx pgx.Tx, p tenant.Principal) (historyCursor, error) {
 	c := historyCursor{Tenant: p.TenantID, Thread: r.PathValue("id")}
 	if !workorders.UUID(c.Thread) {
 		return c, unavailable()
-	}
-	if err := accessFence(r.Context(), tx, p); err != nil {
-		return c, err
 	}
 	person, err := personID(r.Context(), tx, p)
 	if err != nil {

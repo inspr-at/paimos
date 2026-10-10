@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,8 @@ import (
 const (
 	liveThreadLimit      = 256
 	liveViewerLimit      = 256
+	liveTenantThreads    = 64
+	liveTenantViewers    = 64
 	livePerThreadViewers = 4
 	liveFrameLimit       = 64
 	liveByteLimit        = 256 << 10
@@ -39,6 +42,7 @@ type liveFrame struct {
 }
 type liveThread struct {
 	id                         string
+	tenant                     string
 	sequence                   int64
 	sourceSession, sourceEpoch string
 	sourceSequence             uint64
@@ -76,18 +80,47 @@ func (b *liveRelay) thread(key string) (*liveThread, error) {
 	}
 	v := b.threads[key]
 	if v == nil {
+		tenant, _, _ := strings.Cut(key, "/")
+		count := 0
+		for _, thread := range b.threads {
+			if thread.tenant == tenant {
+				count++
+			}
+		}
+		if count >= liveTenantThreads && !b.evictIdle(tenant) {
+			return nil, workorders.Fail(429, "live chat tenant thread limit reached")
+		}
 		if len(b.threads) >= liveThreadLimit {
-			return nil, workorders.Fail(429, "live chat thread limit reached")
+			if !b.evictIdle("") {
+				return nil, workorders.Fail(429, "live chat thread limit reached")
+			}
 		}
 		var id [16]byte
 		if _, err := rand.Read(id[:]); err != nil {
 			return nil, err
 		}
-		v = &liveThread{id: hex.EncodeToString(id[:]), viewers: map[chan struct{}]bool{}}
+		v = &liveThread{id: hex.EncodeToString(id[:]), tenant: tenant, viewers: map[chan struct{}]bool{}}
 		b.threads[key] = v
 	}
 	v.touched = now
 	return v, nil
+}
+
+// Called with mu held. Active streams are never evicted; an idle eviction
+// invalidates that relay ID so its previous cursors fail explicitly.
+func (b *liveRelay) evictIdle(tenant string) bool {
+	var oldest *liveThread
+	var key string
+	for k, thread := range b.threads {
+		if len(thread.viewers) == 0 && (tenant == "" || thread.tenant == tenant) && (oldest == nil || thread.touched.Before(oldest.touched) || thread.touched.Equal(oldest.touched) && k < key) {
+			oldest, key = thread, k
+		}
+	}
+	if oldest == nil {
+		return false
+	}
+	delete(b.threads, key)
+	return true
 }
 func liveKey(tenant, thread string) string { return tenant + "/" + thread }
 
@@ -132,7 +165,13 @@ func (b *liveRelay) subscribe(c liveCursor, token string) (liveCursor, <-chan st
 		c.Relay = v.id
 		c.Sequence = v.sequence
 	}
-	if b.viewers >= liveViewerLimit || len(v.viewers) >= livePerThreadViewers {
+	tenantViewers := 0
+	for _, thread := range b.threads {
+		if thread.tenant == c.Tenant {
+			tenantViewers += len(thread.viewers)
+		}
+	}
+	if b.viewers >= liveViewerLimit || tenantViewers >= liveTenantViewers || len(v.viewers) >= livePerThreadViewers {
 		return c, nil, nil, workorders.Fail(429, "live chat viewer limit reached")
 	}
 	wake := make(chan struct{}, 1)
@@ -173,6 +212,11 @@ func (b *liveRelay) publish(key, session, epoch string, source uint64, payload a
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	// Durable-state notifications carry no interim content and only wake an
+	// existing replay buffer. They must not consume capacity without viewers.
+	if session == "" && source == 0 && b.threads[key] == nil {
+		return false, nil
+	}
 	v, err := b.thread(key)
 	if err != nil {
 		return false, err
@@ -227,31 +271,44 @@ func (m *Module) publishLive(r *http.Request, tx pgx.Tx, p tenant.Principal, in 
 	return map[string]any{"contract": "chat-live-v1", "accepted": accepted}, err
 }
 
-// Each frame and heartbeat is reauthorized under the same tenant fence used by
-// access revocation. The bounded socket write completes before releasing it.
+var errLiveBindingChanged = errors.New("live chat binding changed")
+
+// Check every frame/heartbeat in a bounded, read-only snapshot. A snapshot
+// started after a committed revocation sees it. Release the transaction and
+// admission slot before socket I/O so slow viewers retain no DB resources.
 func (m *Module) liveAuthorized(r *http.Request, p tenant.Principal, f *liveFrame, send func() error) error {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	return db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		c, err := participant(r.WithContext(ctx), tx, p)
+	select {
+	case m.liveChecks <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	current := true
+	err := db.InTenantReadSnapshot(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		c, err := participantRead(r.WithContext(ctx), tx, p)
 		if err != nil {
 			return err
 		}
 		if f != nil && f.session != "" {
-			var current bool
 			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM chat_threads t JOIN chat_session_bindings b ON b.tenant_id=t.tenant_id AND b.role_id=t.role_id JOIN harness_sessions s ON s.tenant_id=b.tenant_id AND s.id=b.session_id WHERE t.id=$1 AND b.session_id=$2 AND b.binding_epoch=$3 AND b.valid_to IS NULL AND s.stopped_at IS NULL AND s.archived_at IS NULL AND s.phase NOT IN ('stopping','stopped') AND coalesce(s.heartbeat_at,s.created_at)>clock_timestamp()-interval '2 minutes')`, c.Thread, f.session, f.epoch).Scan(&current)
 			if err != nil {
 				return err
 			}
-			if !current {
-				return unavailable()
-			}
-		}
-		if send != nil {
-			return send()
 		}
 		return nil
 	})
+	<-m.liveChecks
+	if err != nil {
+		return err
+	}
+	if !current {
+		return errLiveBindingChanged
+	}
+	if send != nil {
+		return send()
+	}
+	return nil
 }
 func (m *Module) streamLive(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -327,6 +384,9 @@ func (m *Module) streamLive(w http.ResponseWriter, r *http.Request) {
 			next := c
 			next.Sequence = f.sequence
 			if err = m.liveAuthorized(r, p, &f, func() error { return send("chat", next, f.raw) }); err != nil {
+				if errors.Is(err, errLiveBindingChanged) {
+					_ = send("resync", next, []byte(`{"reason":"binding_changed"}`))
+				}
 				return
 			}
 			c = next
