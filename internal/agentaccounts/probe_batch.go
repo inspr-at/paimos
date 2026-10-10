@@ -23,6 +23,7 @@ type probeBatchEntry struct {
 // Transport batching deliberately preserves separate transactions: reportProbe
 // appends events last, and one denied enrollment must not hide sibling results.
 func (m *Module) probes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	p, ok := principal(w, r)
 	if !ok {
 		return
