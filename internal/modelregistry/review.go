@@ -67,6 +67,7 @@ func ResolveRoutineEvaluationFor(ctx context.Context, tx pgx.Tx, p tenant.Princi
 		policy = reviewgate.DefaultFamilyPolicy()
 	}
 	q.Role, q.AuthorFamily = "review-gate", family
+	q.routineEvaluation = true
 	route, err := ResolveReviewWithPolicyFor(ctx, tx, p, q, now, policy)
 	return route, settings.Effective, err
 }
@@ -88,7 +89,11 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	}
 	q.Role = out.Role
 	q.AuthorFamily = author
-	if board, err := resolveBoardWork(ctx, tx, p, q, now, nil, policies...); err != nil {
+	var boardPolicies []reviewgate.FamilyPolicy
+	if q.routineEvaluation {
+		boardPolicies = policies
+	}
+	if board, err := resolveBoardWork(ctx, tx, p, q, now, nil, boardPolicies...); err != nil {
 		return out, err
 	} else if board != nil {
 		out.Profile, out.Ladder, out.OwnerRequired, out.Trace, out.Residency = board.Profile, board.Ladder, board.OwnerRequired, board.Trace, board.Residency

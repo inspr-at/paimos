@@ -15,24 +15,27 @@ import (
 )
 
 type WorkQuery struct {
-	TicketID         string
-	Role             string
-	TicketRole       string
-	Area             string
-	Complexity       string
-	ComplexitySource string
-	ProjectID        string
-	PersonID         *string
-	AuthorFamily     string
-	Harness          string
-	TicketResidency  string
-	Situation        string
-	Labels           []string
-	EstimateHours    float64
-	FixRound         int
-	PreviousFamily   string
-	Concept          bool
-	Queued           bool
+	// routineEvaluation applies the mandatory family floor to board routing
+	// only for the internal routine resolver; ordinary routes retain their API.
+	routineEvaluation bool
+	TicketID          string
+	Role              string
+	TicketRole        string
+	Area              string
+	Complexity        string
+	ComplexitySource  string
+	ProjectID         string
+	PersonID          *string
+	AuthorFamily      string
+	Harness           string
+	TicketResidency   string
+	Situation         string
+	Labels            []string
+	EstimateHours     float64
+	FixRound          int
+	PreviousFamily    string
+	Concept           bool
+	Queued            bool
 	// Column and OffHarnesses are supplied by shadow round routing only.
 	Column       string
 	OffHarnesses []string
