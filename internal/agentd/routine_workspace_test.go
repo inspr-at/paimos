@@ -181,6 +181,11 @@ func TestRoutineWorkspacesSeparateAndRetainWriters(t *testing.T) {
 			t.Fatalf("replayed unjournaled allocation: %v", err)
 		}
 		item.s.runs[item.g.AgentRunID] = &owned{record: Record{RoutineWorkspace: item.w, Workspace: item.w.Path, Generation: item.g.DaemonGeneration, LaunchState: launchAttempted, State: "ownership_lost"}}
+		raw, _ := json.Marshal(map[string]any{"routine_launch": item.g, "routine_run_id": item.g.RoutineRunID})
+		stale := Run{ID: item.g.AgentRunID, WorkOrderID: item.g.ProjectID, AgentPrincipalID: item.g.PrincipalID, Status: "queued", AccountID: item.g.AccountID, RoutineLaunchID: &item.g.LaunchID, Trace: raw}
+		if err := item.s.StartRun(ctx, stale); !errors.Is(err, ErrProcessesUnconfirmed) {
+			t.Fatalf("unknown prior launch acknowledged as started: %v", err)
+		}
 		// Closing the OS handle simulates crash; durable owner must survive.
 		if err := item.s.routineCheckouts[item.g.AgentRunID].Close(); err != nil {
 			t.Fatal(err)

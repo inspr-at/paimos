@@ -948,6 +948,10 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	s.mu.Unlock()
 	if entry != nil {
 		entry.mu.Lock()
+		if grant != nil && entry.record.State == "ownership_lost" && !noLocalProcess(entry.record) {
+			entry.mu.Unlock()
+			return ErrProcessesUnconfirmed
+		}
 		retry := entry.record.LaunchState == launchPrepared && entry.record.State == "claim_pending" && (entry.record.Generation == s.generation || s.ledger != nil)
 		entry.mu.Unlock()
 		if !retry {
