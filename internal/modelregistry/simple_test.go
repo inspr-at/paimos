@@ -699,6 +699,7 @@ func TestModelAllowanceUnknownAndMeasuredLimit(t *testing.T) {
 	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
 	opus := profileBySlug(profiles, "claude-opus-xhigh")
 	sol := profileBySlug(profiles, "codex-6-1-sol-xhigh")
+	runner := addPrincipal(t, admin.TenantID, "agent", "Allowance runner", nil)
 	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"anthropic:opus", "openai:sol"}, "not": []string{}, "revision": 0}, ""), 200)
 	inRegistry(t, admin, func(tx pgx.Tx) error {
 		now, err := dbNow(t.Context(), tx)
@@ -714,8 +715,12 @@ func TestModelAllowanceUnknownAndMeasuredLimit(t *testing.T) {
 		}
 		ids := map[string]string{}
 		for _, h := range []string{"claude", "codex"} {
+			profileID := opus.ID
+			if h == "codex" {
+				profileID = sol.ID
+			}
 			var id string
-			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,state,last_probe_at,last_probe_ok,last_daemon_generation,owner_person_id) VALUES($1,$2,$2,'fixture',$3,$2,'available',$4,true,'fixture',$3) RETURNING id::text`, admin.TenantID, h, admin.ID, now).Scan(&id); err != nil {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,state,last_probe_at,last_probe_ok,last_daemon_generation,owner_person_id,allowed_model_profile_ids) VALUES($1,$2,$2,'fixture',$3,$2,'available',$4,true,'fixture',$5,ARRAY[$6::uuid]) RETURNING id::text`, admin.TenantID, h, runner.ID, now, admin.ID, profileID).Scan(&id); err != nil {
 				return err
 			}
 			ids[h] = id
