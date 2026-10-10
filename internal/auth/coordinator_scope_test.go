@@ -177,6 +177,37 @@ func TestCoordinatorKeysThroughRealHandlers(t *testing.T) {
 	call(t, creatorCapped.Token, http.MethodGet, "/api/rules/layers", http.StatusForbidden)
 }
 
+// Risk: enabling coordinator preference reads broadens the ordinary key's
+// route ceiling, even when its name resembles a production coordinator.
+func TestModelPreferenceReadsRetainOrdinaryKeyCeiling(t *testing.T) {
+	m, owner := keyFixture(t)
+	mux := http.NewServeMux()
+	modelregistry.New(m.pool).Mount(mux)
+	handler := m.Middleware(mux)
+	for _, name := range []string{"ordinary model reader", "workstation-agents", "aeon-coordinator"} {
+		t.Run(name, func(t *testing.T) {
+			key := decodeKey(t, keyRequest(m, owner, map[string]any{"name": name, "scopes": []string{"models.read"}}))
+			call := func(path string) *httptest.ResponseRecorder {
+				r := httptest.NewRequest(http.MethodGet, path, nil)
+				_, r.Pattern = mux.Handler(r)
+				r.Header.Set("Authorization", "Bearer "+key.Token)
+				out := httptest.NewRecorder()
+				handler.ServeHTTP(out, r)
+				return out
+			}
+			if out := call("/api/models/resolve?role=build&mode=placement"); out.Code != http.StatusOK {
+				t.Fatalf("ordinary placement read: %d %s", out.Code, out.Body.String())
+			}
+			for _, path := range []string{"/api/model-preferences", "/api/model-preferences/board", "/api/model-preferences/coverage", "/api/model-preferences/evidence", "/api/model-preferences/simple", "/api/model-preferences/situations"} {
+				out := call(path)
+				if out.Code != http.StatusForbidden || !strings.Contains(out.Body.String(), "agent key scope required") {
+					t.Fatalf("ordinary preference ceiling %s: %d %s", path, out.Code, out.Body.String())
+				}
+			}
+		})
+	}
+}
+
 func workspacePermissions(t *testing.T, tenantID, principalID string) []string {
 	t.Helper()
 	var out []string

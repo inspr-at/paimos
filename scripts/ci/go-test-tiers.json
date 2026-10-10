@@ -3564,6 +3564,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestMePublicSignInConfig","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestModelPreferenceReadsRetainOrdinaryKeyCeiling","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestNativeCandidateArtifactAgentCeiling","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestNewDefaults","tier":"GATED-FULL"}

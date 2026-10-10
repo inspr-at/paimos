@@ -57,6 +57,15 @@ describe('registry lines', () => {
     expect(metaParts({ ...codex, origin: 'shipped' }).at(-1)).toBe('Shipped')
     expect(metaParts({ ...codex, origin: 'provider' }).at(-1)).toBe('From provider')
   })
+  it('keeps legacy auto provenance generic until the server names its origin', () => {
+    const line = buildLines([sol('high', 3)])[0]!
+    expect(line.origin).toBeUndefined()
+    expect(metaParts(line)).toEqual(['Codex', 'OpenAI', 'gpt-6.1-sol', 'Auto-discovered'])
+    expect(metaParts({ ...line, source: 'manual' }).at(-1)).toBe('Added by hand')
+    expect(metaParts({ ...line, origin: 'shipped' }).at(-1)).toBe('Shipped')
+    expect(metaParts({ ...line, origin: 'provider' }).at(-1)).toBe('From provider')
+    expect(metaParts({ ...line, origin: 'harness' }).at(-1)).toBe('From harness')
+  })
 })
 
 describe('routes and families', () => {
