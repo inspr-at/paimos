@@ -578,6 +578,8 @@ watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
   if (viewer) await refresh()
   if (generation !== readGeneration || s.value.id !== id) return
   loaded = true
+  // Without a viewer this runs during setup, before the live state exists.
+  if (viewer) startLive()
   if (props.active) await enter()
   refreshReceipts()
 }, { immediate: true })
@@ -651,11 +653,13 @@ watch(() => agents.controls[s.value.id], control => {
 })
 watch([liveTurn, latestAgentMessage], ([turn, latest]) => { if (settled(turn, latest)) liveTurn.value = null })
 const openLive = (url: string) => typeof EventSource === 'undefined' ? null : new EventSource(url, { withCredentials: true }) as unknown as LiveSource
-// One stream per open chat tab and person; it ends with the session.
-watch([() => me.value, () => s.value.id, () => props.active, ended], () => {
+// One stream per open chat tab and person; it ends with the session. It
+// starts after the first thread read, so a turn knows which agent message
+// preceded it.
+function startLive() {
   follower?.stop(); follower = undefined
   resetLive()
-  if (!me.value || !person.value || !props.active || ended.value || !s.value.id) return
+  if (!loaded || !me.value || !person.value || !props.active || ended.value || !s.value.id) return
   const generation = ++liveGeneration
   follower = followChatLive(s.value.id, {
     frame: data => { if (generation === liveGeneration) liveFrame(data) },
@@ -666,7 +670,8 @@ watch([() => me.value, () => s.value.id, () => props.active, ended], () => {
     },
     attached: () => {},
   }, { lookup: chatThreadForSession, open: openLive })
-}, { immediate: true })
+}
+watch([() => me.value, () => s.value.id, () => props.active, ended], startLive)
 // A session without a live thread so far may get one when a turn starts.
 watch(() => s.value.activity, activity => { if (activity === 'busy') follower?.retry() })
 // Streaming grows only at the bottom; keep a pinned reader on the latest line.
