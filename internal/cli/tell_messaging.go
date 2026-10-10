@@ -245,7 +245,7 @@ func (rt *runtime) cmdMessagingListen() *Command {
 		if deliver != "" && ((sessionID == "" && !messagingAddressRE.MatchString(as)) || !localMessagingAdapter(deliver)) {
 			return usagef("--deliver requires --as harness:agent and a registered local adapter")
 		}
-		p, err := rt.projectNode(project)
+		projectID, err := rt.projectIdentityCtx(rt.context(), project)
 		if err != nil {
 			return err
 		}
@@ -254,10 +254,10 @@ func (rt *runtime) cmdMessagingListen() *Command {
 			return err
 		}
 		if sessionID != "" && deliver != "" {
-			return rt.listenSessionDelivery(p.ID, project, sessionID, deliver, targetRefFile, after, limit, follow, interval)
+			return rt.listenSessionDelivery(projectID, project, sessionID, deliver, targetRefFile, after, limit, follow, interval)
 		}
 		if deliver != "" {
-			return rt.listenMessagingDelivery(p.ID, project, as, deliver, follow, interval)
+			return rt.listenMessagingDelivery(projectID, project, as, deliver, follow, interval)
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
@@ -284,7 +284,7 @@ func (rt *runtime) cmdMessagingListen() *Command {
 				NextAfter int64                 `json:"next_after"`
 				Preamble  string                `json:"preamble"`
 			}
-			path := "/api/projects/" + url.PathEscape(p.ID) + "/messages/listen?" + q.Encode()
+			path := "/api/projects/" + url.PathEscape(projectID) + "/messages/listen?" + q.Encode()
 			if !strings.Contains(as, ":") {
 				q.Set("wait_ms", "0")
 				if follow {
@@ -326,7 +326,7 @@ func (rt *runtime) cmdMessagingListen() *Command {
 			}
 			if ack {
 				for _, v := range page.Items {
-					ackPath := "/api/projects/" + url.PathEscape(p.ID) + "/messages/" + url.PathEscape(v.ID) + "/ack"
+					ackPath := "/api/projects/" + url.PathEscape(projectID) + "/messages/" + url.PathEscape(v.ID) + "/ack"
 					if !strings.Contains(as, ":") {
 						ackPath = "/api/inbox/messages/" + url.PathEscape(v.ID) + "/ack"
 					}

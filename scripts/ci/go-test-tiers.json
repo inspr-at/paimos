@@ -4528,6 +4528,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatPairedReconnectBindsOnlyItsLiveIndexedSession","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/cli","file":"internal/cli/project_identity_test.go","name":"TestHeartbeatProjectIdentityAvoidsRichListsAndRechecksAccess","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatRegistersHarnessVersion","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatRejectedStatusEstimatesRetryWithoutBlockingLiveness","tier":"GATED-FULL"}
@@ -4658,6 +4660,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestListenFollowRetriesReadsWakeAndAck","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","file":"internal/cli/project_identity_test.go","name":"TestListenSetupUsesOneExactProjectLookup","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestLocalRunnerAcceptedDeadlineSurvivesDispatch","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestLocalRunnerCancelsBothPhasesAndDescendants","tier":"GATED-FULL"}
@@ -4759,6 +4763,8 @@
     {"kind":"go","package":"internal/cli","name":"TestPrintHeartbeatRequestsRejectsUnsafeOrUncataloguedValues","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestPrintHeartbeatSessionRequests","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","file":"internal/cli/project_identity_test.go","name":"TestProjectIdentityErrorsNeverFallBackToRichLists","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestProjectListCompatTranscript","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
@@ -5508,11 +5514,15 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowCompletionKeepsFlake","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowConcurrentPassesApplyEachEventOnce","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowETAFromHistoryOrNoneWithReason","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowETAUsesThirtyDaysOfHistory","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowEarlierRunQueuedAfterLaterRunMovesItemStart","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowEmptyPassDoesNotLockTenant","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowGitHubRunsBecomeChecksSteps","tier":"ESSENTIAL"}
     ,
@@ -7563,6 +7573,10 @@
     {"kind":"go","package":"internal/nodes","name":"TestPortalMutationGuard","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestProjectCountsWorkKindsAndStateGroups","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","file":"internal/nodes/project_lookup_test.go","name":"TestProjectLookupAliasesVisibilityAndZeroAggregates","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nodes","file":"internal/nodes/project_lookup_test.go","name":"TestProjectLookupCancellation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestProjectMoveAliasAndUndo","tier":"GATED-FULL"}
     ,
