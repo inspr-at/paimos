@@ -76,8 +76,7 @@ func newCatalogFixture(t *testing.T, complete bool, cold ...bool) *fixture {
 		if err := modelregistry.PrepareCatalog(t.Context(), f.d.App, f.person, modelregistry.CatalogPreparation{Operation: modelregistry.CatalogRead, Request: request}); err != nil {
 			t.Fatal(err)
 		}
-		// An explicit saved policy narrows the complete catalog to this fixture's
-		// three profiles and two unavailable cross-provider fallback entries.
+		// This fixture owns its review policy independently of catalog bootstrap.
 		f.tx(t, func(tx pgx.Tx) error { _, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes`); return err })
 	}
 	f.profile = testID()
@@ -94,9 +93,14 @@ func newCatalogFixture(t *testing.T, complete bool, cold ...bool) *fixture {
 			}
 		}
 		if complete {
-			if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state)
-          SELECT $1,'review-gate',CASE harness WHEN 'gemini' THEN 4 ELSE 5 END,id,'available'
-          FROM model_profiles WHERE slug IN ('gemini-gemini-2-5-pro-32768','opencode-google-gemini-2-5-pro-default')`, tid); err != nil {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES
+				($1,'gemini-gemini-2-5-pro-32768','review-fallback-fixture','gemini','google','gemini-2.5-pro','32768','strong'),
+				($1,'opencode-google-gemini-2-5-pro-default','review-fallback-fixture','opencode','google','google/gemini-2.5-pro','default','strong')`, tid); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state,valid_until,reason)
+				SELECT $1,'review-gate',CASE harness WHEN 'gemini' THEN 4 ELSE 5 END,id,'unavailable',now()+interval '1 hour','fixture fallback unavailable'
+				FROM model_profiles WHERE slug IN ('gemini-gemini-2-5-pro-32768','opencode-google-gemini-2-5-pro-default')`, tid); err != nil {
 				return err
 			}
 		}
