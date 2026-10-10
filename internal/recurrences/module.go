@@ -254,6 +254,9 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	items := []Recurrence{}
 	var next *string
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.SetLocalStatementTimeout(r.Context(), tx, 5*time.Second); err != nil {
+			return err
+		}
 		permission := readPermission(p)
 		if err := authz.RequireTx(r.Context(), tx, p, permission, authz.Scope{AnyProject: true}); err != nil {
 			return err
