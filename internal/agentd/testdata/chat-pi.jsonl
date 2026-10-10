@@ -1,0 +1,8 @@
+{"type":"agent_start"}
+{"type":"message_update","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_delta","delta":"Hello ","contentIndex":0,"partial":{"reasoning":"PRIVATE_SENTINEL"}}}
+{"type":"message_update","message":{"role":"assistant"},"assistantMessageEvent":{"type":"text_delta","delta":"world","contentIndex":0,"partial":{"reasoning":"PRIVATE_SENTINEL"}}}
+{"type":"tool_execution_start","toolCallId":"call-1","toolName":"Bash","args":{"command":"PRIVATE_SENTINEL"}}
+{"type":"extension_ui_request","id":"dialog-1","method":"confirm","message":"PRIVATE_SENTINEL"}
+{"type":"tool_execution_end","toolCallId":"call-1","toolName":"Bash","isError":false,"result":{"content":"PRIVATE_SENTINEL"}}
+{"type":"agent_end","messages":[{"content":"PRIVATE_SENTINEL"}]}
+{"type":"future","payload":"PRIVATE_SENTINEL"}

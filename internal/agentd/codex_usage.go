@@ -21,6 +21,7 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 	if p.sealed || p.abandoned.Load() {
 		return
 	}
+	p.observeCodexChat(raw)
 	method, _, model := eventProbe(raw)
 	if method == "account/rateLimits/updated" || method == "rateLimits/updated" {
 		p.emitCapacity(raw, "update")
@@ -301,6 +302,7 @@ func (p *codexProcess) startTurn(ctx context.Context, r StartRequest) error {
 		return errors.New("Codex turn start failed")
 	}
 	p.turnID, p.acknowledged = turn, true
+	p.flushCodexChat(turn)
 	if p.pendingLimit != nil && p.pendingLimitTurn == turn {
 		p.emitVendorLimit(p.pendingLimit)
 	}

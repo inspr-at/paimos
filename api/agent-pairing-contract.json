@@ -412,5 +412,47 @@
     "progress": "Reconcile progress accepts state=connected,error_code=verification_unavailable. Enrollment projection uses verification_state=unavailable and verification_error=verification_unavailable only for unclaimed queued unsupported verification; does not change computer authority/connectivity or infer process death.",
     "expiry": "Unclaimed queued verification is cancelled and its owned reservation released transactionally at expiry under tenant claim/lifecycle fence. Claimed live/uncertain work is never expired this way. No replacement run/allowance/refill.",
     "implementation_seam": "internal/agentpairing/capabilities.go verificationCapabilities(platform, arch). Empty platform/arch means conservative global guide. PairingView and approval use immutable request platform/arch; RunFence and VerificationTargets dispatch use the same function. The darwin/arm64 Grok qualification does not widen through client input."
+  },
+  "session_chat_v1": {
+    "ticket": "AEON-1069",
+    "schema": "aeon.session-chat.v1",
+    "transport": "Daemon-local SubscribeChat binding; thread SSE and remote relay belong to the following chat slice. No new HTTP route.",
+    "binding": {
+      "tenant_id": "exact supervisor tenant",
+      "principal_id": "exact supervisor principal",
+      "run_id": "owned run",
+      "generation": "current daemon generation",
+      "session_id": "exact registered harness session; no lease or native reference"
+    },
+    "event": {
+      "sequence": "monotonic per owned session; gaps are possible, no replay",
+      "dropped_events": "cumulative subscriber overflow count",
+      "capabilities": {
+        "steer": "native|next-step|queue",
+        "interrupt": "boolean, qualified owned control only",
+        "deltas": "boolean, qualified adapter stream only"
+      },
+      "update": {
+        "sessionUpdate": "agent_message_chunk|tool_call|state",
+        "content": {
+          "type": "text",
+          "text": "UTF-8 text delta, <=65536 bytes; no reasoning or raw vendor payload"
+        },
+        "toolCallId": "bounded opaque tool id, <=256 bytes",
+        "title": "bounded tool name, <=128 bytes; no arguments or results",
+        "status": "in_progress|completed|failed",
+        "state": "running|idle|requires_action"
+      }
+    },
+    "capabilities": "Initial content-free snapshot. Claude and Codex use native owned steering; Pi steering takes effect at the next agent step. Sessions without qualified steering use queue; interrupt follows exact advertised capabilities. Verification and read-only review have no chat stream.",
+    "policy": "All chunks and tool events are live-only. Never copy them to Record, Telemetry, checkpoints, inbox, audit events, or logs. Final-message persistence remains in the chat delivery slice. State/capability snapshots are content-free; no transcript replay.",
+    "bounds": {
+      "frame_bytes": 8388608,
+      "chunk_bytes": 65536,
+      "subscribers_per_session": 4,
+      "events_per_subscriber": 32
+    },
+    "unknown_frames": "Valid but unsupported or invalid chat shapes are discarded and counted per owned wire process; no payload is logged. Malformed JSON and transport bounds retain existing fail-closed lifecycle handling.",
+    "ownership": "Codex frames must match the owned thread and turn. Claude forwards only main-session output. Pi is scoped to its owned RPC child. Subscribing grants no control authority and never acknowledges or resolves permission requests."
   }
 }

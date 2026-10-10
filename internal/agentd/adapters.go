@@ -131,6 +131,7 @@ type codexShutdown struct {
 }
 
 type codexProcess struct {
+	chatPending      []pendingCodexChat // normalized, bounded and memory-only before turn acknowledgement
 	serviceTier      string
 	capacityParser   capacity.Parser
 	capacityModel    string
@@ -510,6 +511,7 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 		scope: piHeldQueue{TenantID: r.TenantID, PrincipalID: r.PrincipalID, RunID: r.Run.ID, Generation: r.Generation}}
 	usage := &piUsageTracker{}
 	p.setOnEvent(func(raw json.RawMessage) {
+		p.observeChat(Pi, raw)
 		if ev, ok := usage.event(raw); ok {
 			observe(ev)
 		}
@@ -948,6 +950,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		if json.Unmarshal(raw, &frame) != nil {
 			return
 		}
+		p.observeChat(Claude, raw)
 		switch frame.Kind {
 		case "review_result":
 			if r.Run.ReadOnlyReview && len(frame.Answer) <= 64<<10 {

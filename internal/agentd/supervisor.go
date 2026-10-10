@@ -111,6 +111,7 @@ type Record struct {
 }
 
 type owned struct {
+	chat                                           *sessionChat // ephemeral; excluded from Record and checkpoints
 	budgetMu                                       sync.Mutex
 	budgetProcess                                  Process
 	budgetTools                                    *managedToolServer
@@ -1320,6 +1321,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		}, func() {
 			entry.mu.Lock()
 			entry.harnessArchived = true
+			entry.chat.close()
 			entry.mu.Unlock()
 		})
 		entry.usage.billing = sessionusage.BillingMode(billing)
@@ -1390,6 +1392,11 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		}
 	}
 	observe := func(ev AdapterEvent) { s.observe(entry, ev) }
+	if !verification && !review {
+		entry.mu.Lock()
+		entry.chat = newSessionChat(ChatBinding{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, Generation: s.generation, SessionID: entry.harness.ID}, sessionChatCapabilities(profile.Harness, caps))
+		entry.mu.Unlock()
+	}
 	// Commit the possible-fork boundary before handing control to an adapter.
 	// On a journal failure Start is never invoked; after success a crash is
 	// unconfirmed, even if no PID was subsequently persisted.
@@ -1437,6 +1444,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	cancelStart()
 	if err != nil {
 		cancelRun()
+		entry.chat.close()
 		s.verificationDiagnosticFor(run.ID, run.AccountID, run.Purpose, "ownership_lost", "start_unconfirmed")
 		if errors.Is(err, errModelInvalid) {
 			s.reportModelState(entry, "invalid", profile.Model, profile.Effort)
@@ -1488,6 +1496,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if errors.Is(heartbeatErr, ErrHarnessArchived) {
 		entry.mu.Lock()
 		entry.harnessArchived = true
+		entry.chat.close()
 		entry.mu.Unlock()
 		heartbeatErr = nil
 	}
@@ -1608,6 +1617,17 @@ func (s *Supervisor) runDeadline(entry *owned, proc Process, done <-chan struct{
 }
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
+	if ev.Chat != nil {
+		entry.mu.Lock()
+		chat := entry.chat
+		live := entry.record.Generation == s.generation && !entry.harnessArchived && (entry.record.State == "starting" || entry.record.State == "running")
+		entry.mu.Unlock()
+		if live && chat != nil {
+			chat.publish(*ev.Chat)
+		}
+		// This event can carry content: never let it fall through to telemetry.
+		return
+	}
 	if len(ev.ModelReports) > 0 {
 		s.reportModels(entry, ev.ModelReports)
 	}
@@ -1736,6 +1756,7 @@ func (s *Supervisor) monitor(entry *owned) {
 	}
 	defer entry.tools.Close()
 	err := proc.Wait()
+	entry.chat.close()
 	entry.mu.Lock()
 	entry.record.BudgetStopReason = entry.budgetStopReason()
 	entry.record.ExitObserved = err == nil
@@ -1765,6 +1786,7 @@ func (s *Supervisor) monitor(entry *owned) {
 		if errors.Is(flushErr, ErrHarnessArchived) {
 			entry.mu.Lock()
 			entry.harnessArchived = true
+			entry.chat.close()
 			entry.mu.Unlock()
 		} else if flushErr != nil {
 			slog.Warn("managed session metadata settlement incomplete")
@@ -1896,6 +1918,7 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 		if errors.Is(result, ErrHarnessArchived) {
 			entry.mu.Lock()
 			entry.harnessArchived = true
+			entry.chat.close()
 			entry.mu.Unlock()
 			entry.pending = nil
 			result = nil
