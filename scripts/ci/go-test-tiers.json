@@ -1204,6 +1204,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCapacityCancellationKillsOwnedProcessAndDescendant","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestCapacityCancellationWaitsForCleanupOutcome","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestCapacityCheckAuthenticationCauseSurvivesHealthProbe","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCapacityCheckDurableFailureBackoff","tier":"GATED-FULL"}
