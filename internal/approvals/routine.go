@@ -32,7 +32,8 @@ func RoutineScope(permission, digest string) string {
 
 func routineApproval(a Approval) bool {
 	permission := approvalPermission(a.Scope)
-	return a.ResourceKind == "node" && a.ResourceID != nil && a.TargetDigestSHA256 != "" && a.Scope == RoutineScope(permission, a.TargetDigestSHA256)
+	digest := strings.TrimPrefix(a.Scope, permission+".routine_")
+	return a.ResourceKind == "node" && a.ResourceID != nil && a.Target == nil && a.TargetDigestSHA256 == "" && a.Scope == RoutineScope(permission, digest)
 }
 
 // RequestRoutineHoldTx reuses the approval/Decision Desk source without
@@ -54,14 +55,16 @@ func RequestRoutineHoldTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ta
 		return Approval{}, err
 	}
 	var id string
-	err := tx.QueryRow(ctx, `SELECT id::text FROM approval_requests WHERE tenant_id=$1 AND agent_principal_id=$2 AND resource_kind='node' AND resource_id=$3 AND scope=$4 AND target_digest_sha256=$5 AND expires_at>$6 ORDER BY proposed_at DESC,id DESC LIMIT 1`, p.TenantID, p.ID, target, RoutineScope(permission, digest), digest, now).Scan(&id)
+	err := tx.QueryRow(ctx, `SELECT id::text FROM approval_requests WHERE tenant_id=$1 AND agent_principal_id=$2 AND resource_kind='node' AND resource_id=$3 AND scope=$4 AND target IS NULL AND target_digest_sha256 IS NULL AND expires_at>$5 ORDER BY proposed_at DESC,id DESC LIMIT 1`, p.TenantID, p.ID, target, RoutineScope(permission, digest), now).Scan(&id)
 	if err == nil {
 		return loadApproval(ctx, tx, id)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return Approval{}, err
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at,target_digest_sha256) VALUES($1,$2,$2,$3,'node',$4,$5,$6,$7) RETURNING id::text`, p.TenantID, p.ID, RoutineScope(permission, digest), target, "Routine action needs an owner or administrator decision. Exact evaluation request: "+digest, expires, digest).Scan(&id)
+	// target/target_digest_sha256 are a paired deployment-only projection.
+	// The exact routine digest is immutable in this reserved permission scope.
+	err = tx.QueryRow(ctx, `INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at) VALUES($1,$2,$2,$3,'node',$4,$5,$6) RETURNING id::text`, p.TenantID, p.ID, RoutineScope(permission, digest), target, "Routine action needs an owner or administrator decision. Exact evaluation request: "+digest, expires).Scan(&id)
 	if err != nil {
 		return Approval{}, err
 	}
@@ -113,7 +116,7 @@ func LiveRoutineHoldTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, t
 	if err != nil {
 		return false, err
 	}
-	if expired || !a.ExpiresAt.After(now) || !routineApproval(a) || a.AgentPrincipalID != p.ID || a.ResourceID == nil || *a.ResourceID != target || a.Scope != RoutineScope(permission, digest) || a.TargetDigestSHA256 != digest {
+	if expired || !a.ExpiresAt.After(now) || !routineApproval(a) || a.AgentPrincipalID != p.ID || a.ResourceID == nil || *a.ResourceID != target || a.Scope != RoutineScope(permission, digest) {
 		return false, nil
 	}
 	var person string
