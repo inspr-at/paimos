@@ -68,7 +68,12 @@ func TestRefreshAutoUpdateUsesCanonicalModelRule(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		decode[RefreshSettings](t, &p, "PUT", "/api/models/refresh/settings", string(stale), 409)
+		refusal := decode[struct {
+			Error string `json:"error"`
+		}](t, &p, "PUT", "/api/models/refresh/settings", string(stale), 409)
+		if refusal.Error != "account_use_revision_conflict" {
+			t.Fatalf("wrong stale-toggle refusal: %s", refusal.Error)
+		}
 		unchanged, unchangedRefresh := read()
 		if !reflect.DeepEqual(unchanged, after) || unchangedRefresh != stored {
 			t.Fatal("stale toggle changed the stored setting")
