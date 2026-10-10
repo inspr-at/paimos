@@ -203,7 +203,7 @@ func TestMergeDoneAlreadyDoneRecordsEvidenceAndPreservesTicket(t *testing.T) {
 		}
 		var snapshots bool
 		if err := tx.QueryRow(t.Context(), `SELECT coalesce(before->>'state'='done' AND after->>'state'='done'
- AND before->'fields'=$2::jsonb AND after->'fields'-'merged_at'=before->'fields'
+ AND before->'fields'=$2::jsonb AND (after->'fields')-'merged_at'=before->'fields'
  AND before->'human_check'=after->'human_check' AND before->'status_autopilot'=after->'status_autopilot'
  AND metadata->>'merged_at'=$3,false) FROM events WHERE node_id=$1 AND type='delivery.merge_done'`, f.ticket, mergeBenefits, fact.At.UTC().Format(time.RFC3339Nano)).Scan(&snapshots); err != nil {
 			return err

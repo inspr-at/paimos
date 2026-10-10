@@ -253,7 +253,7 @@ func TestStatusAutopilotFullAccessAgentReadAllowlist(t *testing.T) {
 	key := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "autopilot-reader", "full_access": true}))
 	var project string
 	if err := db.InTenant(dbtest.Seed(t.Context()), m.pool, owner.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,'AUTO','Autopilot','open' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, owner.TenantID).Scan(&project)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,'AUTO-1','Autopilot','open' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, owner.TenantID).Scan(&project)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -292,11 +292,11 @@ func TestStatusAutopilotFullAccessAgentReadAllowlist(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, owner.TenantID, key.PrincipalID, project); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,'HIDDEN-INHERIT','Hidden inherited','open' FROM node_kinds WHERE tenant_id=$1 AND slug='project'`, owner.TenantID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,'HIDDEN-1','Hidden inherited','open' FROM node_kinds WHERE tenant_id=$1 AND slug='project'`, owner.TenantID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `WITH hidden AS (
- INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,'HIDDEN-OFF','Hidden override','open' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id,tenant_id)
+ INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,'HIDDEN-2','Hidden override','open' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id,tenant_id)
  INSERT INTO status_autopilot_projects(tenant_id,project_id,mode,revision) SELECT tenant_id,id,'off',1 FROM hidden`, owner.TenantID)
 		return err
 	}); err != nil {
