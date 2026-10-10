@@ -482,6 +482,11 @@ func TestModelsV2NativeLevelsPerRoute(t *testing.T) {
 	if len(review) != 2 || review[1].ID != "cursor-ultra" || !qualifiedReviewProfile(review[1]) {
 		t.Fatalf("highest native review: %+v", review)
 	}
+	state := modelprefs.BoardState{Orders: []modelprefs.BoardOrder{{Rank: []string{"anthropic:claude-opus"}, Not: []string{"anthropic:claude-opus"}, Efforts: map[string]string{"anthropic:claude-opus": "xhigh"}}}, Rules: []modelprefs.Rule{{Line: "anthropic:claude-opus"}}}
+	normalized := modelsBoardIdentities(state, boardCatalog{profiles: map[string][]Profile{"anthropic:claude-opus": profiles[1:]}})
+	if normalized.Orders[0].Rank[0] != "anthropic:opus" || normalized.Orders[0].Not[0] != "anthropic:opus" || normalized.Orders[0].Efforts["anthropic:opus"] != "xhigh" || normalized.Rules[0].Line != "anthropic:opus" || state.Orders[0].Rank[0] != "anthropic:claude-opus" || state.Rules[0].Line != "anthropic:claude-opus" {
+		t.Fatalf("stored pick identity or immutability lost: %+v / %+v", normalized, state)
+	}
 	ties := profiles[1:]
 	ties[0].EffortLevel = ptr(2)
 	ties[1].EffortLevel = ptr(4)

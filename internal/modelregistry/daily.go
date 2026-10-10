@@ -222,9 +222,12 @@ func (d *modelsDailyAdmission) filter(ctx context.Context, tx pgx.Tx, profile Pr
 	if err != nil {
 		return nil, "", err
 	}
-	visible, err := accountprivacy.Load(ctx, tx, d.principal, ids)
-	if err != nil {
-		return nil, "", err
+	visible := accountprivacy.Policy{}
+	if d.principal.ID != "" {
+		visible, err = accountprivacy.Load(ctx, tx, d.principal, ids)
+		if err != nil {
+			return nil, "", err
+		}
 	}
 	tenantID := d.principal.TenantID
 	if tenantID == "" {
