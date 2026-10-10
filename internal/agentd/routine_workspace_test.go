@@ -207,7 +207,7 @@ func TestRoutineWorkspacesSeparateAndRetainWriters(t *testing.T) {
 	for _, mutate := range []func(*agentsetup.RoutineGrant){func(g *agentsetup.RoutineGrant) { g.Capability = "old" }, func(g *agentsetup.RoutineGrant) { g.TenantID = g.OwnerID }, func(g *agentsetup.RoutineGrant) { g.ComputerID = g.OwnerID }, func(g *agentsetup.RoutineGrant) { g.AccountID = g.OwnerID }} {
 		g := g1
 		mutate(&g)
-		raw, _ := json.Marshal(map[string]any{"routine_launch": g})
+		raw, _ := json.Marshal(map[string]any{"routine_launch": g, "routine_run_id": g.RoutineRunID})
 		run := Run{ID: g.AgentRunID, RoutineLaunchID: &g.LaunchID, Trace: raw, AccountID: g.AccountID}
 		parsed, err := routineGrant(run)
 		if err == nil {

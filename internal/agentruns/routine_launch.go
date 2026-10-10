@@ -59,7 +59,7 @@ func routineTrace(v Run) (*agentsetup.RoutineGrant, error) {
 	if (v.RoutineLaunchID == nil) != (trace.Grant == nil) {
 		return nil, workorders.Fail(409, "routine_binding_unavailable")
 	}
-	if trace.Grant != nil && (*v.RoutineLaunchID != trace.Grant.LaunchID || trace.Grant.AgentRunID != v.ID) {
+	if trace.Grant != nil && (*v.RoutineLaunchID != trace.Grant.LaunchID || trace.Grant.AgentRunID != v.ID || trace.RoutineRunID != trace.Grant.RoutineRunID) {
 		return nil, workorders.Fail(409, "routine_binding_changed")
 	}
 	return trace.Grant, nil
@@ -117,7 +117,7 @@ func PrepareRoutineLaunchTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `UPDATE agent_runs SET routine_launch_id=$2,trace=jsonb_set(coalesce(trace,'{}'::jsonb),'{routine_launch}',$3::jsonb) WHERE id=$1`, g.AgentRunID, g.LaunchID, raw)
+	_, err = tx.Exec(ctx, `UPDATE agent_runs SET routine_launch_id=$2,trace=jsonb_set(jsonb_set(coalesce(trace,'{}'::jsonb),'{routine_launch}',$3::jsonb),'{routine_run_id}',to_jsonb($4::text)) WHERE id=$1`, g.AgentRunID, g.LaunchID, raw, g.RoutineRunID)
 	return err
 }
 

@@ -84,7 +84,7 @@ func routineGrant(run Run) (*agentsetup.RoutineGrant, error) {
 	if trace.RunID != "" && trace.Grant == nil {
 		return nil, ErrRoutineUnavailable
 	}
-	if trace.Grant != nil && (trace.Grant.Validate() != nil || *run.RoutineLaunchID != trace.Grant.LaunchID || trace.Grant.AgentRunID != run.ID) {
+	if trace.Grant != nil && (trace.Grant.Validate() != nil || *run.RoutineLaunchID != trace.Grant.LaunchID || trace.Grant.AgentRunID != run.ID || trace.RunID != trace.Grant.RoutineRunID) {
 		return nil, ErrRoutineUnavailable
 	}
 	return trace.Grant, nil

@@ -30,7 +30,7 @@ func RequireRoutineRouteTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, r
 		return nil
 	}
 	g := saved.Grant
-	if g == nil || launch == nil || *launch != g.LaunchID || g.AgentRunID != run || g.Validate() != nil {
+	if g == nil || launch == nil || *launch != g.LaunchID || g.AgentRunID != run || saved.RunID != g.RoutineRunID || g.Validate() != nil {
 		return fail(409, "routine_intent_required", "qualified routine intent required before routing")
 	}
 	var pickup agentsetup.RoutinePickup
