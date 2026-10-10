@@ -193,19 +193,19 @@ func TestMergeDoneAlreadyDoneRecordsEvidenceAndPreservesTicket(t *testing.T) {
 	var revision time.Time
 	f.tx(t, func(tx pgx.Tx) error {
 		var preserved bool
-		if err := tx.QueryRow(t.Context(), `SELECT state='done' AND human_check='Keep review'
+		if err := tx.QueryRow(t.Context(), `SELECT coalesce(state='done' AND human_check='Keep review'
  AND status_autopilot='{"blocked_reminder":true}'::jsonb AND fields-'merged_at'=$2::jsonb
- AND fields->>'merged_at'=$3,updated_at FROM nodes WHERE id=$1`, f.ticket, mergeBenefits, fact.At.UTC().Format(time.RFC3339Nano)).Scan(&preserved, &revision); err != nil {
+ AND fields->>'merged_at'=$3,false),updated_at FROM nodes WHERE id=$1`, f.ticket, mergeBenefits, fact.At.UTC().Format(time.RFC3339Nano)).Scan(&preserved, &revision); err != nil {
 			return err
 		}
 		if !preserved {
 			t.Fatal("merge evidence lost or changed the already-Done ticket")
 		}
 		var snapshots bool
-		if err := tx.QueryRow(t.Context(), `SELECT before->>'state'='done' AND after->>'state'='done'
+		if err := tx.QueryRow(t.Context(), `SELECT coalesce(before->>'state'='done' AND after->>'state'='done'
  AND before->'fields'=$2::jsonb AND after->'fields'-'merged_at'=before->'fields'
  AND before->'human_check'=after->'human_check' AND before->'status_autopilot'=after->'status_autopilot'
- AND metadata->>'merged_at'=$3 FROM events WHERE node_id=$1 AND type='delivery.merge_done'`, f.ticket, mergeBenefits, fact.At.UTC().Format(time.RFC3339Nano)).Scan(&snapshots); err != nil {
+ AND metadata->>'merged_at'=$3,false) FROM events WHERE node_id=$1 AND type='delivery.merge_done'`, f.ticket, mergeBenefits, fact.At.UTC().Format(time.RFC3339Nano)).Scan(&snapshots); err != nil {
 			return err
 		}
 		if !snapshots {
@@ -240,7 +240,7 @@ func TestMergeDoneAlreadyDoneRecordsEvidenceAndPreservesTicket(t *testing.T) {
 	}
 	f.tx(t, func(tx pgx.Tx) error {
 		var flagged bool
-		if err := tx.QueryRow(t.Context(), `SELECT state='done' AND human_check='Keep review' AND status_autopilot->'missed_release'='true'::jsonb AND status_autopilot->'blocked_reminder'='true'::jsonb FROM nodes WHERE id=$1`, f.ticket).Scan(&flagged); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT coalesce(state='done' AND human_check='Keep review' AND status_autopilot->'missed_release'='true'::jsonb AND status_autopilot->'blocked_reminder'='true'::jsonb,false) FROM nodes WHERE id=$1`, f.ticket).Scan(&flagged); err != nil {
 			return err
 		}
 		if !flagged {
