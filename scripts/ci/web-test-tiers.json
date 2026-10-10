@@ -16004,6 +16004,8 @@
     ,
     {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"a candidate read cannot restore another person’s choices and reopening after a cancelled read works","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"an empty adoption list explains missing person ownership without offering the session","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"an unmanaged lead card offers cooperative pause and hides restart controls after exit","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"candidate errors and empty lists are explicit and a changed lead cannot be confirmed","tier":"ESSENTIAL"}

@@ -47,7 +47,8 @@ export const canRemoveLead = (lead: ProjectLead | null | undefined) => !!lead &&
 /** Checkpoints and pauses: new dispatch stops now; the process keeps its slot until it exits. */
 export const pauseLead = (id: string, revision: number, generation: number) => leadRequest<ProjectLead>(`${project(id)}/lead/pause`, 'POST', { expected_revision: revision, generation })
 export interface LeadCandidate { id: string; display_label: string | null; harness: string; host: string; management_mode: string; reported_at: string }
-export const readLeadCandidates = (id: string, cursor?: string) => leadRequest<{ items: LeadCandidate[]; next_cursor: string | null }>(`${project(id)}/lead/candidates?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
+export interface LeadCandidates { items: LeadCandidate[]; next_cursor: string | null; empty_reason?: { code: 'person_owner_missing'; display_label: string | null; harness: string; host: string } }
+export const readLeadCandidates = (id: string, cursor?: string) => leadRequest<LeadCandidates>(`${project(id)}/lead/candidates?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
 export const adoptLead = (id: string, revision: number, sessionId: string) => leadRequest<ProjectLead>(`${project(id)}/lead/adopt`, 'POST', { expected_revision: revision, session_id: sessionId })
 /** Drops only an unclaimed selection. The running session is not paused or stopped. */
 export const cancelLeadAdoption = (id: string, revision: number) => leadRequest<ProjectLead>(`${project(id)}/lead/adopt/cancel`, 'POST', { expected_revision: revision })

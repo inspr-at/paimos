@@ -4462,6 +4462,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessInvokePinsArgumentsAndBudget","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestHarnessLeadClaimDerivesRegisteredReferenceFromState","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessLeadClaimUsesExistingFilesAndRedactsProof","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHarnessLeadUsageReadAndFailure","tier":"ESSENTIAL"}
@@ -6231,6 +6233,8 @@
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadAssignmentFenceAndArchive","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadCompetingStartsClaimsAndRevocation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadEmptyCandidatesExplainMissingPersonOwnership","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadLegacyUnclaimedStartStaysCancellable","tier":"GATED-FULL"}
     ,

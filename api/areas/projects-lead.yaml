@@ -58,7 +58,7 @@ paths:
   /projects/{projectId}/lead/candidates:
     get:
       summary: List the person's eligible running root coordinators
-      description: 'Person-only harness.read, harness.control and run.create. Returns only same-project canonical-person-owned root coordinators with reporting no more than two minutes old, no archive, stop or pending pause. Keyset pages are bounded at 200. No private session reference or worker lease is returned.'
+      description: 'Person-only harness.read, harness.control and run.create. Returns only same-project canonical-person-owned root coordinators with reporting no more than two minutes old, no archive, stop or pending pause. Keyset pages are bounded at 200. An empty first page may explain a reporting root coordinator without a person owner; that session remains ineligible. No private session reference or worker lease is returned.'
       parameters:
         - $ref: '#/components/parameters/projectId'
         - {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
@@ -74,6 +74,15 @@ paths:
                 properties:
                   items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/LeadCandidate'}}
                   next_cursor: {type: [string, 'null']}
+                  empty_reason:
+                    type: object
+                    description: 'Omitted unless the first page is empty and a reporting root coordinator has no person owner. Public context only; no adoption authority.'
+                    required: [code, display_label, harness, host]
+                    properties:
+                      code: {type: string, enum: [person_owner_missing]}
+                      display_label: {type: [string, 'null']}
+                      harness: {type: string}
+                      host: {type: string}
         '403': {description: 'Person and current project authority required'}
   /projects/{projectId}/lead/adopt:
     post:

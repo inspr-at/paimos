@@ -2,13 +2,13 @@
 import { expect, it } from 'vitest'
 import { reactive, ref } from 'vue'
 import { flatten, mountView, settle, textOf, type RenderNode } from './webcore-view-harness'
-import { leadBand, type ProjectLead } from '../src/lib/lead'
+import { leadBand, type LeadCandidates, type ProjectLead } from '../src/lib/lead'
 import * as leadAPI from '../src/lib/lead'
 
 const candidate = { id: 'running', display_label: 'AEON-LEAD', harness: 'codex', host: 'build-7', management_mode: 'unmanaged', reported_at: '2026-10-09T11:50:00Z' }
 const deferred = <T>() => { let resolve!: (v: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
 const click = async (node: RenderNode) => { await (node.props.onClick as () => unknown)(); await settle() }
-function adoption(read = async () => ({ items: [candidate], next_cursor: null as string | null })) {
+function adoption(read: () => Promise<LeadCandidates> = async () => ({ items: [candidate], next_cursor: null })) {
   const identity = reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } } })
   const writes: unknown[][] = []
   const props = reactive({ projectId: 'project', revision: 4 })
@@ -59,6 +59,23 @@ it('candidate errors and empty lists are explicit and a changed lead cannot be c
     await click(changed.button('adopt-confirm')); expect(changed.writes).toEqual([])
     expect(textOf(changed.root)).toContain('The lead changed')
   } finally { changed.app.unmount() }
+})
+
+// Risk: ownership feedback is missing, turns an ineligible session into a
+// choice, or survives a person/project change in the adoption panel.
+it('an empty adoption list explains missing person ownership without offering the session', async () => {
+  const view = adoption(async () => ({ items: [], next_cursor: null, empty_reason: { code: 'person_owner_missing', display_label: 'AEON-LEAD', harness: 'claude', host: 'build-7' } }))
+  try {
+    await click(view.button('adopt-open'))
+    expect(textOf(view.root)).toContain('AEON-LEAD on build-7 is registered without a person owner; register it with a key you created.')
+    expect(textOf(view.root)).not.toContain('No eligible running coordinator')
+    expect(flatten(view.root).filter(n => n.props.role === 'radio')).toHaveLength(0)
+    expect(view.button('adopt-confirm').props['aria-disabled']).toBe(true)
+    await click(view.button('adopt-confirm'))
+    expect(view.writes).toEqual([])
+    view.identity.identity.principal.id = 'other-person'; await settle()
+    expect(textOf(view.root)).not.toContain('AEON-LEAD on build-7')
+  } finally { view.app.unmount() }
 })
 
 it('an unmanaged lead card offers cooperative pause and hides restart controls after exit', async () => {
