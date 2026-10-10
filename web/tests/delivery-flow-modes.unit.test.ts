@@ -17,9 +17,9 @@ vi.mock('../src/lib/api.ts', () => ({
 import * as flow from '../src/lib/deliveryFlow'
 import { createTimeline, criticalPath, fitAll, laneModel, minutesText, refreshTimeline, resetTimeline, runEnd, timeLabel, type FlowData } from '../src/lib/deliveryFlow'
 import { arionTarget, ARION_LATER_MINUTES, ARION_MINUTES, ARION_PATH, compareData, liveData, recordedRuns, replayData, type ApiFlow, type ApiItem, type ApiRun, type ApiStep } from '../src/lib/deliveryFlowData'
-import { EXAMPLE_NOW, exampleCompare, exampleLive, exampleReplay } from '../src/lib/deliveryFlowExample'
+import { EXAMPLE_NOW, exampleCompare, exampleLive, exampleReplay } from './delivery-flow-example-fixtures'
 import * as modes from '../src/lib/deliveryFlowModes'
-import { autoplayOnce, createPlayer, flightRows, headOf, momentOf, PLAY_MS, recordOf, wentOf, type Frames } from '../src/lib/deliveryFlowModes'
+import { autoplayOnce, createPlayer, flightRows, headOf, momentOf, PLAY_MS, recordOf, wentOf, type FlowMode, type Frames } from '../src/lib/deliveryFlowModes'
 import { useDeliveryFlow } from '../src/lib/useDeliveryFlow'
 import * as words from '../src/lib/deliveryFlowText'
 import { flowText } from '../src/lib/deliveryFlowText'
@@ -593,8 +593,8 @@ function flowRun(id: string): ApiRun {
 async function ticks(turns: number) {
   for (let i = 0; i < turns; i++) { await Promise.resolve(); await Vue.nextTick() }
 }
-function mountFlow(run: string | null) {
-  const props = Vue.reactive({ mode: 'replay' as const, run })
+function mountFlow(run: string | null, mode: FlowMode = 'replay') {
+  const props = Vue.reactive({ mode, run })
   let loaded!: ReturnType<typeof useDeliveryFlow>
   const app = renderer.createApp({
     setup() {
@@ -607,6 +607,45 @@ function mountFlow(run: string | null) {
   const root = node('root'); apps.push(app); app.mount(root)
   return { props, flow: loaded }
 }
+
+// AEON-1135 risk: without a recorded run Flow showed a built-in example as if it were live. Every mode now
+// selects the empty state and no data; once the list has a run, the same view selects the recorded run.
+it('without a recorded run every mode is empty with no data or choices; a recorded run is shown', async () => {
+  const reads: string[] = []
+  let list: ApiFlow = { ...flowList(), items: [], steps: [] }
+  http.handle = async path => {
+    reads.push(path)
+    return json(path.includes('/runs/') ? flowRun(path.split('/runs/')[1]!.split('?')[0]!) : list)
+  }
+  for (const mode of ['live', 'replay', 'compare'] as const) {
+    reads.length = 0
+    const view = mountFlow(null, mode)
+    await ticks(20)
+    expect(view.flow.status.value, mode).toBe('ready')
+    expect(view.flow.data.value, mode).toBeNull()
+    expect(view.flow.empty.value, mode).toBe('none')
+    expect(view.flow.choices.value, mode).toEqual([])
+    expect(view.flow.runId.value, mode).toBeNull()
+    expect(view.flow.truncated.value, mode).toBe(false)
+    // Only the run list is read: there is no run to read.
+    expect(reads.filter(path => path.includes('/runs/')), mode).toEqual([])
+  }
+  list = flowList()
+  for (const mode of ['live', 'replay', 'compare'] as const) {
+    const view = mountFlow(null, mode)
+    await ticks(20)
+    expect(view.flow.status.value, mode).toBe('ready')
+    expect(view.flow.empty.value, mode).toBeNull()
+    // Live shows both recorded runs; Replay and Compare the latest release (Compare from its step a), with both offered.
+    const shown = view.flow.data.value?.sets[0]
+    if (mode === 'live') expect(shown?.runs.map(run => run.id).sort(), mode).toEqual(['r1', 'r2'])
+    else {
+      expect(view.flow.runId.value, mode).toBe('r2')
+      expect(shown?.main.id, mode).toBe(mode === 'compare' ? 'r2:a' : 'r2')
+      expect(view.flow.choices.value.map(choice => choice.id), mode).toEqual(['r2', 'r1'])
+    }
+  }
+})
 
 it('a failed run read settles until Retry and does not reload from a cleared list', async () => {
   const counts = { list: 0, run: 0 }

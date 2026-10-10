@@ -118,6 +118,6 @@ runs. *Agent app test evidence* shows the qualification reference; its leading
 ticket key is a link to the ticket when this workspace has it and plain text
 otherwise. *If it goes wrong* gives the rollback class in plain words (Expert:
 `digest-safe` or `restore-required`). A fact nobody reported reads "not
-recorded". Changes, example data and the Arion target have no record, so they
+recorded". Changes and the Arion target have no record, so they
 show no panel. The panel sits below the card and grows downward; no control
 above it moves.

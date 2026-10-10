@@ -331,7 +331,7 @@ function attemptWords(attempt: RecordedAttempt, ctx: Ctx): string {
  * not change shape as facts arrive; a fact nobody reported reads "not recorded", and one the answer may have
  * left out (a window that starts after the release did) says so instead. The timing comes from the run's own
  * facts, not from the lanes, so Compare's slice from step a never hides it. Null for a change, for the Arion
- * target and for example data, which have no record to report.
+ * target and for test data built without one, which have no record to report.
  */
 export function recordOf(run: FlowRun, ctx: Ctx): ReleaseRecord | null {
   const record = run.facts?.record

@@ -54,7 +54,6 @@ const EN = {
   },
   unitRecorded: 'recorded', unitPerHundred: 'per 100 PRs', unitAudits: 'audits', unitDefects: 'defects', unitAuditOne: 'audit', unitDefectOne: 'defect',
   flowSub: 'What is moving right now, what it waits for and when it will be done. Replay any run, or race it against the target.',
-  flowNone: 'No flow data recorded yet.', flowNoneB: 'Live, Replay and Compare appear here once delivery steps are recorded.',
   defsTitle: 'How these numbers are counted',
   defs: [
     ['First attempt vs. time to green', 'PR CI run measures one run’s first attempt. Time to first green counts from the first run to the first green one, with every re-run and fix in between.'],
@@ -130,7 +129,6 @@ const DE: DeliveryText = {
   },
   unitRecorded: 'erfasst', unitPerHundred: 'pro 100 PRs', unitAudits: 'Prüfungen', unitDefects: 'Fehler', unitAuditOne: 'Prüfung', unitDefectOne: 'Fehler',
   flowSub: 'Was gerade läuft, worauf es wartet und wann es fertig ist. Jeden Lauf wiedergeben oder gegen das Ziel antreten lassen.',
-  flowNone: 'Noch keine Ablaufdaten aufgezeichnet.', flowNoneB: 'Live, Wiedergabe und Vergleich erscheinen hier, sobald Lieferschritte aufgezeichnet werden.',
   defsTitle: 'So werden die Zahlen gezählt',
   defs: [
     ['Erster Versuch vs. Zeit bis Grün', 'PR-CI-Lauf misst den ersten Versuch eines Laufs. Zeit bis erstes Grün zählt vom ersten Lauf bis zum ersten grünen, mit allen Wiederholungen und Fixes dazwischen.'],

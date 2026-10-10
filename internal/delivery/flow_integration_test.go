@@ -294,6 +294,93 @@ func appendFlowSource(t *testing.T, f *fixture, c events.Change) {
 	})
 }
 
+func TestDeliveryFlowProjectorUsesPartialEventIndex(t *testing.T) {
+	// Risk (migrations): installations without OPS's manual index scan the
+	// unrelated event tail every round; predicate drift makes the index unusable.
+	f := newFixture(t)
+	ctx := t.Context()
+	const migration = "1328_delivery_flow_event_index.sql"
+	var originalOID uint32
+	if err := f.d.App.QueryRow(ctx, `SELECT indexrelid FROM pg_index
+		WHERE indexrelid='events_delivery_flow_idx'::regclass AND indisvalid`).Scan(&originalOID); err != nil {
+		t.Fatal(err)
+	}
+	// Model an installation where OPS created the index before migration 1328.
+	if tag, err := f.d.App.Exec(ctx, `DELETE FROM schema_migrations WHERE version=$1`, migration); err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("remove migration record: %v (%d rows)", err, tag.RowsAffected())
+	}
+	if err := db.MigrateWithHook(ctx, f.d.App, nil); err != nil {
+		t.Fatal(err)
+	}
+	var oid uint32
+	if err := f.d.App.QueryRow(ctx, `SELECT indexrelid FROM pg_index
+		WHERE indexrelid='events_delivery_flow_idx'::regclass AND indisvalid`).Scan(&oid); err != nil {
+		t.Fatal(err)
+	}
+	if oid != originalOID {
+		t.Fatal("migration rebuilt the existing valid index")
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after)
+			SELECT $1,$2,$3,CASE WHEN n=2049 THEN 'delivery.workxqueue.queued' ELSE 'node.updated' END,'{}'::jsonb
+			FROM generate_series(1,2049) AS n`, f.person.TenantID, f.agent.ID, f.ticket)
+		return err
+	})
+	for _, kind := range []string{"delivery.work_queue.queued", "delivery.review.queued", "delivery.state_changed"} {
+		appendFlowSource(t, f, events.Change{NodeID: &f.ticket, Type: kind, After: map[string]any{}})
+	}
+	if _, err := f.d.Admin.Exec(ctx, `ANALYZE events`); err != nil {
+		t.Fatal(err)
+	}
+	// Use the production query, normal planner settings, and the projector's
+	// restricted app role and read snapshot: tenant_id comes from RLS.
+	err := db.InTenantReadSnapshot(db.AllProjects(ctx, "delivery flow index test"), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, "EXPLAIN "+flowSourceEventsSQL, int64(1024), flowSyncBatch)
+		if err != nil {
+			return err
+		}
+		var plan strings.Builder
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				rows.Close()
+				return err
+			}
+			plan.WriteString(line + "\n")
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if !strings.Contains(plan.String(), "Index Scan using events_delivery_flow_idx") || !strings.Contains(plan.String(), "id >") {
+			return fmt.Errorf("projector did not use the partial cursor index:\n%s", plan.String())
+		}
+		rows, err = tx.Query(ctx, flowSourceEventsSQL, int64(1024), flowSyncBatch)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var kinds []string
+		for rows.Next() {
+			var e flowSourceEvent
+			if err := rows.Scan(&e.ID, &e.Type, &e.NodeID, &e.At, &e.Before, &e.After, &e.Metadata); err != nil {
+				return err
+			}
+			kinds = append(kinds, e.Type)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if got := strings.Join(kinds, ","); got != "delivery.work_queue.queued,delivery.review.queued,delivery.state_changed" {
+			return fmt.Errorf("projector event types: %s", got)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDeliveryFlowProjectsPaimosRoundsReviewsAndHolds(t *testing.T) {
 	// Risk: build, fix and review rounds or holds never become steps, a
 	// replayed event log duplicates them, or a hold stays open after release.
