@@ -3726,6 +3726,16 @@
     ,
     {"kind":"go","package":"internal/business/costunits","name":"TestRateWriteRollsBackWithTheEvent","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/business/crm","name":"TestAEON587ConcurrentProviderImportReturnsOneConflict","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/business/crm","name":"TestAEON587ExternalIdentityUniqueConflictIsSpecific","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/business/crm","name":"TestAEON587ProviderSearchReportsAllFailedAndPartial","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/business/crm","name":"TestAEON587SyncFailurePersistenceErrorIsVisible","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/business/crm","name":"TestAEON587SyncFailurePersistsAfterFetchCancellation","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/business/crm","name":"TestAINoteRejectsRevisionRaceAfterGeneration","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/business/crm","name":"TestAINoteRequiresToolGrantAndModelAndNeverApplies","tier":"GATED-FULL"}
@@ -3812,6 +3822,20 @@
     ,
     {"kind":"go","package":"internal/business/hours","name":"TestUndoUsesCurrentAdminAuthority","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/business/quotedocument","name":"TestCanonicalDigestPreservesJSONBMeaningAndLegacyMode","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/business/quotedocument","name":"TestHistoricalImporterSenderEvidence","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/business/quotes","name":"TestAEON587ArchivedLegacyFreezeIsReadOnly","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/business/quotes","name":"TestAEON587HistoricalImporterV1BranchAndAccept","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/business/quotes","name":"TestAEON587IssuedImportNativeVerificationBranchAndAccept","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/business/quotes","name":"TestAEON587ProfileBundleRequiresFontAsset","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/business/quotes","name":"TestAEON587VisibilityUndoRejectsStaleRevision","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/business/quotes","name":"TestDeleteNeverIssuedDraftUndoArchiveAndDuplicate","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/business/quotes","name":"TestExactMoneyAndManifest","tier":"ESSENTIAL"}
@@ -3847,6 +3871,8 @@
     {"kind":"go","package":"internal/business/quotes","name":"TestViennaNumberingBoundary","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/business/quotes","name":"TestWriteProfileBundleTarCountsTarOverhead","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/business/quotes/collaboration","name":"TestAEON587IdleHeartbeatThenEventOnRealConnection","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/business/quotes/collaboration","name":"TestConcurrentJoinsAndTenantIsolation","tier":"GATED-FULL"}
     ,
@@ -6406,6 +6432,10 @@
     ,
     {"kind":"go","package":"internal/identity","name":"TestZitadelFailedInviteCarriesOnlyCreatedSubjectForRetry","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/importer","name":"TestAEON587DeltaWaitsForNativeEditBeforeCheckingBaseline","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/importer","name":"TestAEON587RelationBackfillKeepsSourceNamespaces","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/importer","name":"TestAllClassicIssueKindsUseR1Nodes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/importer","name":"TestAttachmentDeltaRefreshesChangedClassicBytes","tier":"GATED-FULL"}
@@ -6473,6 +6503,14 @@
     {"kind":"go","package":"internal/importer","name":"TestWorkNodesImporterReplaysMigrationWithoutMaskingPersonEdits","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/importer","name":"TestWorkParentStatusImporterReplayAndChildChange","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/importer/offers","name":"TestAEON587ImportIssueFlushFailureRollsBack","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/importer/offers","name":"TestAEON587ImportIssueWritesBeforeEventCounter","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/importer/offers","name":"TestAEON587OfflineImportPreservesNativeEdits","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/importer/offers","name":"TestAEON587PreBaselineImportUpgrade","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/importer/offers","name":"TestBundleDirectoryTarAndDryRun","tier":"GATED-FULL"}
     ,
