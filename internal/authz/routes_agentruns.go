@@ -12,6 +12,7 @@ func init() {
 		"GET /api/queue/{nodeId}/readiness":            "nodes.read",
 		"GET /api/runs":                                "run.read",
 		"GET /api/runs/queued":                         "run.read",
+		"GET /api/runs/queued/notifications":           "run.read",
 		"GET /api/runs/{runId}":                        "run.read",
 		"GET /api/runs/{runId}/handoff":                "run.read",
 		"POST /api/queue":                              "nodes.read",

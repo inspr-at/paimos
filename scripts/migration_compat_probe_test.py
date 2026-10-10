@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import uuid
 from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('migration_compat_probe', Path(__file__).with_name('migration-compat-probe.py'))
@@ -59,8 +60,12 @@ elif tool == 'python3':
         expected = '261009095632.0.0' if active.read_text() == floor_id else '261010123154.0.0'
         if version != expected:
             sys.exit('tested binary does not match the previous release')
-    if mode == 'account-use' and active.read_text() != floor_id:
-        sys.exit('activated previous binary returned HTTP 200')
+    if mode == 'account-use':
+        if '--release-tag' in args:
+            if active.read_text() != latest_id or args[args.index('--release-tag') + 1] != 'v' + expected:
+                sys.exit('latest account-use policy must use its pinned release')
+        elif active.read_text() != floor_id:
+            sys.exit('activated previous binary returned HTTP 200')
 elif tool not in ('go', 'trash'):
     sys.exit('unexpected tool')
 '''
@@ -88,6 +93,7 @@ elif tool not in ('go', 'trash'):
                       if tool == 'python3' and '--version' in args]
             self.assertEqual(probes, [
                 ('seed', latest_tag[1:]), ('check', latest_tag[1:]),
+                ('account-use', latest_tag[1:]),
                 ('check', '261009095632.0.0'), ('account-use', '261009095632.0.0')])
             pulls = [args[-1] for tool, args in calls if tool == 'docker' and args[0] == 'pull']
             self.assertEqual(pulls, ['ghcr.io/inspr-at/aeon@' + latest_digest,
@@ -258,13 +264,123 @@ class ProbeTest(unittest.TestCase):
             result.stderr = 'ERROR: 0A000: '+module.CAPABILITY_ERROR+'\nCONTEXT: aeon_enter_principal(uuid,uuid,boolean)'
             self.assertEqual(boundary.errors(), (1, 1))
 
+    def capable_fixture(self):
+        tenant, owner, agent, account, run, order, request = [str(uuid.UUID(int=i)) for i in range(1, 8)]
+        self.responses['/api/me'] = {'principal': {'id': owner, 'tenant_id': tenant}}
+        preview = {'preview': True, 'profile': {'id': 'catalog-only'}, 'ladder': []}
+        resolutions = iter([preview, preview, {'profile': None, 'ladder': [{'skip_reasons': [module.CONTEXT_SKIP_REASON]}]}])
+        self.responses['/api/models/resolve?role=build&harness=codex'] = lambda: next(resolutions)
+        capacity = iter([{'accounts': [], 'parallel_runs': 0, 'wait': {'code': reason}}
+                         for reason in ('offline', 'context')])
+        self.responses['/api/agent-accounts/capacity/next?harness=codex'] = lambda: next(capacity)
+        uses = iter([(404, 'application/json', b'{"error":"account not found"}'),
+                     (409, 'application/json', b'{"error":"account_not_allowed_for_context"}')])
+        self.responses[f'/api/agent-accounts/use?harness=codex&account_id={account}'] = lambda: next(uses)
+        self.responses['/api/agent-accounts/route'] = (403, 'application/json', b'{"error":"agent key required"}')
+        self.responses[f'/api/agent-pairing/requests/{request}/approve'] = (404, 'application/json', b'{"error":"pairing not found"}')
+        claims = iter([(409, 'application/json', json.dumps({'error': reason}).encode())
+                       for reason in ('account reservation required', 'account daemon generation changed')])
+        self.responses[f'/api/runs/{run}/claim'] = lambda: next(claims)
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
+        boundary.capable = True
+
+        def sql(statement):
+            if 'enforced_at IS NULL' in statement:
+                return '0,1,true'
+            if "key='agents.working'" in statement:
+                return '0'
+            if 'jsonb_build_object' in statement:
+                return 'unchanged reservations, runs and claims'
+            return ''
+
+        boundary.sql = Mock(side_effect=sql)
+        boundary.errors = Mock(return_value=(0, 0))
+        ids = [uuid.UUID(value) for value in (agent, account, run, order, request)]
+        ids += [uuid.UUID(int=i) for i in (8, 9)]
+        return boundary, ids, {'ticket': str(uuid.UUID(int=10))}
+
+    # Risk: the latest published binary already supports account_use_v1. Its
+    # safe HTTP 200 preview must pass while runnable material still fails.
+    def test_supported_previous_release_checks_both_activated_pools(self):
+        boundary, ids, state = self.capable_fixture()
+        with patch.object(module.uuid, 'uuid4', side_effect=ids), patch.object(module.time, 'sleep'), contextlib.redirect_stdout(io.StringIO()):
+            boundary.check(state)
+        boundary.errors.assert_not_called()
+        self.assertEqual(sum('jsonb_build_object' in c.args[0] for c in boundary.sql.call_args_list), 4)
+        self.assertTrue(any('DELETE FROM account_use_cells' in c.args[0] for c in boundary.sql.call_args_list))
+        self.assertEqual(sum(path.startswith('/api/runs/') for path, _ in self.posts), 2)
+
+    def test_supported_previous_release_rejects_executable_preview(self):
+        boundary, ids, state = self.capable_fixture()
+        self.responses['/api/models/resolve?role=build&harness=codex'] = {
+            'preview': True, 'profile': {'id': 'unsafe'}, 'command_template': 'unsafe launch'}
+        with patch.object(module.uuid, 'uuid4', side_effect=ids), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(AssertionError, 'activated pool supplied executable material'):
+                boundary.check(state)
+
+    def test_supported_previous_release_requires_context_and_no_capacity(self):
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
+        path = '/api/models/resolve?role=build&harness=codex'
+        self.responses[path] = {'profile': None, 'ladder': [{'skip_reasons': ['offline']}]}
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(AssertionError, 'denied pool lacks its context refusal'):
+                boundary.selection(True, 'account')
+            self.responses[path] = {'profile': None, 'ladder': [{'skip_reasons': [module.CONTEXT_SKIP_REASON]}]}
+            self.responses['/api/agent-accounts/capacity/next?harness=codex'] = {
+                'accounts': [{'account_id': 'denied'}], 'parallel_runs': 1, 'wait': {'code': 'context'}}
+            with self.assertRaisesRegex(AssertionError, 'pool supplied capacity or lost its refusal'):
+                boundary.selection(True, 'account')
+
+    # Risk: the released ladder names the full context refusal, never a bare
+    # category. CI against the published binary failed on the bare token; a
+    # substring match would also accept unrelated reasons that mention context.
+    def test_supported_previous_release_matches_released_context_reason(self):
+        go = (Path(__file__).resolve().parent.parent / 'internal/agentaccounts/use_policy.go').read_text()
+        self.assertIn('const ContextSkipReason = ' + json.dumps(module.CONTEXT_SKIP_REASON), go)
+        path = '/api/models/resolve?role=build&harness=codex'
+        self.responses['/api/agent-accounts/capacity/next?harness=codex'] = {
+            'accounts': [], 'parallel_runs': 0, 'wait': {'code': 'context'}}
+        self.responses['/api/agent-accounts/use?harness=codex&account_id=account'] = (
+            409, 'application/json', b'{"error":"account_not_allowed_for_context"}')
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
+        released = {'profile': None, 'preview': False, 'ladder': [
+            {'profile_id': 'other', 'skip_reasons': ['harness filter']},
+            {'profile_id': 'codex', 'skip_reasons': ["no account allowed for this project's context"]}]}
+        self.responses[path] = released
+        with contextlib.redirect_stdout(io.StringIO()):
+            boundary.selection(True, 'account')
+            for reasons in (['context'], ['account availability: context pending']):
+                self.responses[path] = {'profile': None, 'ladder': [{'skip_reasons': reasons}]}
+                with self.subTest(reasons=reasons), self.assertRaisesRegex(AssertionError, 'denied pool lacks its context refusal'):
+                    boundary.selection(True, 'account')
+
+    def test_pinned_release_floor_selects_checks_without_http_fallback(self):
+        with patch.object(module.subprocess, 'run') as run:
+            run.return_value = Mock(returncode=0, stdout='internal/db/migrations/1310_account_use_entry_guard.sql\n')
+            self.assertTrue(module.previous_account_use_capable('pinned-release'))
+            self.assertEqual(run.call_args.args[0][3], 'pinned-release')
+            run.return_value = Mock(returncode=0, stdout='')
+            self.assertFalse(module.previous_account_use_capable('legacy-release'))
+            run.return_value = Mock(returncode=128, stdout='')
+            with self.assertRaisesRegex(AssertionError, 'cannot determine the pinned release'):
+                module.previous_account_use_capable('missing-release')
+
+    def test_supported_refusal_rejects_wrong_status_or_reason(self):
+        path = '/api/agent-accounts/use'
+        self.responses[path] = (500, 'application/json', b'{"error":"unrelated"}')
+        with self.assertRaisesRegex(AssertionError, 'expected HTTP 409, got 500'):
+            self.probe.refused(path, status=409, message='account_not_allowed_for_context')
+        self.responses[path] = (409, 'application/json', b'{"error":"unrelated"}')
+        with self.assertRaisesRegex(AssertionError, 'wrong policy refusal'):
+            self.probe.refused(path, status=409, message='account_not_allowed_for_context')
+
 
 class MigrationHarnessTest(unittest.TestCase):
     def test_latest_compatibility_and_legacy_capability_use_distinct_images(self):
         # Risk: once the latest release understands account use, expecting it
         # to fail the legacy capability guard rejects every subsequent PR.
         # Execute the harness with disposable command doubles: keep latest
-        # read compatibility and exact legacy refusal as independent gates.
+        # reads, pinned policy checks and exact legacy refusal as gates.
         latest_tag = 'v261010123154.0.0'
         latest_digest = 'sha256:c9952c1561c8d32c4a3efb17ed95934f81efd6bc2546de41a3b56bd138304deb'
         legacy_tag = 'v261009095632.0.0'
@@ -300,10 +416,14 @@ elif name == 'python3':
     if mode == 'seed':
         Path(args[args.index('--state') + 1]).write_text('{}')
     elif mode == 'account-use':
-        if state.get('image') != os.environ['HARNESS_LEGACY_DIGEST']:
-            sys.exit('capability refusal must exercise the immutable legacy image')
-        if os.environ['HARNESS_FAIL_BOUNDARY'] == '1':
-            sys.exit(23)
+        if '--release-tag' in args:
+            if state.get('image') != os.environ['HARNESS_LATEST_DIGEST'] or args[args.index('--release-tag') + 1] != 'v261010123154.0.0':
+                sys.exit('latest account-use policy must use its pinned release')
+        else:
+            if state.get('image') != os.environ['HARNESS_LEGACY_DIGEST']:
+                sys.exit('capability refusal must exercise the immutable legacy image')
+            if os.environ['HARNESS_FAIL_BOUNDARY'] == '1':
+                sys.exit(23)
 state_path.write_text(json.dumps(state))
 '''
             for name in ('docker', 'python3', 'go', 'trash'):
@@ -315,6 +435,7 @@ state_path.write_text(json.dumps(state))
                     log = root / f'commands-{fail_boundary}.jsonl'
                     harness_env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ['PATH'],
                         HARNESS_LOG=str(log), HARNESS_STATE=str(root / f'state-{fail_boundary}.json'),
+                        HARNESS_LATEST_DIGEST=latest_digest,
                         HARNESS_LEGACY_DIGEST=legacy_digest, HARNESS_FAIL_BOUNDARY=str(int(fail_boundary)),
                         GITHUB_STEP_SUMMARY=str(root / f'summary-{fail_boundary}.txt'))
                     result = subprocess.run(['bash', str(scripts / 'migration-compat.sh'), latest_tag, latest_digest],
@@ -328,10 +449,11 @@ state_path.write_text(json.dumps(state))
                     self.assertEqual([(event['image'], event['migrated'], event['args'][-1]) for event in reads],
                         [(latest_digest, True, latest_tag[1:]), (legacy_digest, True, legacy_tag[1:])])
                     boundary = [event for event in probes if event['args'][1] == 'account-use']
-                    self.assertEqual(len(boundary), 1)
-                    self.assertEqual(boundary[0]['image'], legacy_digest)
-                    self.assertTrue(boundary[0]['migrated'])
-                    self.assertEqual(boundary[0]['args'][boundary[0]['args'].index('--version') + 1], legacy_tag[1:])
+                    self.assertEqual([(event['image'], event['migrated'],
+                        event['args'][event['args'].index('--version') + 1]) for event in boundary],
+                        [(latest_digest, True, latest_tag[1:]), (legacy_digest, True, legacy_tag[1:])])
+                    self.assertEqual(boundary[0]['args'][boundary[0]['args'].index('--release-tag') + 1], latest_tag)
+                    self.assertNotIn('--release-tag', boundary[1]['args'])
                     if fail_boundary:
                         self.assertNotIn('Migration compatibility passed:', result.stdout)
                     else:
@@ -340,14 +462,14 @@ state_path.write_text(json.dumps(state))
 
 class MigrationRuntimeTest(unittest.TestCase):
     def test_latest_compatibility_and_legacy_refusal_use_their_own_images(self):
-        # Risk: after publishing a capable release, an activated 200 from that
-        # release must not replace the below-floor binary's strict refusal gate.
+        # Risk: the latest release's policy checks and the below-floor binary's
+        # strict refusals must both run against their own inactive fixture.
         floor_digest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
         floor_version = '261009095632.0.0'
         latest_digest = 'sha256:' + 'a' * 64
         latest_version = '261010123154.0.0'
-        for legacy_fails in (False, True):
-            with self.subTest(legacy_fails=legacy_fails), tempfile.TemporaryDirectory() as directory:
+        for latest_fails, legacy_fails in ((False, False), (False, True), (True, False)):
+            with self.subTest(latest_fails=latest_fails, legacy_fails=legacy_fails), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 scripts, commands = root / 'scripts', root / 'commands'
                 scripts.mkdir()
@@ -371,12 +493,26 @@ if tool == 'docker':
         print(floor_id if args[-1].endswith(floor) else latest_id)
     elif args[0] == 'run' and args[-1] in (latest_id, floor_id):
         (root / 'image').write_text(args[-1])
+        (root / 'running').write_text('true')
         record(['boot', args[-1]])
+    elif args[0] == 'stop':
+        (root / 'running').write_text('false')
     elif args[0] == 'port':
         print('127.0.0.1:18080')
     elif args[0] == 'exec' and '-i' in args:
-        sys.stdin.read()
+        statement = sys.stdin.read()
+        if 'CREATE DATABASE aeon_compat_floor' in statement:
+            if (root / 'running').read_text() != 'false' or (root / 'fixture').read_text() != 'inactive':
+                sys.exit('snapshot requires an inactive fixture with no server connected')
+            (root / 'floor-fixture').write_text((root / 'fixture').read_text())
+            record(['snapshot'])
+        elif 'DROP DATABASE aeon;' in statement:
+            if (root / 'running').read_text() != 'false' or 'ALTER DATABASE aeon_compat_floor RENAME TO aeon;' not in statement:
+                sys.exit('restore requires no server connected and the saved database')
+            (root / 'fixture').write_text((root / 'floor-fixture').read_text())
+            record(['restore'])
 elif tool == 'go':
+    (root / 'fixture').write_text('inactive')
     record(['migrate'])
 elif tool == 'python3':
     mode = args[1]
@@ -388,9 +524,19 @@ elif tool == 'python3':
         if version != expected:
             sys.exit('wrong binary version')
     if mode == 'account-use':
-        if current != floor_id or version != '261009095632.0.0':
-            sys.exit('activated capable release correctly returns HTTP 200')
-        if os.environ['AEON_COMPAT_TEST_LEGACY_FAILS'] == 'true':
+        expected = '261009095632.0.0' if current == floor_id else '261010123154.0.0'
+        if version != expected:
+            sys.exit('wrong account-use capability release')
+        if current == latest_id and args[args.index('--release-tag') + 1] != 'v' + expected:
+            sys.exit('latest capability must use its pinned release')
+        if current == floor_id and '--release-tag' in args:
+            sys.exit('legacy refusal must remain unconditional')
+        if (root / 'fixture').read_text() != 'inactive':
+            sys.exit('account-use probes require an empty inactive fixture')
+        (root / 'fixture').write_text('activated with populated pool')
+        if current == latest_id and os.environ['AEON_COMPAT_TEST_LATEST_FAILS'] == 'true':
+            sys.exit('latest policy gate failed')
+        if current == floor_id and os.environ['AEON_COMPAT_TEST_LEGACY_FAILS'] == 'true':
             sys.exit('legacy refusal gate failed')
 '''
                 for name in ('docker', 'go', 'python3', 'trash'):
@@ -401,20 +547,33 @@ elif tool == 'python3':
                     cwd=root, env={**os.environ, 'PATH': str(commands) + os.pathsep + os.environ['PATH'],
                         'GITHUB_STEP_SUMMARY': str(root / 'summary'),
                         'AEON_COMPAT_TEST_ROOT': str(root),
+                        'AEON_COMPAT_TEST_LATEST_FAILS': str(latest_fails).lower(),
                         'AEON_COMPAT_TEST_LEGACY_FAILS': str(legacy_fails).lower()},
                     capture_output=True, text=True, timeout=30, check=False)
                 events = [json.loads(line) for line in (root / 'events.jsonl').read_text().splitlines()]
                 latest_id, floor_id = 'sha256:' + 'b' * 64, 'sha256:' + 'c' * 64
                 checks = [event for event in events if event[:2] == ['probe', 'check']]
+                if latest_fails:
+                    self.assertEqual(checks, [['probe', 'check', latest_id, latest_version]])
+                    self.assertEqual([event for event in events if event[:2] == ['probe', 'account-use']],
+                        [['probe', 'account-use', latest_id, latest_version]])
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('latest policy gate failed', result.stderr)
+                    self.assertNotIn('Migration compatibility passed:', result.stdout)
+                    self.assertNotIn(['restore'], events)
+                    continue
                 self.assertEqual(checks, [['probe', 'check', latest_id, latest_version],
                     ['probe', 'check', floor_id, floor_version]])
                 self.assertEqual([event for event in events if event[:2] == ['probe', 'account-use']],
-                    [['probe', 'account-use', floor_id, floor_version]])
+                    [['probe', 'account-use', latest_id, latest_version],
+                     ['probe', 'account-use', floor_id, floor_version]])
                 self.assertEqual([event for event in events if event[0] == 'pull'],
                     [['pull', 'ghcr.io/inspr-at/aeon@' + latest_digest],
                      ['pull', 'ghcr.io/inspr-at/aeon@' + floor_digest]])
-                self.assertLess(events.index(['migrate']), events.index(checks[0]))
-                self.assertLess(events.index(checks[0]), events.index(checks[1]))
+                self.assertLess(events.index(['migrate']), events.index(['snapshot']))
+                self.assertLess(events.index(['snapshot']), events.index(checks[0]))
+                self.assertLess(events.index(['probe', 'account-use', latest_id, latest_version]), events.index(['restore']))
+                self.assertLess(events.index(['restore']), events.index(checks[1]))
                 if legacy_fails:
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn('legacy refusal gate failed', result.stderr)
