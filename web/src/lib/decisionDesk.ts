@@ -3,6 +3,7 @@ import { api, APIError } from './api.ts'
 import type { KeyTrimProposal } from './keyTrim'
 import type { Approval } from './agents'
 import type { DoctrineInboxItem } from './doctrine'
+import { sha256FirstByte } from './avatar.ts'
 import type { StepupRequest } from './stepup'
 // P6 presentation model. Wire contracts live in decisionDeskApi.ts.
 export type DeskOutcome = 'once' | 'always' | 'requirement' | 'doctrine'
@@ -19,7 +20,7 @@ export interface DeskOutcomeEffect {
   effect_data?: { retryable?: boolean; review_required?: DeskEffectReview[]; ticket_id?: string; criterion?: string; knowledge_id?: string; doctrine_id?: string; supersedes?: string; superseded_by?: string }
 }
 export interface DeskItem {
-  id: string; kind: DeskKind; projectId: string; projectName: string; ticketId?: string; ticketKey?: string
+  id: string; kind: DeskKind; projectId: string; projectName: string; projectKey?: string; ticketId?: string; ticketKey?: string
   title: string; context: string; findings: string; meanwhile: string; destination: string
   choices: DeskChoice[]; recommended?: string; why: string; outcome: DeskOutcome; suggestion: string
   revision: number; createdAt: string; expiresAt?: string; held: boolean; decided: boolean
@@ -63,6 +64,25 @@ export function roundCounts(items: DeskItem[], round: string[], skipped: Set<str
     else open++
   }
   return { decided, open, skipped: skip }
+}
+// AEON-1057: every item names its project. PAIMOS projects carry no colour of
+// their own, so a project gets a stable hue from its key: the project-group
+// marker hues, at one lightness per theme (--project-l / --project-c).
+const PROJECT_HUES = [190, 75, 290, 12, 150, 240, 45, 335]
+export interface DeskProject { id: string; key: string; name: string; href: string; hue: number | null }
+export function projectHue(key: string): number { return PROJECT_HUES[sha256FirstByte(key) % PROJECT_HUES.length]! }
+/** Workspace-wide items (no project, or no key to link to) stay neutral and unlinked. */
+export function deskProject(item: Pick<DeskItem, 'projectId' | 'projectName' | 'projectKey'>): DeskProject {
+  const key = item.projectId ? item.projectKey ?? '' : ''
+  return { id: item.projectId, key, name: item.projectName, href: key ? `/p/${encodeURIComponent(key)}` : '', hue: key ? projectHue(key) : null }
+}
+/** The project colour as a CSS value; neutral ink when there is no project. */
+export function projectColor(project: Pick<DeskProject, 'hue'>): string {
+  return project.hue === null ? 'var(--ink-3)' : `oklch(var(--project-l) var(--project-c) ${project.hue})`
+}
+/** The project of the previously shown item, when it differs from this one. */
+export function projectSwitch(previous: DeskProject | undefined, current: DeskProject): DeskProject | undefined {
+  return previous && previous.id !== current.id ? previous : undefined
 }
 export function fieldTarget(target: EventTarget | null): target is HTMLElement {
   return target instanceof HTMLElement && (!!target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'))

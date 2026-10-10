@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
@@ -111,6 +112,11 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	projectID := r.URL.Query().Get("project_id")
+	if projectID != "" && !uuidRE.MatchString(projectID) {
+		writeErr(w, fail(400, "invalid project id"))
+		return
+	}
 	role, family := r.URL.Query().Get("role"), r.URL.Query().Get("author_family")
 	if role == "" {
 		role = "build"
@@ -164,6 +170,14 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 					}
 					if len(choice.Models) == 0 {
 						wait = waitFor("models")
+					}
+					allowed, err := accountuse.AllowedForProject(r.Context(), tx, a.ID, projectID)
+					if err != nil {
+						return err
+					}
+					if !allowed {
+						wait = waitFor("context")
+						wait.Context = projectID
 					}
 					choice.Wait = wait
 					choice.Available = wait == nil

@@ -7,16 +7,28 @@ import (
 	"sort"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/jackc/pgx/v5"
 )
 
 // HarnessHealthAt reports dispatch capacity for every enrolled harness.
 // A harness with no accounts is absent. Callers treat that as "no pool yet"
 // and do not skip a model for account reasons.
-func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time) (map[string]HarnessHealth, error) {
+func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time, projectIDs ...string) (map[string]HarnessHealth, error) {
 	accounts, err := listAccounts(ctx, tx)
 	if err != nil {
 		return nil, err
+	}
+	var allowed map[string]bool
+	if len(projectIDs) > 0 {
+		ids := make([]string, len(accounts))
+		for i, a := range accounts {
+			ids[i] = a.ID
+		}
+		allowed, err = accountuse.AllowedIDs(ctx, tx, ids, projectIDs[0])
+		if err != nil {
+			return nil, err
+		}
 	}
 	used, err := occupancy(ctx, tx)
 	if err != nil {
@@ -26,6 +38,11 @@ func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time) (map[string]
 	for _, account := range accounts {
 		health := out[account.Harness]
 		health.Accounts++
+		if allowed != nil && !allowed[account.ID] {
+			health.ContextDenied++
+			out[account.Harness] = health
+			continue
+		}
 		if account.State == "available" && probeFresh(account, now) && used[account.ID] < account.MaxParallel {
 			health.Available++
 			windows, wait, err := admission(ctx, tx, account, account.Windows, now, used[account.ID], runRow{Purpose: "managed"}, false)

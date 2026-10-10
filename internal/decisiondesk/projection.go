@@ -242,6 +242,9 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		if i.Kind == "key_trim" || i.Kind == "stepup" {
 			i.Href = "/decision-desk?needs=" + prefix + i.ID
 		}
+		if i.Kind == "account_matrix" {
+			i.Href = "/settings/accounts#account-use"
+		}
 		switch i.Kind {
 		case "question":
 			i.CanDecide = check("questions.decide", i.ProjectID)

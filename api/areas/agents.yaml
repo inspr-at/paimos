@@ -115,6 +115,7 @@ components:
       type: object
       required: [account_id, label, order, used_pct, left_pct, start_of_day_used_pct, limit_used_pct, floor_pct, resets_at, freshness, resets, reset_policy, reset_plan, routable, details_redacted, can_edit]
       properties:
+        contexts: {type: array, items: {$ref: '#/components/schemas/AccountContextLabel'}}
         account_id: {type: string, format: uuid}
         label: {type: string}
         order: {type: integer, minimum: 1}

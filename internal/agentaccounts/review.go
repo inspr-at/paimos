@@ -34,6 +34,10 @@ func ReviewAccounts(ctx context.Context, tx pgx.Tx, profileID, harness, projectI
 			kept = append(kept, a)
 		}
 	}
+	kept, err = applyUse(ctx, tx, kept, projectID)
+	if err != nil {
+		return nil, err
+	}
 	if len(residency) > 0 {
 		kept, _, err = applyResidency(ctx, tx, kept, profileID, residency[0], now)
 		if err != nil {

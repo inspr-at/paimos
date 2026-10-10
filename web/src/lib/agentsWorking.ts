@@ -29,7 +29,7 @@ const accountBlockers: Record<CapacityWait['code'], string> = {
   vendor: 'the vendor has stopped new starts', offline: 'the computer or account check is unavailable', sign_in: 'sign-in is required',
   hold: 'on hold', approval: 'ongoing agent use needs approval', capacity: 'all start slots are occupied', allowance: 'the account allowance is exhausted',
   models: 'no model is granted for this account', state: 'agent use is paused', residency: 'no account within the allowed providers',
-  context: 'not allowed for this project’s context',
+  context: 'no account is allowed for this project’s context',
 }
 /** Start advice and usage measurements are different facts. Only the server
  * decides eligibility; neither Ready nor a missing reading invents slots. */
