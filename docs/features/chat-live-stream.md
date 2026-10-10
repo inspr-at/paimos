@@ -44,3 +44,28 @@ the durable outbox/history to reconcile them.
 These routes preserve the disabled-by-default chat gate. They do not launch,
 resume, steer, stop or automatically resend an agent's work. No schema
 migration or release version change is required for this server slice.
+
+## Acceptance and validation
+
+`TestChatLiveViewersReplayFinalOnlyAndReceipts` exercises two actual HTTP SSE
+viewers, resume through `Last-Event-ID`, duplicate source suppression, an
+expired replay cursor, database non-persistence of interim content, wrong
+person/tenant/lease/epoch refusals, current key-scope revocation, final-message
+idempotency, bounded outbox pages, monotonic receipts and active-viewer access
+revocation. `TestChatLiveFiftyThreadsRemainBounded` concurrently floods 50 RAM
+relay threads, checks frame/byte/subscription bounds and proves idle cleanup
+with an injected clock.
+
+The affected `internal/chat`, `internal/agentd`, `internal/authz` and
+`internal/reportercontract` packages passed on the approved remote test lane.
+The locked `ci-static --merge-main` check passed all 42 checks without skips;
+ownership, test-tier and web-shard checks also passed. No migration was added,
+and existing pinned response schemas remain unchanged.
+
+Remote snapshot preparation must generate the ignored OpenAPI bundle with
+`node api/generate.mjs --write` before running contract tests. Maintenance
+database identifiers must be SQL-safe or quoted. The coordinator's runner
+currently omits bundle preparation and uses an unquoted hyphenated database
+name. Validation used an in-memory adaptation for those two prerequisites,
+preserving its canonical script identity and all host, hold, load, capacity,
+cache and cleanup guards. The shared runner was not edited.
