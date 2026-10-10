@@ -155,6 +155,15 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 }
 
 func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog) (WorkResolution, error) {
+	if catalog != nil {
+		// Editor previews retain their smaller, honest truncation boundary.
+		if _, err := catalog.profiles(ctx, tx); err != nil {
+			return WorkResolution{}, err
+		}
+		if q.PersonID == nil {
+			q.WorkspaceOnly = true
+		}
+	}
 	if q.TicketID != "" {
 		var fields []byte
 		var project *string
@@ -181,7 +190,7 @@ func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 		}
 	}
 	q.Role = strings.TrimSpace(q.Role)
-	if q.PersonID == nil {
+	if q.PersonID == nil && !q.WorkspaceOnly {
 		q.PersonID = modelprefs.PrefsPerson(ctx, tx, p)
 	}
 	if q.Role != "review-gate" && q.Role != "review-gate-security" {

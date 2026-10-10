@@ -468,7 +468,7 @@ func TestModelsV2RolesRoutesAndWait(t *testing.T) {
 		if _, err := tx.Exec(ctx, `UPDATE model_pref_orders SET rank=ARRAY['anthropic:opus'] WHERE column_key='other' AND situation='first'`); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET state='paused' WHERE harness='cursor'`); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET state='unavailable' WHERE harness='cursor'`); err != nil {
 			return err
 		}
 		waited, err := ResolveWork(ctx, tx, admin, WorkQuery{Role: "build"}, now)

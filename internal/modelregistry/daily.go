@@ -270,6 +270,11 @@ func (d *modelsDailyAdmission) filter(ctx context.Context, tx pgx.Tx, profile Pr
 		for _, item := range snapshot.DailyState[profile.Harness].Accounts {
 			if item.AccountID == a.id {
 				reason = agentplan.DailyAccountReason(item, now)
+				// An unreadable plan still refuses above. Missing or stale quota
+				// is unknown, rather than evidence of a reached daily cap.
+				if reason == "daily_limit_unknown" {
+					reason = ""
+				}
 				break
 			}
 		}
