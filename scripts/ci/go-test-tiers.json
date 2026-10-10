@@ -7718,8 +7718,6 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleSplitWaitsAndReplays","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleStaleHolds","tier":"GATED-FULL"}
-    ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleStalePreviewAndAbandon","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleWorkOrderAndDispatchBindings","tier":"GATED-FULL"}

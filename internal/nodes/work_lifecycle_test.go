@@ -464,6 +464,7 @@ func TestWorkLifecycleLostContactBlocksOrdinaryWrites(t *testing.T) {
 	if status != 409 || !containsBytes(raw, "live session") {
 		t.Fatalf("lost contact must expose recovery requirement: %d %s", status, raw)
 	}
+	t.Run("bounded stale holds", testWorkLifecycleStaleHolds)
 }
 
 func TestWorkLifecyclePendingFencesOriginalBindings(t *testing.T) {
@@ -666,7 +667,7 @@ func TestWorkLifecyclePendingFencesOrderAndRunBindings(t *testing.T) {
 // R4/R6/R7/R9: stale administrative holds must not strand cancellation, claim
 // process-exit evidence, release accounting, leak private diagnostics or bypass
 // the original person's current authority. Fixed timestamps prove the boundary.
-func TestWorkLifecycleStaleHolds(t *testing.T) {
+func testWorkLifecycleStaleHolds(t *testing.T) {
 	t.Run("SQL grace boundary and exit proof", func(t *testing.T) {
 		useDB(t)
 		now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
