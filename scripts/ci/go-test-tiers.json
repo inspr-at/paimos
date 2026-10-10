@@ -8166,6 +8166,8 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineDefinitionScopeAuthorityAndInertRoundTrip","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineGuardrailsPersonRevisionScopeAndStoredDecisions","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineIntentAtomicReplayAndAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestSixMonthSpringGapWalksPastOneYear","tier":"NIGHTLY"}
@@ -8547,6 +8549,8 @@
     {"kind":"go","package":"internal/reviewgate","name":"TestModelMatchesRequiresRequestedPin","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reviewgate","name":"TestParseFinalVerdict","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/routineguard","name":"TestGuardrailFloorScopeEvidenceAndBoundedCheckpoints","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/rules","name":"TestAccessChangesStillTakeConflictingTenantFence","tier":"GATED-FULL"}
     ,

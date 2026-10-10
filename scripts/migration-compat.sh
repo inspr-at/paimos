@@ -47,6 +47,9 @@ pull_previous() {
   echo "Previous image: $image_id"
 }
 pull_previous
+previous_tag="$tag"
+previous_image="$image"
+previous_image_id="$image_id"
 docker network create "$network" >/dev/null
 docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=aeon \
@@ -89,14 +92,11 @@ AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=di
 start_previous
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 echo "Previous release reads passed: $tag on the candidate schema"
-if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
-    "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
-fi
 
 if [[ "$digest" != "$rollback_digest" ]]; then
   docker stop --time 30 "$app" >/dev/null
   docker container rm "$app" >/dev/null
+  echo "Account-use rollback boundary release: $rollback_tag"
   tag="$rollback_tag"
   image="ghcr.io/inspr-at/aeon@$rollback_digest"
   pull_previous
@@ -108,6 +108,6 @@ python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$t
 echo "Account-use rollback boundary passed: $rollback_tag on the candidate schema"
 echo "Migration compatibility passed: latest-release reads and below-floor account-use boundary"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  printf 'Below-floor release %s; registry image ghcr.io/inspr-at/aeon@%s; loaded image %s refused activated empty/populated pools at exact capability entry and created no reservation, claim or start.\n' \
-    "$rollback_tag" "$rollback_digest" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations. Account-use refusal boundary %s; registry image ghcr.io/inspr-at/aeon@%s; loaded image %s passed the activated legacy probes.\n' \
+    "$previous_tag" "$previous_image" "$previous_image_id" "$rollback_tag" "$rollback_digest" "$image_id" >> "$GITHUB_STEP_SUMMARY"
 fi

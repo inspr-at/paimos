@@ -365,7 +365,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "recurrences.manage", true
 		}
 		if len(parts) == 3 && parts[1] != "" {
-			if read && (parts[2] == "preview" || parts[2] == "history" || parts[2] == "releases") || r.Method == http.MethodPost && (parts[2] == "pause" || parts[2] == "resume" || parts[2] == "run-now") {
+			if read && (parts[2] == "preview" || parts[2] == "history" || parts[2] == "releases" || parts[2] == "guardrails") || r.Method == http.MethodPost && (parts[2] == "pause" || parts[2] == "resume" || parts[2] == "run-now") {
 				return "recurrences.manage", true
 			}
 		}
