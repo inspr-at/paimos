@@ -51,6 +51,10 @@ func TestParseTicketMeta(t *testing.T) {
 	if got := ParseTicketMeta("ticket", json.RawMessage(benefit(false))); got.Note == nil || got.Note.PillEN != "Quotes open reliably" || got.PublicBenefit {
 		t.Fatalf("visible bug keeps its note %+v", got)
 	}
+	contentNote := json.RawMessage(strings.Replace(string(hiddenNote), "hide_from_release_notes", "no_release_needed", 1))
+	if got := ParseTicketMeta("ticket", contentNote); got.Note != nil || got.PublicBenefit {
+		t.Fatal("content work copied into notes")
+	}
 	if got := ParseTicketMeta("ticket", hiddenNote); got.Note != nil {
 		t.Fatalf("hidden note leaked %+v", got.Note)
 	}

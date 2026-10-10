@@ -4506,6 +4506,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatInvalidStatusValuesNeverFailBeat","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestHeartbeatKnownProjectBypassesProjection","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatLegacyStateBackfillsBoundTicket","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatModelAcknowledgementAndRestart","tier":"GATED-FULL"}
@@ -5990,6 +5992,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatEstimateWarningMatrix","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestHeartbeatIsolationCommitAndAuthority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatLabelAndMetadataHistory","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatModelSwitchRequiresGenerationLease","tier":"GATED-FULL"}
@@ -7444,6 +7448,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestMovePreconditions","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestNoReleaseNeededAPIRoundTrip","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestNodeChangesNameProjectFieldsAndRevisionForVisibleNodesOnly","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestNodeKeysFieldsAndEvents","tier":"ESSENTIAL"}
@@ -8157,6 +8163,10 @@
     {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceWriteLockOrderWithTreeWriters","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRollbackUniqueKeyAndInvalidTarget","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineDefinitionScopeAuthorityAndInertRoundTrip","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineIntentAtomicReplayAndAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestSixMonthSpringGapWalksPastOneYear","tier":"NIGHTLY"}
     ,
@@ -9255,6 +9265,10 @@
     {"kind":"go","package":"internal/statusautopilot","name":"TestHumanChecksPermitNonDeliveryDailyRules","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestMissingReleaseDoesNotPoisonDailyCursor","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestNoReleaseNeededAcceptancePolicy","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestNoReleaseNeededDailyAcceptanceAndObjections","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestPausedSessionsOccupyTicketUntilResumedOrArchived","tier":"GATED-FULL"}
     ,

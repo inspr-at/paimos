@@ -247,6 +247,22 @@ func (rt *runtime) harnessProjectCtx(ctx context.Context, ref string) (string, e
 	}
 	return rt.projectIdentityCtx(ctx, ref)
 }
+
+// A coordinator can supply its known project UUID to keep heartbeat reports
+// independent of the optional project-list projection. The server still
+// checks current project authority and exact generation ownership on writes.
+func (rt *runtime) heartbeatProjectCtx(ctx context.Context, ref, id string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if id != "" {
+		if !validUUID(id) {
+			return "", usagef("--project-id must be a UUID")
+		}
+		return id, nil
+	}
+	return rt.harnessProjectCtx(ctx, ref)
+}
 func (rt *runtime) printHarness(v any) error {
 	if rt.jsonOut {
 		return rt.printJSON(v)
@@ -547,6 +563,7 @@ func (rt *runtime) harnessBind() *Command {
 }
 func (rt *runtime) harnessWorker(kind string) *Command {
 	var capacityOptions heartbeatCapacity
+	var projectID, knownHarness string
 	var project, session, agent, leaseFile, phase, activity, activityKind, note, doing, model, effort, accountLabel, harnessVersion, brief, worktree, branch, deliveryID, level, reason, etaReady, etaLive, progress string
 	// The sentinel distinguishes an omitted flag from --label "", which clears a label.
 	const omittedLabel = "\x00"
@@ -561,6 +578,8 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		fs.string(&leaseFile, "worker-lease-file", 0, "private generation lease file")
 		switch kind {
 		case "heartbeat":
+			fs.string(&projectID, "project-id", 0, "known project UUID; skips project-list lookup for this heartbeat")
+			fs.string(&knownHarness, "harness", 0, "known execution family; skips session-status lookup for the client byte limit")
 			capacityOptions.flags(fs)
 			fs.string(&phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&label, "label", 0, "current session display name (empty clears it)")
@@ -595,7 +614,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		if err := capacityOptions.validate(); err != nil {
 			return err
 		}
-		id, err := rt.harnessProject(project)
+		id, err := rt.heartbeatProjectCtx(rt.context(), project, projectID)
 		if err != nil {
 			return err
 		}
@@ -635,9 +654,18 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 					return usagef("unknown activity kind %q", activityKind)
 				}
 			}
-			limit, err := rt.reportedSessionFileLimit(id, session)
-			if err != nil {
-				return err
+			var limit int
+			if knownHarness != "" {
+				if !runkind.Valid(knownHarness) {
+					return usagef("unsupported session harness %q", knownHarness)
+				}
+				limit = rules.SessionFileLimit(knownHarness)
+			} else {
+				var err error
+				limit, err = rt.reportedSessionFileLimit(id, session)
+				if err != nil {
+					return err
+				}
 			}
 			body = map[string]any{"max_session_file_bytes": limit, "rules_client_version": version.Version, "phase": phase, "activity": activity, "activity_sequence": sequence}
 			if label != omittedLabel {
