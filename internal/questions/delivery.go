@@ -159,7 +159,7 @@ func (m *Module) listenDeliveryConnection(ctx context.Context, wakes chan<- stru
 		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		var relevant bool
 		err = db.InTenantReadSnapshot(db.AllProjects(readCtx, "decision desk notification hint; effects reauthorized"), m.pool, hint.Tenant, func(tx pgx.Tx) error {
-			return tx.QueryRow(readCtx, `SELECT coalesce(type='question.answered' OR type='inbox.receipt_failed' AND after->>'failure_reason'='session_ended',false) FROM events WHERE tenant_id=$1 AND id=$2`, hint.Tenant, hint.ID).Scan(&relevant)
+			return tx.QueryRow(readCtx, `SELECT coalesce(type IN ('question.answered','question.reused') OR type='inbox.receipt_failed' AND after->>'failure_reason'='session_ended',false) FROM events WHERE tenant_id=$1 AND id=$2`, hint.Tenant, hint.ID).Scan(&relevant)
 		})
 		cancel()
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {

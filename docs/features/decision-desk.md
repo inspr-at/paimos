@@ -60,8 +60,9 @@ in the log; the new typed correction names its `replaces` answer ID. The inbox
 outbox state `delivered` means dispatched, while `receipt_state` reports `queued`,
 `handed_off`, or `failed`. CLI status distinguishes dispatch from receiver proof.
 
-The question dispatcher (AEON-1111) wakes on committed answer and session-ended
-receipt notifications. A single tenant-scoped read selects up to 32 due effects
+The question dispatcher (AEON-1111) wakes on committed answer, reused-answer and
+session-ended receipt notifications. Reused answers create immediately due inbox
+and comment effects, without another grace window. A single tenant-scoped read selects up to 32 due effects
 and the earliest persisted delivery or retry deadline; the ten-second grace and
 30-second retry windows remain unchanged. Startup, listener reconnect and a
 30-second reconciliation recover missed notifications. Notifications only prompt
