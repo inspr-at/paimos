@@ -211,16 +211,9 @@ func TestACPChatOwnedTurnsAndRefusals(t *testing.T) {
 func TestACPChatQueuedDeliveryExactlyOnceAndControlsPass(t *testing.T) {
 	for _, harness := range []string{Cursor, OpenCode, Gemini, Grok} {
 		t.Run(harness, func(t *testing.T) {
-			s, a, e, p := managedFixture(t)
-			e.mu.Lock()
-			e.managedPolicy = false
-			e.inboxCapable = true
-			e.queueInput = true
-			e.harness.Harness = harness
-			e.mu.Unlock()
+			s, a, e, p := acpQueuedControlFixture(t, harness)
 			api := &replayInboxAPI{fakeAPI: a, fail: true}
 			s.api = api
-			p.observe = func(AdapterEvent) { s.observe(e, AdapterEvent{Activity: "busy"}) }
 			s.observe(e, AdapterEvent{Activity: "busy"})
 			a.harnessDeliveries = []HarnessDelivery{{ID: "queued", Level: "steer", Body: "send after this turn"}}
 			a.harnessControls = []HarnessControl{{ID: "queued-steer", Kind: "steer", Text: "next turn"}, {ID: "interrupt", Kind: "interrupt"}}
@@ -294,5 +287,62 @@ func TestACPChatQueuedDeliveryExactlyOnceAndControlsPass(t *testing.T) {
 			}
 			p.fail = false
 		})
+	}
+}
+
+// Exercise manual delivery cycles without starting an automatic heartbeat
+// consumer that can race the test for the same controls or completion outage.
+func acpQueuedControlFixture(t *testing.T, harness string) (*Supervisor, *fakeAPI, *owned, *managedFake) {
+	t.Helper()
+	s, a, process := testSupervisor(t)
+	p := &managedFake{fakeProcess: process}
+	e := &owned{
+		record: Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: a.run.ID,
+			Generation: s.generation, State: "running", PID: p.PID(), Controls: map[string]replay{}},
+		harness: HarnessSession{ID: "session", ProjectID: "project", Harness: harness},
+		process: p, inboxCapable: true, queueInput: true, replies: map[string]InboxReplyTarget{},
+	}
+	s.runs[a.run.ID] = e
+	p.observe = func(AdapterEvent) { s.observe(e, AdapterEvent{Activity: "busy"}) }
+	return s, a, e, p
+}
+
+// Risk: a lost server completion remains stuck behind the turn started by its
+// own input, or replay writes that input twice. Explicit activity changes and
+// manual cycles establish the boundary without a competing timer consumer.
+func TestACPQueuedControlSettlesWhileBusy(t *testing.T) {
+	for _, harness := range []string{Cursor, OpenCode, Gemini, Grok} {
+		for _, rejected := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/rejected=%t", harness, rejected), func(t *testing.T) {
+				s, a, e, p := acpQueuedControlFixture(t, harness)
+				p.fail = rejected
+				a.harnessCompletionFailures = 1
+				a.harnessControls = []HarnessControl{{ID: "lost-steer", Kind: "steer", Text: "one input"}}
+				if err := s.serviceHarness(t.Context(), e); !errors.Is(err, ErrControlUnconfirmed) {
+					t.Fatal("lost completion must report uncertainty", err)
+				}
+				prior, recorded := e.record.Controls["lost-steer"]
+				if len(p.texts) != 1 || p.texts[0] != "one input" || len(e.pending) != 1 ||
+					len(a.harnessCompletions) != 0 || !recorded || prior.Rejected != rejected || e.harness.Activity != "busy" {
+					t.Fatal("fixture did not retain the exact attempted write and busy turn")
+				}
+				// The same leased control is returned while the child is still busy.
+				// A later emergency control must still pass it without reinjection.
+				p.fail = false
+				a.harnessControls = []HarnessControl{{ID: "lost-steer", Kind: "steer", Text: "one input"}, {ID: "interrupt", Kind: "interrupt"}}
+				if err := s.serviceHarness(t.Context(), e); err != nil {
+					t.Fatal(err)
+				}
+				outcome := "lost-steer:applied:queued_next_turn"
+				if rejected {
+					outcome = "lost-steer:rejected:outcome_unconfirmed"
+				}
+				want := []string{outcome, "interrupt:applied:agentd_applied"}
+				if !reflect.DeepEqual(a.harnessCompletions, want) || len(e.pending) != 0 ||
+					len(e.record.Controls) != 0 || !reflect.DeepEqual(p.texts, []string{"one input", ""}) || e.harness.Activity != "busy" {
+					t.Fatalf("busy completion changed or reinjected input: completions=%v writes=%v pending=%d", a.harnessCompletions, p.texts, len(e.pending))
+				}
+			})
+		}
 	}
 }

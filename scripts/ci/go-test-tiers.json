@@ -1038,6 +1038,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestACPProbeOutcomesGateDispatchAndRecover","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestACPQueuedControlSettlesWhileBusy","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestACPVendorFixture","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestACPVersionOnlyProbeNeverEstablishesReadiness","tier":"GATED-FULL"}
