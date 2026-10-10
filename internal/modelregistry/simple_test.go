@@ -836,7 +836,7 @@ func TestModelAllowanceUnknownAndMeasuredLimit(t *testing.T) {
 				profileID = sol.ID
 			}
 			var id string
-			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,state,last_probe_at,last_probe_ok,last_daemon_generation,owner_person_id,linked_at,allowed_model_profile_ids) VALUES($1,$2,$2,'fixture',$3,$2,'available',$4,true,'fixture',$5,$4,ARRAY[$6::uuid]) RETURNING id::text`, admin.TenantID, h, runner.ID, now, admin.ID, profileID).Scan(&id); err != nil {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,state,last_probe_at,last_probe_ok,last_daemon_generation,owner_person_id,linked_at,allowed_model_profile_ids) VALUES($1,$2,$2,'fixture',$3,$2,'available',$4,true,'fixture',$5,$7,ARRAY[$6::uuid]) RETURNING id::text`, admin.TenantID, h, runner.ID, now, admin.ID, profileID, now.Add(-2*time.Minute)).Scan(&id); err != nil {
 				return err
 			}
 			ids[h] = id
@@ -855,7 +855,11 @@ func TestModelAllowanceUnknownAndMeasuredLimit(t *testing.T) {
 		}
 		used := 14.0
 		for _, amount := range []float64{used, 100} {
-			if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','',10080,$3,$4,$5,'harness') ON CONFLICT(tenant_id,account_id,window_kind,bucket,read_at,source,phase) DO UPDATE SET used_percent=EXCLUDED.used_percent`, admin.TenantID, ids["claude"], amount, reset, now); err != nil {
+			readAt := now
+			if amount < 100 {
+				readAt = now.Add(-time.Minute)
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','',10080,$3,$4,$5,'harness')`, admin.TenantID, ids["claude"], amount, reset, readAt); err != nil {
 				return err
 			}
 			out, err := resolveBoardWork(ctx, tx, admin, query, now, nil)
