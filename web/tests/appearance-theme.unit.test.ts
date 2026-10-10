@@ -82,8 +82,17 @@ it('reset invalidates pending reads and the shared editor before another sign-in
 })
 it('invalid, failed and oversized initial answers expose an honest default-colour error', async () => {
   const module = await runtime()
-  for (const response of [new Response('{}'), new Response(null, { status: 503 }), new Response(' '.repeat(16385)), new Response('{}', { headers: { 'Content-Length': '16385' } })]) {
-    request.mockImplementation(async (path: string) => path.startsWith('/themes?') ? page() : response)
+  const valid = JSON.stringify(selected())
+  const { getActiveTheme } = await import('../src/lib/themes')
+  for (const [response, reason] of [
+    [() => new Response('{}'), 'Invalid theme response'],
+    [() => new Response(null, { status: 503 }), 'Your theme could not be loaded'],
+    [() => new Response(valid + ' '.repeat(16385)), 'Theme response is too large'],
+    [() => new Response(valid, { headers: { 'Content-Length': '16385' } }), 'Theme response is too large'],
+  ] as const) {
+    request.mockImplementation(async (path: string) => path.startsWith('/themes?') ? page() : response())
+    // The oversized payloads are valid themes: JSON/schema failure cannot pass.
+    await expect(getActiveTheme()).rejects.toThrow(reason)
     await module.restoreAgentTheme(ME)
     expect(css).toBeNull(); expect(module.agentTheme.value).toBeNull()
     expect(notify).toHaveBeenLastCalledWith(expect.stringContaining('could not be loaded'), { tone: 'error' })
