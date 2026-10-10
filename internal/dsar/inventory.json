@@ -884,6 +884,23 @@
       "table": "personal_profiles"
     },
     {
+      "classification": "personal",
+      "columns": {
+        "automatic_launch_enabled": "personal",
+        "project_id": "metadata",
+        "qualification_id": "metadata",
+        "revision": "metadata",
+        "tenant_id": "metadata",
+        "updated_at": "personal",
+        "updated_by": "personal"
+      },
+      "locator": {
+        "person_column": "updated_by",
+        "tenant_column": "tenant_id"
+      },
+      "table": "project_routine_execution_settings"
+    },
+    {
       "classification": "metadata",
       "columns": {
         "context_id": "metadata",
@@ -899,6 +916,8 @@
       "classification": "personal",
       "columns": {
         "assignment": "personal",
+        "consent_policy_digest": "metadata",
+        "consent_qualification_id": "metadata",
         "consent_revision": "metadata",
         "consented_at": "personal",
         "consented_by_principal_id": "personal",
@@ -1016,6 +1035,32 @@
       "table": "routine_effect_outbox"
     },
     {
+      "classification": "personal",
+      "columns": {
+        "budget_modes": "metadata",
+        "capabilities": "metadata",
+        "capability_digest": "metadata",
+        "coordinator_acceptance": "metadata",
+        "daemon_digest": "metadata",
+        "host_mapping_digest": "metadata",
+        "id": "metadata",
+        "ops_attestation": "metadata",
+        "owner_person_id": "personal",
+        "policy_digest": "metadata",
+        "project_id": "metadata",
+        "recorded_at": "personal",
+        "recorded_by": "personal",
+        "revoked_at": "metadata",
+        "server_digest": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "owner_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "routine_execution_qualifications"
+    },
+    {
       "classification": "review",
       "columns": {
         "checkpoint": "metadata",
@@ -1037,8 +1082,8 @@
         "tenant_id": "metadata"
       },
       "locator": {
-        "tenant_column": "tenant_id",
-        "person_column": "owner_principal_id"
+        "person_column": "owner_principal_id",
+        "tenant_column": "tenant_id"
       },
       "table": "routine_guard_evaluations"
     },
@@ -1056,8 +1101,8 @@
         "tenant_id": "metadata"
       },
       "locator": {
-        "tenant_column": "tenant_id",
-        "person_column": "created_by"
+        "person_column": "created_by",
+        "tenant_column": "tenant_id"
       },
       "table": "routine_guard_policies"
     },
@@ -1091,8 +1136,8 @@
         "work_order_id": "metadata"
       },
       "locator": {
-        "tenant_column": "tenant_id",
-        "person_column": "owner_principal_id"
+        "person_column": "owner_principal_id",
+        "tenant_column": "tenant_id"
       },
       "table": "routine_runs"
     },
