@@ -5732,6 +5732,24 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryOmitsProjectsWithoutDeliveryRead","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestWebhookFailureAudit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestWebhookFailureCompleteMerges","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestWebhookFailureCompletedGroup","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestWebhookFailureGitHubMetadata","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestWebhookFailureMergedGroup","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestWebhookFailureMergedPull","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestWebhookFailureParse","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestWebhookFailureRateLimit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestWebhookFailureSuccessIsQuiet","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/deliveryvote","name":"TestDeliveryRoutesArePersonRead","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/deliveryvote","name":"TestFormatAverage","tags":["delete-candidate"],"tier":"GATED-FULL"}

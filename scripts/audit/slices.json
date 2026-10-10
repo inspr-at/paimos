@@ -121,6 +121,8 @@
         "internal/agents/**",
         "internal/hooknote/**",
         "internal/delivery/**",
+        "internal/delivery/webhook_log.go",
+        "internal/delivery/webhook_log_test.go",
         "internal/engineadmission/**",
         "internal/agentsetup/ledger.go",
         "internal/agentsetup/ledger_test.go",
