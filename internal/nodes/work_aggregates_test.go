@@ -609,8 +609,9 @@ func TestListEstimateSortBoundedConcurrentMatchesBaseline(t *testing.T) {
 		}
 	}
 	// RLS still applies to every filtered root and every scope descendant.
-	bindProjectRole(t, w.admin.TenantID, w.viewer.ID, "viewer", w.root.ID)
-	viewerCtx := tenant.WithPrincipal(t.Context(), w.viewer)
+	scopedViewer := insertPerson(t, w.admin.TenantID, "Scoped list viewer")
+	bindProjectRole(t, w.admin.TenantID, scopedViewer.ID, "viewer", w.root.ID)
+	viewerCtx := tenant.WithPrincipal(t.Context(), scopedViewer)
 	q.States = []string{"open"}
 	q.IDs = []string{group.ID, unknown.ID, archived.ID}
 	viewerBase, err := plain.listNodes(viewerCtx, w.admin.TenantID, q)
