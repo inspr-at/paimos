@@ -605,12 +605,17 @@ func TestReleaseSubscriptionOrderedReplayAndSourceAuthority(t *testing.T) {
 			_, err := tx.Exec(t.Context(), `UPDATE routine_runs SET state='completed' WHERE recurrence_id=$1`, r.ID)
 			return err
 		})
-		// Manual-first recovery uses the same publication key as the scheduler.
+		// The second publication runs automatically once both overlap holds end.
+		f.run()
+		got = f.receipts(r.ID)
+		if len(got) != 2 || got[1].Key != "release:"+publicationKey(second) || got[1].NodeID == nil {
+			t.Fatalf("second eventual publication: %+v", got)
+		}
 		var manual Occurrence
 		if err := json.Unmarshal(f.call(f.p, "POST", path, map[string]string{"idempotency_key": "recovered", "release_key": publicationKey(second)}, 200), &manual); err != nil {
 			t.Fatal(err)
 		}
-		if manual.Run == nil || manual.Key != "release:"+publicationKey(second) || manual.SourceEventID == nil {
+		if manual.Run == nil || manual.Key != "release:"+publicationKey(second) || manual.SourceEventID == nil || *manual.NodeID != *got[1].NodeID {
 			t.Fatalf("manual publication lineage: %+v", manual)
 		}
 		// Restart and duplicate delivery cannot create a third ticket or intent.
