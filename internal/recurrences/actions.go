@@ -54,6 +54,9 @@ func (m *Module) AuthorizeActionTx(ctx context.Context, tx pgx.Tx, p tenant.Prin
 	if err != nil {
 		return empty, decision, "", err
 	}
+	if decision.DeterministicResult != routineguard.Allow {
+		return empty, decision, "", workorders.Fail(409, "guardrail_action_denied")
+	}
 	if m.actionEvaluator == nil {
 		return empty, decision, "", workorders.Fail(409, "guardrail_evaluation_required")
 	}
@@ -61,7 +64,7 @@ func (m *Module) AuthorizeActionTx(ctx context.Context, tx pgx.Tx, p tenant.Prin
 	if err != nil {
 		return empty, decision, "", err
 	}
-	if verified.PolicyDigest != decision.PolicyDigest || verified.ContextDigest != decision.ContextDigest || !verified.CanExecute() {
+	if verified.PolicyDigest != decision.PolicyDigest || verified.ContextDigest != decision.ContextDigest || verified.HardVersion != decision.HardVersion || verified.PresetVersion != decision.PresetVersion || verified.DeterministicResult != routineguard.Allow || !verified.CanExecute() {
 		return empty, decision, "", workorders.Fail(409, "guardrail_evaluation_required")
 	}
 	actor := tenant.Principal{ID: identity, TenantID: p.TenantID, Scopes: executionPermissions(d.Assignment)}
