@@ -6,6 +6,11 @@ registered Mac, assignment/consent revisions, daemon generation, qualification
 pins and remaining budget grant. Existing manual runs keep their claim protocol.
 Missing capability or incomplete intent returns a bounded refusal.
 
+Routine lineage retains S03/S05 scope visibility. A launch grant supplies no
+read override for a private personal definition. The current claim path requires
+authorized visibility to the linked routine run; private execution needs S13's
+owner-scoped validation integration before that capability can be qualified.
+
 Automatic execution remains off. S04 person consent and accepted qualification
 are required independently of the daemon's advertised capability. S13 must bind
 `agentruns.BindRoutineLaunch` to trusted runtime observations and S09's current
@@ -38,3 +43,8 @@ prove fixture cleanup: resource release requires independent fixture-exit
 evidence, or durable proof that native launch was never attempted. Unconfirmed
 cleanup retains the resource allocation. Exit receipts are append-only and do
 not manufacture budget settlement.
+
+The daemon also retains its live checkout fence and refuses shutdown when
+fixture exit is unknown, even after root-process exit. Existing allowance
+reservations remain active until an accepted routine exit receipt permits
+settlement. Reconciliation preserves the exact assigned daemon generation.
