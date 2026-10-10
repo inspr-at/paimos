@@ -2,7 +2,7 @@
 
 package modelregistry
 
-// CatalogVersion is the dispatch catalog pin seeded and upgraded automatically.
+// CatalogVersion identifies the ID-only offline evidence bootstrap.
 const CatalogVersion = "4"
 
 type seedProfile struct {

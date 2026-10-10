@@ -176,6 +176,9 @@ func ParseProviderCatalog(source string, raw []byte, at time.Time) (ProviderCata
 			}
 			sort.Strings(ids)
 			for _, id := range ids {
+				if len(models[id]) > 1<<20 {
+					return out, errors.New("model row limit")
+				}
 				row, err := boundedCatalogObject(models[id], 256)
 				if err != nil {
 					return out, err
@@ -192,6 +195,9 @@ func ParseProviderCatalog(source string, raw []byte, at time.Time) (ProviderCata
 		for _, id := range sortedRawKeys(root) {
 			if id == "sample_spec" {
 				continue
+			}
+			if len(root[id]) > 1<<20 {
+				return out, errors.New("model row limit")
 			}
 			row, err := boundedCatalogObject(root[id], 256)
 			if err != nil {

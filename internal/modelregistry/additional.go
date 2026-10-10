@@ -10,8 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Existing tenants receive additive profiles under their ordinary RLS context.
-// Their saved route order and immutable pins are never replaced by this upgrade.
+// Kept for compatibility with earlier setup callers. Additional model IDs
+// provide evidence through refresh; they never synthesize pins or routes.
 func prepareAdditionalCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]events.Change, error) {
 	return nil, nil
 }

@@ -78,6 +78,13 @@ func TestCatalogSourcesPreserveNativePrecedenceAndUnknown(t *testing.T) {
 	if f := got["native_levels"]; f.SourceKind != "native" || f.Source != vendorURLs["anthropic"] || string(f.Value) != `["high","low","max","medium","xhigh"]` {
 		t.Fatalf("native fields lost precedence: %+v", f)
 	}
+	unknown := native.Facts[0]
+	unknown.Fact, unknown.Value, unknown.Source = "missing", json.RawMessage(" null "), "native-missing"
+	fallback := unknown
+	fallback.Value, fallback.SourceKind, fallback.Source = json.RawMessage("false"), "aggregator", "public-fallback"
+	if f := ResolveCatalogFacts([]CatalogFact{fallback, unknown}, "")["missing"]; f.Source != fallback.Source {
+		t.Fatal("a whitespace-wrapped unknown overrode an explicit public value")
+	}
 	// Route evidence wins only on that exact route, and preserves new level names.
 	harness := CatalogFact{Provider: "anthropic", ModelID: "claude-opus-5", Route: "pi/anthropic/claude-opus-5", Fact: "native_levels", Value: json.RawMessage(`["ultra"]`), Source: "harness:pi", SourceKind: "harness", FieldPath: "levels", FetchedAt: at}
 	facts = append(facts, harness)
