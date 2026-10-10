@@ -154,7 +154,7 @@ func (rt *runtime) syncSubagent(ctx context.Context, hold *heartbeatHold, req *s
 	if err != nil {
 		return err
 	}
-	if exists && session.disk.Closed {
+	if exists && (session.disk.Closed || session.disk.Terminal) {
 		return nil
 	}
 	if !exists {
@@ -239,8 +239,15 @@ func (rt *runtime) syncSubagent(ctx context.Context, hold *heartbeatHold, req *s
 	if err := saveHeartbeatSession(&session); err != nil {
 		return err
 	}
-	return rt.harnessDoCtx(ctx, http.MethodPost, harnessPath(req.Project, session.id)+"/heartbeat", session.lease,
+	err = rt.harnessDoCtx(ctx, http.MethodPost, harnessPath(req.Project, session.id)+"/heartbeat", session.lease,
 		map[string]any{"activity_sequence": session.disk.Sequence, "phase": "working", "activity": "busy", "max_session_file_bytes": rules.SessionFileLimit("claude"), "rules_client_version": version.Version}, new(any))
+	if heartbeatTerminalStatus(err) {
+		markHeartbeatTerminal(&session, terminalReason(err))
+		if saveErr := saveHeartbeatSession(&session); saveErr != nil {
+			return saveErr
+		}
+	}
+	return err
 }
 
 // The existing parent helper maintains children without launching a watcher,

@@ -374,6 +374,21 @@ func TestClaudeSubagentHookEndToEnd(t *testing.T) {
 	if err := c.Do(t.Context(), http.MethodGet, harnessPath(project, ""), nil, &sessions); err != nil || len(sessions) != 2 {
 		t.Fatal("Agents session inventory did not contain parent and child")
 	}
+	var agents struct {
+		Items []harness.SessionSummary `json:"items"`
+	}
+	if err := c.Do(t.Context(), http.MethodGet, "/api/harness-sessions?project="+project+"&view=current", nil, &agents); err != nil {
+		t.Fatal(err)
+	}
+	visible := false
+	for _, item := range agents.Items {
+		if item.ID == child.ID && item.ParentID != nil && *item.ParentID == parent.ID && item.Ticket != nil && item.Ticket.ID == ticket.ID {
+			visible = true
+		}
+	}
+	if !visible {
+		t.Fatal("child was not visible under its parent in the Agents API")
+	}
 	if stderr := f.invoke(t, "SubagentStop", ""); stderr != "" {
 		t.Fatal(stderr)
 	}

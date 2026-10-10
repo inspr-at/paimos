@@ -13,7 +13,11 @@ import (
 )
 
 func openSubagentParent(path string) (*os.File, error) {
-	fd, err := openNoFollowDir(canonicalPrivatePath(path))
+	path = canonicalPrivatePath(path)
+	if path == "" {
+		return nil, errHeartbeatState
+	}
+	fd, err := openNoFollowDir(path)
 	if err != nil {
 		return nil, err
 	}
@@ -22,7 +26,7 @@ func openSubagentParent(path string) (*os.File, error) {
 		unix.Close(fd)
 		return nil, errHeartbeatState
 	}
-	return os.NewFile(uintptr(fd), canonicalPrivatePath(path)), nil
+	return os.NewFile(uintptr(fd), path), nil
 }
 
 // Child paths are opened relative to validated directory descriptors. No hook
