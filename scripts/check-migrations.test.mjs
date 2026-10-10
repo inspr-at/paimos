@@ -239,8 +239,16 @@ test('the runtime probe pulls by digest and rejects a malformed digest before Do
   writeFileSync(join(dir, 'go'), '#!/bin/bash\nexit 19\n', {mode: 0o700});
   const script = new URL('./migration-compat.sh', import.meta.url).pathname;
   const digest = 'sha256:' + 'a'.repeat(64);
-  assert.throws(() => execFileSync('bash', [script, 'v260930115354.0.0', digest], {env: {...process.env, PATH: `${dir}:${process.env.PATH}`}, stdio: 'pipe'}));
+  // Risk: allocating disposable resources before a failed image pull hides
+  // the pull failure and leaves cleanup to run against uncreated resources.
+  assert.throws(() => execFileSync('bash', [script, 'v260930115354.0.0', digest], {env: {...process.env, PATH: `${dir}:${process.env.PATH}`}, stdio: 'pipe'}), error => error.status === 19);
   assert.match(readFileSync(log, 'utf8'), new RegExp(`pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${digest}`));
+  assert.equal(readFileSync(log, 'utf8'), `pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${digest}\n`, 'a failed pull must precede any Docker resource allocation or cleanup');
+  const floorDigest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c';
+  writeFileSync(log, '');
+  writeFileSync(join(dir, 'docker'), `#!/bin/bash\nprintf '%s\\n' "$*" >> '${log}'\nif [[ "$*" = 'pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${digest}' ]]; then exit 0; fi\nexit 19\n`, {mode: 0o700});
+  assert.throws(() => execFileSync('bash', [script, 'v260930115354.0.0', digest], {env: {...process.env, PATH: `${dir}:${process.env.PATH}`}, stdio: 'pipe'}), error => error.status === 19);
+  assert.equal(readFileSync(log, 'utf8'), `pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${digest}\npull --platform linux/amd64 ghcr.io/inspr-at/aeon@${floorDigest}\n`, 'a failed rollback-floor pull must also precede Docker resource allocation or cleanup');
   writeFileSync(log, '');
   assert.throws(() => execFileSync('bash', [script, 'v260930115354.0.0', 'sha256:bad'], {env: {...process.env, PATH: `${dir}:${process.env.PATH}`}, stdio: 'pipe'}));
   assert.equal(readFileSync(log, 'utf8'), '');

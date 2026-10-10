@@ -13,6 +13,20 @@ tag="${1:?usage: bash scripts/migration-compat.sh vYYMMDDhhmmss.0.0 sha256:DIGES
 [[ "$tag" =~ ^v[0-9]{12}\.0\.0$ ]] || { echo 'Expected an immutable release tag' >&2; exit 1; }
 digest="${2:?Expected the published release image digest}"
 [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected an immutable image digest' >&2; exit 1; }
+
+# Release 128 is the last published binary below the account-use floor.
+# Keep this immutable rollback probe after the latest stable gains capability;
+# a capable binary must not be expected to fail at principal entry.
+account_use_floor_tag=v261009095632.0.0
+account_use_floor_digest=sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
+
+# Pull every required image before allocating disposable probe resources.
+# A failed pull must retain its own failure without network or container work.
+docker pull --platform linux/amd64 "ghcr.io/inspr-at/aeon@$digest"
+if [[ "$tag" != "$account_use_floor_tag" || "$digest" != "$account_use_floor_digest" ]]; then
+  docker pull --platform linux/amd64 "ghcr.io/inspr-at/aeon@$account_use_floor_digest"
+fi
+
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 mkdir -p tmp
@@ -29,19 +43,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Release 128 is the last published binary below the account-use floor.
-# Keep this immutable rollback probe after the latest stable gains capability;
-# a capable binary must not be expected to fail at principal entry.
-account_use_floor_tag=v261009095632.0.0
-account_use_floor_digest=sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
-
 probe_release() {
   local tag="$1" digest="$2" exercise_floor="$3"
   local image="ghcr.io/inspr-at/aeon@$digest" image_id base db_address ready
   echo "Previous published release: $tag"
   echo "Previous registry image: $image"
-  docker pull --platform linux/amd64 "$image"
-  # Pull the release-note digest, then resolve its local config ID for both boots.
+  # Resolve the pulled release-note digest's local config ID for both boots.
   image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
   [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
   echo "Previous image: $image_id"
