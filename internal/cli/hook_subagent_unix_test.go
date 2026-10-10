@@ -32,6 +32,8 @@ type subagentFixture struct {
 	srv                                *httptest.Server
 	mu                                 sync.Mutex
 	registrations                      []map[string]any
+	childSessions                      map[string]map[string]any
+	childSequences                     map[string]int
 	beats, stops, reads                int
 	failStart, failStop, parentStopped bool
 	shape                              string
@@ -40,7 +42,7 @@ type subagentFixture struct {
 
 func newSubagentFixture(t *testing.T, shape string) *subagentFixture {
 	t.Helper()
-	f := &subagentFixture{config: setupHookTest(t), dir: t.TempDir(), shape: shape}
+	f := &subagentFixture{config: setupHookTest(t), dir: t.TempDir(), shape: shape, childSessions: make(map[string]map[string]any), childSequences: make(map[string]int)}
 	useIndexHome(t)
 	writeIndexState(t, f.dir, indexAeonID, "Parent", `"project_id":"`+transcriptProjectID+`"`)
 	publishIndex(t, indexSourceID, f.dir)
@@ -77,19 +79,38 @@ func newSubagentFixture(t *testing.T, shape string) *subagentFixture {
 				http.Error(w, `{"error":"private fixture failure"}`, 503)
 				return
 			}
-			fmt.Fprintf(w, `{"id":%q}`, indexAeonAlt)
-		case "POST " + harnessPath(transcriptProjectID, indexAeonAlt) + "/heartbeat":
+			id := ""
+			for candidate, registered := range f.childSessions {
+				if registered["harness_session_ref"] == body["harness_session_ref"] {
+					if !reflect.DeepEqual(registered, body) {
+						t.Error("registration replay changed metadata or proof")
+					}
+					id = candidate
+				}
+			}
+			if id == "" {
+				id = indexAeonAlt
+				if len(f.childSessions) != 0 {
+					id = hookMessageID
+				}
+				f.childSessions[id] = body
+			}
+			fmt.Fprintf(w, `{"id":%q}`, id)
+		case "POST " + harnessPath(transcriptProjectID, indexAeonAlt) + "/heartbeat", "POST " + harnessPath(transcriptProjectID, hookMessageID) + "/heartbeat":
 			f.beats++
-			if body["activity_sequence"] != float64(f.beats) || body["phase"] != "working" {
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, harnessPath(transcriptProjectID, "")+"/"), "/heartbeat")
+			f.childSequences[id]++
+			if body["activity_sequence"] != float64(f.childSequences[id]) || body["phase"] != "working" {
 				t.Error("heartbeat did not use a monotonically increasing activity sequence")
 			}
-			if len(f.registrations) == 0 || r.Header.Get("X-Aeon-Worker-Lease") != f.registrations[0]["worker_lease"] {
+			if f.childSessions[id] == nil || r.Header.Get("X-Aeon-Worker-Lease") != f.childSessions[id]["worker_lease"] {
 				t.Error("heartbeat lost child proof")
 			}
 			fmt.Fprint(w, `{}`)
-		case "POST " + harnessPath(transcriptProjectID, indexAeonAlt) + "/stop":
+		case "POST " + harnessPath(transcriptProjectID, indexAeonAlt) + "/stop", "POST " + harnessPath(transcriptProjectID, hookMessageID) + "/stop":
 			f.stops++
-			if len(f.registrations) == 0 || r.Header.Get("X-Aeon-Worker-Lease") != f.registrations[0]["worker_lease"] {
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, harnessPath(transcriptProjectID, "")+"/"), "/stop")
+			if f.childSessions[id] == nil || r.Header.Get("X-Aeon-Worker-Lease") != f.childSessions[id]["worker_lease"] {
 				t.Error("stop lost child proof")
 			}
 			if f.failStop {
@@ -208,6 +229,77 @@ func TestClaudeSubagentHookLifecycle(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Risk: Claude resumes the same agent_id after completion, leaving it invisible
+// or immediately stopping it with the previous run's proof and stop intent.
+func TestClaudeSubagentHookResume(t *testing.T) {
+	f := newSubagentFixture(t, "ship")
+	f.invoke(t, "SubagentStart", `,"description":"first run"`)
+	first := f.childDisk(t)
+	f.invoke(t, "SubagentStop", "")
+	if f.stops != 1 || !f.childDisk(t).Closed {
+		t.Fatal("first generation was not stopped")
+	}
+	// Parent maintenance must not revive a closed generation by itself.
+	p := f.parent(t)
+	f.rt().heartbeatSubagents(t.Context(), p, false)
+	if len(f.registrations) != 1 || f.beats != 1 {
+		t.Fatal("parent maintenance revived a closed child")
+	}
+	if stderr := f.invoke(t, "SubagentStart", `,"description":"resumed run"`); stderr != "" {
+		t.Fatal(stderr)
+	}
+	resumed := f.childDisk(t)
+	if len(f.registrations) != 2 || resumed.SessionID == first.SessionID || resumed.Closed || resumed.Terminal || resumed.Sequence != 1 || f.beats != 2 || f.stops != 1 {
+		t.Fatal("resume did not register and heartbeat a fresh active generation")
+	}
+	a, b := f.registrations[0], f.registrations[1]
+	if a["harness_session_ref"] == b["harness_session_ref"] || a["worker_lease"] == b["worker_lease"] {
+		t.Fatal("resume reused the completed generation's reference or proof")
+	}
+	if b["parent_harness_session_id"] != indexAeonID || b["ticket_node_id"] != indexMessage || b["work_shape"] != "ship" || b["display_label"] != "Explore: resumed run" {
+		t.Fatal("resumed generation lost its inherited metadata or new label")
+	}
+	f.invoke(t, "SubagentStart", `,"description":"resumed run"`)
+	f.rt().heartbeatSubagents(t.Context(), p, false)
+	if len(f.registrations) != 2 || f.beats != 4 || f.childDisk(t).Sequence != 3 {
+		t.Fatal("active resume was duplicated or its heartbeat sequence was lost")
+	}
+	f.invoke(t, "SubagentStop", "")
+	f.invoke(t, "SubagentStop", "")
+	if f.stops != 2 || !f.childDisk(t).Closed {
+		t.Fatal("resumed generation was not stopped exactly once")
+	}
+}
+
+// Risk: a valid final response over 64 KiB discards the lifecycle stop, so the
+// parent keeps heartbeating a child that has already finished.
+func TestClaudeSubagentHookLargeStopPayload(t *testing.T) {
+	f := newSubagentFixture(t, "scout")
+	f.invoke(t, "SubagentStart", "")
+	response := strings.Repeat("final response content ", 8192)
+	if stderr := f.invoke(t, "SubagentStop", `,"last_assistant_message":"`+response+`","agent_transcript_path":"/unused/transcript.jsonl"`); stderr != "" {
+		t.Fatal(stderr)
+	}
+	if f.stops != 1 || !f.childDisk(t).Closed {
+		t.Fatal("large stop payload did not close the child generation")
+	}
+	f.rt().heartbeatSubagents(t.Context(), f.parent(t), false)
+	if f.beats != 1 || f.stops != 1 {
+		t.Fatal("parent continued heartbeating a finished child")
+	}
+	root := filepath.Join(f.dir, "subagents", subagentName("agent-fixture"))
+	files, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		raw, err := os.ReadFile(filepath.Join(root, file.Name()))
+		if err != nil || bytes.Contains(raw, []byte("final response content")) || bytes.Contains(raw, []byte("/unused/transcript.jsonl")) {
+			t.Fatal("stop response or transcript path was persisted")
+		}
 	}
 }
 

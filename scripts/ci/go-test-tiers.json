@@ -4316,9 +4316,13 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookEndToEnd","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookLargeStopPayload","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookLifecycle","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookNoOp","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookResume","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookRetries","tier":"ESSENTIAL"}
     ,
