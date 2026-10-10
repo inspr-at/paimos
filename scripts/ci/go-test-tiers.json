@@ -5724,6 +5724,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeBackfillPreviewApplyAndSafety","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeDoneAlreadyDoneRecordsEvidenceAndPreservesTicket","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeDoneOwnerFallbackWithoutLeadSettings","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeDoneProtectsOwnershipParentsAndHumanChecks","tier":"ESSENTIAL"}

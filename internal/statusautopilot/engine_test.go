@@ -633,11 +633,15 @@ func (f *fixture) merge(id string, days int) {
 		f.release(nil)
 	}
 	f.tx(func(tx pgx.Tx) error {
+		var snapshot json.RawMessage
+		if err := tx.QueryRow(f.t.Context(), `SELECT to_jsonb(n) FROM nodes n WHERE id=$1`, id).Scan(&snapshot); err != nil {
+			return err
+		}
 		meta, err := json.Marshal(map[string]any{"merged_at": f.now.Add(-time.Duration(days) * 24 * time.Hour), "merge_sha": strings.Repeat("a", 40), "pull_request": 1})
 		if err != nil {
 			return err
 		}
-		_, err = events.Append(f.t.Context(), tx, f.p, events.Change{NodeID: &id, Type: "delivery.merge_done", Metadata: meta})
+		_, err = events.Append(f.t.Context(), tx, f.p, events.Change{NodeID: &id, Type: "delivery.merge_done", Before: snapshot, After: snapshot, Metadata: meta})
 		return err
 	})
 }

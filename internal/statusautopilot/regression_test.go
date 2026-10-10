@@ -578,5 +578,12 @@ func TestProjectSettingsPagesSearchInheritanceAndAuthority(t *testing.T) {
 	f.call(f.p, "GET", "/api/status-autopilot/projects?after=invalid", "", 400)
 	f.call(f.p, "GET", "/api/status-autopilot/projects?q="+strings.Repeat("a", 201), "", 400)
 	member := attentionMember(f)
-	f.call(member, "GET", "/api/status-autopilot/projects", "", 403)
+	var visible projectSettingsPage
+	if err := json.Unmarshal(f.call(member, "GET", "/api/status-autopilot/projects?mode=inherit", "", 200).Body.Bytes(), &visible); err != nil {
+		t.Fatal(err)
+	}
+	if len(visible.Items) != 1 || visible.Items[0].ID != f.project || visible.Inherited != 1 || visible.Next != nil {
+		t.Fatalf("project reader visibility: %+v", visible)
+	}
+	f.call(member, "PUT", "/api/projects/"+f.project+"/status-autopilot", `{"mode":"off","expected_revision":0}`, 403)
 }

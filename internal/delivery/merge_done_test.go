@@ -178,6 +178,78 @@ func TestMergeDoneRecordedWebhookReplay(t *testing.T) {
 	}
 }
 
+// Risk: a genuine merge of an already-Done leaf is lost, making its reminder
+// disappear or allowing cleanup to erase it; replay must not duplicate writes.
+func TestMergeDoneAlreadyDoneRecordsEvidenceAndPreservesTicket(t *testing.T) {
+	f, _ := mergeFixture(t)
+	fact := mergeFactFixture(f, 7, "AEON-848", strings.Repeat("c", 40))
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='done',human_check='Keep review',status_autopilot='{"blocked_reminder":true}' WHERE id=$1`, f.ticket)
+		return err
+	})
+	if err := f.m.completeMerges(t.Context(), []MergeFact{fact}); err != nil {
+		t.Fatal(err)
+	}
+	var revision time.Time
+	f.tx(t, func(tx pgx.Tx) error {
+		var preserved bool
+		if err := tx.QueryRow(t.Context(), `SELECT state='done' AND human_check='Keep review'
+ AND status_autopilot='{"blocked_reminder":true}'::jsonb AND fields-'merged_at'=$2::jsonb
+ AND fields->>'merged_at'=$3,updated_at FROM nodes WHERE id=$1`, f.ticket, mergeBenefits, fact.At.UTC().Format(time.RFC3339Nano)).Scan(&preserved, &revision); err != nil {
+			return err
+		}
+		if !preserved {
+			t.Fatal("merge evidence lost or changed the already-Done ticket")
+		}
+		var snapshots bool
+		if err := tx.QueryRow(t.Context(), `SELECT before->>'state'='done' AND after->>'state'='done'
+ AND before->'fields'=$2::jsonb AND after->'fields'-'merged_at'=before->'fields'
+ AND before->'human_check'=after->'human_check' AND before->'status_autopilot'=after->'status_autopilot'
+ AND metadata->>'merged_at'=$3 FROM events WHERE node_id=$1 AND type='delivery.merge_done'`, f.ticket, mergeBenefits, fact.At.UTC().Format(time.RFC3339Nano)).Scan(&snapshots); err != nil {
+			return err
+		}
+		if !snapshots {
+			t.Fatal("merge audit does not preserve the ticket snapshots")
+		}
+		return nil
+	})
+	if err := f.m.completeMerges(t.Context(), []MergeFact{fact}); err != nil {
+		t.Fatal(err)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var count int
+		var unchanged bool
+		if err := tx.QueryRow(t.Context(), `SELECT updated_at=$2,(SELECT count(*) FROM events WHERE node_id=$1 AND type='delivery.merge_done') FROM nodes WHERE id=$1`, f.ticket, revision).Scan(&unchanged, &count); err != nil {
+			return err
+		}
+		if !unchanged || count != 1 {
+			t.Fatalf("merge replay wrote again: revision unchanged=%v receipts=%d", unchanged, count)
+		}
+		var release string
+		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_projects(tenant_id,project_node_id) VALUES($1,$2)`, f.person.TenantID, f.project); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,key,kind_id,title) SELECT $1,$2,'REL-1147',id,'Planning release' FROM node_kinds WHERE slug='release' RETURNING id::text`, f.person.TenantID, f.project).Scan(&release); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number,state) VALUES($1,$2,$3,1,'planning')`, f.person.TenantID, release, f.project)
+		return err
+	})
+	if err := statusautopilot.New(f.d.App).RunTenant(t.Context(), f.person.TenantID, fact.At.Add(14*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var flagged bool
+		if err := tx.QueryRow(t.Context(), `SELECT state='done' AND human_check='Keep review' AND status_autopilot->'missed_release'='true'::jsonb AND status_autopilot->'blocked_reminder'='true'::jsonb FROM nodes WHERE id=$1`, f.ticket).Scan(&flagged); err != nil {
+			return err
+		}
+		if !flagged {
+			t.Fatal("recorded already-Done merge did not reach the release reminder")
+		}
+		return nil
+	})
+}
+
 func TestMergeDoneQueueConstituentsRequireActualMerge(t *testing.T) {
 	// Risk: green/destroyed queue groups complete unmerged work; a disappearing
 	// queue ref or distinct merge SHAs lose all but the last PR in a group.

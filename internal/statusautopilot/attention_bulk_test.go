@@ -589,7 +589,7 @@ func TestInvalidMissedReleaseCleanupReplayAndUndo(t *testing.T) {
 	fresh, _ := bulkPreview(f, f.p, "dismiss", attentionScope{Kind: "invalid_missed", Q: "AUT-1148"})
 	f.merge(unmerged, 20)
 	guarded := bulkRun(f, f.p, fresh, "cleanup-fresh-merge")
-	if guarded.Changed != 0 || len(guarded.Failed) != 1 || !f.state(unmerged).Marks["missed_release"] {
+	if !guarded.Completed || guarded.Changed != 0 || len(guarded.Failed) != 0 || len(guarded.Skipped) != 1 || guarded.Skipped[0].Reason != "Changed since the preview." || guarded.Skipped[0].Count != 1 || len(guarded.Skipped[0].SampleKeys) != 1 || guarded.Skipped[0].SampleKeys[0] != "AUT-1148" || !f.state(unmerged).Marks["missed_release"] {
 		t.Fatalf("new merge was cleared: %+v", guarded)
 	}
 }

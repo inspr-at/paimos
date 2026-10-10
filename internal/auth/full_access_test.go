@@ -282,4 +282,44 @@ func TestStatusAutopilotFullAccessAgentReadAllowlist(t *testing.T) {
 			t.Fatalf("unexpected allowlist: %+v %s", route, scope)
 		}
 	}
+	// The read permission must work without settings.manage and retain the
+	// current agent/creator project intersection for rows and aggregate counts.
+	narrow := decodeKey(t, keyRequest(m, owner, map[string]any{"principal_id": key.PrincipalID, "scopes": []string{"nodes.read"}}))
+	if err := db.InTenant(dbtest.Seed(t.Context()), m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, key.PrincipalID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, owner.TenantID, key.PrincipalID, project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,'HIDDEN-INHERIT','Hidden inherited','open' FROM node_kinds WHERE tenant_id=$1 AND slug='project'`, owner.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `WITH hidden AS (
+ INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,'HIDDEN-OFF','Hidden override','open' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id,tenant_id)
+ INSERT INTO status_autopilot_projects(tenant_id,project_id,mode,revision) SELECT tenant_id,id,'off',1 FROM hidden`, owner.TenantID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, reader := range []agentKeyCreatedJSON{key, narrow} {
+		for _, mode := range []string{"overrides", "inherit"} {
+			r := httptest.NewRequest(http.MethodGet, "/api/status-autopilot/projects?mode="+mode, nil)
+			r.Header.Set("Authorization", "Bearer "+reader.Token)
+			_, r.Pattern = mux.Handler(r)
+			w := httptest.NewRecorder()
+			m.Middleware(mux).ServeHTTP(w, r)
+			var page struct {
+				Items     []struct{ ID string } `json:"items"`
+				Inherited int                   `json:"inherited_count"`
+				Next      *string               `json:"next_cursor"`
+			}
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &page) != nil {
+				t.Fatalf("project-only agent read: mode=%s status=%d", mode, w.Code)
+			}
+			if page.Inherited != 1 || page.Next != nil || mode == "overrides" && len(page.Items) != 0 || mode == "inherit" && (len(page.Items) != 1 || page.Items[0].ID != project) {
+				t.Fatalf("project-only agent saw hidden projects: mode=%s page=%+v", mode, page)
+			}
+		}
+	}
 }
