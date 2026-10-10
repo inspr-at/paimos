@@ -96,5 +96,5 @@ func UpdateRoutineWorkTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id,
 	expected := time.UnixMicro(revision)
 	pending := &routineEvents{}
 	n, err := (&Module{events: pending}).updateNodeTx(ctx, tx, p, id, raw, &expected)
-	return RoutineMutation{ID: n.ID, Revision: n.UpdatedAt.UnixMicro(), Events: pending.items}, routineError(err)
+	return RoutineMutation{ID: n.ID, Revision: n.UpdatedAt.UnixMicro(), Events: pending.items}, routineError(dbErr("update node", err))
 }

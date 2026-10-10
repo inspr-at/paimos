@@ -422,7 +422,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		out, err = m.updateNodeTx(ctx, tx, p, id, raw, expected)
 		return err
 	})
-	return out, err
+	return out, dbErr("update node", err)
 }
 
 func validateNodePatch(raw map[string]json.RawMessage) error {
@@ -646,7 +646,7 @@ func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		}
 		return enrichNodes(ctx, tx, []*nodeJSON{&node})
 	}(ctx, tx)
-	return node, dbErr("update node", err)
+	return node, err
 }
 
 func (m *Module) deleteNode(ctx context.Context, p tenant.Principal, id string) (time.Time, error) {
