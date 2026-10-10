@@ -2642,6 +2642,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRequestedAccountIsValidatedAndAuditedWithoutReservation","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRoutinePreparationPreservesAuthorityCriteriaAndPickup","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunAndQueueAccountContextChecks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunClaimTelemetryReplayAndBudget","tier":"GATED-FULL"}

@@ -2,11 +2,59 @@
 package workqueue
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"regexp"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
+
+// BlockingTx is a bounded, redacted eligibility probe. A relation can itself be
+// hidden by project RLS, so first collect its sources in a savepoint with full
+// project visibility, then judge them under the original caller visibility.
+// Tenant RLS is never widened. Call under the shared tenant/tree fence; this
+// returns no hidden source identities and grants no authority to mutate them.
+func BlockingTx(ctx context.Context, tx pgx.Tx, nodeID string) (string, error) {
+	const limit = 64
+	sources := []string{}
+	err := withFullOrder(ctx, tx, func(step pgx.Tx) error {
+		rows, err := step.Query(ctx, `SELECT source_node_id::text FROM node_relations WHERE target_node_id=$1 AND type='blocks' ORDER BY source_node_id LIMIT 65`, nodeID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			sources = append(sources, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(sources) > limit {
+		return "blocker_scan_partial", nil
+	}
+	for _, id := range sources {
+		var resolved bool
+		err := tx.QueryRow(ctx, `SELECT deleted_at IS NOT NULL OR aeon_work_status_category(n.state,k.field_schema) IN ('done','delivered','accepted','cancelled','archived') FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1`, id).Scan(&resolved)
+		if err == pgx.ErrNoRows {
+			return "blocker_unavailable", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if !resolved {
+			return "dependency_wait", nil
+		}
+	}
+	return "", nil
+}
 
 // Readiness is advice only. Add and pickup recheck the live ticket.
 type Readiness struct {
