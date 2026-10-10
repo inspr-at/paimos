@@ -224,56 +224,47 @@ func TestV2UpgradePreservesPinsCustomRoutesAndOverrides(t *testing.T) {
 						}
 					}
 				}
+				// The previously configured security gate is historical policy,
+				// not a route added by the ID-only catalog upgrade.
+				if err := insertRoute(t.Context(), tx, p.TenantID, Route{Role: "review-gate-security", Priority: 1, ProfileID: ids["codex-sol-high"], State: "available"}); err != nil {
+					return err
+				}
 				// Custom build-hard order must survive. Both versions match seed values,
 				// but it is structurally different from the v2 default.
-				_, err = tx.Exec(t.Context(), `UPDATE model_role_routes SET priority=priority+10 WHERE role='build-hard'`)
+				if _, err = tx.Exec(t.Context(), `UPDATE model_role_routes SET priority=priority+10 WHERE role='build-hard'`); err != nil {
+					return err
+				}
+				_, err = tx.Exec(t.Context(), `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,'2')`, p.TenantID)
 				return err
 			})
+			var oldProfiles []Profile
+			inRegistry(t, p, func(tx pgx.Tx) error { var err error; oldProfiles, err = listProfiles(t.Context(), tx); return err })
 			var before []Route
 			inRegistry(t, p, func(tx pgx.Tx) error { var err error; before, err = listRoutes(t.Context(), tx); return err })
 			m := NewWithVault(appPool, nil)
 			m.discovery = fixtureCatalogClient(t, nil)
 			m.sweep(t.Context())
 			profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
-			if profileBySlug(profiles, "codex-6-1-sol-high").ID == "" || profileBySlug(profiles, "grok-4-7-xhigh").ID == "" {
-				t.Fatal("v3 profiles missing")
+			for _, old := range oldProfiles {
+				if got := profileBySlug(profiles, old.Slug); !reflect.DeepEqual(got, old) {
+					t.Fatalf("historical pin or metadata changed: before=%+v after=%+v", old, got)
+				}
 			}
 			inRegistry(t, p, func(tx pgx.Tx) error {
-				steps, err := loadLadder(t.Context(), tx, "build")
-				if err != nil {
-					return err
-				}
-				if steps[0].Profile.Model != "gpt-6.1-sol" {
-					t.Fatalf("build still selects %s", steps[0].Profile.Model)
-				}
-				profile := steps[0].Profile
-				if profile.FullName() != "Codex Sol 6.1" || profile.ShortName != "Sol" || profile.Provider != "openai" || profile.EffortLevel == nil || *profile.EffortLevel != 3 {
-					t.Fatalf("upgraded ladder lost display or effort metadata: %+v", profile)
-				}
 				after, err := listRoutes(t.Context(), tx)
 				if err != nil {
 					return err
 				}
-				filter := func(in []Route, role string) []Route {
-					out := []Route{}
-					for _, r := range in {
-						if r.Role == role {
-							out = append(out, r)
-						}
-					}
-					return out
+				if !reflect.DeepEqual(before, after) {
+					t.Fatal("catalog facts changed saved routes or active override")
 				}
-				oldHard, newHard := filter(before, "build-hard"), filter(after, "build-hard")
-				additional := 2
-				if expanded {
-					additional = 0
+				var version string
+				var facts int
+				if err := tx.QueryRow(t.Context(), `SELECT catalog_version,(SELECT count(*) FROM model_catalog_facts WHERE source_kind='bootstrap') FROM model_refresh_settings`).Scan(&version, &facts); err != nil {
+					return err
 				}
-				if len(newHard) != len(oldHard)+additional || !reflect.DeepEqual(oldHard, newHard[:len(oldHard)]) {
-					t.Fatal("custom routes changed instead of appending additional harnesses")
-				}
-				oldGate, newGate := filter(before, "review-gate"), filter(after, "review-gate")
-				if !reflect.DeepEqual(oldGate[1], newGate[1]) {
-					t.Fatal("active override changed")
+				if version != CatalogVersion || facts == 0 {
+					t.Fatal("catalog provenance upgrade not prepared", version, facts)
 				}
 				return nil
 			})

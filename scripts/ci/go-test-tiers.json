@@ -7164,7 +7164,7 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestEveryAgentObservationRequiresAvailableOwnedHarnessAccount","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/modelregistry","name":"TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/modelregistry","name":"TestExistingTenantCatalogFactsPreservePolicyAndPins","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestExplicitPlacementModeSelectsManagedReview","tier":"GATED-FULL"}
     ,

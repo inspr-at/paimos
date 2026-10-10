@@ -160,7 +160,7 @@ func TestCatalogKeylessRefreshPersistsFactsWithoutAccountAuthority(t *testing.T)
 	other := makePrincipal(t, "catalog-other", "person", "Other", []string{"admin"})
 	seen := []string{}
 	m := &Module{pool: appPool, discovery: fixtureCatalogClient(t, &seen)}
-	out, err := m.runRefresh(t.Context(), p, false)
+	out, err := m.runRefresh(tenant.WithPrincipal(t.Context(), p), p, false)
 	if err != nil {
 		t.Fatal(err)
 	}
