@@ -864,7 +864,7 @@ func terminalGitSandboxProfile(profile, workspace, branch string) (string, error
 	if filepath.Dir(gitDir) != filepath.Join(common, "worktrees") {
 		return "", denied
 	}
-	if branch == "" || filepath.Clean(branch) != branch || filepath.IsAbs(branch) || strings.HasPrefix(branch, "-") || strings.ContainsAny(branch, "\x00\r\n\\") {
+	if branch == "" || branch == "." || branch == ".." || filepath.Clean(branch) != branch || filepath.IsAbs(branch) || strings.HasPrefix(branch, "-") || strings.ContainsAny(branch, "\x00\r\n\\") {
 		return "", denied
 	}
 	ref := filepath.Join(common, "refs", "heads", branch)

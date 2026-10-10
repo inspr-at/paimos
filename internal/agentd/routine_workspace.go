@@ -384,15 +384,18 @@ func routineGit(ctx context.Context, repository string, args ...string) (string,
 	// Read effective key names in this exact worktree: includes, includeIf and
 	// extensions.worktreeConfig all participate in checkout configuration.
 	if len(args) > 0 && (args[0] == "worktree" || args[0] == "checkout") {
-		keys, err := run(append(append([]string(nil), flags...), "config", "--includes", "--name-only", "--get-regexp", `^filter\..*\.(clean|smudge|process|required)$`))
+		keys, err := run(append(append([]string(nil), flags...), "config", "--includes", "--null", "--name-only", "--get-regexp", `^filter\..*\.(clean|smudge|process|required)$`))
 		var exit *exec.ExitError
 		if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1 && keys == "") {
 			return "", ErrRoutineUnavailable
 		}
 		sections := map[string]bool{}
-		for _, key := range strings.Fields(keys) {
+		for _, key := range strings.Split(strings.TrimSuffix(keys, "\x00"), "\x00") {
+			if key == "" {
+				continue
+			}
 			index := strings.LastIndex(key, ".")
-			if index < 7 || len(key) > 160 {
+			if index < 7 || len(key) > 160 || strings.ContainsAny(key, "=\x00\r\n\t ") {
 				return "", ErrRoutineUnavailable
 			}
 			sections[key[:index]] = true
