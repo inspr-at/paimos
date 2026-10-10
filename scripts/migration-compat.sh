@@ -17,6 +17,7 @@ digest="${2:?Expected the published release image digest}"
 # Release 128 is the last published binary below the account-use floor.
 # Keep this immutable rollback probe after the latest stable gains capability;
 # a capable binary must not be expected to fail at principal entry.
+# Published release v261009095632.0.0, source 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
 account_use_floor_tag=v261009095632.0.0
 account_use_floor_digest=sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
 
@@ -46,6 +47,9 @@ trap cleanup EXIT
 probe_release() {
   local tag="$1" digest="$2" exercise_floor="$3"
   local image="ghcr.io/inspr-at/aeon@$digest" image_id base db_address ready
+  if [[ "$exercise_floor" = 1 ]]; then
+    echo "Account-use rollback boundary release: $tag"
+  fi
   echo "Previous published release: $tag"
   echo "Previous registry image: $image"
   # Resolve the pulled release-note digest's local config ID for both boots.
@@ -93,12 +97,17 @@ SQL
   start_previous
   python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
   if [[ "$exercise_floor" = 1 ]]; then
+    # Seeded reads precede activation. Exact SQLSTATE/entry, empty/populated
+    # pool and background-write refusal assertions remain mandatory.
     python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
   fi
-  echo "Migration compatibility passed: $tag on the candidate schema"
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
       "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+    if [[ "$exercise_floor" = 1 ]]; then
+      printf 'Account-use refusal boundary %s; registry image %s; loaded image %s passed the activated legacy probes.\n' \
+        "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+    fi
   fi
   docker stop --time 30 "$app" >/dev/null
   docker container rm -fv "$app" "$db" >/dev/null
@@ -112,3 +121,4 @@ else
   probe_release "$tag" "$digest" 0
   probe_release "$account_use_floor_tag" "$account_use_floor_digest" 1
 fi
+echo "Migration compatibility passed: $tag on the candidate schema"
