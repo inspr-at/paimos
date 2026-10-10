@@ -30,10 +30,27 @@ the thread, then the reply takes its place. Chat-native replies are stored
 only in the chat thread, so the panel also reads the thread's newest page
 (`GET /api/chat-threads/{id}/messages`, whose items now name
 `sender_principal_id` and `created_at`) and shows the agent's messages from it
-in the session thread. Message, receipt and read-marker hints reload both. A resync,
+in the session thread, together with the person's own chat inputs. A turn ends
+on screen when its final is there: a message the stream announced during the
+turn, or, once the thread's history has been read, a newer agent message than
+the one before the turn. A history read that lands after a turn began
+therefore never dismisses it with an older reply. Message, receipt and
+read-marker hints reload both. A resync,
 or a refused or expired stream, drops interim content, reloads history and
 looks up the thread again; refused streams retry with backoff four times per
 turn.
+
+## Chat-native messages
+
+Messages from the chat thread keep their thread. Reply on one sends through
+`POST /api/chat-threads/{id}/outbox` with the message as `reply_to`, because
+the project message route only accepts project messages as parents; the
+client message ID keeps a retry idempotent. Such a reply has no project
+receipt and shows none. Read state follows the same split: a chat-native
+message seen on screen goes to `PUT /api/chat-threads/{id}/read-marker` as an
+exact visible ID, and the session read marker receives the newest project
+message at or before it. Another device takes the furthest message the
+history page reports as `seen` as its read watermark.
 
 ## Sends and Stop
 
@@ -60,7 +77,8 @@ part of the daemon slices.
 
 `internal/chat` `TestSessionThreadLookupFollowsOnlyTheCallersCurrentBinding`
 covers the lookup's participant, handover and disabled-module refusals;
-`TestChatLiveViewersReplayFinalOnlyAndReceipts` checks that history names each message's author and time.
+`TestChatLiveViewersReplayFinalOnlyAndReceipts` checks that history names each message's author and time
+and reports a read-marker union as `seen`.
 `web/tests/chatLive.test.ts` covers turn assembly, bounds, gap detection, the
 capability mapping, the stream follower's resync and bounded retry, the full
 frame queue, the stop claim and the mapping of saved chat replies.
@@ -69,4 +87,8 @@ light and dark themes. The stability guard keeps the field, Send, Send now and
 Stop within 0.5 px through streaming, Esc-to-stop, the applied interrupt, the
 tool fold and a chat-native saved reply replacing the block. The spec also
 checks the composer for each capability and that a refused stop after the
-turn ended claims nothing.
+turn ended claims nothing. Against mocks that refuse chat-native IDs the way
+the project routes do, it checks that a reply to a chat-native final goes to
+its chat thread, that seeing one is recorded on the thread and not sent again
+on the next visit, and that a delayed history read keeps the ended turn until
+its own final arrives.

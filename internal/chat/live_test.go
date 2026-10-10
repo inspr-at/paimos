@@ -206,6 +206,12 @@ func TestChatLiveViewersReplayFinalOnlyAndReceipts(t *testing.T) {
 		}
 	}
 	decode[seenMarker](t, f.call(f.alice, "PUT", path+"/read-marker", seenUnion{[]string{final.Message.ID}, "0"}, ""))
+	// The session panel on any device reads this evidence from the history
+	// page; the union names only the final, never the input before it (AEON-1071).
+	history = decode[historyPage](t, f.call(f.alice, "GET", path+"/messages", nil, ""))
+	if len(history.Items) != 2 || history.Items[1].ReadState != "seen" || history.Items[0].ReadState == "seen" {
+		t.Fatalf("history read state after the union: %+v", history.Items)
+	}
 	personPage := decode[outboxPage](t, f.call(f.alice, "GET", path+"/outbox?limit=1", nil, ""))
 	if personPage.Next == nil || len(personPage.Items) != 1 || personPage.Items[0].Receipt.State != "read" {
 		t.Fatal("bounded receipt page missing cursor/evidence")
