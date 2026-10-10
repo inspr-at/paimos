@@ -344,6 +344,8 @@
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 390"
     ,
+    "browser:tests/business.spec.ts:the overview includes open periods older than a year in its waiting count"
+    ,
     "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 dark"
     ,
     "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 light"
@@ -537,6 +539,12 @@
     "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (short at 390)"
     ,
     "browser:tests/header-glimpse.spec.ts:the glimpse is off unless the developer setting turns it on, even after an earlier Display choice"
+    ,
+    "browser:tests/hours.spec.ts:an older week shows existing hours and logs into its existing period"
+    ,
+    "browser:tests/hours.spec.ts:open periods older than a year appear in the home waiting count and week badge"
+    ,
+    "browser:tests/hours.spec.ts:open periods older than a year appear on a direct approvals load"
     ,
     "browser:tests/knowledge-learnings.spec.ts:a learning that changed after review is refused and shown again"
     ,
@@ -6188,7 +6196,7 @@
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"the header offers Business once a business plugin is enabled","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/business.spec.ts","name":"the overview includes open periods older than a year in its waiting count","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/business.spec.ts","name":"the overview includes open periods older than a year in its waiting count","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"the overview shows the week, where it went, what waits and the rates","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -8112,7 +8120,7 @@
     ,
     {"kind":"browser","file":"tests/hours.spec.ts","name":"admins switch to a colleague or an agent; agents have no manual entry","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/hours.spec.ts","name":"an older week shows existing hours and logs into its existing period","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"an older week shows existing hours and logs into its existing period","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/hours.spec.ts","name":"approving a period sends the reviewed revision and digest","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -8120,9 +8128,9 @@
     ,
     {"kind":"browser","file":"tests/hours.spec.ts","name":"members see only their own week, without approvals","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/hours.spec.ts","name":"open periods older than a year appear in the home waiting count and week badge","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"open periods older than a year appear in the home waiting count and week badge","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/hours.spec.ts","name":"open periods older than a year appear on a direct approvals load","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"open periods older than a year appear on a direct approvals load","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
