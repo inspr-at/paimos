@@ -183,7 +183,7 @@ func (rt *runtime) downloadAttachment(meta attachmentView, destination string) e
 		return rt.fail(err, key)
 	}
 	if n != meta.Size {
-		return fmt.Errorf("attachment size mismatch: expected %d bytes, received %d", meta.Size, n)
+		return rt.fail(fmt.Errorf("incomplete attachment download: got %d bytes, expected %d", n, meta.Size), key)
 	}
 	if err := tmp.Sync(); err != nil {
 		return err
