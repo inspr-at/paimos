@@ -78,6 +78,15 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 				t.Fatalf("%s requires %s", op, field)
 			}
 		}
+		// R10: a committed isolated receipt must remain decodable by strict
+		// reporters, including its explicit unknown-projection warning.
+		warnings, _ := props["warnings"].(map[string]any)
+		warning, _ := warnings["items"].(map[string]any)
+		warningProps, _ := warning["properties"].(map[string]any)
+		code, _ := warningProps["code"].(map[string]any)
+		if !reflect.DeepEqual(code["enum"], []any{"missing_progress", "missing_eta", "ticket_without_estimate", "projection_unavailable"}) {
+			t.Fatalf("%s warning enum rejects isolated receipts: %#v", op, code["enum"])
+		}
 	}
 }
 

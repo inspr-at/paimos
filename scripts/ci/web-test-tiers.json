@@ -20560,6 +20560,8 @@
     ,
     {"kind":"vitest","file":"tests/webcore-views.unit.test.ts","name":"S8-014: a failed second search labels retained results and exposes retry until success","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/work-benefit-visibility.unit.test.ts","name":"the no-release toggle edits its own boolean, stays controlled and respects disabled editing","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/work-benefit-visibility.unit.test.ts","name":"ticket offers its benefit editor in the workspace","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/work-benefit-visibility.unit.test.ts","name":"ticket offers its benefit reading section in the workspace","tier":"NIGHTLY"}
