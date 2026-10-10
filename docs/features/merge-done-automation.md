@@ -116,7 +116,8 @@ with `action: "dismiss"`, `dry_run: true`, and `scope: {kind: "invalid_missed"}`
 This filter selects classic-history flags and flags without delivery merge
 evidence, preserving genuine merge reminders. Execute the frozen preview using
 its `preview_token` and `through_event_id`, `dry_run: false`, and a stable
-`Idempotency-Key`. Batches retain the existing 1,000-item cap; preview another
+`Idempotency-Key` for retries of that preview. Use a new key for each new
+preview. Batches retain the existing 1,000-item cap; preview another
 batch until the remaining total is zero. The cleanup writes one audit event per
 ticket, preserves status and other fields/flags, rechecks authority and merge
 evidence in the final transaction, and supports the existing batch undo endpoint
