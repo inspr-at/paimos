@@ -8612,7 +8612,13 @@
     ,
     {"kind":"go","package":"internal/reviewgate","name":"TestParseFinalVerdict","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/routineguard","name":"TestEvaluationAuthorMatchesPersistedActionAttempt","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineguard","name":"TestEvaluationPersonHoldSurvivesEvaluatorDeadline","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/routineguard","name":"TestEvaluationRequestPersistsBeforeDispatchAndRechecksOwner","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineguard","name":"TestEvaluationVerifiedVerdictCannotBeShopped","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineguard","name":"TestGuardrailFloorScopeEvidenceAndBoundedCheckpoints","tier":"ESSENTIAL"}
     ,
