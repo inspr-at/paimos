@@ -40,6 +40,7 @@ CREATE POLICY routine_launch_intents_scope ON routine_launch_intents AS RESTRICT
  USING (EXISTS(SELECT 1 FROM routine_runs r WHERE r.tenant_id=routine_launch_intents.tenant_id AND r.id=routine_launch_intents.routine_run_id))
  WITH CHECK (EXISTS(SELECT 1 FROM routine_runs r WHERE r.tenant_id=routine_launch_intents.tenant_id AND r.id=routine_launch_intents.routine_run_id));
 CREATE INDEX routine_launch_intents_pending ON routine_launch_intents(tenant_id,created_at,id) WHERE state='pending';
+CREATE INDEX routine_launch_intents_worktree_exit ON routine_launch_intents(tenant_id,worktree_id) WHERE exit_observed_at IS NULL AND worktree_id IS NOT NULL;
 
 -- Append-only accepted evidence; process labels and heartbeat expiry cannot
 -- clear a claim. Only a verified owned-exit report advances exit_observed_at.
