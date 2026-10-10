@@ -42,7 +42,8 @@ type EvaluationRequirement struct {
 type Decision struct {
 	// Only S08's verified verdict path in this package may set this latch.
 	// Serialized or reconstructed metadata cannot grant action execution.
-	evaluationVerified  bool
+	evaluationVerified  string
+	evaluationBinding   string
 	Checkpoint          string                 `json:"checkpoint"`
 	Result              Outcome                `json:"result"`
 	DeterministicResult Outcome                `json:"deterministic_result"`
@@ -57,7 +58,7 @@ type Decision struct {
 // CanExecute is fail closed. S08 must verify and bind the independent verdict
 // before action execution; a deterministic allow never substitutes for it.
 func (d Decision) CanExecute() bool {
-	return d.evaluationVerified && d.Checkpoint == "action" && d.Result == Allow && d.RequiredEvaluation != nil && d.RequiredEvaluation.RuleID == "hard.different_family_v1" && d.RequiredEvaluation.Version == HardVersion && d.RequiredEvaluation.PolicyDigest == d.PolicyDigest && d.RequiredEvaluation.ContextDigest == d.ContextDigest && d.HardVersion == HardVersion
+	return d.evaluationBinding != "" && d.evaluationVerified != "" && d.evaluationVerified == Digest(d) && d.Checkpoint == "action" && d.Result == Allow && d.RequiredEvaluation != nil && d.RequiredEvaluation.RuleID == "hard.different_family_v1" && d.RequiredEvaluation.Version == HardVersion && d.RequiredEvaluation.PolicyDigest == d.PolicyDigest && d.RequiredEvaluation.ContextDigest == d.ContextDigest && d.HardVersion == HardVersion
 }
 func validatePath(p string) error {
 	if p == "" || len(p) > MaxPathBytes || !utf8.ValidString(p) || strings.ContainsAny(p, "\\\x00\r\n:%?#") || strings.HasPrefix(p, "/") || path.Clean(p) != p {

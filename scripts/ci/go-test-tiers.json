@@ -3316,6 +3316,8 @@
     ,
     {"kind":"go","package":"internal/approvals","name":"TestProjectScopedApprovalNames","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/approvals","name":"TestRoutineHoldIsExactPersonOwnedAndRevocable","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/approvals","name":"TestScopeWithinKey","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachedmsg","name":"TestFrameLimitsAndEscaping","tier":"GATED-FULL"}
@@ -7374,6 +7376,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRouteSuppressionAccountSkipsAndExpiry","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestRoutineEvaluationHonorsLivePolicyInBothRegistryRoutes","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestSecurityRoutesReplaceExpireAndRemainTenantScoped","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestSelectorChecksReuseAndSeparateReviewFloor","tier":"GATED-FULL"}
@@ -8682,7 +8686,17 @@
     ,
     {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetUnknownRetainsSlotAndChildBinding","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/routineguard","name":"TestEvaluationAuthorMatchesPersistedActionAttempt","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineguard","name":"TestEvaluationPersonHoldSurvivesEvaluatorDeadline","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineguard","name":"TestEvaluationRequestPersistsBeforeDispatchAndRechecksOwner","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineguard","name":"TestEvaluationVerifiedVerdictCannotBeShopped","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/routineguard","name":"TestGuardrailFloorScopeEvidenceAndBoundedCheckpoints","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineguard","name":"TestIndependentEvaluationBindsEvidenceAndCannotBootstrap","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/rules","name":"TestAccessChangesStillTakeConflictingTenantFence","tier":"GATED-FULL"}
     ,

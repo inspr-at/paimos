@@ -10,8 +10,58 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
+
+// Risk R15: an adopted preference board bypasses project family policy, or the
+// ordinary review-off setting removes the compiled routine evaluator floor.
+func TestRoutineEvaluationHonorsLivePolicyInBothRegistryRoutes(t *testing.T) {
+	p, _ := boardFixture(t)
+	project := editorProject(t, p, "EVAL-1")
+	profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", http.StatusOK)
+	opus := profileBySlug(profiles, "claude-opus-xhigh")
+	minimalAccount(t, p, opus)
+	author := VerifiedModel{Harness: "codex", RequestedModel: "gpt-6.1-sol", EffectiveModel: "gpt-6.1-sol", Evidence: "vendor_reported"}
+	for _, board := range []bool{false, true} {
+		if board {
+			boardDecode[boardWriteResult](t, boardCall(t, p, "PUT", "/api/model-preferences/orders/review:openai/first?for=default", map[string]any{"rank": []string{"anthropic:opus"}, "not": []string{}, "revision": 0}, ""), 200)
+		}
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO cross_family_policies(tenant_id,project_id,mode,allowed_families,updated_by) VALUES($1,$2,'off',ARRAY[]::text[],$3) ON CONFLICT (tenant_id,(coalesce(project_id,'00000000-0000-0000-0000-000000000000'::uuid))) DO UPDATE SET mode='off',allowed_families=ARRAY[]::text[]`, p.TenantID, project, p.ID); err != nil {
+				return err
+			}
+			q := WorkQuery{ProjectID: project, PersonID: &p.ID}
+			route, policy, err := ResolveRoutineEvaluationFor(t.Context(), tx, p, q, author, time.Now())
+			if err != nil {
+				return err
+			}
+			if route.Profile == nil || route.Profile.ID != opus.ID || policy.Mode != "off" {
+				t.Fatalf("off setting lost independent pinned route (board=%v): %+v", board, route)
+			}
+			if _, err := tx.Exec(t.Context(), `UPDATE cross_family_policies SET mode='allowlist',allowed_families=ARRAY['xai'] WHERE project_id=$1`, project); err != nil {
+				return err
+			}
+			route, policy, err = ResolveRoutineEvaluationFor(t.Context(), tx, p, q, author, time.Now())
+			if err != nil {
+				return err
+			}
+			if route.Profile != nil || !route.OwnerRequired || policy.Mode != "allowlist" {
+				t.Fatalf("project policy bypassed (board=%v): %+v", board, route)
+			}
+			wrong := author
+			wrong.Evidence = "requested"
+			if _, _, err = ResolveRoutineEvaluationFor(t.Context(), tx, p, q, wrong, time.Now()); err == nil || !strings.Contains(err.Error(), "unverified") {
+				t.Fatalf("unverified author wrong failure: %v", err)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 func TestNormalizeAuthorFamily(t *testing.T) {
 	for _, tc := range []struct{ input, want string }{
