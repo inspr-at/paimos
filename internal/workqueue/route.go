@@ -63,7 +63,8 @@ func RouteCandidatesTx(ctx context.Context, tx pgx.Tx, run string, fields []byte
 	}
 	rows, err := tx.Query(ctx, `SELECT DISTINCT a.registered_by_principal_id::text FROM agent_accounts a JOIN model_profiles m ON m.tenant_id=a.tenant_id AND m.harness=a.harness
  WHERE m.id=$1 AND m.enabled AND a.state='available' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes'
- AND aeon_account_allows_profile(a.harness,a.allowed_model_profile_ids,m.id) ORDER BY 1 LIMIT 201`, target.Profile)
+ AND aeon_account_allows_profile(a.harness,a.allowed_model_profile_ids,m.id)
+ AND aeon_account_use_allowed_for_project(a.id,NULLIF($2,'')::uuid) ORDER BY 1 LIMIT 201`, target.Profile, project)
 	if err != nil {
 		return nil, nil, err
 	}

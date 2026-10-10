@@ -152,7 +152,7 @@ func EndpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status i
 		}
 		// An explicit error response returned as the result is emitted after
 		// commit, for mutations that release an obsolete hold before a conflict.
-		if failure, ok := result.(*Error); ok {
+		if failure, ok := result.(error); ok {
 			WriteError(w, failure)
 			return
 		}

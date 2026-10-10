@@ -59,14 +59,39 @@ func resolveDailyWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if err := input.Commit(ctx); err != nil {
 		return out, err
 	}
+	snapshot, allDenied, err := agentaccounts.ProjectDailySnapshot(ctx, tx, snapshot, q.ProjectID)
+	if err != nil {
+		return out, err
+	}
 	// A catalog preview before accounts have been enrolled stays a preview.
 	// A saved daily setting already requires complete plan evidence.
 	if len(snapshot.DailyState) == 0 && len(snapshot.Daily) == 0 {
 		return out, nil
 	}
+	if q.Harness != "" && allDenied[q.Harness] {
+		return blockDaily(out, "context"), nil
+	}
 	trace := []Candidate{}
 	for attempts := 0; attempts < 7 && out.Profile != nil; attempts++ {
 		harness := out.Profile.Harness
+		if allDenied[harness] {
+			if q.Harness != "" {
+				return blockDaily(out, "context"), nil
+			}
+			for _, c := range out.Ladder {
+				c.Selected = false
+				if c.ProfileID == out.Profile.ID {
+					c.SkipReasons = append(c.SkipReasons, agentaccounts.ContextSkipReason)
+				}
+				trace = append(trace, c)
+			}
+			q.OffHarnesses = append(q.OffHarnesses, harness)
+			out, err = resolve(q)
+			if err != nil {
+				return out, err
+			}
+			continue
+		}
 		daily := agentplan.DailyStart(snapshot, harness, now)
 		if daily.Reason == "" {
 			qualified, err := dailyQualified(ctx, tx, out, q.ProjectID, now)

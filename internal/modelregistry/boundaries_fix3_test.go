@@ -190,6 +190,8 @@ func TestProjectQualifiedResolvePreservesLegacyLadder(t *testing.T) {
 		return err
 	})
 	path := "/api/models/resolve?role=review-gate&author_family=openai&harness=claude"
+	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
+	minimalAccount(t, p, profileBySlug(profiles, "claude-fable-xhigh"))
 	legacy := decode[Resolution](t, &p, http.MethodGet, path, "", 200)
 	if legacy.Profile == nil || legacy.CommandTemplate == "" || legacy.OwnerRequired {
 		t.Fatal("fixture must have a runnable legacy review ladder")

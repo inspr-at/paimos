@@ -238,7 +238,7 @@ func (m *Module) admit(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			var until *time.Time
-			out.Reason, until, err = m.evaluate(ctx, inputTx, p, in, wip, wipErr, wipAt, at)
+			out.Reason, until, err = m.evaluate(ctx, inputTx, p, in, project, wip, wipErr, wipAt, at)
 			if err != nil {
 				if rollbackErr := inputTx.Rollback(ctx); rollbackErr != nil {
 					return rollbackErr
@@ -278,7 +278,7 @@ func (m *Module) admit(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 
-func (m *Module) evaluate(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Request, wip int, wipErr error, wipAt, now time.Time) (string, *time.Time, error) {
+func (m *Module) evaluate(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Request, project string, wip int, wipErr error, wipAt, now time.Time) (string, *time.Time, error) {
 	if in.Harness == "" {
 		return "harness_required", nil, nil
 	}
@@ -288,6 +288,13 @@ func (m *Module) evaluate(ctx context.Context, tx pgx.Tx, p tenant.Principal, in
 	}
 	if err := agentaccounts.PopulateDailyTx(ctx, tx, p, &plan, now); err != nil {
 		return "daily_limit_unknown", nil, err
+	}
+	plan, allDenied, err := agentaccounts.ProjectDailySnapshot(ctx, tx, plan, project)
+	if err != nil {
+		return "inputs_unreadable", nil, err
+	}
+	if allDenied[in.Harness] {
+		return "context", nil, nil
 	}
 	if reason := planReason(in, plan); reason != "" {
 		return reason, nil, nil
@@ -303,7 +310,7 @@ func (m *Module) evaluate(ctx context.Context, tx pgx.Tx, p tenant.Principal, in
 			return "wip_limit", nil, nil
 		}
 	}
-	capacity, err := agentaccounts.EngineCapacityTx(ctx, tx, p, plan.PrincipalID, in.Harness, in.Estimate, now)
+	capacity, err := agentaccounts.EngineCapacityTx(ctx, tx, p, plan.PrincipalID, in.Harness, in.Estimate, now, project)
 	if err != nil {
 		return "", nil, err
 	}

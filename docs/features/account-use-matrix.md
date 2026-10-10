@@ -51,7 +51,7 @@ account count spans up to 1,000 accounts and says when it stops short. The
 pairing review shows the ticks the rule gives new accounts, and model
 Auto-update sends the matrix revision as the "New model versions" rule.
 
-All Go selection filters and daemon enrolment are separate
+Model activation, Go selection filters and daemon enrolment are separate
 slices of the same release. This core alone is not a complete release
 of the account matrix. Exact-byte migration-policy records are review artifacts
 and require the coordinator's review and previous-image compatibility gate.
@@ -66,3 +66,25 @@ The previous-image harness also checks activated empty and populated pools.
 Older handlers sanitize database errors, so each refused request must produce
 the exact `0A000` message from `aeon_enter_principal` in the disposable
 Postgres log. Generic HTTP errors alone cannot pass that gate.
+
+The selection layer uses the same database predicates for dispatch, claims,
+explicit account targets, review, catalog choices and account hand-outs. Denied
+explicit choices return `409 account_not_allowed_for_context`; queued pinned
+work waits with `context`. Catalog, use and capacity-next accept `project_id`;
+omission checks Default, while a holding or unmapped project remains denied.
+
+Daily start decisions use a project-filtered copy of the owner's snapshot.
+Denied headroom and unknown readings cannot widen that decision. A harness
+whose owned accounts are all denied skips to the next resolver ladder step;
+a pinned harness and engine admission return `context` without a retry time.
+Plan views and stored usage retain all accounts and totals. Context labels are
+included in account projections. Unmanaged usage is compliant only with an
+explicit allowed account UUID; denied UUIDs emit `account_use.outside_matrix`
+and missing UUIDs or label-only reports emit `account_use.unattributed`. Labels never
+supply compliance evidence. Pairing verification bypasses context denial only
+for the enrollment-bound verification run and account.
+
+CLI account hand-outs accept `--project-id`. Otherwise `project_folders` in
+the selected instance maps absolute working folders to project UUIDs; the
+longest containing link wins, including through symlinks. Missing links use
+Default. Invalid or ambiguous links refuse hand-out, never falling back.
