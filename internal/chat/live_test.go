@@ -327,6 +327,8 @@ func TestChatLiveFiftyHTTPViewersReleaseDatabaseBeforeWrite(t *testing.T) {
 	for i := range threads {
 		threads[i] = f.thread(t, f.alice, f.role(t, f.alice, f.project, "worker", fmt.Sprintf("slow-%d", i)))
 	}
+	session, _ := f.session(t, f.alice, f.project, "worker", "unmanaged")
+	f.bind(t, f.alice, threads[0], session, "0")
 	cfg := f.d.App.Config()
 	cfg.MaxConns = 16
 	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
