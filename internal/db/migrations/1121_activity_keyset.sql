@@ -4,7 +4,7 @@
 CREATE FUNCTION aeon_activity_at(typ text, doc jsonb, event_at timestamptz) RETURNS timestamptz
 LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
  SELECT CASE WHEN typ='import.node_created'
- AND doc->>'created_at' ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$'
+ AND doc->>'created_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$'
  AND pg_input_is_valid(doc->>'created_at','timestamptz')
  THEN (doc->>'created_at')::timestamptz ELSE event_at END
 $$;
