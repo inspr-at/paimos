@@ -301,8 +301,16 @@ func acpQueuedControlFixture(t *testing.T, harness string) (*Supervisor, *fakeAP
 			Generation: s.generation, State: "running", PID: p.PID(), Controls: map[string]replay{}},
 		harness: HarnessSession{ID: "session", ProjectID: "project", Harness: harness},
 		process: p, inboxCapable: true, queueInput: true, replies: map[string]InboxReplyTarget{},
+		harnessWake: make(chan struct{}, 1),
 	}
 	s.runs[a.run.ID] = e
+	// This synthetic entry has no monitor to retire it. Remove only this fixture
+	// before testSupervisor's cleanup closes its state store and journal.
+	t.Cleanup(func() {
+		s.mu.Lock()
+		delete(s.runs, a.run.ID)
+		s.mu.Unlock()
+	})
 	p.observe = func(AdapterEvent) { s.observe(e, AdapterEvent{Activity: "busy"}) }
 	return s, a, e, p
 }
