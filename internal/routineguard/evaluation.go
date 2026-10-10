@@ -32,6 +32,7 @@ const (
 
 var ErrEvaluationBudgetUnavailable = errors.New("budget_enforcement_unavailable")
 var errEvaluationUnavailable = errors.New("evaluation_evidence_unavailable")
+var errEvaluationRecorded = errors.New("evaluation_result_already_recorded")
 
 // ActionBinding is supplied by the typed action broker under its final write
 // fence. PayloadDigest covers the complete typed payload, including the exact
@@ -262,6 +263,11 @@ type evaluationRecord struct {
 	EvaluatorRunID string                       `json:"evaluator_run_id,omitempty"`
 	Evidence       *modelregistry.VerifiedModel `json:"evidence,omitempty"`
 	Result         *StructuredVerdict           `json:"result,omitempty"`
+	RecordedAt     time.Time                    `json:"recorded_at,omitempty"`
+}
+
+func (r evaluationRecord) hasResult() bool {
+	return r.EvaluatorRunID != "" && r.Evidence != nil && r.Result != nil
 }
 
 type evaluationTarget struct {
@@ -283,16 +289,18 @@ func lockEvaluationAction(ctx context.Context, tx pgx.Tx, p tenant.Principal, b 
  JOIN recurrence_definitions x ON x.tenant_id=r.tenant_id AND x.recurrence_id=r.recurrence_id
  WHERE r.tenant_id=$1 AND r.id=$2 AND d.revision=r.definition_revision AND x.owner_principal_id=r.owner_principal_id
  AND x.assignment=r.assignment AND x.scope_type=r.scope_type AND x.scope_project_id IS NOT DISTINCT FROM r.scope_project_id
- AND r.assignment->'allowed_actions' ? $4::text
- AND (r.agent_run_id=$3 OR EXISTS(SELECT 1 FROM routine_attempts a WHERE a.tenant_id=r.tenant_id AND a.run_id=r.id AND a.agent_run_id=$3))
- FOR NO KEY UPDATE OF r`, p.TenantID, b.RunID, b.AuthorRunID, b.Kind).Scan(&target.recurrence, &target.owner, &target.scopeKind, &target.scopeProject, &outputProject, &target.revision); err != nil {
+ AND r.assignment->'allowed_actions' ? $3::text
+ FOR NO KEY UPDATE OF r`, p.TenantID, b.RunID, b.Kind).Scan(&target.recurrence, &target.owner, &target.scopeKind, &target.scopeProject, &outputProject, &target.revision); err != nil {
 		return target, nil, err
 	}
 	if outputProject != b.ProjectID {
 		return target, nil, errors.New("evaluation project changed")
 	}
 	var actionID string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM routine_actions WHERE tenant_id=$1 AND run_id=$2 AND id=$3 AND kind=$4 AND request_digest=$5 AND target_node_id=$6 AND target_revision=$7 AND state IN ('pending','needs_person','blocked') FOR NO KEY UPDATE`, b.TenantID, b.RunID, b.ActionID, b.Kind, b.PayloadDigest, b.TargetID, b.TargetRevision).Scan(&actionID); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT a.id::text FROM routine_actions a JOIN routine_runs r ON r.tenant_id=a.tenant_id AND r.id=a.run_id
+ WHERE a.tenant_id=$1 AND a.run_id=$2 AND a.id=$3 AND a.kind=$4 AND a.request_digest=$5 AND a.target_node_id=$6 AND a.target_revision=$7 AND a.state IN ('pending','needs_person','blocked')
+ AND ((a.attempt_id IS NULL AND r.agent_run_id=$8) OR EXISTS(SELECT 1 FROM routine_attempts attempt WHERE attempt.tenant_id=a.tenant_id AND attempt.run_id=a.run_id AND attempt.id=a.attempt_id AND attempt.agent_run_id=$8 AND attempt.role<>'evaluation'))
+ FOR NO KEY UPDATE OF a`, b.TenantID, b.RunID, b.ActionID, b.Kind, b.PayloadDigest, b.TargetID, b.TargetRevision, b.AuthorRunID).Scan(&actionID); err != nil {
 		return target, nil, err
 	}
 	var targetProject string
@@ -333,6 +341,21 @@ func PrepareEvaluationTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b A
 	if err != nil {
 		return r, err
 	}
+	previous, previousErr := loadEvaluationRecord(ctx, tx, b)
+	if previousErr != nil && !errors.Is(previousErr, pgx.ErrNoRows) {
+		return r, previousErr
+	}
+	if previousErr == nil && previous.hasResult() && b.matches(previous.Request.Binding) && d.ContextDigest == previous.Request.ContextDigest && d.PolicyDigest == previous.Request.PolicyDigest {
+		policy, err := reviewgate.LoadFamilyPolicyTx(ctx, tx, &b.ProjectID)
+		if err != nil {
+			return r, err
+		}
+		if Digest(policy.Effective) == Digest(previous.Request.FamilyPolicy) {
+			// Verified restrictions survive evaluator/hold expiry and route
+			// availability changes. Only a changed binding reopens evaluation.
+			return previous.Request, nil
+		}
+	}
 	r = EvaluationRequest{Binding: b, ContextDigest: d.ContextDigest, PolicyDigest: d.PolicyDigest, Capability: EvaluationCapability, CreatedAt: now.UTC(), Deadline: now.UTC().Add(MaxEvaluationTime)}
 	if err = tx.QueryRow(ctx, `SELECT p.harness,a.requested_model,coalesce(a.effective_model,''),a.model_evidence FROM agent_runs a JOIN model_profiles p ON p.tenant_id=a.tenant_id AND p.id=a.model_profile_id WHERE a.tenant_id=$1 AND a.id=$2`, b.TenantID, b.AuthorRunID).Scan(&r.Author.Harness, &r.Author.RequestedModel, &r.Author.EffectiveModel, &r.Author.Evidence); err != nil {
 		return r, err
@@ -346,15 +369,12 @@ func PrepareEvaluationTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b A
 		r.ProfileID, r.AccountID, r.Harness, r.Model, r.Family = route.Profile.ID, route.Account.ID, route.Profile.Harness, route.Profile.Model, route.Profile.Family
 	}
 	r.Digest = r.digest()
-	previous, previousErr := loadEvaluationRecord(ctx, tx, b)
 	if previousErr == nil {
 		candidate := r
 		candidate.CreatedAt, candidate.Deadline, candidate.Digest = previous.Request.CreatedAt, previous.Request.Deadline, previous.Request.Digest
 		if previous.Request.Digest == candidate.digest() && now.Before(previous.Request.Deadline) {
 			return previous.Request, nil
 		}
-	} else if !errors.Is(previousErr, pgx.ErrNoRows) {
-		return r, previousErr
 	}
 	state, reason := "pending", ErrEvaluationBudgetUnavailable.Error()
 	if d.DeterministicResult == Block {
@@ -509,6 +529,21 @@ func RecordEvaluationTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Ac
 	if err != nil {
 		return d, err
 	}
+	if record.hasResult() {
+		if record.EvaluatorRunID != evaluatorRunID {
+			return d, errEvaluationRecorded
+		}
+		policy, err := currentEvaluationPolicy(ctx, tx, record.Request)
+		if err != nil {
+			return d, err
+		}
+		if _, err = VerifyEvaluation(sources, c, b, record.Request, "completed", *record.Evidence, *record.Result, policy, record.RecordedAt); err != nil {
+			return d, err
+		}
+		// Replay returns the persisted decision without replacing its verdict,
+		// person hold, completion time, or append-only audit receipt.
+		return record.Decision, nil
+	}
 	verdict, verdictErr := ParseEvaluationResult(output)
 	status, evidence, _, evidenceErr := evaluationEvidence(ctx, tx, record.Request, evaluatorRunID)
 	policy, policyErr := currentEvaluationPolicy(ctx, tx, record.Request)
@@ -534,11 +569,12 @@ func RecordEvaluationTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Ac
 	var approvalID *string
 	if verified {
 		record.EvaluatorRunID, record.Evidence, record.Result = evaluatorRunID, &evidence, &verdict
+		record.RecordedAt = now.UTC()
 		if d.Result != Block {
 			reason = ErrEvaluationBudgetUnavailable.Error()
 		}
 		if d.Result == NeedsPerson {
-			a, err := approvals.RequestRoutineHoldTx(ctx, tx, p, b.TargetID, actionPermission(b.Kind), record.Request.Digest, record.Request.Deadline, now, pending)
+			a, err := approvals.RequestRoutineHoldTx(ctx, tx, p, b.TargetID, actionPermission(b.Kind), record.Request.Digest, now.Add(24*time.Hour), now, pending)
 			if err != nil {
 				return d, err
 			}
@@ -548,6 +584,7 @@ func RecordEvaluationTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Ac
 	// Rejected replacement output never inherits an earlier verified receipt.
 	if !verified {
 		record.EvaluatorRunID, record.Evidence, record.Result = "", nil, nil
+		record.RecordedAt = time.Time{}
 	}
 	d.evaluationVerified, d.evaluationBinding = "", ""
 	if d.Result == Allow {
@@ -582,7 +619,7 @@ func CheckPersonHoldTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Act
 	if err != nil {
 		return false, err
 	}
-	if record.Result == nil || record.Evidence == nil {
+	if !record.hasResult() || record.RecordedAt.IsZero() || now.Before(record.RecordedAt) {
 		return false, nil
 	}
 	status, evidence, _, err := evaluationEvidence(ctx, tx, record.Request, record.EvaluatorRunID)
@@ -593,7 +630,7 @@ func CheckPersonHoldTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Act
 	if err != nil {
 		return false, err
 	}
-	d, err := VerifyEvaluation(sources, c, b, record.Request, status, evidence, *record.Result, policy, now)
+	d, err := VerifyEvaluation(sources, c, b, record.Request, status, evidence, *record.Result, policy, record.RecordedAt)
 	if err != nil || d.Result != NeedsPerson {
 		return false, err
 	}
