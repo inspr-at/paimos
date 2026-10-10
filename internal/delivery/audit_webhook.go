@@ -44,7 +44,11 @@ func (m *Module) auditWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, (2<<20)+1))
 	if err != nil || len(raw) > 2<<20 {
-		w.WriteHeader(413)
+		class := webhookClass("body_too_large")
+		if err != nil {
+			class = "body_read"
+		}
+		m.rejectWebhook(w, r, "unknown", "audit", 413, class)
 		return
 	}
 	r.Body = io.NopCloser(bytes.NewReader(raw))
@@ -81,8 +85,8 @@ func (m *Module) auditWebhook(w http.ResponseWriter, r *http.Request) {
 			Conclusion string `json:"conclusion"`
 		} `json:"check_run"`
 	}
-	if json.Unmarshal(raw, &e) != nil {
-		w.WriteHeader(400)
+	if err := json.Unmarshal(raw, &e); err != nil {
+		m.rejectWebhook(w, r, webhookLogAction(raw, name), "audit", 400, webhookClass("invalid_json"))
 		return
 	}
 	var f *MergeFact
@@ -128,7 +132,7 @@ func (m *Module) auditWebhook(w http.ResponseWriter, r *http.Request) {
 		err = m.flowFromWorkflowRun(ctx, raw)
 	}
 	if err != nil {
-		w.WriteHeader(502)
+		m.rejectWebhook(w, r, e.Action, "audit", 502, err)
 		return
 	}
 	w.WriteHeader(204)

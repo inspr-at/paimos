@@ -377,6 +377,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if len(parts) == 2 && parts[1] == "plan" && read {
 			return "agents.plan.read", true
 		}
+	case "status-autopilot":
+		if read && (len(parts) == 2 && (parts[1] == "attention" || parts[1] == "changes" || parts[1] == "projects" || parts[1] == "proposals") || len(parts) == 3 && parts[1] == "attention" && parts[2] == "groups") {
+			return "nodes.read", true
+		}
 	case "decision-desk":
 		if len(parts) == 1 && read {
 			return "questions.read", true
@@ -425,6 +429,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "status-autopilot":
+			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
+				return "nodes.read", true
+			}
 		case "lead-settings":
 			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
 				return "nodes.read", true
@@ -561,6 +569,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "search.read", true
 		}
 	case "settings":
+		if len(parts) == 2 && parts[1] == "status-autopilot" && read {
+			return "nodes.read", true
+		}
 		if len(parts) == 2 && parts[1] == "review-policy" {
 			if read {
 				return "reviewpolicy.read", true
