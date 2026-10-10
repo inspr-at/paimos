@@ -81,6 +81,8 @@ test('an open list holds its rows: a late answer appends, never inserts or drops
   assert.deepEqual(later.map(o => o.label), ['Epic', 'Story', 'Ticket'])
   const held = heldOptions(heldOptions([], first), later)
   assert.deepEqual(held.map(o => [o.label, o.count]), [['Epic', 1], ['Ticket', 4], ['Story', 1]])
+  // grow false: a new option waits for the next opening, the rows only recount.
+  assert.deepEqual(heldOptions(heldOptions([], first), later, false).map(o => [o.label, o.count]), [['Epic', 1], ['Ticket', 4]])
   // A row the newest answer no longer has keeps its place, uncounted.
   assert.deepEqual(heldOptions(held, facetOptions('type', { leaf: 2 })).map(o => [o.label, o.count]), [['Epic', 0], ['Ticket', 2], ['Story', 0]])
   // A status keeps its row when the data's spelling of it changes.

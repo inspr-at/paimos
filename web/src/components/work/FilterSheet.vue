@@ -33,13 +33,14 @@ const hideNames = computed(() => hiddenStates(props.filters.hideStates).map(stat
 const kept = ref<Dimension[]>([])
 const dimensions = computed(() => offeredDimensions(props.filters, props.view === 'graph' ? TICKET_GRAPH_FILTERS : undefined, kept.value))
 // The filters appear once their names and counts are in, then every row holds
-// its place until the sheet closes: a late answer never moves one (AEON-974).
+// its place until the sheet closes: a late answer updates counts but never adds
+// a row, which would push the sections below it down (AEON-974).
 const shown = ref(false)
 const held = ref<Partial<Record<Dimension, FacetOption[]>> | null>(null)
 watch(() => shown.value && !props.loading ? dimensions.value.map(d => [d.key, props.options(d.key)] as const) : null, entries => {
   if (!entries) return
   const next = { ...held.value ?? {} }
-  for (const [key, live] of entries) next[key] = heldOptions(next[key] ?? [], live)
+  for (const [key, live] of entries) next[key] = heldOptions(next[key] ?? [], live, !next[key])
   held.value = next
 })
 const dialog = ref<HTMLDialogElement>()

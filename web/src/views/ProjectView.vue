@@ -477,12 +477,15 @@ function needOptions(dimension: Dimension) {
   if (dimension === 'type') work.push(vocabulary.load())
   const facet = dimension === 'tag' ? 'tag' : dimension === 'cost' ? 'cost_unit' : dimension === 'release' ? 'release' : dimension === 'human_check' ? 'human_check'
     : dimension === 'type' ? 'level' : dimension === 'shape' ? 'shape' : dimension === 'depth' ? 'depth' : null
+  // An applied filter's own counts come without it, with the newest load.
   if (!graphActive.value && facet && !filters.value[dimension].length) work.push(list.requestFacet(facet))
+  else if (!graphActive.value && filters.value[dimension].length) work.push(list.settled())
   const request = ++facetWait
   facetLoading.value = work.length > 0
   if (work.length) void Promise.allSettled(work).then(() => { if (request === facetWait) facetLoading.value = false })
 }
-// The sheet shows its filters once their names and counts are in, so a late answer moves nothing.
+// The sheet shows its filters once their names and counts are in (an applied
+// filter's own counts with the newest load), so a late answer moves nothing.
 const sheetLoading = ref(false)
 let sheetWait = 0
 function sheetOpened() {
@@ -490,7 +493,7 @@ function sheetOpened() {
   const work: Promise<unknown>[] = [vocabulary.load()]
   if (!graphActive.value) {
     void list.resolveNames(options('assignee').map(o => o.value))
-    work.push(list.loadEpics())
+    work.push(list.settled(), list.loadEpics())
     for (const facet of ['tag', 'cost_unit', 'release', 'human_check', 'level']) work.push(list.requestFacet(facet))
   }
   sheetLoading.value = true

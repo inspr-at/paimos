@@ -147,11 +147,12 @@ test('a shared-name Type option shows a partial saved choice as mixed; a click c
   await expect(not).toHaveAttribute('aria-pressed', 'true')
 })
 
-// The level counts answer only when the test releases them.
-async function heldLevelCounts(page: Page) {
+// The level counts answer only when the test releases them; unfiltered: only
+// the counts an applied Type filter reads, asked without it.
+async function heldLevelCounts(page: Page, unfiltered = false) {
   const state = { asked: false, release: () => {} }
   const gate = new Promise<void>(resolve => { state.release = resolve })
-  await page.route(url => url.pathname === '/api/nodes' && url.searchParams.get('facets') === 'level', async route => {
+  await page.route(url => url.pathname === '/api/nodes' && url.searchParams.get('facets') === 'level' && (!unfiltered || !url.searchParams.get('level')), async route => {
     state.asked = true
     await gate
     await route.fallback()
@@ -210,6 +211,41 @@ test('the Filters sheet shows its filters once their counts are in and keeps eve
     await expect.poll(() => level(calls)).toBe('2')
     await expect(box('Story')).toBeChecked()
   })
+  guard.done()
+})
+
+test('with Type applied, the Filters sheet waits for its unfiltered counts; a later new value never moves the sections below', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const { data, calls } = await world(page, 'light', DEFAULT_NAMES)
+  const counts = await heldLevelCounts(page, true)
+  await page.goto('/p/PHAROS?type=leaf')
+  await expect(rows(page).first()).toBeVisible()
+  await expect.poll(() => counts.asked).toBe(true)
+  await page.getByRole('button', { name: 'Filters', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+  // Story would join the Type section late and push Labels and Date down.
+  await expect(sheet.getByText('Loading filters…')).toBeVisible()
+  await expect(sheet.getByRole('checkbox', { name: /^Ticket/ })).toHaveCount(0)
+  counts.release()
+  const section = (title: string) => sheet.locator('.sheet-section').filter({ has: page.locator('.eyebrow', { hasText: new RegExp(`^${title}$`) }) })
+  const type = section('Type')
+  await expect(type.locator('.facet-option .option-label')).toHaveText(['Epic', 'Story', 'Ticket'])
+  await expect(type.getByRole('checkbox', { name: /^Ticket/ })).toBeChecked()
+  await type.scrollIntoViewIfNeeded()
+  const box = (name: string) => type.getByRole('checkbox', { name: new RegExp(`^${name}`) })
+  const guard = await controlStability(page, {
+    story: box('Story'), ticket: box('Ticket'), labels: section('Labels').locator('.eyebrow'),
+    bug: section('Labels').getByRole('checkbox', { name: /^BUG/ }), today: sheet.getByRole('group', { name: 'Period' }).getByRole('button', { name: 'Today' }),
+  })
+  // A ticket in a status the sheet does not show arrives with the next answer.
+  data.nodes.push({ ...data.nodes.find(n => n.id === 'n-4')!, id: 'n-late', key: 'PHAROS-17', title: 'Parked meanwhile', state: 'parked' })
+  await guard.check(async () => {
+    await box('Story').check()
+    await expect.poll(() => level(calls)).toBe('leaf,2')
+    await expect(rows(page).filter({ hasText: 'Parked meanwhile' })).toHaveCount(1)
+    await expect(box('Story')).toBeChecked()
+  })
+  await expect(section('Status').getByRole('checkbox', { name: /parked/i })).toHaveCount(0)
   guard.done()
 })
 

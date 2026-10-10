@@ -5056,6 +5056,8 @@
     ,
     {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"the toolbar shows Filter and only applied filters; Type uses the workspace names and never moves Filter or the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"with Type applied, the Filters sheet waits for its unfiltered counts; a later new value never moves the sections below","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agent-activity.spec.ts","name":"Off shows no activity line or current activity history","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/agent-activity.spec.ts","name":"activity fits phone and desktop in both themes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
