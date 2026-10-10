@@ -107,7 +107,7 @@ func (m *Module) putGuardrails(w http.ResponseWriter, r *http.Request) {
 	}
 	var in struct {
 		Scope            string              `json:"scope"`
-		ExpectedRevision int64               `json:"expected_revision"`
+		ExpectedRevision *int64              `json:"expected_revision"`
 		Reason           string              `json:"reason"`
 		Rules            []routineguard.Rule `json:"rules"`
 	}
@@ -116,7 +116,7 @@ func (m *Module) putGuardrails(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if len(in.Reason) > 2048 || in.ExpectedRevision < 0 || in.ExpectedRevision == 9223372036854775807 {
+	if (in.Scope != "tenant" && in.Scope != "project" && in.Scope != "user") || in.Rules == nil || in.ExpectedRevision == nil || len(in.Reason) > 2048 || *in.ExpectedRevision < 0 || *in.ExpectedRevision == 9223372036854775807 {
 		httpapi.WriteError(w, 400, "policy revision or reason exceeds limits")
 		return
 	}
@@ -193,10 +193,10 @@ func (m *Module) putGuardrails(w http.ResponseWriter, r *http.Request) {
 				inherited = append(inherited, source)
 			}
 		}
-		if before.Revision != in.ExpectedRevision {
+		if before.Revision != *in.ExpectedRevision {
 			return workorders.Fail(409, "guardrail revision changed")
 		}
-		out, err = routineguard.Change(inherited, before, in.Rules, in.ExpectedRevision, routineguard.Actor{ID: person, Person: true, Administrator: admin, Reason: in.Reason})
+		out, err = routineguard.Change(inherited, before, in.Rules, *in.ExpectedRevision, routineguard.Actor{ID: person, Person: true, Administrator: admin, Reason: in.Reason})
 		if err != nil {
 			return workorders.Fail(403, err.Error())
 		}
@@ -249,6 +249,13 @@ func persistGuardrailDecision(ctx context.Context, tx pgx.Tx, p tenant.Principal
 func saveGuardrails(ctx context.Context, tx pgx.Tx, p tenant.Principal, r Recurrence) error {
 	if r.Definition == nil || r.Definition.Assignment == nil {
 		return nil
+	}
+	size := len(r.Definition.Assignment.Goal) + len(r.Template.Name) + len(r.Template.Title) + len(r.Template.Description) + len(r.Template.PillEN) + len(r.Template.PillDE) + len(r.Template.BenefitEN) + len(r.Template.BenefitDE)
+	for _, criterion := range r.Template.Criteria {
+		size += len(criterion)
+	}
+	if size > routineguard.MaxTextBytes {
+		return workorders.Fail(400, "saved guardrail context exceeds limits")
 	}
 	raw, err := json.Marshal(r.Input)
 	if err != nil {

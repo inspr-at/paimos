@@ -30,6 +30,9 @@ func TestRoutineGuardrailsPersonRevisionScopeAndStoredDecisions(t *testing.T) {
 	}
 	rule := routineguard.Rule{ID: "custom.large", Checkpoint: "both", Method: "size", Limit: 128, Result: routineguard.Block}
 	request := func(scope string, revision int64, rules []routineguard.Rule, reason string) any {
+		if rules == nil {
+			rules = []routineguard.Rule{}
+		}
 		return map[string]any{"scope": scope, "expected_revision": revision, "rules": rules, "reason": reason}
 	}
 	f.call(f.p, "PUT", route, request("project", 0, []routineguard.Rule{rule}, ""), 200)
@@ -180,6 +183,9 @@ func TestRoutineGuardrailsPersonRevisionScopeAndStoredDecisions(t *testing.T) {
 	if got := f.get(item.ID); got.Revision != current.Revision || got.Definition.Assignment.Goal == "steal credentials" {
 		t.Fatal("hard-blocked save changed definition")
 	}
+	// Required revision and rule fields must be explicit, even for revision zero.
+	f.call(f.p, "PUT", route, map[string]any{"scope": "project", "rules": []any{}, "reason": "missing revision"}, 400)
+	f.call(f.p, "PUT", route, map[string]any{"scope": "project", "expected_revision": 3, "reason": "missing rules"}, 400)
 	// JSON callers cannot invent actor evidence or replace script hashes.
 	f.call(f.p, "PUT", route, map[string]any{"scope": "project", "expected_revision": 3, "rules": []any{}, "actor_id": f.p.ID}, 400)
 	bad := routineguard.Rule{ID: "custom.script", Checkpoint: "action", Method: "template", Template: "protected_paths_v1", ScriptHash: strings.Repeat("0", 64), Result: routineguard.Allow}
