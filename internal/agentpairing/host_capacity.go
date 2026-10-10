@@ -18,12 +18,15 @@ import (
 func hostCapacity(ctx context.Context, tx pgx.Tx, computer string) (hostcapacity.View, error) {
 	v := hostcapacity.View{History: []hostcapacity.Point{}}
 	var policy, signals, history []byte
+	var platform, state string
 	var now time.Time
+	// Legacy pairing records may omit platform; unknown evidence must remain
+	// advisory rather than failing capacity reads and lifecycle mutations.
 	err := tx.QueryRow(ctx, `SELECT capacity_policy,capacity_signals,capacity_reported_at,capacity_history,
  (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND (r.status IN ('starting','running','waiting')
   OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')),
- (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.status='queued'),clock_timestamp()
- FROM agent_pairing_computers c WHERE c.id=$1`, computer).Scan(&policy, &signals, &v.ReportedAt, &history, &v.Running, &v.Queued, &now)
+ (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.status='queued'),clock_timestamp(),coalesce(q.details->>'platform',''),c.state
+ FROM agent_pairing_computers c JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id WHERE c.id=$1`, computer).Scan(&policy, &signals, &v.ReportedAt, &history, &v.Running, &v.Queued, &now, &platform, &state)
 	if err != nil {
 		return v, notFound(err)
 	}
@@ -46,7 +49,34 @@ func hostCapacity(ctx context.Context, tx pgx.Tx, computer string) (hostcapacity
 	}
 	v.History = recent
 	v.Reason, v.LoadLimit = hostcapacity.Evaluate(v.Policy, v.Signals, v.ReportedAt, v.Running, now)
+	var unattended *hostcapacity.UnattendedSignals
+	if v.Signals != nil {
+		unattended = v.Signals.Unattended
+	}
+	readiness := hostcapacity.EvaluateUnattended(platform, state, unattended, v.ReportedAt, now)
+	v.Unattended = &readiness
 	return v, nil
+}
+
+// UnattendedForPrincipal is the report-only integration seam for routine
+// routing/claim. Call with the pairing mutation fence held in the final claim
+// transaction, alongside existing owner/account/generation/capability gates.
+// It grants no authority, takes no new lock and never changes legacy runs.
+// Missing, revoked and other-tenant computers cannot become available.
+func UnattendedForPrincipal(ctx context.Context, tx pgx.Tx, principal string) (hostcapacity.UnattendedView, error) {
+	var computer string
+	err := tx.QueryRow(ctx, `SELECT id::text FROM agent_pairing_computers WHERE principal_id=$1`, principal).Scan(&computer)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return hostcapacity.UnattendedView{Status: "wait", Reason: "unattended_computer_unknown", Message: "No paired computer is available for this principal.", AfterRebootReason: "unattended_reboot_unknown", AfterRebootMessage: "Unattended recovery after reboot is unconfirmed."}, nil
+	}
+	if err != nil {
+		return hostcapacity.UnattendedView{}, err
+	}
+	v, err := hostCapacity(ctx, tx, computer)
+	if err != nil {
+		return hostcapacity.UnattendedView{}, err
+	}
+	return *v.Unattended, nil
 }
 
 func (m *Module) saveHostCapacity(w http.ResponseWriter, r *http.Request, p tenant.Principal) {

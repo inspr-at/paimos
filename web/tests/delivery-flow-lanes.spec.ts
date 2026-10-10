@@ -7,7 +7,10 @@ import { fixtures, mockWork } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
 import { deliveryMetrics, mockDelivery } from './delivery-numbers-fixtures'
-import { mockFlow } from './delivery-flow-fixtures'
+import { mockFlow, RUN, ZONE } from './delivery-flow-fixtures'
+
+// The recorded runs are 8 Oct 2026 in Vienna; their clock reads the same everywhere.
+test.use({ timezoneId: ZONE })
 
 async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en' | 'de' } = {}) {
   const work = fixtures()
@@ -16,8 +19,9 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en
   await mockWork(page, work)
   if (options.lang === 'de') { const data = settingsData(); data.profile.locale = 'de-AT'; await mockSettings(page, data) }
   await mockDelivery(page, async () => ({ status: 200, body: deliveryMetrics() }), ['delivery.read'])
-  // No recorded run yet: Flow shows the labelled example (AEON-1006 reads the recorded runs).
-  await mockFlow(page, { empty: true })
+  // The recorded runs of release 126 at 20:25 (AEON-1135: Flow never shows sample data), with the
+  // one-minute merge of #935 so ops has a "+N" sliver cluster at Fit all.
+  await mockFlow(page, { merge: true })
 }
 const lanes = (page: Page) => page.getByTestId('flow-lanes')
 const overview = (page: Page) => page.getByTestId('flow-overview')
@@ -35,7 +39,7 @@ test('lanes zoom, pan and move the time without moving a control, and a click ne
   await page.setViewportSize({ width: 1440, height: 1100 })
   await setup(page)
   await page.goto('/p/AEON/delivery?view=flow')
-  await expect(page.getByRole('status')).toContainText('No flow data recorded yet. Until then, release 126 from 8 Oct is shown as an example.')
+  await expect(page.getByTestId('flow-empty')).toHaveCount(0)
   const bar = page.getByTestId('flow-bar')
   const zoom = bar.getByRole('radiogroup', { name: 'Zoom' })
   const follow = page.getByTestId('flow-follow')
@@ -59,7 +63,7 @@ test('lanes zoom, pan and move the time without moving a control, and a click ne
   await expect(zoom.getByRole('radio', { name: '15 min' })).toHaveAttribute('aria-checked', 'true')
   await expect.poll(() => windowText(page)).toBe('20:15 – 20:30')
   await guard.check(() => zoom.getByRole('radio', { name: 'Fit all' }).click())
-  await expect.poll(() => windowText(page)).toBe('18:10 – 21:40')
+  await expect.poll(() => windowText(page)).toBe('18:13 – 21:45')
   // A "+N" cluster of slivers zooms in on click.
   const clusters = lanes(page).locator('[data-cluster]')
   await expect(clusters.first()).toBeVisible()
@@ -100,8 +104,8 @@ test('lanes zoom, pan and move the time without moving a control, and a click ne
 
   // A click selects a step (outline + readout) and never moves the time; Esc clears.
   await guard.check(() => zoom.getByRole('radio', { name: 'Fit all' }).click())
-  await guard.check(async () => { const c = await center(page, '[data-step="0:c983:2"] .fl-hit'); await page.mouse.click(c.x, c.y) })
-  await expect(page.getByTestId('flow-readout')).toHaveText('983–986 · Reviewed: OK · Reviewer (agent) · 19:50–20:14 (24 min) · Working')
+  await guard.check(async () => { const c = await center(page, `[data-step="0:${RUN.c983}:2"] .fl-hit`); await page.mouse.click(c.x, c.y) })
+  await expect(page.getByTestId('flow-readout')).toHaveText('983 · Reviewed: OK · Reviewer (agent) · 19:50–20:14 (24 min) · Working')
   await expect(lanes(page).locator('.ln-selbox')).toHaveCount(1)
   await expect(clock(page)).toHaveText('At 20:25 (now)')
   await lanes(page).focus()
@@ -183,7 +187,7 @@ test('at Fit all a phone overview keeps each 44 px handle inside and a drag at e
   await setup(page)
   await page.goto('/p/AEON/delivery?view=flow')
   await page.getByTestId('flow-bar').getByRole('radio', { name: 'Fit all' }).click()
-  await expect.poll(() => windowText(page)).toBe('18:10 – 21:40')
+  await expect.poll(() => windowText(page)).toBe('18:13 – 21:45')
   await overview(page).scrollIntoViewIfNeeded()
   const before = await windowText(page)
   const geometry = await overview(page).evaluate(host => {
@@ -251,7 +255,7 @@ test('a 15 min window at a phone overview edge keeps both handles draggable', as
     await expect.poll(() => windowText(page)).toBe('20:15 – 20:30')
     await lanes(page).focus()
     await page.keyboard.press(key)
-    await expect.poll(() => windowText(page)).toBe(key === 'End' ? '21:25 – 21:40' : '18:10 – 18:25')
+    await expect.poll(() => windowText(page)).toBe(key === 'End' ? '21:30 – 21:45' : '18:13 – 18:28')
     await overview(page).scrollIntoViewIfNeeded()
     const geometry = await overview(page).evaluate(host => {
       const box = (id: string) => host.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect()

@@ -68,6 +68,8 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"operatoractor/actor.go:Ensure":                     "operator.EnsureWithProduction",
 		"operatoractor/actor.go:EnsureWithProduction":       "tree.Mutation",
 
+		"recurrences/engine.go:syncSubscriptionPublications": "recurrence.lock",
+
 		"nodes/bulk.go:applyBulk":                     "pairing.Lock",
 		"nodes/module.go:lockTree":                    "tree.Mutation",
 		"nodes/causal_undo.go:undoWorkChild":          "project.Write",
