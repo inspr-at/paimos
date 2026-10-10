@@ -338,6 +338,27 @@ func TestTerminalStagesAndCommitsLinkedWorktree(t *testing.T) {
 	if _, err := runTerminal(t.Context(), workspace, "routine/owned", terminalArgs{Command: "git", Args: []string{"add", "--", "../sibling/tracked.txt"}}); err == nil || !strings.Contains(err.Error(), "path denied") {
 		t.Fatal("sibling staging was not refused", err)
 	}
+	// Exercise the OS fence itself, not just the terminal argument allowlist.
+	// The same Git filter can query the owned tree, then fails when pointed at
+	// the sibling. A successful control rejects failures caused by its shell or
+	// executable being unavailable rather than denied sibling access.
+	if err := os.WriteFile(filepath.Join(workspace, ".gitattributes"), []byte("safe.go filter=scopecheck\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git("config", "filter.scopecheck.required", "true")
+	for i, target := range []string{workspace, sibling} {
+		git("config", "filter.scopecheck.clean", "git -C "+target+" rev-parse HEAD")
+		if err := os.WriteFile(filepath.Join(workspace, "safe.go"), []byte(fmt.Sprintf("package safe\n// scope check %d\n", i)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		out, err := runTerminal(t.Context(), workspace, "routine/owned", terminalArgs{Command: "git", Args: []string{"add", "--", "safe.go"}})
+		if i == 0 && err != nil {
+			t.Fatal("owned filter control failed", err, out)
+		}
+		if i == 1 && (err == nil || !strings.Contains(out, "Operation not permitted")) {
+			t.Fatal("sibling read did not fail at the sandbox", err, out)
+		}
+	}
 	// A forged .git pointer must not grant the other worktree's metadata. The
 	// reverse Git-dir binding, rather than a caller-selected metadata path, owns it.
 	ownedPointer, err := os.ReadFile(filepath.Join(workspace, ".git"))

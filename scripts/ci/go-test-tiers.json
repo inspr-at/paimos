@@ -1832,6 +1832,12 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRevokedProbeDoesNotStarveOtherAccount","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineCheckoutDisablesEffectiveFilterConfiguration","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineContinuationRetainsOriginalCheckout","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineSupervisorReplaysInterruptedRouting","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineWorkspacesSeparateAndRetainWriters","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRunCommitsEarlierReproductions","tier":"GATED-FULL"}
@@ -2007,6 +2013,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestTerminalSandboxesTestProcessFiles","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestTerminalSandboxesTestProcessNetwork","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestTerminalStagesAndCommitsLinkedWorktree","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestTerminalToolClosureGrantsOnlyExactPackages","tier":"GATED-FULL"}
     ,

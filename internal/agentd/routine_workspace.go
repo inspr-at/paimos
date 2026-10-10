@@ -60,11 +60,15 @@ type RoutineWorkspace struct {
 	ID     string                  `json:"id"`
 	Path   string                  `json:"path"`
 	Branch string                  `json:"branch"`
+	// Continuations keep the checkout identity, while Grant binds the new
+	// launch. Empty preserves the original schema-5 allocation representation.
+	CheckoutLaunchID string `json:"checkout_launch_id,omitempty"`
 }
 
 type routineAllocation struct {
 	RoutineWorkspace
-	Ready bool `json:"ready"`
+	Ready          bool `json:"ready"`
+	FixturesExited bool `json:"fixtures_exited,omitempty"`
 }
 
 func routineGrant(run Run) (*agentsetup.RoutineGrant, error) {
@@ -131,6 +135,15 @@ func (s *Supervisor) prepareRoutineWorkspace(ctx context.Context, run Run, g age
 	raw, _ := json.Marshal([]string{g.TenantID, g.OwnerID, g.ProjectID, g.AccountID, g.ComputerID, g.LaunchID})
 	id := fmt.Sprintf("%x", sha256.Sum256(raw))
 	w := RoutineWorkspace{Grant: g, ID: id, Path: filepath.Join(repository.Root, id), Branch: "routine/" + g.LaunchID}
+	predecessor := ""
+	if run.CapacityHandoff {
+		retained, err := s.routineContinuation(ctx, run, g, repository)
+		if err != nil {
+			return nil, err
+		}
+		w = *retained
+		id, predecessor = w.ID, run.RetryOfRunID
+	}
 	name := "routine-workspace-" + g.LaunchID + ".json"
 	previous, err := s.state.Read(name, 16384)
 	if err == nil {
@@ -160,6 +173,16 @@ func (s *Supervisor) prepareRoutineWorkspace(ctx context.Context, run Run, g age
 		if err := s.acquireRoutineCheckout(run.ID, w); err != nil {
 			return nil, err
 		}
+		if err := validateRoutineCheckout(ctx, repository, w); err != nil {
+			return nil, err
+		}
+		if s.routineResources[run.ID] == nil {
+			lease, err := s.routineConfig.AcquireResources(ctx, RoutineResourceOwner{g.TenantID, g.AccountID, g.ComputerID, g.LaunchID})
+			if err != nil {
+				return nil, err
+			}
+			s.routineResources[run.ID] = lease
+		}
 		return &w, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
@@ -176,6 +199,26 @@ func (s *Supervisor) prepareRoutineWorkspace(ctx context.Context, run Run, g age
 	encoded, _ := json.Marshal(allocation)
 	if err := s.state.Write(name, encoded, true); err != nil {
 		return nil, err
+	}
+	if predecessor != "" {
+		// Do not create a new tree or overwrite retained content. Under the
+		// existing checkout lock, finish only proven-exited fixture resources
+		// and transfer the durable owner to this exact continuation.
+		if oldLease := s.routineResources[predecessor]; oldLease != nil {
+			if err := oldLease.Finish(true); err != nil {
+				return nil, err
+			}
+			delete(s.routineResources, predecessor)
+		}
+		if err := s.acquireRoutineCheckoutFrom(run.ID, w, predecessor); err != nil {
+			return nil, err
+		}
+		allocation.Ready = true
+		encoded, _ = json.Marshal(allocation)
+		if err := s.state.Write(name, encoded, false); err != nil {
+			return nil, err
+		}
+		return &w, nil
 	}
 	gitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -227,6 +270,74 @@ func (s *Supervisor) prepareRoutineWorkspace(ctx context.Context, run Run, g age
 	return &w, nil
 }
 
+// A continuation is local recovery of the same routine lineage, not authority
+// to adopt another owner's checkout. Root exit alone never clears fixtures.
+func (s *Supervisor) routineContinuation(ctx context.Context, run Run, g agentsetup.RoutineGrant, repository RoutineRepository) (*RoutineWorkspace, error) {
+	s.mu.Lock()
+	previous := s.runs[run.RetryOfRunID]
+	s.mu.Unlock()
+	if previous == nil || run.RetryOfRunID == "" || run.RetryOfRunID == run.ID {
+		return nil, ErrProcessesUnconfirmed
+	}
+	previous.mu.Lock()
+	r, process := previous.record, previous.process
+	previous.mu.Unlock()
+	if r.RoutineWorkspace == nil || r.RunID != run.RetryOfRunID || r.WorkOrderID != run.WorkOrderID || r.TenantID != s.tenantID || r.PrincipalID != s.principalID || r.State != "failed" || !r.ExitObserved || r.Workspace != r.RoutineWorkspace.Path || r.LaunchBranch != r.RoutineWorkspace.Branch || validateLaunchRecord(r) != nil {
+		return nil, ErrProcessesUnconfirmed
+	}
+	old := r.RoutineWorkspace.Grant
+	if old.TenantID != g.TenantID || old.OwnerID != g.OwnerID || old.ExecutionPrincipalID != g.ExecutionPrincipalID || old.PrincipalID != g.PrincipalID || old.ProjectID != g.ProjectID || old.RoutineRunID != g.RoutineRunID || old.AccountID != g.AccountID || old.ComputerID != g.ComputerID || old.DaemonID != g.DaemonID || old.DaemonDigest != g.DaemonDigest || old.CapabilityDigest != g.CapabilityDigest || old.HostMappingDigest != g.HostMappingDigest || old.RuntimeCapability != g.RuntimeCapability || old.QualificationID != g.QualificationID {
+		return nil, ErrProcessesUnconfirmed
+	}
+	w := *r.RoutineWorkspace
+	if w.Path != filepath.Join(repository.Root, w.ID) {
+		return nil, ErrProcessesUnconfirmed
+	}
+	if err := validateRoutineCheckout(ctx, repository, w); err != nil {
+		return nil, err
+	}
+	if err := s.confirmRoutineFixtureExit(r, process); err != nil {
+		return nil, err
+	}
+	if w.CheckoutLaunchID == "" {
+		w.CheckoutLaunchID = old.LaunchID
+	}
+	w.Grant = g
+	return &w, nil
+}
+
+// Persist exact allocation-bound fixture proof before transferring or releasing
+// its owner. Missing in-memory leases after a restart are never exit evidence.
+func (s *Supervisor) confirmRoutineFixtureExit(r Record, process Process) error {
+	if !r.ExitObserved || r.RoutineWorkspace == nil {
+		return ErrProcessesUnconfirmed
+	}
+	name := "routine-workspace-" + r.RoutineWorkspace.Grant.LaunchID + ".json"
+	raw, err := s.state.Read(name, 16384)
+	if err != nil {
+		return ErrProcessesUnconfirmed
+	}
+	var saved routineAllocation
+	if json.Unmarshal(raw, &saved) != nil || !saved.Ready {
+		return ErrProcessesUnconfirmed
+	}
+	expected, _ := json.Marshal(r.RoutineWorkspace)
+	observed, _ := json.Marshal(saved.RoutineWorkspace)
+	if string(expected) != string(observed) {
+		return ErrProcessesUnconfirmed
+	}
+	if saved.FixturesExited {
+		return nil
+	}
+	observer, ok := process.(RoutineFixtureExitObserver)
+	if !ok || !observer.RoutineFixturesExited() {
+		return ErrProcessesUnconfirmed
+	}
+	saved.FixturesExited = true
+	raw, _ = json.Marshal(saved)
+	return s.state.Write(name, raw, false)
+}
+
 func validateRoutineCheckout(ctx context.Context, r RoutineRepository, w RoutineWorkspace) error {
 	physical, err := filepath.EvalSymlinks(w.Path)
 	if err != nil || physical != w.Path {
@@ -270,8 +381,10 @@ func routineGit(ctx context.Context, repository string, args ...string) (string,
 		err := command.Run()
 		return out.String(), err
 	}
-	if len(args) > 0 && args[0] == "worktree" {
-		keys, err := run(append(append([]string(nil), flags...), "config", "--local", "--name-only", "--get-regexp", `^filter\..*\.(smudge|process|required)$`))
+	// Read effective key names in this exact worktree: includes, includeIf and
+	// extensions.worktreeConfig all participate in checkout configuration.
+	if len(args) > 0 && (args[0] == "worktree" || args[0] == "checkout") {
+		keys, err := run(append(append([]string(nil), flags...), "config", "--includes", "--name-only", "--get-regexp", `^filter\..*\.(clean|smudge|process|required)$`))
 		var exit *exec.ExitError
 		if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1 && keys == "") {
 			return "", ErrRoutineUnavailable
@@ -288,8 +401,18 @@ func routineGit(ctx context.Context, repository string, args ...string) (string,
 			return "", ErrRoutineUnavailable
 		}
 		for section := range sections {
-			flags = append(flags, "-c", section+".smudge=", "-c", section+".process=", "-c", section+".required=false")
+			flags = append(flags, "-c", section+".clean=", "-c", section+".smudge=", "-c", section+".process=", "-c", section+".required=false")
 		}
+	}
+	// A destination-specific includeIf can differ from the source worktree's
+	// config. Create only metadata first, then sanitize the destination's own
+	// effective config before materializing any tracked files.
+	if len(args) == 6 && args[0] == "worktree" && args[1] == "add" && args[2] == "-b" {
+		creation := append([]string{"worktree", "add", "--no-checkout"}, args[2:]...)
+		if _, err := run(append(flags, creation...)); err != nil {
+			return "", ErrRoutineUnavailable
+		}
+		return routineGit(ctx, args[4], "checkout", "HEAD", "--", ".")
 	}
 	out, err := run(append(flags, args...))
 	if err != nil {
@@ -299,6 +422,10 @@ func routineGit(ctx context.Context, repository string, args ...string) (string,
 }
 
 func (s *Supervisor) acquireRoutineCheckout(runID string, w RoutineWorkspace) error {
+	return s.acquireRoutineCheckoutFrom(runID, w, "")
+}
+
+func (s *Supervisor) acquireRoutineCheckoutFrom(runID string, w RoutineWorkspace, predecessor string) error {
 	if s.routineCheckouts[runID] != nil {
 		return nil
 	}
@@ -306,18 +433,24 @@ func (s *Supervisor) acquireRoutineCheckout(runID string, w RoutineWorkspace) er
 	if err != nil || physical != w.Path {
 		return ErrRoutineUnavailable
 	}
-	store, err := agentsetup.OpenStore(filepath.Join(w.Path, ".aeon-agentd"), true)
-	if err != nil {
-		return err
+	store := s.routineCheckouts[predecessor]
+	reused := store != nil
+	if !reused {
+		store, err = agentsetup.OpenStore(filepath.Join(w.Path, ".aeon-agentd"), true)
+		if err != nil {
+			return err
+		}
 	}
 	keep := false
 	defer func() {
-		if !keep {
+		if !keep && !reused {
 			_ = store.Close()
 		}
 	}()
-	if err := store.Lock(); err != nil {
-		return err
+	if !reused {
+		if err := store.Lock(); err != nil {
+			return err
+		}
 	}
 	owner, _ := json.Marshal([]string{s.tenantID, s.principalID, s.daemonID, s.state.Path(), runID, w.ID})
 	previous, err := store.Read("owner.json", 4096)
@@ -325,12 +458,18 @@ func (s *Supervisor) acquireRoutineCheckout(runID string, w RoutineWorkspace) er
 		return err
 	}
 	if err == nil && string(previous) != "[]" && string(previous) != string(owner) {
-		return ErrProcessesUnconfirmed
+		priorOwner, _ := json.Marshal([]string{s.tenantID, s.principalID, s.daemonID, s.state.Path(), predecessor, w.ID})
+		if predecessor == "" || string(previous) != string(priorOwner) {
+			return ErrProcessesUnconfirmed
+		}
 	}
 	if err := store.Write("owner.json", owner, false); err != nil {
 		return err
 	}
 	s.routineCheckouts[runID] = store
+	if reused {
+		delete(s.routineCheckouts, predecessor)
+	}
 	keep = true
 	return nil
 }
@@ -343,6 +482,19 @@ func (s *Supervisor) claimRoutine(ctx context.Context, run Run, ids []string, pi
 		return ErrRoutineUnavailable
 	}
 	return api.ClaimRoutine(ctx, run.ID, s.daemonID, s.generation, ids, pickup, w.pickup())
+}
+
+func (s *Supervisor) routeWorkspace(ctx context.Context, runID string, ids []string, w *RoutineWorkspace) (Route, error) {
+	if w == nil {
+		return s.api.Route(ctx, runID, s.daemonID, ids, s.estimates)
+	}
+	api, ok := s.api.(interface {
+		RouteRoutine(context.Context, string, string, []string, map[string]int64, agentsetup.RoutinePickup) (Route, error)
+	})
+	if !ok || w.Grant.Validate() != nil || w.Grant.AgentRunID != runID || w.Grant.TenantID != s.tenantID || w.Grant.PrincipalID != s.principalID || w.Grant.DaemonID != s.daemonID || w.Grant.LedgerGeneration != s.ledgerBinding.Generation {
+		return Route{}, ErrRoutineUnavailable
+	}
+	return api.RouteRoutine(ctx, runID, s.daemonID, ids, s.estimates, w.pickup())
 }
 
 func (w RoutineWorkspace) pickup() agentsetup.RoutinePickup {
@@ -362,8 +514,8 @@ func (s *Supervisor) releaseRoutineCheckouts() error {
 			record, process := entry.record, entry.process
 			entry.mu.Unlock()
 			confirmed = record.LaunchState == launchPrepared || record.LaunchState == launchRoutePending
-			if observed, ok := process.(RoutineFixtureExitObserver); ok && record.ExitObserved {
-				confirmed = observed.RoutineFixturesExited()
+			if record.ExitObserved {
+				confirmed = s.confirmRoutineFixtureExit(record, process) == nil
 			}
 		}
 		if !confirmed {

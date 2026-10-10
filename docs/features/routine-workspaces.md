@@ -27,6 +27,20 @@ worktree. Allocation intent is persisted before Git runs; incomplete allocations
 remain disputed. Each checkout has its own durable owner record and OS lock,
 independent of the pairing ledger. Replaying an assignment cannot create another
 writer. Worktrees and branches survive process exit, failure and recovery.
+Capacity continuation binds the new launch to the previous local checkout and
+branch only after exact root and fixture exit proof. The new grant retains its
+own resource lease and current claim authority; it cannot adopt a different
+owner, account, host or routine lineage.
+
+Pre-launch checkout disables hooks, fsmonitor and effective filters, including
+included and worktree-specific configuration. Metadata is allocated without
+checkout first, so destination-specific includes are sanitized before files
+are materialized. Interrupted routing replays the persisted routine pickup and
+keeps checkout, resource and ledger ownership evidence through refusals.
+
+Managed Git uses the owned linked worktree's index and HEAD, common objects and
+only its branch's writable refs and logs. Sibling checkouts and their private
+worktree metadata remain outside the terminal sandbox.
 
 Resource ownership uses AEON-1089's lease surface (`Environment`, `HandoffPorts`,
 `Running`, `Finish`), through `AcquireResources`. S14 adapts the existing
@@ -37,7 +51,9 @@ launch. A qualified S10/S15 adapter must declare routine support and apply the
 resource environment to every native child and fixture. Existing adapters do
 not declare that qualification and remain unavailable for automatic routines.
 
-The journal schema advances to 5 with forward migrations for 2–4. Unknown
+The journal schema advances to 6 with forward migrations for 2–5. Existing
+routine provenance remains intact; continuation adds its original checkout
+launch identity. Older readers refuse the new schema before mutation. Unknown
 process exit never clears a checkout or pairing hold. Root exit alone does not
 prove fixture cleanup: resource release requires independent fixture-exit
 evidence, or durable proof that native launch was never attempted. Unconfirmed

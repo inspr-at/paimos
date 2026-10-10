@@ -430,13 +430,16 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 			}
 			s.ledgerReplayAfter = r.RunID
 			routeCtx, routeCancel := context.WithTimeout(replayCtx, 500*time.Millisecond)
-			route, e := s.api.Route(routeCtx, r.RunID, s.daemonID, candidateIDs(r.RouteCandidates), s.estimates)
+			route, e := s.routeWorkspace(routeCtx, r.RunID, candidateIDs(r.RouteCandidates), r.RoutineWorkspace)
 			routeCancel()
 			if e != nil {
 				// A generic 409 includes capacity/grant/generation refusals. Release only
 				// after independent run state confirms this attempt can no longer route.
 				var status *client.StatusError
-				if errors.As(e, &status) && status.Status == 409 {
+				// Routine records also own checkout/resource provenance. An account
+				// binding may be the very route whose response was lost; a refusal
+				// cannot discard that durable owner or convert it to a manual route.
+				if r.RoutineWorkspace == nil && errors.As(e, &status) && status.Status == 409 {
 					readCtx, readCancel := context.WithTimeout(replayCtx, 500*time.Millisecond)
 					run, readErr := s.api.GetRun(readCtx, r.RunID)
 					readCancel()

@@ -309,6 +309,7 @@ type routineReplayAPI struct {
 	pickups []agentsetup.RoutinePickup
 	claims  []agentsetup.RoutinePickup
 	lost    bool
+	refusal error
 }
 
 func (a *routineReplayAPI) Identity(context.Context) (string, string, error) {
@@ -323,6 +324,9 @@ func (a *routineReplayAPI) RouteRoutine(_ context.Context, run, daemon string, i
 	}
 	a.pickups = append(a.pickups, pickup)
 	a.run.AccountID = a.grant.AccountID // server commit precedes the lost response
+	if a.refusal != nil {
+		return Route{}, a.refusal
+	}
 	if a.lost {
 		a.lost = false
 		return Route{}, errors.New("fixture lost routine route response")
@@ -381,6 +385,13 @@ func routineSupervisorFixture(t *testing.T) (*Supervisor, *routineReplayAPI, *fa
 		for _, store := range s.routineCheckouts {
 			_ = store.Close()
 		}
+		if s.lock != nil {
+			_ = s.lock.Close()
+		}
+		_ = s.state.Close()
+		if s.ledger != nil {
+			_ = s.ledger.Close()
+		}
 	})
 	return s, api, process, base, allocations
 }
@@ -395,10 +406,18 @@ func TestRoutineSupervisorReplaysInterruptedRouting(t *testing.T) {
 	}
 	intent := s.journal.Snapshot()[0]
 	lease := s.routineResources[api.run.ID]
+	api.refusal = &client.StatusError{Status: 409, Message: "fixture current authority unavailable"}
+	if err := s.StartRun(t.Context(), api.run); !errors.Is(err, ErrProcessesUnconfirmed) {
+		t.Fatal("refused routine replay reported success", err)
+	}
+	if records := s.journal.Snapshot(); !reflect.DeepEqual(records, []Record{intent}) || s.routineResources[api.run.ID] != lease {
+		t.Fatal("refused replay discarded routine provenance", records)
+	}
+	api.refusal = nil
 	if err := s.StartRun(t.Context(), api.run); err != nil {
 		t.Fatal("routine route replay failed", err)
 	}
-	if len(api.pickups) != 2 || api.pickups[0] != api.pickups[1] || len(api.claims) != 2 || api.claims[0] != api.pickups[0] || api.claims[1] != api.pickups[0] {
+	if len(api.pickups) != 3 || api.pickups[0] != api.pickups[1] || api.pickups[0] != api.pickups[2] || len(api.claims) != 2 || api.claims[0] != api.pickups[0] || api.claims[1] != api.pickups[0] {
 		t.Fatal("route/claim replay changed persisted pickup", api.pickups, api.claims)
 	}
 	entry := s.runs[api.run.ID]
@@ -417,6 +436,18 @@ func TestRoutineContinuationRetainsOriginalCheckout(t *testing.T) {
 	s, api, _, repository, _ := routineSupervisorFixture(t)
 	oldRun, oldGrant := api.run, api.grant
 	w, err := s.prepareRoutineWorkspace(t.Context(), oldRun, oldGrant, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(w.Path, "retained-commit.txt"), []byte("committed work\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "--", "retained-commit.txt"}, {"commit", "-qm", "retained commit"}} {
+		if out, err := exec.Command("git", append([]string{"-C", w.Path}, args...)...).CombinedOutput(); err != nil {
+			t.Fatal("retained commit fixture", err, string(out))
+		}
+	}
+	retainedHEAD, err := routineGit(t.Context(), w.Path, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,6 +473,19 @@ func TestRoutineContinuationRetainsOriginalCheckout(t *testing.T) {
 		prior.record = record
 		prior.process.(*routineExitedFixture).fixturesExited = true
 	}
+	prior.process = nil
+	lease := s.routineResources[oldRun.ID]
+	delete(s.routineResources, oldRun.ID)
+	if _, err := s.prepareRoutineWorkspace(t.Context(), next, nextGrant, repository); !errors.Is(err, ErrProcessesUnconfirmed) {
+		t.Fatal("missing restart lease manufactured fixture exit", err)
+	}
+	prior.process = &routineExitedFixture{fakeProcess: &fakeProcess{}, fixturesExited: true}
+	s.routineResources[oldRun.ID] = lease
+	changedGrant := nextGrant
+	changedGrant.OwnerID = changedGrant.PrincipalID
+	if _, err := s.prepareRoutineWorkspace(t.Context(), next, changedGrant, repository); !errors.Is(err, ErrProcessesUnconfirmed) {
+		t.Fatal("changed owner adopted retained checkout", err)
+	}
 	api.grant = nextGrant
 	next.RoutineLaunchID = &api.grant.LaunchID
 	next.Trace, _ = json.Marshal(map[string]any{"routine_launch": nextGrant, "routine_run_id": nextGrant.RoutineRunID})
@@ -462,6 +506,9 @@ func TestRoutineContinuationRetainsOriginalCheckout(t *testing.T) {
 	}
 	if data, err := os.ReadFile(filepath.Join(recovered.Path, "retained.txt")); err != nil || string(data) != "retained work\n" {
 		t.Fatal("continuation lost work", err)
+	}
+	if head, err := routineGit(t.Context(), recovered.Path, "rev-parse", "HEAD"); err != nil || head != retainedHEAD {
+		t.Fatal("continuation lost retained commit", err)
 	}
 	if err := s.validateCapacityHandoff(next, recovered.Branch); err != nil {
 		t.Fatal("retained handoff refused", err)

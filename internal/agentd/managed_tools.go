@@ -411,6 +411,12 @@ func (libraries *terminalLibraryCache) runTerminalWithResources(ctx context.Cont
 		sandboxTemporary = routineTempRoot(resources)
 	}
 	profile := terminalSandboxProfile(physicalWorkspace, sandboxTemporary, readRoots, toolPaths, libraryPaths)
+	if in.Command == "git" {
+		profile, err = terminalGitSandboxProfile(profile, physicalWorkspace, branch)
+		if err != nil {
+			return "", err
+		}
+	}
 	childEnv := routineResourceEnvironment(terminalEnvironment(physicalTmp, moduleProxy, goRoot, toolPaths...), resources)
 	// Even read-only Git queries can trigger repository-configured helpers.
 	// Keep branch/staging checks inside exactly the same sandbox as the command.
@@ -786,6 +792,108 @@ func terminalSandboxProfile(workspace, tmp string, readRoots, toolPaths, library
 	}
 	profile += ` (allow file-write* (literal "/dev/null"))`
 	return profile
+}
+
+// Resolve only Git's bounded local pointer files, never run a host-side Git
+// discovery/helper. The reverse pointer proves this is the owned worktree's
+// private index/HEAD, not a caller-selected sibling. Common repository access
+// is limited to objects and this branch's refs/logs; no sibling checkout or
+// sibling worktrees metadata receives a recursive grant.
+func terminalGitSandboxProfile(profile, workspace, branch string) (string, error) {
+	denied := errors.New("linked worktree Git metadata unavailable")
+	pointer := filepath.Join(workspace, ".git")
+	info, err := os.Lstat(pointer)
+	if errors.Is(err, os.ErrNotExist) {
+		return profile, nil
+	}
+	if err != nil {
+		return "", denied
+	}
+	if info.IsDir() {
+		return profile, nil
+	} // Ordinary checkout: already fenced.
+	readPointer := func(path string) (string, error) {
+		root := filepath.Dir(path)
+		physical, err := filepath.EvalSymlinks(root)
+		if err != nil || physical != root {
+			return "", denied
+		}
+		file, err := openManagedFile(root, filepath.Base(path), false, false)
+		if err != nil {
+			return "", denied
+		}
+		defer file.Close()
+		if err := checkManagedRegular(file); err != nil {
+			return "", denied
+		}
+		out, err := io.ReadAll(io.LimitReader(file, 4097))
+		if err != nil || len(out) > 4096 || strings.ContainsAny(string(out), "\x00\r") {
+			return "", denied
+		}
+		return strings.TrimSuffix(string(out), "\n"), nil
+	}
+	data, err := readPointer(pointer)
+	if err != nil || !strings.HasPrefix(data, "gitdir: ") {
+		return "", denied
+	}
+	gitDir := strings.TrimPrefix(data, "gitdir: ")
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(workspace, gitDir)
+	}
+	physical, err := filepath.EvalSymlinks(gitDir)
+	if err != nil || physical != filepath.Clean(gitDir) {
+		return "", denied
+	}
+	gitDir = physical
+	back, err := readPointer(filepath.Join(gitDir, "gitdir"))
+	if err != nil || back != pointer {
+		return "", denied
+	}
+	common, err := readPointer(filepath.Join(gitDir, "commondir"))
+	if err != nil {
+		return "", denied
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(gitDir, common)
+	}
+	physical, err = filepath.EvalSymlinks(common)
+	if err != nil || physical != filepath.Clean(common) {
+		return "", denied
+	}
+	common = physical
+	if filepath.Dir(gitDir) != filepath.Join(common, "worktrees") {
+		return "", denied
+	}
+	if branch == "" || filepath.Clean(branch) != branch || filepath.IsAbs(branch) || strings.HasPrefix(branch, "-") || strings.ContainsAny(branch, "\x00\r\n\\") {
+		return "", denied
+	}
+	ref := filepath.Join(common, "refs", "heads", branch)
+	if !pathWithin(filepath.Join(common, "refs", "heads"), ref) {
+		return "", denied
+	}
+	objects := filepath.Join(common, "objects")
+	if physical, err := filepath.EvalSymlinks(objects); err != nil || physical != objects {
+		return "", denied
+	}
+	profile += fmt.Sprintf(" (allow file-read* file-write* (subpath %q) (subpath %q))", gitDir, objects)
+	// Config is read-only; includes outside these grants remain inaccessible.
+	for _, path := range []string{filepath.Join(common, "config"), filepath.Join(common, "packed-refs"), filepath.Join(common, "shallow"), filepath.Join(common, "info", "attributes"), filepath.Join(common, "info", "exclude")} {
+		profile += fmt.Sprintf(" (allow file-read* (literal %q))", path)
+	}
+	for _, path := range []string{ref, filepath.Join(common, "logs", "refs", "heads", branch)} {
+		profile += fmt.Sprintf(" (allow file-read* file-write* (literal %q) (literal %q))", path, path+".lock")
+		for parent := filepath.Dir(path); pathWithin(common, parent); parent = filepath.Dir(parent) {
+			profile += fmt.Sprintf(" (allow file-read* file-write-create (literal %q))", parent)
+		}
+	}
+	// Git resolves these ancestor directories but may not read their contents.
+	for parent := filepath.Dir(gitDir); ; parent = filepath.Dir(parent) {
+		profile += fmt.Sprintf(" (allow file-read-metadata (literal %q))", parent)
+		if parent == "/" {
+			break
+		}
+	}
+	return profile, nil
 }
 
 func terminalEnvironment(tmp, moduleProxy, goRoot string, toolPaths ...string) []string {

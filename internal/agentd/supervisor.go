@@ -948,6 +948,10 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	s.mu.Unlock()
 	if entry != nil {
 		entry.mu.Lock()
+		if grant != nil && entry.record.LaunchState == launchRoutePending && entry.record.State == "route_pending" {
+			entry.mu.Unlock()
+			return ErrProcessesUnconfirmed
+		}
 		if grant != nil && entry.record.State == "ownership_lost" && !noLocalProcess(entry.record) {
 			entry.mu.Unlock()
 			return ErrProcessesUnconfirmed
@@ -1151,7 +1155,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			prompt += "\n\n" + run.RecoveryBrief
 		}
 		if run.CapacityHandoff {
-			if err := s.validateCapacityHandoff(run, branch); err != nil {
+			if err := s.validateCapacityHandoffAt(run, runWorkspace, branch); err != nil {
 				return err
 			}
 			prompt += "\n\nContinue the stopped attempt " + run.RetryOfRunID + ". Inspect its existing work and local changes before continuing; do not redo completed work."
@@ -1231,17 +1235,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		accountIDs = candidateIDs(attempt.RouteCandidates)
 	}
 	if route.AccountID == "" {
-		if routineWorkspace != nil {
-			api, ok := s.api.(interface {
-				RouteRoutine(context.Context, string, string, []string, map[string]int64, agentsetup.RoutinePickup) (Route, error)
-			})
-			if !ok {
-				return ErrRoutineUnavailable
-			}
-			route, err = api.RouteRoutine(ctx, run.ID, s.daemonID, accountIDs, s.estimates, routineWorkspace.pickup())
-		} else {
-			route, err = s.api.Route(ctx, run.ID, s.daemonID, accountIDs, s.estimates)
-		}
+		route, err = s.routeWorkspace(ctx, run.ID, accountIDs, routineWorkspace)
 		if err != nil {
 			return err
 		}
@@ -1541,6 +1535,18 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if routineWorkspace != nil {
 		if err := validateRoutineCheckout(ctx, approvedRepository, *routineWorkspace); err != nil {
 			return err
+		}
+		if run.CapacityHandoff {
+			retained, err := s.routineContinuation(ctx, run, routineWorkspace.Grant, approvedRepository)
+			if err != nil {
+				return err
+			}
+			if retained.ID != routineWorkspace.ID || retained.Path != runWorkspace || retained.Branch != branch || retained.CheckoutLaunchID != routineWorkspace.CheckoutLaunchID {
+				return ErrProcessesUnconfirmed
+			}
+			if err := s.validateCapacityHandoffAt(run, runWorkspace, branch); err != nil {
+				return err
+			}
 		}
 		if err := claim(); err != nil {
 			return err
