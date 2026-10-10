@@ -89,13 +89,17 @@ SQL
   if [[ "$account_use" = below-floor ]]; then
     python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
   fi
-  echo "Migration compatibility passed: $tag on the candidate schema"
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
       "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+    if [[ "$account_use" = below-floor ]]; then
+      printf 'Account-use refusal boundary %s; registry image %s; loaded image %s passed the activated legacy probes.\n' \
+        "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+    fi
   fi
 )
 
+# Published release v261009095632.0.0, source 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
 below_floor_tag=v261009095632.0.0
 below_floor_digest=sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
 if [[ "$tag" = "$below_floor_tag" && "$digest" = "$below_floor_digest" ]]; then
@@ -104,3 +108,4 @@ else
   check_release "$tag" "$digest" latest
   check_release "$below_floor_tag" "$below_floor_digest" below-floor
 fi
+echo "Migration compatibility passed: $tag on the candidate schema; $below_floor_tag passed activated refusal checks"

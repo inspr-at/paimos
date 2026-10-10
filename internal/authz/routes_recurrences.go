@@ -8,7 +8,9 @@ package authz
 // workspace grant, and project definitions a grant in their scope project.
 func init() {
 	registerRoutes("recurrences", map[string]string{
-		"DELETE /api/recurrences/{recurrenceId}": "recurrences.manage",
+		"GET /api/recurrences/{recurrenceId}/guardrails": "nodes.read|recurrences.manage",
+		"PUT /api/recurrences/{recurrenceId}/guardrails": "recurrences.manage",
+		"DELETE /api/recurrences/{recurrenceId}":         "recurrences.manage",
 		// Read-only people enter with nodes.read. Recurrence handlers still require
 		// recurrences.manage for agents, including their explicit role and key scope.
 		"GET /api/recurrences":                                  "nodes.read|recurrences.manage",

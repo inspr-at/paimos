@@ -1061,6 +1061,52 @@
       "table": "routine_execution_qualifications"
     },
     {
+      "classification": "review",
+      "columns": {
+        "checkpoint": "metadata",
+        "context_digest": "metadata",
+        "created_at": "metadata",
+        "decision": "review",
+        "definition_revision": "metadata",
+        "hard_version": "metadata",
+        "id": "metadata",
+        "output_project_id": "metadata",
+        "owner_principal_id": "personal",
+        "policy_digest": "metadata",
+        "preset_version": "metadata",
+        "recurrence_id": "metadata",
+        "required_evaluation": "metadata",
+        "result": "metadata",
+        "scope_kind": "metadata",
+        "scope_project_id": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "owner_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "routine_guard_evaluations"
+    },
+    {
+      "classification": "review",
+      "columns": {
+        "created_at": "metadata",
+        "created_by": "personal",
+        "loosenings": "review",
+        "reason": "review",
+        "revision": "metadata",
+        "rules": "review",
+        "scope_id": "personal",
+        "scope_kind": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "created_by",
+        "tenant_column": "tenant_id"
+      },
+      "table": "routine_guard_policies"
+    },
+    {
       "classification": "personal",
       "columns": {
         "agent_run_id": "metadata",

@@ -231,6 +231,7 @@
         "internal/questions/lock_order_test.go",
         "internal/recurrences/consent.go",
         "internal/recurrences/consent_test.go",
+        "internal/routineguard/**",
         "internal/recurrences/runs.go",
         "internal/recurrences/runs_test.go"
       ]
