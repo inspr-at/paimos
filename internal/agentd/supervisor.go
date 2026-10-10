@@ -159,6 +159,10 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	queuePollMu            sync.Mutex
+	queueNext              time.Time
+	queueDirty             atomic.Bool
+	queueWake              chan struct{}
 	chatGate               chatRelayGate
 	ledger                 *agentsetup.SharedLedger
 	ledgerBinding          ledgerBinding
@@ -409,7 +413,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if c.UsageProbes == nil {
 		c.UsageProbes = usageprobe.Client{}
 	}
-	s := &Supervisor{usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{queueWake: make(chan struct{}, 1), usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic, verificationDiagnostic: c.VerificationDiagnostic}
 	if _, err := state.Read("ledger-member.json", 8192); err == nil {
@@ -535,6 +539,10 @@ func pollContextError(ctx context.Context, causes ...error) error {
 }
 
 func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr error) {
+	return s.poll(ctx, dispatch, dispatch, nil)
+}
+
+func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempty *bool) (resultErr error) {
 	diagnostic := ""
 	defer func() {
 		if pollContextError(ctx, resultErr) == nil {
@@ -572,12 +580,15 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			return err
 		}
 	}
-	if dispatch {
+	if scanQueue {
 		var err error
 		runs, err = s.api.Queued(ctx)
 		if err != nil {
 			diagnostic = "queue_unavailable"
 			return err
+		}
+		if nonempty != nil {
+			*nonempty = len(runs) > 0
 		}
 	}
 	failures := []error{recoveryErr, settlementErr}
@@ -585,6 +596,15 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 	accounts := append([]EnrolledAccount(nil), s.accounts...)
 	adapters := map[string]Adapter{}
 	pendingProbes := make(map[string]time.Time, len(accounts))
+	type observation struct {
+		account                 EnrolledAccount
+		status                  ProbeStatus
+		pendingSince            time.Time
+		hold                    string
+		dependencyErr, probeErr error
+		observedAt              time.Time
+	}
+	observations := make([]observation, 0, len(accounts))
 	for _, account := range accounts {
 		pendingProbes[account.ID] = s.probePendingSince[account.ID]
 	}
@@ -606,12 +626,7 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			continue
 		}
 		if account.DependencyBlocked {
-			if err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, false); err != nil {
-				if cancelled := pollContextError(ctx, err); cancelled != nil {
-					return cancelled
-				}
-				failures = append(failures, errors.New("account probe unavailable"))
-			}
+			observations = append(observations, observation{account: account, status: probeUnavailable, pendingSince: pendingProbes[account.ID], observedAt: s.capacityNow()})
 			continue
 		}
 		// Account health is independent of optional verification. Refusing a
@@ -676,18 +691,43 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			}
 			pi.probeMu.Unlock()
 		}
-		available := status.OK
 		s.mu.Lock()
 		current = s.probePendingSince[account.ID].Equal(pendingSince)
 		s.mu.Unlock()
 		if !current {
 			continue
 		}
-		var err error
-		if reporter, ok := s.api.(ProbeStatusReporter); ok {
-			err = reporter.ProbeStatus(ctx, account.ID, s.daemonID, s.generation, status)
-		} else {
-			err = s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
+		observations = append(observations, observation{account, status, pendingSince, hold, dependencyErr, probeErr, s.capacityNow()})
+	}
+	probes := make([]AccountProbeObservation, 0, len(observations))
+	currentObservations := observations[:0]
+	for _, o := range observations {
+		// A sibling's slow local probe leaves time for a repin or tombstone.
+		// Do not publish the earlier observation after its lifecycle changed.
+		s.mu.Lock()
+		current := s.probePendingSince[o.account.ID].Equal(o.pendingSince)
+		s.mu.Unlock()
+		fenced, err := s.readFence(o.account.ID)
+		if !current || fenced || err != nil {
+			continue
+		}
+		currentObservations = append(currentObservations, o)
+		probes = append(probes, AccountProbeObservation{AccountID: o.account.ID, Status: o.status, ObservedAt: o.observedAt})
+	}
+	observations = currentObservations
+	results := s.reportAccountProbes(ctx, probes)
+	for i, o := range observations {
+		account, status, pendingSince, hold := o.account, o.status, o.pendingSince, o.hold
+		dependencyErr, probeErr, err := o.dependencyErr, o.probeErr, results[i]
+		available := status.OK
+		if cancelled := pollContextError(ctx, err); cancelled != nil {
+			return cancelled
+		}
+		if account.DependencyBlocked {
+			if err != nil {
+				failures = append(failures, errors.New("account probe unavailable"))
+			}
+			continue
 		}
 		s.mu.Lock()
 		if cancelled := pollContextError(ctx, err); cancelled != nil {

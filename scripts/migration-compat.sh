@@ -91,15 +91,17 @@ docker container rm "$app" >/dev/null
 db_address="$(docker port "$db" 5432/tcp)"
 AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=disable" \
   GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
+# Neither application nor migration runner is connected now. Preserve the
+# inactive, migrated fixture for the separate legacy refusal gate: the latest
+# release's account-use probes activate policy and populate its account pool.
+docker exec -i "$db" psql -U postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+CREATE DATABASE aeon_compat_floor WITH TEMPLATE aeon OWNER aeon;
+SQL
 start_image "$image_id"
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 echo "Previous release reads passed: $tag on the candidate schema"
-
-# Verify the immutable pre-capability binary and the seeded reads before
-# activation. The existing exact SQLSTATE/entry, empty/populated pool and
-# background-write refusal assertions remain mandatory for that binary.
 # Verify the pinned source remains below the capability floor before any
-# activated refusal probe, even when the ordinary release is the same image.
+# activated probe, even when the ordinary release is the same image.
 legacy_entry="$(git show "$legacy_tag:internal/db/visibility.go")"
 [[ "$legacy_entry" == *"func enterTenant("* && "$legacy_entry" != *"aeon.account_use_capable"* ]] || {
   echo 'Pinned rollback image must predate the account-use capability' >&2; exit 1;
@@ -110,17 +112,28 @@ if [[ "$digest" != "$legacy_digest" ]]; then
   docker pull --platform linux/amd64 "$legacy_image"
   legacy_image_id="$(docker image ls --quiet --no-trunc "$legacy_image" | sort -u)"
   [[ "$legacy_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable legacy image ID' >&2; exit 1; }
-  docker stop --time 30 "$app" >/dev/null
-  docker container rm "$app" >/dev/null
-  start_image "$legacy_image_id"
-  python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}"
 fi
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db" --release-tag "$tag"
+
+# Verify the immutable pre-capability binary and the seeded reads before
+# activation. The existing exact SQLSTATE/entry, empty/populated pool and
+# background-write refusal assertions remain mandatory for that binary.
+docker stop --time 30 "$app" >/dev/null
+docker container rm "$app" >/dev/null
+# Only this run's disposable database is replaced; both binaries start from
+# the same migrated rows with an empty account pool and inactive policy.
+docker exec -i "$db" psql -U postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+DROP DATABASE aeon;
+ALTER DATABASE aeon_compat_floor RENAME TO aeon;
+SQL
+start_image "$legacy_image_id"
+python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}"
 python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}" --database-container "$db"
 echo "Account-use rollback floor passed: $legacy_tag on the candidate schema"
 echo "Account-use rollback boundary passed: $legacy_tag on the candidate schema"
-echo "Migration compatibility passed: latest-release reads and below-floor account-use boundary"
+echo "Migration compatibility passed: latest-release reads and account-use probes, and below-floor account-use boundary"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
+  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations and passed account-use probes.\n' \
     "$previous_tag" "$previous_image" "$previous_image_id" >> "$GITHUB_STEP_SUMMARY"
   printf 'Rollback fixture %s; registry image %s; loaded image %s passed non-activated reads and verified activated empty/populated pools refuse below-floor binaries.\n' \
     "$legacy_tag" "$legacy_image" "$legacy_image_id" >> "$GITHUB_STEP_SUMMARY"

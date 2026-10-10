@@ -63,12 +63,18 @@ policy and activates it; policy-specific and pre-expansion migration fixtures
 retain their production defaults so their before-activation assertions remain
 meaningful. No production predicate, permission or audit is disabled.
 The previous-image harness checks the latest published release's reads on the
-candidate schema, then boots the pinned release 128 image without
-`account_use_v1`. It verifies that image's exact version and non-activated reads
-before checking activated empty and populated pools.
-Older handlers sanitize database errors, so each refused request must produce
-the exact `0A000` message from `aeon_enter_principal` in the disposable
-Postgres log. Generic HTTP errors alone cannot pass that gate.
+candidate schema and checks activated empty and denied pools.
+The pinned release's embedded principal-entry migration identifies whether it
+supports the capability. Supported releases must return only a catalog preview
+for an empty pool, refuse denied context selection and account hand-outs, and
+leave reservations, claims, starts and background state unchanged. The harness
+then boots the pinned release 128 image without `account_use_v1` on a separate
+copy of the inactive, migrated fixture. It verifies that image's exact version
+and non-activated reads before checking activated empty and populated pools.
+For releases below the floor, handlers sanitize database errors, so each
+refused request must produce the exact `0A000` message from
+`aeon_enter_principal` in the disposable Postgres log. Generic HTTP errors alone
+cannot pass that gate.
 
 The selection layer uses the same database predicates for dispatch, claims,
 explicit account targets, review, catalog choices and account hand-outs. Denied
