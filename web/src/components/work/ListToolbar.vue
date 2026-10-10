@@ -191,6 +191,8 @@ function filterText(dimension: Dimension, full = false) {
   const shorten = (parts: string[]) => !full && parts.length > 2 ? `${parts.slice(0, 2).join(', ')} +${parts.length - 2}` : parts.join(', ')
   return [plain.length ? shorten(plain) : '', not.length ? `not ${shorten(not)}` : ''].filter(Boolean).join(' · ')
 }
+// How many values a pill holds, as named (levels that share a name count once).
+function valueCount(dimension: Dimension) { const { plain, not } = presentedLabels.value.get(dimension)!; return plain.length + not.length }
 function filterKey(event: KeyboardEvent, clear: () => void) {
   if (event.key === 'Backspace' || event.key === 'Delete') {
     event.preventDefault()
@@ -266,7 +268,7 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
             @keydown="filterKey($event, () => emit('clear', dimension.key))">
             {{ dimension.title }}
             <span v-clip-tip="filterText(dimension.key, true)" class="facet-value"> · {{ filterText(dimension.key) }}</span>
-            <span class="facet-end"><span class="facet-count mono">{{ presented[dimension.key].length }}</span></span>
+            <span class="facet-end"><span class="facet-count mono">{{ valueCount(dimension.key) }}</span></span>
           </button>
           <button type="button" class="facet-x" :aria-label="`Remove ${dimension.title} filter`" @click="emit('clear', dimension.key)"><AppIcon name="close" :size="11" /></button>
         </span>
