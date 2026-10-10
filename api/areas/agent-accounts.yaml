@@ -290,6 +290,8 @@ paths:
       operationId: reserveAgentAccount
       description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing orders fitting accounts by soonest long-window reset, then larger available cap and account ID; concurrency reservations spread parallel work across accounts; fail closed when estimates are absent or no account fits. Queued retries recheck account state, probe, enabled profile and grants. If the reserved account leaves its routing fence or loses quota-pool confirmation, release its hold and slot and reroute within the current fence. When no replacement is eligible, return 409 with code account_moved_out_of_group or quota_pool_changed and leave the run unreserved. The daemon resolves the opaque key to its local credential.
       security: [{agentKey: []}]
+      parameters:
+        - {name: X-Aeon-Routine-Pickup, in: header, required: false, description: 'Required only for a persisted routine launch intent. JSON-encoded RoutinePickup binds qualified capability, artifact pins, registered computer and opaque checkout before reservation. Existing manual routing omits it.', schema: {type: string, maxLength: 2048}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRouteRequest'}}}}
       responses:
         '200': {description: Selected account, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRoute'}}}}

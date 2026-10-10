@@ -4,6 +4,7 @@ package agentpairing
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"

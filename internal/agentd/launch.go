@@ -6,10 +6,11 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
-	"github.com/inspr-at/paimos/internal/agentsetup"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/agentsetup"
 )
 
 const (

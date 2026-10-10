@@ -33,6 +33,9 @@ func migrateRecordV2(raw json.RawMessage) (Record, error) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return Record{}, errors.New("legacy Record has trailing data")
 	}
+	if record.RoutineWorkspace != nil {
+		return Record{}, errors.New("legacy Record cannot carry routine authority")
+	}
 	// Missing additive fields keep their zero values. In particular an empty
 	// launch_state never proves that no child was forked; startup still fences
 	// persisted PIDs as ownership_lost and never adopts or signals them.
