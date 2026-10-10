@@ -18,8 +18,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Risks: queue/assignment acting as a grant, fabricated evaluation granting a
-// write, and owner revocation between admission and the final mutation. Uses
+// Risks: queue/assignment acting as a grant, a tampered frozen assignment or
+// fabricated evaluation granting a write, and owner revocation before mutation. Uses
 // synthetic qualification and a PostgreSQL barrier at the final access fence.
 func TestRoutineActionGrantRejectsUnverifiedAndRevokedOwner(t *testing.T) {
 	f, in, q, reader := consentFixture(t)
@@ -66,6 +66,22 @@ func TestRoutineActionGrantRejectsUnverifiedAndRevokedOwner(t *testing.T) {
 	if !strings.Contains(string(held), "guardrail_evaluation_required") {
 		t.Fatalf("missing evaluation was not held: %s", held)
 	}
+	var frozen json.RawMessage
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT assignment FROM routine_runs WHERE id=$1`, o.Run.ID).Scan(&frozen)
+	})
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE routine_runs SET assignment=jsonb_set(assignment,'{goal}','"Tampered frozen goal"') WHERE id=$1`, o.Run.ID)
+		return err
+	})
+	tampered := f.call(f.p, "POST", actionPath, request, 409)
+	if !strings.Contains(string(tampered), "routine_assignment_changed") {
+		t.Fatalf("tampered snapshot was not denied: %s", tampered)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE routine_runs SET assignment=$2 WHERE id=$1`, o.Run.ID, frozen)
+		return err
+	})
 	var retainedOwner string
 	f.tx(func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Retained owner') RETURNING id::text`, f.p.TenantID).Scan(&retainedOwner)

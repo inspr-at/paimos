@@ -26,7 +26,9 @@ The final transaction takes the tenant, tree and pairing fences, reads the
 persisted running run/attempt grant, and checks current caller and owner rights,
 definition revision, assignment, consent, execution identity and exact project
 qualification. It requires a verified guardrail allow bound to the current
-policy and action context. The S08 evaluator supplies already persisted evidence
+policy and action context. The frozen assignment must still match its immutable
+digest and the current definition. Deterministic denials cannot be overridden by
+the independent evaluator. The S08 evaluator supplies already persisted evidence
 through `WithActionEvaluator`, including the persisted evaluation ID. The broker
 checks that allow record against the current definition, policy, context and
 hard/preset versions, and links it in the immutable action receipt. No model or

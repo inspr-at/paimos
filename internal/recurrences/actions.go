@@ -42,6 +42,10 @@ func (m *Module) AuthorizeActionTx(ctx context.Context, tx pgx.Tx, p tenant.Prin
 	if err != nil {
 		return empty, routineguard.Decision{}, "", err
 	}
+	var frozen Assignment
+	if json.Unmarshal(b.Assignment, &frozen) != nil || routineguard.Digest(&frozen) != b.AssignmentDigest {
+		return empty, routineguard.Decision{}, "", workorders.Fail(409, "routine_assignment_changed")
+	}
 	d := current.Definition
 	if identity != b.ExecutionPrincipalID || d == nil || d.Assignment == nil || d.OwnerPrincipalID != b.OwnerID || current.ProjectID != b.ProjectID || current.ParentID != b.ParentID || d.Scope.Kind != b.ScopeType || d.Scope.ProjectID != b.ScopeProjectID || routineguard.Digest(d.Assignment) != b.AssignmentDigest || b.ConsentRevision != current.Revision {
 		return empty, routineguard.Decision{}, "", workorders.Fail(409, "routine_grant_changed")
