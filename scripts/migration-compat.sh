@@ -21,6 +21,7 @@ suffix="${tmp##*.}"
 db="aeon-compat-db-$suffix"
 app="aeon-compat-app-$suffix"
 network="aeon-compat-$suffix"
+database='aeon'
 image="ghcr.io/inspr-at/aeon@$digest"
 # AEON-1051's activated refusal gate needs a binary below the capability floor.
 # The latest release may already advertise that capability. Keep testing its
@@ -67,7 +68,7 @@ start_previous() {
     --memory 256m -p 127.0.0.1::8080 \
     -e AEON_ENV=dev -e AEON_ADDR=:8080 -e AEON_FILES_DIR=/tmp/aeon-compat-files \
     -e AEON_PUBLIC_URL=http://localhost:8080 -e AEON_BOOTSTRAP_ADMIN_EMAIL=compat@example.invalid \
-    -e "AEON_DATABASE_URL=postgres://aeon:aeon@$db:5432/aeon?sslmode=disable" \
+    -e "AEON_DATABASE_URL=postgres://aeon:aeon@$db:5432/$database?sslmode=disable" \
     "$image_id" >/dev/null
   base="http://$(docker port "$app" 8080/tcp)"
   python3 scripts/migration-compat-probe.py wait-ready --base "$base"
@@ -86,6 +87,16 @@ AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=di
 start_previous
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 
+# Each binary gets the same inactive candidate-schema fixture. Stop all app
+# connections before copying it; activation is never undone or shared between
+# the capable normal path and the immutable legacy refusal gate.
+docker stop --time 30 "$app" >/dev/null
+docker container rm "$app" >/dev/null
+docker exec "$db" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 \
+  -c 'CREATE DATABASE aeon_legacy WITH TEMPLATE aeon OWNER aeon' >/dev/null
+start_previous
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
+
 # Verify the immutable pre-capability binary and the seeded reads before
 # activation. The existing exact SQLSTATE/entry, empty/populated pool and
 # background-write refusal assertions remain mandatory for that binary.
@@ -96,11 +107,12 @@ docker pull --platform linux/amd64 "$floor_image"
 floor_image_id="$(docker image ls --quiet --no-trunc "$floor_image" | sort -u)"
 [[ "$floor_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable rollback boundary image ID' >&2; exit 1; }
 image_id="$floor_image_id"
+database='aeon_legacy'
 start_previous
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${floor_tag#v}"
-python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${floor_tag#v}" --database-container "$db"
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${floor_tag#v}" --database-container "$db" --database "$database" --require-refusal
 echo "Migration compatibility passed: $tag on the candidate schema"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations. Account-use refusal boundary %s; registry image %s; loaded image %s passed the activated legacy probes.\n' \
+  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations and passed the capability-aware activated probes. Account-use refusal boundary %s; registry image %s; loaded image %s passed the activated legacy probes in an independent fixture.\n' \
     "$tag" "$image" "$previous_image_id" "$floor_tag" "$floor_image" "$floor_image_id" >> "$GITHUB_STEP_SUMMARY"
 fi

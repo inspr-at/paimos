@@ -13,6 +13,8 @@ import urllib.error
 import urllib.request
 import uuid
 
+MISSING_ROUTE = object()
+
 
 def release_ready(payload):
     """A previous binary is ready only when status is ready and it names no failure.
@@ -45,7 +47,7 @@ class Probe:
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
-    def call(self, path, body=None):
+    def call(self, path, body=None, *, missing_route=False):
         request = urllib.request.Request(
             self.base + path,
             data=None if body is None else json.dumps(body).encode(),
@@ -56,14 +58,35 @@ class Probe:
                     raise AssertionError(f'{path}: HTTP {response.status}')
                 if response.headers.get_content_type() != 'application/json':
                     raise AssertionError(f'{path}: expected JSON')
-                payload = json.load(response)
+                raw = response.read((1 << 20) + 1)
+                if len(raw) > 1 << 20:
+                    raise AssertionError(f'{path}: response exceeds bound')
+                payload = json.loads(raw)
         except urllib.error.HTTPError as error:
             # Do not dump headers, cookies or response bodies into CI logs.
-            status = error.code
-            error.close()
+            with error:
+                status = error.code
+                if missing_route and status == 404 and error.headers.get_content_type() == 'application/json':
+                    raw = error.read((1 << 20) + 1)
+                    if len(raw) <= 1 << 20 and json.loads(raw) == {'error': 'not found'}:
+                        return MISSING_ROUTE
             raise AssertionError(f'{path}: HTTP {status}') from None
         print(f'previous release: {path} OK')
         return payload
+
+    def account_use(self):
+        # Detect the previous binary's own API, never its release number or the
+        # candidate schema. A denied/broken route is not capability absence.
+        path = '/api/account-use?limit=1'
+        matrix = self.call(path, missing_route=True)
+        if matrix is MISSING_ROUTE:
+            return None
+        if (not isinstance(matrix, dict) or not isinstance(matrix.get('rules'), dict)
+            or type(matrix['rules'].get('revision')) is not int or matrix['rules']['revision'] < 1
+            or 'enforced_at' not in matrix['rules']
+            or any(not isinstance(matrix.get(key), list) for key in ('accounts', 'contexts', 'cells'))):
+            raise AssertionError(f'{path}: invalid account-use capability response')
+        return matrix
 
     def refused(self, path, body=None):
         headers = {'Origin': 'http://localhost:8080'}
@@ -132,12 +155,12 @@ class AccountUseBoundary:
     verbose error log proves the exact SQLSTATE, message and entry function for
     each request; an unrelated 403/404/500 cannot satisfy this gate.
     """
-    def __init__(self, probe, container):
-        self.probe, self.container = probe, container
+    def __init__(self, probe, container, database='aeon'):
+        self.probe, self.container, self.database = probe, container, database
 
     def sql(self, statement):
         result = subprocess.run(['docker', 'exec', '-i', self.container, 'psql',
-            '-X', '-qAt', '-U', 'postgres', '-d', 'aeon', '-v', 'ON_ERROR_STOP=1'],
+            '-X', '-qAt', '-U', 'postgres', '-d', self.database, '-v', 'ON_ERROR_STOP=1'],
             input=statement, text=True, capture_output=True, timeout=30, check=False)
         if result.returncode:
             raise AssertionError('disposable account-use fixture SQL failed')
@@ -151,8 +174,13 @@ class AccountUseBoundary:
         logs = result.stdout + result.stderr
         return logs.count('0A000: ' + CAPABILITY_ERROR), logs.count('aeon_enter_principal(')
 
-    def request(self, probe, path, body=None):
+    def request(self, probe, path, body=None, *, capable=False):
         before = self.errors()
+        if capable:
+            payload = probe.call(path, body)
+            if self.errors() != before:
+                raise AssertionError(f'{path}: capable binary hit the capability refusal gate')
+            return payload
         probe.refused(path, body)
         after = self.errors()
         if not all(a > b for a, b in zip(after, before)):
@@ -165,11 +193,26 @@ class AccountUseBoundary:
             'runs',(SELECT coalesce(jsonb_agg(jsonb_build_array(id,status,started_at,daemon_id,daemon_generation) ORDER BY id),'[]') FROM agent_runs WHERE tenant_id='{tenant}'),
             'claims',(SELECT count(*) FROM events WHERE tenant_id='{tenant}' AND type IN ('run.claimed','work_order.started')));""")
 
-    def check(self, state):
+    def check(self, state, version, *, require_refusal=False):
         self.probe.login()
         me = self.probe.call('/api/me')['principal']
         tenant, owner = str(uuid.UUID(me['tenant_id'])), str(uuid.UUID(me['id']))
         ticket = str(uuid.UUID(state['ticket']))
+        capable = self.probe.account_use() is not None
+        if capable:
+            if require_refusal:
+                raise AssertionError('legacy refusal boundary unexpectedly supports account_use_v1')
+            self.sql("ALTER SYSTEM SET log_error_verbosity='verbose'; SELECT pg_reload_conf();")
+            self.sql(f"UPDATE account_use_rules SET enforced_at=coalesce(enforced_at,clock_timestamp()) WHERE tenant_id='{tenant}';")
+            # A capable binary must keep serving the strict seeded reads and
+            # normal resolution after activation, rather than merely avoid 0A000.
+            self.probe.check(state, version)
+            matrix = self.probe.account_use()
+            if matrix is None or matrix['rules']['enforced_at'] is None:
+                raise AssertionError('capable account-use fixture is not activated')
+            self.request(self.probe, '/api/models/resolve?role=build&harness=codex', capable=True)
+            print('previous release: activated account_use_v1 normal path OK')
+            return
         # Prepare an enabled catalog before activation, with no daily settings.
         self.probe.call('/api/models/resolve?role=build&harness=codex')
         self.sql("ALTER SYSTEM SET log_error_verbosity='verbose'; SELECT pg_reload_conf();")
@@ -231,6 +274,8 @@ def main():
     parser.add_argument('--state', type=Path)
     parser.add_argument('--version')
     parser.add_argument('--database-container')
+    parser.add_argument('--database', default='aeon')
+    parser.add_argument('--require-refusal', action='store_true')
     args = parser.parse_args()
     if args.mode == 'wait-ready':
         wait_ready(args.base)
@@ -241,7 +286,8 @@ def main():
     if args.mode == 'account-use':
         if not args.database_container:
             parser.error('account-use requires --database-container')
-        AccountUseBoundary(probe, args.database_container).check(json.loads(args.state.read_text()))
+        AccountUseBoundary(probe, args.database_container, args.database).check(
+            json.loads(args.state.read_text()), args.version, require_refusal=args.require_refusal)
         return
     if args.mode == 'seed':
         state = probe.seed()

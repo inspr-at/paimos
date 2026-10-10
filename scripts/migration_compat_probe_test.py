@@ -178,6 +178,101 @@ class ProbeTest(unittest.TestCase):
             result.stderr = 'ERROR: 0A000: '+module.CAPABILITY_ERROR+'\nCONTEXT: aeon_enter_principal(uuid,uuid,boolean)'
             self.assertEqual(boundary.errors(), (1, 1))
 
+    def test_capability_detection_uses_the_binary_api_and_rejects_ambiguous_responses(self):
+        # Risk: an auth failure, broken endpoint or arbitrary 200 must not be
+        # mistaken for an older binary, or for supported account-use entry.
+        path = '/api/account-use?limit=1'
+        matrix = {'rules': {'revision': 1, 'enforced_at': None},
+                  'accounts': [], 'contexts': [], 'cells': []}
+        for version in ('260930115354.0.0', '261010123154.0.0', 'dev'):
+            with self.subTest(version=version), contextlib.redirect_stdout(io.StringIO()):
+                self.responses['/api/version'] = {'version': version}
+                self.responses[path] = matrix
+                self.assertEqual(self.probe.account_use(), matrix)
+                self.responses[path] = (404, 'application/json', b'{"error":"not found"}')
+                self.assertIsNone(self.probe.account_use())
+        for response in ({}, (200, 'application/json', b'null'),
+                         (200, 'text/html', b'<html>SPA</html>'),
+                         (200, 'application/json', b'x' * ((1 << 20) + 1)),
+                         (403, 'application/json', b'{"error":"forbidden"}'),
+                         (500, 'application/json', b'{"error":"failed"}'),
+                         (404, 'application/json', b'{"error":"account-use resource not found"}')):
+            with self.subTest(response=response[:2] if isinstance(response, tuple) else response):
+                self.responses[path] = response
+                with self.assertRaises(AssertionError):
+                    self.probe.account_use()
+        self.assertNotIn('/api/version', self.requests)
+
+    def test_capable_binary_serves_strict_reads_after_activation(self):
+        # Risk: capability support can no longer make an activated HTTP 200
+        # fail the gate, but lost rows or a broken resolver must still fail it.
+        ticket = '11111111-1111-4111-8111-111111111111'
+        tenant = '22222222-2222-4222-8222-222222222222'
+        owner = '33333333-3333-4333-8333-333333333333'
+        state = {'project': 'project', 'ticket': ticket}
+        self.responses['/api/me'] = {'principal': {'tenant_id': tenant, 'id': owner}}
+        self.responses['/api/nodes?parent_id=project&limit=100'] = {'items': [{'id': ticket}]}
+        self.responses['/api/nodes/' + ticket] = {'id': ticket}
+        path = '/api/account-use?limit=1'
+        resolve = '/api/models/resolve?role=build&harness=codex'
+        matrix = {'rules': {'revision': 1, 'enforced_at': None},
+                  'accounts': [], 'contexts': [], 'cells': []}
+        self.responses[path] = matrix
+        self.responses[resolve] = {'command_template': 'fixture launch'}
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
+        def sql(statement):
+            if statement.startswith('UPDATE account_use_rules'):
+                matrix['rules']['enforced_at'] = '2026-10-10T00:00:00Z'
+            return ''
+        boundary.sql = Mock(side_effect=sql)
+        boundary.errors = Mock(return_value=(0, 0))
+        with contextlib.redirect_stdout(io.StringIO()):
+            boundary.check(state, '260930115354.0.0')
+        self.assertIsNotNone(matrix['rules']['enforced_at'])
+        self.assertIn('/api/nodes/' + ticket, self.requests)
+        self.assertIn(resolve, self.requests)
+        self.assertEqual(boundary.errors.call_count, 2)
+        with self.assertRaisesRegex(AssertionError, 'unexpectedly supports account_use_v1'):
+            boundary.check(state, '260930115354.0.0', require_refusal=True)
+        self.responses['/api/nodes/' + ticket] = (500, 'application/json', b'{"error":"read failed"}')
+        with self.assertRaisesRegex(AssertionError, '/api/nodes/' + ticket + ': HTTP 500'):
+            boundary.check(state, '260930115354.0.0')
+        self.responses['/api/nodes/' + ticket] = {'id': ticket}
+        self.responses[resolve] = (500, 'application/json', b'{"error":"resolve failed"}')
+        with self.assertRaisesRegex(AssertionError, 'models/resolve.*HTTP 500'):
+            boundary.check(state, '260930115354.0.0')
+        self.responses[resolve] = {'command_template': 'fixture launch'}
+        boundary.errors = Mock(side_effect=[(0, 0), (1, 1)])
+        with self.assertRaisesRegex(AssertionError, 'capable binary hit the capability refusal gate'):
+            boundary.request(self.probe, resolve, capable=True)
+
+    def test_unsupported_binary_retains_both_strict_activated_pool_probes(self):
+        tenant = '22222222-2222-4222-8222-222222222222'
+        owner = '33333333-3333-4333-8333-333333333333'
+        self.responses['/api/me'] = {'principal': {'tenant_id': tenant, 'id': owner}}
+        self.responses['/api/account-use?limit=1'] = (404, 'application/json', b'{"error":"not found"}')
+        resolve = '/api/models/resolve?role=build&harness=codex'
+        self.responses[resolve] = {}
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container', 'aeon_legacy')
+        def sql(statement):
+            if statement.startswith('SELECT (SELECT count(*) FROM agent_accounts'):
+                return '0,1,true'
+            if statement.startswith('SELECT count(*) FROM user_preferences'):
+                return '0'
+            return ''
+        boundary.sql = Mock(side_effect=sql)
+        boundary.snapshot = Mock(return_value='unchanged')
+        with patch.object(boundary, 'request') as request, patch.object(module.time, 'sleep'), contextlib.redirect_stdout(io.StringIO()):
+            boundary.check({'ticket': '11111111-1111-4111-8111-111111111111'}, '260930115354.0.0')
+        # Every original endpoint and the real runtime claim path remain in
+        # both empty and populated probes, with the strict default expectation.
+        self.assertEqual(request.call_count, 12)
+        for offset in (0, 6):
+            self.assertEqual(request.call_args_list[offset].args[1], resolve)
+            self.assertRegex(request.call_args_list[offset + 5].args[1], r'^/api/runs/.+/claim$')
+        self.assertTrue(all(not call.kwargs for call in request.call_args_list))
+        self.assertEqual(boundary.snapshot.call_count, 4)
+
 
 class MigrationRuntimeTest(unittest.TestCase):
     def test_latest_compatibility_and_legacy_refusal_use_their_own_images(self):
@@ -187,8 +282,9 @@ class MigrationRuntimeTest(unittest.TestCase):
         floor_version = '261009095632.0.0'
         latest_digest = 'sha256:' + 'a' * 64
         latest_version = '261010123154.0.0'
-        for legacy_fails in (False, True):
-            with self.subTest(legacy_fails=legacy_fails), tempfile.TemporaryDirectory() as directory:
+        for latest_capable, latest_fails, legacy_fails in ((True, False, False), (False, False, False),
+                                                        (True, True, False), (True, False, True)):
+            with self.subTest(latest_capable=latest_capable, latest_fails=latest_fails, legacy_fails=legacy_fails), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 scripts, commands = root / 'scripts', root / 'commands'
                 scripts.mkdir()
@@ -212,11 +308,15 @@ if tool == 'docker':
         print(floor_id if args[-1].endswith(floor) else latest_id)
     elif args[0] == 'run' and args[-1] in (latest_id, floor_id):
         (root / 'image').write_text(args[-1])
-        record(['boot', args[-1]])
+        database = next(value for value in args if value.startswith('AEON_DATABASE_URL=')).split('/')[-1].split('?')[0]
+        (root / 'database').write_text(database)
+        record(['boot', args[-1], database])
     elif args[0] == 'port':
         print('127.0.0.1:18080')
     elif args[0] == 'exec' and '-i' in args:
         sys.stdin.read()
+    elif args[0] == 'exec' and 'CREATE DATABASE aeon_legacy WITH TEMPLATE aeon OWNER aeon' in args:
+        record(['copy-fixture'])
 elif tool == 'go':
     record(['migrate'])
 elif tool == 'python3':
@@ -229,10 +329,20 @@ elif tool == 'python3':
         if version != expected:
             sys.exit('wrong binary version')
     if mode == 'account-use':
-        if current != floor_id or version != '261009095632.0.0':
-            sys.exit('activated capable release correctly returns HTTP 200')
-        if os.environ['AEON_COMPAT_TEST_LEGACY_FAILS'] == 'true':
-            sys.exit('legacy refusal gate failed')
+        database = args[args.index('--database') + 1] if '--database' in args else 'aeon'
+        if database != (root / 'database').read_text():
+            sys.exit('probe and binary used different fixtures')
+        if current == latest_id:
+            if '--require-refusal' in args:
+                sys.exit('latest binary forced to refuse regardless of capability')
+            record(['activated-latest', os.environ['AEON_COMPAT_TEST_LATEST_CAPABLE']])
+            if os.environ['AEON_COMPAT_TEST_LATEST_FAILS'] == 'true':
+                sys.exit('capable normal path failed')
+        else:
+            if database != 'aeon_legacy' or '--require-refusal' not in args:
+                sys.exit('legacy refusal gate lost its independent strict fixture')
+            if os.environ['AEON_COMPAT_TEST_LEGACY_FAILS'] == 'true':
+                sys.exit('legacy refusal gate failed')
 '''
                 for name in ('docker', 'go', 'python3', 'trash'):
                     executable = commands / name
@@ -242,23 +352,30 @@ elif tool == 'python3':
                     cwd=root, env={**os.environ, 'PATH': str(commands) + os.pathsep + os.environ['PATH'],
                         'GITHUB_STEP_SUMMARY': str(root / 'summary'),
                         'AEON_COMPAT_TEST_ROOT': str(root),
+                        'AEON_COMPAT_TEST_LATEST_CAPABLE': str(latest_capable).lower(),
+                        'AEON_COMPAT_TEST_LATEST_FAILS': str(latest_fails).lower(),
                         'AEON_COMPAT_TEST_LEGACY_FAILS': str(legacy_fails).lower()},
                     capture_output=True, text=True, timeout=30, check=False)
                 events = [json.loads(line) for line in (root / 'events.jsonl').read_text().splitlines()]
                 latest_id, floor_id = 'sha256:' + 'b' * 64, 'sha256:' + 'c' * 64
                 checks = [event for event in events if event[:2] == ['probe', 'check']]
-                self.assertEqual(checks, [['probe', 'check', latest_id, latest_version],
-                    ['probe', 'check', floor_id, floor_version]])
+                self.assertEqual(checks, [['probe', 'check', latest_id, latest_version]] +
+                    ([] if latest_fails else [['probe', 'check', floor_id, floor_version]]))
                 self.assertEqual([event for event in events if event[:2] == ['probe', 'account-use']],
-                    [['probe', 'account-use', floor_id, floor_version]])
+                    [['probe', 'account-use', latest_id, latest_version]] +
+                    ([] if latest_fails else [['probe', 'account-use', floor_id, floor_version]]))
                 self.assertEqual([event for event in events if event[0] == 'pull'],
-                    [['pull', 'ghcr.io/inspr-at/aeon@' + latest_digest],
-                     ['pull', 'ghcr.io/inspr-at/aeon@' + floor_digest]])
+                    [['pull', 'ghcr.io/inspr-at/aeon@' + latest_digest]] +
+                    ([] if latest_fails else [['pull', 'ghcr.io/inspr-at/aeon@' + floor_digest]]))
                 self.assertLess(events.index(['migrate']), events.index(checks[0]))
-                self.assertLess(events.index(checks[0]), events.index(checks[1]))
-                if legacy_fails:
+                self.assertLess(events.index(checks[0]), events.index(['copy-fixture']))
+                self.assertLess(events.index(['copy-fixture']), events.index(['activated-latest', str(latest_capable).lower()]))
+                if not latest_fails:
+                    self.assertLess(events.index(checks[0]), events.index(checks[1]))
+                    self.assertIn(['boot', floor_id, 'aeon_legacy'], events)
+                if latest_fails or legacy_fails:
                     self.assertNotEqual(result.returncode, 0)
-                    self.assertIn('legacy refusal gate failed', result.stderr)
+                    self.assertIn('capable normal path failed' if latest_fails else 'legacy refusal gate failed', result.stderr)
                     self.assertNotIn('Migration compatibility passed:', result.stdout)
                 else:
                     self.assertEqual(result.returncode, 0, result.stderr)
