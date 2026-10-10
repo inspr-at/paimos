@@ -63,7 +63,7 @@ func routinePolicyTx(ctx context.Context, tx pgx.Tx, tenantID string, item Recur
 		}
 		return out, err
 	}
-	for _, permission := range []string{"harness.control", "run.create"} {
+	for _, permission := range append(executionPermissions(d.Assignment), "harness.control") {
 		if err := authz.RequireTx(ctx, tx, owner, permission, authz.Scope{ProjectID: item.ProjectID}); err != nil {
 			if errors.Is(err, authz.ErrForbidden) {
 				out.WaitReason = "owner_unavailable"
@@ -78,6 +78,14 @@ func routinePolicyTx(ctx context.Context, tx pgx.Tx, tenantID string, item Recur
 	}
 	if q.OwnerPersonID != owner.ID {
 		out.WaitReason = "owner_policy_mismatch"
+		return out, nil
+	}
+	capability := "routine_native_coding_v1"
+	if d.Assignment.RuntimeRequirements.NeedsBrowser {
+		capability = "routine_native_browser_v1"
+	}
+	if !slices.Contains(q.Runtime.Capabilities, capability) {
+		out.WaitReason = "capability_unqualified"
 		return out, nil
 	}
 	if !slices.Contains(q.Runtime.BudgetModes, d.Assignment.Budget.Mode) {
@@ -136,6 +144,9 @@ func (m *Module) projectExecutionPolicy(ctx context.Context, tx pgx.Tx, tenantID
 // tenant/tree fences. It creates no grant. S05/S13 must call this before run
 // rows/holds and append events only after every further admission check.
 func RequireExecutionConsentTx(ctx context.Context, tx pgx.Tx, tenantID, id string, revision int64, reader ExecutionRuntimeReader) (string, error) {
+	if !workorders.UUID(id) || revision < 1 {
+		return "", workorders.Fail(400, "invalid_routine_revision")
+	}
 	if _, err := lock(ctx, tx, tenantID, false); err != nil {
 		return "", err
 	}
@@ -164,6 +175,11 @@ func RequireExecutionConsentTx(ctx context.Context, tx pgx.Tx, tenantID, id stri
 
 func executionPermissions(a *Assignment) []string {
 	permissions := []string{"nodes.read", "run.create", "work_orders.write"}
+	for _, source := range a.Sources {
+		if source.Kind == "knowledge" {
+			permissions = append(permissions, "knowledge.read")
+		}
+	}
 	for _, action := range a.AllowedActions {
 		switch action {
 		case "work.create", "work.update":
@@ -239,6 +255,19 @@ func executionIdentityTx(ctx context.Context, tx pgx.Tx, tenantID string, in Inp
 	p := tenant.Principal{ID: id, TenantID: tenantID, Kind: tenant.Agent, Scopes: permissions}
 	for _, permission := range []string{"nodes.read", "run.create", "work_orders.write"} {
 		if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: in.ProjectID}); err != nil {
+			return err
+		}
+	}
+	for _, source := range d.Assignment.Sources {
+		var project string
+		if err := tx.QueryRow(ctx, `SELECT coalesce(project_id::text,'') FROM nodes WHERE id=$1 AND deleted_at IS NULL`, source.ID).Scan(&project); err != nil {
+			return err
+		}
+		permission := "nodes.read"
+		if source.Kind == "knowledge" {
+			permission = "knowledge.read"
+		}
+		if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: project}); err != nil {
 			return err
 		}
 	}

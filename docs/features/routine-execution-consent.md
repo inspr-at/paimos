@@ -17,7 +17,7 @@ bearer credentials cannot enable or disable this person-owned setting.
 Enabling requires an immutable accepted qualification for the same tenant,
 project and canonical owner. It binds the current workspace/project/model
 policy revisions, exact server and daemon SHA-256 artifacts, capability digest
-(including adapter/model/browser pins), native host mapping and qualified budget
+(including adapter/model/browser pins), native host mapping, explicit native coding/browser capabilities and qualified budget
 modes. Coordinator acceptance and OPS attestation are separate redacted evidence
 pins. The internal `modelregistry.RecordQualificationTx` seam records them only
 under existing workspace `releases.deploy` authority, held by an interactive

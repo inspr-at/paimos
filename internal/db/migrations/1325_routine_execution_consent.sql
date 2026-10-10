@@ -11,6 +11,7 @@ CREATE TABLE routine_execution_qualifications (
  server_digest text NOT NULL,
  daemon_digest text NOT NULL,
  capability_digest text NOT NULL,
+ capabilities jsonb NOT NULL,
  host_mapping_digest text NOT NULL,
  budget_modes jsonb NOT NULL,
  coordinator_acceptance text NOT NULL,

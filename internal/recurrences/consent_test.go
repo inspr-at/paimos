@@ -33,7 +33,7 @@ func consentFixture(t *testing.T) (*fixture, Input, modelregistry.Qualification,
 		_, err := tx.Exec(t.Context(), `INSERT INTO project_lead_settings(tenant_id,project_id,owner_person_id,overrides,updated_by) VALUES($1,$2,$3,'{}',$3)`, f.p.TenantID, f.project, f.p.ID)
 		return err
 	})
-	q := modelregistry.Qualification{ID: "10000000-0000-4000-8000-000000000084", ProjectID: f.project, Runtime: ExecutionRuntime{ServerDigest: strings.Repeat("a", 64), DaemonDigest: strings.Repeat("b", 64), CapabilityDigest: strings.Repeat("c", 64), HostMappingDigest: strings.Repeat("d", 64), BudgetModes: []string{"off"}}, CoordinatorAcceptance: strings.Repeat("e", 64), OPSAttestation: strings.Repeat("f", 64)}
+	q := modelregistry.Qualification{ID: "10000000-0000-4000-8000-000000000084", ProjectID: f.project, Runtime: ExecutionRuntime{ServerDigest: strings.Repeat("a", 64), DaemonDigest: strings.Repeat("b", 64), CapabilityDigest: strings.Repeat("c", 64), Capabilities: []string{"routine_native_coding_v1"}, HostMappingDigest: strings.Repeat("d", 64), BudgetModes: []string{"off"}}, CoordinatorAcceptance: strings.Repeat("e", 64), OPSAttestation: strings.Repeat("f", 64)}
 	f.tx(func(tx pgx.Tx) error {
 		var err error
 		q.OwnerPersonID, q.PolicyDigest, err = modelregistry.QualificationPolicyTx(t.Context(), tx, f.p.TenantID, f.project)
@@ -182,6 +182,30 @@ func TestRoutineConsentBindsQualificationAndScopedIdentity(t *testing.T) {
 			reader = original
 		})
 	}
+	// A coding qualification cannot approve browser or capped-budget work.
+	browser := f.input()
+	browser.Definition = &Definition{Scope: DefinitionScope{Kind: "personal"}, OwnerPrincipalID: f.p.ID, Assignment: &Assignment{Goal: "Synthetic browser", Role: "build", WorkKindID: in.Definition.Assignment.WorkKindID, AllowedActions: []string{}, RuntimeRequirements: RuntimeRequirements{NeedsNativeHost: true, NeedsBrowser: true, RuntimeClass: "native_browser"}, Budget: DefinitionBudget{Mode: "off"}}}
+	browserRoutine := f.create(browser)
+	if browserRoutine.ExecutionPolicy.WaitReason != "capability_unqualified" {
+		t.Fatalf("coding qualification admitted browser: %+v", browserRoutine.ExecutionPolicy)
+	}
+	tokens := int64(100)
+	browser.Definition.Assignment.RuntimeRequirements = RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"}
+	browser.Definition.Assignment.Budget = DefinitionBudget{Mode: "tokens", TokenCeiling: &tokens}
+	budgetRoutine := f.create(browser)
+	if budgetRoutine.ExecutionPolicy.WaitReason != "budget_mode_unqualified" {
+		t.Fatalf("unsupported budget admitted: %+v", budgetRoutine.ExecutionPolicy)
+	}
+	originalReader := reader
+	for _, offset := range []string{"-interval '1 hour'", "+interval '1 hour'"} {
+		reader = func(ctx context.Context, tx pgx.Tx, _ string) (ExecutionRuntime, error) {
+			out := q.Runtime
+			err := tx.QueryRow(ctx, `SELECT clock_timestamp()`+offset).Scan(&out.ObservedAt)
+			return out, err
+		}
+		claim(r, "runtime_unavailable", "")
+	}
+	reader = originalReader
 	// Any definition edit discards consent without touching the personal actor.
 	f.call(f.p, "PUT", path, struct {
 		Input

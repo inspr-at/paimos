@@ -971,6 +971,7 @@
       "classification": "personal",
       "columns": {
         "budget_modes": "metadata",
+        "capabilities": "metadata",
         "capability_digest": "metadata",
         "coordinator_acceptance": "metadata",
         "daemon_digest": "metadata",

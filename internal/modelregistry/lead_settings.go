@@ -539,6 +539,7 @@ type ExecutionRuntime struct {
 	ServerDigest      string   `json:"server_digest"`
 	DaemonDigest      string   `json:"daemon_digest"`
 	CapabilityDigest  string   `json:"capability_digest"`
+	Capabilities      []string `json:"capabilities"`
 	HostMappingDigest string   `json:"host_mapping_digest"`
 	BudgetModes       []string `json:"budget_modes"`
 	// ObservedAt is required on live facts, and is not part of qualification.
@@ -591,6 +592,16 @@ func validRuntime(r ExecutionRuntime) bool {
 	if len(r.BudgetModes) < 1 || len(r.BudgetModes) > 4 {
 		return false
 	}
+	if len(r.Capabilities) < 1 || len(r.Capabilities) > 2 {
+		return false
+	}
+	capabilities := map[string]bool{}
+	for _, capability := range r.Capabilities {
+		if capabilities[capability] || !slices.Contains([]string{"routine_native_coding_v1", "routine_native_browser_v1"}, capability) {
+			return false
+		}
+		capabilities[capability] = true
+	}
 	seen := map[string]bool{}
 	for _, mode := range r.BudgetModes {
 		if seen[mode] || !slices.Contains([]string{"off", "tokens", "money", "both"}, mode) {
@@ -607,7 +618,10 @@ func runtimeMatches(a, b ExecutionRuntime) bool {
 	aa, bb := slices.Clone(a.BudgetModes), slices.Clone(b.BudgetModes)
 	slices.Sort(aa)
 	slices.Sort(bb)
-	return a.ServerDigest == b.ServerDigest && a.DaemonDigest == b.DaemonDigest && a.CapabilityDigest == b.CapabilityDigest && a.HostMappingDigest == b.HostMappingDigest && slices.Equal(aa, bb)
+	ac, bc := slices.Clone(a.Capabilities), slices.Clone(b.Capabilities)
+	slices.Sort(ac)
+	slices.Sort(bc)
+	return a.ServerDigest == b.ServerDigest && a.DaemonDigest == b.DaemonDigest && a.CapabilityDigest == b.CapabilityDigest && a.HostMappingDigest == b.HostMappingDigest && slices.Equal(aa, bb) && slices.Equal(ac, bc)
 }
 
 // FenceExecutionTx is the final-write entry: tenant -> tree -> project row.
@@ -649,13 +663,16 @@ func QualificationPolicyTx(ctx context.Context, tx pgx.Tx, tenantID, project str
 
 func LoadRoutineQualificationTx(ctx context.Context, tx pgx.Tx, project, id string) (Qualification, error) {
 	var q Qualification
-	var modes []byte
-	err := tx.QueryRow(ctx, `SELECT id::text,project_id::text,owner_person_id::text,policy_digest,server_digest,daemon_digest,capability_digest,host_mapping_digest,budget_modes,coordinator_acceptance,ops_attestation FROM routine_execution_qualifications WHERE id=$1 AND project_id=$2 AND revoked_at IS NULL`, id, project).Scan(&q.ID, &q.ProjectID, &q.OwnerPersonID, &q.PolicyDigest, &q.Runtime.ServerDigest, &q.Runtime.DaemonDigest, &q.Runtime.CapabilityDigest, &q.Runtime.HostMappingDigest, &modes, &q.CoordinatorAcceptance, &q.OPSAttestation)
+	var modes, capabilities []byte
+	err := tx.QueryRow(ctx, `SELECT id::text,project_id::text,owner_person_id::text,policy_digest,server_digest,daemon_digest,capability_digest,host_mapping_digest,budget_modes,capabilities,coordinator_acceptance,ops_attestation FROM routine_execution_qualifications WHERE id=$1 AND project_id=$2 AND revoked_at IS NULL`, id, project).Scan(&q.ID, &q.ProjectID, &q.OwnerPersonID, &q.PolicyDigest, &q.Runtime.ServerDigest, &q.Runtime.DaemonDigest, &q.Runtime.CapabilityDigest, &q.Runtime.HostMappingDigest, &modes, &capabilities, &q.CoordinatorAcceptance, &q.OPSAttestation)
 	if err == nil {
-		if len(modes) > 1024 {
+		if len(modes) > 1024 || len(capabilities) > 1024 {
 			return q, workorders.Fail(409, "qualification_unavailable")
 		}
 		err = json.Unmarshal(modes, &q.Runtime.BudgetModes)
+	}
+	if err == nil {
+		err = json.Unmarshal(capabilities, &q.Runtime.Capabilities)
 	}
 	return q, err
 }
@@ -779,7 +796,8 @@ func RecordQualificationTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, q
 		return workorders.Fail(409, "qualification_policy_changed")
 	}
 	modes, _ := json.Marshal(q.Runtime.BudgetModes)
-	_, err = tx.Exec(ctx, `INSERT INTO routine_execution_qualifications(tenant_id,id,project_id,owner_person_id,policy_digest,server_digest,daemon_digest,capability_digest,host_mapping_digest,budget_modes,coordinator_acceptance,ops_attestation,recorded_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, p.TenantID, q.ID, q.ProjectID, q.OwnerPersonID, q.PolicyDigest, q.Runtime.ServerDigest, q.Runtime.DaemonDigest, q.Runtime.CapabilityDigest, q.Runtime.HostMappingDigest, modes, q.CoordinatorAcceptance, q.OPSAttestation, p.ID)
+	capabilities, _ := json.Marshal(q.Runtime.Capabilities)
+	_, err = tx.Exec(ctx, `INSERT INTO routine_execution_qualifications(tenant_id,id,project_id,owner_person_id,policy_digest,server_digest,daemon_digest,capability_digest,host_mapping_digest,budget_modes,capabilities,coordinator_acceptance,ops_attestation,recorded_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, p.TenantID, q.ID, q.ProjectID, q.OwnerPersonID, q.PolicyDigest, q.Runtime.ServerDigest, q.Runtime.DaemonDigest, q.Runtime.CapabilityDigest, q.Runtime.HostMappingDigest, modes, capabilities, q.CoordinatorAcceptance, q.OPSAttestation, p.ID)
 	if err != nil {
 		return err
 	}

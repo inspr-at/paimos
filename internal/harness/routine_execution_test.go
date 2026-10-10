@@ -28,7 +28,7 @@ func TestRoutineExecutionSettingsRequirePersonAndExactQualification(t *testing.T
 		_, err := tx.Exec(t.Context(), `INSERT INTO project_lead_settings(tenant_id,project_id,owner_person_id,overrides,updated_by) VALUES($1,$2,$3,'{}',$3)`, f.person.TenantID, f.project, f.person.ID)
 		return err
 	})
-	runtime := modelregistry.ExecutionRuntime{ServerDigest: strings.Repeat("a", 64), DaemonDigest: strings.Repeat("b", 64), CapabilityDigest: strings.Repeat("c", 64), HostMappingDigest: strings.Repeat("d", 64), BudgetModes: []string{"off"}}
+	runtime := modelregistry.ExecutionRuntime{ServerDigest: strings.Repeat("a", 64), DaemonDigest: strings.Repeat("b", 64), CapabilityDigest: strings.Repeat("c", 64), Capabilities: []string{"routine_native_coding_v1"}, HostMappingDigest: strings.Repeat("d", 64), BudgetModes: []string{"off"}}
 	reader := func(ctx context.Context, tx pgx.Tx, _ string) (modelregistry.ExecutionRuntime, error) {
 		out := runtime
 		err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&out.ObservedAt)
@@ -76,6 +76,18 @@ func TestRoutineExecutionSettingsRequirePersonAndExactQualification(t *testing.T
 	got := request(f.person, 0, true, q.ID, 200)
 	if got["automatic_launch_enabled"] != true || got["revision"] != float64(1) {
 		t.Fatal(got)
+	}
+	// A configured admission adapter and persisted consent cannot stand in for
+	// independent runtime facts on a different/unconfigured executable.
+	unconfigured := http.NewServeMux()
+	harness.NewWithLeadAdmission(f.db.App, readyLeadChecks).Mount(unconfigured)
+	requestOff := httptest.NewRequest("GET", path, nil)
+	requestOff = requestOff.WithContext(tenant.WithPrincipal(requestOff.Context(), f.person))
+	responseOff := httptest.NewRecorder()
+	unconfigured.ServeHTTP(responseOff, requestOff)
+	expect(t, responseOff, 200)
+	if disabled := decode(t, responseOff); disabled["automatic_launch_enabled"] != false || disabled["wait_reason"] != "runtime_unavailable" {
+		t.Fatal(disabled)
 	}
 	request(f.person, 0, true, q.ID, 409)
 	lead := startLead(t, f, 0)
