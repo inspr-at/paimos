@@ -89,7 +89,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	}
 	out := WorkResolution{Resolution: Resolution{Role: roleName, AuthorFamily: q.AuthorFamily, Source: "aeon", Ladder: []Candidate{}, OwnerRequired: true}, Residency: requirement}
 	out.Trace = PreferenceTrace{PersonID: q.PersonID, Kind: q.Area, KindSource: "ticket", Complexity: q.Complexity, ComplexitySource: q.ComplexitySource, Bucket: modelprefs.BucketOf(q.Complexity, q.Role), SetBy: "default", Mode: "auto", QualifyingAccountIDs: []string{}}
-	health, err := agentaccounts.HarnessHealthAt(ctx, tx, now)
+	health, err := agentaccounts.HarnessHealthAt(ctx, tx, now, q.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +302,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		if err != nil {
 			return nil, err
 		}
-	} else {
+	} else if out.Profile == nil {
 		out.Trace.Blocked = "no model in the ranked order can run now"
 		if roleName == "review-gate-security" {
 			out.Trace.Blocked = "no qualified security review profile/account"

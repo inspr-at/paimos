@@ -21,11 +21,12 @@ import (
 var useAccountID = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 func (rt *runtime) cmdUse() *Command {
-	var shell, socket, root string
+	var shell, socket, root, project string
 	shell = "sh"
 	return &Command{
 		Name: "use", Short: "Print the local environment for one account", Use: "use <harness> <label-or-account-id>", minArgs: 2, maxArgs: 2,
 		addFlags: func(fs *flagSet) {
+			fs.string(&project, "project-id", 0, "project context (otherwise infer from the linked working folder)")
 			fs.string(&shell, "shell", 0, "sh, bash, zsh or fish")
 			fs.string(&socket, "socket", 0, "owner-only local agentd socket")
 			fs.string(&root, "setup-root", 0, "private pairing state")
@@ -50,6 +51,13 @@ func (rt *runtime) cmdUse() *Command {
 			q := url.Values{"harness": {args[0]}, "label": {args[1]}}
 			if useAccountID.MatchString(args[1]) {
 				q = url.Values{"harness": {args[0]}, "account_id": {args[1]}}
+			}
+			projectID, err := rt.accountProject(project)
+			if err != nil {
+				return err
+			}
+			if projectID != "" {
+				q.Set("project_id", projectID)
 			}
 			var found agentaccounts.UseResult
 			if err := rt.do("GET", "/api/agent-accounts/use?"+q.Encode(), nil, &found); err != nil {

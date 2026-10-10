@@ -126,7 +126,7 @@ func PopulateDailyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, out *ag
 		} else {
 			d = agentplan.DefaultDaily()
 		}
-		item := agentplan.DailyAccount{AccountID: a.ID, Label: a.Label, Order: len(groups[a.Harness]) + 1, Freshness: "unknown", ResetPolicy: "suggest", DetailsRedacted: !privacy[a.ID], CanEdit: canManage && privacy[a.ID]}
+		item := agentplan.DailyAccount{Contexts: a.Contexts, AccountID: a.ID, Label: a.Label, Order: len(groups[a.Harness]) + 1, Freshness: "unknown", ResetPolicy: "suggest", DetailsRedacted: !privacy[a.ID], CanEdit: canManage && privacy[a.ID]}
 		if !privacy[a.ID] {
 			groups[a.Harness] = append(groups[a.Harness], item)
 			continue

@@ -3,19 +3,20 @@ import { hostCapacityReason } from './hostCapacity.ts'
 export const WAIT_CODES = ['schedule', 'reserve', 'reading', 'vendor', 'offline', 'sign_in', 'hold', 'approval', 'capacity', 'allowance', 'models', 'state', 'residency', 'context'] as const
 export interface CapacityWait {
   code: typeof WAIT_CODES[number]
+  /** AEON-1044: the work context the account is not allowed for (wait code `context`). */
+  context?: string
   host_reason?: string
   until?: string
   read_at?: string
   timezone?: string
   run_now_allowed: boolean
-  /** AEON-1044: the work context the account is not allowed for (wait code `context`). */
-  context?: unknown
 }
 export function isCapacityWait(value: unknown): value is CapacityWait {
   if (!value || typeof value !== 'object') return false
   const v = value as Record<string, unknown>
   return WAIT_CODES.includes(v.code as CapacityWait['code']) && typeof v.run_now_allowed === 'boolean'
     && ['until', 'read_at'].every(key => v[key] === undefined || typeof v[key] === 'string' && Number.isFinite(Date.parse(v[key] as string)))
+    && (v.context === undefined || typeof v.context === 'string' && v.context.length <= 36)
     && (v.timezone === undefined || typeof v.timezone === 'string' && v.timezone.length < 100)
 }
 export function capacityWaitText(wait: CapacityWait, subject = 'Agents', now = Date.now()): string {

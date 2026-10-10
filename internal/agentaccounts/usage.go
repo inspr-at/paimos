@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/accountprivacy"
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/events"
@@ -284,14 +285,15 @@ func (m *Module) writeUsagePolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 type guardPosture struct {
-	ID         string     `json:"id"`
-	Label      string     `json:"label"`
-	Order      int        `json:"order"`
-	Posture    string     `json:"posture"`
-	Floor      int        `json:"floor_percent"`
-	Boost      int        `json:"boost_percent"`
-	BoostUntil *time.Time `json:"boost_until"`
-	Keep       float64    `json:"keep_for_you_percent"`
+	Contexts   []accountuse.ContextLabel `json:"contexts,omitempty"`
+	ID         string                    `json:"id"`
+	Label      string                    `json:"label"`
+	Order      int                       `json:"order"`
+	Posture    string                    `json:"posture"`
+	Floor      int                       `json:"floor_percent"`
+	Boost      int                       `json:"boost_percent"`
+	BoostUntil *time.Time                `json:"boost_until"`
+	Keep       float64                   `json:"keep_for_you_percent"`
 }
 
 func (m *Module) postures(w http.ResponseWriter, r *http.Request) {
@@ -397,7 +399,7 @@ func (m *Module) postures(w http.ResponseWriter, r *http.Request) {
 			if u.Posture == "maxout" {
 				keep = float64(u.Floor)
 			}
-			out.Accounts = append(out.Accounts, guardPosture{ID: a.ID, Label: a.Label, Order: advice[a.ID].Rank, Posture: u.Posture, Floor: u.Floor, Boost: u.Boost, BoostUntil: u.BoostUntil, Keep: keep})
+			out.Accounts = append(out.Accounts, guardPosture{Contexts: a.Contexts, ID: a.ID, Label: a.Label, Order: advice[a.ID].Rank, Posture: u.Posture, Floor: u.Floor, Boost: u.Boost, BoostUntil: u.BoostUntil, Keep: keep})
 		}
 		return nil
 	})
