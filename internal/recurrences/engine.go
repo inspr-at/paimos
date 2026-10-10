@@ -98,6 +98,11 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 		processed := false
 		var claimed Recurrence
 		err = db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+			// Each claim bounds database work before scanning source events or
+			// holding the access/tree fence; a timeout rolls back the whole unit.
+			if err := db.SetLocalStatementTimeout(ctx, tx, 5*time.Second); err != nil {
+				return err
+			}
 			got, err := lock(ctx, tx, tenantID, true)
 			if err != nil || !got {
 				return err
