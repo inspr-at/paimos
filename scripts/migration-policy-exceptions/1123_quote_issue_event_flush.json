@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1123_quote_issue_event_flush.sql",
+      "sha256": "fa31c2e2cddac5696eed32284ee5aaa3fd864e1033a8bd2e606413859b47d7fb",
+      "ticket": "AEON-587",
+      "reason": "Issue event linkage moves to deferred FK and constraint-trigger validation at commit; quote completeness, draft state, totals and immutable evidence remain guarded. This permits imports to insert issues and update quote state before the event counter, with predicted event identities checked during final flush. No rows, tables, columns, digests or evidence are rewritten. ALTER CONSTRAINT and replacement trigger-function definitions require this exact-byte exception; coordinator review and previous-binary compatibility CI remain required before merge/release."
+    }
+  ]
+}

@@ -86,6 +86,21 @@ carries an exact-byte exception and a case module that pins the key list.
 
 ## Expand and contract (AEON-415)
 
+AEON-587 uses 1119 for the shared `document-v2` digest and 1123 to move the
+issue event FK and event-type/actor check to commit. Quote completeness, current
+draft state, totals and append-only issue evidence still validate on insertion.
+The importer predicts issue event IDs while holding the tenant/tree/quote locks,
+inserts issues and changes state, then appends events in the final flush. Any
+counter drift, missing event or invalid event evidence rolls the transaction
+back. Native writers that already append before inserting remain compatible.
+Neither migration changes a stored digest or historical snapshot. V1 readers
+retain the frozen importer field order and map-shaped prose alongside native
+v1 verification. Pre-baseline mappings bootstrap only without a later native
+event, recording both the pre-update and final snapshots as new import events.
+Both migrations have exact-byte policy exceptions requiring coordinator review
+and previous-binary compatibility CI before merge/release; a rollback below
+1119 still requires a v2-capable reader once any v2 quote has been issued.
+
 Ship schema changes in two releases. The expansion release adds the replacement
 table or column, backfills data, and moves readers and writers while retaining
 the old shape. A later release may remove the unused shape. A rename is

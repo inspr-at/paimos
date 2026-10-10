@@ -173,6 +173,8 @@ paths:
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
         '200': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '409': {description: "Provider unavailable (provider_unavailable); failure status and audit event were persisted."}
+        '503': {description: "Provider unavailable and the authorized failure status could not be persisted."}
   /crm/organisations/{organisationId}/sync-status:
     get:
       operationId: getCRMProviderSyncStatus
@@ -227,7 +229,19 @@ paths:
       security: [{session: []}]
       parameters: [{name: q, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 200}}]
       responses:
-        '200': {description: External matches, content: {application/json: {schema: {type: array, items: {type: object}}}}}
+        '200':
+          description: "External matches; the response remains an array. Availability headers identify unavailable providers when results are partial."
+          headers:
+            X-CRM-Provider-Availability:
+              description: "JSON array of provider_id and state (available or unavailable); excludes provider errors and credentials."
+              schema: {type: string}
+            X-CRM-Partial-Results:
+              description: "True when at least one enabled provider could not be searched."
+              schema: {type: boolean}
+          content: {application/json: {schema: {type: array, items: {type: object}}}}
+        '503':
+          description: "Every enabled provider is unavailable; availability headers remain present."
+          content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
   /crm/providers/{providerId}/config:
     put:
       operationId: putCRMProviderConfig
@@ -245,6 +259,7 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [external_id], properties: {external_id: {type: string}}}}}}
       responses:
         '201': {description: Imported customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '409': {description: "External identity already imported (external_identity_conflict) or provider unavailable (provider_unavailable); unrelated database errors are not masked."}
 components:
   schemas:
     CRMAddress:

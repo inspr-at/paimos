@@ -18,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/business/quotedocument"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/linkvault"
 	"github.com/inspr-at/paimos/internal/plugins/fence"
@@ -31,19 +32,7 @@ type finalizeWrite struct {
 }
 
 func documentDigest(id string, version int, offerNo string, doc quoteDocument) (string, error) {
-	payload := struct {
-		Mode        string        `json:"mode"`
-		QuoteNodeID string        `json:"quote_node_id"`
-		Version     int           `json:"version"`
-		OfferNo     string        `json:"offer_no"`
-		Document    quoteDocument `json:"document"`
-	}{"document-v1", id, version, offerNo, doc}
-	b, e := json.Marshal(payload)
-	if e != nil {
-		return "", e
-	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:]), nil
+	return quotedocument.Digest(quotedocument.DigestMode, id, version, offerNo, doc)
 }
 func decimalCents(cents int64) string { return fmt.Sprintf("%d.%02d00", cents/100, cents%100) }
 func rateCents(rate decimal, quantity int64) (int64, error) {

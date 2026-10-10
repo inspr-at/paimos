@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -20,10 +21,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/plugins/fence"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Provider is compiled into the host. Tenant configuration contains only an
@@ -340,7 +344,7 @@ func (m *module) putProviderConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := providerConfig{ID: id, Enabled: in.Enabled, Configured: in.SecretRef != ""}
-	e := m.run(r, p, fence.PermIntegrationsCall, func(tx pgx.Tx) error {
+	e := m.providerWrite(r.Context(), p, fence.PermIntegrationsCall, "crm.manage", func(tx pgx.Tx) error {
 		var revision int64
 		var oldEnabled bool
 		var oldRef string
@@ -414,9 +418,25 @@ func (m *module) searchProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := []RemoteCustomer{}
+	availability := []struct {
+		ProviderID string `json:"provider_id"`
+		State      string `json:"state"`
+	}{}
+	failed := 0
 	for _, t := range targets {
-		items, e := t.provider.Search(r.Context(), t.ref, q)
-		if e != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		items, e := t.provider.Search(ctx, t.ref, q)
+		cancel()
+		state := "available"
+		if e != nil || len(items) > 100 {
+			state = "unavailable"
+			failed++
+		}
+		availability = append(availability, struct {
+			ProviderID string `json:"provider_id"`
+			State      string `json:"state"`
+		}{t.id, state})
+		if state == "unavailable" {
 			continue
 		}
 		for _, item := range items {
@@ -426,7 +446,19 @@ func (m *module) searchProviders(w http.ResponseWriter, r *http.Request) {
 			item.Provider = t.id
 			out = append(out, item)
 		}
-	} // Deduplicate already imported identities under RLS.
+	}
+	summary, err := json.Marshal(availability)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.Header().Set("X-CRM-Provider-Availability", string(summary))
+	w.Header().Set("X-CRM-Partial-Results", strconv.FormatBool(failed > 0))
+	if len(targets) > 0 && failed == len(targets) {
+		writeBody(w, http.StatusServiceUnavailable, "provider_unavailable", "customer providers are unavailable")
+		return
+	}
+	// Deduplicate already imported identities under RLS.
 	filtered := []RemoteCustomer{}
 	seen := map[string]bool{}
 	e = m.run(r, p, fence.PermIntegrationsCall, func(tx pgx.Tx) error {
@@ -478,9 +510,11 @@ func (m *module) importProvider(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errClosed)
 		return
 	}
-	remote, e := m.providers[id].Fetch(r.Context(), ref, in.ExternalID)
+	fetchCtx, fetchCancel := context.WithTimeout(r.Context(), 8*time.Second)
+	remote, e := m.providers[id].Fetch(fetchCtx, ref, in.ExternalID)
+	fetchCancel()
 	if e != nil {
-		writeErr(w, errConflict)
+		writeBody(w, http.StatusConflict, "provider_unavailable", "customer provider is unavailable")
 		return
 	}
 	remote.Provider = id
@@ -493,7 +527,7 @@ func (m *module) importProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Customer
-	e = m.run(r, p, fence.PermNodesContribute, func(tx pgx.Tx) error {
+	e = m.providerWrite(r.Context(), p, fence.PermNodesContribute, "crm.manage", func(tx pgx.Tx) error {
 		if e := m.providerGate(r.Context(), tx, p.TenantID); e != nil {
 			return e
 		}
@@ -510,13 +544,13 @@ func (m *module) importProvider(w http.ResponseWriter, r *http.Request) {
 			return e
 		}
 		if exists {
-			return errConflict
+			return providerIdentityConflict()
 		}
 		fields, _ := json.Marshal(write.CustomerFields)
 		var nodeID string
 		e = tx.QueryRow(r.Context(), `WITH kind AS (SELECT id,short_prefix FROM node_kinds WHERE slug='organisation') INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1::uuid,kind.id,aeon_next_node_key($1::uuid,kind.short_prefix),$2,$3::jsonb FROM kind RETURNING id::text`, p.TenantID, write.Name, fields).Scan(&nodeID)
 		if e != nil {
-			return e
+			return providerImportError(e)
 		}
 		_, e = tx.Exec(r.Context(), `INSERT INTO crm_organisation_profiles(tenant_id,organisation_node_id) VALUES($1::uuid,$2::uuid) ON CONFLICT DO NOTHING`, p.TenantID, nodeID)
 		if e != nil {
@@ -564,24 +598,47 @@ func (m *module) syncProvider(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errClosed)
 		return
 	}
-	remote, e := m.providers[before.ExternalProvider].Fetch(r.Context(), ref, before.ExternalID)
+	fetchCtx, fetchCancel := context.WithTimeout(r.Context(), 8*time.Second)
+	remote, e := m.providers[before.ExternalProvider].Fetch(fetchCtx, ref, before.ExternalID)
+	fetchCancel()
 	if e != nil {
-		_ = m.run(r, p, fence.PermIntegrationsCall, func(tx pgx.Tx) error {
-			current, err := customer(r.Context(), tx, org, true)
-			if err != nil || current.ExternalProvider != before.ExternalProvider || current.ExternalID != before.ExternalID {
-				return errConflict
-			}
-			if err := appendCRM(r.Context(), tx, p, org, "crm.customer_sync_failed", nil, map[string]any{"provider_id": before.ExternalProvider, "reason": "provider_unavailable"}); err != nil {
+		// Fetch may have cancelled its request. Preserve attribution and scope,
+		// give audit persistence its own bounded context, and reauthorize the write.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+		defer cancel()
+		auditErr := m.providerWrite(ctx, p, fence.PermIntegrationsCall, "crm.write", func(tx pgx.Tx) error {
+			ref2, on, err := m.config(ctx, tx, before.ExternalProvider)
+			if err != nil {
 				return err
 			}
-			_, err = tx.Exec(r.Context(), `INSERT INTO crm_provider_sync_status(tenant_id,organisation_node_id,provider_id,state,last_error)
-				VALUES($1::uuid,$2::uuid,$3,'error','provider_unavailable')
-				ON CONFLICT(tenant_id,organisation_node_id) DO UPDATE SET provider_id=excluded.provider_id,state='error',attempted_at=clock_timestamp(),last_error='provider_unavailable'`, p.TenantID, org, before.ExternalProvider)
-			return err
+			if !on || ref2 != ref {
+				return errClosed
+			}
+			current, err := customer(ctx, tx, org, true)
+			if err != nil {
+				return err
+			}
+			if current.ExternalProvider != before.ExternalProvider || current.ExternalID != before.ExternalID {
+				return errConflict
+			}
+			_, err = tx.Exec(ctx, `INSERT INTO crm_provider_sync_status(tenant_id,organisation_node_id,provider_id,state,last_error)
+    VALUES($1::uuid,$2::uuid,$3,'error','provider_unavailable')
+    ON CONFLICT(tenant_id,organisation_node_id) DO UPDATE SET provider_id=excluded.provider_id,state='error',attempted_at=clock_timestamp(),last_error='provider_unavailable'`, p.TenantID, org, before.ExternalProvider)
+			if err != nil {
+				return err
+			}
+			return appendCRM(ctx, tx, p, org, "crm.customer_sync_failed", nil, map[string]any{"provider_id": before.ExternalProvider, "reason": "provider_unavailable"})
 		})
-		writeErr(w, errConflict)
+		if auditErr != nil {
+			// Neither provider nor database error text crosses this diagnostic boundary.
+			slog.Error("crm sync failure could not be recorded", "provider_id", before.ExternalProvider, "reason", "persistence_unavailable")
+			writeBody(w, http.StatusServiceUnavailable, "sync_failure_unrecorded", "provider unavailable; failure status could not be recorded")
+			return
+		}
+		writeBody(w, http.StatusConflict, "provider_unavailable", "customer provider is unavailable; failure status recorded")
 		return
 	}
+
 	write := CustomerWrite{Name: remote.Name, CustomerFields: remote.Fields}
 	write.CustomerNotes = before.CustomerNotes
 	write.ExternalProvider = before.ExternalProvider
@@ -591,7 +648,7 @@ func (m *module) syncProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Customer
-	e = m.run(r, p, fence.PermNodesContribute, func(tx pgx.Tx) error {
+	e = m.providerWrite(r.Context(), p, fence.PermNodesContribute, "crm.write", func(tx pgx.Tx) error {
 		if e := m.providerGate(r.Context(), tx, p.TenantID); e != nil {
 			return e
 		}
@@ -606,7 +663,7 @@ func (m *module) syncProvider(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			return e
 		}
-		if current.Revision != before.Revision || current.ExternalID != before.ExternalID {
+		if current.Revision != before.Revision || current.ExternalProvider != before.ExternalProvider || current.ExternalID != before.ExternalID {
 			return errConflict
 		}
 		fields, _ := json.Marshal(write.CustomerFields)
@@ -618,13 +675,13 @@ func (m *module) syncProvider(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			return e
 		}
-		if e = appendCRM(r.Context(), tx, p, org, "crm.customer_synced", current, out); e != nil {
-			return e
-		}
 		_, e = tx.Exec(r.Context(), `INSERT INTO crm_provider_sync_status(tenant_id,organisation_node_id,provider_id,state,synced_at)
 			VALUES($1::uuid,$2::uuid,$3,'ok',clock_timestamp())
 			ON CONFLICT(tenant_id,organisation_node_id) DO UPDATE SET provider_id=excluded.provider_id,state='ok',attempted_at=clock_timestamp(),synced_at=clock_timestamp(),last_error=''`, p.TenantID, org, before.ExternalProvider)
-		return e
+		if e != nil {
+			return e
+		}
+		return appendCRM(r.Context(), tx, p, org, "crm.customer_synced", current, out)
 	})
 	if e != nil {
 		writeErr(w, e)
@@ -667,4 +724,25 @@ func (m *module) providerSyncStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, 200, out)
+}
+
+// providerWrite serializes access changes before reauthorization and follows
+// tenant -> tree -> record -> event-counter ordering in the final transaction.
+func (m *module) providerWrite(ctx context.Context, p tenant.Principal, permission, authority string, fn func(pgx.Tx) error) error {
+	return db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var locked string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID).Scan(&locked); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
+			return err
+		}
+		if authz.RequireTx(ctx, tx, p, authority, authz.Scope{}) != nil {
+			return errForbidden
+		}
+		if err := m.gate(ctx, tx, p.TenantID, permission); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
 }
