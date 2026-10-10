@@ -56,8 +56,13 @@ func (s *Supervisor) RunQueueHints(ctx context.Context) {
 		return
 	}
 	for ctx.Err() == nil {
-		_ = watcher.WatchQueue(ctx, s.wakeQueue)
-		timer := time.NewTimer(emptyQueueInterval)
+		err := watcher.WatchQueue(ctx, s.wakeQueue)
+		delay := emptyQueueInterval
+		var status *client.StatusError
+		if errors.As(err, &status) && (status.Status == http.StatusNotFound || status.Status == http.StatusMethodNotAllowed) {
+			delay = 5 * time.Minute
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()

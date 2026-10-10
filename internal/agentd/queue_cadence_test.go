@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -138,10 +139,10 @@ func TestSupervisorQueueHintsCannotBypassDispatchFences(t *testing.T) {
 }
 
 func TestRemoteProbeBatchPreservesIndividualResults(t *testing.T) {
-	var calls int
+	var calls atomic.Int32
 	now := time.Now()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
+		calls.Add(1)
 		if r.URL.Path != "/api/agent-accounts/probes" {
 			t.Errorf("unexpected route %s", r.URL.Path)
 		}
@@ -166,8 +167,35 @@ func TestRemoteProbeBatchPreservesIndividualResults(t *testing.T) {
 	}))
 	defer server.Close()
 	results := NewRemote(server.URL, "fixture").ProbeBatch(t.Context(), "daemon", "generation", []AccountProbeObservation{{"a", probeOK, now}, {"b", probeAuthFailed, now}, {"c", probeUnavailable, now}})
-	if calls != 1 || len(results) != 3 || results[0] != nil || results[1] == nil || results[2] == nil {
-		t.Fatalf("calls=%d results=%v", calls, results)
+	if calls.Load() != 1 || len(results) != 3 || results[0] != nil || results[1] == nil || results[2] == nil {
+		t.Fatalf("calls=%d results=%v", calls.Load(), results)
+	}
+	var unsupported, singles atomic.Int32
+	older := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/agent-accounts/probes":
+			unsupported.Add(1)
+			w.WriteHeader(http.StatusNotFound)
+		case "/api/agent-accounts/a/probe", "/api/agent-accounts/b/probe", "/api/agent-accounts/c/probe":
+			singles.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected compatibility route %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer older.Close()
+	remote := NewRemote(older.URL, "fixture")
+	for range 2 {
+		results := remote.ProbeBatch(t.Context(), "daemon", "generation", []AccountProbeObservation{{"a", probeOK, now}, {"b", probeOK, now}, {"c", probeOK, now}})
+		for _, err := range results {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if unsupported.Load() != 1 || singles.Load() != 6 {
+		t.Fatalf("old server repeated unsupported requests: batch=%d single=%d", unsupported.Load(), singles.Load())
 	}
 }
 

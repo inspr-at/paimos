@@ -48,8 +48,17 @@ func (s *Supervisor) reportAccountProbes(ctx context.Context, probes []AccountPr
 // and acknowledged; a partial response cannot establish readiness for a sibling.
 func (r *Remote) ProbeBatch(ctx context.Context, daemon, generation string, probes []AccountProbeObservation) []error {
 	results := make([]error, len(probes))
+	r.mu.RLock()
+	legacy := time.Now().Before(r.probeBatchRetryAt)
+	r.mu.RUnlock()
 	for offset := 0; offset < len(probes); offset += 32 {
 		part := probes[offset:min(offset+32, len(probes))]
+		if legacy {
+			for i, p := range part {
+				results[offset+i] = r.ProbeStatus(ctx, p.AccountID, daemon, generation, p.Status)
+			}
+			continue
+		}
 		items := make([]map[string]any, 0, len(part))
 		for _, p := range part {
 			body := map[string]any{"daemon_id": daemon, "daemon_generation": generation, "available": p.Status.OK}
@@ -78,6 +87,11 @@ func (r *Remote) ProbeBatch(ctx context.Context, daemon, generation string, prob
 		var status *client.StatusError
 		if errors.As(err, &status) && (status.Status == http.StatusNotFound || status.Status == http.StatusMethodNotAllowed) {
 			// Older servers keep their established single-probe contract.
+			// Do not add one failed batch request to every idle health tick.
+			legacy = true
+			r.mu.Lock()
+			r.probeBatchRetryAt = time.Now().Add(5 * time.Minute)
+			r.mu.Unlock()
 			for i, p := range part {
 				results[offset+i] = r.ProbeStatus(ctx, p.AccountID, daemon, generation, p.Status)
 			}
