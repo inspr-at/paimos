@@ -248,6 +248,22 @@ async function projectValidation(page: Page, data: { messages: { id: string }[];
   return refused
 }
 
+// The chat outbox accepts a reply only to a message of its own thread.
+async function chatOutbox(page: Page, chat: { message: Record<string, unknown> }[]) {
+  const outbox: { client_message_id: string; body: string; reply_to?: string }[] = []
+  await page.route(/\/api\/chat-threads\/[^/]+\/outbox$/, route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    const input = route.request().postDataJSON() as { client_message_id: string; body: string; reply_to?: string }
+    outbox.push(input)
+    if (input.reply_to && !chat.some(item => item.message.message_id === input.reply_to)) return route.fulfill({ status: 404, json: { error: 'not found' } })
+    const position = 901 + outbox.length - 1
+    const message = { message_id: `3e000000-0000-4000-8000-${String(position).padStart(12, '0')}`, conversation_id: conversation, read_seq: String(position), sent_event_position: String(position), body: input.body, payload_mode: 'inline', reply_to: input.reply_to ?? null }
+    chat.push({ message: { ...message, sender_principal_id: me.id, created_at: new Date(now).toISOString() } })
+    return route.fulfill({ json: { contract: 'chat-live-v1', message, receipt: { message_id: message.message_id, state: 'sent' } } })
+  })
+  return outbox
+}
+
 // Risk (AEON-1071 gate): Reply on a chat-native final sent its id as the
 // parent of a project message, which the server refuses.
 test('AEON-1071 a reply to a chat-native final goes to its chat thread', async ({ page }) => {
@@ -255,16 +271,7 @@ test('AEON-1071 a reply to a chat-native final goes to its chat thread', async (
   const refused = await projectValidation(page, data)
   const final = '3e000000-0000-4000-8000-000000000900'
   chat.push(nativeFinal(worker, final, 900, 'Final: the release checks pass.'))
-  const outbox: { client_message_id: string; body: string; reply_to?: string }[] = []
-  await page.route(/\/api\/chat-threads\/[^/]+\/outbox$/, route => {
-    if (route.request().method() !== 'POST') return route.fallback()
-    const input = route.request().postDataJSON() as { client_message_id: string; body: string; reply_to?: string }
-    outbox.push(input)
-    if (input.reply_to && !chat.some(item => item.message.message_id === input.reply_to)) return route.fulfill({ status: 404, json: { error: 'not found' } })
-    const message = { message_id: '3e000000-0000-4000-8000-000000000901', conversation_id: conversation, read_seq: '901', sent_event_position: '901', body: input.body, payload_mode: 'inline', reply_to: input.reply_to ?? null }
-    chat.push({ message: { ...message, sender_principal_id: me.id, created_at: new Date(now).toISOString() } })
-    return route.fulfill({ json: { contract: 'chat-live-v1', message, receipt: { message_id: message.message_id, state: 'sent' } } })
-  })
+  const outbox = await chatOutbox(page, chat)
   await page.setViewportSize({ width: 1440, height: 860 })
   await page.goto(`/agents/${worker.id}?tab=messages`)
   const panel = panelOf(page)
@@ -351,4 +358,100 @@ test('AEON-1071 a late history read never dismisses the live turn', async ({ pag
   await emit(page, 'chat', { type: 'message', message_id: '3e000000-0000-4000-8000-000000000950', receipt: null })
   await expect(panel.getByText('Final: next step planned.', { exact: true })).toBeVisible()
   await expect(panel.locator('.live-turn')).toHaveCount(0)
+})
+
+// Risk (AEON-1071 gate, fix round 4): reopening with a cached watermark on a
+// chat-native final sent that id to the session read marker before the chat
+// history had loaded, and retried the refused mark even after it had.
+test('AEON-1071 a cached watermark on a chat-native final never reaches the session marker', async ({ page }) => {
+  const { worker, data, calls, chat } = await setup(page)
+  const refused = await projectValidation(page, data)
+  const final = '3e000000-0000-4000-8000-000000000900'
+  chat.push(nativeFinal(worker, final, 900, 'Final: the release checks pass.', { person_read_state: 'seen' }))
+  // This browser read up to the chat-native final on an earlier visit.
+  await page.addInitScript(([key, event, id, at]) => {
+    localStorage.setItem('aeon.session-read.v1', JSON.stringify({ [key]: { event, id, at } }))
+  }, [`${me.id}:${worker.id}`, 900, final, now] as const)
+  await page.setViewportSize({ width: 1440, height: 860 })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const panel = panelOf(page)
+  await expect(panel.locator('.msg', { hasText: 'Final: the release checks pass.' })).toBeVisible()
+  await page.clock.runFor(2_000)
+  const marks = () => calls.filter(call => call.method === 'PUT' && call.path.endsWith('/read-marker')).map(call => call.body as { last_read_message_id: string; last_read_event_id: number })
+  // The session marker gets the newest project message before the final.
+  await expect.poll(marks).toEqual([{ last_read_message_id: data.messages[2]!.id, last_read_event_id: 202 }])
+  await page.clock.runFor(4_000)
+  expect(refused).toEqual([])
+  expect(marks()).toHaveLength(1)
+  // The local watermark stays on the final.
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('aeon.session-read.v1') ?? '{}'))).toEqual({ [`${me.id}:${worker.id}`]: expect.objectContaining({ event: 900, id: final }) })
+})
+
+// Risk (AEON-1071 gate, fix round 4): only the newest visible row counted as
+// read evidence, and a collapsed group named only its first and last posts.
+test('AEON-1071 every visible chat-native post is recorded on its chat thread', async ({ page }) => {
+  const { worker, chat } = await setup(page)
+  const ids = [901, 902, 903, 904, 905].map(n => `3e000000-0000-4000-8000-000000000${n}`)
+  const bodies = ['Alpha: the build is green.', 'Beta: the counts match.', 'Same check passed.', 'Same check passed.', 'Same check passed.']
+  ids.forEach((id, i) => chat.push(nativeFinal(worker, id, 901 + i, bodies[i]!, { person_read_state: 'known_unread' })))
+  const seen = new Set<string>()
+  await page.route(/\/api\/chat-threads\/[^/]+\/read-marker$/, route => {
+    if (route.request().method() !== 'PUT') return route.fallback()
+    for (const id of (route.request().postDataJSON() as { visible_message_ids: string[] }).visible_message_ids) seen.add(id)
+    return route.fulfill({ json: { contract: 'chat-v1', conversation_id: conversation, contiguous_prefix: '0', chunks: [], migration_epoch: '0', revision: '1', next_cursor: null } })
+  })
+  await page.setViewportSize({ width: 1440, height: 860 })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const panel = panelOf(page)
+  // The three identical posts render as one row.
+  await expect(panel.locator('.msg', { hasText: 'Same check passed.' }).locator('.duplicate')).toHaveText('×3')
+  for (const body of bodies.slice(0, 3)) await expect(panel.locator('.msg', { hasText: body })).toBeInViewport({ ratio: 1 })
+  await page.clock.runFor(2_000)
+  await expect.poll(() => [...seen].sort()).toEqual(ids)
+})
+
+// Risk (AEON-1071 gate, fix round 4): a reply to a chat-native final offered
+// Send now, but the chat outbox is read only between turns, so the chosen
+// mode was silently dropped. The offered sends follow the next message's transport.
+for (const width of [390, 1440]) test(`AEON-1071 a chat-native reply offers only what its transport consumes ${width}`, async ({ page }, testInfo) => {
+  const { worker, data, chat } = await setup(page, { session: { activity: 'busy' } })
+  const final = '3e000000-0000-4000-8000-000000000900'
+  chat.push(nativeFinal(worker, final, 900, 'Final: the release checks pass.'))
+  const outbox = await chatOutbox(page, chat)
+  await page.setViewportSize({ width, height: 860 })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const panel = panelOf(page)
+  const composer = panel.getByRole('textbox', { name: 'Message to release-lead' })
+  const send = panel.locator('.compose .send'), steer = panel.locator('.steer-send'), stop = panel.locator('.chat-stop'), note = panel.locator('.steer-note')
+  const row = panel.locator('.msg', { hasText: 'Final: the release checks pass.' })
+  await expect(row).toBeVisible()
+  await composer.fill('Ship it after the smoke test.')
+  await composer.blur()
+  // Managed delivery steers natively.
+  await expect(steer).toContainText('Send now')
+  await expect(steer).toBeEnabled()
+  await expect(note).toHaveCount(0)
+  const guard = await controlStability(page, { composer, send, stop })
+  await guard.check(async () => {
+    await row.hover()
+    await row.getByRole('button', { name: 'Reply', exact: true }).click()
+    await expect(panel.locator('.replying')).toContainText('Final: the release checks pass.')
+    // The chat outbox is consumed between turns: no steer action, not even a disabled one.
+    await expect(steer).toHaveCount(0)
+    await expect(note).toHaveText('Chat replies arrive between turns')
+    await expect(send).toContainText('After this turn')
+    await expect(stop).toBeEnabled()
+  })
+  await page.screenshot({ path: testInfo.outputPath(`aeon-1071-chat-reply-${width}.png`) })
+  await guard.check(async () => {
+    // The steer shortcut sends after the turn, to the chat thread.
+    await composer.press('ControlOrMeta+Enter')
+    await expect.poll(() => outbox.length).toBe(1)
+    expect(outbox[0]).toMatchObject({ body: 'Ship it after the smoke test.', reply_to: final })
+    // The reply is done: the next message is managed again and may steer.
+    await expect(steer).toContainText('Send now')
+    await expect(note).toHaveCount(0)
+  })
+  guard.done()
+  expect(data.sent.some(message => message.body === 'Ship it after the smoke test.')).toBe(false)
 })

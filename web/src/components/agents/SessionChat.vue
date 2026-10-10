@@ -13,7 +13,7 @@ import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import SessionRequests from './SessionRequests.vue'
 import ChatLiveBlock from './ChatLiveBlock.vue'
-import { applyLiveFrame, chatFinals, chatSeenIds, chatSeenMark, chatSent, followChatLive, liveQueue, liveWorking, rebaseTurn, sessionReadMark, settleStop, settled, type LiveSource, type LiveTurn } from './chatLive'
+import { applyLiveFrame, chatFinals, chatSeenIds, chatSeenMark, chatSent, followChatLive, liveQueue, liveWorking, offeredSteer, rebaseTurn, sessionReadMark, settleStop, settled, type LiveSource, type LiveTurn, type SendTransport } from './chatLive'
 import { collapseMessages } from './sessionMessages'
 import { advanceReceipt, chatCapability, isQueuedMessage, chatSendLevel, chatWords, awaitsInboxHook, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
 
@@ -72,11 +72,17 @@ const threadMessages = computed(() => {
 })
 const current = computed(() => collapseMessages(threadMessages.value))
 const ended = computed(() => s.value.phase === 'stopped' || !!s.value.stopped_at || !!s.value.archived_at)
-// The steer action stays in place for the whole session, enabled only while
+// The steer slot stays in place for the whole session, enabled only while
 // the agent works, so a turn starting or ending never moves the composer.
-const steerOffered = computed(() => ['native', 'next'].includes(capability.value) && s.value.advertised_capabilities.includes('steer'))
-const canSteer = computed(() => working.value && steerOffered.value)
-const alternative = computed(() => capability.value === 'next' ? words.value.next : words.value.now)
+const steerAdvertised = computed(() => s.value.advertised_capabilities.includes('steer'))
+const steerOffered = computed(() => !!offeredSteer(capability.value, steerAdvertised.value, 'managed'))
+// The next send's transport decides what the slot offers. A reply to a
+// chat-native message goes to the chat outbox, consumed only between turns:
+// the slot then says so instead of offering a send mode nothing would honour.
+const transport = computed<SendTransport>(() => !editing.value && replyTo.value?.chat_thread ? 'chat' : 'managed')
+const steerMode = computed(() => offeredSteer(capability.value, steerAdvertised.value, transport.value))
+const canSteer = computed(() => working.value && !!steerMode.value)
+const alternative = computed(() => steerMode.value === 'next' ? words.value.next : words.value.now)
 const primaryLabel = computed(() => editing.value ? words.value.save : working.value && capability.value !== 'between' ? words.value.after : words.value.send)
 // Unmanaged sessions take rename/model requests next to the composer (AEON-225).
 const unmanaged = computed(() => s.value.management_mode === 'unmanaged')
@@ -131,19 +137,35 @@ const unread = computed(() => me.value ? unreadGroups(current.value, me.value, m
 const newFrom = ref<string>()
 const newCount = ref(0)
 watch(() => unread.value.length, n => emit('unread', n), { immediate: true })
-function markRead(event: number, id: string) {
+function markRead(event: number, id: string, rows: readonly string[] = [id]) {
   if (holdingMarker()) return
   if (!me.value || !id || !Number.isFinite(event)) return
   if (!mark.value || mark.value.event < event) mark.value = saveReadMark(me.value, s.value.id, event, id)
   if (!person.value || !mark.value) return
   // A chat-native post is evidence for its thread's read marker only.
   const seenBefore = seenPending.size
-  if (chatThread) { seenThread = chatThread; for (const seenId of chatSeenIds(messages.value, id, event)) seenPending.add(seenId) }
+  if (chatThread) { seenThread = chatThread; for (const seenId of chatSeenIds(messages.value, current.value, rows)) seenPending.add(seenId) }
   const before = pending?.event ?? -1
   queueSessionMark(mark.value)
   // A repeated look at the same post must not postpone a flush that is already waiting.
   if (flushTimer === undefined || (pending?.event ?? -1) > before || seenPending.size > seenBefore) arm()
 }
+// The furthest event the session's read marker holds, once read this visit.
+let serverEvent: number | undefined
+// The local watermark reaches the session marker only through a loaded
+// project message. A cached mark on reopening may name a message that is not
+// loaded yet, so every thread load tries again.
+function reconcileMark() {
+  const local = mark.value
+  if (!person.value || !local?.id || serverEvent === undefined) return
+  const session = sessionReadMark(local, messages.value)
+  if (!session || session.event <= serverEvent || (pending && pending.event >= session.event)) return
+  boundProject = s.value.project_id
+  boundSession = s.value.id
+  pending = queueReadMark(pending, session)
+  arm()
+}
+watch(() => agents.thread(s.value).map(message => message.id).join(), () => reconcileMark())
 // The session's read marker names only its project messages.
 function queueSessionMark(next: ReadMark) {
   const session = sessionReadMark(next, messages.value)
@@ -212,6 +234,7 @@ async function sendMark(projectId: string, sessionId: string, viewer: string, ge
   const response = await writeSessionMarker(projectId, sessionId, { last_read_message_id: next.id, last_read_event_id: next.event })
   if (!response.ok || generation !== readGeneration || s.value.id !== sessionId) return response.ok && generation === readGeneration
   const remote = markerFromServer(await response.json())
+  serverEvent = Math.max(serverEvent ?? -1, next.event, remote?.event ?? -1)
   if (remote && s.value.id === sessionId && (!mark.value || remote.event > mark.value.event)) {
     mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
   }
@@ -257,6 +280,7 @@ async function pullReadMark(projectId: string, sessionId: string, viewer: string
       return
     }
     const remote = markerFromServer(await response.json())
+    serverEvent = Math.max(serverEvent ?? -1, remote?.event ?? -1)
     const advanced = !!(remote && preferReadMark(mark.value, remote) === remote)
     if (advanced && remote) mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
     const waiting = awaitingServerPlacement && generation === readGeneration
@@ -272,14 +296,7 @@ async function pullReadMark(projectId: string, sessionId: string, viewer: string
     }
     // The reader left the provisional bottom before the marker arrived.
     if (held && entered && placed && userMoved) observe()
-    const current = mark.value
-    if (!person.value || !current?.id || (remote && current.event <= remote.event)) return
-    const session = sessionReadMark(current, messages.value)
-    if (!session || (remote && session.event <= remote.event)) return
-    boundProject = projectId
-    boundSession = sessionId
-    pending = queueReadMark(pending, session)
-    arm()
+    reconcileMark()
   } catch {
     // Offline: the local watermark stands, and a provisional landing may observe.
     releaseMarkerHold(generation)
@@ -519,13 +536,17 @@ function observe() {
     if (!props.active || document.visibilityState !== 'visible') return
     const rootHeight = el.clientHeight
     let best: { event: number; id: string } | undefined
+    // Every qualifying row is read evidence for its chat-native posts; the
+    // newest one moves the watermark.
+    const rows: string[] = []
     for (const entry of entries) {
       if (!entry.isIntersecting || (entry.intersectionRatio < 0.6 && entry.intersectionRect.height < rootHeight * 0.5)) continue
       const target = entry.target as HTMLElement
       const event = Number(target.dataset.event)
+      if (target.dataset.id) rows.push(target.dataset.id)
       if (!best || event > best.event) best = { event, id: target.dataset.id ?? '' }
     }
-    if (best) markRead(best.event, best.id)
+    if (best) markRead(best.event, best.id, rows)
   }, { root: el, threshold: [0, 0.6, 1] })
   el.querySelectorAll<HTMLElement>('.msg[data-event]').forEach(node => seen!.observe(node))
 }
@@ -606,6 +627,7 @@ watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
   if (leftover && person.value && before?.[0] === viewer && leftoverSession && leftoverSession !== id) void sendMark(leftoverProject, leftoverSession, viewer, generation - 1, leftover).catch(() => undefined)
   const local = viewer ? loadReadMark(viewer, id) : null
   mark.value = local
+  serverEvent = undefined
   statuses.value = {}
   entered = false; loaded = false; newFrom.value = undefined; distance.value = 0; stick = true
   userMoved = false
@@ -803,7 +825,7 @@ async function send(level: 'simple' | 'steer' = 'simple', source?: ProjectMessag
     id: clientId, client_id: clientId, optimistic: true, queue_pending: chat ? false : source?.queue_pending ?? (working.value || atPrompt.value), resend_of: chat ? undefined : source?.id, body, sender_principal_id: me.value,
     recipient_principal_id: s.value.agent_principal_id, recipient_session_id: s.value.id, to: recipient.value,
     sent_event_id: Number.MAX_SAFE_INTEGER, is_action_request: false, expects_reply: false,
-    delivery_level: level, reply_to: source ? source.reply_to : replyTo.value?.id, status: 'accepted', reply_obligation: 'none', created_at: new Date().toISOString(),
+    delivery_level: chat ? 'simple' : level, reply_to: source ? source.reply_to : replyTo.value?.id, status: 'accepted', reply_obligation: 'none', created_at: new Date().toISOString(),
     ...(chat ? { chat_thread: chat } : {}),
   }
   if (local.queue_pending) queuedIds.value = new Set([...queuedIds.value, local.id])
@@ -956,7 +978,8 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
         <p v-if="sendError" class="send-error" role="alert"><AppIcon name="alert" :size="12" />{{ sendError }}</p>
         <div class="compose-row" :class="{ steering: steerOffered }">
           <span class="compose-hint"><KeyCap k="shift" /><KeyCap k="enter" />{{ words.newline }}</span>
-          <button v-if="steerOffered" type="button" class="btn sm steer-send" :aria-label="alternative" :aria-busy="sending" :data-tip="canSteer ? undefined : words.steerIdle" :disabled="!canSteer || !draft.trim() || !canWrite || queueBusy || !!editing || offline" @click="send('steer')"><AppIcon name="bolt" :size="13" />{{ alternative }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
+          <button v-if="steerMode" type="button" class="btn sm steer-send" :aria-label="alternative" :aria-busy="sending" :data-tip="canSteer ? undefined : words.steerIdle" :disabled="!canSteer || !draft.trim() || !canWrite || queueBusy || !!editing || offline" @click="send('steer')"><AppIcon name="bolt" :size="13" />{{ alternative }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
+          <span v-else-if="steerOffered" class="steer-note" role="status">{{ words.chatBetween }}</span>
           <button v-if="capability === 'abort' && working" type="button" class="btn sm stop-send" :aria-label="words.stopSend" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || !canStop || offline" @click="stopAndSend"><AppIcon name="alert" :size="13" />{{ words.stopSend }}</button>
           <button type="submit" class="btn sm primary send" :aria-label="primaryLabel" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || offline"><AppIcon name="send" :size="13" /><span class="send-label"><span>{{ primaryLabel }}</span><span aria-hidden="true" class="label-size">{{ words.after }}</span></span><KeyCap k="enter" /></button>
           <button type="button" class="btn sm chat-stop" :aria-label="words.stop" :data-tip="canStop ? words.stopTip : interruptBlock || words.stopTip" :disabled="!canStop" @click="stop"><AppIcon name="stop" :size="13" /><span>{{ words.stop }}</span><KeyCap k="Esc" /></button>
@@ -984,6 +1007,8 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 .send-label > span { grid-area: 1 / 1; }
 .label-size { visibility: hidden; }
 .gemini-note { font-size: 12px; color: var(--ink-2); }
+/* Shrinks and wraps inside the action row instead of pushing the actions to a new line. */
+.steer-note { flex: 1 1 0; min-width: 0; font-size: 12px; line-height: 1.3; text-align: right; color: var(--ink-3); overflow-wrap: anywhere; }
 .stop-send { color: var(--warn-ink); background: var(--gold-wash); }
 .session-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .thread-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -1013,7 +1038,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
    so Stop stays on the action row (AEON-1071). */
 @container (max-width: 640px) {
   .compose-row.steering .compose-hint { display: none; }
-  .compose-row.steering .steer-send { margin-left: auto; }
+  .compose-row.steering .compose-hint + * { margin-left: auto; }
 }
 .compose-block { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); padding: 6px 2px; overflow-wrap: anywhere; }
 .compose-block svg { flex: none; }
@@ -1031,6 +1056,8 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
   .compose-row .steer-send, .stop-send { min-height: 44px; }
   .compose-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
   .compose-row .send { margin-left: 0; }
-  .compose-row .steer-send, .compose-row .stop-send { grid-column: 1 / -1; }
+  .compose-row .steer-send, .compose-row .stop-send, .compose-row .steer-note { grid-column: 1 / -1; }
+  /* The note holds the steer action's row, so the field never moves. */
+  .compose-row .steer-note { display: flex; align-items: center; min-height: 44px; }
 }
 </style>

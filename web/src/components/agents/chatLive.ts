@@ -6,7 +6,8 @@
 // replaces the live block once it lands in the thread.
 import { parseJson } from '../../lib/json.ts'
 import type { ChatHistoryMessage, ProjectMessage } from '../../lib/agents.ts'
-import type { ReadMark } from './sessionChat.ts'
+import type { ChatCapability, ReadMark } from './sessionChat.ts'
+import type { MessageGroup } from './sessionMessages.ts'
 
 export type LiveState = 'running' | 'idle' | 'requires_action'
 export type ToolStatus = 'in_progress' | 'completed' | 'failed'
@@ -195,22 +196,25 @@ export function chatSent(message: ChatHistoryMessage, viewer: string, agent: str
 }
 
 // Read state. The session's read marker accepts only its project messages, so
-// a watermark on a chat-native message is written as the newest project
-// message at or before it. The chat message itself goes to its thread's
-// read marker.
+// a watermark goes there only through a project message this view has loaded.
+// A watermark on a chat-native message, or one whose message is not loaded
+// yet (a cached mark on reopening), becomes the newest loaded project message
+// at or before it. The chat message itself goes to its thread's read marker.
 const projectMessage = (message: ProjectMessage | undefined) => !!message && !message.chat_thread && !message.optimistic
 export function sessionReadMark(mark: ReadMark, messages: readonly ProjectMessage[]): ReadMark | null {
   const own = messages.find(message => message.id === mark.id)
   const at = messages.find(message => message.sent_event_id === mark.event)
-  if ((!own || projectMessage(own)) && (!at || projectMessage(at))) return mark
+  if (projectMessage(own) && (!at || projectMessage(at))) return mark
   let best: ProjectMessage | undefined
   for (const message of messages) if (projectMessage(message) && message.sent_event_id <= mark.event && (!best || message.sent_event_id > best.sent_event_id)) best = message
   return best ? { event: best.sent_event_id, id: best.id, at: mark.at } : null
 }
-// The chat-native messages a visible row stands for: its own id, and a
-// collapsed group's newest post.
-export function chatSeenIds(messages: readonly ProjectMessage[], id: string, event: number): string[] {
-  return messages.filter(message => message.chat_thread && !message.chat_seen && (message.id === id || message.sent_event_id === event)).map(message => message.id)
+// The unseen chat-native messages the visible rows stand for: every row on
+// screen, and every post folded into a collapsed group.
+export function chatSeenIds(messages: readonly ProjectMessage[], groups: readonly MessageGroup[], rows: readonly string[]): string[] {
+  const visible = new Set(rows)
+  const members = new Set(groups.flatMap(group => visible.has(group.id) ? group.members : []))
+  return messages.filter(message => message.chat_thread && !message.chat_seen && members.has(message.id)).map(message => message.id)
 }
 // The furthest chat-native message the thread's read marker says this person
 // saw, on any device.
@@ -218,6 +222,16 @@ export function chatSeenMark(messages: readonly ProjectMessage[]): { event: numb
   let best: ProjectMessage | undefined
   for (const message of messages) if (message.chat_thread && message.chat_seen && (!best || message.sent_event_id > best.sent_event_id)) best = message
   return best ? { event: best.sent_event_id, id: best.id } : null
+}
+
+// The mid-turn send a message's transport consumes. Managed delivery takes
+// Send now (native steer) or At next step where the harness advertises steer.
+// A reply to a chat-native message goes to the chat outbox, which the daemon
+// relay reads only at turn boundaries: After this turn is all it offers.
+export type SendTransport = 'managed' | 'chat'
+export function offeredSteer(capability: ChatCapability, steerAdvertised: boolean, transport: SendTransport): 'now' | 'next' | null {
+  if (transport !== 'managed' || !steerAdvertised) return null
+  return capability === 'native' ? 'now' : capability === 'next' ? 'next' : null
 }
 
 // m:ss, tabular so the timer never changes width within a minute range.

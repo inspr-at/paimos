@@ -5,8 +5,9 @@
 // keeps retrying a refused thread.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { applyLiveFrame, chatFinals, chatSeenIds, chatSeenMark, elapsed, followChatLive, liveQueue, liveTextLimit, liveToolLimit, rebaseTurn, sessionReadMark, settleStop, settled, type LiveSource, type LiveTurn } from '../src/components/agents/chatLive.ts'
-import { sessionChatFlags } from '../src/components/agents/sessionChat.ts'
+import { applyLiveFrame, chatFinals, chatSeenIds, chatSeenMark, elapsed, followChatLive, liveQueue, liveTextLimit, liveToolLimit, offeredSteer, rebaseTurn, sessionReadMark, settleStop, settled, type LiveSource, type LiveTurn } from '../src/components/agents/chatLive.ts'
+import { chatCapability, sessionChatFlags } from '../src/components/agents/sessionChat.ts'
+import { collapseMessages } from '../src/components/agents/sessionMessages.ts'
 import type { ProjectMessage } from '../src/lib/agents.ts'
 
 const chunk = (text: string, dropped = 0) => JSON.stringify({ type: 'update', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }, dropped_events: dropped, source_sequence: 1 })
@@ -276,13 +277,61 @@ test('read state for chat-native posts goes to the chat thread, never to the ses
   assert.deepEqual(sessionReadMark({ event: 30, id: 'p-2', at: 2 }, thread), { event: 20, id: 'p-2', at: 2 })
   assert.equal(sessionReadMark({ event: 5, id: 'c-0', at: 2 }, [project('c-0', 5, { chat_thread: 't' })]), null)
   // Only unseen chat-native posts on screen go to the thread's read marker.
-  assert.deepEqual(chatSeenIds(thread, 'c-1', 30), ['c-1'])
-  assert.deepEqual(chatSeenIds(thread, 'c-2', 40), [])
-  assert.deepEqual(chatSeenIds(thread, 'p-2', 20), [])
+  const groups = collapseMessages(thread)
+  assert.deepEqual(chatSeenIds(thread, groups, ['c-1']), ['c-1'])
+  assert.deepEqual(chatSeenIds(thread, groups, ['c-2']), [])
+  assert.deepEqual(chatSeenIds(thread, groups, ['p-2']), [])
   // Another device's chat evidence advances this view's watermark.
   assert.deepEqual(chatSeenMark(thread), { event: 40, id: 'c-2' })
   assert.equal(chatSeenMark(thread.slice(0, 3)), null)
   // The history page says what the person saw.
   const page = chatFinals([{ message: { message_id: 'c-9', sent_event_position: '90', body: 'x', sender_principal_id: 'agent-1' }, person_read_state: 'seen' }, { message: { message_id: 'c-8', sent_event_position: '80', body: 'y', sender_principal_id: 'agent-1' }, person_read_state: 'known_unread' }], 'agent-1', 's', 'person-1', 'l', 't')
   assert.deepEqual(page.map(message => [message.id, message.chat_seen]), [['c-9', true], ['c-8', false]])
+})
+
+// Risk (AEON-1071 gate, fix round 4): a cached watermark on a chat-native
+// message reached the session marker unchanged before the chat history had
+// loaded, and the refused mark was retried even after it had.
+test('a watermark reaches the session marker only through a loaded project message', () => {
+  const project = (id: string, event: number, extra: Partial<ProjectMessage> = {}): ProjectMessage => ({ id, sender_principal_id: 'agent-1', recipient_principal_id: 'person-1', to: '', body: id, sent_event_id: event, is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none', ...extra })
+  const cached = { event: 90, id: 'c-cached', at: 3 }
+  // Nothing loaded yet: no session mark at all.
+  assert.equal(sessionReadMark(cached, []), null)
+  // Only project history loaded: the newest project post at or before it.
+  const projects = [project('p-1', 10), project('p-2', 20)]
+  assert.deepEqual(sessionReadMark(cached, projects), { event: 20, id: 'p-2', at: 3 })
+  // The chat page arrives: the same answer, never the chat id.
+  assert.deepEqual(sessionReadMark(cached, [...projects, project('c-cached', 90, { chat_thread: 't' })]), { event: 20, id: 'p-2', at: 3 })
+  // An optimistic copy is no provenance either.
+  assert.deepEqual(sessionReadMark({ event: 30, id: 'local', at: 3 }, [...projects, project('local', 30, { optimistic: true })]), { event: 20, id: 'p-2', at: 3 })
+})
+
+// Risk (AEON-1071 gate, fix round 4): only the newest visible row was read
+// evidence, and a collapsed group named only its first and last posts.
+test('every visible row and every folded post is chat read evidence', () => {
+  const at = Date.parse('2026-10-10T08:00:00Z')
+  const native = (id: string, event: number, body: string, extra: Partial<ProjectMessage> = {}): ProjectMessage => ({ id, sender_principal_id: 'agent-1', recipient_principal_id: 'person-1', to: '', body, sent_event_id: event, created_at: new Date(at + event * 1000).toISOString(), is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none', chat_thread: 't', ...extra })
+  const thread = [native('c-1', 1, 'First.'), native('c-2', 2, 'Second.'), native('c-3', 3, 'Same.'), native('c-4', 4, 'Same.'), native('c-5', 5, 'Same.'), native('c-6', 6, 'Last.', { chat_seen: true })]
+  const groups = collapseMessages(thread)
+  assert.deepEqual(groups.map(group => [group.id, group.members]), [['c-1', ['c-1']], ['c-2', ['c-2']], ['c-3', ['c-3', 'c-4', 'c-5']], ['c-6', ['c-6']]])
+  // Two visible rows: both are evidence.
+  assert.deepEqual(chatSeenIds(thread, groups, ['c-1', 'c-2']), ['c-1', 'c-2'])
+  // A collapsed group of three: all three, the middle one included.
+  assert.deepEqual(chatSeenIds(thread, groups, ['c-3']), ['c-3', 'c-4', 'c-5'])
+  // Already seen posts and rows that are not on screen add nothing.
+  assert.deepEqual(chatSeenIds(thread, groups, ['c-6', 'gone']), [])
+})
+
+// Risk (AEON-1071 gate, fix round 4): a reply to a chat-native message offered
+// Send now and At next step, but the chat outbox is read only between turns.
+test('the offered sends match the transport of the next message', () => {
+  const session = (harness: string, capabilities: string[]) => ({ harness, management_mode: 'managed', advertised_capabilities: capabilities })
+  const claude = session('claude', ['inbox', 'steer', 'interrupt']), pi = session('pi', ['inbox', 'steer', 'interrupt']), codex = session('codex', ['inbox', 'interrupt'])
+  const offered = (s: typeof claude, transport: 'managed' | 'chat') => offeredSteer(chatCapability(s), s.advertised_capabilities.includes('steer'), transport)
+  assert.equal(offered(claude, 'managed'), 'now')
+  assert.equal(offered(pi, 'managed'), 'next')
+  assert.equal(offered(codex, 'managed'), null)
+  assert.equal(offered(claude, 'chat'), null)
+  assert.equal(offered(pi, 'chat'), null)
+  assert.equal(offered({ ...claude, management_mode: 'unmanaged' }, 'managed'), null)
 })
