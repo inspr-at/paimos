@@ -313,7 +313,7 @@ func TestTerminalPolicyAndBranchFence(t *testing.T) {
 // Risk: linked worktrees need their own index/HEAD and common objects/branch
 // refs, while another checkout and its private Git metadata stay inaccessible.
 func TestTerminalStagesAndCommitsLinkedWorktree(t *testing.T) {
-	root, repository, git := routineGitFixture(t)
+	root, _, git := routineGitFixture(t)
 	workspace, sibling := filepath.Join(root, "owned"), filepath.Join(root, "sibling")
 	git("worktree", "add", "-b", "routine/owned", workspace, "HEAD")
 	git("worktree", "add", "-b", "routine/sibling", sibling, "HEAD")
