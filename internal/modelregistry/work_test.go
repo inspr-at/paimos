@@ -465,7 +465,7 @@ func TestModelsV2RolesRoutesAndWait(t *testing.T) {
 		if got.Ladder[0].Selected || !strings.Contains(got.Ladder[0].SkipReasons[0], "daily cap until "+until.UTC().Format(time.RFC3339)) {
 			t.Fatalf("missing cap/reset cause: %+v", got.Ladder)
 		}
-		if _, err := tx.Exec(ctx, `UPDATE model_pref_orders SET rank=ARRAY['anthropic:opus'] WHERE column_key='other' AND situation='first'`); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE model_pref_orders SET rank=ARRAY['anthropic:opus','missing:route'] WHERE column_key='other' AND situation='first'`); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET state='unavailable' WHERE harness='cursor'`); err != nil {
@@ -475,7 +475,7 @@ func TestModelsV2RolesRoutesAndWait(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if waited.Profile != nil || !waited.OwnerRequired || len(waited.Trace.Held) != 1 || waited.Trace.Blocked != waited.Ladder[0].SkipReasons[0] || !strings.Contains(waited.Trace.Blocked, until.UTC().Format(time.RFC3339)) {
+		if waited.Profile != nil || !waited.OwnerRequired || len(waited.Trace.Held) != 2 || waited.Trace.Held[1].Line != "missing:route" || waited.Trace.Held[1].Reason != "no registered route for this line" || waited.Trace.Blocked != waited.Ladder[0].SkipReasons[0] || !strings.Contains(waited.Trace.Blocked, until.UTC().Format(time.RFC3339)) {
 			t.Fatalf("Wait lost first cause or ran hidden fallback: %+v", waited)
 		}
 		for _, step := range waited.Ladder {

@@ -160,8 +160,33 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 		q.Situation = "review"
 	}
 	s.Lines = slices.Clone(s.Lines)
+	known := map[string]bool{}
 	for i := range s.Lines {
 		s.Lines[i].Tools, s.Lines[i].Review, s.Lines[i].Residency = true, true, nil
+		known[s.Lines[i].ID] = true
+	}
+	// Keep configured but missing lines in the walk. Dispatch must report their
+	// cause at their position, rather than ahead of an earlier capped route.
+	keep := func(id string) {
+		if !known[id] {
+			known[id] = true
+			s.Lines = append(s.Lines, BoardLine{ID: id, Tools: true, Review: true})
+		}
+	}
+	for _, o := range s.Orders {
+		for _, id := range o.Rank {
+			keep(id)
+		}
+	}
+	for _, r := range s.Rules {
+		keep(r.Line)
+	}
+	for _, template := range []string{"balanced", "best", "save"} {
+		for _, column := range []string{"other", "concept"} {
+			for _, id := range TemplateRank(template, column) {
+				keep(id)
+			}
+		}
 	}
 	column := ResolveBoard(s, BoardQuery{Column: q.Column, Area: q.Area, Labels: q.Labels, Concept: q.Concept, Situation: "first"}, nil).Column
 	// A workspace pick lock freezes its order too, including effort. Personal
@@ -201,6 +226,7 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 	d.FollowsFirst = q.Situation != "first" && !hasExact
 	if review && !hasExact {
 		d.Rank, d.Steps, d.Automatic = []string{}, []BoardStep{}, true
+		d.Held = []HeldLine{}
 		return d
 	}
 	if hasExact {
@@ -218,7 +244,16 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 		d = ResolveBoard(owned, rowQuery, nil)
 		d.Situation, d.FollowsFirst = q.Situation, false
 	}
-	order, _, found := profileOrder(s, owner, column, "first")
+	orderFor := func(state BoardState, decision BoardDecision, col string) (BoardOrder, bool) {
+		who := state.Workspace
+		if state.Person != nil && decision.PreferenceOf.Source == "person" {
+			who = *state.Person
+		}
+		o, _, found := profileOrder(state, who, col, "first")
+		return o, found
+	}
+	rowOrder, rowFound := orderFor(baseOwned, row, column)
+	order, found := rowOrder, rowFound
 	if hasExact {
 		order, found = exact, true
 	}
@@ -260,8 +295,18 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 	end := "wait"
 	if found && order.End != "" {
 		end = order.End
-	} else if hasExact && q.Situation != "first" && !review {
-		end = "default"
+	} else if hasExact && q.Situation != "first" {
+		end = "row"
+		if review {
+			end = "auto"
+		}
+	}
+	if end == "row" && hasExact && !review {
+		appendSteps(row.Rank, row.Effort, row.EffortLevel, rowOrder.Efforts, "column")
+		end = rowOrder.End
+	}
+	if end == "auto" && review {
+		d.Automatic = true
 	}
 	if end == "default" && (column != "other" || q.Situation != "first") {
 		def := ResolveBoard(baseOwned, BoardQuery{Column: "other", Situation: "first"}, nil)
@@ -270,7 +315,7 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 				d.Not = append(d.Not, id)
 			}
 		}
-		defOrder, _, _ := profileOrder(baseOwned, owner, "other", "first")
+		defOrder, _ := orderFor(baseOwned, def, "other")
 		appendSteps(def.Rank, def.Effort, def.EffortLevel, defOrder.Efforts, "default")
 	}
 	d.Rank = []string{}

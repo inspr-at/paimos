@@ -111,11 +111,14 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if err != nil {
 		return nil, err
 	}
-	if review && d.Automatic {
-		d.Steps = automaticReviewSteps(c, q.AuthorFamily)
-		out.Trace.OrderMode = reviewOrderLegacy
-	} else if review {
+	if review {
 		out.Trace.OrderMode = reviewOrderSaved
+		if d.Automatic {
+			if len(d.Steps) == 0 {
+				out.Trace.OrderMode = reviewOrderLegacy
+			}
+			d.Steps = append(d.Steps, automaticReviewSteps(c, q.AuthorFamily)...)
+		}
 	}
 	if roleName == "scout" || roleName == "mechanical" {
 		quick, err := quickJobSteps(ctx, tx, c, role.effort)

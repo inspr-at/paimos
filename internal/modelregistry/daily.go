@@ -15,11 +15,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// resolveDailyWork uses the existing ranked order and qualification, excluding
-// exhausted harnesses only after the selected harness explicitly permits it.
-// A pinned harness, unknown reading or wait setting never becomes a fallback.
-// Trying another route belongs inside the Models walk, before moving to the
-// next model. Reservation rechecks the same owner policy under its write fence.
+// resolveDailyWork admits each route inside the Models walk before moving to
+// the next model. Reservation rechecks owner policy under its write fence.
 func resolveDailyWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time) (WorkResolution, error) {
 	return resolveWorkWithCatalog(ctx, tx, p, q, now, nil)
 }

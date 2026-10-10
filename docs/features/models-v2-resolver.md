@@ -2,6 +2,8 @@
 
 Live model choices use Settings → Models for build, Quick jobs, review, escalation and ticket route reads. Build follows the ticket kind’s row or Default. Build-hard uses the Stuck situation and requires a strong or frontier model. A workspace pick lock also freezes the order and effort; otherwise personal rows precede workspace rows.
 
+A situation can resume the row's order with that row's native efforts and ending. Review situations can continue with automatic review selection. Missing catalog entries remain at their saved position so Wait reports the first failed step's cause.
+
 Scout and mechanical work try fast models by catalog input plus output list price, with registry order breaking ties. Missing prices follow known prices. If no fast model qualifies, Default runs. Each model step tries its registered routes before the next model, translating effort to each route’s nearest native level and resolving ties upward.
 
 Account eligibility retains project access, live harness health, model grants, schedules, approval, residency and daily caps. Missing quota is unknown and does not imply exhaustion. A capped route can use another registered route of the same model. When the visible order is exhausted, `owner_required` is true and the existing trace preserves the first cause, including its known reset time when sharing permits disclosure. No role ladder is appended.

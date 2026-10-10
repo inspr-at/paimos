@@ -319,4 +319,19 @@ func TestModelsV2RowOwnershipAndSituations(t *testing.T) {
 	if own.PreferenceOf.Source != "person" || !reflect.DeepEqual(own.Rank, []string{"anthropic:opus"}) {
 		t.Fatalf("personal situation disappeared: %+v", own)
 	}
+	s.Person = nil
+	s.Orders = []BoardOrder{
+		{ProfileID: "workspace", Column: "other", Situation: "first", Rank: []string{"openai:astra"}, Efforts: map[string]string{"openai:astra": "xhigh"}},
+		{ProfileID: "workspace", Column: "backend", Situation: "first", Rank: []string{"openai:sol", "missing:route"}, End: "default", Efforts: map[string]string{"openai:sol": "high"}},
+		{ProfileID: "workspace", Column: "backend", Situation: "fix", Rank: []string{"anthropic:opus"}, End: "row"},
+		{ProfileID: "workspace", Column: "backend", Situation: "review", Rank: []string{"anthropic:opus"}, End: "auto"},
+	}
+	resumed := ResolveModelsBoard(s, BoardQuery{Column: "backend", FixRound: 1})
+	if !reflect.DeepEqual(resumed.Rank, []string{"anthropic:opus", "openai:sol", "missing:route", "openai:astra"}) || len(resumed.Held) != 0 || resumed.Steps[1].Effort != "high" || resumed.Steps[3].Effort != "xhigh" || resumed.Steps[3].Stage != "default" {
+		t.Fatalf("situation lost its row, effort or Default continuation: %+v", resumed)
+	}
+	reviewer := ResolveModelsBoard(s, BoardQuery{Column: "backend", Review: true, AuthorFamily: "openai"})
+	if !reviewer.Automatic || !reflect.DeepEqual(reviewer.Rank, []string{"anthropic:opus"}) || len(reviewer.Steps) != 1 {
+		t.Fatalf("saved review lost automatic continuation: %+v", reviewer)
+	}
 }
