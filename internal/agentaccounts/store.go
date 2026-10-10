@@ -85,7 +85,7 @@ func queryAccountsLimit(ctx context.Context, tx pgx.Tx, retired bool, bound int)
 	out := []Account{}
 	for rows.Next() {
 		if bound > 0 && len(out) == bound {
-			return nil, fail(http.StatusConflict, "queue account snapshot exceeds bound")
+			return nil, queueSnapshotOverflow("account")
 		}
 		account, err := scanAccount(rows)
 		if err != nil {
@@ -181,7 +181,7 @@ func attachWindowsLimit(ctx context.Context, tx pgx.Tx, accounts []Account, boun
 	count := 0
 	for rows.Next() {
 		if bound > 0 && count == bound {
-			return nil, fail(http.StatusConflict, "queue window snapshot exceeds bound")
+			return nil, queueSnapshotOverflow("window")
 		}
 		count++
 		var w Window

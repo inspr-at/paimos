@@ -7,8 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
+
+func queueSnapshotOverflow(part string) error {
+	return workorders.Fail(http.StatusConflict, "queue "+part+" snapshot exceeds bound")
+}
 
 const (
 	maxWaitRuns     = 4096
@@ -40,7 +45,7 @@ func (s *waitSnapshot) windows(ctx context.Context, tx pgx.Tx, a Account, own []
 	}
 	remaining := maxWaitWindows - s.sharedCount
 	if remaining <= 0 {
-		return nil, fail(http.StatusConflict, "queue quota window snapshot exceeds bound")
+		return nil, queueSnapshotOverflow("quota window")
 	}
 	windows, err := sharedQuotaWindowsLimit(ctx, tx, a, own, now, maxWaitAccounts, remaining)
 	if err != nil {
@@ -73,7 +78,7 @@ func (s *waitSnapshot) load(ctx context.Context, tx pgx.Tx) error {
 	for rows.Next() {
 		if len(s.used) == maxWaitAccounts {
 			rows.Close()
-			return fail(http.StatusConflict, "queue occupancy snapshot exceeds bound")
+			return queueSnapshotOverflow("occupancy")
 		}
 		var id, harness, pool string
 		var count int
@@ -101,7 +106,7 @@ func (s *waitSnapshot) load(ctx context.Context, tx pgx.Tx) error {
 // Run-specific grants, pins, residency, policies and readiness are rechecked.
 func WaitForRuns(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*CapacityWait, error) {
 	if len(ids) > maxWaitRuns {
-		return nil, fail(http.StatusConflict, "queue run snapshot exceeds bound")
+		return nil, queueSnapshotOverflow("run")
 	}
 	out := make(map[string]*CapacityWait, len(ids))
 	if len(ids) == 0 {
@@ -109,7 +114,7 @@ func WaitForRuns(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*Capa
 	}
 	for _, id := range ids {
 		if !uuidRE.MatchString(id) {
-			return nil, fail(http.StatusBadRequest, "invalid run id")
+			return nil, workorders.Fail(http.StatusBadRequest, "invalid run id")
 		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)

@@ -124,7 +124,7 @@ func sharedQuotaWindowsLimit(ctx context.Context, tx pgx.Tx, a Account, own []Wi
 	for rows.Next() {
 		if accountBound > 0 && len(ids) == accountBound {
 			rows.Close()
-			return nil, fail(http.StatusConflict, "queue quota snapshot exceeds bound")
+			return nil, queueSnapshotOverflow("quota")
 		}
 		var id string
 		if err := rows.Scan(&id); err != nil {

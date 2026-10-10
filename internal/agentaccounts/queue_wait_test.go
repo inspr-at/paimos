@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -211,8 +214,17 @@ func TestQueueWaitBatchScansAndFreshClaimFences(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, err := WaitForRuns(ctx, nil, make([]string, maxWaitRuns+1)); err == nil || err.Error() != "queue run snapshot exceeds bound" || got != nil {
+		got, err := WaitForRuns(ctx, nil, make([]string, maxWaitRuns+1))
+		if err == nil || err.Error() != "queue run snapshot exceeds bound" || got != nil {
 			t.Fatalf("overflow was not rejected before DB work: %+v %v", got, err)
+		}
+		response := httptest.NewRecorder()
+		workorders.WriteError(response, err)
+		if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "queue run snapshot exceeds bound") {
+			t.Fatalf("overflow lost its safe HTTP refusal: %d %s", response.Code, response.Body.String())
+		}
+		if got, err := WaitForRuns(ctx, nil, []string{strings.Repeat("a", 4096)}); err == nil || err.Error() != "invalid run id" || got != nil {
+			t.Fatalf("oversized identity was not rejected before DB work: %+v %v", got, err)
 		}
 		if got, err := WaitForRuns(ctx, nil, nil); err != nil || len(got) != 0 {
 			t.Fatalf("empty batch performed DB work: %+v %v", got, err)

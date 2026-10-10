@@ -673,7 +673,7 @@ func readAccountWindowsLimit(ctx context.Context, tx pgx.Tx, accountIDs []string
 	count := 0
 	for rows.Next() {
 		if bound > 0 && count == bound {
-			return nil, fail(http.StatusConflict, "queue quota window snapshot exceeds bound")
+			return nil, queueSnapshotOverflow("quota window")
 		}
 		count++
 		var w Window
