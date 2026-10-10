@@ -126,11 +126,11 @@ func persistRun(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurr
 		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO routine_actions(tenant_id,run_id,action_key,kind,request_digest,target_node_id,target_revision,state,result)
- VALUES($1,$2,'occurrence','work.create',$3,$4,1,'succeeded',jsonb_build_object('node_id',$4::text))`, actor.TenantID, run.ID, digest(request), o.NodeID); err != nil {
+ VALUES($1,$2,'occurrence','work.create',$3,$4::uuid,1,'succeeded',jsonb_build_object('node_id',$4::uuid::text))`, actor.TenantID, run.ID, digest(request), o.NodeID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,payload)
- VALUES($1,$2,'execute','routine.execute',jsonb_build_object('run_id',$2::text))`, actor.TenantID, run.ID); err != nil {
+ VALUES($1,$2::uuid,'execute','routine.execute',jsonb_build_object('run_id',$2::uuid::text))`, actor.TenantID, run.ID); err != nil {
 		return err
 	}
 	// PostgreSQL delivers transactional notifications only after COMMIT, and
