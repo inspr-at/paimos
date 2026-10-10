@@ -47,6 +47,8 @@
         "internal/agentaccounts/**",
         "internal/accountprivacy/**",
         "internal/approvals/**",
+        "internal/approvals/routine.go",
+        "internal/approvals/routine_test.go",
         "internal/principallink/**",
         "internal/scopecode/**",
         "internal/systemactor/**",
@@ -242,6 +244,9 @@
         "internal/recurrences/consent.go",
         "internal/recurrences/consent_test.go",
         "internal/routineguard/**",
+        "internal/routineguard/evaluation.go",
+        "internal/routineguard/evaluation_test.go",
+        "internal/routineguard/evaluation_tx_test.go",
         "internal/recurrences/runs.go",
         "internal/recurrences/runs_test.go"
       ]

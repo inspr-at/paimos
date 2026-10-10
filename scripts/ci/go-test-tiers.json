@@ -3302,6 +3302,8 @@
     ,
     {"kind":"go","package":"internal/approvals","name":"TestProjectScopedApprovalNames","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/approvals","name":"TestRoutineHoldIsExactPersonOwnedAndRevocable","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/approvals","name":"TestScopeWithinKey","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachedmsg","name":"TestFrameLimitsAndEscaping","tier":"GATED-FULL"}
@@ -8608,7 +8610,11 @@
     ,
     {"kind":"go","package":"internal/reviewgate","name":"TestParseFinalVerdict","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/routineguard","name":"TestEvaluationRequestPersistsBeforeDispatchAndRechecksOwner","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/routineguard","name":"TestGuardrailFloorScopeEvidenceAndBoundedCheckpoints","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineguard","name":"TestIndependentEvaluationBindsEvidenceAndCannotBootstrap","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/rules","name":"TestAccessChangesStillTakeConflictingTenantFence","tier":"GATED-FULL"}
     ,

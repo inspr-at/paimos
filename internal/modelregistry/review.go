@@ -50,6 +50,27 @@ func ResolveReviewWithPolicyFor(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	return resolveReviewWithCatalog(ctx, tx, p, q, now, nil, policy)
 }
 
+// ResolveRoutineEvaluationFor preserves live project/person pins and account
+// qualification. The compiled routine checkpoint requires independence even
+// when ordinary project review has its cross-family setting switched off.
+func ResolveRoutineEvaluationFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, author VerifiedModel, now time.Time) (ReviewRoute, reviewgate.FamilyPolicy, error) {
+	family, err := author.Family()
+	if err != nil {
+		return ReviewRoute{}, reviewgate.FamilyPolicy{}, err
+	}
+	settings, err := reviewgate.LoadFamilyPolicyTx(ctx, tx, &q.ProjectID)
+	if err != nil {
+		return ReviewRoute{}, reviewgate.FamilyPolicy{}, err
+	}
+	policy := settings.Effective
+	if policy.Mode == "off" {
+		policy = reviewgate.DefaultFamilyPolicy()
+	}
+	q.Role, q.AuthorFamily = "review-gate", family
+	route, err := ResolveReviewWithPolicyFor(ctx, tx, p, q, now, policy)
+	return route, settings.Effective, err
+}
+
 func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog, policies ...reviewgate.FamilyPolicy) (ReviewRoute, error) {
 	out := ReviewRoute{Ladder: []Candidate{}, Role: "review-gate"}
 	if strings.TrimSpace(q.Area) == "security" || q.Role == "review-gate-security" {
@@ -67,7 +88,7 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	}
 	q.Role = out.Role
 	q.AuthorFamily = author
-	if board, err := resolveBoardWork(ctx, tx, p, q, now, nil); err != nil {
+	if board, err := resolveBoardWork(ctx, tx, p, q, now, nil, policies...); err != nil {
 		return out, err
 	} else if board != nil {
 		out.Profile, out.Ladder, out.OwnerRequired, out.Trace, out.Residency = board.Profile, board.Ladder, board.OwnerRequired, board.Trace, board.Residency
