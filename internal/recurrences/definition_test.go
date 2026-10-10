@@ -42,6 +42,13 @@ func TestRoutineDefinitionScopeAuthorityAndInertRoundTrip(t *testing.T) {
 	if got := f.get(private.ID); !reflect.DeepEqual(got.Definition, in.Definition) {
 		t.Fatalf("get lost assignment: %+v", got.Definition)
 	}
+	f.tx(func(tx pgx.Tx) error {
+		// An older released server does not know the optional projection fields.
+		// Its audit snapshots must still follow the saved private scope.
+		oldSnapshot := private
+		oldSnapshot.Definition = nil
+		return record(t.Context(), tx, f.p, private.ProjectID, "recurrence.updated", private, oldSnapshot)
+	})
 	f.now = f.now.AddDate(0, 0, 30)
 	f.run()
 	f.tx(func(tx pgx.Tx) error {

@@ -62,9 +62,12 @@ CREATE POLICY recurrences_definition_scope ON recurrences AS RESTRICTIVE
 
 -- Protect full snapshots even for workspace owners and /events/SSE consumers.
 -- Existing event/reference policies still apply; legacy events are unchanged.
+-- Bind old-binary snapshots (which omit definition) to the marked row as well.
 CREATE POLICY events_routine_definition_scope ON events AS RESTRICTIVE FOR SELECT
  USING (type NOT IN ('recurrence.created','recurrence.updated','recurrence.paused','recurrence.resumed','recurrence.deleted')
-  OR ((after->'definition' IS NULL OR after->'definition'='null'::jsonb
+  OR ((coalesce(aeon_uuid_or_null(metadata->>'recurrence_id'),aeon_uuid_or_null(after->>'id'),aeon_uuid_or_null(before->>'id')) IS NULL
+       OR EXISTS(SELECT 1 FROM recurrences r WHERE r.tenant_id=events.tenant_id AND r.id=coalesce(aeon_uuid_or_null(metadata->>'recurrence_id'),aeon_uuid_or_null(after->>'id'),aeon_uuid_or_null(before->>'id'))))
+   AND (after->'definition' IS NULL OR after->'definition'='null'::jsonb
        OR aeon_routine_scope_visible(after#>>'{definition,scope,kind}',aeon_uuid_or_null(after#>>'{definition,scope,project_id}'),aeon_uuid_or_null(after#>>'{definition,owner_principal_id}')))
    AND (before->'definition' IS NULL OR before->'definition'='null'::jsonb
        OR aeon_routine_scope_visible(before#>>'{definition,scope,kind}',aeon_uuid_or_null(before#>>'{definition,scope,project_id}'),aeon_uuid_or_null(before#>>'{definition,owner_principal_id}')))));
