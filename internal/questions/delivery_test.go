@@ -61,8 +61,8 @@ func deliveryTracedPool(t *testing.T, pool *pgxpool.Pool, trace *deliveryWorkTra
 	return traced
 }
 
-// Risk: replacing polling loses answers/retries in notification gaps, dispatches
-// before grace expires, or leaves the empty loop consuming database commits.
+// Risk: replacing polling loses fresh/reused answers or retries in notification
+// gaps, dispatches before grace, or leaves the empty loop consuming DB commits.
 // Existing delivery tests cover final-write revocation and replica exclusivity.
 // Real LISTEN/termination barriers and injected clocks prove recovery ordering.
 func TestDeliveryDeadlineWakeScheduling(t *testing.T) {
@@ -110,10 +110,10 @@ func TestDeliveryDeadlineWakeScheduling(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal("listener never subscribed")
 		}
-		var q Question
+		var q, reused Question
 		step := 0
 		f.m.runDelivery(ctx, wakes, func() time.Time { return time.Unix(0, f.now.Load()) }, func(ctx context.Context, hints <-chan struct{}, delay time.Duration) bool {
-			want := []time.Duration{30 * time.Second, 10 * time.Second, time.Second, 10 * time.Millisecond, 30 * time.Second}
+			want := []time.Duration{30 * time.Second, 10 * time.Second, time.Second, 10 * time.Millisecond, 30 * time.Second, 10 * time.Millisecond, 30 * time.Second}
 			if step >= len(want) || delay != want[step] {
 				t.Fatalf("step %d delay=%v", step, delay)
 			}
@@ -121,7 +121,8 @@ func TestDeliveryDeadlineWakeScheduling(t *testing.T) {
 			case 0:
 				in := input()
 				in.SessionID = f.session
-				q = f.answer(t, f.ask(t, in), "wake me")
+				q = f.ask(t, in)
+				q = question(t, request(ctx, f.mux, f.person, "POST", "/api/questions/"+q.ID+"/decision", DecisionInput{RequestID: uid(), ExpectedRevision: q.Revision, OptionID: "a", Outcome: "always"}), 200)
 				select {
 				case <-hints:
 				case <-ctx.Done():
@@ -136,13 +137,55 @@ func TestDeliveryDeadlineWakeScheduling(t *testing.T) {
 				f.advance(time.Second)
 			case 3:
 				f.expectEffects(t, q, "delivered")
+				if outcomeRow(t, f.status(t, q.ID)).State != "delivered" || f.knowledge(t, q.Answer.ID).Status != "active" {
+					t.Fatal("reusable answer was not published after grace")
+				}
 			case 4:
+				in := input()
+				in.SessionID = f.otherSession
+				reused = question(t, request(ctx, f.mux, f.otherAgent, "POST", "/api/projects/"+f.project+"/questions", in), 201)
+				if reused.ID != q.ID || reused.Answer == nil || reused.Answer.ID != q.Answer.ID || len(reused.Askers) != 1 || reused.Askers[0].FromRecord == nil || reused.Askers[0].FromRecord.DecisionID != q.Answer.ID {
+					t.Fatal("new asker did not reuse the published answer")
+				}
+				pending := 0
+				for _, e := range reused.Pending {
+					if e.Kind == "outcome" {
+						continue
+					}
+					if e.AskerID != reused.Askers[0].ID || e.State != "pending" {
+						t.Fatalf("reuse did not create a pending per-asker effect: %+v", e)
+					}
+					pending++
+				}
+				if pending != 2 {
+					t.Fatalf("reuse effects=%d, want inbox and comment", pending)
+				}
+				// Reuse uses the database clock. Align the injected clock after
+				// its commit without advancing to the reconciliation deadline.
+				var databaseNow time.Time
+				if err := f.d.Admin.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&databaseNow); err != nil {
+					t.Fatal(err)
+				}
+				if databaseNow.UnixNano() > f.now.Load() {
+					f.now.Store(databaseNow.UnixNano())
+				}
+				select {
+				case <-hints:
+				case <-ctx.Done():
+					t.Fatal("committed reuse did not wake idle dispatcher")
+				}
+			case 5:
+				f.expectEffects(t, reused, "delivered")
+				if n := f.count(t, `SELECT count(*) FROM inbox_compat_messages WHERE recipient_session_id=$1 AND body::jsonb->>'answer_id'=$2 AND body::jsonb->>'asker_id'=$3 AND reply_to_id=$4`, f.otherSession, q.Answer.ID, reused.Askers[0].ID, reused.Askers[0].ReplyRootID); n != 1 {
+					t.Fatalf("reuse delivered %d correlated replies, want 1", n)
+				}
+			case 6:
 				return false
 			}
 			step++
 			return true
 		})
-		if step != 4 {
+		if step != 6 {
 			t.Fatalf("scheduler stopped at step %d", step)
 		}
 	})
