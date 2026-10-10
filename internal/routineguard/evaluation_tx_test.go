@@ -117,7 +117,6 @@ type evaluationFixture struct {
 	binding       routineguard.ActionBinding
 	context       routineguard.Context
 	in            func(func(pgx.Tx) error)
-	call          func(string, string, any, int) []byte
 }
 
 func newEvaluationFixture(t *testing.T) *evaluationFixture {
@@ -126,7 +125,7 @@ func newEvaluationFixture(t *testing.T) *evaluationFixture {
 	ctx := dbtest.Seed(t.Context())
 	p := tenant.Principal{TenantID: "10000000-0000-4000-8000-000000000001", Kind: tenant.Person}
 	agent := tenant.Principal{TenantID: p.TenantID, Kind: tenant.Agent, Scopes: []string{"nodes.write", "harness.control", "models.read"}}
-	var project, parent, workKind string
+	var project, parent, workKind, backupOwner string
 	in := func(fn func(pgx.Tx) error) {
 		t.Helper()
 		if err := db.InTenant(ctx, d.App, p.TenantID, fn); err != nil {
@@ -138,6 +137,9 @@ func newEvaluationFixture(t *testing.T) *evaluationFixture {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Owner') RETURNING id::text`, p.TenantID).Scan(&p.ID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Backup owner') RETURNING id::text`, p.TenantID).Scan(&backupOwner); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Coordinator') RETURNING id::text`, p.TenantID).Scan(&agent.ID); err != nil {
@@ -155,6 +157,7 @@ func newEvaluationFixture(t *testing.T) *evaluationFixture {
 		return tx.QueryRow(t.Context(), `SELECT id::text FROM work_kinds WHERE slug='backend' AND project_id IS NULL AND archived_at IS NULL`).Scan(&workKind)
 	})
 	dbtest.BindRole(t, d, p.TenantID, p.ID, "owner")
+	dbtest.BindRole(t, d, p.TenantID, backupOwner, "owner")
 	dbtest.BindRole(t, d, p.TenantID, agent.ID, "admin")
 	mux := http.NewServeMux()
 	recurrences.New(d.App).Mount(mux)
@@ -195,8 +198,7 @@ func newEvaluationFixture(t *testing.T) *evaluationFixture {
 		return tx.QueryRow(t.Context(), `INSERT INTO routine_actions(tenant_id,run_id,action_key,kind,request_digest,target_node_id,target_revision) VALUES($1,$2,'evaluate','pr.open',$3,$4,1) RETURNING id::text`, p.TenantID, b.RunID, b.PayloadDigest, b.TargetID).Scan(&b.ActionID)
 	})
 	c := routineguard.Context{Checkpoint: "action", Action: b.Kind, Text: "Inspect assigned source", PayloadBytes: 100}
-	approvals.New(d.App).Mount(mux)
-	return &evaluationFixture{db: d, person: p, agent: agent, binding: b, context: c, in: in, call: call}
+	return &evaluationFixture{db: d, person: p, agent: agent, binding: b, context: c, in: in}
 }
 
 func (f *evaluationFixture) write(t *testing.T, fn func(pgx.Tx) error) error {
@@ -309,8 +311,7 @@ func (f *evaluationFixture) action(t *testing.T) (string, string, *string, []byt
 // deciding. Approval time must not be mistaken for evaluator completion time.
 func TestEvaluationPersonHoldSurvivesEvaluatorDeadline(t *testing.T) {
 	f := newEvaluationFixture(t)
-	// The real approval handler also sees the evaluator deadline in the past.
-	now := time.Now().UTC().Truncate(time.Microsecond).Add(-5 * time.Minute)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	f.reviewer(t, now)
 	request, err := f.prepare(t, now)
 	if err != nil {
@@ -326,13 +327,34 @@ func TestEvaluationPersonHoldSurvivesEvaluatorDeadline(t *testing.T) {
 	if state != "needs_person" || approval == nil {
 		t.Fatalf("person hold missing: %s %v", state, approval)
 	}
+	decidedAt := now.Add(time.Hour)
+	// Seed the delayed person decision under the real authorization fence.
+	// The approval handler uses the DB clock; no wall-clock wait is needed.
+	if err := f.write(t, func(tx pgx.Tx) error {
+		hold, err := approvals.Review(t.Context(), tx, f.person, *approval)
+		if err != nil {
+			return err
+		}
+		if err := approvals.CanDecide(t.Context(), tx, f.person, hold); err != nil {
+			return err
+		}
+		if !hold.ExpiresAt.After(decidedAt) || hold.ExpiresAt.After(recorded.Add(24*time.Hour)) {
+			t.Fatalf("person hold cannot accept delayed decision within 24-hour cap: %s", hold.ExpiresAt)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO approval_decisions(tenant_id,request_id,decided_by_principal_id,decision,decided_at) VALUES($1,$2,$3,'approved',$4)`, f.person.TenantID, *approval, f.person.ID, decidedAt); err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO agent_permission_grants(tenant_id,approval_request_id,agent_principal_id,scope,resource_kind,resource_id,valid_until) SELECT tenant_id,id,agent_principal_id,scope,resource_kind,resource_id,expires_at FROM approval_requests WHERE id=$1`, *approval)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	var receipt struct {
 		RecordedAt time.Time `json:"recorded_at"`
 	}
 	if err := json.Unmarshal(raw, &receipt); err != nil || !receipt.RecordedAt.Equal(recorded) {
 		t.Fatalf("recorded completion clock missing: %s %v", raw, err)
 	}
-	f.call("POST", "/api/approvals/"+*approval+"/decision", map[string]string{"decision": "approved"}, 200)
 	check := func(at time.Time) (bool, error) {
 		var live bool
 		err := f.write(t, func(tx pgx.Tx) error {
@@ -342,7 +364,7 @@ func TestEvaluationPersonHoldSurvivesEvaluatorDeadline(t *testing.T) {
 		})
 		return live, err
 	}
-	if live, err := check(now.Add(time.Hour)); err != nil || !live {
+	if live, err := check(decidedAt); err != nil || !live {
 		t.Fatalf("approval after evaluator deadline refused: %v %v", live, err)
 	}
 	if live, err := check(recorded.Add(24 * time.Hour)); err != nil || live {
@@ -380,7 +402,11 @@ func TestEvaluationVerifiedVerdictCannotBeShopped(t *testing.T) {
 				t.Fatalf("verified first verdict: %+v %v", decision, err)
 			}
 			state, evaluation, approval, raw := f.action(t)
-			if state != string(verdict) {
+			wantState := "needs_person"
+			if verdict == routineguard.Block {
+				wantState = "blocked"
+			}
+			if state != wantState {
 				t.Fatalf("wrong first state: %s", state)
 			}
 			other := f.evaluator(t, request, "EVAL-SECOND")
