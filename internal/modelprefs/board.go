@@ -189,6 +189,7 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 	if owner.Scope != "person" {
 		owned.Person = nil
 	}
+	baseOwned := owned
 	exact, hasExact := boardOrder(owned, owner, column, q.Situation)
 	if !hasExact && row.Source == "follows" {
 		exact, hasExact = boardOrder(owned, owner, "other", q.Situation)
@@ -261,13 +262,13 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 		end = "default"
 	}
 	if end == "default" && (column != "other" || q.Situation != "first") {
-		def := ResolveBoard(owned, BoardQuery{Column: "other", Situation: "first"}, nil)
+		def := ResolveBoard(baseOwned, BoardQuery{Column: "other", Situation: "first"}, nil)
 		for _, id := range def.Not {
 			if !slices.Contains(d.Not, id) {
 				d.Not = append(d.Not, id)
 			}
 		}
-		defOrder, _, _ := profileOrder(owned, owner, "other", "first")
+		defOrder, _, _ := profileOrder(baseOwned, owner, "other", "first")
 		appendSteps(def.Rank, def.Effort, def.EffortLevel, defOrder.Efforts, "default")
 	}
 	d.Rank = []string{}

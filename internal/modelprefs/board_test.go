@@ -300,4 +300,23 @@ func TestModelsV2RowOwnershipAndSituations(t *testing.T) {
 	if !auto.Automatic || len(auto.Steps) != 0 {
 		t.Fatalf("review fell into build order: %+v", auto)
 	}
+
+	s.Orders = []BoardOrder{
+		{ProfileID: "workspace", Column: "other", Situation: "first", Rank: []string{"openai:sol"}, Efforts: map[string]string{"openai:sol": "high"}},
+		{ProfileID: "workspace", Column: "other", Situation: ModelsSmallSituation, Rank: []string{"anthropic:opus"}, End: "default", Efforts: map[string]string{"anthropic:opus": "xhigh"}},
+	}
+	s.Person = nil
+	small := ResolveModelsBoard(s, BoardQuery{Column: "other", EstimateHours: 1})
+	if !reflect.DeepEqual(small.Rank, []string{"anthropic:opus", "openai:sol"}) || len(small.Steps) != 2 || small.Steps[0].Effort != "xhigh" || small.Steps[1].Effort != "high" {
+		t.Fatalf("Default small did not return to the row: %+v", small)
+	}
+	s = rankedFixture()
+	s.Orders = []BoardOrder{
+		{ProfileID: "workspace", Column: "backend", Situation: "first", Rank: []string{"openai:sol"}},
+		{ProfileID: "person", Column: "backend", Situation: "fix", Rank: []string{"anthropic:opus"}, End: "wait"},
+	}
+	own := ResolveModelsBoard(s, BoardQuery{Column: "backend", FixRound: 1})
+	if own.PreferenceOf.Source != "person" || !reflect.DeepEqual(own.Rank, []string{"anthropic:opus"}) {
+		t.Fatalf("personal situation disappeared: %+v", own)
+	}
 }
