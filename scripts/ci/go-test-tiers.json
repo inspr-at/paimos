@@ -842,6 +842,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestProjectLookupPreservesQueryFailure","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestQueueWaitBatchScansAndFreshClaimFences","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaHintsNeedPersonConfirmationForExactAccounts","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaWarningDedupeRecoveryAndReset","tier":"GATED-FULL"}
@@ -6736,7 +6738,19 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestReplyToHeldParentStaysInvisible","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineDispatcherSharesListenerAcrossTenants","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestRoutineDispatcherUsesEncryptedTargetAndFencedCompletion","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineDurableWakeRetryLeaseAndRestart","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineEarliestDeadlineBehindLeasedHead","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineHintsFilterTenantAndChannel","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineIdleFallbackAndReconnectScheduling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineSharedListenerRoutesHintsAndReleasesConnection","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestSendDoesNotWaitForTargetWriterAfterEvent","tier":"ESSENTIAL"}
     ,

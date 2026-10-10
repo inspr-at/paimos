@@ -8,14 +8,113 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import subprocess
 import sys
-import threading
 import tempfile
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('migration_compat_probe', Path(__file__).with_name('migration-compat-probe.py'))
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+
+
+class MigrationCompatImagesTest(unittest.TestCase):
+    # Risk: once the latest stable binary supports account-use, an unconditional
+    # rollback-floor probe against that binary fails despite a sound DB fence.
+    # Mock only process boundaries; execute the real shell orchestration and
+    # retain strict refusals against an independently pinned incapable binary.
+    def test_capable_previous_release_keeps_the_incapable_rollback_probe(self):
+        latest_tag = 'v261010123154.0.0'
+        latest_digest = 'sha256:' + 'a' * 64
+        floor_digest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / 'scripts'
+            scripts.mkdir()
+            script = scripts / 'migration-compat.sh'
+            script.write_text(Path(__file__).with_name(script.name).read_text())
+            tools = root / 'tools'
+            tools.mkdir()
+            fake = '''import json, os, sys
+from pathlib import Path
+tool, args = Path(sys.argv[0]).name, sys.argv[1:]
+root = Path(os.environ['COMPAT_FIXTURE_ROOT'])
+with (root / 'calls.jsonl').open('a') as log:
+    log.write(json.dumps([tool, args]) + '\\n')
+latest_id, floor_id = 'sha256:' + '1' * 64, 'sha256:' + '2' * 64
+active = root / 'active-image'
+active_database = root / 'active-database'
+if tool == 'docker':
+    if args[:2] == ['image', 'ls']:
+        print(floor_id if args[-1].endswith(os.environ['COMPAT_FLOOR_DIGEST']) else latest_id)
+    elif args[0] == 'port':
+        print('127.0.0.1:5432' if args[-1] == '5432/tcp' else '127.0.0.1:8080')
+    elif args[0] == 'run' and args[-1] in (latest_id, floor_id):
+        active.write_text(args[-1])
+        database = next(value for value in args if value.startswith('AEON_DATABASE_URL=')).split('/')[-1].split('?')[0]
+        active_database.write_text(database)
+elif tool == 'python3':
+    mode = args[1]
+    if mode == 'seed':
+        Path(args[args.index('--state') + 1]).write_text('{}')
+    if mode in ('seed', 'check', 'account-use'):
+        version = args[args.index('--version') + 1]
+        expected = '261009095632.0.0' if active.read_text() == floor_id else '261010123154.0.0'
+        if version != expected:
+            sys.exit('tested binary does not match the previous release')
+    if mode == 'account-use':
+        database = args[args.index('--database') + 1] if '--database' in args else 'aeon'
+        if database != active_database.read_text():
+            sys.exit('probe and binary used different fixtures')
+        if '--require-refusal' in args:
+            if active.read_text() != floor_id or database != 'aeon_legacy':
+                sys.exit('capability refusal must exercise the independent legacy fixture')
+        elif active.read_text() != latest_id or database != 'aeon':
+            sys.exit('capability-aware activation must exercise the latest binary')
+elif tool not in ('go', 'trash'):
+    sys.exit('unexpected tool')
+'''
+            for name in ('docker', 'python3', 'go', 'trash'):
+                executable = tools / name
+                executable.write_text('#!' + sys.executable + '\n' + fake)
+                executable.chmod(0o755)
+            summary = root / 'summary'
+            environment = os.environ.copy()
+            environment.update({
+                'PATH': str(tools) + os.pathsep + environment['PATH'],
+                'COMPAT_FIXTURE_ROOT': str(root),
+                'COMPAT_FLOOR_DIGEST': floor_digest,
+                'GITHUB_STEP_SUMMARY': str(summary),
+            })
+            completed = subprocess.run(
+                ['bash', str(script), latest_tag, latest_digest], env=environment,
+                capture_output=True, text=True, timeout=15, check=False)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            calls = [json.loads(line) for line in (root / 'calls.jsonl').read_text().splitlines()]
+            boots = [args[-1] for tool, args in calls
+                     if tool == 'docker' and args[0] == 'run' and args[-1].startswith('sha256:')]
+            self.assertEqual(boots, ['sha256:' + '1' * 64] * 3 + ['sha256:' + '2' * 64])
+            probes = [(args[1], args[args.index('--version') + 1]) for tool, args in calls
+                      if tool == 'python3' and '--version' in args]
+            self.assertEqual(probes, [
+                ('seed', latest_tag[1:]), ('check', latest_tag[1:]),
+                ('account-use', latest_tag[1:]),
+                ('check', '261009095632.0.0'), ('account-use', '261009095632.0.0')])
+            activations = [args for tool, args in calls if tool == 'python3' and args[1] == 'account-use']
+            self.assertEqual(['--require-refusal' in args for args in activations], [False, True])
+            self.assertNotIn('--database', activations[0])
+            self.assertEqual(activations[1][activations[1].index('--database') + 1], 'aeon_legacy')
+            copies = [i for i, (_tool, args) in enumerate(calls)
+                      if 'CREATE DATABASE aeon_legacy WITH TEMPLATE aeon OWNER aeon' in args]
+            self.assertEqual(len(copies), 1)
+            self.assertLess(copies[0], calls.index(['python3', activations[0]]))
+            pulls = [args[-1] for tool, args in calls if tool == 'docker' and args[0] == 'pull']
+            self.assertEqual(pulls, ['ghcr.io/inspr-at/aeon@' + latest_digest,
+                                     'ghcr.io/inspr-at/aeon@' + floor_digest])
+            self.assertIn('registry image ghcr.io/inspr-at/aeon@' + latest_digest +
+                          '; loaded image sha256:' + '1' * 64, summary.read_text())
+            self.assertIn('registry image ghcr.io/inspr-at/aeon@' + floor_digest +
+                          '; loaded image sha256:' + '2' * 64, summary.read_text())
 
 
 class ProbeTest(unittest.TestCase):
@@ -311,6 +410,96 @@ class ProbeTest(unittest.TestCase):
             self.assertRegex(request.call_args_list[offset + 5].args[1], r'^/api/runs/.+/claim$')
         self.assertTrue(all(not call.kwargs for call in request.call_args_list))
         self.assertEqual(boundary.snapshot.call_count, 4)
+
+
+class MigrationHarnessTest(unittest.TestCase):
+    def test_latest_compatibility_and_legacy_capability_use_distinct_images(self):
+        # Risk: once the latest release understands account use, expecting it
+        # to fail the legacy capability guard rejects every subsequent PR.
+        # Execute the harness with disposable command doubles: keep latest
+        # read compatibility and exact legacy refusal as independent gates.
+        latest_tag = 'v261010123154.0.0'
+        latest_digest = 'sha256:c9952c1561c8d32c4a3efb17ed95934f81efd6bc2546de41a3b56bd138304deb'
+        legacy_tag = 'v261009095632.0.0'
+        legacy_digest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / 'scripts'
+            scripts.mkdir()
+            (scripts / 'migration-compat.sh').write_text(
+                Path(__file__).with_name('migration-compat.sh').read_text())
+            bin_dir = root / 'bin'
+            bin_dir.mkdir()
+            command = '''import json, os, sys
+from pathlib import Path
+name, args = Path(sys.argv[0]).name, sys.argv[1:]
+state_path = Path(os.environ['HARNESS_STATE'])
+state = json.loads(state_path.read_text()) if state_path.exists() else {}
+with open(os.environ['HARNESS_LOG'], 'a') as log:
+    log.write(json.dumps({'command': name, 'args': args, 'image': state.get('image'), 'database': state.get('database'), 'migrated': state.get('migrated', False)}) + '\\n')
+if name == 'docker':
+    if args[:2] == ['image', 'ls']:
+        print(args[-1].split('@')[1])
+    elif args[0] == 'run' and '--name' in args and args[args.index('--name') + 1].startswith('aeon-compat-app-'):
+        state['image'] = args[-1]
+        state['database'] = next(value for value in args if value.startswith('AEON_DATABASE_URL=')).split('/')[-1].split('?')[0]
+    elif args[0] == 'port':
+        print('127.0.0.1:8080' if args[-1] == '8080/tcp' else '127.0.0.1:5432')
+    elif args[0] == 'exec' and '-i' in args:
+        sys.stdin.read()
+elif name == 'go':
+    state['migrated'] = True
+elif name == 'python3':
+    mode = args[1]
+    if mode == 'seed':
+        Path(args[args.index('--state') + 1]).write_text('{}')
+    elif mode == 'account-use':
+        database = args[args.index('--database') + 1] if '--database' in args else 'aeon'
+        if database != state.get('database'):
+            sys.exit('probe and binary used different fixtures')
+        boundary = 'legacy' if '--require-refusal' in args else 'latest'
+        if boundary == 'legacy':
+            if state.get('image') != os.environ['HARNESS_LEGACY_DIGEST'] or database != 'aeon_legacy':
+                sys.exit('capability refusal must exercise the independent immutable legacy image')
+        elif state.get('image') != os.environ['HARNESS_LATEST_DIGEST'] or database != 'aeon':
+            sys.exit('capability-aware activation must exercise the latest binary')
+        if os.environ['HARNESS_FAIL_BOUNDARY'] == boundary:
+            sys.exit(23)
+state_path.write_text(json.dumps(state))
+'''
+            for name in ('docker', 'python3', 'go', 'trash'):
+                executable = bin_dir / name
+                executable.write_text('#!' + sys.executable + '\n' + command)
+                executable.chmod(0o755)
+            for fail_boundary in ('none', 'latest', 'legacy'):
+                with self.subTest(fail_boundary=fail_boundary):
+                    log = root / f'commands-{fail_boundary}.jsonl'
+                    harness_env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ['PATH'],
+                        HARNESS_LOG=str(log), HARNESS_STATE=str(root / f'state-{fail_boundary}.json'),
+                        HARNESS_LATEST_DIGEST=latest_digest, HARNESS_LEGACY_DIGEST=legacy_digest,
+                        HARNESS_FAIL_BOUNDARY=fail_boundary,
+                        GITHUB_STEP_SUMMARY=str(root / f'summary-{fail_boundary}.txt'))
+                    result = subprocess.run(['bash', str(scripts / 'migration-compat.sh'), latest_tag, latest_digest],
+                        env=harness_env, capture_output=True, text=True, timeout=15, check=False)
+                    self.assertEqual(result.returncode, 0 if fail_boundary == 'none' else 23, result.stdout + result.stderr)
+                    events = [json.loads(line) for line in log.read_text().splitlines()]
+                    migrations = [event for event in events if event['command'] == 'go']
+                    self.assertEqual(len(migrations), 1)
+                    probes = [event for event in events if event['command'] == 'python3']
+                    reads = [event for event in probes if event['args'][1] == 'check']
+                    self.assertEqual([(event['image'], event['migrated'], event['args'][-1]) for event in reads],
+                        [(latest_digest, True, latest_tag[1:])] +
+                        ([] if fail_boundary == 'latest' else [(legacy_digest, True, legacy_tag[1:])]))
+                    boundary = [event for event in probes if event['args'][1] == 'account-use']
+                    self.assertEqual([(event['image'], event['database'], event['migrated'],
+                                       event['args'][event['args'].index('--version') + 1],
+                                       '--require-refusal' in event['args']) for event in boundary],
+                        [(latest_digest, 'aeon', True, latest_tag[1:], False)] +
+                        ([] if fail_boundary == 'latest' else [(legacy_digest, 'aeon_legacy', True, legacy_tag[1:], True)]))
+                    if fail_boundary != 'none':
+                        self.assertNotIn('Migration compatibility passed:', result.stdout)
+                    else:
+                        self.assertIn('Migration compatibility passed:', result.stdout)
 
 
 class MigrationRuntimeTest(unittest.TestCase):

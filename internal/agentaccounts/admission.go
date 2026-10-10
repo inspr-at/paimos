@@ -38,6 +38,10 @@ func synthetic(w Window) bool { return w.capacityKind == "refresh" || w.capacity
 // provisional grant is materialized, under the account lock in selectAccount.
 // claiming excludes the run's own slot and preserves its exact one-shot grant.
 func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time.Time, slots int, run runRow, claiming bool) ([]Window, *CapacityWait, error) {
+	return admissionSnapshot(ctx, tx, a, all, now, slots, run, claiming, nil)
+}
+
+func admissionSnapshot(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time.Time, slots int, run runRow, claiming bool, snapshot *waitSnapshot) ([]Window, *CapacityWait, error) {
 	// Projections with no run ID retain their existing capacity advice. Every
 	// real managed reservation and claim re-reads daily policy under its fence.
 	if run.Purpose == "managed" && run.ID != "" {
@@ -76,7 +80,11 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	if !approved {
 		return nil, waitFor("approval"), nil
 	}
-	all, err = sharedQuotaWindows(ctx, tx, a, all, now)
+	if snapshot == nil {
+		all, err = sharedQuotaWindows(ctx, tx, a, all, now)
+	} else {
+		all, err = snapshot.windows(ctx, tx, a, all, now)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -334,6 +342,10 @@ func WaitForQueueRoute(ctx context.Context, tx pgx.Tx, id, agent, profile string
 }
 
 func waitForRun(ctx context.Context, tx pgx.Tx, run runRow) (*CapacityWait, error) {
+	return waitForRunSnapshot(ctx, tx, run, nil)
+}
+
+func waitForRunSnapshot(ctx context.Context, tx pgx.Tx, run runRow, snapshot *waitSnapshot) (*CapacityWait, error) {
 	host, err := agentpairing.HostCapacityForPrincipal(ctx, tx, run.AgentID)
 	if err != nil {
 		return nil, err
@@ -341,22 +353,27 @@ func waitForRun(ctx context.Context, tx pgx.Tx, run runRow) (*CapacityWait, erro
 	if host != nil && host.Reason != "" {
 		return &CapacityWait{Code: "capacity", HostReason: host.Reason}, nil
 	}
-	accounts, err := listAccounts(ctx, tx)
+	if snapshot == nil {
+		// Single-run callers include routing writes. Keep their facts current
+		// in the transaction that will perform the mutation.
+		snapshot = &waitSnapshot{}
+		snapshot.accounts, err = listAccounts(ctx, tx)
+		if err == nil {
+			snapshot.used, err = occupancy(ctx, tx)
+		}
+		if err == nil {
+			snapshot.quotaUsed, err = quotaOccupancy(ctx, tx)
+		}
+		if err == nil {
+			snapshot.now, err = dbNow(ctx, tx)
+		}
+	} else if !snapshot.loaded {
+		err = snapshot.load(ctx, tx)
+	}
 	if err != nil {
 		return nil, err
 	}
-	used, err := occupancy(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	quotaUsed, err := quotaOccupancy(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	now, err := dbNow(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
+	accounts, used, quotaUsed, now := snapshot.accounts, snapshot.used, snapshot.quotaUsed, snapshot.now
 	var harness string
 	if err := tx.QueryRow(ctx, `SELECT harness FROM model_profiles WHERE id=$1 AND enabled`, run.ProfileID).Scan(&harness); isNoRows(err) {
 		return waitFor("models"), nil
@@ -431,7 +448,11 @@ func waitForRun(ctx context.Context, tx pgx.Tx, run runRow) (*CapacityWait, erro
 		if claiming && slots > 0 {
 			slots--
 		}
-		windows, wait, err := admission(ctx, tx, a, a.Windows, now, slots, run, claiming)
+		var advisory *waitSnapshot
+		if snapshot.loaded {
+			advisory = snapshot
+		}
+		windows, wait, err := admissionSnapshot(ctx, tx, a, a.Windows, now, slots, run, claiming, advisory)
 		if err != nil {
 			return nil, err
 		}
