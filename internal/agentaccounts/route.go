@@ -214,6 +214,10 @@ func ValidateReservedCapacity(ctx context.Context, tx pgx.Tx, runID, accountID s
 	if err := agentpairing.Lock(ctx, tx); err != nil {
 		return err
 	}
+	run, err := lockRun(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
 	routine, err := workorders.GuardRoutineRunTx(ctx, tx, runID)
 	if err != nil {
 		return err
@@ -225,10 +229,6 @@ func ValidateReservedCapacity(ctx context.Context, tx pgx.Tx, runID, accountID s
 		if err := routineChecks[0](ctx, tx, runID, accountID); err != nil {
 			return err
 		}
-	}
-	run, err := lockRun(ctx, tx, runID)
-	if err != nil {
-		return err
 	}
 	return validateReservedAccount(ctx, tx, run, accountID)
 }
