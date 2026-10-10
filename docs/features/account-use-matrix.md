@@ -63,6 +63,11 @@ policy and activates it; policy-specific and pre-expansion migration fixtures
 retain their production defaults so their before-activation assertions remain
 meaningful. No production predicate, permission or audit is disabled.
 The previous-image harness also checks activated empty and populated pools.
+The latest published image retains its startup and authenticated read checks
+on the candidate schema. The rollback-floor checks use Release 128
+(`v261009095632.0.0`), pinned to its published image digest, in a separate fresh
+disposable database. Release 129 advertises account-use capability, so it
+must not be expected to fail at the older binary's entry guard.
 Older handlers sanitize database errors, so each refused request must produce
 the exact `0A000` message from `aeon_enter_principal` in the disposable
 Postgres log. Generic HTTP errors alone cannot pass that gate.

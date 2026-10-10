@@ -246,6 +246,60 @@ test('the runtime probe pulls by digest and rejects a malformed digest before Do
   assert.equal(readFileSync(log, 'utf8'), '');
 });
 
+test('the runtime probe checks the latest release and enforces the pinned account-use rollback floor', () => {
+  // Risk: after a capable release ships, treating it as a downgraded binary
+  // fails compatibility CI, or skipping its refusal also loses rollback proof.
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-1112-compat-'));
+  const state = join(directory, 'state');
+  mkdirSync(state);
+  const log = join(directory, 'commands.log');
+  const fixture = (tool, body) => writeFileSync(join(directory, tool),
+    `#!/bin/bash\nprintf '${tool} %s\\n' "$*" >> "$AEON_COMPAT_FIXTURE_LOG"\n${body}\n`, {mode: 0o700});
+  fixture('docker', `if [[ "$1 $2" = 'image ls' ]]; then echo "\${5##*@}"; fi
+if [[ "$1" = port ]]; then echo 127.0.0.1:18080; fi`);
+  fixture('go', 'exit 0');
+  fixture('python3', `if [[ "$2" = account-use && "$AEON_COMPAT_FIXTURE_FLOOR_FAIL" = 1 ]]; then exit 23; fi
+exit 0`);
+  fixture('mktemp', 'echo "$AEON_COMPAT_FIXTURE_STATE"');
+  fixture('trash', 'exit 0');
+  const script = new URL('./migration-compat.sh', import.meta.url).pathname;
+  const latest = {tag: 'v261010123154.0.0', digest: 'sha256:' + 'a'.repeat(64)};
+  const floor = {tag: 'v261009095632.0.0', digest: 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'};
+  const run = failFloor => {
+    writeFileSync(log, '');
+    const result = childProcess.spawnSync('bash', [script, latest.tag, latest.digest], {
+      env: {...process.env, PATH: `${directory}:${process.env.PATH}`, GITHUB_STEP_SUMMARY: '',
+        AEON_COMPAT_FIXTURE_LOG: log, AEON_COMPAT_FIXTURE_STATE: state,
+        AEON_COMPAT_FIXTURE_FLOOR_FAIL: failFloor ? '1' : '0'},
+      encoding: 'utf8', timeout: 15_000,
+    });
+    assert.ifError(result.error);
+    return {result, commands: readFileSync(log, 'utf8').trim().split('\n')};
+  };
+  const {result, commands} = run(false);
+  assert.equal(result.status, 0, result.stderr);
+  for (const release of [latest, floor]) {
+    assert.ok(commands.includes(`docker pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${release.digest}`));
+    const boots = commands.filter(line => line.startsWith('docker run ') && line.endsWith(release.digest));
+    assert.equal(boots.length, 2, `${release.tag} must boot before and after candidate migrations`);
+    assert.equal(commands.filter(line => line.startsWith('python3 scripts/migration-compat-probe.py check ') && line.endsWith(release.tag.slice(1))).length, 1);
+  }
+  assert.equal(commands.filter(line => line === 'go run -p 2 ./scripts/migrate-candidate.go').length, 2);
+  const databases = commands.filter(line => line.startsWith('docker run ') && line.includes('POSTGRES_USER=postgres'));
+  assert.equal(databases.length, 2, 'each release must seed a fresh database');
+  const firstDatabase = commands.indexOf(databases[0]);
+  const nextDatabase = commands.indexOf(databases[1], firstDatabase + 1);
+  assert.ok(commands.slice(firstDatabase + 1, nextDatabase).some(line => line.startsWith('docker container rm -fv ')), 'the first database must be removed before the rollback fixture starts');
+  const refusals = commands.filter(line => line.startsWith('python3 scripts/migration-compat-probe.py account-use '));
+  assert.equal(refusals.length, 1, 'the below-floor refusal must always run');
+  assert.ok(refusals[0].includes(`--version ${floor.tag.slice(1)} --database-container `));
+  assert.ok(commands.indexOf(refusals[0]) > commands.indexOf(`docker pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${floor.digest}`));
+  const failure = run(true);
+  assert.equal(failure.result.status, 23, 'a failed rollback refusal must fail compatibility CI');
+  assert.ok(failure.commands.some(line => line.startsWith('python3 scripts/migration-compat-probe.py account-use ') && line.includes(`--version ${floor.tag.slice(1)} `)));
+  assert.doesNotMatch(failure.result.stdout, new RegExp(`Migration compatibility passed: ${floor.tag}`));
+});
+
 test('marker must name an expansion release and ticket before SQL', () => {
   assert.equal(contractMarker(marker + 'DROP TABLE nodes;'), true);
   for (const sql of [

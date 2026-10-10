@@ -21,7 +21,6 @@ suffix="${tmp##*.}"
 db="aeon-compat-db-$suffix"
 app="aeon-compat-app-$suffix"
 network="aeon-compat-$suffix"
-image="ghcr.io/inspr-at/aeon@$digest"
 cleanup() {
   docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
@@ -30,57 +29,79 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Previous published release: $tag"
-echo "Previous registry image: $image"
-docker pull --platform linux/amd64 "$image"
-# Pull the release-note digest, then resolve its local config ID for both boots.
-image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
-[[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
-echo "Previous image: $image_id"
-docker network create "$network" >/dev/null
-docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
-  -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=aeon \
-  "$pgvector_image" >/dev/null
-ready=0
-for _ in {1..60}; do
-  if docker exec "$db" pg_isready -h 127.0.0.1 -U postgres -d postgres >/dev/null 2>&1; then ready=1; break; fi
-  sleep 1
-done
-[[ "$ready" = 1 ]] || { echo 'Disposable Postgres failed to start' >&2; exit 1; }
-# Fixture credentials only. The application role cannot bypass tenant RLS.
-docker exec -i "$db" psql -U postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+# Release 128 is the last published binary below the account-use floor.
+# Keep this immutable rollback probe after the latest stable gains capability;
+# a capable binary must not be expected to fail at principal entry.
+account_use_floor_tag=v261009095632.0.0
+account_use_floor_digest=sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
+
+probe_release() {
+  local tag="$1" digest="$2" exercise_floor="$3"
+  local image="ghcr.io/inspr-at/aeon@$digest" image_id base db_address ready
+  echo "Previous published release: $tag"
+  echo "Previous registry image: $image"
+  docker pull --platform linux/amd64 "$image"
+  # Pull the release-note digest, then resolve its local config ID for both boots.
+  image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
+  [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
+  echo "Previous image: $image_id"
+  docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
+    -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=aeon \
+    "$pgvector_image" >/dev/null
+  ready=0
+  for _ in {1..60}; do
+    if docker exec "$db" pg_isready -h 127.0.0.1 -U postgres -d postgres >/dev/null 2>&1; then ready=1; break; fi
+    sleep 1
+  done
+  [[ "$ready" = 1 ]] || { echo 'Disposable Postgres failed to start' >&2; exit 1; }
+  # Fixture credentials only. The application role cannot bypass tenant RLS.
+  docker exec -i "$db" psql -U postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 CREATE ROLE aeon LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD 'aeon';
 CREATE DATABASE aeon OWNER aeon;
 \connect aeon
 CREATE EXTENSION vector;
 SQL
 
-start_previous() {
-  docker run -d --name "$app" --network "$network" --platform linux/amd64 \
-    --memory 256m -p 127.0.0.1::8080 \
-    -e AEON_ENV=dev -e AEON_ADDR=:8080 -e AEON_FILES_DIR=/tmp/aeon-compat-files \
-    -e AEON_PUBLIC_URL=http://localhost:8080 -e AEON_BOOTSTRAP_ADMIN_EMAIL=compat@example.invalid \
-    -e "AEON_DATABASE_URL=postgres://aeon:aeon@$db:5432/aeon?sslmode=disable" \
-    "$image_id" >/dev/null
-  base="http://$(docker port "$app" 8080/tcp)"
-  python3 scripts/migration-compat-probe.py wait-ready --base "$base"
+  start_previous() {
+    docker run -d --name "$app" --network "$network" --platform linux/amd64 \
+      --memory 256m -p 127.0.0.1::8080 \
+      -e AEON_ENV=dev -e AEON_ADDR=:8080 -e AEON_FILES_DIR=/tmp/aeon-compat-files \
+      -e AEON_PUBLIC_URL=http://localhost:8080 -e AEON_BOOTSTRAP_ADMIN_EMAIL=compat@example.invalid \
+      -e "AEON_DATABASE_URL=postgres://aeon:aeon@$db:5432/aeon?sslmode=disable" \
+      "$image_id" >/dev/null
+    base="http://$(docker port "$app" 8080/tcp)"
+    python3 scripts/migration-compat-probe.py wait-ready --base "$base"
+  }
+
+  start_previous
+  python3 scripts/migration-compat-probe.py seed --base "$base" --state "$tmp/state.json" --version "${tag#v}"
+  docker stop --time 30 "$app" >/dev/null
+  docker container rm "$app" >/dev/null
+
+  # Run exactly the candidate's embedded migration path, including Go backfills
+  # and nontransactional index recovery. No candidate server or image is built.
+  db_address="$(docker port "$db" 5432/tcp)"
+  AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=disable" \
+    GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
+  start_previous
+  python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
+  if [[ "$exercise_floor" = 1 ]]; then
+    python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
+  fi
+  echo "Migration compatibility passed: $tag on the candidate schema"
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
+      "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+  fi
+  docker stop --time 30 "$app" >/dev/null
+  docker container rm -fv "$app" "$db" >/dev/null
 }
 
-start_previous
-python3 scripts/migration-compat-probe.py seed --base "$base" --state "$tmp/state.json" --version "${tag#v}"
-docker stop --time 30 "$app" >/dev/null
-docker container rm "$app" >/dev/null
-
-# Run exactly the candidate's embedded migration path, including Go backfills
-# and nontransactional index recovery. No candidate server or image is built.
-db_address="$(docker port "$db" 5432/tcp)"
-AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=disable" \
-  GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
-start_previous
-python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
-python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
-echo "Migration compatibility passed: $tag on the candidate schema"
-if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
-    "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+docker network create "$network" >/dev/null
+if [[ "$tag" = "$account_use_floor_tag" && "$digest" = "$account_use_floor_digest" ]]; then
+  probe_release "$tag" "$digest" 1
+else
+  # Both images seed and migrate their own fresh disposable database.
+  probe_release "$tag" "$digest" 0
+  probe_release "$account_use_floor_tag" "$account_use_floor_digest" 1
 fi
