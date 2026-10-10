@@ -30,3 +30,11 @@ Malformed JSON and transport-size failures retain the existing fail-closed behav
 All interim events remain in memory and bypass `Record`, `Telemetry`, checkpoint,
 inbox and audit writes. Final-message persistence and remote thread streaming are
 the responsibility of the following chat slices.
+
+The fixture tests exercise native JSONL framing, matching per-harness projections,
+unknown-frame counts, capability flags, ownership rejection, bounded queues and
+journal isolation. A mock Agent SDK drives the actual Claude bridge to verify
+text/tool projection and exclusion of tool payloads, reasoning and subagent output.
+Protocol references: [Claude SDK partial messages](https://code.claude.com/docs/en/agent-sdk/streaming-output),
+[Codex app-server events and runtime status](https://learn.chatgpt.com/docs/app-server),
+and [Pi RPC records](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md).
