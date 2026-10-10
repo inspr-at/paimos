@@ -138,6 +138,7 @@ func TestRoutineLaunchClaimReplayAndCurrentAuthority(t *testing.T) {
 		raw, _ := json.Marshal(body)
 		r := httptest.NewRequest("POST", "/api/runs/"+run.ID+"/claim", strings.NewReader(string(raw))).WithContext(tenant.WithPrincipal(ctx, f.agent))
 		r.Header.Set(agentpairing.LedgerGenerationHeader, ledger)
+		r.Header.Set("Authorization", "Bearer "+f.token)
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, r)
 		return w
@@ -154,6 +155,7 @@ func TestRoutineLaunchClaimReplayAndCurrentAuthority(t *testing.T) {
 	routeRaw, _ := json.Marshal(map[string]any{"run_id": run.ID, "daemon_id": "daemon-test", "account_ids": []string{account}, "estimated_units": map[string]int64{"cost_micros": 100}})
 	routeRequest := httptest.NewRequest("POST", "/api/agent-accounts/route", strings.NewReader(string(routeRaw))).WithContext(tenant.WithPrincipal(t.Context(), f.agent))
 	routeRequest.Header.Set(agentpairing.LedgerGenerationHeader, ledger)
+	routeRequest.Header.Set("Authorization", "Bearer "+f.token)
 	routeResult := httptest.NewRecorder()
 	f.mux.ServeHTTP(routeResult, routeRequest)
 	if routeResult.Code != 409 || !strings.Contains(routeResult.Body.String(), "routine_daemon_update_required") {
