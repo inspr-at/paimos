@@ -143,10 +143,10 @@ func newEvaluationFixture(t *testing.T) *evaluationFixture {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Coordinator') RETURNING id::text`, p.TenantID).Scan(&agent.ID); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'EVAL','Evaluation' FROM node_kinds WHERE slug='project' RETURNING id::text`, p.TenantID).Scan(&project); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Evaluation' FROM node_kinds WHERE slug='project' RETURNING id::text`, p.TenantID).Scan(&project); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id) SELECT $1,id,'EVAL-1','Assigned work',$2,$2 FROM node_kinds WHERE slug='work' RETURNING id::text`, p.TenantID, project).Scan(&parent); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Assigned work',$2,$2 FROM node_kinds WHERE slug='work' RETURNING id::text`, p.TenantID, project).Scan(&parent); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `SELECT aeon_seed_work_kinds($1)`, p.TenantID); err != nil {
@@ -269,7 +269,7 @@ func (f *evaluationFixture) attempt(t *testing.T, key, role, profile, account, d
 	var run, attempt string
 	f.in(func(tx pgx.Tx) error {
 		var work string
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id) SELECT $1,id,$2,'Fixture attempt',$3,$4 FROM node_kinds WHERE slug='work_order' RETURNING id::text`, f.person.TenantID, key, f.binding.TargetID, f.binding.ProjectID).Scan(&work); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Fixture attempt',$2,$3 FROM node_kinds WHERE slug='work_order' RETURNING id::text`, f.person.TenantID, f.binding.TargetID, f.binding.ProjectID).Scan(&work); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,kind) VALUES($1,$2,$3,'review')`, f.person.TenantID, work, f.person.ID); err != nil {
