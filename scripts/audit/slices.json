@@ -137,7 +137,8 @@
         "internal/agentd/chat_stream.go",
         "internal/agentd/chat_stream_test.go",
         "internal/agentd/chat_acp.go",
-        "internal/agentd/chat_acp_test.go"
+        "internal/agentd/chat_acp_test.go",
+        "internal/runisolation/**"
       ]
     },
     {

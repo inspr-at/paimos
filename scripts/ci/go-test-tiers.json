@@ -8988,6 +8988,12 @@
     ,
     {"kind":"go","package":"internal/rulesimport","name":"TestUnsupportedDoctrineReadFailsClosed","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/runisolation","name":"TestIsolationAllocationAndOrphanReport","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/runisolation","name":"TestIsolationControllerCrashCleansOnlyOwnedFixtures","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/runisolation","name":"TestIsolationHelper","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/runkind","name":"TestExecutionLabels","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/scopecode","name":"FuzzCodeRoundTrip","tier":"GATED-FULL"}
