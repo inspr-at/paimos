@@ -591,6 +591,12 @@ func TestRoutineBudgetDaemonSettlementKeepsLedgerPrivate(t *testing.T) {
 			return checkPrivate(tx)
 		})
 	}
+	unknown := settlement("unknown-exit", Amount{})
+	unknown.ExitConfirmed = false
+	must(t, report(f.agent, root.ID, unknown))
+	if f.balance().Held != in.Maximum {
+		t.Fatal("unknown daemon exit freed hold")
+	}
 	missingScope := f.agent
 	missingScope.Scopes = []string{"run.claim"}
 	if err := report(missingScope, child.ID, settlement("missing-scope", Amount{})); !errors.Is(err, authz.ErrForbidden) {
@@ -610,12 +616,6 @@ func TestRoutineBudgetDaemonSettlementKeepsLedgerPrivate(t *testing.T) {
 	})
 	if !errors.Is(err, authz.ErrForbidden) {
 		t.Fatalf("cross-tenant reporter: %v", err)
-	}
-	unknown := settlement("unknown-exit", Amount{})
-	unknown.ExitConfirmed = false
-	must(t, report(f.agent, root.ID, unknown))
-	if f.balance().Held != in.Maximum {
-		t.Fatal("unknown daemon exit freed hold")
 	}
 	// Reconciliation remains allowed after launch consent is revoked.
 	f.exec(`UPDATE routine_runs SET execute_consent=false WHERE id=$1`, f.run)
@@ -641,7 +641,7 @@ func TestRoutineBudgetAdmissionBoundsHistoricalWindows(t *testing.T) {
 		t.Run(map[bool]string{false: "retired", true: "removed-rule-source"}[removed], func(t *testing.T) {
 			f := setup(t, "off", false)
 			in := f.attempt("build", Amount{RecoveryMS: 1000})
-			check := func() error {
+			check := func(rejectReads bool) error {
 				return f.tx(func(tx pgx.Tx) error {
 					if _, err := begin(t.Context(), tx, f.owner, f.run); err != nil {
 						return err
@@ -650,20 +650,32 @@ func TestRoutineBudgetAdmissionBoundsHistoricalWindows(t *testing.T) {
 					if err := tx.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now); err != nil {
 						return err
 					}
-					_, _, _, err := agentaccounts.RequireRoutineCapacityTx(t.Context(), tx, f.owner.ID, in.AgentRunID, f.account, f.gate, now)
+					_, _, _, err := agentaccounts.RequireRoutineCapacityTx(t.Context(), admissionWindowGuardTx{Tx: tx, rejectReads: rejectReads}, f.owner.ID, in.AgentRunID, f.account, f.gate, now)
 					return err
 				})
 			}
 			f.exec(`INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source,capacity_retired) SELECT $1,$2,clock_timestamp()-interval '8 days'-n*interval '1 minute',clock_timestamp()-interval '1 day'-n*interval '1 minute','percent',100,20,'unrestricted',clock_timestamp(),true,'weekly','codex','harness',true FROM generate_series(1,4095) n`, f.owner.TenantID, f.account)
-			must(t, check()) // Exactly 4096 consumed rows remain admissible.
+			must(t, check(false)) // Exactly 4096 consumed rows remain admissible.
 			var last string
 			must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model,capacity_retired,removed_at) VALUES($1,$2,clock_timestamp()-interval '9 days',clock_timestamp()-interval '2 days','requests',1000000,'unrestricted',true,CASE WHEN $3 THEN clock_timestamp() END) RETURNING id::text`, f.owner.TenantID, f.account, removed).Scan(&last))
 			if removed {
 				f.exec(`INSERT INTO account_limit_rules(tenant_id,account_id,amount,unit,period,from_window_id,created_by) VALUES($1,$2,1000000,'requests','week',$3,$4)`, f.owner.TenantID, f.account, last, f.owner.ID)
 			}
-			wantError(t, check(), "account_inputs_unreadable")
+			wantError(t, check(true), "account_inputs_unreadable")
 		})
 	}
+}
+
+type admissionWindowGuardTx struct {
+	pgx.Tx
+	rejectReads bool
+}
+
+func (tx admissionWindowGuardTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if tx.rejectReads && strings.Contains(strings.ToLower(sql), "from account_allowance_windows") {
+		return nil, errors.New("window overflow reached materialization or row locking")
+	}
+	return tx.Tx.Query(ctx, sql, args...)
 }
 
 func TestRoutineBudgetCheckedArithmeticAndModes(t *testing.T) {
