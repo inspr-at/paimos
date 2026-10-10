@@ -366,6 +366,9 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (out 
 	if err = reportHandoff(ctx, tx, p, v, t, status); err != nil {
 		return nil, err
 	}
+	if err = reportRoutineExit(ctx, tx, v, t); err != nil {
+		return nil, err
+	}
 	var pending []events.Change
 	before := v
 	model, evidence := v.EffectiveModel, v.ModelEvidence

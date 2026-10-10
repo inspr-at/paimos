@@ -15,10 +15,12 @@ import (
 // Version 1 belongs to classic and is never opened implicitly. Releases 123
 // and 124 both wrote version 2; version 3 accepts their known additive fields.
 // Version 4 adds private ledger attempts and process-group exit evidence.
-const RecordSchemaVersion = 4
+// Version 5 adds immutable routine workspace/grant provenance. Earlier records
+// retain their launch/process/ledger evidence and acquire no routine authority.
+const RecordSchemaVersion = 5
 
 func recordMigrations() map[int]func(json.RawMessage) (Record, error) {
-	return map[int]func(json.RawMessage) (Record, error){2: migrateRecordV2, 3: migrateRecordV2}
+	return map[int]func(json.RawMessage) (Record, error){2: migrateRecordV2, 3: migrateRecordV2, 4: migrateRecordV2}
 }
 
 func migrateRecordV2(raw json.RawMessage) (Record, error) {

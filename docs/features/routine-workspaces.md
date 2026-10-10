@@ -1,0 +1,40 @@
+# Routine launch intents and workspaces
+
+Routine demand carries an immutable run marker. A routine can claim only its
+persisted launch intent, with the exact tenant, owner, project, account,
+registered Mac, assignment/consent revisions, daemon generation, qualification
+pins and remaining budget grant. Existing manual runs keep their claim protocol.
+Missing capability or incomplete intent returns a bounded refusal.
+
+Automatic execution remains off. S04 person consent and accepted qualification
+are required independently of the daemon's advertised capability. S13 must bind
+`agentruns.BindRoutineLaunch` to trusted runtime observations and S09's current
+admission/hold validation, then persist the assignment using
+`PrepareRoutineLaunchTx`. These callbacks perform bounded transactional work;
+no native process or network call runs in the claim transaction. The daemon
+repeats the claim immediately before its durable possible-fork boundary.
+
+The local `RoutineWorkspaceConfig` is owner-approved configuration, never a
+prompt-derived repository URL or path. Each mapping binds the project/account
+to an existing physical repository, exact base commit, private worktree root,
+computer and qualified artifact pins. A routine creates a fresh branch and Git
+worktree. Allocation intent is persisted before Git runs; incomplete allocations
+remain disputed. Each checkout has its own durable owner record and OS lock,
+independent of the pairing ledger. Replaying an assignment cannot create another
+writer. Worktrees and branches survive process exit, failure and recovery.
+
+Resource ownership uses AEON-1089's lease surface (`Environment`, `HandoffPorts`,
+`Running`, `Finish`), through `AcquireResources`. S14 adapts the existing
+`runisolation.Acquire` allocator when that dependency is integrated. There is no
+second port/database allocator. The lease supplies unique ports, database and
+temporary directory plus fixture ownership. Missing resource wiring refuses
+launch. A qualified S10/S15 adapter must declare routine support and apply the
+resource environment to every native child and fixture. Existing adapters do
+not declare that qualification and remain unavailable for automatic routines.
+
+The journal schema advances to 5 with forward migrations for 2–4. Unknown
+process exit never clears a checkout or pairing hold. Root exit alone does not
+prove fixture cleanup: resource release requires independent fixture-exit
+evidence, or durable proof that native launch was never attempted. Unconfirmed
+cleanup retains the resource allocation. Exit receipts are append-only and do
+not manufacture budget settlement.

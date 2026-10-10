@@ -147,6 +147,16 @@
     {
       "classification": "personal",
       "columns": {
+        "routine_launch_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "agent_runs"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "action": "metadata",
         "actor_id": "personal",
         "completed_at": "metadata",
@@ -1105,6 +1115,45 @@
         "tenant_column": "tenant_id"
       },
       "table": "routine_guard_policies"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "created_at": "personal",
+        "kind": "metadata",
+        "launch_id": "metadata",
+        "receipt": "personal",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "routine_launch_evidence"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "agent_run_id": "metadata",
+        "binding": "personal",
+        "claimed_at": "personal",
+        "created_at": "personal",
+        "exit_observed_at": "personal",
+        "id": "metadata",
+        "kind": "metadata",
+        "lead_generation": "metadata",
+        "owner_principal_id": "personal",
+        "project_id": "metadata",
+        "routine_run_id": "metadata",
+        "state": "metadata",
+        "tenant_id": "metadata",
+        "worker_principal_id": "personal",
+        "worktree_id": "metadata"
+      },
+      "locator": {
+        "person_column": "owner_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "routine_launch_intents"
     },
     {
       "classification": "personal",

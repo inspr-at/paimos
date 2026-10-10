@@ -35,6 +35,7 @@ import (
 )
 
 type Config struct {
+	RoutineWorkspaces *RoutineWorkspaceConfig
 	UsageProbes       usageprobe.Probe
 	StepUps           *StepUpManager
 	MaxTokens         int64
@@ -68,6 +69,7 @@ type replay struct {
 // Record contains only local process provenance and bounded control digests.
 // RecordSchemaVersion pins its persisted schema; classic is never opened implicitly.
 type Record struct {
+	RoutineWorkspace      *RoutineWorkspace            `json:"routine_workspace,omitempty"`
 	LedgerGroup           string                       `json:"ledger_group,omitempty"`
 	LedgerGeneration      string                       `json:"ledger_generation,omitempty"`
 	RouteCandidates       []agentsetup.LedgerCandidate `json:"route_candidates,omitempty"`
@@ -159,6 +161,9 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	routineConfig          *RoutineWorkspaceConfig
+	routineCheckouts       map[string]*agentsetup.Store
+	routineResources       map[string]RoutineResourceLease
 	chatGate               chatRelayGate
 	ledger                 *agentsetup.SharedLedger
 	ledgerBinding          ledgerBinding
@@ -418,6 +423,9 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		return nil, err
 	}
 	s.capacityNow = c.Now
+	s.routineConfig = c.RoutineWorkspaces
+	s.routineCheckouts = map[string]*agentsetup.Store{}
+	s.routineResources = map[string]RoutineResourceLease{}
 	s.capacityWake = make(chan struct{}, 1)
 	if err := s.loadCapacityChecks(); err != nil {
 		return nil, err
@@ -884,6 +892,10 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if run.ID == "" || run.WorkOrderID == "" || run.AgentPrincipalID != s.principalID || run.Status != "queued" {
 		return ErrScope
 	}
+	grant, err := routineGrant(run)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
 	entry := s.runs[run.ID]
 	s.mu.Unlock()
@@ -991,6 +1003,16 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			}
 		}
 	}
+	var approvedRepository RoutineRepository
+	if grant != nil {
+		if s.ledger == nil || review || verification {
+			return ErrRoutineUnavailable
+		}
+		approvedRepository, err = s.routineRepository(run, *grant, adapter)
+		if err != nil {
+			return err
+		}
+	}
 	node, err := s.api.Node(ctx, run.WorkOrderID)
 	if err != nil {
 		return err
@@ -1011,9 +1033,21 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if review != (order.Kind == "review") {
 		return errors.New("review execution mode does not match its work order")
 	}
+	runWorkspace := s.workspace
 	pickup, err := s.workerPickup(run, node, order)
 	if err != nil {
 		return err
+	}
+	var routineWorkspace *RoutineWorkspace
+	if grant != nil {
+		routineWorkspace, err = s.prepareRoutineWorkspace(ctx, run, *grant, approvedRepository)
+		if err != nil {
+			return err
+		}
+		runWorkspace = routineWorkspace.Path
+		if pickup != nil {
+			pickup.WorktreeID = routineWorkspace.ID
+		}
 	}
 	if entry != nil {
 		entry.mu.Lock()
@@ -1024,7 +1058,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			return errors.New("journaled assignment pickup changed")
 		}
 	}
-	if !review && !verification {
+	if grant == nil && !review && !verification {
 		if err := s.acquireCheckout(run.ID); err != nil {
 			return err
 		}
@@ -1051,7 +1085,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	branch := ""
 	if !verification && !review {
-		if output, branchErr := exec.CommandContext(ctx, "git", "-C", s.workspace, "branch", "--show-current").Output(); branchErr == nil {
+		if output, branchErr := exec.CommandContext(ctx, "git", "-C", runWorkspace, "branch", "--show-current").Output(); branchErr == nil {
 			branch = strings.TrimSpace(string(output))
 		}
 		if run.RecoveryBrief != "" {
@@ -1071,7 +1105,6 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if verification {
 		prompt = VerificationTask
 	}
-	runWorkspace := s.workspace
 	if len(prompt) > 256<<10 {
 		return errors.New("work order prompt exceeds local bound")
 	}
@@ -1122,7 +1155,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			if s.ledgerBarrier != nil {
 				s.ledgerBarrier("group")
 			}
-			rec := Record{WorkerPickup: pickup, LaunchState: launchRoutePending, RouteCandidates: subset, LedgerGroup: gid, LedgerGeneration: s.ledgerBinding.Generation, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: s.workspace, State: "route_pending", Controls: map[string]replay{}}
+			rec := Record{RoutineWorkspace: routineWorkspace, WorkerPickup: pickup, LaunchState: launchRoutePending, RouteCandidates: subset, LedgerGroup: gid, LedgerGeneration: s.ledgerBinding.Generation, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: runWorkspace, State: "route_pending", Controls: map[string]replay{}}
 			if e = s.journal.Put(rec); e != nil {
 				return e
 			}
@@ -1182,7 +1215,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	if entry == nil {
-		rec := Record{WorkerPickup: pickup, LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: s.workspace, State: "claim_pending", Controls: map[string]replay{}}
+		rec := Record{RoutineWorkspace: routineWorkspace, WorkerPickup: pickup, LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: runWorkspace, State: "claim_pending", Controls: map[string]replay{}}
 		if err := s.journal.Put(rec); err != nil {
 			return err
 		}
@@ -1193,6 +1226,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	} else {
 		entry.mu.Lock()
 		next := entry.record
+		next.RoutineWorkspace = routineWorkspace
 		next.ClaimRoute, next.AccountID, next.RouteReleased = &route, route.AccountID, false
 		next.LaunchState, next.State = launchPrepared, "claim_pending"
 		if s.ledger != nil {
@@ -1205,7 +1239,13 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		entry.record = next
 		entry.mu.Unlock()
 	}
-	if err := s.claimWorker(ctx, run, ids, pickup); err != nil {
+	claim := func() error {
+		if routineWorkspace != nil {
+			return s.claimRoutine(ctx, run, ids, pickup, routineWorkspace)
+		}
+		return s.claimWorker(ctx, run, ids, pickup)
+	}
+	if err := claim(); err != nil {
 		return errors.Join(err, s.reconcileUnlaunched(ctx, entry))
 	}
 	// Every error before launch intent must settle this claimed, never-launched
@@ -1301,7 +1341,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if api, ok := s.api.(serviceTierAPI); ok {
 		report := servicetier.Advertised(profile.Harness, profile.Model, "unknown")
 		if reporter, ok := adapter.(serviceTierAdapter); ok {
-			observed, e := reporter.ServiceTiers(ctx, StartRequest{Profile: profile, AccountKey: route.AccountKey, Workspace: s.workspace})
+			observed, e := reporter.ServiceTiers(ctx, StartRequest{Profile: profile, AccountKey: route.AccountKey, Workspace: runWorkspace})
 			if e == nil {
 				report = observed
 			}
@@ -1390,7 +1430,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				return mode, true
 			}
 			entry.tools, err = startManagedTools(signer.runCredential(s.tenantID, s.principalID, run.ID, s.generation),
-				toolBinding{api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: s.workspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
+				toolBinding{api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: runWorkspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
 			if err != nil {
 				closeHarness("process_failed")
 				return err
@@ -1432,12 +1472,22 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			}
 		}()
 	}
+	var resourceEnvironment []string
+	if routineWorkspace != nil {
+		if err := claim(); err != nil {
+			return err
+		}
+		resourceEnvironment, err = s.routineEnvironment(run.ID, routineWorkspace.Grant)
+		if err != nil {
+			return err
+		}
+	}
 	// Commit the possible-fork boundary before handing control to an adapter.
 	// On a journal failure Start is never invoked; after success a crash is
 	// unconfirmed, even if no PID was subsequently persisted.
 	var launchRev, launchDefault string
 	if !verification && !review {
-		launchRev, launchDefault = workspaceHEAD(ctx, s.workspace), launchDefaultRev(ctx, s.workspace)
+		launchRev, launchDefault = workspaceHEAD(ctx, runWorkspace), launchDefaultRev(ctx, runWorkspace)
 	}
 	if s.ledger != nil {
 		entry.mu.Lock()
@@ -1469,12 +1519,15 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if s.ledgerBarrier != nil {
 		s.ledgerBarrier("attempted")
 	}
+	if routineWorkspace != nil {
+		s.routineResources[run.ID].HandoffPorts()
+	}
 	launchedAt := time.Now()
 	s.verificationDiagnosticFor(run.ID, run.AccountID, run.Purpose, "starting", "")
 	// The accepted duration includes startup, before the monitor exists.
 	runCtx, cancelRun := context.WithTimeout(s.lifetime, duration)
 	startCtx, cancelStart := context.WithDeadline(ctx, launchedAt.Add(duration))
-	proc, err := adapter.Start(startCtx, StartRequest{Lifetime: runCtx, TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
+	proc, err := adapter.Start(startCtx, StartRequest{ResourceEnvironment: resourceEnvironment, Lifetime: runCtx, TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
 		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, ServiceTier: entry.harness.ServiceTier, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
 	cancelStart()
 	if err != nil {
@@ -1505,6 +1558,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	entry.record.State = "running"
 	saveErr := s.journal.Put(entry.record)
+	if routineWorkspace != nil {
+		saveErr = errors.Join(saveErr, s.routineResources[run.ID].Running(proc.PID()))
+	}
 	runningRecord := entry.record
 	entry.mu.Unlock()
 	if s.ledger != nil {
@@ -1868,12 +1924,13 @@ func (s *Supervisor) monitor(entry *owned) {
 	defer cancel()
 	entry.mu.Lock()
 	launchRev, launchDefault := entry.record.LaunchRev, entry.record.LaunchDefaultRev
+	workspace := entry.record.Workspace
 	automaticReview := entry.record.AutomaticReview
 	entry.mu.Unlock()
 	s.flushCapacity(ctx, entry)
-	final := Telemetry{Kind: "finished", Status: status, ErrorCode: code, GitCommits: runCommits(ctx, s.workspace, launchRev, launchDefault)}
+	final := Telemetry{Kind: "finished", Status: status, ErrorCode: code, GitCommits: runCommits(ctx, workspace, launchRev, launchDefault)}
 	if automaticReview && status == "completed" && len(final.GitCommits) > 0 && launchRev != "" {
-		final.ReviewRange = completedReviewRange(ctx, s.workspace, launchRev)
+		final.ReviewRange = completedReviewRange(ctx, workspace, launchRev)
 	}
 	if code == "vendor_limit" {
 		final.LimitWindow, final.LimitResetsAt = limit.Window, limit.ResetsAt
@@ -2209,7 +2266,7 @@ func inboxMessageText(item HarnessDelivery) string {
 func (s *Supervisor) update(ctx context.Context, entry *owned, t Telemetry) error {
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	if entry.record.WorkerPickup != nil && t.Kind == "finished" {
+	if (entry.record.WorkerPickup != nil || entry.record.RoutineWorkspace != nil) && t.Kind == "finished" {
 		t.ProcessState = "unconfirmed"
 		if entry.record.ExitObserved {
 			t.ProcessState = "exited"
@@ -2501,6 +2558,9 @@ func (s *Supervisor) Close(ctx context.Context) error {
 		if err := s.reconcileLedgerLocked(ctx); err != nil {
 			return err
 		}
+	}
+	if err := s.releaseRoutineCheckouts(); err != nil {
+		return err
 	}
 	if err := s.releaseCheckout(); err != nil {
 		return err

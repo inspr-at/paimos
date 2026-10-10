@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"net/http"
 	"net/url"
 	"os"
@@ -408,14 +409,18 @@ func (r *Remote) Route(ctx context.Context, runID, daemonID string, accountIDs [
 }
 
 func (r *Remote) Claim(ctx context.Context, runID, daemonID, generation string, reservations []string) error {
-	return r.claim(ctx, runID, daemonID, generation, reservations, nil)
+	return r.claim(ctx, runID, daemonID, generation, reservations, nil, nil)
 }
 
 func (r *Remote) ClaimHandoff(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup WorkerPickup) error {
-	return r.claim(ctx, runID, daemonID, generation, reservations, &pickup)
+	return r.claim(ctx, runID, daemonID, generation, reservations, &pickup, nil)
 }
 
-func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup *WorkerPickup) error {
+func (r *Remote) ClaimRoutine(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup *WorkerPickup, routine agentsetup.RoutinePickup) error {
+	return r.claim(ctx, runID, daemonID, generation, reservations, pickup, &routine)
+}
+
+func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup *WorkerPickup, routine *agentsetup.RoutinePickup) error {
 	// Retain the attempted binding even if the HTTP response is lost. It is
 	// only a header hint; the server remains the authority for claim ownership.
 	r.mu.Lock()
@@ -424,6 +429,9 @@ func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, 
 	body := map[string]any{"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations}
 	if pickup != nil {
 		body["handoff"] = pickup
+	}
+	if routine != nil {
+		body["routine"] = routine
 	}
 	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", body, nil, r.ledgerHeaders(map[string]string{reviewgate.PolicyHeader: reviewgate.Policy}))
 	return err
