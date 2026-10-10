@@ -36,6 +36,7 @@ docker pull --platform linux/amd64 "$image"
 # Pull the release-note digest, then resolve its local config ID for both boots.
 image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
 [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
+previous_image_id="$image_id"
 echo "Previous image: $image_id"
 docker network create "$network" >/dev/null
 docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
@@ -78,9 +79,28 @@ AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=di
   GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
 start_previous
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
-python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
+
+# The latest stable release may already support account-use. Keep testing its
+# compatibility above, and exercise the rollback floor with the last published
+# binary below it. Release 128's immutable digest comes from its release record:
+# https://github.com/inspr-at/paimos/releases/tag/v261009095632.0.0
+# Both boots use the candidate schema; the refusal and SQLSTATE assertions in
+# AccountUseBoundary remain unconditional, including the empty-pool case.
+floor_tag="v261009095632.0.0"
+floor_image="ghcr.io/inspr-at/aeon@sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c"
+docker stop --time 30 "$app" >/dev/null
+docker container rm "$app" >/dev/null
+docker pull --platform linux/amd64 "$floor_image"
+image_id="$(docker image ls --quiet --no-trunc "$floor_image" | sort -u)"
+[[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable rollback-floor image ID' >&2; exit 1; }
+echo "Rollback-floor release: $floor_tag; image: $floor_image; loaded image: $image_id"
+start_previous
+python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${floor_tag#v}"
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${floor_tag#v}" --database-container "$db"
 echo "Migration compatibility passed: $tag on the candidate schema"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
-    "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+    "$tag" "$image" "$previous_image_id" >> "$GITHUB_STEP_SUMMARY"
+  printf 'Rollback-floor release %s; registry image %s; loaded image %s refused activated account-use requests at capability entry on the candidate schema.\n' \
+    "$floor_tag" "$floor_image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
 fi
