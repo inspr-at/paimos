@@ -76,6 +76,8 @@ func TestRecordSchemaGolden(t *testing.T) {
 func TestRecordSchemaForwardRecoveryAndDowngrade(t *testing.T) {
 	t.Run("routine-version-5", func(t *testing.T) {
 		grant := routineTestGrant("31")
+		// Persistence stores wall-clock UTC, without time.Now's monotonic data.
+		grant.ExpiresAt = grant.ExpiresAt.UTC()
 		root, err := filepath.EvalSymlinks(t.TempDir())
 		if err != nil {
 			t.Fatal(err)
