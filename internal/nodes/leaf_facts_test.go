@@ -37,14 +37,18 @@ func TestLeafFactsBatchParityAndVisibility(t *testing.T) {
 		// Explicit timestamps and UUID ties prove both orderings without sleeps.
 		_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions
  (tenant_id,id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,
-  ref_digest,lease_digest,phase,activity,progress_pct,eta_ready_at,eta_reported_at,stopped_at,stop_reason,archived_at)
+  ref_digest,lease_digest,phase,activity,progress_pct,eta_ready_at,eta_reported_at,stopped_at,stop_reason,archived_at,
+  recovery_process_state,recovery_request_id,recovery_request_digest,recovery_actor_id,recovery_reason)
  SELECT $1,v.sid::uuid,CASE WHEN v.old_project THEN $2::uuid ELSE $3::uuid END,$4,v.node::uuid,
   'codex','test','unmanaged',v.role,'ship',decode(md5(v.sid),'hex'),decode(md5(v.sid||'lease'),'hex'),
   CASE WHEN v.stopped THEN 'stopped' ELSE 'working' END,'busy',v.pct::smallint,
   CASE WHEN NOT v.stopped THEN now()+make_interval(hours=>v.pct) END,
   CASE WHEN v.report_age IS NOT NULL THEN now()-make_interval(mins=>v.report_age) END,
   CASE WHEN v.stopped THEN now()-make_interval(mins=>v.stop_age) END,
-  CASE WHEN v.stopped THEN v.reason END,CASE WHEN v.archived THEN now() END
+  CASE WHEN v.stopped THEN v.reason END,CASE WHEN v.archived THEN now() END,
+  CASE WHEN v.archived THEN 'unknown' END,CASE WHEN v.archived THEN v.sid::uuid END,
+  CASE WHEN v.archived THEN decode(md5(v.sid||'recovery'),'hex') END,
+  CASE WHEN v.archived THEN $4::uuid END,CASE WHEN v.archived THEN 'fixture recovery' END
  FROM (VALUES
   ('00000000-0000-4000-8000-000000000001',$5::text,'worker',false,false,false,10,0,NULL::int,NULL::text),
   ('00000000-0000-4000-8000-000000000002',$5,'worker',false,false,false,70,0,NULL,NULL),

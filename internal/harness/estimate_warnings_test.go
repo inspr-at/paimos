@@ -91,14 +91,15 @@ func TestHeartbeatIsolationCommitAndAuthority(t *testing.T) {
 	if _, err := blocker.Exec(ctx, `LOCK TABLE eta_settings IN ACCESS EXCLUSIVE MODE`); err != nil {
 		t.Fatal(err)
 	}
-	waitBlocked := func(query string) {
+	waitBlocked := func(query string, backendPID int) {
 		t.Helper()
 		for {
 			var waiting bool
 			if err := f.db.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
 				WHERE datname=current_database() AND wait_event_type='Lock'
 				AND query LIKE $2
-				AND $1::int=ANY(pg_blocking_pids(pid)))`, blockerPID, query).Scan(&waiting); err != nil {
+				AND ($3::int=0 OR pid=$3)
+				AND $1::int=ANY(pg_blocking_pids(pid)))`, blockerPID, query, backendPID).Scan(&waiting); err != nil {
 				t.Fatal(err)
 			}
 			if waiting {
@@ -120,7 +121,7 @@ func TestHeartbeatIsolationCommitAndAuthority(t *testing.T) {
 		f.mux.ServeHTTP(w, r)
 		legacy <- w
 	}()
-	waitBlocked("%SELECT interval_minutes FROM eta_settings%")
+	waitBlocked("%SELECT interval_minutes FROM eta_settings%", 0)
 	assertStored := func(want int64, accepted bool) {
 		t.Helper()
 		f.tx(t, f.person, func(tx pgx.Tx) error {
@@ -156,13 +157,28 @@ func TestHeartbeatIsolationCommitAndAuthority(t *testing.T) {
 	projectionCtx, cancelProjection := context.WithCancel(ctx)
 	defer cancelProjection()
 	projection := make(chan error, 1)
+	projectionPID := make(chan int, 1)
 	go func() {
 		projection <- db.InTenant(tenant.WithPrincipal(projectionCtx, f.person), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
+			var pid int
+			if err := tx.QueryRow(projectionCtx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+				return err
+			}
+			projectionPID <- pid
 			_, err := eta.LoadAggregates(projectionCtx, tx, []string{f.ticket})
 			return err
 		})
 	}()
-	waitBlocked("%aeon_work_aggregates%")
+	// Bind the barrier to this transaction, regardless of whether the aggregate
+	// uses the published SQL function or the shared inline leaf projection.
+	select {
+	case pid := <-projectionPID:
+		waitBlocked("%", pid)
+	case err := <-projection:
+		t.Fatalf("projection did not reach its lock barrier: %v", err)
+	case <-ctx.Done():
+		t.Fatal("projection transaction did not start")
+	}
 	enabled = true
 	beat := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
