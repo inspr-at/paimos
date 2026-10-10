@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -83,6 +84,140 @@ func (l *routineFixtureListener) WaitForNotification(ctx context.Context) (*pgco
 }
 
 func (l *routineFixtureListener) Close(context.Context) error { l.closed++; return nil }
+
+type routineQueryEvent struct {
+	tenantID string
+	listen   bool
+}
+
+type routineQueryKey struct{}
+
+type routineQueryTracer struct {
+	events chan routineQueryEvent
+}
+
+func (tr *routineQueryTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if data.SQL == "LISTEN "+routineChannel {
+		return context.WithValue(ctx, routineQueryKey{}, routineQueryEvent{listen: true})
+	}
+	if strings.Contains(data.SQL, "WITH clock AS MATERIALIZED") {
+		return context.WithValue(ctx, routineQueryKey{}, routineQueryEvent{tenantID: data.Args[0].(string)})
+	}
+	return ctx
+}
+
+func (tr *routineQueryTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	if event, ok := ctx.Value(routineQueryKey{}).(routineQueryEvent); ok && data.Err == nil {
+		select {
+		case tr.events <- event:
+		case <-ctx.Done():
+		}
+	}
+}
+
+// Risk: Run is called once per tenant, but idle tenants must not reserve one
+// PostgreSQL connection each. Query barriers establish completed LISTEN and
+// startup scans before counting actual backend connections, without sleeps.
+// This test uses the pre-fix public API and fails on e63d694a with three listeners.
+func TestRoutineDispatcherSharesListenerAcrossTenants(t *testing.T) {
+	w, m, _, _ := messagingWorld(t)
+	tracer := &routineQueryTracer{events: make(chan routineQueryEvent, 64)}
+	cfg := w.db.App.Config()
+	cfg.ConnConfig.Tracer = tracer
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	m.base.pool = pool
+	d := &RoutineDispatcher{m: m}
+	tenants := []string{w.agent.TenantID, w.outsider.TenantID, insertTenant(t, w.db, "routine-idle")}
+	var cancels []context.CancelFunc
+	var exits []chan error
+	t.Cleanup(func() {
+		for _, cancel := range cancels {
+			cancel()
+		}
+		for _, exit := range exits {
+			select {
+			case <-exit:
+			case <-time.After(30 * time.Second):
+				t.Error("tenant dispatcher shutdown hung")
+			}
+		}
+	})
+	listens := 0
+	awaitScan := func(tenantID string) {
+		t.Helper()
+		guard := time.NewTimer(30 * time.Second)
+		defer guard.Stop()
+		for {
+			select {
+			case event := <-tracer.events:
+				if event.listen {
+					listens++
+				} else if event.tenantID == tenantID {
+					return
+				}
+			case <-guard.C:
+				t.Fatal("routine startup or wake scan did not complete")
+			}
+		}
+	}
+	countListeners := func(want int) {
+		t.Helper()
+		var count int
+		if err := w.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND query=$1`, "LISTEN "+routineChannel).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != want {
+			t.Fatalf("dedicated routine listeners=%d want=%d for %d tenant loops", count, want, len(tenants))
+		}
+	}
+	for _, tenantID := range tenants {
+		ctx, cancel := context.WithCancel(t.Context())
+		exit := make(chan error, 1)
+		cancels = append(cancels, cancel)
+		exits = append(exits, exit)
+		go func() { exit <- d.Run(ctx, tenantID); close(exit) }()
+		awaitScan(tenantID)
+	}
+	countListeners(1)
+	if listens != 1 {
+		t.Fatalf("LISTEN calls=%d want=1", listens)
+	}
+	// Stopping the first tenant must not close the remaining tenants' listener.
+	cancels[0]()
+	select {
+	case err := <-exits[0]:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("first tenant cancellation hung")
+	}
+	countListeners(1)
+	for _, tenantID := range tenants[1:] {
+		payload, _ := json.Marshal(map[string]string{"tenant_id": tenantID})
+		if _, err := w.db.Admin.Exec(t.Context(), `SELECT pg_notify($1,$2)`, routineChannel, string(payload)); err != nil {
+			t.Fatal(err)
+		}
+		awaitScan(tenantID)
+	}
+	for i := 1; i < len(cancels); i++ {
+		cancels[i]()
+		select {
+		case err := <-exits[i]:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatal("final tenant cancellation hung")
+		}
+	}
+	countListeners(0)
+	t.Logf("dedicated listeners for %d idle tenants: before=%d after=1; after cancellation=0", len(tenants), len(tenants))
+}
 
 // Risk: an empty or disconnected queue must not keep querying at 250 ms;
 // injected timer firings measure calls without elapsed-time assertions.

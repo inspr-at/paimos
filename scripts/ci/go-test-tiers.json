@@ -6722,6 +6722,8 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestReplyToHeldParentStaysInvisible","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineDispatcherSharesListenerAcrossTenants","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestRoutineDispatcherUsesEncryptedTargetAndFencedCompletion","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestRoutineDurableWakeRetryLeaseAndRestart","tier":"ESSENTIAL"}
