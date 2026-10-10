@@ -41,7 +41,7 @@ export function capacityWaitText(wait: CapacityWait, subject = 'Agents', now = D
     case 'capacity': return wait.host_reason ? `Waiting for host capacity: ${hostCapacityReason(wait.host_reason)}` : 'Waiting for the current run to finish'
     case 'allowance': return at ? `Capacity available after ${at}` : 'Waiting for capacity'
     case 'residency': return 'Waiting for an account within the allowed providers'
-    case 'context': return typeof wait.context === 'string' && wait.context.trim() && wait.context.length <= 128 ? `Not allowed for ${wait.context.trim()}` : 'No account allowed for this project’s context'
+    case 'context': return typeof wait.context === 'string' && wait.context.trim() && wait.context.length <= 128 ? `Not allowed for ${wait.context.trim()}` : 'No account is allowed for this project’s context'
     case 'models': return 'No model is granted for this account'
     // Why and how to resume, not just that it is paused (AEON-402).
     case 'state': return 'Paused in Settings / Accounts; turn “Agents may use it” back on to resume'
