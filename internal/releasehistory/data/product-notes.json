@@ -5715,8 +5715,8 @@
     "261010123154.0.0": {
       "release_channel": "stable",
       "release_sequence": 129,
-      "snapshot_sha256": "b233eaf57d04d55e513f850f232cff321c756d82671b579472e3fe481084b332",
-      "captured_at": "2026-10-10T13:01:01Z",
+      "snapshot_sha256": "189cc06fcac9520d39e957133509a2e8a09bddb976b53696ebf362dcb8f3009e",
+      "captured_at": "2026-10-10T14:04:39Z",
       "release_revision": 1,
       "items": [
         {
@@ -5923,8 +5923,8 @@
           "key": "AEON-1073",
           "pill_en": "Chat with more agents",
           "pill_de": "Chat mit mehr Agenten",
-          "benefit_en": "Where live chat is switched on, Cursor, OpenCode, Gemini and Grok sessions stream their replies too.",
-          "benefit_de": "Wo der Live-Chat eingeschaltet ist, streamen auch Cursor-, OpenCode-, Gemini- und Grok-Sitzungen ihre Antworten.",
+          "benefit_en": "Where live chat is switched on, Cursor and Grok sessions stream their replies too.",
+          "benefit_de": "Wo der Live-Chat eingeschaltet ist, streamen auch Cursor- und Grok-Sitzungen ihre Antworten.",
           "group": "features"
         },
         {
@@ -5942,6 +5942,14 @@
           "benefit_en": "Database connections recycle regularly to reduce memory retained by long-lived backends.",
           "benefit_de": "Datenbankverbindungen werden regelmäßig erneuert, um den von langlebigen Datenbankprozessen zurückgehaltenen Speicher zu reduzieren.",
           "group": "fixes"
+        },
+        {
+          "key": "AEON-1105",
+          "pill_en": "Chat can be enabled",
+          "pill_de": "Chat lässt sich einschalten",
+          "benefit_en": "Live chat with agents is off by default and can be switched on per installation.",
+          "benefit_de": "Der Live-Chat mit Agenten ist standardmäßig aus und lässt sich pro Installation einschalten.",
+          "group": "features"
         },
         {
           "key": "AEON-536",
