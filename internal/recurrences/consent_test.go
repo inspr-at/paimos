@@ -228,6 +228,94 @@ func TestRoutineConsentBindsQualificationAndScopedIdentity(t *testing.T) {
 	}
 }
 
+// Risk: a definition invalidated after consent must close execution without
+// breaking reads, pause or the owner's ability to revoke that consent.
+func TestRoutineInvalidDefinitionPreservesSafetyControls(t *testing.T) {
+	f, in, q, reader := consentFixture(t)
+	enableConsentProject(t, f, q, reader)
+	r := f.create(in)
+	path := "/api/recurrences/" + r.ID
+	f.call(f.p, "POST", path+"/resume", map[string]any{"expected_revision": r.Revision}, 200)
+	r = f.get(r.ID)
+	f.call(f.p, "PUT", path+"/execution-consent", map[string]any{"expected_revision": r.Revision, "execute_consent": true}, 200)
+	r = f.get(r.ID)
+	if r.Paused || r.ExecutionPolicy == nil || !r.ExecutionPolicy.Eligible {
+		t.Fatalf("fixture did not establish a consented, active routine: %+v", r)
+	}
+	claim := func(want string) {
+		t.Helper()
+		err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
+			id, err := RequireExecutionConsentTx(t.Context(), tx, f.p.TenantID, r.ID, r.Revision, reader)
+			if err == nil && id != f.p.ID {
+				t.Fatalf("claim identity %q, want owner %q", id, f.p.ID)
+			}
+			return err
+		})
+		if want == "" {
+			if err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		var failure *workorders.Error
+		if !errors.As(err, &failure) || failure.Status != 409 || failure.Message != want {
+			t.Fatalf("claim error %v, want 409 %s", err, want)
+		}
+	}
+	claim("")
+	f.tx(func(tx pgx.Tx) error {
+		result, err := tx.Exec(t.Context(), `UPDATE work_kinds SET archived_at=clock_timestamp() WHERE id=$1`, in.Definition.Assignment.WorkKindID)
+		if err == nil && result.RowsAffected() != 1 {
+			t.Fatalf("archived %d work kinds, want one", result.RowsAffected())
+		}
+		return err
+	})
+	assertUnavailable := func(policy *ExecutionPolicy) {
+		t.Helper()
+		if policy == nil || policy.Eligible || !policy.ConsentRequired || policy.WaitReason != "definition_unavailable" {
+			t.Fatalf("invalid definition policy: %+v", policy)
+		}
+	}
+	r = f.get(r.ID)
+	assertUnavailable(r.ExecutionPolicy)
+	var page struct {
+		Items []Recurrence `json:"items"`
+	}
+	if err := json.Unmarshal(f.call(f.p, "GET", "/api/recurrences?project_id="+f.project, nil, 200), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != r.ID {
+		t.Fatalf("invalid routine missing from list: %+v", page.Items)
+	}
+	assertUnavailable(page.Items[0].ExecutionPolicy)
+	var preview struct {
+		Policy *ExecutionPolicy `json:"execution_policy"`
+	}
+	if err := json.Unmarshal(f.call(f.p, "GET", path+"/preview", nil, 200), &preview); err != nil {
+		t.Fatal(err)
+	}
+	assertUnavailable(preview.Policy)
+	claim("definition_unavailable")
+	f.call(f.p, "POST", path+"/pause", map[string]any{"expected_revision": r.Revision}, 200)
+	r = f.get(r.ID)
+	if !r.Paused {
+		t.Fatal("pause did not persist")
+	}
+	assertUnavailable(r.ExecutionPolicy)
+	f.call(f.p, "PUT", path+"/execution-consent", map[string]any{"expected_revision": r.Revision, "execute_consent": false}, 200)
+	r = f.get(r.ID)
+	assertUnavailable(r.ExecutionPolicy)
+	f.tx(func(tx pgx.Tx) error {
+		var revoked bool
+		err := tx.QueryRow(t.Context(), `SELECT NOT execute_consent AND consent_revision=0 AND execution_principal_id IS NULL AND consented_by_principal_id IS NULL AND consented_at IS NULL AND consent_policy_digest IS NULL AND consent_qualification_id IS NULL FROM recurrence_definitions WHERE recurrence_id=$1`, r.ID).Scan(&revoked)
+		if err == nil && !revoked {
+			t.Fatal("consent revocation did not persist")
+		}
+		return err
+	})
+	claim("routine_paused")
+}
+
 // Risk: owner revocation after preview must win over the final consent write.
 // A real tenant lock establishes overlap; the deadline only guards a hang.
 func TestRoutineConsentRechecksOwnerBehindAccessFence(t *testing.T) {
