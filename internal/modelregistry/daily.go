@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountprivacy"
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/modelprefs"
@@ -17,8 +18,8 @@ import (
 // resolveDailyWork uses the existing ranked order and qualification, excluding
 // exhausted harnesses only after the selected harness explicitly permits it.
 // A pinned harness, unknown reading or wait setting never becomes a fallback.
-// Daily caps are already part of shared account admission. Trying another
-// route belongs inside the Models walk, before moving to the next model.
+// Trying another route belongs inside the Models walk, before moving to the
+// next model. Reservation rechecks the same owner policy under its write fence.
 func resolveDailyWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time) (WorkResolution, error) {
 	return resolveWorkWithCatalog(ctx, tx, p, q, now, nil)
 }
@@ -181,4 +182,111 @@ func blockDaily(out WorkResolution, reason string, decisions ...*agentplan.Daily
 		out.Ladder[i].Selected = false
 	}
 	return out
+}
+
+// modelsDailyAdmission narrows the already-qualified accounts per route. The
+// owner's snapshot is reused across native levels and model steps, without
+// publishing another person's plan or quota to the current model reader.
+type modelsDailyAdmission struct {
+	principal tenant.Principal
+	snapshots map[string]agentplan.Snapshot
+	unknown   map[string]bool
+}
+
+func (d *modelsDailyAdmission) filter(ctx context.Context, tx pgx.Tx, profile Profile, ids []string, now time.Time) ([]string, string, error) {
+	if len(ids) == 0 {
+		return ids, "", nil
+	}
+	if len(ids) > 256 {
+		return nil, "", modelprefs.ErrBoardBounds
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text,owner_person_id::text FROM agent_accounts WHERE id=ANY($1::uuid[]) ORDER BY id LIMIT 257`, ids)
+	if err != nil {
+		return nil, "", err
+	}
+	type owned struct {
+		id    string
+		owner *string
+	}
+	accounts := []owned{}
+	for rows.Next() {
+		var a owned
+		if err := rows.Scan(&a.id, &a.owner); err != nil {
+			rows.Close()
+			return nil, "", err
+		}
+		accounts = append(accounts, a)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, "", err
+	}
+	visible, err := accountprivacy.Load(ctx, tx, d.principal, ids)
+	if err != nil {
+		return nil, "", err
+	}
+	tenantID := d.principal.TenantID
+	if tenantID == "" {
+		if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id')`).Scan(&tenantID); err != nil {
+			return nil, "", err
+		}
+	}
+	kept := []string{}
+	firstCause := ""
+	for _, a := range accounts {
+		// Unlinked accounts have no owner daily plan, exactly as reservation's
+		// dailyAccountWaitTx. Their ordinary schedules and quotas still apply.
+		if a.owner == nil {
+			kept = append(kept, a.id)
+			continue
+		}
+		snapshot, found := d.snapshots[*a.owner]
+		if !found && !d.unknown[*a.owner] {
+			input, err := tx.Begin(ctx)
+			if err != nil {
+				return nil, "", err
+			}
+			snapshot, err = agentaccounts.ReadDailyPolicyTx(ctx, input, tenantID, *a.owner, now)
+			if err != nil {
+				if rollback := input.Rollback(ctx); rollback != nil {
+					return nil, "", rollback
+				}
+				if ctx.Err() != nil {
+					return nil, "", ctx.Err()
+				}
+				d.unknown[*a.owner] = true
+			} else {
+				if err := input.Commit(ctx); err != nil {
+					return nil, "", err
+				}
+				d.snapshots[*a.owner] = snapshot
+			}
+		}
+		reason := "daily_limit_unknown"
+		for _, item := range snapshot.DailyState[profile.Harness].Accounts {
+			if item.AccountID == a.id {
+				reason = agentplan.DailyAccountReason(item, now)
+				break
+			}
+		}
+		if reason == "" {
+			kept = append(kept, a.id)
+			continue
+		}
+		if firstCause == "" {
+			wait := &agentaccounts.CapacityWait{Code: reason}
+			if reason == "daily_limit" {
+				wait.Until = &snapshot.DailyUntil
+			}
+			if !visible[a.id] {
+				wait = &agentaccounts.CapacityWait{}
+			}
+			firstCause = agentaccounts.ModelWaitReason(profile.Harness, wait)
+		}
+	}
+	if len(kept) > 0 {
+		return kept, "", nil
+	}
+	return kept, firstCause, nil
 }

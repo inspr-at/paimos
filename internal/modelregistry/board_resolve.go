@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -123,6 +124,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		d = def
 		d.Steps = append(quick, def.Steps...)
 	}
+	daily := modelsDailyAdmission{principal: p, snapshots: map[string]agentplan.Snapshot{}, unknown: map[string]bool{}}
 	seen := map[string]bool{}
 	for _, order := range d.Steps {
 		if seen[order.Line] || slices.Contains(d.Not, order.Line) {
@@ -186,6 +188,16 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 				}
 				if err != nil {
 					return nil, err
+				}
+			}
+			if len(reasons) == 0 && len(ids) > 0 {
+				var cause string
+				ids, cause, err = daily.filter(ctx, tx, profile, ids, now)
+				if err != nil {
+					return nil, err
+				}
+				if cause != "" {
+					reasons = append(reasons, cause)
 				}
 			}
 			if len(reasons) == 0 && len(ids) == 0 {
@@ -302,8 +314,10 @@ func modelsBoardIdentities(s modelprefs.BoardState, c boardCatalog) modelprefs.B
 		}
 		return id
 	}
+	s.Orders = slices.Clone(s.Orders)
 	for i := range s.Orders {
 		o := &s.Orders[i]
+		o.Rank, o.Not = slices.Clone(o.Rank), slices.Clone(o.Not)
 		for j, id := range o.Rank {
 			o.Rank[j] = canonical(id)
 		}
@@ -328,6 +342,7 @@ func modelsBoardIdentities(s modelprefs.BoardState, c boardCatalog) modelprefs.B
 			o.Efforts = efforts
 		}
 	}
+	s.Rules = slices.Clone(s.Rules)
 	for i := range s.Rules {
 		s.Rules[i].Line = canonical(s.Rules[i].Line)
 	}
