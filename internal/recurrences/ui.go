@@ -4,6 +4,7 @@ package recurrences
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -32,6 +33,7 @@ func (m *Module) previewDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	times := []time.Time{}
+	var policy *ExecutionPolicy
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if in.Definition == nil {
 			if err := manage(r.Context(), tx, p, in.ProjectID); err != nil {
@@ -56,9 +58,18 @@ func (m *Module) previewDraft(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		times, err = Preview(in.Trigger, now, 4)
+		if err == nil && in.Definition != nil {
+			item := Recurrence{Input: in}
+			err = m.projectExecutionPolicy(r.Context(), tx, p.TenantID, &item)
+			policy = item.ExecutionPolicy
+		}
 		return err
 	})
-	reply(w, 200, map[string]any{"times": times, "trigger_kind": in.Trigger.Kind}, err)
+	out := map[string]any{"times": times, "trigger_kind": in.Trigger.Kind}
+	if policy != nil {
+		out["execution_policy"] = policy
+	}
+	reply(w, 200, out, err)
 }
 
 // One bounded SQL read decorates a whole page, rather than fetching each row's
@@ -181,6 +192,7 @@ type ReleaseChoice struct {
 	Publication
 	Key     string  `json:"key"`
 	Receipt *Result `json:"receipt,omitempty"`
+	eventID *int64
 }
 
 func publicationKey(p Publication) string {
@@ -193,38 +205,111 @@ func publicationKey(p Publication) string {
 	return ""
 }
 func (m *Module) releases(ctx context.Context, tx pgx.Tx, item Recurrence, now time.Time) ([]ReleaseChoice, bool, error) {
-	rows, err := tx.Query(ctx, `SELECT r.release_node_id::text,n.title,coalesce(r.version,''),r.released_at FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id AND n.deleted_at IS NULL WHERE r.project_node_id=$1 AND r.state IN ('released','superseded') AND r.released_at IS NOT NULL AND r.released_at<=$2 ORDER BY r.released_at DESC,r.release_node_id DESC LIMIT 101`, item.ProjectID, now)
+	projects := []string{item.ProjectID}
+	if releaseSubscription(item.Input) {
+		projects = sourceProjects(item.Input)
+	}
+	pubs := map[string]ReleaseChoice{}
+	var rows pgx.Rows
+	var err error
+	truncated := false
+	if releaseSubscription(item.Input) {
+		rows, err = tx.Query(ctx, `SELECT e.id FROM events e WHERE e.type='release.published' AND e.node_id=ANY($1::uuid[]) ORDER BY e.id DESC LIMIT 101`, projects)
+		if err != nil {
+			return nil, false, err
+		}
+		ids := []int64{}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, false, err
+			}
+			ids = append(ids, id)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, false, err
+		}
+		truncated = len(ids) > 100
+		for _, id := range ids {
+			p, err := readPublication(ctx, tx, item, id)
+			if err != nil {
+				return nil, false, err
+			}
+			if p.PublishedAt.After(now) {
+				continue
+			}
+			key := publicationKey(p)
+			if key == "" {
+				key = fmt.Sprintf("%s/event:%d", p.ProjectID, id)
+			}
+			if _, exists := pubs[key]; !exists {
+				id := id
+				pubs[key] = ReleaseChoice{Publication: p, Key: key, eventID: &id}
+			}
+		}
+	} else {
+		// Legacy picker retains historical publications without adding any
+		// new dependency on the retired publisher.
+		rows, err = tx.Query(ctx, `SELECT r.release_node_id::text,left(n.title,256),coalesce(r.version,''),r.released_at FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id AND n.deleted_at IS NULL WHERE r.project_node_id=$1 AND r.state IN ('released','superseded') AND r.released_at IS NOT NULL AND r.released_at<=$2 ORDER BY r.released_at DESC,r.release_node_id DESC LIMIT 101`, item.ProjectID, now)
+		if err != nil {
+			return nil, false, err
+		}
+		for rows.Next() {
+			var p Publication
+			p.ProjectID = item.ProjectID
+			if err = rows.Scan(&p.ReleaseID, &p.Name, &p.Version, &p.PublishedAt); err != nil {
+				rows.Close()
+				return nil, false, err
+			}
+			p.Name = boundedText(p.Name, 256)
+			key := publicationKey(p)
+			pubs[key] = ReleaseChoice{Publication: p, Key: key}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	rows, err = tx.Query(ctx, `SELECT id::text,coalesce(fields->>'project_key','') FROM nodes WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL`, projects)
 	if err != nil {
 		return nil, false, err
 	}
-	pubs := map[string]ReleaseChoice{}
+	projectKeys := map[string][]string{}
+	projectCount := 0
 	for rows.Next() {
-		var p Publication
-		p.ProjectID = item.ProjectID
-		if err = rows.Scan(&p.ReleaseID, &p.Name, &p.Version, &p.PublishedAt); err != nil {
+		var id, key string
+		if err := rows.Scan(&id, &key); err != nil {
 			rows.Close()
 			return nil, false, err
 		}
-		key := publicationKey(p)
-		pubs[key] = ReleaseChoice{Publication: p, Key: key}
+		projectKeys[key] = append(projectKeys[key], id)
+		projectCount++
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return nil, false, err
 	}
-	var projectKey string
-	if err = tx.QueryRow(ctx, `SELECT coalesce(fields->>'project_key','') FROM nodes WHERE id=$1 AND deleted_at IS NULL`, item.ProjectID).Scan(&projectKey); err != nil {
-		return nil, false, err
+	if projectCount != len(projects) {
+		return nil, false, pgx.ErrNoRows
 	}
 	for _, p := range m.history {
-		if p.ProjectKey != projectKey || p.PublishedAt.IsZero() || p.PublishedAt.After(now) {
+		projects, exists := projectKeys[p.ProjectKey]
+		if !exists || p.PublishedAt.IsZero() || p.PublishedAt.After(now) || len(p.Version) > 128 {
 			continue
 		}
-		p.ProjectID = item.ProjectID
-		key := publicationKey(p)
-		if key != "" {
-			pubs[key] = ReleaseChoice{Publication: p, Key: key}
+		for _, project := range projects {
+			p.ProjectID, p.Name = project, boundedText(p.Name, 256)
+			key := publicationKey(p)
+			if key != "" {
+				if _, exists := pubs[key]; !exists {
+					pubs[key] = ReleaseChoice{Publication: p, Key: key}
+				}
+			}
 		}
 	}
 	out := make([]ReleaseChoice, 0, len(pubs))
@@ -232,8 +317,8 @@ func (m *Module) releases(ctx context.Context, tx pgx.Tx, item Recurrence, now t
 		out = append(out, p)
 	}
 	sortReleases(out)
-	truncated := len(out) > 100
-	if truncated {
+	truncated = truncated || len(out) > 100
+	if len(out) > 100 {
 		out = out[:100]
 	}
 	// Bounded by the choice page and fetched once. Existing event:id receipts
@@ -283,12 +368,20 @@ func (m *Module) listReleases(w http.ResponseWriter, r *http.Request) {
 	items := []ReleaseChoice{}
 	truncated := false
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.SetLocalStatementTimeout(r.Context(), tx, 5*time.Second); err != nil {
+			return err
+		}
 		item, err := load(r.Context(), tx, r.PathValue("recurrenceId"), false)
 		if err != nil {
 			return err
 		}
 		if err = readDefinition(r.Context(), tx, p, item.Input); err != nil {
 			return err
+		}
+		if item.Trigger.Event == "release.published" {
+			if err = authorizeSources(r.Context(), tx, p, item.Input); err != nil {
+				return err
+			}
 		}
 		now, err := m.clock(r.Context(), tx)
 		if err != nil {

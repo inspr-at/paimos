@@ -90,8 +90,10 @@ follows the server-sent hints `delivery.step`, `delivery.item` and `delivery.inc
 by reading again; Live also reads every minute. New data for the same view keeps the
 person's window, time and selected step; a failed read shows an error with **Retry**,
 never an old answer. Steps carry facts only, so their labels are built from the step
-key, kind, round, outcome and wait reason. Without any recorded run, Flow says so and
-shows release 126 of 8 Oct 2026 as a labelled example in all three modes.
+key, kind, round, outcome and wait reason. Without any recorded run, all three modes
+show one plain empty state: "No recorded runs yet. Runs appear here once work goes
+through the PAIMOS work queue." Flow never shows sample data (AEON-1135); the first
+recorded run replaces the empty state without a reload.
 
 - **Live** shows the runs active in the last hours (and those that ended in the last
   45 minutes): releases first, then the soonest estimate. An open step runs on to its

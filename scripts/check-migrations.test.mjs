@@ -239,11 +239,77 @@ test('the runtime probe pulls by digest and rejects a malformed digest before Do
   writeFileSync(join(dir, 'go'), '#!/bin/bash\nexit 19\n', {mode: 0o700});
   const script = new URL('./migration-compat.sh', import.meta.url).pathname;
   const digest = 'sha256:' + 'a'.repeat(64);
-  assert.throws(() => execFileSync('bash', [script, 'v260930115354.0.0', digest], {env: {...process.env, PATH: `${dir}:${process.env.PATH}`}, stdio: 'pipe'}));
+  // Risk: allocating disposable resources before a failed image pull hides
+  // the pull failure and leaves cleanup to run against uncreated resources.
+  assert.throws(() => execFileSync('bash', [script, 'v260930115354.0.0', digest], {env: {...process.env, PATH: `${dir}:${process.env.PATH}`}, stdio: 'pipe'}), error => error.status === 19);
   assert.match(readFileSync(log, 'utf8'), new RegExp(`pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${digest}`));
+  assert.equal(readFileSync(log, 'utf8'), `pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${digest}\n`, 'a failed pull must precede any Docker resource allocation or cleanup');
+  const floorDigest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c';
+  writeFileSync(log, '');
+  writeFileSync(join(dir, 'docker'), `#!/bin/bash\nprintf '%s\\n' "$*" >> '${log}'\nif [[ "$*" = 'pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${digest}' ]]; then exit 0; fi\nexit 19\n`, {mode: 0o700});
+  assert.throws(() => execFileSync('bash', [script, 'v260930115354.0.0', digest], {env: {...process.env, PATH: `${dir}:${process.env.PATH}`}, stdio: 'pipe'}), error => error.status === 19);
+  assert.equal(readFileSync(log, 'utf8'), `pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${digest}\npull --platform linux/amd64 ghcr.io/inspr-at/aeon@${floorDigest}\n`, 'a failed rollback-floor pull must also precede Docker resource allocation or cleanup');
   writeFileSync(log, '');
   assert.throws(() => execFileSync('bash', [script, 'v260930115354.0.0', 'sha256:bad'], {env: {...process.env, PATH: `${dir}:${process.env.PATH}`}, stdio: 'pipe'}));
   assert.equal(readFileSync(log, 'utf8'), '');
+});
+
+test('the runtime probe checks the latest release and enforces the pinned account-use rollback floor', () => {
+  // Risk: after a capable release ships, treating it as a downgraded binary
+  // fails compatibility CI, or skipping its refusal also loses rollback proof.
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-1112-compat-'));
+  const state = join(directory, 'state');
+  mkdirSync(state);
+  const log = join(directory, 'commands.log');
+  const fixture = (tool, body) => writeFileSync(join(directory, tool),
+    `#!/bin/bash\nprintf '${tool} %s\\n' "$*" >> "$AEON_COMPAT_FIXTURE_LOG"\n${body}\n`, {mode: 0o700});
+  fixture('docker', `if [[ "$1 $2" = 'image ls' ]]; then echo "\${5##*@}"; fi
+if [[ "$1" = port ]]; then echo 127.0.0.1:18080; fi`);
+  fixture('go', 'exit 0');
+  fixture('git', "echo 'func enterTenant() {}'");
+  fixture('python3', `if [[ "$2" = account-use && "$*" != *--release-tag* && "$AEON_COMPAT_FIXTURE_FLOOR_FAIL" = 1 ]]; then exit 23; fi
+exit 0`);
+  fixture('mktemp', 'echo "$AEON_COMPAT_FIXTURE_STATE"');
+  fixture('trash', 'exit 0');
+  const script = new URL('./migration-compat.sh', import.meta.url).pathname;
+  const latest = {tag: 'v261010123154.0.0', digest: 'sha256:' + 'a'.repeat(64)};
+  const floor = {tag: 'v261009095632.0.0', digest: 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'};
+  const run = failFloor => {
+    writeFileSync(log, '');
+    const result = childProcess.spawnSync('bash', [script, latest.tag, latest.digest], {
+      env: {...process.env, PATH: `${directory}:${process.env.PATH}`, GITHUB_STEP_SUMMARY: '',
+        AEON_COMPAT_FIXTURE_LOG: log, AEON_COMPAT_FIXTURE_STATE: state,
+        AEON_COMPAT_FIXTURE_FLOOR_FAIL: failFloor ? '1' : '0'},
+      encoding: 'utf8', timeout: 15_000,
+    });
+    assert.ifError(result.error);
+    return {result, commands: readFileSync(log, 'utf8').trim().split('\n')};
+  };
+  const {result, commands} = run(false);
+  assert.equal(result.status, 0, result.stderr);
+  for (const release of [latest, floor]) {
+    assert.ok(commands.includes(`docker pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${release.digest}`));
+    const boots = commands.filter(line => line.startsWith('docker run ') && line.endsWith(release.digest));
+    assert.equal(boots.length, 2, `${release.tag} must boot before and after candidate migrations`);
+    assert.equal(commands.filter(line => line.startsWith('python3 scripts/migration-compat-probe.py check ') && line.endsWith(release.tag.slice(1))).length, 1);
+  }
+  assert.equal(commands.filter(line => line === 'go run -p 2 ./scripts/migrate-candidate.go').length, 2);
+  const databases = commands.filter(line => line.startsWith('docker run ') && line.includes('POSTGRES_USER=postgres'));
+  assert.equal(databases.length, 2, 'each release must seed a fresh database');
+  const firstDatabase = commands.indexOf(databases[0]);
+  const nextDatabase = commands.indexOf(databases[1], firstDatabase + 1);
+  assert.ok(commands.slice(firstDatabase + 1, nextDatabase).some(line => line.startsWith('docker container rm -fv ')), 'the first database must be removed before the rollback fixture starts');
+  const policyProbes = commands.filter(line => line.startsWith('python3 scripts/migration-compat-probe.py account-use '));
+  assert.equal(policyProbes.length, 2, 'both the latest policy and rollback refusal must run');
+  assert.ok(policyProbes[0].endsWith(`--release-tag ${latest.tag}`));
+  const refusals = policyProbes.filter(line => !line.includes('--release-tag'));
+  assert.equal(refusals.length, 1, 'the below-floor refusal must always run');
+  assert.ok(refusals[0].includes(`--version ${floor.tag.slice(1)} --database-container `));
+  assert.ok(commands.indexOf(refusals[0]) > commands.indexOf(`docker pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${floor.digest}`));
+  const failure = run(true);
+  assert.equal(failure.result.status, 23, 'a failed rollback refusal must fail compatibility CI');
+  assert.ok(failure.commands.some(line => line.startsWith('python3 scripts/migration-compat-probe.py account-use ') && line.includes(`--version ${floor.tag.slice(1)} `)));
+  assert.doesNotMatch(failure.result.stdout, new RegExp(`Migration compatibility passed: ${floor.tag}`));
 });
 
 test('AEON-1107 compatibility keeps latest-release reads and the below-floor activated refusal', () => {
@@ -307,7 +373,7 @@ elif tool == 'python3':
     assert.equal(version(probes.at(-1)), rollbackTag.slice(1));
     const pulls = calls.filter(call => call[0] === 'docker' && call[1] === 'pull');
     assert.deepEqual(pulls.map(call => call.at(-1)), sameImage ?
-      [`ghcr.io/inspr-at/aeon@${rollbackDigest}`, `ghcr.io/inspr-at/aeon@${rollbackDigest}`] :
+      [`ghcr.io/inspr-at/aeon@${rollbackDigest}`] :
       [`ghcr.io/inspr-at/aeon@${latestDigest}`, `ghcr.io/inspr-at/aeon@${rollbackDigest}`]);
     const starts = calls.filter(call => call[0] === 'docker' && call[1] === 'run' && call.includes('256m'));
     assert.deepEqual(starts.map(call => call.at(-1)), sameImage ? Array(4).fill('sha256:' + '1'.repeat(64)) :
@@ -316,6 +382,9 @@ elif tool == 'python3':
     const databaseNames = databases.map(call => call[call.indexOf('--name') + 1]);
     assert.equal(databases.length, 2);
     assert.equal(new Set(databaseNames).size, 2);
+    const first = calls.indexOf(databases[0]), second = calls.indexOf(databases[1]);
+    assert.ok(calls.slice(first + 1, second).some(call =>
+      call[0] === 'docker' && call[1] === 'container' && call[2] === 'rm' && call.includes('-fv')));
     assert.equal(probes.at(-1)[probes.at(-1).indexOf('--database-container') + 1], databaseNames[1]);
     const seeds = probes.filter(call => call[2] === 'seed');
     assert.deepEqual(seeds.map(version), checks.map(version));
@@ -323,7 +392,7 @@ elif tool == 'python3':
     assert.equal(migrations.length, 2);
     for (let i = 0; i < migrations.length; i++)
       assert.ok(calls.indexOf(seeds[i]) < migrations[i] && migrations[i] < calls.indexOf(checks[i]));
-    assert.deepEqual(calls.filter(call => call[0] === 'git'), Array(2).fill(['git', 'show', `${rollbackTag}:internal/db/visibility.go`]));
+    assert.deepEqual(calls.filter(call => call[0] === 'git'), [['git', 'show', `${rollbackTag}:internal/db/visibility.go`]]);
     for (let i = 0; i < accountUse.length; i++) {
       assert.equal(accountUse[i][accountUse[i].indexOf('--database-container') + 1], databaseNames[i]);
       assert.equal(accountUse[i][accountUse[i].indexOf('--state') + 1], seeds[i][seeds[i].indexOf('--state') + 1]);
