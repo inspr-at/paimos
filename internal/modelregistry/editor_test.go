@@ -395,14 +395,21 @@ func TestEditorMiddlewarePersonHeadersAndPermissionMatrix(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct{ method, path, body string }{{"PUT", "/api/models/routes", "[]"}, {"PUT", path, body}, {"DELETE", path + "?revision=0", ""}, {"GET", "/api/work-kinds", ""}} {
+	for _, tc := range []struct{ method, path, body string }{{"PUT", "/api/models/routes", "[]"}, {"GET", "/api/model-preferences", ""}, {"PUT", path, body}, {"DELETE", path + "?revision=0", ""}, {"GET", "/api/work-kinds", ""}} {
 		r := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 		r.Header.Set("Authorization", "Bearer aeon_"+prefix+"_editor-fixture")
 		w := httptest.NewRecorder()
 		h.handler.ServeHTTP(w, r)
 		editorError(t, w, 403, "agent key scope required")
 	}
-	// AEON-1146 permits preferences reads under the existing models.read grant.
+	// AEON-1146 permits preference reads for coordinator ceilings. Establish
+	// that ceiling explicitly after proving the ordinary key's denials above.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=$2 WHERE principal_id=$1`, agent.ID, authz.CoordinatorKeyScopes)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	r := httptest.NewRequest(http.MethodGet, "/api/model-preferences", nil)
 	r.Header.Set("Authorization", "Bearer aeon_"+prefix+"_editor-fixture")
 	w = httptest.NewRecorder()
