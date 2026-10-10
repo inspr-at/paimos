@@ -5715,16 +5715,16 @@
     "261010123154.0.0": {
       "release_channel": "stable",
       "release_sequence": 129,
-      "snapshot_sha256": "4027a724288af2fcc4764fa8fb5844b548daefb4d1c9f84756e4c0aa7f4bf8cb",
-      "captured_at": "2026-10-10T12:31:59Z",
+      "snapshot_sha256": "b233eaf57d04d55e513f850f232cff321c756d82671b579472e3fe481084b332",
+      "captured_at": "2026-10-10T13:01:01Z",
       "release_revision": 1,
       "items": [
         {
           "key": "AEON-1008",
-          "pill_en": "Ticket status stays true",
-          "pill_de": "Ticketstatus bleibt korrekt",
-          "benefit_en": "Tickets move to Done when their change merges, so the board and release notes stay correct.",
-          "benefit_de": "Tickets wechseln auf Erledigt, sobald ihre Änderung gemergt ist, damit Board und Release-Notes stimmen.",
+          "pill_en": "Done without a lead",
+          "pill_de": "Erledigt auch ohne Lead",
+          "benefit_en": "After a verified merge, eligible AEON tickets can now reach Done without a configured lead when an existing person has permission.",
+          "benefit_de": "Nach einem verifizierten Merge können geeignete AEON-Tickets nun auch ohne konfigurierten Lead auf Erledigt wechseln, sofern eine bereits berechtigte Person vorhanden ist.",
           "group": "fixes"
         },
         {
@@ -5736,99 +5736,43 @@
           "group": "features"
         },
         {
-          "key": "AEON-1018",
-          "pill_en": "Nightly runs green",
-          "pill_de": "Nächtliche Läufe grün",
-          "benefit_en": "The full nightly test run is green again and stays green.",
-          "benefit_de": "Der vollständige nächtliche Testlauf ist wieder grün und bleibt es.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1020",
-          "pill_en": "Queue causes known",
-          "pill_de": "Ursachen in der Warteschlange",
-          "benefit_en": "Every merge-queue rebuild has a known cause before anyone tunes the queue.",
-          "benefit_de": "Jeder Neuaufbau in der Merge-Warteschlange hat eine bekannte Ursache, bevor jemand sie anpasst.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1021",
-          "pill_en": "Fewer review rounds",
-          "pill_de": "Weniger Prüfrunden",
-          "benefit_en": "Builders check their own work against the review rules before a reviewer sees it.",
-          "benefit_de": "Ersteller prüfen ihre Arbeit selbst nach den Prüfregeln, bevor ein Prüfer sie sieht.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1023",
-          "pill_en": "Faster browser tests",
-          "pill_de": "Schnellere Browsertests",
-          "benefit_en": "Browser test shards spend their time on tests, not on startup.",
-          "benefit_de": "Browsertest-Teile verbringen ihre Zeit mit Tests, nicht mit dem Start.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1025",
-          "pill_en": "Less Go compile time",
-          "pill_de": "Weniger Go-Kompilierzeit",
-          "benefit_en": "Go tests stop compiling the same code twice.",
-          "benefit_de": "Go-Tests kompilieren denselben Code nicht mehr doppelt.",
-          "group": "features"
-        },
-        {
           "key": "AEON-1028",
           "pill_en": "Display in compact header",
           "pill_de": "Anzeige im kompakten Kopf",
           "benefit_en": "In the collapsed header, sections, Hide closed and all display options stay one click away under Display.",
-          "benefit_de": "Im eingeklappten Kopf bleiben Bereiche, „Erledigte ausblenden“ und alle Anzeige-Optionen mit einem Klick unter „Anzeige“ erreichbar.",
+          "benefit_de": "Im eingeklappten Kopf bleiben Bereiche, „Geschlossene ausblenden“ und alle Anzeigeoptionen mit einem Klick unter „Anzeige“ erreichbar.",
           "group": "features"
         },
         {
           "key": "AEON-1033",
           "pill_en": "Daily limits planned",
           "pill_de": "Tageslimits im Plan",
-          "benefit_en": "PAIMOS holds each harness's daily limit and today's usage in one place that every start reads.",
-          "benefit_de": "PAIMOS hält das Tageslimit und die heutige Nutzung jedes Harness an einer Stelle, die jeder Start liest.",
+          "benefit_en": "PAIMOS keeps daily settings and measured account usage together for managed start checks.",
+          "benefit_de": "PAIMOS hält Tagesvorgaben und gemessene Kontonutzung gemeinsam für die Startprüfung verwalteter Agenten bereit.",
           "group": "features"
         },
         {
           "key": "AEON-1034",
-          "pill_en": "Starts respect limits",
-          "pill_de": "Starts achten Limits",
-          "benefit_en": "No agent start goes past a harness's daily limit; work follows the model ladder or waits.",
-          "benefit_de": "Kein Agentenstart überschreitet das Tageslimit eines Harness; Arbeit folgt der Modellleiter oder wartet.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1035",
-          "pill_en": "Resets never expire",
-          "pill_de": "Resets verfallen nie",
-          "benefit_en": "PAIMOS suggests when to use a limit reset, or uses it automatically before it expires.",
-          "benefit_de": "PAIMOS schlägt vor, wann ein Limit-Reset genutzt wird, oder nutzt ihn automatisch vor dem Verfall.",
+          "pill_en": "Starts check daily limits",
+          "pill_de": "Starts prüfen Tageslimits",
+          "benefit_en": "New managed starts check measured daily usage; at a measured limit, model selection can follow the permitted ladder or work waits.",
+          "benefit_de": "Neue verwaltete Starts prüfen die gemessene Tagesnutzung; bei einem gemessenen Limit kann die Modellauswahl der erlaubten Modellleiter folgen oder die Arbeit wartet.",
           "group": "features"
         },
         {
           "key": "AEON-1036",
           "pill_en": "Limits on the dial",
           "pill_de": "Limits am Regler",
-          "benefit_en": "The agent dial shows each harness's daily limit, what is running and why work waits, in one compact row.",
-          "benefit_de": "Der Agentenregler zeigt Tageslimit, laufende Arbeit und Wartegründe jedes Harness in einer kompakten Zeile.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1037",
-          "pill_en": "Reset settings",
-          "pill_de": "Einstellungen für Resets",
-          "benefit_en": "Account settings let you decide whether limit resets are only suggested or never allowed to expire.",
-          "benefit_de": "In den Kontoeinstellungen lässt sich festlegen, ob Limit-Resets nur vorgeschlagen werden oder nie verfallen.",
+          "benefit_en": "The agent dial brings together daily usage, limits and running counts, with expandable details about waits.",
+          "benefit_de": "Der Agentenregler bündelt Tagesnutzung, Limits und Laufzahlen; ausklappbare Details erklären Wartegründe.",
           "group": "features"
         },
         {
           "key": "AEON-1038",
-          "pill_en": "Project leads start",
-          "pill_de": "Projekt-Leads starten",
-          "benefit_en": "Starting a project lead actually starts it, or says honestly what it is waiting for.",
-          "benefit_de": "Ein gestarteter Projekt-Lead startet wirklich oder sagt ehrlich, worauf er wartet.",
+          "pill_en": "Clearer lead start status",
+          "pill_de": "Klarer Startstatus für Leads",
+          "benefit_en": "Lead controls explain why automatic launch is unavailable and why existing start requests are waiting.",
+          "benefit_de": "Lead-Steuerelemente erklären, warum der automatische Start nicht verfügbar ist und bestehende Startanfragen warten.",
           "group": "fixes"
         },
         {
@@ -5865,10 +5809,10 @@
         },
         {
           "key": "AEON-1047",
-          "pill_en": "Approve protected changes",
-          "pill_de": "Geschützte Änderungen freigeben",
-          "benefit_en": "Agents can ask a person to approve one protected change, and it applies only exactly as approved.",
-          "benefit_de": "Agenten können eine Person um Freigabe einer geschützten Änderung bitten, die nur genau wie freigegeben angewendet wird.",
+          "pill_en": "Approve feature changes",
+          "pill_de": "Feature-Änderungen freigeben",
+          "benefit_en": "Agents can request approval for one protected feature-setting change, applied only exactly as approved.",
+          "benefit_de": "Agenten können die Freigabe einer geschützten Änderung an einer Feature-Einstellung anfordern, die nur genau wie freigegeben angewendet wird.",
           "group": "features"
         },
         {
@@ -5891,56 +5835,56 @@
           "key": "AEON-1051",
           "pill_en": "Account matrix basics",
           "pill_de": "Grundlage der Kontomatrix",
-          "benefit_en": "Which model accounts may work on which projects is enforced everywhere, and one Mac can serve both trackers safely.",
-          "benefit_de": "Welche Modellkonten an welchen Projekten arbeiten dürfen, wird überall durchgesetzt, und ein Mac kann beide Tracker sicher bedienen.",
+          "benefit_en": "Choose which accounts may serve each project context; new managed starts respect those settings while existing runs continue.",
+          "benefit_de": "Für jeden Projektkontext lässt sich festlegen, welche Konten genutzt werden dürfen; neue verwaltete Starts beachten diese Einstellungen, laufende Arbeit wird fortgesetzt.",
           "group": "features"
         },
         {
           "key": "AEON-1052",
           "pill_en": "Model rules enforced",
           "pill_de": "Modellregeln durchgesetzt",
-          "benefit_en": "Which model accounts may work on which projects is enforced everywhere, and one Mac can serve both trackers safely.",
-          "benefit_de": "Welche Modellkonten an welchen Projekten arbeiten dürfen, wird überall durchgesetzt, und ein Mac kann beide Tracker sicher bedienen.",
+          "benefit_en": "Automatic model additions follow the saved model-version rule; disallowed additions stay disabled.",
+          "benefit_de": "Automatische Modellergänzungen folgen der gespeicherten Regel für Modellversionen; nicht erlaubte Ergänzungen bleiben deaktiviert.",
           "group": "features"
         },
         {
           "key": "AEON-1053",
           "pill_en": "Accounts used rightly",
           "pill_de": "Konten richtig genutzt",
-          "benefit_en": "Which model accounts may work on which projects is enforced everywhere, and one Mac can serve both trackers safely.",
-          "benefit_de": "Welche Modellkonten an welchen Projekten arbeiten dürfen, wird überall durchgesetzt, und ein Mac kann beide Tracker sicher bedienen.",
+          "benefit_en": "Model selection and new managed starts use accounts allowed for the project’s work context.",
+          "benefit_de": "Modellauswahl und neue verwaltete Starts nutzen Konten, die für den Arbeitskontext des Projekts freigegeben sind.",
           "group": "features"
         },
         {
           "key": "AEON-1054",
           "pill_en": "Account matrix screen",
           "pill_de": "Ansicht der Kontomatrix",
-          "benefit_en": "Which model accounts may work on which projects is enforced everywhere, and one Mac can serve both trackers safely.",
-          "benefit_de": "Welche Modellkonten an welchen Projekten arbeiten dürfen, wird überall durchgesetzt, und ein Mac kann beide Tracker sicher bedienen.",
+          "benefit_en": "Settings shows account permissions by work context and lists running work outside the matrix.",
+          "benefit_de": "In den Einstellungen werden Kontofreigaben je Arbeitskontext und bereits laufende Arbeit außerhalb der Matrix angezeigt.",
           "group": "features"
         },
         {
           "key": "AEON-1055",
           "pill_en": "Safe second daemon",
           "pill_de": "Sicherer zweiter Dienst",
-          "benefit_en": "Which model accounts may work on which projects is enforced everywhere, and one Mac can serve both trackers safely.",
-          "benefit_de": "Welche Modellkonten an welchen Projekten arbeiten dürfen, wird überall durchgesetzt, und ein Mac kann beide Tracker sicher bedienen.",
+          "benefit_en": "Shared operation requires compatible, enrolled daemons before new work is dispatched.",
+          "benefit_de": "Gemeinsamer Betrieb erfordert kompatible, registrierte Dienste, bevor neue Arbeit zugewiesen wird.",
           "group": "features"
         },
         {
           "key": "AEON-1056",
           "pill_en": "Two trackers per Mac",
           "pill_de": "Zwei Tracker pro Mac",
-          "benefit_en": "Which model accounts may work on which projects is enforced everywhere, and one Mac can serve both trackers safely.",
-          "benefit_de": "Welche Modellkonten an welchen Projekten arbeiten dürfen, wird überall durchgesetzt, und ein Mac kann beide Tracker sicher bedienen.",
+          "benefit_en": "Two compatible, manually paired daemons can connect one Mac to separate trackers while sharing account occupancy and machine limits.",
+          "benefit_de": "Zwei kompatible, manuell gekoppelte Dienste können einen Mac mit getrennten Trackern verbinden und dabei Kontobelegung und Rechnerlimits gemeinsam berücksichtigen.",
           "group": "features"
         },
         {
           "key": "AEON-1057",
-          "pill_en": "Project on every decision",
-          "pill_de": "Projekt bei jeder Entscheidung",
-          "benefit_en": "The Decision Desk names each item's project and opens it in a new tab, and says when the next item is in another project.",
-          "benefit_de": "Der Decision Desk nennt bei jedem Eintrag das Projekt, öffnet es in einem neuen Tab und zeigt an, wenn der nächste Eintrag zu einem anderen Projekt gehört.",
+          "pill_en": "Project context on decisions",
+          "pill_de": "Projektkontext bei Entscheidungen",
+          "benefit_en": "Project-linked decisions offer a project link that opens in a new tab, and the desk marks changes from the previously shown project.",
+          "benefit_de": "Projektbezogene Entscheidungen bieten einen Projektlink in einem neuen Tab; der Entscheidungstisch markiert Wechsel gegenüber dem zuvor angezeigten Projekt.",
           "group": "features"
         },
         {
@@ -5969,42 +5913,34 @@
         },
         {
           "key": "AEON-1071",
-          "pill_en": "Steer agents mid-reply",
-          "pill_de": "Agenten mittendrin lenken",
-          "benefit_en": "Send a correction while an agent is still answering, or right after its reply; Stop always works.",
-          "benefit_de": "Eine Korrektur senden, während ein Agent noch antwortet, oder direkt danach; Stopp funktioniert immer.",
+          "pill_en": "Clearer chat controls",
+          "pill_de": "Klarere Chatsteuerung",
+          "benefit_en": "Chat offers immediate steering, delivery at the next step or delivery after the turn according to session capabilities; Stop is offered when interruption is available.",
+          "benefit_de": "Je nach Sitzungsfähigkeiten bietet der Chat sofortige Steuerung, Zustellung beim nächsten Schritt oder nach der Runde; Stopp ist bei verfügbarer Unterbrechung möglich.",
           "group": "features"
         },
         {
           "key": "AEON-1073",
-          "pill_en": "Chat with every agent",
-          "pill_de": "Chat mit jedem Agenten",
-          "benefit_en": "Live replies and steering work in chat for Cursor, OpenCode, Gemini and Grok sessions too, with an honest fallback where a harness cannot steer mid-turn.",
-          "benefit_de": "Live-Antworten und Steuerung funktionieren im Chat auch für Cursor-, OpenCode-, Gemini- und Grok-Sitzungen, mit einer ehrlichen Alternative, wo ein Harness mitten im Zug nicht steuern kann.",
+          "pill_en": "Chat with more agents",
+          "pill_de": "Chat mit mehr Agenten",
+          "benefit_en": "Where live chat is switched on, Cursor, OpenCode, Gemini and Grok sessions stream their replies too.",
+          "benefit_de": "Wo der Live-Chat eingeschaltet ist, streamen auch Cursor-, OpenCode-, Gemini- und Grok-Sitzungen ihre Antworten.",
           "group": "features"
         },
         {
           "key": "AEON-1074",
           "pill_en": "Live agent replies",
-          "pill_de": "Live-Chat durchgehend",
-          "benefit_en": "Agent replies appear live in the browser while they are being written.",
-          "benefit_de": "Antworten von Agenten erscheinen live im Browser, während sie entstehen.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1095",
-          "pill_en": "Read status for Pi",
-          "pill_de": "Lesestatus für Pi",
-          "benefit_en": "You see exactly when a Pi agent received and read your message.",
-          "benefit_de": "Du siehst genau, wann ein Pi-Agent deine Nachricht erhalten und gelesen hat.",
+          "pill_de": "Live-Antworten von Agenten",
+          "benefit_en": "Where live chat is switched on, agent replies appear in the browser while they are being written (Pi agents follow later).",
+          "benefit_de": "Wo der Live-Chat eingeschaltet ist, erscheinen Antworten von Agenten im Browser, während sie entstehen (Pi-Agenten folgen später).",
           "group": "features"
         },
         {
           "key": "AEON-1100",
           "pill_en": "Steadier database",
           "pill_de": "Stabilere Datenbank",
-          "benefit_en": "PAIMOS stays fast and available because database memory no longer creeps up until it crashes.",
-          "benefit_de": "PAIMOS bleibt schnell und erreichbar, weil der Datenbankspeicher nicht mehr bis zum Absturz anwächst.",
+          "benefit_en": "Database connections recycle regularly to reduce memory retained by long-lived backends.",
+          "benefit_de": "Datenbankverbindungen werden regelmäßig erneuert, um den von langlebigen Datenbankprozessen zurückgehaltenen Speicher zu reduzieren.",
           "group": "fixes"
         },
         {
@@ -6027,8 +5963,8 @@
           "key": "AEON-569",
           "pill_en": "Decision Desk on Agents",
           "pill_de": "Decision Desk bei Agenten",
-          "benefit_en": "Everything agents need from a person (questions, approvals, requests and rule changes) waits in one Decision Desk on Agents, answered one at a time.",
-          "benefit_de": "Alles, was Agenten von einer Person brauchen – Fragen, Freigaben, Anfragen und Regeländerungen –, wartet in einem Decision Desk bei Agenten und wird eins nach dem anderen beantwortet.",
+          "benefit_en": "Questions, approvals, action requests and doctrine proposals are gathered in the Decision Desk on Agents; account-matrix setup links to Settings.",
+          "benefit_de": "Fragen, Freigaben, Aktionsanfragen und Doktrin-Vorschläge werden im Decision Desk bei Agenten gebündelt; die Einrichtung der Kontomatrix führt zu den Einstellungen.",
           "group": "features"
         },
         {
@@ -6041,10 +5977,10 @@
         },
         {
           "key": "AEON-590",
-          "pill_en": "Steady under load",
-          "pill_de": "Stabil unter Last",
-          "benefit_en": "Large inputs and long histories no longer slow the app down or cut results silently.",
-          "benefit_de": "Große Eingaben und lange Verläufe bremsen die App nicht mehr und kürzen Ergebnisse nicht still.",
+          "pill_en": "Bounded reads and histories",
+          "pill_de": "Begrenzte Abfragen und Verläufe",
+          "benefit_en": "Explicit size limits and paged history reads keep large reads manageable.",
+          "benefit_de": "Klare Größenlimits und seitenweise geladene Verläufe begrenzen umfangreiche Abfragen.",
           "group": "features"
         },
         {
@@ -6067,24 +6003,24 @@
           "key": "AEON-823",
           "pill_en": "Find entries by key",
           "pill_de": "Einträge per Schlüssel finden",
-          "benefit_en": "Typing a knowledge key such as GUI-22 in search opens that entry.",
-          "benefit_de": "Ein Wissensschlüssel wie GUI-22 in der Suche öffnet direkt diesen Eintrag.",
+          "benefit_en": "Search for a knowledge key such as GUI-22, then open the matching result.",
+          "benefit_de": "Eine Suche nach einem Wissensschlüssel wie GUI-22 findet den passenden Eintrag, der sich anschließend öffnen lässt.",
           "group": "fixes"
         },
         {
           "key": "AEON-825",
           "pill_en": "Event-driven recurrences",
           "pill_de": "Ereignisgesteuerte Wiederholung",
-          "benefit_en": "Recurring work starts when something relevant happens, such as a feature landing, a guideline changing or a product release, not only on a calendar.",
-          "benefit_de": "Wiederkehrende Arbeit startet, wenn etwas Relevantes passiert (eine Funktion fertig wird, eine Richtlinie sich ändert oder ein Produkt veröffentlicht wird), nicht nur nach Kalender.",
+          "benefit_en": "Recurring tickets can now be created by matching completion events, knowledge changes, releases or signed external events.",
+          "benefit_de": "Wiederkehrende Tickets können nun durch passende Abschlussereignisse, Wissensänderungen, Releases oder signierte externe Ereignisse angelegt werden.",
           "group": "features"
         },
         {
           "key": "AEON-826",
           "pill_en": "Agents can tag",
           "pill_de": "Agenten können taggen",
-          "benefit_en": "Every workspace has a default tag type, so agents allowed to manage tags can create tags without extra setup.",
-          "benefit_de": "Jeder Arbeitsbereich hat einen Standard-Tag-Typ, sodass Agenten mit Tag-Berechtigung ohne zusätzliche Einrichtung Tags anlegen können.",
+          "benefit_en": "Every workspace has a tag type, so agents with the required node-write permission can create tags without defining a type first.",
+          "benefit_de": "Jeder Arbeitsbereich hat einen Tag-Typ, sodass Agenten mit der erforderlichen Schreibberechtigung für Nodes Tags anlegen können, ohne zuerst einen Typ einzurichten.",
           "group": "features"
         },
         {
@@ -6115,8 +6051,8 @@
           "key": "AEON-907",
           "pill_en": "Adopt a running lead",
           "pill_de": "Laufenden Lead übernehmen",
-          "benefit_en": "Make an agent that is already working the project's lead without restarting it or losing its context.",
-          "benefit_de": "Einen bereits arbeitenden Agenten ohne Neustart und ohne Kontextverlust zum Lead des Projekts machen.",
+          "benefit_en": "An owned, running root coordinator in the same project can be adopted as lead after confirmation and session proof, without restarting it or losing its context.",
+          "benefit_de": "Ein eigener laufender Hauptkoordinator im selben Projekt kann nach Bestätigung und Sitzungsnachweis ohne Neustart oder Kontextverlust als Lead übernommen werden.",
           "group": "features"
         },
         {
