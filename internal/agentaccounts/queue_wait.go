@@ -4,6 +4,7 @@ package agentaccounts
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -18,11 +19,39 @@ const (
 // waitSnapshot belongs only to one advisory batch and its tenant transaction.
 // It is never passed into reservation or claim code, or retained across calls.
 type waitSnapshot struct {
-	accounts  []Account
-	used      map[string]int
-	quotaUsed map[string]int
-	now       time.Time
-	loaded    bool
+	accounts    []Account
+	used        map[string]int
+	quotaUsed   map[string]int
+	shared      map[string][]Window
+	sharedCount int
+	now         time.Time
+	loaded      bool
+}
+
+// A confirmed pool has the same ledger through every door. Keep that bounded
+// ledger only for this advisory batch; admission derives fresh window copies.
+func (s *waitSnapshot) windows(ctx context.Context, tx pgx.Tx, a Account, own []Window, now time.Time) ([]Window, error) {
+	if a.QuotaPoolFingerprint == "" {
+		return own, nil
+	}
+	key := a.Harness + ":" + a.QuotaPoolFingerprint
+	if windows, ok := s.shared[key]; ok {
+		return windows, nil
+	}
+	remaining := maxWaitWindows - s.sharedCount
+	if remaining <= 0 {
+		return nil, fail(http.StatusConflict, "queue quota window snapshot exceeds bound")
+	}
+	windows, err := sharedQuotaWindowsLimit(ctx, tx, a, own, now, maxWaitAccounts, remaining)
+	if err != nil {
+		return nil, err
+	}
+	if s.shared == nil {
+		s.shared = map[string][]Window{}
+	}
+	s.shared[key] = windows
+	s.sharedCount += len(windows)
+	return windows, nil
 }
 
 func (s *waitSnapshot) load(ctx context.Context, tx pgx.Tx) error {
@@ -78,6 +107,11 @@ func WaitForRuns(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*Capa
 	if len(ids) == 0 {
 		return out, nil
 	}
+	for _, id := range ids {
+		if !uuidRE.MatchString(id) {
+			return nil, fail(http.StatusBadRequest, "invalid run id")
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	rows, err := tx.Query(ctx, `SELECT id::text,agent_principal_id::text,model_profile_id::text,account_id::text,
@@ -102,7 +136,7 @@ func WaitForRuns(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*Capa
 	// Fail the whole batch on a missing or wrong-tenant identity. Never make a
 	// partial result look like a successful capacity projection.
 	for _, id := range ids {
-		if _, ok := runs[id]; !ok {
+		if _, ok := runs[strings.ToLower(id)]; !ok {
 			return nil, pgx.ErrNoRows
 		}
 	}
@@ -111,7 +145,7 @@ func WaitForRuns(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*Capa
 		if _, ok := out[id]; ok {
 			continue
 		}
-		run := runs[id]
+		run := runs[strings.ToLower(id)]
 		if run.Status == "queued" && run.Purpose == "managed" {
 			out[id], err = waitForRunSnapshot(ctx, tx, run, snapshot)
 			if err != nil {

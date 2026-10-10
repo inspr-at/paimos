@@ -16,7 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type waitQueryCounts struct{ accounts, windows, occupancy, runs int }
+type waitQueryCounts struct{ accounts, windows, occupancy, runs, quota int }
 
 type waitCountingTx struct {
 	pgx.Tx
@@ -30,6 +30,10 @@ func (tx *waitCountingTx) count(query string) {
 		tx.counts.accounts++
 	case strings.Contains(query, "FROM account_allowance_windows w WHERE w.account_id=ANY"):
 		tx.counts.windows++
+	case strings.Contains(query, "FROM account_allowance_windows WHERE account_id::text = ANY"):
+		tx.counts.windows++
+	case strings.HasPrefix(query, "SELECT sibling.id FROM agent_accounts own"):
+		tx.counts.quota++
 	case strings.HasPrefix(query, "SELECT id::text,agent_principal_id::text,model_profile_id::text,account_id::text,"):
 		tx.counts.runs++
 	case strings.Contains(query, "GROUP BY account_id"), strings.Contains(query, "GROUP BY a.harness, a.quota_pool_fingerprint"), strings.Contains(query, "GROUP BY r.account_id,a.harness,a.quota_pool_fingerprint"):
@@ -53,11 +57,22 @@ func TestQueueWaitBatchScansAndFreshClaimFences(t *testing.T) {
 	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 	f := limitWorldAt(t, "queue-wait-batch", 3, now)
 	callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", windowBody(now.Add(-time.Hour), now.Add(time.Hour), "requests", 100, "unrestricted"), 201, nil)
+	var sibling Account
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", `{"account_key":"sibling","harness":"codex","daemon_id":"daemon-b","label":"Sibling"}`, 201, &sibling)
+	ownFixtureAccount(t, f.admin, &sibling)
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+sibling.ID+"/probe", `{"daemon_id":"daemon-b","daemon_generation":"g1","available":true}`, 200, nil)
 	ctx := context.WithValue(dbtest.Seed(t.Context()), clockKey{}, now)
 	ids := make([]string, 8)
 	for i := range ids {
 		ids[i] = insertRun(t, f.admin, f.runner, f.profile)
 	}
+	seed(t, f.admin, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET quota_pool_fingerprint=$1`, strings.Repeat("ab", 32)); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE agent_runs SET requested_account_id=$1 WHERE id=ANY($2::uuid[])`, f.account.ID, ids)
+		return err
+	})
 	for _, count := range []int{1, 8} {
 		t.Run(fmt.Sprintf("%d queued runs", count), func(t *testing.T) {
 			err := db.InTenant(ctx, appPool, f.admin.TenantID, func(tx pgx.Tx) error {
@@ -81,10 +96,10 @@ func TestQueueWaitBatchScansAndFreshClaimFences(t *testing.T) {
 				if !reflect.DeepEqual(got, want) {
 					t.Fatalf("batch changed advice: got=%+v want=%+v", got, want)
 				}
-				if before.counts != (waitQueryCounts{count, count, 2 * count, count}) || after.counts != (waitQueryCounts{1, 1, 1, 1}) {
+				if before.counts != (waitQueryCounts{count, 2 * count, 2 * count, count, count}) || after.counts != (waitQueryCounts{1, 2, 1, 1, 1}) {
 					t.Fatalf("common scans before=%+v after=%+v", before.counts, after.counts)
 				}
-				t.Logf("%d runs: account/window/occupancy/run reads before=%+v after=%+v", count, before.counts, after.counts)
+				t.Logf("%d runs: account/window/occupancy/run/quota reads before=%+v after=%+v", count, before.counts, after.counts)
 				return nil
 			})
 			if err != nil {
@@ -146,6 +161,31 @@ func TestQueueWaitBatchScansAndFreshClaimFences(t *testing.T) {
 			}
 		})
 	}
+	t.Run("retired pool door still occupies slots", func(t *testing.T) {
+		err := db.InTenant(ctx, appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET archived_at=$2 WHERE id=$1`, sibling.ID, now); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE agent_runs SET account_id=$1,status='running' WHERE id=ANY($2::uuid[])`, sibling.ID, ids[1:4]); err != nil {
+				return err
+			}
+			before, err := WaitForRun(ctx, tx, ids[0])
+			if err != nil {
+				return err
+			}
+			after, err := WaitForRuns(ctx, tx, ids[:1])
+			if err != nil {
+				return err
+			}
+			if before == nil || before.Code != "capacity" || !reflect.DeepEqual(before, after[ids[0]]) {
+				t.Fatalf("retired shared door lost its occupied slots: before=%+v after=%+v", before, after[ids[0]])
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
 	t.Run("tenant and input bounds", func(t *testing.T) {
 		other := makePrincipal(t, "queue-wait-foreign", "person", "Other", []string{"admin"})
 		foreignProfile := codexProfile(t, other)

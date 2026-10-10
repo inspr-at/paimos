@@ -38,6 +38,10 @@ func synthetic(w Window) bool { return w.capacityKind == "refresh" || w.capacity
 // provisional grant is materialized, under the account lock in selectAccount.
 // claiming excludes the run's own slot and preserves its exact one-shot grant.
 func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time.Time, slots int, run runRow, claiming bool) ([]Window, *CapacityWait, error) {
+	return admissionSnapshot(ctx, tx, a, all, now, slots, run, claiming, nil)
+}
+
+func admissionSnapshot(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time.Time, slots int, run runRow, claiming bool, snapshot *waitSnapshot) ([]Window, *CapacityWait, error) {
 	// Projections with no run ID retain their existing capacity advice. Every
 	// real managed reservation and claim re-reads daily policy under its fence.
 	if run.Purpose == "managed" && run.ID != "" {
@@ -76,7 +80,11 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	if !approved {
 		return nil, waitFor("approval"), nil
 	}
-	all, err = sharedQuotaWindows(ctx, tx, a, all, now)
+	if snapshot == nil {
+		all, err = sharedQuotaWindows(ctx, tx, a, all, now)
+	} else {
+		all, err = snapshot.windows(ctx, tx, a, all, now)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -440,7 +448,11 @@ func waitForRunSnapshot(ctx context.Context, tx pgx.Tx, run runRow, snapshot *wa
 		if claiming && slots > 0 {
 			slots--
 		}
-		windows, wait, err := admission(ctx, tx, a, a.Windows, now, slots, run, claiming)
+		var advisory *waitSnapshot
+		if snapshot.loaded {
+			advisory = snapshot
+		}
+		windows, wait, err := admissionSnapshot(ctx, tx, a, a.Windows, now, slots, run, claiming, advisory)
 		if err != nil {
 			return nil, err
 		}
