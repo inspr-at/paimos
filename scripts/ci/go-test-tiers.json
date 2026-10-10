@@ -7922,7 +7922,11 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestDoneEventCategoryFiltersOrderedDeliveryAndReplay","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestEventCandidatesExcludeUnrelatedProjectEdits","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestEventMorningFollowsLocalDateAcrossDST","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestEventRecurrenceBacklogDoesNotStarveRelease","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestExternalEventSignatureOwnershipReplayAndNoAgentExecution","tier":"ESSENTIAL"}
     ,
@@ -7965,6 +7969,8 @@
     {"kind":"go","package":"internal/recurrences","name":"TestRollbackUniqueKeyAndInvalidTarget","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestSixMonthSpringGapWalksPastOneYear","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestSourceClaimSkipsFilteredEventsInBoundedBatches","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestSourceEventVisibilityAndLiveOwnerAuthorization","tier":"ESSENTIAL"}
     ,

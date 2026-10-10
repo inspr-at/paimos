@@ -69,6 +69,128 @@ func (f *fixture) assertContextAndNoRuns(r Recurrence, count int, identifiers ..
 	})
 }
 
+// Risk: ordinary ticket edits consume the budget before a relevant source event.
+func TestEventCandidatesExcludeUnrelatedProjectEdits(t *testing.T) {
+	for _, event := range []string{"node.done", "knowledge.changed"} {
+		t.Run(event, func(t *testing.T) {
+			f := setup(t)
+			work := f.node("work", &f.project, "Busy ticket")
+			source := work
+			if event == "knowledge.changed" {
+				f.tx(func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1,'guideline','Guideline','GUI','book') ON CONFLICT DO NOTHING`, f.p.TenantID)
+					return err
+				})
+				source = f.node("guideline", &f.project, "Product guidance")
+			}
+			in := f.input()
+			in.Trigger = Trigger{Kind: "event", Event: event}
+			r := f.create(in)
+			f.now = f.now.Add(time.Minute)
+			for i := 0; i <= batchSize; i++ {
+				f.sourceEvent(work, "node.updated", "open", "open", map[string]any{})
+			}
+			id := f.sourceEvent(source, "node.updated", "open", "accepted", map[string]any{})
+			f.run()
+			got := f.receipts(r.ID)
+			if len(got) != 1 || got[0].SourceEventID == nil || *got[0].SourceEventID != id {
+				t.Fatalf("ordinary edits delayed the relevant event in one pass: %+v", got)
+			}
+		})
+	}
+}
+
+// Risk: filtered transitions need one transaction each, or a claim scans without a bound.
+func TestSourceClaimSkipsFilteredEventsInBoundedBatches(t *testing.T) {
+	f := setup(t)
+	source := f.node("work", &f.project, "Feature without release copy")
+	in := f.input()
+	in.Trigger = Trigger{Kind: "event", Event: "node.done"}
+	r := f.create(in)
+	f.now = f.now.Add(time.Minute)
+	var first int64
+	for i := 0; i < 125; i++ {
+		id := f.sourceEvent(source, "node.updated", "open", "in_progress", map[string]any{})
+		if i == 0 {
+			first = id
+		}
+	}
+	wanted := f.sourceEvent(source, "node.updated", "open", "accepted", map[string]any{})
+	actor, err := ensureActor(t.Context(), f.m, f.p.TenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := func() {
+		t.Helper()
+		current := f.get(r.ID)
+		f.tx(func(tx pgx.Tx) error {
+			if err := db.SetLocalStatementTimeout(t.Context(), tx, 5*time.Second); err != nil {
+				return err
+			}
+			if _, err := lock(t.Context(), tx, f.p.TenantID, false); err != nil {
+				return err
+			}
+			deferred := []string{}
+			return f.m.consumeSource(t.Context(), tx, actor, current, f.now, &deferred)
+		})
+	}
+	claim()
+	if cursor := f.get(r.ID).EventCursor; cursor <= first || cursor >= wanted {
+		t.Fatalf("claim did not skip a bounded batch: cursor %d, first %d, relevant %d", cursor, first, wanted)
+	}
+	f.assertContextAndNoRuns(r, 0)
+	claim()
+	got := f.receipts(r.ID)
+	if len(got) != 1 || got[0].SourceEventID == nil || *got[0].SourceEventID != wanted || f.get(r.ID).EventCursor != wanted {
+		t.Fatalf("second claim failed to reach the relevant event: %+v", got)
+	}
+	f.run()
+	f.assertContextAndNoRuns(r, 1, source)
+}
+
+// Risk: a lower-ID recurrence's matching backlog stalls legacy release triggers.
+func TestEventRecurrenceBacklogDoesNotStarveRelease(t *testing.T) {
+	f := setup(t)
+	source := f.node("work", &f.project, "Busy feature")
+	in := f.input()
+	in.Trigger = Trigger{Kind: "event", Event: "node.done"}
+	busy, release := f.create(in), f.create(in)
+	if busy.ID > release.ID {
+		busy, release = release, busy
+	}
+	in.Trigger = Trigger{Kind: "event", Event: "release.published"}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	body["expected_revision"] = release.Revision
+	f.call(f.p, "PUT", "/api/recurrences/"+release.ID, body, 200)
+	f.now = f.now.Add(time.Minute)
+	for i := 0; i <= batchSize; i++ {
+		f.sourceEvent(source, "node.updated", "open", "accepted", map[string]any{})
+	}
+	var publication int64
+	f.tx(func(tx pgx.Tx) error {
+		e, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &f.project, Type: "release.published", After: Publication{ProjectID: f.project, Name: "Fair delivery", Version: "v1", PublishedAt: f.now}, At: &f.now})
+		publication = e.ID
+		return err
+	})
+	f.run()
+	got := f.receipts(release.ID)
+	if len(got) != 1 || got[0].SourceEventID == nil || *got[0].SourceEventID != publication {
+		t.Fatalf("backlog starved release delivery in the same tenant pass: %+v", got)
+	}
+	if count := len(f.receipts(busy.ID)); count == 0 || count+len(got) > batchSize {
+		t.Fatalf("tenant claim budget was lost: busy %d, release %d", count, len(got))
+	}
+	f.run()
+	f.assertContextAndNoRuns(release, 1, `"event":"release.published"`)
+}
+
 // Risk: status spelling, unrelated updates or replay create false/duplicate work.
 func TestDoneEventCategoryFiltersOrderedDeliveryAndReplay(t *testing.T) {
 	f := setup(t)
