@@ -1,14 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { DIMENSIONS, type Dimension, type ListFilters } from '../../lib/ticketList'
+import { offeredDimensions, type Dimension, type ListFilters } from '../../lib/ticketList'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
 import StatusIcon from './StatusIcon.vue'
 
 // "Filter": every way to narrow the list, the quick ones included, then the date.
 const props = withDefaults(defineProps<{ anchor: HTMLElement | null; filters: ListFilters; dimensions?: Dimension[]; showDate?: boolean }>(), { showDate: true })
-const dimensions = computed(() => DIMENSIONS.filter(d => !props.dimensions || props.dimensions.includes(d.key)))
+const dimensions = computed(() => offeredDimensions(props.filters, props.dimensions))
 const emit = defineEmits<{ choose: [dimension: Dimension | 'date']; close: [restoreFocus: boolean] }>()
 const ICONS: Record<Dimension, IconName> = { shape: 'tree', depth: 'layers', status: 'check', priority: 'gauge', assignee: 'user', type: 'ticket', tag: 'tag', epic: 'epic', cost: 'coin', release: 'box', human_check: 'person-check' }
 const list = ref<HTMLElement>()

@@ -732,6 +732,8 @@
         ,
         {"file":"tests/aeon-908-polish.spec.ts","weightSeconds":120}
         ,
+        {"file":"tests/aeon-974-typefilter.spec.ts","listedTests":14,"weightSeconds":24,"weightSource":"local-single-worker-AEON-974-11.8s-plus-margin"}
+        ,
         {"file":"tests/agent-done-state.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/agent-indicator.spec.ts","listedTests":15,"weightSeconds":33.292682647,"weightSource":"unmeasured-test-rate"}
