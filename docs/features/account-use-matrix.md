@@ -62,7 +62,10 @@ The shared fixture template explicitly preserves the previous all-allowed
 policy and activates it; policy-specific and pre-expansion migration fixtures
 retain their production defaults so their before-activation assertions remain
 meaningful. No production predicate, permission or audit is disabled.
-The previous-image harness also checks activated empty and populated pools.
+The previous-image harness checks the latest published release's reads on the
+candidate schema, then boots the pinned release 128 image without
+`account_use_v1`. It verifies that image's exact version and non-activated reads
+before checking activated empty and populated pools.
 Older handlers sanitize database errors, so each refused request must produce
 the exact `0A000` message from `aeon_enter_principal` in the disposable
 Postgres log. Generic HTTP errors alone cannot pass that gate.

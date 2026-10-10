@@ -6,7 +6,7 @@ set -euo pipefail
 # OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
 pgvector_image="${PGVECTOR_IMAGE:-ghcr.io/inspr-at/paimos-ci/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11}"
 
-for tool in docker python3 go; do
+for tool in docker python3 go git; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
 tag="${1:?usage: bash scripts/migration-compat.sh vYYMMDDhhmmss.0.0 sha256:DIGEST}"
@@ -56,17 +56,18 @@ CREATE EXTENSION vector;
 SQL
 
 start_previous() {
+  local selected_image="$1"
   docker run -d --name "$app" --network "$network" --platform linux/amd64 \
     --memory 256m -p 127.0.0.1::8080 \
     -e AEON_ENV=dev -e AEON_ADDR=:8080 -e AEON_FILES_DIR=/tmp/aeon-compat-files \
     -e AEON_PUBLIC_URL=http://localhost:8080 -e AEON_BOOTSTRAP_ADMIN_EMAIL=compat@example.invalid \
     -e "AEON_DATABASE_URL=postgres://aeon:aeon@$db:5432/aeon?sslmode=disable" \
-    "$image_id" >/dev/null
+    "$selected_image" >/dev/null
   base="http://$(docker port "$app" 8080/tcp)"
   python3 scripts/migration-compat-probe.py wait-ready --base "$base"
 }
 
-start_previous
+start_previous "$image_id"
 python3 scripts/migration-compat-probe.py seed --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 docker stop --time 30 "$app" >/dev/null
 docker container rm "$app" >/dev/null
@@ -76,11 +77,36 @@ docker container rm "$app" >/dev/null
 db_address="$(docker port "$db" 5432/tcp)"
 AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=disable" \
   GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
-start_previous
+start_previous "$image_id"
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
-python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
 echo "Migration compatibility passed: $tag on the candidate schema"
+
+# The latest published image may already support account_use_v1 (release 129
+# does). Keep its migration/read check above, then run every rollback-floor
+# refusal assertion with the last published image without that capability.
+# Release 128's tag and digest are immutable; never substitute latest here.
+legacy_tag="v261009095632.0.0"
+legacy_digest="sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c"
+legacy_entry="$(git show "$legacy_tag:internal/db/visibility.go")"
+[[ "$legacy_entry" == *"func enterTenant("* && "$legacy_entry" != *"aeon.account_use_capable"* ]] || {
+  echo 'Pinned rollback image must predate the account-use capability' >&2; exit 1;
+}
+docker stop --time 30 "$app" >/dev/null
+docker container rm "$app" >/dev/null
+legacy_image="ghcr.io/inspr-at/aeon@$legacy_digest"
+echo "Account-use rollback-floor release: $legacy_tag; image: $legacy_image"
+docker pull --platform linux/amd64 "$legacy_image"
+legacy_image_id="$(docker image ls --quiet --no-trunc "$legacy_image" | sort -u)"
+[[ "$legacy_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable rollback image ID' >&2; exit 1; }
+start_previous "$legacy_image_id"
+# Prove healthy non-activated reads, the fixture's survival and the exact
+# below-floor binary before checking activated empty and populated pools.
+python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}"
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}" --database-container "$db"
+echo "Account-use rollback floor passed: $legacy_tag on the candidate schema"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
     "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+  printf 'Rollback-floor release %s; registry image %s; loaded image %s passed non-activated reads and every activated empty/populated account-use refusal.\n' \
+    "$legacy_tag" "$legacy_image" "$legacy_image_id" >> "$GITHUB_STEP_SUMMARY"
 fi
