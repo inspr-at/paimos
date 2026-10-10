@@ -125,7 +125,7 @@ func PrepareCatalog(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal,
 				return err
 			}
 		}
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id',true),0))`); err != nil {
+		if err := catalogLock(ctx, tx); err != nil {
 			return err
 		}
 		keyPrincipal := func(scope string) (tenant.Principal, error) {
