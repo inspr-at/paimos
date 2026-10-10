@@ -92,3 +92,19 @@ reconciliation and runtime validation succeed; recovery clears the diagnostic.
 Revoked enrollments retain their fences without requiring an old local candidate;
 live enrollments match the approved account key and harness, independently of a
 changed display label. Unapproved live accounts still block reconciliation.
+
+## Installed with (AEON-733)
+
+Each lifecycle report from a daemon names the add-harness entry point that
+reaches it: `homebrew` when `<prefix>/bin/aeon-agentd` links into the
+`Cellar/aeon-agentd` formula it runs from, `nix` when
+`~/.nix-profile/bin/aeon-agentd` resolves into the Nix store, `direct` when
+`~/.local/bin/aeon-agentd` resolves into `~/.local/lib/aeon`. It is omitted when
+none of them provably does. The daemon sends it only to a server listing
+`agent-install-v1` in `server_capabilities`. The server stores other values as
+unknown. Settings → Accounts → Add an account preselects **Installed with** from the
+selected machine's report and marks that option as reported. A different choice
+is remembered per signed-in person and machine, and is dropped when the machine
+later reports something else. A machine without a report starts at Homebrew and
+says so below the steps. The copied command is always one of the three fixed,
+generated forms; no reported path enters it.

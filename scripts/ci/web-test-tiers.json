@@ -4764,6 +4764,8 @@
     ,
     {"kind":"browser","file":"tests/add-account.spec.ts","name":"the accounts hash opens the steps once a machine is paired","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/add-account.spec.ts","name":"the selected machine decides Installed with; an override stays with that machine","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/add-account.spec.ts","name":"the steps name the machine, the known sign-in, and a path-proof add-harness","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/add-account.spec.ts","name":"without account.manage the action is gone and the hint stays","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -12976,11 +12978,17 @@
     ,
     {"kind":"node","file":"tests/activity.test.ts","name":"worker markers parse in their real variants; other comments stay comments","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/add-account.test.ts","name":"a missing or unrecognised report stays usable through an explicit choice","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/add-account.test.ts","name":"add-harness names the binary by its install and rejects a harness that is not a shell token","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/add-account.test.ts","name":"an override belongs to one machine and one person, and a new report replaces it","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/add-account.test.ts","name":"duplicate machine names keep the platform, and a blank name is Paired machine","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/add-account.test.ts","name":"each generated add-harness line runs in bash, zsh, and fish against a stub","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/add-account.test.ts","name":"each machine starts at the install its agentd reports, so the copied command matches it","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/add-account.test.ts","name":"missing harnesses come first, then another account of a vendor that allows one","tier":"GATED-FULL"}
     ,

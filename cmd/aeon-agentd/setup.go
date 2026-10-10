@@ -251,7 +251,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		return err
 	}
 	manager := &agentsetup.ServiceManager{Instance: instance, Platform: platform, Home: home, UID: os.Getuid(), Executable: executable, Systemctl: systemctl}
-	engine := &agentsetup.Engine{Store: store, Services: manager, Local: localPairing{root: root, readOnly: command == "status"}}
+	engine := &agentsetup.Engine{Store: store, Services: manager, Local: localPairing{root: root, readOnly: command == "status"}, InstallMethod: agentsetup.InstallMethod(executable, home)}
 	if instance != "" {
 		if platform.OS != "darwin" {
 			return agentsetup.ErrDeclarative

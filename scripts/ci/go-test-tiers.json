@@ -2220,6 +2220,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestComputerReadinessProjectsActualConfirmationPin","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestComputerReportsItsInstallMethod","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestConsentProofVersionUpgradeKeepsPairingKeyAndRejectsV1","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestCoordinatorScopeSetStaysNarrow","tier":"GATED-FULL"}
@@ -2817,6 +2819,10 @@
     {"kind":"go","package":"internal/agentsetup","name":"TestHookReportsDoNotBlockNewHarnessEnrollments","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestInitialPairReportsReadinessWithoutUnconfirmedFallback","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestInstallMethodNamesOnlyAnEntryPointThatReachesTheDaemon","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestInstallMethodNegotiatesAndSurvivesServerDowngrade","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestLaunchdPrivateDiagnosticPaths","tier":"GATED-FULL"}
     ,

@@ -174,6 +174,8 @@ export interface PairingView {
   verification_helper_version?: string
   agent_compatibility?: AgentCompatibility
   agent_release?: { version: string }
+  /** Add-harness entry point agentd reports reaching it: homebrew, nix or direct. Absent when unknown. */
+  install_method?: string
 }
 
 export interface AgentCompatibility {
@@ -1823,6 +1825,8 @@ function parseView(data: unknown): PairingView {
     const version = (record.agent_release as Record<string, unknown>).version
     if (typeof version === 'string' && /^[\w.+-]{1,64}$/.test(version)) view.agent_release = { version }
   }
+  // Advisory: only a known install is kept; anything else reads as not reported.
+  if (record.install_method === 'homebrew' || record.install_method === 'nix' || record.install_method === 'direct') view.install_method = record.install_method
   return view
 }
 

@@ -79,6 +79,36 @@ func TestComputerCompatibilityUsesItsReportedAgent(t *testing.T) {
 	}
 }
 
+// Risk: Settings offers an add-harness command for an install the machine does
+// not have (AEON-733), or one machine's report leaks into another's view.
+func TestComputerReportsItsInstallMethod(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	if !slices.Contains(v.ServerCapabilities, agentpairing.InstallCapability) {
+		t.Fatal("server does not advertise the install report")
+	}
+	for _, tc := range []struct{ reported, want string }{
+		{"homebrew", "homebrew"},
+		{"nix", "nix"},
+		{"direct", "direct"},
+		{"winget", ""},
+		{"", ""},
+	} {
+		t.Run("reported "+tc.reported, func(t *testing.T) {
+			progress := agentpairing.SetupProgress{State: "connected", InstallMethod: tc.reported}
+			var report agentpairing.View
+			decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": progress}, false, "", 200), &report)
+			var listed agentpairing.View
+			decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &listed)
+			if report.InstallMethod != tc.want || listed.InstallMethod != tc.want || report.SetupState != "connected" {
+				t.Fatalf("install method = %q/%q, want %q", report.InstallMethod, listed.InstallMethod, tc.want)
+			}
+		})
+	}
+}
+
 func nixGuideFixture() *config.PairingNixGuide {
 	return &config.PairingNixGuide{
 		ModuleURL: "https://example.test/instance/module.nix", ServiceOption: "services.aeon.enable",
