@@ -22,13 +22,14 @@ db="aeon-compat-db-$suffix"
 app="aeon-compat-app-$suffix"
 network="aeon-compat-$suffix"
 image="ghcr.io/inspr-at/aeon@$digest"
-# AEON-1051's entry refusal applies to binaries below the account-use floor.
-# Release 129 and later advertise that capability, so keep the last published
-# below-floor image as a separate immutable counterexample. Its release body
-# records this digest and source commit 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
-# The latest release still runs every ordinary compatibility read below.
-rollback_tag="v261009095632.0.0"
-rollback_digest="sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c"
+# AEON-1051's activated refusal gate needs a binary below the capability floor.
+# Release 129 and later advertise that capability. Keep testing the latest
+# release's read compatibility and retain the last pre-capability release
+# separately as an immutable counterexample.
+# Published release v261009095632.0.0, source 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
+legacy_tag=v261009095632.0.0
+legacy_digest=sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
+legacy_image="ghcr.io/inspr-at/aeon@$legacy_digest"
 cleanup() {
   docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
@@ -68,18 +69,19 @@ CREATE DATABASE aeon OWNER aeon;
 CREATE EXTENSION vector;
 SQL
 
-start_previous() {
+start_image() {
+  local selected_image="$1"
   docker run -d --name "$app" --network "$network" --platform linux/amd64 \
     --memory 256m -p 127.0.0.1::8080 \
     -e AEON_ENV=dev -e AEON_ADDR=:8080 -e AEON_FILES_DIR=/tmp/aeon-compat-files \
     -e AEON_PUBLIC_URL=http://localhost:8080 -e AEON_BOOTSTRAP_ADMIN_EMAIL=compat@example.invalid \
     -e "AEON_DATABASE_URL=postgres://aeon:aeon@$db:5432/aeon?sslmode=disable" \
-    "$image_id" >/dev/null
+    "$selected_image" >/dev/null
   base="http://$(docker port "$app" 8080/tcp)"
   python3 scripts/migration-compat-probe.py wait-ready --base "$base"
 }
 
-start_previous
+start_image "$image_id"
 python3 scripts/migration-compat-probe.py seed --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 docker stop --time 30 "$app" >/dev/null
 docker container rm "$app" >/dev/null
@@ -95,7 +97,7 @@ AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=di
 docker exec -i "$db" psql -U postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 CREATE DATABASE aeon_compat_floor WITH TEMPLATE aeon OWNER aeon;
 SQL
-start_previous
+start_image "$image_id"
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 echo "Previous release reads passed: $tag on the candidate schema"
 python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db" --release-tag "$tag"
@@ -111,19 +113,21 @@ docker exec -i "$db" psql -U postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 DROP DATABASE aeon;
 ALTER DATABASE aeon_compat_floor RENAME TO aeon;
 SQL
-echo "Account-use rollback boundary release: $rollback_tag"
-tag="$rollback_tag"
-image="ghcr.io/inspr-at/aeon@$rollback_digest"
-if [[ "$digest" != "$rollback_digest" ]]; then
-  pull_previous
+legacy_image_id="$previous_image_id"
+if [[ "$digest" != "$legacy_digest" ]]; then
+  echo "Account-use rollback fixture: $legacy_tag; image: $legacy_image"
+  docker pull --platform linux/amd64 "$legacy_image"
+  legacy_image_id="$(docker image ls --quiet --no-trunc "$legacy_image" | sort -u)"
+  [[ "$legacy_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable legacy image ID' >&2; exit 1; }
 fi
-start_previous
-# Prove the below-floor image and fixture work before activation too.
-python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
-python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${rollback_tag#v}" --database-container "$db"
-echo "Account-use rollback boundary passed: $rollback_tag on the candidate schema"
+start_image "$legacy_image_id"
+python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}"
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}" --database-container "$db"
+echo "Account-use rollback boundary passed: $legacy_tag on the candidate schema"
 echo "Migration compatibility passed: latest-release reads and account-use probes, and below-floor account-use boundary"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations and passed account-use probes. Account-use refusal boundary %s; registry image ghcr.io/inspr-at/aeon@%s; loaded image %s passed the activated legacy probes.\n' \
-    "$previous_tag" "$previous_image" "$previous_image_id" "$rollback_tag" "$rollback_digest" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations and passed account-use probes.\n' \
+    "$previous_tag" "$previous_image" "$previous_image_id" >> "$GITHUB_STEP_SUMMARY"
+  printf 'Rollback fixture %s; registry image %s; loaded image %s verified activated empty/populated pools refuse below-floor binaries.\n' \
+    "$legacy_tag" "$legacy_image" "$legacy_image_id" >> "$GITHUB_STEP_SUMMARY"
 fi
