@@ -47,7 +47,9 @@ trap cleanup EXIT
 probe_release() {
   local tag="$1" digest="$2" exercise_floor="$3"
   local image="ghcr.io/inspr-at/aeon@$digest" image_id base db_address ready
+  local database=aeon
   if [[ "$exercise_floor" = 1 ]]; then
+    database=aeon_legacy
     echo "Account-use rollback boundary release: $tag"
     echo "Account-use rollback fixture: $tag; image: $image"
   fi
@@ -67,10 +69,10 @@ probe_release() {
   done
   [[ "$ready" = 1 ]] || { echo 'Disposable Postgres failed to start' >&2; exit 1; }
   # Fixture credentials only. The application role cannot bypass tenant RLS.
-  docker exec -i "$db" psql -U postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+  docker exec -i "$db" psql -U postgres -v ON_ERROR_STOP=1 >/dev/null <<SQL
 CREATE ROLE aeon LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD 'aeon';
-CREATE DATABASE aeon OWNER aeon;
-\connect aeon
+CREATE DATABASE $database OWNER aeon;
+\connect $database
 CREATE EXTENSION vector;
 SQL
 
@@ -79,7 +81,7 @@ SQL
       --memory 256m -p 127.0.0.1::8080 \
       -e AEON_ENV=dev -e AEON_ADDR=:8080 -e AEON_FILES_DIR=/tmp/aeon-compat-files \
       -e AEON_PUBLIC_URL=http://localhost:8080 -e AEON_BOOTSTRAP_ADMIN_EMAIL=compat@example.invalid \
-      -e "AEON_DATABASE_URL=postgres://aeon:aeon@$db:5432/aeon?sslmode=disable" \
+      -e "AEON_DATABASE_URL=postgres://aeon:aeon@$db:5432/$database?sslmode=disable" \
       "$image_id" >/dev/null
     base="http://$(docker port "$app" 8080/tcp)"
     python3 scripts/migration-compat-probe.py wait-ready --base "$base"
@@ -93,7 +95,7 @@ SQL
   # Run exactly the candidate's embedded migration path, including Go backfills
   # and nontransactional index recovery. No candidate server or image is built.
   db_address="$(docker port "$db" 5432/tcp)"
-  AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=disable" \
+  AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/$database?sslmode=disable" \
     GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
   start_previous
   python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
@@ -101,7 +103,7 @@ SQL
   if [[ "$exercise_floor" = 1 ]]; then
     # Seeded reads precede activation. Exact SQLSTATE/entry, empty/populated
     # pool and background-write refusal assertions remain mandatory.
-    python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
+    python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db" --database "$database" --require-refusal
     echo "Account-use rollback boundary passed: $tag on the candidate schema"
   else
     # Capability comes from the pinned release's embedded entry migration;
