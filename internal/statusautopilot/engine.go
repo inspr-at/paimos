@@ -53,6 +53,11 @@ func fieldString(n node, key string) string {
 	_ = json.Unmarshal(n.Fields[key], &s)
 	return strings.TrimSpace(s)
 }
+func noReleaseNeeded(n node) bool {
+	var marked bool
+	_ = json.Unmarshal(n.Fields["no_release_needed"], &marked)
+	return marked
+}
 func evaluate(c candidate, s Settings, now time.Time) *decision {
 	n := c.Node
 	var key, to, flag, reason string
@@ -83,6 +88,12 @@ func evaluate(c candidate, s Settings, now time.Time) *decision {
 			return nil
 		}
 	case "done":
+		if noReleaseNeeded(n) {
+			key = "accept"
+			to = "accepted"
+			reason = "Done for %d days without objection; no release needed. Accepted under this workspace’s status policy."
+			break
+		}
 		key = "done"
 		flag = "missed_release"
 		reason = "Merged but not released for %d days; flagged as missed release."
@@ -93,10 +104,10 @@ func evaluate(c candidate, s Settings, now time.Time) *decision {
 		key = "accept"
 		to = "accepted"
 		reason = "Delivered for %d days without objection; accepted under this workspace’s status policy."
-		if c.Objection || fieldString(n, "delivery_objection") != "" {
-			return nil
-		}
 	default:
+		return nil
+	}
+	if key == "accept" && (c.Objection || fieldString(n, "delivery_objection") != "") {
 		return nil
 	}
 	r := s.Rules[key]

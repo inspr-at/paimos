@@ -121,7 +121,10 @@ func authorizeDefinition(ctx context.Context, tx pgx.Tx, p tenant.Principal, in 
 			}
 		}
 	}
-	return authorizeSources(ctx, tx, p, in)
+	if err := authorizeSources(ctx, tx, p, in); err != nil {
+		return err
+	}
+	return validateDefinition(ctx, tx, p, in)
 }
 
 // Tenant access fence precedes tree and resource rows. Try mode yields rather
@@ -179,13 +182,25 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		var id string
+		if err = tx.QueryRow(r.Context(), `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
+			return err
+		}
+		if err = saveDefinition(r.Context(), tx, p, id, in); err != nil {
+			return err
+		}
+		var scope any
+		if in.Definition != nil {
+			scope = in.Definition.Scope.Kind
+		}
 		template, _ := json.Marshal(in.Template)
 		trigger, _ := json.Marshal(in.Trigger)
-		out, err = scanRecurrence(tx.QueryRow(r.Context(), `INSERT INTO recurrences(tenant_id,project_id,parent_id,template,trigger,queue_each,overlap_policy,catch_up_policy,next_at,event_cursor,created_by_principal_id,created_at,updated_at,active_since)
-   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,(SELECT coalesce(max(id),0) FROM events WHERE ($5::jsonb->>'kind'='event' AND $5::jsonb->>'event'<>'release.published') OR type='release.published'),$10,$11,$11,$11) RETURNING `+recurrenceColumns, p.TenantID, in.ProjectID, in.ParentID, template, trigger, in.QueueEach, in.OverlapPolicy, in.CatchUpPolicy, next, p.ID, now))
+		out, err = scanRecurrence(tx.QueryRow(r.Context(), `INSERT INTO recurrences(tenant_id,project_id,parent_id,template,trigger,queue_each,overlap_policy,catch_up_policy,next_at,event_cursor,created_by_principal_id,created_at,updated_at,active_since,id,definition_scope,paused)
+   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,(SELECT coalesce(max(id),0) FROM events WHERE ($5::jsonb->>'kind'='event' AND $5::jsonb->>'event'<>'release.published') OR type='release.published'),$10,$11,$11,$11,$12,$13,$13::text IS NOT NULL) RETURNING `+recurrenceColumns, p.TenantID, in.ProjectID, in.ParentID, template, trigger, in.QueueEach, in.OverlapPolicy, in.CatchUpPolicy, next, p.ID, now, id, scope))
 		if err != nil {
 			return err
 		}
+		out.Definition = in.Definition
 		return record(r.Context(), tx, p, out.ProjectID, "recurrence.created", nil, out)
 	})
 	reply(w, 201, out, err)
@@ -213,7 +228,7 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if err = read(r.Context(), tx, p, out.ProjectID); err != nil {
+		if err = readDefinition(r.Context(), tx, p, out.Input); err != nil {
 			return err
 		}
 		return results(r.Context(), tx, []Recurrence{out}, func(items []Recurrence) { out = items[0] })
@@ -227,6 +242,11 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	}
 	project := r.URL.Query().Get("project_id")
 	after := r.URL.Query().Get("after")
+	scope := r.URL.Query().Get("scope")
+	if scope != "" && scope != "project" && scope != "personal" && scope != "workspace" {
+		httpapi.WriteError(w, 400, "invalid definition scope")
+		return
+	}
 	if project != "" && !workorders.UUID(project) || after != "" && !workorders.UUID(after) {
 		httpapi.WriteError(w, 400, "invalid project or cursor")
 		return
@@ -234,6 +254,9 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	items := []Recurrence{}
 	var next *string
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.SetLocalStatementTimeout(r.Context(), tx, 5*time.Second); err != nil {
+			return err
+		}
 		permission := readPermission(p)
 		if err := authz.RequireTx(r.Context(), tx, p, permission, authz.Scope{AnyProject: true}); err != nil {
 			return err
@@ -249,7 +272,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		workspace := check(permission, "")
-		rows, err := tx.Query(r.Context(), `SELECT `+recurrenceColumns+` FROM recurrences WHERE ($1='' OR project_id=nullif($1,'')::uuid) AND ($2='' OR id>nullif($2,'')::uuid) AND ($3 OR project_id=ANY($4::uuid[])) AND retired_at IS NULL ORDER BY id LIMIT 101`, project, after, workspace, allowed)
+		rows, err := tx.Query(r.Context(), `SELECT `+recurrenceColumns+` FROM recurrences WHERE ($1='' OR project_id=nullif($1,'')::uuid) AND ($2='' OR id>nullif($2,'')::uuid) AND ($3 OR project_id=ANY($4::uuid[])) AND (definition_scope IS NULL OR EXISTS(SELECT 1 FROM recurrence_definitions d WHERE d.recurrence_id=recurrences.id AND d.tenant_id=recurrences.tenant_id AND ((d.scope_type='personal' AND $6) OR (d.scope_type='workspace' AND $3) OR (d.scope_type='project' AND ($3 OR d.scope_project_id=ANY($4::uuid[])))))) AND ($5='' OR coalesce(definition_scope,'project')=$5) AND retired_at IS NULL ORDER BY id LIMIT 101`, project, after, workspace, allowed, scope, p.Kind == tenant.Person)
 		if err != nil {
 			return err
 		}
@@ -270,6 +293,9 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		rows.Close()
+		if err := definitions(r.Context(), tx, items, func(out []Recurrence) { items = out }); err != nil {
+			return err
+		}
 		return results(r.Context(), tx, items, func(out []Recurrence) { items = out })
 	})
 	reply(w, 200, map[string]any{"items": items, "next_cursor": next}, err)
@@ -295,7 +321,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if err = manage(r.Context(), tx, p, before.ProjectID); err != nil {
+		if err = manageDefinition(r.Context(), tx, p, before.Input); err != nil {
 			return err
 		}
 		if in.ExpectedRevision < 1 || in.ExpectedRevision != before.Revision {
@@ -312,11 +338,22 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		if reflect.DeepEqual(comparable, before.Trigger) {
 			in.Trigger = before.Trigger
 		}
+		if in.Definition == nil {
+			in.Definition = before.Definition
+		}
 		if err = in.Input.normalize(now); err != nil {
 			return workorders.Fail(400, err.Error())
 		}
 		if in.ProjectID != before.ProjectID || in.ParentID != before.ParentID {
 			return workorders.Fail(400, "project and parent are immutable")
+		}
+		// Legacy routines and their audit events are shared with project readers.
+		// Conversion must preserve that visibility boundary.
+		if before.Definition == nil && in.Definition != nil && (in.Definition.Scope.Kind != "project" || in.Definition.Scope.ProjectID != before.ProjectID) {
+			return workorders.Fail(400, "legacy definitions must retain their project scope; create a new scoped definition")
+		}
+		if before.Definition != nil && (in.Definition.Scope != before.Definition.Scope || in.Definition.OwnerPrincipalID != before.Definition.OwnerPrincipalID) {
+			return workorders.Fail(400, "definition scope and owner are immutable")
 		}
 		if err = authorizeDefinition(r.Context(), tx, p, in.Input); err != nil {
 			return err
@@ -337,12 +374,20 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		if err = saveDefinition(r.Context(), tx, p, before.ID, in.Input); err != nil {
+			return err
+		}
+		var scope any
+		if in.Definition != nil {
+			scope = in.Definition.Scope.Kind
+		}
 		template, _ := json.Marshal(in.Template)
 		trigger, _ := json.Marshal(in.Trigger)
-		out, err = scanRecurrence(tx.QueryRow(r.Context(), `UPDATE recurrences SET template=$2,trigger=$3,queue_each=$4,overlap_policy=$5,catch_up_policy=$6,next_at=$7,event_cursor=$8,revision=revision+1,updated_at=$9,active_since=$10 WHERE id=$1 RETURNING `+recurrenceColumns, before.ID, template, trigger, in.QueueEach, in.OverlapPolicy, in.CatchUpPolicy, next, cursor, now, active))
+		out, err = scanRecurrence(tx.QueryRow(r.Context(), `UPDATE recurrences SET template=$2,trigger=$3,queue_each=$4,overlap_policy=$5,catch_up_policy=$6,next_at=$7,event_cursor=$8,revision=revision+1,updated_at=$9,active_since=$10,paused=paused OR (definition_scope IS NULL AND $11::text IS NOT NULL),definition_scope=$11 WHERE id=$1 RETURNING `+recurrenceColumns, before.ID, template, trigger, in.QueueEach, in.OverlapPolicy, in.CatchUpPolicy, next, cursor, now, active, scope))
 		if err != nil {
 			return err
 		}
+		out.Definition = in.Definition
 		return record(r.Context(), tx, p, out.ProjectID, "recurrence.updated", before, out)
 	})
 	reply(w, 200, out, err)
@@ -372,7 +417,7 @@ func (m *Module) setPaused(w http.ResponseWriter, r *http.Request, paused, retir
 		if err != nil {
 			return err
 		}
-		if err = manage(r.Context(), tx, p, before.ProjectID); err != nil {
+		if err = manageDefinition(r.Context(), tx, p, before.Input); err != nil {
 			return err
 		}
 		if in.Revision < 1 || in.Revision != before.Revision {
@@ -391,12 +436,18 @@ func (m *Module) setPaused(w http.ResponseWriter, r *http.Request, paused, retir
 			if err != nil {
 				return err
 			}
+			out.Definition = before.Definition
 			return record(r.Context(), tx, p, before.ProjectID, "recurrence.deleted", before, out)
 		}
 		next := before.NextAt
 		cursor := before.EventCursor
 		active := before.ActiveSince
 		if !paused {
+			if before.Definition != nil {
+				if err = authorizeDefinition(r.Context(), tx, p, before.Input); err != nil {
+					return err
+				}
+			}
 			active = now
 			next, err = nextTime(before.Trigger, now)
 			if err != nil {
@@ -410,6 +461,7 @@ func (m *Module) setPaused(w http.ResponseWriter, r *http.Request, paused, retir
 		if err != nil {
 			return err
 		}
+		out.Definition = before.Definition
 		typ := "recurrence.resumed"
 		if paused {
 			typ = "recurrence.paused"
@@ -443,7 +495,7 @@ func (m *Module) preview(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if err = read(r.Context(), tx, p, item.ProjectID); err != nil {
+		if err = readDefinition(r.Context(), tx, p, item.Input); err != nil {
 			return err
 		}
 		now, err := m.clock(r.Context(), tx)

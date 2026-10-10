@@ -202,6 +202,26 @@ func (m *Module) stampSessions(ctx context.Context, tx pgx.Tx, sessions []*Sessi
 	return stampMoveRights(ctx, tx, sessions)
 }
 
+// heartbeatReceipt preserves authoritative write fields, including finished
+// and process_observed_at. Missing optional projections are unknown, never a
+// fresh estimate or a cached coordinator percent (which may predate its workers).
+// The unknown-projection warning is declared in the pinned reporter contract.
+func heartbeatReceipt(s Session) heartbeatResponse {
+	if s.Role == "coordinator" && s.StoppedAt == nil && s.ArchivedAt == nil {
+		s.ProgressPct = nil
+	}
+	// The reporting interval is constrained to at most 240 minutes. Beyond
+	// two maximum intervals the estimate is certainly stale; anything newer
+	// has unknown freshness until a read loads the setting. Use the committed
+	// beat's database timestamp, never the API host's clock.
+	s.EtaStale = s.StoppedAt == nil && s.EtaReportedAt != nil && s.HeartbeatAt != nil &&
+		s.HeartbeatAt.Sub(*s.EtaReportedAt) > 480*time.Minute
+	return heartbeatResponse{reporterSession(s), []EstimateWarning{{
+		Code: "projection_unavailable",
+		Hint: "Heartbeat accepted; ETA freshness, coordinator progress and estimate guidance are unknown on this receipt. Read session status separately; a failed read is not a failed heartbeat.",
+	}}}
+}
+
 func stampSessionEta(s *Session, interval time.Duration, now time.Time) {
 	if s == nil {
 		return
