@@ -5530,11 +5530,15 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowCompletionKeepsFlake","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowConcurrentPassesApplyEachEventOnce","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowETAFromHistoryOrNoneWithReason","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowETAUsesThirtyDaysOfHistory","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowEarlierRunQueuedAfterLaterRunMovesItemStart","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowEmptyPassDoesNotLockTenant","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowGitHubRunsBecomeChecksSteps","tier":"ESSENTIAL"}
     ,
