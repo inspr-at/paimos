@@ -220,7 +220,7 @@ export const reasonText = (reason: string) => {
     'harness filter': 'the model uses another harness',
     'security review policy': 'the model does not meet the security review policy',
   }
-  const parts = reason.split(';').map(part => part.replace(/^(column|default|role):\s*/, '').trim()).filter(Boolean)
+  const parts = reason.split(';').map(part => part.trim().replace(/^(column|default|role):\s*/, '').trim()).filter(Boolean)
     .map(part => words[part] ?? part)
   const plain = [...new Set(parts)].join('; ')
   return plain ? plain.charAt(0).toLowerCase() + plain.slice(1) : 'no qualified account has room right now'

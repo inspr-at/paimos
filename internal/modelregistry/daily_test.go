@@ -124,7 +124,7 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 			}
 			found := false
 			for _, step := range got.Ladder {
-				if step.ProfileID == next.ID && slices.Contains(step.SkipReasons, "daily_limit") {
+				if step.ProfileID == next.ID && slices.Contains(step.SkipReasons, "Codex account is at its daily cap until "+end.UTC().Format(time.RFC3339)) {
 					found = true
 				}
 			}
