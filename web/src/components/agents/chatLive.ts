@@ -6,6 +6,7 @@
 // replaces the live block once it lands in the thread.
 import { parseJson } from '../../lib/json.ts'
 import type { ChatHistoryMessage, ProjectMessage } from '../../lib/agents.ts'
+import type { ReadMark } from './sessionChat.ts'
 
 export type LiveState = 'running' | 'idle' | 'requires_action'
 export type ToolStatus = 'in_progress' | 'completed' | 'failed'
@@ -21,8 +22,12 @@ export interface LiveTurn {
   started: number
   ended: boolean
   // The agent message id that was newest when the turn began. A newer one
-  // after the turn ended is its final reply.
-  before: string
+  // after the turn ended is its final reply. Undefined while the thread's
+  // saved history is still loading: an older reply arriving then is no proof.
+  before?: string
+  // Saved messages the stream announced during this turn. One of them in the
+  // thread from the agent is the turn's own final reply.
+  finals: string[]
   // 'requested' while an interrupt is pending, 'applied' once the harness
   // confirmed it. Only 'applied' may say the person stopped the turn.
   stop: LiveStop
@@ -35,20 +40,28 @@ export const liveTextLimit = 256 * 1024
 export const liveToolLimit = 64
 
 interface Update { sessionUpdate?: unknown; content?: { type?: unknown; text?: unknown }; toolCallId?: unknown; title?: unknown; status?: unknown; state?: unknown }
-interface Frame { type?: unknown; update?: Update; dropped_events?: unknown }
+interface Frame { type?: unknown; update?: Update; dropped_events?: unknown; message_id?: unknown }
 
-const newTurn = (now: number, before: string, state: LiveState = 'running'): LiveTurn =>
-  ({ text: '', truncated: false, tools: [], state, gap: false, started: now, ended: false, before, stop: 'none' })
+const newTurn = (now: number, before: string | undefined, state: LiveState = 'running'): LiveTurn =>
+  ({ text: '', truncated: false, tools: [], state, gap: false, started: now, ended: false, before, finals: [], stop: 'none' })
+const finalLimit = 16
 
 export interface Applied { turn: LiveTurn | null; hint?: LiveHint; dropped?: number }
 // One chat frame. `dropped` is the relay's cumulative per-session overflow
 // count; the caller passes back the last one it saw, or undefined on a fresh
-// connection, whose first count is only the baseline.
-export function applyLiveFrame(turn: LiveTurn | null, data: string, now: number, before: string, dropped?: number): Applied {
+// connection, whose first count is only the baseline. `before` is undefined
+// while the saved history is not yet known.
+export function applyLiveFrame(turn: LiveTurn | null, data: string, now: number, before: string | undefined, dropped?: number): Applied {
   let frame: Frame | null
   try { frame = parseJson(data) as Frame | null } catch { return { turn } }
   if (!frame || typeof frame !== 'object') return { turn }
-  if (frame.type === 'message' || frame.type === 'receipt' || frame.type === 'read_marker') return { turn, hint: frame.type }
+  if (frame.type === 'message') {
+    // A saved message announced while a turn is on screen may be its final.
+    const id = typeof frame.message_id === 'string' ? frame.message_id : ''
+    if (!turn || !id || turn.finals.includes(id)) return { turn, hint: 'message' }
+    return { turn: { ...turn, finals: [...turn.finals, id].slice(-finalLimit) }, hint: 'message' }
+  }
+  if (frame.type === 'receipt' || frame.type === 'read_marker') return { turn, hint: frame.type }
   if (frame.type !== 'update' || !frame.update || typeof frame.update !== 'object') return { turn }
   const update = frame.update
   const count = typeof frame.dropped_events === 'number' && Number.isFinite(frame.dropped_events) ? frame.dropped_events : dropped
@@ -99,10 +112,20 @@ export function applyLiveFrame(turn: LiveTurn | null, data: string, now: number,
   return { turn, dropped: count }
 }
 
-// The live block gives way to the persisted reply: once the turn ended and a
-// newer agent message is in the thread.
-export const settled = (turn: LiveTurn | null, latestAgentMessage: string) =>
-  !!turn && turn.ended && !!latestAgentMessage && latestAgentMessage !== turn.before
+// The live block gives way to the persisted reply once the turn ended and its
+// final is in the thread: a message the stream announced during the turn, or
+// an agent message newer than the one before it. Without a known history
+// baseline only the announced final counts, so a late read of older history
+// never dismisses the turn.
+export function settled(turn: LiveTurn | null, latestAgentMessage: string, agentMessages: ReadonlySet<string> = new Set([latestAgentMessage])) {
+  if (!turn || !turn.ended) return false
+  if (turn.finals.some(id => agentMessages.has(id))) return true
+  return turn.before !== undefined && !!latestAgentMessage && latestAgentMessage !== turn.before
+}
+// The first saved-history read establishes the baseline of a turn that is
+// still running. A turn that already ended waits for its announced final.
+export const rebaseTurn = (turn: LiveTurn | null, latestAgentMessage: string): LiveTurn | null =>
+  turn && turn.before === undefined && !turn.ended ? { ...turn, before: latestAgentMessage } : turn
 
 export const liveWorking = (turn: LiveTurn | null) => !!turn && !turn.ended
 
@@ -142,19 +165,59 @@ export function liveQueue(apply: (frames: string[]) => void, deps: LiveQueueDeps
   }
 }
 
-// The agent's saved replies in the chat thread, shaped like the session's
-// project messages so the thread renders them in place. Chat-native finals
-// are stored only in the chat thread, never in the project message list.
-export function chatFinals(items: readonly { message: ChatHistoryMessage }[], agent: string, session: string, viewer: string, label: string): ProjectMessage[] {
-  return items.flatMap(({ message }) => {
+// The saved chat-native messages of the bound thread between the agent and
+// the viewer, shaped like the session's project messages so the thread
+// renders them in place. They are stored only in the chat thread, never in the
+// project message list, so each keeps its thread: replies and read evidence
+// for it go through the chat routes.
+export function chatFinals(items: readonly { message: ChatHistoryMessage; person_read_state?: string }[], agent: string, session: string, viewer: string, label: string, thread: string): ProjectMessage[] {
+  return items.flatMap(({ message, person_read_state }) => {
     const position = Number(message.sent_event_position)
-    if (!agent || message.sender_principal_id !== agent || !Number.isSafeInteger(position) || position <= 0) return []
+    const sender = message.sender_principal_id
+    if (!agent || !viewer || (sender !== agent && sender !== viewer) || !Number.isSafeInteger(position) || position <= 0) return []
+    const fromAgent = sender === agent
     return [{
-      id: message.message_id, sender_principal_id: agent, recipient_principal_id: viewer, to: '', body: message.body, reply_to: message.reply_to ?? null,
-      sent_event_id: position, created_at: message.created_at, sender_session_id: session, sender_label: label,
+      id: message.message_id, sender_principal_id: sender, recipient_principal_id: fromAgent ? viewer : agent, to: '', body: message.body, reply_to: message.reply_to ?? null,
+      sent_event_id: position, created_at: message.created_at, ...(fromAgent ? { sender_session_id: session, sender_label: label } : { recipient_session_id: session }),
       is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none',
+      chat_thread: thread, chat_seen: person_read_state === 'seen',
     } satisfies ProjectMessage]
   })
+}
+// A chat input the viewer just sent, as the thread shows it. The outbox
+// answer names neither author nor time.
+export function chatSent(message: ChatHistoryMessage, viewer: string, agent: string, session: string, thread: string, at: string): ProjectMessage {
+  return {
+    id: message.message_id, sender_principal_id: viewer, recipient_principal_id: agent, recipient_session_id: session, to: '', body: message.body, reply_to: message.reply_to ?? null,
+    sent_event_id: Number(message.sent_event_position), created_at: message.created_at ?? at,
+    is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none', chat_thread: thread,
+  }
+}
+
+// Read state. The session's read marker accepts only its project messages, so
+// a watermark on a chat-native message is written as the newest project
+// message at or before it. The chat message itself goes to its thread's
+// read marker.
+const projectMessage = (message: ProjectMessage | undefined) => !!message && !message.chat_thread && !message.optimistic
+export function sessionReadMark(mark: ReadMark, messages: readonly ProjectMessage[]): ReadMark | null {
+  const own = messages.find(message => message.id === mark.id)
+  const at = messages.find(message => message.sent_event_id === mark.event)
+  if ((!own || projectMessage(own)) && (!at || projectMessage(at))) return mark
+  let best: ProjectMessage | undefined
+  for (const message of messages) if (projectMessage(message) && message.sent_event_id <= mark.event && (!best || message.sent_event_id > best.sent_event_id)) best = message
+  return best ? { event: best.sent_event_id, id: best.id, at: mark.at } : null
+}
+// The chat-native messages a visible row stands for: its own id, and a
+// collapsed group's newest post.
+export function chatSeenIds(messages: readonly ProjectMessage[], id: string, event: number): string[] {
+  return messages.filter(message => message.chat_thread && !message.chat_seen && (message.id === id || message.sent_event_id === event)).map(message => message.id)
+}
+// The furthest chat-native message the thread's read marker says this person
+// saw, on any device.
+export function chatSeenMark(messages: readonly ProjectMessage[]): { event: number; id: string } | null {
+  let best: ProjectMessage | undefined
+  for (const message of messages) if (message.chat_thread && message.chat_seen && (!best || message.sent_event_id > best.sent_event_id)) best = message
+  return best ? { event: best.sent_event_id, id: best.id } : null
 }
 
 // m:ss, tabular so the timer never changes width within a minute range.

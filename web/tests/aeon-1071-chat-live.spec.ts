@@ -54,7 +54,7 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; session?: 
   const lookups: string[] = []
   // The bound chat thread's saved messages: chat-native finals live only here,
   // never in the project message list.
-  const chat: { message: Record<string, unknown> }[] = []
+  const chat: { message: Record<string, unknown>; person_read_state?: string }[] = []
   await page.route(/\/api\/chat-threads\/[^/]+\/messages(\?|$)/, route => route.fulfill({ json: { contract: 'chat-v1', items: chat, has_more_before: false, has_more_after: false, before_cursor: null, after_cursor: null, snapshot_cursor: 'c', migration_epoch: '0' } }))
   await page.route('**/api/chat-sessions/*/thread', route => {
     lookups.push(new URL(route.request().url()).pathname)
@@ -221,4 +221,134 @@ test('AEON-1071 a refused stop after the turn ended claims nothing', async ({ pa
   await expect(page.getByText(/refused the interrupt/).first()).toBeVisible()
   await expect(panel.locator('.live-turn')).toContainText('Checking the gate.')
   await expect(panel.locator('.live-turn')).not.toContainText('You stopped this turn')
+})
+
+// Fix round 3. The project routes know only project messages: these mocks
+// refuse a chat-native parent or read marker the way the server does
+// (inbox_compat_messages membership), so a wrong route fails the test.
+const nativeFinal = (worker: { agent_principal_id: string }, id: string, position: number, body: string, extra: Record<string, unknown> = {}) => ({
+  message: { message_id: id, conversation_id: conversation, read_seq: String(position), sent_event_position: String(position), body, payload_mode: 'inline', sender_principal_id: worker.agent_principal_id, created_at: new Date(now - 30_000).toISOString() },
+  ...extra,
+})
+async function projectValidation(page: Page, data: { messages: { id: string }[]; sent: { id: string }[] }) {
+  const refused: { path: string; body: unknown }[] = []
+  const known = () => new Set([...data.messages, ...data.sent].map(message => message.id))
+  await page.route(/\/api\/projects\/[^/]+\/messages$/, route => {
+    const body = route.request().postDataJSON() as { reply_to?: string } | null
+    if (route.request().method() !== 'POST' || !body?.reply_to || known().has(body.reply_to)) return route.fallback()
+    refused.push({ path: new URL(route.request().url()).pathname, body })
+    return route.fulfill({ status: 400, json: { error: 'invalid reply_to_id' } })
+  })
+  await page.route(/\/api\/projects\/[^/]+\/harness-sessions\/[^/]+\/read-marker$/, route => {
+    const body = route.request().method() === 'PUT' ? route.request().postDataJSON() as { last_read_message_id?: string } : null
+    if (!body || known().has(body.last_read_message_id ?? '')) return route.fallback()
+    refused.push({ path: new URL(route.request().url()).pathname, body })
+    return route.fulfill({ status: 400, json: { error: 'message is not in this session' } })
+  })
+  return refused
+}
+
+// Risk (AEON-1071 gate): Reply on a chat-native final sent its id as the
+// parent of a project message, which the server refuses.
+test('AEON-1071 a reply to a chat-native final goes to its chat thread', async ({ page }) => {
+  const { worker, data, chat } = await setup(page)
+  const refused = await projectValidation(page, data)
+  const final = '3e000000-0000-4000-8000-000000000900'
+  chat.push(nativeFinal(worker, final, 900, 'Final: the release checks pass.'))
+  const outbox: { client_message_id: string; body: string; reply_to?: string }[] = []
+  await page.route(/\/api\/chat-threads\/[^/]+\/outbox$/, route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    const input = route.request().postDataJSON() as { client_message_id: string; body: string; reply_to?: string }
+    outbox.push(input)
+    if (input.reply_to && !chat.some(item => item.message.message_id === input.reply_to)) return route.fulfill({ status: 404, json: { error: 'not found' } })
+    const message = { message_id: '3e000000-0000-4000-8000-000000000901', conversation_id: conversation, read_seq: '901', sent_event_position: '901', body: input.body, payload_mode: 'inline', reply_to: input.reply_to ?? null }
+    chat.push({ message: { ...message, sender_principal_id: me.id, created_at: new Date(now).toISOString() } })
+    return route.fulfill({ json: { contract: 'chat-live-v1', message, receipt: { message_id: message.message_id, state: 'sent' } } })
+  })
+  await page.setViewportSize({ width: 1440, height: 860 })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const panel = panelOf(page)
+  const row = panel.locator('.msg', { hasText: 'Final: the release checks pass.' })
+  await expect(row).toBeVisible()
+  await row.hover()
+  await row.getByRole('button', { name: 'Reply', exact: true }).click()
+  await expect(panel.locator('.replying')).toContainText('Final: the release checks pass.')
+  await panel.getByRole('textbox', { name: 'Message to release-lead' }).fill('Ship it after the smoke test.')
+  await panel.locator('.compose .send').click()
+  await expect.poll(() => outbox.length).toBe(1)
+  expect(outbox[0]).toMatchObject({ body: 'Ship it after the smoke test.', reply_to: final })
+  expect(outbox[0]!.client_message_id).toBeTruthy()
+  const reply = panel.locator('.msg', { hasText: 'Ship it after the smoke test.' })
+  await expect(reply).toBeVisible()
+  await expect(reply.locator('[data-status="not_delivered"]')).toHaveCount(0)
+  expect(refused).toEqual([])
+  expect(data.sent.some(message => message.body === 'Ship it after the smoke test.')).toBe(false)
+})
+
+// Risk (AEON-1071 gate): seeing a chat-native final wrote its id to the
+// session read marker, which refuses it, so read state never persisted.
+test('AEON-1071 a seen chat-native final is recorded on its chat thread', async ({ page }) => {
+  const { worker, data, chat } = await setup(page)
+  const refused = await projectValidation(page, data)
+  const final = '3e000000-0000-4000-8000-000000000900'
+  chat.push(nativeFinal(worker, final, 900, 'Final: the release checks pass.', { person_read_state: 'known_unread' }))
+  const seen: string[][] = []
+  await page.route(/\/api\/chat-threads\/[^/]+\/read-marker$/, route => {
+    if (route.request().method() !== 'PUT') return route.fulfill({ json: { contract: 'chat-v1', conversation_id: conversation, contiguous_prefix: '0', chunks: [], migration_epoch: '0', revision: '0', next_cursor: null } })
+    const ids = (route.request().postDataJSON() as { visible_message_ids: string[] }).visible_message_ids
+    seen.push(ids)
+    // The history page reports it as seen from now on, on every device.
+    for (const item of chat) if (ids.includes(String(item.message.message_id))) Object.assign(item, { person_read_state: 'seen' })
+    return route.fulfill({ json: { contract: 'chat-v1', conversation_id: conversation, contiguous_prefix: '0', chunks: [], migration_epoch: '0', revision: '1', next_cursor: null } })
+  })
+  await page.setViewportSize({ width: 1440, height: 860 })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const panel = panelOf(page)
+  await expect(panel.locator('.msg', { hasText: 'Final: the release checks pass.' })).toBeInViewport()
+  await page.clock.runFor(2_000)
+  await expect.poll(() => seen.length).toBe(1)
+  expect(seen[0]).toEqual([final])
+  expect(refused).toEqual([])
+  // Another visit: the thread's evidence stands, nothing is sent again.
+  await page.evaluate(() => localStorage.removeItem('aeon.session-read.v1'))
+  await page.reload()
+  await expect(panel.locator('.msg', { hasText: 'Final: the release checks pass.' })).toBeInViewport()
+  await page.clock.runFor(2_000)
+  await expect.poll(() => page.evaluate(() => JSON.stringify(localStorage.getItem('aeon.session-read.v1')))).toContain('900')
+  expect(seen.length).toBe(1)
+  expect(refused).toEqual([])
+})
+
+// Risk (AEON-1071 gate): the first history read finished after a turn began;
+// an earlier saved reply became the newest agent message and dismissed the
+// ended turn before its own final arrived.
+test('AEON-1071 a late history read never dismisses the live turn', async ({ page }) => {
+  const { worker, chat } = await setup(page)
+  chat.push(nativeFinal(worker, '3e000000-0000-4000-8000-000000000210', 210, 'Earlier saved reply.'))
+  let release = () => {}
+  const held = new Promise<void>(resolve => { release = resolve })
+  let first = true
+  await page.route(/\/api\/chat-threads\/[^/]+\/messages(\?|$)/, async route => {
+    if (first) { first = false; await held }
+    return route.fallback()
+  })
+  await page.setViewportSize({ width: 1440, height: 860 })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const panel = panelOf(page)
+  const stop = panel.locator('.chat-stop')
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __live?: unknown[] }).__live?.length ?? 0)).toBe(1)
+  await update(page, 1, { sessionUpdate: 'state', state: 'running' })
+  await chunk(page, 2, 'Thinking about the next step.')
+  await expect(panel.locator('.live-turn')).toContainText('Thinking about the next step.')
+  await expect(stop).toBeEnabled()
+  release()
+  await expect(panel.getByText('Earlier saved reply.', { exact: true })).toBeVisible()
+  await update(page, 3, { sessionUpdate: 'state', state: 'idle' })
+  await expect(stop).toBeDisabled()
+  await expect(panel.locator('.live-turn')).toContainText('Thinking about the next step.')
+  // Its own final, announced by the stream, replaces it.
+  chat.push(nativeFinal(worker, '3e000000-0000-4000-8000-000000000950', 950, 'Final: next step planned.'))
+  await emit(page, 'chat', { type: 'message', message_id: '3e000000-0000-4000-8000-000000000950', receipt: null })
+  await expect(panel.getByText('Final: next step planned.', { exact: true })).toBeVisible()
+  await expect(panel.locator('.live-turn')).toHaveCount(0)
 })

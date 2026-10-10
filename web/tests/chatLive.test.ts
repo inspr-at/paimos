@@ -5,18 +5,20 @@
 // keeps retrying a refused thread.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { applyLiveFrame, chatFinals, elapsed, followChatLive, liveQueue, liveTextLimit, liveToolLimit, settleStop, settled, type LiveSource, type LiveTurn } from '../src/components/agents/chatLive.ts'
+import { applyLiveFrame, chatFinals, chatSeenIds, chatSeenMark, elapsed, followChatLive, liveQueue, liveTextLimit, liveToolLimit, rebaseTurn, sessionReadMark, settleStop, settled, type LiveSource, type LiveTurn } from '../src/components/agents/chatLive.ts'
 import { sessionChatFlags } from '../src/components/agents/sessionChat.ts'
+import type { ProjectMessage } from '../src/lib/agents.ts'
 
 const chunk = (text: string, dropped = 0) => JSON.stringify({ type: 'update', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }, dropped_events: dropped, source_sequence: 1 })
 const tool = (id: string, status: string, title = 'Read file') => JSON.stringify({ type: 'update', update: { sessionUpdate: 'tool_call', toolCallId: id, title, status }, dropped_events: 0 })
 const state = (value: string) => JSON.stringify({ type: 'update', update: { sessionUpdate: 'state', state: value }, dropped_events: 0 })
 
-function run(frames: string[], start: LiveTurn | null = null, before = 'final-0', at = 1000) {
+// `before` null: the saved history is not known yet.
+function run(frames: string[], start: LiveTurn | null = null, before: string | null = 'final-0', at = 1000) {
   let turn = start, dropped: number | undefined
   const hints: string[] = []
   for (const [i, data] of frames.entries()) {
-    const applied = applyLiveFrame(turn, data, at + i * 100, before, dropped)
+    const applied = applyLiveFrame(turn, data, at + i * 100, before ?? undefined, dropped)
     turn = applied.turn
     if (applied.dropped !== undefined) dropped = applied.dropped
     if (applied.hint) hints.push(applied.hint)
@@ -213,18 +215,74 @@ test('only an applied interrupt may say the person stopped the turn', () => {
 })
 
 // Risk (AEON-1071 gate): chat-native finals live only in the chat thread, so
-// reading the project message list never replaced the live block.
-test('saved chat replies from the agent join the thread and settle the live turn', () => {
+// reading the project message list never replaced the live block. Fix round 3:
+// the viewer's own chat inputs (replies to those finals) join it as well, and
+// every joined message keeps its thread.
+test('saved chat messages between agent and viewer join the thread and settle the live turn', () => {
   const page = [
     { message: { message_id: 'in-1', sent_event_position: '40', body: 'input', sender_principal_id: 'person-1', created_at: '2026-10-10T08:00:00Z' } },
     { message: { message_id: 'final-2', sent_event_position: '41', body: 'Final answer', reply_to: 'in-1', sender_principal_id: 'agent-1', created_at: '2026-10-10T08:00:05Z' } },
     { message: { message_id: 'other', sent_event_position: '42', body: 'not ours', sender_principal_id: 'agent-2' } },
     { message: { message_id: 'broken', sent_event_position: 'x', body: 'bad', sender_principal_id: 'agent-1' } },
   ]
-  const finals = chatFinals(page, 'agent-1', 'session-1', 'person-1', 'release-lead')
-  assert.deepEqual(finals.map(message => [message.id, message.sent_event_id, message.body, message.reply_to, message.sender_session_id, message.sender_label, message.recipient_principal_id]),
-    [['final-2', 41, 'Final answer', 'in-1', 'session-1', 'release-lead', 'person-1']])
-  assert.equal(chatFinals(page, '', 'session-1', 'person-1', 'x').length, 0)
+  const finals = chatFinals(page, 'agent-1', 'session-1', 'person-1', 'release-lead', 'thread-1')
+  assert.deepEqual(finals.map(message => [message.id, message.sent_event_id, message.body, message.reply_to, message.sender_session_id, message.sender_label, message.recipient_principal_id, message.recipient_session_id, message.chat_thread]),
+    [['in-1', 40, 'input', null, undefined, undefined, 'agent-1', 'session-1', 'thread-1'], ['final-2', 41, 'Final answer', 'in-1', 'session-1', 'release-lead', 'person-1', undefined, 'thread-1']])
+  assert.equal(chatFinals(page, '', 'session-1', 'person-1', 'x', 'thread-1').length, 0)
   const { turn } = run([state('running'), chunk('live'), state('idle')], null, 'final-1')
   assert.equal(settled(turn, finals.at(-1)!.id), true)
+})
+
+// Risk (AEON-1071 gate, fix round 3): the thread's saved history arrived after
+// a turn began, an older saved reply became the newest agent message, and the
+// ended turn vanished before its own final reply was there.
+test('an older reply from a late history read never dismisses the live turn', () => {
+  // The history baseline is unknown when the turn starts.
+  const { turn } = run([state('running'), chunk('Working on it'), state('idle')], null, null)
+  assert.ok(turn)
+  assert.equal(turn.before, undefined)
+  const older = new Set(['reply-old'])
+  assert.equal(settled(turn, 'reply-old', older), false)
+  // Its own final, announced by the stream, settles it.
+  const announced = run([JSON.stringify({ type: 'message', message_id: 'reply-new' })], turn).turn!
+  assert.deepEqual(announced.finals, ['reply-new'])
+  assert.equal(settled(announced, 'reply-old', older), false)
+  assert.equal(settled(announced, 'reply-new', new Set(['reply-old', 'reply-new'])), true)
+  // A person's input announced the same way is not an agent reply.
+  assert.equal(settled(run([JSON.stringify({ type: 'message', message_id: 'input' })], turn).turn, 'reply-old', older), false)
+  // A turn still running when the history lands takes the newest reply as its baseline.
+  const running = run([state('running'), chunk('x')], null, null).turn!
+  const based = rebaseTurn(running, 'reply-old')!
+  assert.equal(based.before, 'reply-old')
+  const ended = run([state('idle')], based).turn!
+  assert.equal(settled(ended, 'reply-old', older), false)
+  assert.equal(settled(ended, 'reply-newer', new Set(['reply-old', 'reply-newer'])), true)
+  // An ended turn keeps waiting for its announced final, and a known baseline is never moved.
+  assert.equal(rebaseTurn(turn, 'reply-old'), turn)
+  assert.equal(rebaseTurn(based, 'reply-newer'), based)
+})
+
+// Risk (AEON-1071 gate, fix round 3): chat-native messages went to the
+// session read marker, which accepts only project messages, so read state
+// never persisted across devices.
+test('read state for chat-native posts goes to the chat thread, never to the session marker', () => {
+  const project = (id: string, event: number, extra: Partial<ProjectMessage> = {}): ProjectMessage => ({ id, sender_principal_id: 'agent-1', recipient_principal_id: 'person-1', to: '', body: id, sent_event_id: event, is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none', ...extra })
+  const thread = [project('p-1', 10), project('p-2', 20), project('c-1', 30, { chat_thread: 't' }), project('c-2', 40, { chat_thread: 't', chat_seen: true }), project('local', Number.MAX_SAFE_INTEGER, { optimistic: true })]
+  // A project post keeps its mark; a collapsed group may name its first id.
+  assert.deepEqual(sessionReadMark({ event: 20, id: 'p-2', at: 1 }, thread), { event: 20, id: 'p-2', at: 1 })
+  assert.deepEqual(sessionReadMark({ event: 20, id: 'p-1', at: 1 }, thread), { event: 20, id: 'p-1', at: 1 })
+  // A chat-native post becomes the newest project post at or before it.
+  assert.deepEqual(sessionReadMark({ event: 30, id: 'c-1', at: 2 }, thread), { event: 20, id: 'p-2', at: 2 })
+  assert.deepEqual(sessionReadMark({ event: 30, id: 'p-2', at: 2 }, thread), { event: 20, id: 'p-2', at: 2 })
+  assert.equal(sessionReadMark({ event: 5, id: 'c-0', at: 2 }, [project('c-0', 5, { chat_thread: 't' })]), null)
+  // Only unseen chat-native posts on screen go to the thread's read marker.
+  assert.deepEqual(chatSeenIds(thread, 'c-1', 30), ['c-1'])
+  assert.deepEqual(chatSeenIds(thread, 'c-2', 40), [])
+  assert.deepEqual(chatSeenIds(thread, 'p-2', 20), [])
+  // Another device's chat evidence advances this view's watermark.
+  assert.deepEqual(chatSeenMark(thread), { event: 40, id: 'c-2' })
+  assert.equal(chatSeenMark(thread.slice(0, 3)), null)
+  // The history page says what the person saw.
+  const page = chatFinals([{ message: { message_id: 'c-9', sent_event_position: '90', body: 'x', sender_principal_id: 'agent-1' }, person_read_state: 'seen' }, { message: { message_id: 'c-8', sent_event_position: '80', body: 'y', sender_principal_id: 'agent-1' }, person_read_state: 'known_unread' }], 'agent-1', 's', 'person-1', 'l', 't')
+  assert.deepEqual(page.map(message => [message.id, message.chat_seen]), [['c-9', true], ['c-8', false]])
 })

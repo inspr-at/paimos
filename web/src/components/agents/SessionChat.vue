@@ -3,7 +3,7 @@
 import { displayLanguage } from '../../lib/displayLanguage'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { APIError } from '../../lib/api'
-import { cancelSessionMessage, chatThreadForSession, chatThreadMessages, messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
+import { cancelSessionMessage, chatThreadForSession, chatThreadMessages, markChatSeen, messageStatuses, sendChatMessage, type MessageStatus, type ProjectMessage } from '../../lib/agents'
 import { readSessionMarker, writeSessionMarker } from '../../lib/agentRows'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
@@ -13,7 +13,7 @@ import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import SessionRequests from './SessionRequests.vue'
 import ChatLiveBlock from './ChatLiveBlock.vue'
-import { applyLiveFrame, chatFinals, followChatLive, liveQueue, liveWorking, settleStop, settled, type LiveSource, type LiveTurn } from './chatLive'
+import { applyLiveFrame, chatFinals, chatSeenIds, chatSeenMark, chatSent, followChatLive, liveQueue, liveWorking, rebaseTurn, sessionReadMark, settleStop, settled, type LiveSource, type LiveTurn } from './chatLive'
 import { collapseMessages } from './sessionMessages'
 import { advanceReceipt, chatCapability, isQueuedMessage, chatSendLevel, chatWords, awaitsInboxHook, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
 
@@ -32,15 +32,20 @@ const localSends = ref<ProjectMessage[]>([])
 // A late failure for A must not leave B looking busy (S8-013).
 const sending = computed(() => localSends.value.some(message => message.optimistic && !message.send_failed && message.recipient_session_id === s.value.id))
 const statuses = ref<Record<string, MessageStatus>>({})
-// The agent's saved replies in the bound chat thread (AEON-1071). They are
-// stored only there, never in the project message list.
+// Saved chat-native messages of the bound chat thread (AEON-1071): the agent's
+// replies and the viewer's replies to them. They are stored only there, never
+// in the project message list.
 const chatMessages = ref<ProjectMessage[]>([])
 let chatThread = ''
+// The bound thread's saved history has been read once. Before that a turn has
+// no baseline: an older saved reply arriving late must not end it.
+let chatBaseline = false
 const messages = computed(() => {
   if (!me.value) return []
   const project = agents.thread(s.value)
   const stored = new Set(project.map(message => message.id))
-  const server = [...project, ...chatMessages.value.filter(message => message.sender_session_id === s.value.id && !stored.has(message.id))].sort((a, b) => a.sent_event_id - b.sent_event_id)
+  const chat = chatMessages.value.filter(message => (message.sender_session_id === s.value.id || message.recipient_session_id === s.value.id) && !stored.has(message.id))
+  const server = [...project, ...chat].sort((a, b) => a.sent_event_id - b.sent_event_id)
   const known = new Set(server.map(message => message.id))
   return [...server, ...localSends.value.filter(message => !known.has(message.id))]
 })
@@ -80,11 +85,11 @@ const unmanaged = computed(() => s.value.management_mode === 'unmanaged')
 // The id swap can land after the read that already contains it, so both the
 // thread watch and deliver drop it.
 function forgetSettled() {
-  const known = new Set(agents.thread(s.value).map(message => message.id))
+  const known = new Set([...agents.thread(s.value), ...chatMessages.value].map(message => message.id))
   const next = localSends.value.filter(message => !known.has(message.id))
   if (next.length !== localSends.value.length) localSends.value = next
 }
-watch(() => agents.thread(s.value).map(message => message.id).join(), forgetSettled)
+watch(() => [...agents.thread(s.value), ...chatMessages.value].map(message => message.id).join(), forgetSettled)
 const draft = ref('')
 const editing = ref<ProjectMessage | null>(null)
 const queueBusy = ref(false)
@@ -131,12 +136,43 @@ function markRead(event: number, id: string) {
   if (!me.value || !id || !Number.isFinite(event)) return
   if (!mark.value || mark.value.event < event) mark.value = saveReadMark(me.value, s.value.id, event, id)
   if (!person.value || !mark.value) return
+  // A chat-native post is evidence for its thread's read marker only.
+  const seenBefore = seenPending.size
+  if (chatThread) { seenThread = chatThread; for (const seenId of chatSeenIds(messages.value, id, event)) seenPending.add(seenId) }
+  const before = pending?.event ?? -1
+  queueSessionMark(mark.value)
+  // A repeated look at the same post must not postpone a flush that is already waiting.
+  if (flushTimer === undefined || (pending?.event ?? -1) > before || seenPending.size > seenBefore) arm()
+}
+// The session's read marker names only its project messages.
+function queueSessionMark(next: ReadMark) {
+  const session = sessionReadMark(next, messages.value)
+  if (!session) return
   boundProject = s.value.project_id
   boundSession = s.value.id
-  const before = pending?.event ?? -1
-  pending = queueReadMark(pending, mark.value)
-  // A repeated look at the same post must not postpone a flush that is already waiting.
-  if (flushTimer === undefined || (pending?.event ?? -1) > before) arm()
+  pending = queueReadMark(pending, session)
+}
+// Chat-native posts seen on screen, waiting for the same trailing flush.
+const seenPending = new Set<string>()
+let seenThread = ''
+let seenSending = false
+async function flushSeen() {
+  if (seenSending || !seenPending.size || !seenThread || !person.value) return
+  const thread = seenThread, ids = [...seenPending].slice(0, 100)
+  seenSending = true
+  try {
+    await markChatSeen(thread, ids)
+    for (const id of ids) seenPending.delete(id)
+    if (thread === chatThread) chatMessages.value = chatMessages.value.map(message => ids.includes(message.id) ? { ...message, chat_seen: true } : message)
+    if (seenPending.size) arm()
+  } catch { /* They stay queued for the next flush. */ }
+  finally { seenSending = false }
+}
+// A thread change sends what the old thread saw, then starts empty.
+function leaveChatThread(next = '') {
+  void flushSeen()
+  seenPending.clear(); seenThread = ''
+  chatThread = next
 }
 // One trailing timer. Hide and unmount flush immediately. A failed send stays
 // in `pending` and leaves on the next flush, with no toast.
@@ -158,7 +194,7 @@ let anchorTop = 0
 let placeChain: Promise<void> = Promise.resolve()
 const holdingMarker = () => markerHold !== 0 && markerHold === readGeneration
 function arm() {
-  if (!pending || !person.value) return
+  if ((!pending && !seenPending.size) || !person.value) return
   if (flushTimer !== undefined) clearTimeout(flushTimer)
   flushTimer = setTimeout(() => { flushTimer = undefined; void flush() }, readMarkFlushDelay)
 }
@@ -183,6 +219,7 @@ async function sendMark(projectId: string, sessionId: string, viewer: string, ge
 }
 async function flush() {
   if (flushTimer !== undefined) { clearTimeout(flushTimer); flushTimer = undefined }
+  void flushSeen()
   if (!person.value || !pending) return
   if (markSending) { flushAgain = true; return }
   const next = pending
@@ -237,9 +274,11 @@ async function pullReadMark(projectId: string, sessionId: string, viewer: string
     if (held && entered && placed && userMoved) observe()
     const current = mark.value
     if (!person.value || !current?.id || (remote && current.event <= remote.event)) return
+    const session = sessionReadMark(current, messages.value)
+    if (!session || (remote && session.event <= remote.event)) return
     boundProject = projectId
     boundSession = sessionId
-    pending = queueReadMark(pending, current)
+    pending = queueReadMark(pending, session)
     arm()
   } catch {
     // Offline: the local watermark stands, and a provisional landing may observe.
@@ -522,13 +561,14 @@ onBeforeUnmount(() => {
 // every send that still has no terminal receipt.
 // Session-bound sends from the loaded thread. Receipts, not memory, decide
 // which of them still wait on the inbox hook, so a reload matches the server.
-const boundHookIds = computed(() => sessionBoundSends(messages.value, s.value.id, me.value))
+// Chat-native inputs have no project receipt; the status route cannot answer for them.
+const boundHookIds = computed(() => sessionBoundSends(messages.value.filter(message => !message.chat_thread), s.value.id, me.value))
 let statusFlight: Promise<void> | undefined
 let statusAgain = false
 function refreshReceipts() {
   if (!props.active || !me.value) return
   if (statusFlight) { statusAgain = true; return }
-  const visible = current.value.filter(m => m.sender_principal_id === me.value).slice(-30).map(m => m.id)
+  const visible = current.value.filter(m => m.sender_principal_id === me.value && !m.chat_thread).slice(-30).map(m => m.id)
   const batches = receiptQueryBatches(boundHookIds.value, visible, statuses.value)
   if (!batches.length) return
   const session = s.value.id, viewer = me.value, generation = readGeneration
@@ -575,7 +615,7 @@ watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
   markerHold = viewer && person.value && !local ? generation : 0
   seen?.disconnect()
   draft.value = ''; replyTo.value = null; editing.value = null; queueBusy.value = false; uncertain.value = new Set(); queuedIds.value = new Set(); sendError.value = ''; localSends.value = []
-  chatMessages.value = []; chatThread = ''
+  chatMessages.value = []; leaveChatThread(); chatBaseline = false
   historyLoading.value = false; historyError.value = ''; paging = false
   const projectId = s.value.project_id
   boundProject = projectId
@@ -598,6 +638,7 @@ watch(() => props.active, active => { if (active && loaded) void refresh().then(
 // ---------- Live turn (AEON-1071, transcript policy A) ----------
 // Deltas and tool activity render in place, batched per animation frame. They
 // stay in this view's memory only; a reload shows final messages alone.
+const agentMessages = computed(() => new Set(messages.value.filter(message => message.sender_principal_id === s.value.agent_principal_id).map(message => message.id)))
 const latestAgentMessage = computed(() => {
   for (let i = messages.value.length - 1; i >= 0; i--) if (messages.value[i]!.sender_principal_id === s.value.agent_principal_id) return messages.value[i]!.id
   return ''
@@ -614,7 +655,7 @@ function applyLiveFrames(frames: string[]) {
   let turn = liveTurn.value, hint = false
   const at = Date.now()
   for (const data of frames) {
-    const applied = applyLiveFrame(turn, data, at, latestAgentMessage.value, liveDropped)
+    const applied = applyLiveFrame(turn, data, at, chatBaseline ? latestAgentMessage.value : undefined, liveDropped)
     turn = applied.turn
     if (applied.dropped !== undefined) liveDropped = applied.dropped
     if (applied.hint) hint = true
@@ -639,12 +680,22 @@ function refreshChat() {
   void chatThreadMessages(thread).then(page => {
     if (chatThread !== thread || s.value.id !== session || me.value !== viewer || liveGeneration !== generation) return
     const merged = new Map(chatMessages.value.map(message => [message.id, message]))
-    for (const message of chatFinals(page.items, agent, session, viewer, props.view.name)) merged.set(message.id, message)
+    for (const message of chatFinals(page.items, agent, session, viewer, props.view.name, thread)) merged.set(message.id, message)
     chatMessages.value = [...merged.values()].sort((a, b) => a.sent_event_id - b.sent_event_id).slice(-200)
+    if (!chatBaseline) { chatBaseline = true; liveTurn.value = rebaseTurn(liveTurn.value, latestAgentMessage.value) }
+    adoptChatSeen()
   }).catch(() => { /* The live block stays until a read succeeds. */ }).finally(() => {
     chatFlight = false
     if (chatAgain) { chatAgain = false; refreshChat() }
   })
+}
+// The thread's read marker is the other devices' evidence for chat-native
+// posts. The furthest one seen advances this view's watermark.
+function adoptChatSeen() {
+  const seen = chatSeenMark(messages.value)
+  if (!seen || !me.value || (mark.value && mark.value.event >= seen.event)) return
+  mark.value = saveReadMark(me.value, s.value.id, seen.event, seen.id)
+  if (entered) syncDivider()
 }
 function withdrawStop() { liveTurn.value = settleStop(liveTurn.value, 'withdrawn') }
 // "Stopping" holds only while an interrupt is on record; "You stopped this
@@ -664,7 +715,7 @@ watch(() => agents.controls[s.value.id], control => {
   if (control.state !== 'completed') return
   liveTurn.value = settleStop(liveTurn.value, control.outcome === 'applied' ? 'applied' : 'withdrawn')
 })
-watch([liveTurn, latestAgentMessage], ([turn, latest]) => { if (settled(turn, latest)) liveTurn.value = null })
+watch([liveTurn, latestAgentMessage, agentMessages], ([turn, latest, ids]) => { if (settled(turn, latest, ids)) liveTurn.value = null })
 const openLive = (url: string) => typeof EventSource === 'undefined' ? null : new EventSource(url, { withCredentials: true }) as unknown as LiveSource
 // One stream per open chat tab and person; it ends with the session. It
 // starts after the first thread read, so a turn knows which agent message
@@ -683,7 +734,7 @@ function startLive() {
     },
     thread: id => {
       if (generation !== liveGeneration) return
-      chatThread = id
+      if (id !== chatThread) { leaveChatThread(id); chatBaseline = false }
       refreshChat()
     },
     attached: () => {},
@@ -716,6 +767,18 @@ async function deliver(local: ProjectMessage) {
   const stillHere = () => generation === readGeneration && session.id === s.value.id && viewer === me.value
   local.send_failed = false
   try {
+    if (local.chat_thread) {
+      // A reply to a chat-native message stays in its chat thread; the project
+      // message route would refuse the parent. The client ID keeps a retry idempotent.
+      const thread = local.chat_thread
+      const result = await sendChatMessage(thread, { client_message_id: local.client_id ?? local.id, body: local.body, ...(local.reply_to ? { reply_to: local.reply_to } : {}) })
+      if (!stillHere()) return
+      const sent = chatSent(result.message, viewer, session.agent_principal_id, session.id, thread, local.created_at ?? new Date().toISOString())
+      if (thread === chatThread) chatMessages.value = [...chatMessages.value.filter(message => message.id !== sent.id), sent].sort((a, b) => a.sent_event_id - b.sent_event_id)
+      localSends.value = localSends.value.map(message => message.client_id === local.client_id ? { ...sent, client_id: local.client_id } : message)
+      forgetSettled()
+      return
+    }
     const accepted = await agents.send(session, recipient.value, local.body, local.delivery_level, local.reply_to ?? undefined, local.client_id, local.resend_of)
     if (!stillHere()) return
     if (local.queue_pending) queuedIds.value = new Set([...queuedIds.value, accepted.id])
@@ -734,11 +797,14 @@ async function send(level: 'simple' | 'steer' = 'simple', source?: ProjectMessag
   if (editing.value && !source) return saveEdit()
   if (localSends.value.length >= 100) { toast(words.value.pendingLimit); return false }
   const clientId = crypto.randomUUID()
+  // The parent's origin decides the route: a chat-native parent keeps the reply in its thread.
+  const chat = source ? source.chat_thread : replyTo.value?.chat_thread
   const local: ProjectMessage = {
-    id: clientId, client_id: clientId, optimistic: true, queue_pending: source?.queue_pending ?? (working.value || atPrompt.value), resend_of: source?.id, body, sender_principal_id: me.value,
+    id: clientId, client_id: clientId, optimistic: true, queue_pending: chat ? false : source?.queue_pending ?? (working.value || atPrompt.value), resend_of: chat ? undefined : source?.id, body, sender_principal_id: me.value,
     recipient_principal_id: s.value.agent_principal_id, recipient_session_id: s.value.id, to: recipient.value,
     sent_event_id: Number.MAX_SAFE_INTEGER, is_action_request: false, expects_reply: false,
     delivery_level: level, reply_to: source ? source.reply_to : replyTo.value?.id, status: 'accepted', reply_obligation: 'none', created_at: new Date().toISOString(),
+    ...(chat ? { chat_thread: chat } : {}),
   }
   if (local.queue_pending) queuedIds.value = new Set([...queuedIds.value, local.id])
   localSends.value = [...localSends.value, local]
@@ -807,14 +873,14 @@ async function saveEdit(): Promise<boolean> {
 }
 async function stopAndSend() {
   if (!canStop.value || !draft.value.trim() || editing.value || queueBusy.value || offline.value) return
-  const view = props.view, generation = readGeneration, body = draft.value.trim(), parent = replyTo.value?.id
+  const view = props.view, generation = readGeneration, body = draft.value.trim(), parent = replyTo.value?.id, chat = replyTo.value?.chat_thread
   queueBusy.value = true
   try {
     await agents.control(view, 'interrupt')
     if (generation !== readGeneration || view.session.id !== s.value.id) return
     queueBusy.value = false
     // After-turn delivery waits for the explicit interrupt to end the turn.
-    const enqueued = await send('simple', { body, reply_to: parent, queue_pending: true } as ProjectMessage)
+    const enqueued = await send('simple', { body, reply_to: parent, queue_pending: true, chat_thread: chat } as ProjectMessage)
     if (generation !== readGeneration || view.session.id !== s.value.id) return
     if (enqueued && draft.value.trim() === body) { draft.value = ''; replyTo.value = null }
   } catch {
