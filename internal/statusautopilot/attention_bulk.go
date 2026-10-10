@@ -58,16 +58,17 @@ func attentionQueryScope(r *http.Request) attentionScope {
 // Live grants are resolved once for a bounded SQL projection; the final write
 // still rechecks RequireTx under the existing tenant/tree mutation fence.
 const attentionPreparedCTE = `, prepared AS (
- SELECT a.*, CASE target WHEN 'triage_list' THEN 'backlog' WHEN 'cancel_suggested' THEN 'cancelled' WHEN 'blocked_reminder' THEN 'open' WHEN 'missed_release' THEN CASE WHEN r.release_id IS NULL AND NOT EXISTS(SELECT 1 FROM journey_projects j JOIN journey_releases plan ON plan.tenant_id=j.tenant_id AND plan.release_node_id=j.current_release_node_id JOIN nodes pn ON pn.tenant_id=plan.tenant_id AND pn.id=plan.release_node_id WHERE j.project_node_id=a.project_id AND plan.state='planning' AND pn.deleted_at IS NULL) THEN 'no_release_needed' ELSE 'release' END ELSE target END destination,
+ SELECT a.*, CASE target WHEN 'triage_list' THEN 'backlog' WHEN 'cancel_suggested' THEN 'cancelled' WHEN 'blocked_reminder' THEN 'open' WHEN 'missed_release' THEN CASE WHEN r.release_id IS NULL AND NOT planning.available THEN 'no_release_needed' ELSE 'release' END ELSE target END destination,
  coalesce(r.release_id,'') release_id,coalesce(r.title,'') release_title,coalesce(r.revision,0) release_revision,coalesce(r.project_revision,0) release_project_revision,
  ($5::boolean OR coalesce(a.project_id::text,'')=ANY($6::text[])) editable,
  CASE WHEN aeon_work_status_is_parent(a.node_id) THEN 'Parent statuses follow their children.'
  WHEN a.stale THEN 'Ticket changed since the proposal. Dismiss it and review the ticket.'
  WHEN target='missed_release' AND NOT $10::boolean THEN 'Adding to a release needs permission to manage releases.'
- WHEN target='missed_release' AND r.release_id IS NOT NULL AND NOT ($7::boolean OR coalesce(a.project_id::text,'')=ANY($8::text[])) THEN 'Adding to a release needs permission to manage releases.'
- WHEN target='missed_release' AND r.release_id IS NULL AND EXISTS(SELECT 1 FROM journey_projects j JOIN journey_releases plan ON plan.tenant_id=j.tenant_id AND plan.release_node_id=j.current_release_node_id JOIN nodes pn ON pn.tenant_id=plan.tenant_id AND pn.id=plan.release_node_id WHERE j.project_node_id=a.project_id AND plan.state='planning' AND pn.deleted_at IS NULL) THEN 'Choose a planning release in the ticket’s project first.'
+ WHEN target='missed_release' AND (r.release_id IS NOT NULL OR planning.available) AND NOT ($7::boolean OR coalesce(a.project_id::text,'')=ANY($8::text[])) THEN 'Adding to a release needs permission to manage releases.'
+ WHEN target='missed_release' AND r.release_id IS NULL AND planning.available THEN 'Choose a planning release in the ticket’s project first.'
  WHEN kind='proposed' AND $9::boolean THEN 'The server operator has paused status autopilot.' ELSE '' END unavailable
  FROM filtered a
+ LEFT JOIN LATERAL (SELECT EXISTS(SELECT 1 FROM journey_projects j JOIN journey_releases plan ON plan.tenant_id=j.tenant_id AND plan.release_node_id=j.current_release_node_id JOIN nodes pn ON pn.tenant_id=plan.tenant_id AND pn.id=plan.release_node_id WHERE j.project_node_id=a.project_id AND plan.state='planning' AND pn.deleted_at IS NULL) available) planning ON true
  LEFT JOIN LATERAL (SELECT r.release_node_id::text release_id,n.title,r.revision,j.revision project_revision
  FROM journey_projects j JOIN journey_releases r ON r.tenant_id=j.tenant_id AND r.release_node_id=j.current_release_node_id
  JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id

@@ -683,7 +683,7 @@ func (m *Module) undoAttention(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	if err != nil {
 		return err
 	}
-	if parent {
+	if parent && before.State != after.State {
 		return events.ErrConflict
 	}
 	res := metadata.Resolution

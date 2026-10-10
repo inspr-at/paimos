@@ -34,11 +34,11 @@ const waitingNames: Record<string, [string, string, string]> = {
 const explanations: Record<string, string> = {
   proposed: 'Proposed moves leave tickets untouched until someone applies them.', triage: 'New tickets waiting to be triaged.',
   cancel: 'Untouched backlog tickets suggested for cancellation.', blocked: 'Tickets that have stayed blocked and need a reminder.',
-  missed: 'Done for 14+ days and not in any release. The configured delay starts at the recorded merge; classic history is skipped.',
 }
 const needs = computed<NeedsYouItem[]>(() => ATTENTION_KINDS.map(kind => {
   const count = attention.value?.counts[kind.id] ?? 0
-  return { id: kind.id, name: count ? `${count.toLocaleString()} ${waitingNames[kind.id]![count === 1 ? 0 : 1]}` : waitingNames[kind.id]![2], count, detail: count ? explanations[kind.id]! : `${explanations[kind.id]} None right now.`, icon: kind.id === 'cancel' ? 'close' : kind.icon, action: { label: 'Open' } }
+  const explanation = kind.id === 'missed' ? `Done for ${settings.value?.rules.done.days ?? 14}+ days and not in any release.` : explanations[kind.id]!
+  return { id: kind.id, name: count ? `${count.toLocaleString()} ${waitingNames[kind.id]![count === 1 ? 0 : 1]}` : waitingNames[kind.id]![2], count, detail: count ? explanation : `${explanation} None right now.`, icon: kind.id === 'cancel' ? 'close' : kind.icon, action: { label: 'Open' } }
 }))
 const heading = computed(() => { const count = attention.value?.total ?? 0; return count ? `${count.toLocaleString()} ${count === 1 ? 'ticket needs' : 'tickets need'} a person` : 'Nothing needs a person' })
 function openAttention(kind = '') { void router.push({ path: '/tickets', query: kind ? { kind } : {} }) }
