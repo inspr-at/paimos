@@ -50,6 +50,7 @@
     "POST /api/recurrences/{recurrenceId}/resume": "recurrences.manage",
     "POST /api/recurrences/{recurrenceId}/run-now": "recurrences.manage",
     "PUT /api/recurrences/{recurrenceId}": "recurrences.manage",
+    "PUT /api/recurrences/{recurrenceId}/execution-consent": "recurrences.manage",
     "PUT /api/recurrences/{recurrenceId}/guardrails": "recurrences.manage"
   },
   "words": {

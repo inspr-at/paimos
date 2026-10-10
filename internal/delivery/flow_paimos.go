@@ -18,6 +18,11 @@ const (
 	flowSyncInterval = 10 * time.Second
 )
 
+// Keep this predicate identical to migration 1328's partial index predicate.
+const flowSourceEventsSQL = `SELECT id,type,node_id::text,at,before,after,metadata FROM events
+	WHERE id>$1 AND (type LIKE 'delivery.work\_queue.%' OR type LIKE 'delivery.review.%' OR type='delivery.state_changed')
+	ORDER BY id LIMIT $2`
+
 // RunFlow keeps the Flow steps of PAIMOS work in step with the event log:
 // build, fix and merge rounds of the work queue, review gates and holds.
 // Each pass reads a bounded batch after the tenant's stored cursor; replays
@@ -111,9 +116,7 @@ func (m *Module) SyncFlow(ctx context.Context, tid string) (bool, error) {
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT id,type,node_id::text,at,before,after,metadata FROM events
-			WHERE id>$1 AND (type LIKE 'delivery.work\_queue.%' OR type LIKE 'delivery.review.%' OR type='delivery.state_changed')
-			ORDER BY id LIMIT $2`, after, flowSyncBatch)
+		rows, err := tx.Query(ctx, flowSourceEventsSQL, after, flowSyncBatch)
 		if err != nil {
 			return err
 		}

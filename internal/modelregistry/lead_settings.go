@@ -4,6 +4,8 @@ package modelregistry
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,12 +13,15 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -492,4 +497,393 @@ func validateLeadBindings(ctx context.Context, tx pgx.Tx, p LeadPolicy, project 
 		}
 	}
 	return nil
+}
+
+// LoadRoutineLeadPolicyTx resolves the same owner/account/host intersection as
+// lead settings, without exposing its private selectors to the requesting
+// principal. Consumers retain this value internally and fence final writes.
+func LoadRoutineLeadPolicyTx(ctx context.Context, tx pgx.Tx, tenantID, project string) (LeadSettings, error) {
+	row, err := loadLeadRow(ctx, tx, project)
+	if err != nil {
+		return LeadSettings{}, err
+	}
+	if row.Owner == nil {
+		return LeadSettings{}, authz.ErrForbidden
+	}
+	owner, err := modelprefs.CanonicalPerson(ctx, tx, *row.Owner)
+	if err != nil {
+		return LeadSettings{}, err
+	}
+	if owner == nil || *owner != *row.Owner {
+		return LeadSettings{}, authz.ErrForbidden
+	}
+	p := tenant.Principal{ID: *owner, TenantID: tenantID, Kind: tenant.Person}
+	for _, permission := range []string{"harness.control", "run.create"} {
+		if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: project}); err != nil {
+			return LeadSettings{}, err
+		}
+	}
+	out, err := LoadLeadSettingsTx(ctx, tx, p, project)
+	if err == nil && (out.DetailsRedacted || out.WaitReason == "owner_unavailable" || out.WaitReason == "selector_unavailable") {
+		err = authz.ErrForbidden
+	}
+	return out, err
+}
+
+// ExecutionRuntime contains trusted, exact deployed artifact/capability/host
+// pins, including adapter/browser/model versions in the capability digest.
+// The reader is server-owned, bounded, and performs only local/transactional
+// reads: no network, model calls, events or locks after the event counter.
+// Missing observations never inherit the qualification's own assertions.
+type ExecutionRuntime struct {
+	ServerDigest      string   `json:"server_digest"`
+	DaemonDigest      string   `json:"daemon_digest"`
+	CapabilityDigest  string   `json:"capability_digest"`
+	Capabilities      []string `json:"capabilities"`
+	HostMappingDigest string   `json:"host_mapping_digest"`
+	BudgetModes       []string `json:"budget_modes"`
+	// ObservedAt is required on live facts, and is not part of qualification.
+	ObservedAt time.Time `json:"-"`
+}
+type ExecutionRuntimeReader func(context.Context, pgx.Tx, string) (ExecutionRuntime, error)
+
+type ExecutionSettings struct {
+	Revision               int64   `json:"revision"`
+	AutomaticLaunchEnabled bool    `json:"automatic_launch_enabled"`
+	ConsentEnabled         bool    `json:"consent_enabled"`
+	QualificationID        *string `json:"qualification_id"`
+	WaitReason             string  `json:"wait_reason"`
+}
+
+// Qualification is immutable accepted evidence, never a caller-supplied grant.
+// Only RecordQualificationTx (controlled release authority) persists it; the
+// settings/consent APIs accept only its ID. Evidence is a redacted SHA-256 pin.
+type Qualification struct {
+	ID                    string
+	ProjectID             string
+	OwnerPersonID         string
+	PolicyDigest          string
+	Runtime               ExecutionRuntime
+	CoordinatorAcceptance string
+	OPSAttestation        string
+}
+
+func RoutinePolicyDigest(value any) (string, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+func shaPin(s string) bool {
+	if len(s) != 64 || strings.ToLower(s) != s {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
+}
+func validRuntime(r ExecutionRuntime) bool {
+	for _, pin := range []string{r.ServerDigest, r.DaemonDigest, r.CapabilityDigest, r.HostMappingDigest} {
+		if !shaPin(pin) {
+			return false
+		}
+	}
+	if len(r.BudgetModes) < 1 || len(r.BudgetModes) > 4 {
+		return false
+	}
+	if len(r.Capabilities) < 1 || len(r.Capabilities) > 2 {
+		return false
+	}
+	capabilities := map[string]bool{}
+	for _, capability := range r.Capabilities {
+		if capabilities[capability] || !slices.Contains([]string{"routine_native_coding_v1", "routine_native_browser_v1"}, capability) {
+			return false
+		}
+		capabilities[capability] = true
+	}
+	seen := map[string]bool{}
+	for _, mode := range r.BudgetModes {
+		if seen[mode] || !slices.Contains([]string{"off", "tokens", "money", "both"}, mode) {
+			return false
+		}
+		seen[mode] = true
+	}
+	return true
+}
+func runtimeMatches(a, b ExecutionRuntime) bool {
+	if !validRuntime(a) || !validRuntime(b) {
+		return false
+	}
+	aa, bb := slices.Clone(a.BudgetModes), slices.Clone(b.BudgetModes)
+	slices.Sort(aa)
+	slices.Sort(bb)
+	ac, bc := slices.Clone(a.Capabilities), slices.Clone(b.Capabilities)
+	slices.Sort(ac)
+	slices.Sort(bc)
+	return a.ServerDigest == b.ServerDigest && a.DaemonDigest == b.DaemonDigest && a.CapabilityDigest == b.CapabilityDigest && a.HostMappingDigest == b.HostMappingDigest && slices.Equal(aa, bb) && slices.Equal(ac, bc)
+}
+
+// FenceExecutionTx is the final-write entry: tenant -> tree -> project row.
+// Access changes and identity linking serialize on the same tenant fence.
+func FenceExecutionTx(ctx context.Context, tx pgx.Tx, tenantID, project string) error {
+	if !workorders.UUID(project) {
+		return workorders.Fail(400, "invalid project id")
+	}
+	var matches bool
+	if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id')=$1`, tenantID).Scan(&matches); err != nil {
+		return err
+	}
+	if !matches {
+		return authz.ErrForbidden
+	}
+	if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+		return err
+	}
+	var active bool
+	if err := tx.QueryRow(ctx, `SELECT n.state<>'archived' FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND n.deleted_at IS NULL AND k.slug='project' FOR NO KEY UPDATE OF n`, project).Scan(&active); err != nil {
+		return err
+	}
+	if !active {
+		return workorders.Fail(409, "project_unavailable")
+	}
+	return nil
+}
+
+// QualificationPolicyTx returns only a digest of live private policy, including
+// workspace/project/model revisions. The raw account/host selectors stay local.
+func QualificationPolicyTx(ctx context.Context, tx pgx.Tx, tenantID, project string) (string, string, error) {
+	policy, err := LoadRoutineLeadPolicyTx(ctx, tx, tenantID, project)
+	if err != nil {
+		return "", "", err
+	}
+	pin, err := RoutinePolicyDigest(policy)
+	return *policy.OwnerPersonID, pin, err
+}
+
+func LoadRoutineQualificationTx(ctx context.Context, tx pgx.Tx, project, id string) (Qualification, error) {
+	var q Qualification
+	var modes, capabilities []byte
+	err := tx.QueryRow(ctx, `SELECT id::text,project_id::text,owner_person_id::text,policy_digest,server_digest,daemon_digest,capability_digest,host_mapping_digest,budget_modes,capabilities,coordinator_acceptance,ops_attestation FROM routine_execution_qualifications WHERE id=$1 AND project_id=$2 AND revoked_at IS NULL`, id, project).Scan(&q.ID, &q.ProjectID, &q.OwnerPersonID, &q.PolicyDigest, &q.Runtime.ServerDigest, &q.Runtime.DaemonDigest, &q.Runtime.CapabilityDigest, &q.Runtime.HostMappingDigest, &modes, &capabilities, &q.CoordinatorAcceptance, &q.OPSAttestation)
+	if err == nil {
+		if len(modes) > 1024 || len(capabilities) > 1024 {
+			return q, workorders.Fail(409, "qualification_unavailable")
+		}
+		err = json.Unmarshal(modes, &q.Runtime.BudgetModes)
+	}
+	if err == nil {
+		err = json.Unmarshal(capabilities, &q.Runtime.Capabilities)
+	}
+	return q, err
+}
+
+func qualifiedTx(ctx context.Context, tx pgx.Tx, tenantID, project, id string, reader ExecutionRuntimeReader) (Qualification, string, error) {
+	q, err := LoadRoutineQualificationTx(ctx, tx, project, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return q, "qualification_unavailable", nil
+	}
+	if err != nil {
+		return q, "", err
+	}
+	if !shaPin(q.CoordinatorAcceptance) || !shaPin(q.OPSAttestation) {
+		return q, "qualification_unaccepted", nil
+	}
+	owner, policy, err := QualificationPolicyTx(ctx, tx, tenantID, project)
+	if errors.Is(err, authz.ErrForbidden) || errors.Is(err, pgx.ErrNoRows) {
+		return q, "owner_unavailable", nil
+	}
+	if err != nil {
+		return q, "", err
+	}
+	if q.OwnerPersonID != owner || q.PolicyDigest != policy {
+		return q, "qualification_policy_changed", nil
+	}
+	if reader == nil {
+		return q, "runtime_unavailable", nil
+	}
+	runtime, err := reader(ctx, tx, project)
+	if err != nil || !validRuntime(runtime) {
+		return q, "runtime_unavailable", nil
+	}
+	var now time.Time
+	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		return q, "", err
+	}
+	if runtime.ObservedAt.IsZero() || runtime.ObservedAt.After(now) || now.Sub(runtime.ObservedAt) > 2*time.Minute {
+		return q, "runtime_unavailable", nil
+	}
+	if !runtimeMatches(q.Runtime, runtime) {
+		return q, "qualification_runtime_changed", nil
+	}
+	return q, "", nil
+}
+
+// ProjectExecutionTx is shared by preview, save, lead projection and final
+// claims. This is effective policy only; dial/admission/process/budget grants
+// remain independently required. Reads do not modify in-flight holds.
+func ProjectExecutionTx(ctx context.Context, tx pgx.Tx, tenantID, project string, reader ExecutionRuntimeReader) (ExecutionSettings, error) {
+	out := ExecutionSettings{WaitReason: "automatic_launch_disabled"}
+	err := tx.QueryRow(ctx, `SELECT revision,automatic_launch_enabled,qualification_id::text FROM project_routine_execution_settings WHERE project_id=$1`, project).Scan(&out.Revision, &out.ConsentEnabled, &out.QualificationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, nil
+	}
+	if err != nil || !out.ConsentEnabled {
+		return out, err
+	}
+	var active bool
+	if err = tx.QueryRow(ctx, `SELECT state<>'archived' AND deleted_at IS NULL FROM nodes WHERE id=$1`, project).Scan(&active); err != nil {
+		return out, err
+	}
+	if !active {
+		out.WaitReason = "project_unavailable"
+		return out, nil
+	}
+	if out.QualificationID == nil {
+		out.WaitReason = "qualification_unavailable"
+		return out, nil
+	}
+	_, out.WaitReason, err = qualifiedTx(ctx, tx, tenantID, project, *out.QualificationID, reader)
+	out.AutomaticLaunchEnabled = err == nil && out.WaitReason == ""
+	return out, err
+}
+
+func InteractivePerson(p tenant.Principal) bool {
+	return p.Kind == tenant.Person && p.BrowserSession && p.KeyID == "" && p.AuthKeyID == ""
+}
+func RoutineAdministratorTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) (bool, error) {
+	effective, err := authz.EffectiveTx(ctx, tx, p, project)
+	admin := func(role *authz.RoleRef) bool { return role != nil && (role.Key == "owner" || role.Key == "admin") }
+	return admin(effective.Workspace.Role) || effective.Project != nil && admin(effective.Project.Role), err
+}
+
+// RecordQualificationTx is an internal controlled-release seam, deliberately
+// absent from the routine HTTP surface. Existing workspace releases.deploy
+// authority and an interactive canonical person must record both separately
+// obtained acceptance pins; routine/custom grants cannot attest qualification.
+// The controller/OPS integration owns the evidence behind those immutable pins.
+func RecordQualificationTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Qualification) error {
+	if !InteractivePerson(p) {
+		return authz.ErrForbidden
+	}
+	if err := FenceExecutionTx(ctx, tx, p.TenantID, q.ProjectID); err != nil {
+		return err
+	}
+	canonical, err := routineCanonicalPerson(ctx, tx, p)
+	if err != nil {
+		return err
+	}
+	if canonical != p.ID {
+		return authz.ErrForbidden
+	}
+	if err := authz.RequireTx(ctx, tx, p, "releases.deploy", authz.Scope{}); err != nil {
+		return err
+	}
+	admin, err := RoutineAdministratorTx(ctx, tx, p, "")
+	if err != nil {
+		return err
+	}
+	if !admin {
+		return authz.ErrForbidden
+	}
+	if !workorders.UUID(q.ID) || !workorders.UUID(q.OwnerPersonID) || !shaPin(q.PolicyDigest) || !validRuntime(q.Runtime) || !shaPin(q.CoordinatorAcceptance) || !shaPin(q.OPSAttestation) {
+		return workorders.Fail(400, "invalid_qualification")
+	}
+	owner, policy, err := QualificationPolicyTx(ctx, tx, p.TenantID, q.ProjectID)
+	if err != nil {
+		return err
+	}
+	if q.OwnerPersonID != owner || q.PolicyDigest != policy {
+		return workorders.Fail(409, "qualification_policy_changed")
+	}
+	modes, _ := json.Marshal(q.Runtime.BudgetModes)
+	capabilities, _ := json.Marshal(q.Runtime.Capabilities)
+	_, err = tx.Exec(ctx, `INSERT INTO routine_execution_qualifications(tenant_id,id,project_id,owner_person_id,policy_digest,server_digest,daemon_digest,capability_digest,host_mapping_digest,budget_modes,capabilities,coordinator_acceptance,ops_attestation,recorded_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, p.TenantID, q.ID, q.ProjectID, q.OwnerPersonID, q.PolicyDigest, q.Runtime.ServerDigest, q.Runtime.DaemonDigest, q.Runtime.CapabilityDigest, q.Runtime.HostMappingDigest, modes, capabilities, q.CoordinatorAcceptance, q.OPSAttestation, p.ID)
+	if err != nil {
+		return err
+	}
+	_, err = events.Append(ctx, tx, p, events.Change{NodeID: &q.ProjectID, Type: "routine.qualification_recorded", After: map[string]any{"qualification_id": q.ID}})
+	return err
+}
+
+type ExecutionSettingsInput struct {
+	ExpectedRevision       *int64  `json:"expected_revision"`
+	AutomaticLaunchEnabled *bool   `json:"automatic_launch_enabled"`
+	QualificationID        *string `json:"qualification_id"`
+}
+
+// WriteExecutionSettingsTx takes its fences before current authority and rows.
+// No process control or accounting deletion is performed on disable.
+func WriteExecutionSettingsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, in ExecutionSettingsInput, reader ExecutionRuntimeReader) (ExecutionSettings, error) {
+	var out ExecutionSettings
+	if !InteractivePerson(p) {
+		return out, workorders.Fail(403, "interactive_person_required")
+	}
+	if in.ExpectedRevision == nil || *in.ExpectedRevision < 0 || in.AutomaticLaunchEnabled == nil || in.QualificationID != nil && !workorders.UUID(*in.QualificationID) {
+		return out, workorders.Fail(400, "invalid_execution_settings")
+	}
+	if err := FenceExecutionTx(ctx, tx, p.TenantID, project); err != nil {
+		return out, err
+	}
+	person, err := routineCanonicalPerson(ctx, tx, p)
+	if err != nil {
+		return out, err
+	}
+	for _, permission := range []string{"harness.control", "run.create"} {
+		if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: project}); err != nil {
+			return out, err
+		}
+	}
+	admin, err := RoutineAdministratorTx(ctx, tx, p, project)
+	if err != nil {
+		return out, err
+	}
+	var owner *string
+	err = tx.QueryRow(ctx, `SELECT owner_person_id::text FROM project_lead_settings WHERE project_id=$1`, project).Scan(&owner)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return out, err
+	}
+	if !admin && (owner == nil || *owner != person) {
+		return out, authz.ErrForbidden
+	}
+	var revision int64
+	err = tx.QueryRow(ctx, `SELECT revision FROM project_routine_execution_settings WHERE project_id=$1 FOR NO KEY UPDATE`, project).Scan(&revision)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return out, err
+	}
+	if revision != *in.ExpectedRevision {
+		return out, workorders.Fail(409, "stale_revision")
+	}
+	if *in.AutomaticLaunchEnabled {
+		if in.QualificationID == nil {
+			return out, workorders.Fail(409, "qualification_unavailable")
+		}
+		_, reason, err := qualifiedTx(ctx, tx, p.TenantID, project, *in.QualificationID, reader)
+		if err != nil {
+			return out, err
+		}
+		if reason != "" {
+			return out, workorders.Fail(409, reason)
+		}
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO project_routine_execution_settings(tenant_id,project_id,automatic_launch_enabled,qualification_id,updated_by) VALUES($1,$2,$3,$4,$5) ON CONFLICT(tenant_id,project_id) DO UPDATE SET revision=project_routine_execution_settings.revision+1,automatic_launch_enabled=EXCLUDED.automatic_launch_enabled,qualification_id=EXCLUDED.qualification_id,updated_by=EXCLUDED.updated_by,updated_at=clock_timestamp()`, p.TenantID, project, *in.AutomaticLaunchEnabled, in.QualificationID, p.ID)
+	if err != nil {
+		return out, err
+	}
+	out, err = ProjectExecutionTx(ctx, tx, p.TenantID, project, reader)
+	if err != nil {
+		return out, err
+	}
+	_, err = events.Append(ctx, tx, p, events.Change{NodeID: &project, Type: "routine.execution_settings_changed", Before: map[string]any{"revision": revision}, After: out})
+	return out, err
+}
+
+func routineCanonicalPerson(ctx context.Context, tx pgx.Tx, p tenant.Principal) (string, error) {
+	id, err := modelprefs.CanonicalPerson(ctx, tx, p.ID)
+	if err != nil {
+		return "", err
+	}
+	if p.Kind != tenant.Person || id == nil {
+		return "", authz.ErrForbidden
+	}
+	return *id, nil
 }

@@ -7120,6 +7120,18 @@
     ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"a release no record has reported on says \"not recorded\" in the same four rows","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 1024 dark sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 1024 light sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 1440 dark sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 1440 light sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 390 dark sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 390 light sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1024 dark en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1024 light en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -7133,6 +7145,8 @@
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 light de)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"with motion › Replay opens at the start of the latest release and auto-plays once per session","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"without a recorded run every mode shows the empty state and no sample data, until the first run is recorded","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-guarantee.spec.ts","name":"dark 1600: listening status in the list and the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14124,6 +14138,10 @@
     ,
     {"kind":"node","file":"tests/multiple-account-pairing.test.ts","name":"pairing approves every distinct isolated home and rejects a duplicate or default home","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/no-sample-data.test.ts","name":"the guard catches what it is meant to catch","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/no-sample-data.test.ts","name":"web/src has no example, sample, demo or mock data and imports none","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/no-shift-rules.test.ts","name":"worker guidance permits downward growth and scopes fixed-frame measurements to pattern B","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/outline.test.ts","name":"collapsed rows hide children; unloaded children show skeletons; create goes first","tier":"GATED-FULL"}
@@ -15681,6 +15699,8 @@
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"the run picker stays mounted through loading and errors","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"where the time went splits the critical path and lists the incident and the biggest waits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"without a recorded run every mode is empty with no data or choices; a recorded run is shown","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"German numbers use the German decimal comma and impersonal words","tier":"ESSENTIAL"}
     ,

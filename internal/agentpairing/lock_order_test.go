@@ -55,6 +55,8 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"recurrences/module.go:create":                      "recurrence.lock",
 		"recurrences/module.go:update":                      "recurrence.lock",
 		"recurrences/module.go:setPaused":                   "recurrence.lock",
+		"recurrences/consent.go:RequireExecutionConsentTx":  "recurrence.lock",
+		"recurrences/consent.go:writeExecutionConsent":      "recurrence.lock",
 		"recurrences/guardrails.go:putGuardrails":           "recurrence.lock",
 		"recurrences/guardrails.go:recordGuardrailDenial":   "recurrence.lock",
 		"recurrences/engine.go:RunTenant":                   "recurrence.lock",
@@ -65,6 +67,8 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"recurrences/occurrence.go:runNow":                  "recurrence.lock",
 		"operatoractor/actor.go:Ensure":                     "operator.EnsureWithProduction",
 		"operatoractor/actor.go:EnsureWithProduction":       "tree.Mutation",
+
+		"recurrences/engine.go:syncSubscriptionPublications": "recurrence.lock",
 
 		"nodes/bulk.go:applyBulk":                     "pairing.Lock",
 		"nodes/module.go:lockTree":                    "tree.Mutation",
