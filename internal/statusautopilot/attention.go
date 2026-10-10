@@ -582,6 +582,11 @@ func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			}
 			membershipChange = &change
 		} else if item.To == "no_release_needed" {
+			// A captured release action must never turn into content-work marking
+			// when its planning release disappears before the final write.
+			if in.ReleaseID != "" || in.ReleaseRevision != 0 || in.ReleaseProjectRevision != 0 {
+				return events.ErrConflict
+			}
 			if c.Node.Fields == nil {
 				c.Node.Fields = map[string]json.RawMessage{}
 			}

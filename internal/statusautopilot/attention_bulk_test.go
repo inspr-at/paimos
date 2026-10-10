@@ -623,4 +623,14 @@ func TestAttentionWithoutPlanningReleaseMarksNoReleaseNeededAndUndoes(t *testing
 	if n := f.state(id); noReleaseNeeded(n) || !n.Marks["missed_release"] || n.State != "done" {
 		t.Fatalf("fallback undo fields: %+v", n)
 	}
+	planningAttentionRelease(f)
+	captured := attentionRead(f, f.p, "").Items[0].attentionInput
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE journey_projects SET current_release_node_id=NULL WHERE project_node_id=$1`, f.project)
+		return err
+	})
+	stale := attentionWrite(f, f.p, "apply", captured)[0]
+	if stale.OK || !strings.Contains(stale.Error, "changed") || noReleaseNeeded(f.state(id)) {
+		t.Fatalf("release action silently became content marking: %+v", stale)
+	}
 }
