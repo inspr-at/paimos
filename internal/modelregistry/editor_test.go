@@ -402,6 +402,19 @@ func TestEditorMiddlewarePersonHeadersAndPermissionMatrix(t *testing.T) {
 		h.handler.ServeHTTP(w, r)
 		editorError(t, w, 403, "agent key scope required")
 	}
+	// AEON-1146 permits preference reads for coordinator ceilings. Establish
+	// that ceiling explicitly after proving the ordinary key's denials above.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=$2 WHERE principal_id=$1`, agent.ID, authz.CoordinatorKeyScopes)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/api/model-preferences", nil)
+	r.Header.Set("Authorization", "Bearer aeon_"+prefix+"_editor-fixture")
+	w = httptest.NewRecorder()
+	h.handler.ServeHTTP(w, r)
+	editorDecode[preferenceDocument](t, w)
 }
 
 func linkEditorPerson(t *testing.T, p tenant.Principal, from, to string) {

@@ -878,6 +878,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRankDrainGrantAndStaleProbe","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestReadinessAndHarnessHealthShareRoutingSignal","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestReadinessCheckGenerationAndRelinkInvalidate","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestReadinessCheckOwnerCoalescingGapAndAudit","tier":"GATED-FULL"}
@@ -3573,6 +3575,8 @@
     {"kind":"go","package":"internal/auth","name":"TestMeEmptyScopeKeyWithoutBindings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestMePublicSignInConfig","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestModelPreferenceReadsRetainOrdinaryKeyCeiling","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestNativeCandidateArtifactAgentCeiling","tier":"GATED-FULL"}
     ,
@@ -7264,7 +7268,11 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalThinkingWriteKeepsNativeEffort","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelAllowanceUnknownAndMeasuredLimit","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelKeyMatchesAliasesAndAPIIDs","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelWaitReasonsRespectCurrentAccountSharing","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestNewHarnessProfileValidation","tier":"GATED-FULL"}
     ,

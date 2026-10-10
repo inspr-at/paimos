@@ -93,7 +93,7 @@ func TestCoordinatorKeysThroughRealHandlers(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		scopes []string
-	}{{"historical", authz.CoordinatorBaseScopes}, {"current", authz.CoordinatorKeyScopes}} {
+	}{{"workstation-agents", authz.CoordinatorBaseScopes}, {"aeon-coordinator", authz.CoordinatorKeyScopes}} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, humanCreator := range []bool{false, true} {
 				name, actor := tc.name+"-operator", tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}
@@ -115,6 +115,9 @@ func TestCoordinatorKeysThroughRealHandlers(t *testing.T) {
 				}
 				call(t, key.Token, http.MethodGet, "/api/models/resolve?role=build-hard", http.StatusOK)
 				call(t, key.Token, http.MethodGet, "/api/models", http.StatusOK)
+				for _, path := range []string{"/api/model-preferences", "/api/model-preferences/board", "/api/model-preferences/coverage", "/api/model-preferences/evidence", "/api/model-preferences/simple", "/api/model-preferences/situations"} {
+					call(t, key.Token, http.MethodGet, path, http.StatusOK)
+				}
 				paths := []string{
 					"/api/rules/layers",
 					"/api/rules/sets?layer_id=" + layer.ID,
@@ -137,6 +140,7 @@ func TestCoordinatorKeysThroughRealHandlers(t *testing.T) {
 				}
 				call(t, key.Token, http.MethodPost, "/api/rules/layers", http.StatusForbidden)
 				call(t, key.Token, http.MethodPost, "/api/models", http.StatusForbidden)
+				call(t, key.Token, http.MethodPut, "/api/model-preferences", http.StatusForbidden)
 				// Stored scopes remain intact. The next real request must observe
 				// removal of all live bindings for either kind of coordinator key.
 				if _, err := adminPool.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, tenantID, key.PrincipalID); err != nil {
@@ -144,6 +148,7 @@ func TestCoordinatorKeysThroughRealHandlers(t *testing.T) {
 				}
 				call(t, key.Token, http.MethodGet, "/api/models/resolve?role=build-hard", http.StatusForbidden)
 				call(t, key.Token, http.MethodGet, "/api/models", http.StatusForbidden)
+				call(t, key.Token, http.MethodGet, "/api/model-preferences/simple", http.StatusForbidden)
 				call(t, key.Token, http.MethodGet, "/api/rules/layers", http.StatusForbidden)
 				// A different, narrower live role is not a coordinator binding.
 				if _, err := adminPool.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, tenantID, key.PrincipalID, nodeReaderRole); err != nil {
@@ -170,6 +175,37 @@ func TestCoordinatorKeysThroughRealHandlers(t *testing.T) {
 	}
 	call(t, creatorCapped.Token, http.MethodGet, "/api/models/resolve?role=build-hard", http.StatusForbidden)
 	call(t, creatorCapped.Token, http.MethodGet, "/api/rules/layers", http.StatusForbidden)
+}
+
+// Risk: enabling coordinator preference reads broadens the ordinary key's
+// route ceiling, even when its name resembles a production coordinator.
+func TestModelPreferenceReadsRetainOrdinaryKeyCeiling(t *testing.T) {
+	m, owner := keyFixture(t)
+	mux := http.NewServeMux()
+	modelregistry.New(m.pool).Mount(mux)
+	handler := m.Middleware(mux)
+	for _, name := range []string{"ordinary model reader", "workstation-agents", "aeon-coordinator"} {
+		t.Run(name, func(t *testing.T) {
+			key := decodeKey(t, keyRequest(m, owner, map[string]any{"name": name, "scopes": []string{"models.read"}}))
+			call := func(path string) *httptest.ResponseRecorder {
+				r := httptest.NewRequest(http.MethodGet, path, nil)
+				_, r.Pattern = mux.Handler(r)
+				r.Header.Set("Authorization", "Bearer "+key.Token)
+				out := httptest.NewRecorder()
+				handler.ServeHTTP(out, r)
+				return out
+			}
+			if out := call("/api/models/resolve?role=build&mode=placement"); out.Code != http.StatusOK {
+				t.Fatalf("ordinary placement read: %d %s", out.Code, out.Body.String())
+			}
+			for _, path := range []string{"/api/model-preferences", "/api/model-preferences/board", "/api/model-preferences/coverage", "/api/model-preferences/evidence", "/api/model-preferences/simple", "/api/model-preferences/situations"} {
+				out := call(path)
+				if out.Code != http.StatusForbidden || !strings.Contains(out.Body.String(), "agent key scope required") {
+					t.Fatalf("ordinary preference ceiling %s: %d %.220s", path, out.Code, out.Body.String())
+				}
+			}
+		})
+	}
 }
 
 func workspacePermissions(t *testing.T, tenantID, principalID string) []string {
