@@ -224,7 +224,8 @@ elif tool == 'git':
             # Only the subprocess's PATH changes; neither Docker nor a binary
             # runs. The real shell orchestrator must select both immutable IDs.
             completed = subprocess.run(['bash', str(script), self.latest_tag, self.latest_digest],
-                env={**os.environ, 'PATH': str(tools) + os.pathsep + os.environ['PATH']},
+                env={**os.environ, 'PATH': str(tools) + os.pathsep + os.environ['PATH'],
+                     'GITHUB_STEP_SUMMARY': str(root / 'summary')},
                 capture_output=True, text=True, timeout=15, check=False)
             calls = [json.loads(line) for line in log.read_text().splitlines()]
             return completed, calls
