@@ -50,7 +50,8 @@ func TestRoutineExecutionSettingsRequirePersonAndExactQualification(t *testing.T
 	bearer := f.person
 	bearer.BrowserSession = false
 	request(bearer, 0, true, uid(), 403)
-	request(f.foreign, 0, true, uid(), 403)
+	// Foreign project identities stay hidden by the existing tenant RLS.
+	request(f.foreign, 0, true, uid(), 404)
 	request(f.person, 0, true, nil, 409)
 	request(f.person, 0, true, uid(), 409)
 	q := modelregistry.Qualification{ID: uid(), ProjectID: f.project, Runtime: runtime, CoordinatorAcceptance: strings.Repeat("e", 64), OPSAttestation: strings.Repeat("f", 64)}

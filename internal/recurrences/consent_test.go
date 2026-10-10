@@ -234,6 +234,12 @@ func TestRoutineConsentRechecksOwnerBehindAccessFence(t *testing.T) {
 	f, in, q, reader := consentFixture(t)
 	enableConsentProject(t, f, q, reader)
 	r := f.create(in)
+	// Retain another owner so this revocation obeys the last-owner guard.
+	var retainedOwner string
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Synthetic retained owner') RETURNING id::text`, f.p.TenantID).Scan(&retainedOwner)
+	})
+	dbtest.BindRole(t, f.d, f.p.TenantID, retainedOwner, "owner")
 	ctx, cancel := context.WithTimeout(dbtest.Seed(t.Context()), 15*time.Second)
 	defer cancel()
 	holder, err := f.d.App.Begin(ctx)
