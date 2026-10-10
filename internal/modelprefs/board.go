@@ -180,6 +180,11 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 	if s.Person != nil && row.PreferenceOf.Source == "person" {
 		owner = *s.Person
 	}
+	if s.Person != nil {
+		if own, ok := boardOrder(s, *s.Person, column, q.Situation); ok && own.Rank != nil {
+			owner = *s.Person
+		}
+	}
 	owned := s
 	if owner.Scope != "person" {
 		owned.Person = nil

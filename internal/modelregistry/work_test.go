@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -354,6 +355,10 @@ func TestModelsV2RolesRoutesAndWait(t *testing.T) {
 			return err
 		}
 		until = now.Add(time.Hour)
+		start, _, err := agentplan.LocalDay(now, "UTC")
+		if err != nil {
+			return err
+		}
 		schedule := capacity.DefaultSchedule("UTC")
 		schedule.Override = "sprint"
 		schedule.OverrideUntil = &until
@@ -362,7 +367,7 @@ func TestModelsV2RolesRoutesAndWait(t *testing.T) {
 		for _, h := range []string{"claude", "cursor", "codex"} {
 			var id string
 			if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,state,last_probe_at,last_probe_ok,last_daemon_generation,owner_person_id,linked_at)
-    VALUES($1,$2,$2,'models-v2',$3,$2,'available',$4,true,'v2-generation',$5,$6) RETURNING id::text`, admin.TenantID, h, runner.ID, now, admin.ID, now.Add(-2*time.Minute)).Scan(&id); err != nil {
+    VALUES($1,$2,$2,'models-v2',$3,$2,'available',$4,true,'v2-generation',$5,$6) RETURNING id::text`, admin.TenantID, h, runner.ID, now, admin.ID, start.Add(-time.Hour)).Scan(&id); err != nil {
 				return err
 			}
 			accounts[h] = id
@@ -371,11 +376,22 @@ func TestModelsV2RolesRoutesAndWait(t *testing.T) {
 			}
 		}
 		for _, tc := range []struct{ role, author, family string }{
-			{"build", "", "anthropic"}, {"build-hard", "", "anthropic"}, {"scout", "", "openai"}, {"mechanical", "", "openai"}, {"review-gate", "openai", "anthropic"}, {"review-gate-security", "anthropic", "openai"},
+			{"build", "", "anthropic"}, {"build-hard", "", "anthropic"}, {"scout", "", "openai"}, {"mechanical", "", "openai"}, {"review-gate", "openai", "anthropic"}, {"review-gate", "anthropic", ""}, {"review-gate-security", "openai", ""}, {"review-gate-security", "anthropic", ""},
 		} {
 			got, err := ResolveWork(ctx, tx, admin, WorkQuery{Role: tc.role, AuthorFamily: tc.author}, now)
 			if err != nil {
 				return err
+			}
+			if tc.family == "" {
+				if got.Profile != nil || !got.OwnerRequired || len(got.Trace.QualifyingAccountIDs) != 0 {
+					t.Fatalf("unqualified reviewer ran: %+v", got)
+				}
+				for _, candidate := range got.Ladder {
+					if candidate.Selected {
+						t.Fatalf("Wait selected reviewer: %+v", candidate)
+					}
+				}
+				continue
 			}
 			if got.Profile == nil || got.Profile.Family != tc.family || got.OwnerRequired || len(got.Trace.QualifyingAccountIDs) == 0 {
 				t.Fatalf("%s unknown quota: %+v", tc.role, got)
@@ -402,10 +418,21 @@ func TestModelsV2RolesRoutesAndWait(t *testing.T) {
 	}
 	inRegistry(t, admin, func(tx pgx.Tx) error {
 		ctx := tenant.WithPrincipal(t.Context(), admin)
-		// A measured cap skips only Claude's route, before the next model step.
-		if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','',10080,100,$3,$4,'harness')`, admin.TenantID, accounts["claude"], until, now); err != nil {
+		// A fresh daily cap skips only Claude's route, before the next model.
+		start, end, err := agentplan.LocalDay(now, "UTC")
+		if err != nil {
 			return err
 		}
+		until = end
+		for _, reading := range []struct {
+			at   time.Time
+			used float64
+		}{{start.Add(time.Minute), 40}, {now, 50}} {
+			if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','',10080,$3,$4,$5,'harness')`, admin.TenantID, accounts["claude"], reading.used, end.Add(5*24*time.Hour), reading.at); err != nil {
+				return err
+			}
+		}
+
 		got, err := ResolveWork(ctx, tx, admin, WorkQuery{Role: "build"}, now)
 		if err != nil {
 			return err
@@ -413,7 +440,7 @@ func TestModelsV2RolesRoutesAndWait(t *testing.T) {
 		if got.Profile == nil || got.Profile.ID != cursor.ID || len(got.Trace.Held) != 0 || len(got.Ladder) < 2 {
 			t.Fatalf("sibling route was skipped: %+v", got)
 		}
-		if got.Ladder[0].Selected || !strings.Contains(got.Ladder[0].SkipReasons[0], until.UTC().Format(time.RFC3339)) {
+		if got.Ladder[0].Selected || !strings.Contains(got.Ladder[0].SkipReasons[0], "daily cap until "+until.UTC().Format(time.RFC3339)) {
 			t.Fatalf("missing cap/reset cause: %+v", got.Ladder)
 		}
 		if _, err := tx.Exec(ctx, `UPDATE model_pref_orders SET rank=ARRAY['anthropic:opus'] WHERE column_key='other' AND situation='first'`); err != nil {

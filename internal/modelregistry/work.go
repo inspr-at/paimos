@@ -16,6 +16,7 @@ import (
 )
 
 type WorkQuery struct {
+	Escalation       bool
 	ReviewPolicies   []reviewgate.FamilyPolicy
 	TicketID         string
 	Role             string
@@ -38,10 +39,8 @@ type WorkQuery struct {
 	// Column and OffHarnesses are supplied by shadow round routing only.
 	Column       string
 	OffHarnesses []string
-	// ExplicitBoard marks a caller that asked for board placement with
-	// mode=placement. A closed (revision-0) board answers it; dispatch,
-	// review and escalation callers leave it false and keep the legacy ladder
-	// until the board is adopted.
+	// ExplicitBoard is retained for placement callers during the S2 transition;
+	// all live choices now use Models regardless of adoption revision.
 	WorkspaceOnly bool
 	ExplicitBoard bool
 }

@@ -23,22 +23,23 @@ type preferenceOwner struct {
 	Source string  `json:"source"`
 }
 
-// boardDispatchAdopted reports whether dispatch should leave the legacy ladder.
-// Opening the board inserts a revision-0 workspace profile and no orders.
-// That initializer is not an adoption. A migrated profile keeps revision 1.
-func boardDispatchAdopted(s modelprefs.BoardState) bool {
-	if len(s.Orders) > 0 || len(s.Rules) > 0 || s.Workspace.Revision > 0 {
-		return true
-	}
-	return s.Person != nil && s.Person.Revision > 0
-}
-
-// boardInitialized reports whether any board profile exists, adopted or not.
-func boardInitialized(s modelprefs.BoardState) bool {
-	return s.Workspace.ID != "" || s.Person != nil && s.Person.ID != ""
-}
-
 func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, excluded []string) (*WorkResolution, error) {
+	// Bound account/window fan-out before any availability projection.
+	var large bool
+	if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM (SELECT 1 FROM agent_accounts LIMIT 257) a)>256 OR (SELECT count(*) FROM (SELECT 1 FROM account_allowance_windows WHERE NOT pairing_verification AND NOT capacity_retired AND removed_at IS NULL LIMIT 4097) w)>4096`).Scan(&large); err != nil {
+		return nil, err
+	}
+	if large {
+		return nil, modelprefs.ErrBoardBounds
+	}
+	excludedIdentity := map[string]bool{}
+	for _, id := range excluded {
+		var harness, model, effort string
+		if err := tx.QueryRow(ctx, `SELECT harness,model,effort FROM model_profiles WHERE id=$1::uuid`, id).Scan(&harness, &model, &effort); err != nil {
+			return nil, err
+		}
+		excludedIdentity[harness+":"+model+":"+effort] = true
+	}
 	if q.PersonID == nil && !q.WorkspaceOnly {
 		person, err := currentPreferencePerson(ctx, tx, p)
 		if err != nil {
@@ -142,7 +143,10 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 					}
 				}
 			}
-			if slices.Contains(excluded, profile.ID) {
+			if q.Escalation && escalationRank(profile, q.Area) >= 99 {
+				reasons = append(reasons, "not a stronger route for this work area")
+			}
+			if slices.Contains(excluded, profile.ID) || excludedIdentity[profile.Harness+":"+profile.Model+":"+profile.Effort] {
 				reasons = append(reasons, "already attempted")
 			}
 			ids := []string{}
@@ -156,7 +160,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 					}
 				} else {
 					ids, err = boardRouteAccounts(ctx, tx, profile, q.ProjectID, requirement, now)
-					if err == nil && q.Situation == "stuck" && len(excluded) > 0 {
+					if err == nil && q.Escalation {
 						ids, err = agentaccounts.EscalationRoomIDs(ctx, tx, ids, now)
 					}
 				}

@@ -4,6 +4,7 @@ package modelregistry
 import (
 	"context"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -71,7 +72,19 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	} else if board != nil {
 		out.Profile, out.Ladder, out.OwnerRequired, out.Trace, out.Residency = board.Profile, board.Ladder, board.OwnerRequired, board.Trace, board.Residency
 		if out.Profile != nil {
-			out.Account, err = agentaccounts.ReviewAccount(ctx, tx, out.Profile.ID, out.Profile.Harness, q.ProjectID, now, out.Residency)
+			var accounts []agentaccounts.Account
+			accounts, err = agentaccounts.ReviewAccounts(ctx, tx, out.Profile.ID, out.Profile.Harness, q.ProjectID, now, out.Residency)
+			for _, account := range accounts {
+				if slices.Contains(board.Trace.QualifyingAccountIDs, account.ID) {
+					out.Account = &account
+					break
+				}
+			}
+			if err == nil && out.Account == nil {
+				out.Profile = nil
+				out.OwnerRequired = true
+				out.Trace.Blocked = "no qualified review account"
+			}
 		}
 		return out, err
 	}
