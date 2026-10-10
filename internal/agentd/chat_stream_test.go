@@ -54,6 +54,34 @@ func TestChatHarnessFixtureParity(t *testing.T) {
 			}
 		})
 	}
+	for _, harness := range []string{Cursor, OpenCode, Gemini, Grok} {
+		t.Run(harness, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join("testdata", "chat-"+harness+".jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []ChatUpdate
+			p := &wireProcess{sessionID: "session-1", readDone: make(chan struct{}), observe: func(ev AdapterEvent) {
+				if ev.Chat == nil || ev.Kind != "" {
+					t.Fatal("ACP projection became durable telemetry")
+				}
+				got = append(got, *ev.Chat)
+			}}
+			p.onEvent = func(frame json.RawMessage) { p.observeChat(harness, frame) }
+			p.read(bytes.NewReader(raw))
+			want := []ChatUpdate{chatText("Hello "), chatText("world")}
+			if harness != Grok { // Confined native Grok never executes tools.
+				want = append(want, chatTool("call-1", "Bash", "in_progress"), chatState("requires_action"), chatTool("call-1", "Bash", "completed"))
+			}
+			if p.readErr != nil || !reflect.DeepEqual(got, want) || p.DroppedChatFrames() != 2 {
+				t.Fatalf("ACP projections %#v, dropped %d, err %v", got, p.DroppedChatFrames(), p.readErr)
+			}
+			encoded, _ := json.Marshal(got)
+			if bytes.Contains(encoded, []byte("PRIVATE_SENTINEL")) {
+				t.Fatal("ACP payload leaked")
+			}
+		})
+	}
 }
 
 func TestChatCapabilitiesHonorOwnedSessionControls(t *testing.T) {
@@ -66,8 +94,15 @@ func TestChatCapabilitiesHonorOwnedSessionControls(t *testing.T) {
 		{Codex, []string{"steer", "interrupt"}, ChatCapabilities{"native", true, true}},
 		{Pi, []string{"steer", "interrupt"}, ChatCapabilities{"next-step", true, true}},
 		{Claude, []string{"inbox"}, ChatCapabilities{"queue", false, true}},
-		{Grok, []string{"steer", "interrupt"}, ChatCapabilities{"queue", false, false}},
-		{Gemini, []string{"steer", "interrupt"}, ChatCapabilities{"queue", false, false}},
+		{Cursor, []string{"steer", "interrupt"}, ChatCapabilities{"queue", true, true}},
+		{OpenCode, []string{"steer", "interrupt"}, ChatCapabilities{"queue", true, true}},
+		{Grok, []string{"steer", "interrupt"}, ChatCapabilities{"queue", false, true}},
+		{Gemini, []string{"steer", "interrupt"}, ChatCapabilities{"queue", true, true}},
+		{Cursor, []string{"inbox"}, ChatCapabilities{"queue", false, true}},
+		{OpenCode, []string{"inbox"}, ChatCapabilities{"queue", false, true}},
+		{Gemini, []string{"inbox"}, ChatCapabilities{"queue", false, true}},
+		{Grok, []string{"inbox"}, ChatCapabilities{"queue", false, true}},
+		{"unknown", []string{"steer", "interrupt"}, ChatCapabilities{"queue", false, false}},
 	} {
 		if got := sessionChatCapabilities(tc.harness, tc.caps); got != tc.want {
 			t.Fatalf("%s: %#v", tc.harness, got)

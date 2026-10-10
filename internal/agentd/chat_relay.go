@@ -20,10 +20,10 @@ import (
 const chatCapability = "chat"
 
 const (
-	chatRelayLiveLimit     = 64               // pending live frames; the oldest is dropped and counted
-	chatRelayFinalLimit    = 8                // pending final answers
-	chatRelayReceiptLimit  = 32               // pending content-free receipts
-	chatRelayLiveAttempts  = 3                // a live frame is transient; give up after this many failures
+	chatRelayLiveLimit     = 64 // pending live frames; the oldest is dropped and counted
+	chatRelayFinalLimit    = 8  // pending final answers
+	chatRelayReceiptLimit  = 32 // pending content-free receipts
+	chatRelayLiveAttempts  = 3  // a live frame is transient; give up after this many failures
 	chatRelayBackoffBase   = 250 * time.Millisecond
 	chatRelayBackoffMax    = 30 * time.Second
 	chatRelayRecheck       = 15 * time.Second // unbound binding lookups, plus up to 3 s jitter
@@ -648,16 +648,20 @@ func (g *chatRelayGate) clock() time.Time {
 
 // newChatRelay delivers person inputs through the same journaled inbox
 // control as other harness input, so a crash never re-injects one.
+// Called with entry.mu held.
 func (s *Supervisor) newChatRelay(api ChatRelayAPI, entry *owned, runID string) *ChatRelay {
-	return NewChatRelay(api, entry.harness, ChatRelayOptions{
-		Deliver: func(ctx context.Context, id, body string) error {
+	opts := ChatRelayOptions{
+		Settled:     func(id string) { _ = s.forgetSettledControl(entry, "chat:"+id) },
+		Unsupported: s.chatGate.disable,
+	}
+	if entry.inboxCapable {
+		opts.Deliver = func(ctx context.Context, id, body string) error {
 			_, err := s.controlInbox(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: runID,
 				Generation: s.generation, CorrelationID: "chat:" + id, Operation: "inbox", Text: chatInputText(id, body)}, false, true)
 			return err
-		},
-		Settled:     func(id string) { _ = s.forgetSettledControl(entry, "chat:"+id) },
-		Unsupported: s.chatGate.disable,
-	})
+		}
+	}
+	return NewChatRelay(api, entry.harness, opts)
 }
 
 func chatInputText(messageID, body string) string {

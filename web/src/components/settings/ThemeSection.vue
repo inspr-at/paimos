@@ -14,7 +14,7 @@ import KeyCap from '../KeyCap.vue'
 // only renders its selectors and sends its events.
 const editor = useThemeEditor()
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
-const { items, active, draft, cursor, busy, error, message, dirty, valid, confirming, renaming, canEdit, canSave, canCreate, canChoose, canDelete, canReload } = editor
+const { items, active, draft, cursor, busy, error, message, dirty, valid, confirming, renaming, canEdit, canSave, canCreate, canChoose, canDelete, canReload, canLoadMore } = editor
 function rename(theme: ThemeRecord) {
   editor.rename(theme)
   if (renaming.value !== theme.id) return
@@ -35,7 +35,7 @@ onBeforeUnmount(() => editor.leave())
   <div class="theme-section" @keydown="keys">
     <SettingsCard title="Themes" icon="layers" anchor="themes">
       <template #lead>Choose the theme you work in. Duplicate any theme to make your own; only you see your themes.</template>
-      <template #aside><div class="theme-list-actions"><span class="pagination-slot"><button v-if="cursor" type="button" class="btn sm" :disabled="busy" @click="editor.more">Load more themes</button><span v-else class="btn sm pagination-placeholder" aria-hidden="true">Load more themes</span></span><button type="button" class="btn sm" :disabled="!canCreate" @click="editor.newTheme"><AppIcon name="plus" :size="13" />New theme</button></div></template>
+      <template #aside><div class="theme-list-actions"><span class="pagination-slot"><button v-if="cursor" type="button" class="btn sm" :disabled="!canLoadMore" @click="editor.more">Load more themes</button><span v-else class="btn sm pagination-placeholder" aria-hidden="true">Load more themes</span></span><button type="button" class="btn sm" :disabled="!canCreate" @click="editor.newTheme"><AppIcon name="plus" :size="13" />New theme</button></div></template>
       <div class="theme-status" :class="{ error: !!error }"><p :role="error ? 'alert' : 'status'">{{ error || message || (busy ? 'Loading…' : dirty ? 'Save or discard your edits before choosing another theme.' : 'Everyone starts with the workspace default.') }}</p><button type="button" class="text-link" :style="{ visibility: error && canReload ? 'visible' : 'hidden' }" :disabled="!error || !canReload" @click="editor.load">Reload themes</button></div>
       <div class="theme-list" aria-label="Themes list">
         <div v-for="theme in items" :key="theme.id" class="theme-row" :class="{ selected: theme.id === active?.theme.id }" :data-theme-id="theme.id">

@@ -3,6 +3,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { addHistoricalPeriod, businessData, mira, mockBusiness, nova, WEEK39, type BusinessMockOptions } from './business-fixtures'
+import { colourContrast } from '../src/lib/themeEngine'
 
 test.use({ timezoneId: 'Europe/Vienna' })
 
@@ -65,6 +66,14 @@ test('open periods older than a year appear in the home waiting count and week b
   await expect(queue.getByRole('link').first()).toContainText('6h 15m')
   await openWeek(page)
   await expect(page.getByRole('radio', { name: /Approvals/ })).toContainText('2')
+  // AEON-870: the count stays readable on its gold fill in both modes (WCAG AA, 4.5:1).
+  const badge = page.getByRole('radio', { name: /Approvals/ }).locator('.badge')
+  for (const mode of ['light', 'dark'] as const) {
+    await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+    const { color, background } = await badge.evaluate(el => ({ color: getComputedStyle(el).color, background: getComputedStyle(el).backgroundColor }))
+    const hex = (rgb: string) => '#' + rgb.match(/\d+/g)!.slice(0, 3).map(channel => Number(channel).toString(16).padStart(2, '0')).join('')
+    expect(colourContrast(hex(color), hex(background)), `${mode}: ${color} on ${background}`).toBeGreaterThanOrEqual(4.5)
+  }
 })
 
 test('the week grid sums per ticket and day with exact amounts', async ({ page }) => {

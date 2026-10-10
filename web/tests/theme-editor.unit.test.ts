@@ -10,7 +10,7 @@ import * as api from '../src/lib/themes'
 import { themeCss } from '../src/lib/themeEngine'
 import { agentTheme, resetAgentTheme, restoreAgentTheme } from '../src/lib/agentTheme'
 import {
-  ERROR_CLASSES, EVENT_TYPES, OPERATION_KINDS, PHASES, SELECTION, canChoose, canCreate, canDelete, canDuplicate, canEdit, canReload, canSave,
+  ERROR_CLASSES, EVENT_TYPES, OPERATION_KINDS, PHASES, SELECTION, canChoose, canCreate, canDelete, canDuplicate, canEdit, canLoadMore, canReload, canSave,
   createThemeEditor, errorClass, feedback, initialState, isConflicted, isDirty, notices, phase, transition, useThemeEditor,
   type ErrorClass, type Operation, type Recovery, type Rights, type ThemeEditorState, type ThemeEvent, type Unfinished,
 } from '../src/stores/themeEditor'
@@ -203,8 +203,10 @@ const reason = (kind: ErrorClass) => kind === 'network' ? 'The theme service cou
 
 /** A notice must survive unrelated work: a page that arrives or fails. */
 function durable(state: ThemeEditorState, text: string) {
+  // The claim needs a page that really starts; a state that cannot page proves nothing.
+  expect(canLoadMore(state), 'durable() needs a state whose pagination can start').toBe(true)
   const paging = transition(state, { type: 'more' })
-  if (paging === state) return
+  expect(paging.pending?.op.kind).toBe('more')
   for (const end of [result(paging.pending!.token, { items: [LATER], next_cursor: null }), failed(paging.pending!.token, 503)]) {
     const after = transition(paging, end)
     expect(feedback(after)).toContain(text)
@@ -300,7 +302,7 @@ const OUTCOMES: Record<PendingName, Outcomes> = {
       expect(after.items.find(item => item.id === 'default')!.revision).toBe(3); expect(keys(after)).toEqual(['copper'])
     },
     ...write({
-      missing: recovers('default', 'create', 'The workspace default changed elsewhere. Reload themes, then create a new theme again.', after => { expect(canCreate(after)).toBe(false); expect(canChoose(after)).toBe(true) }),
+      missing: recovers('default', 'create', 'The workspace default no longer exists. Reload themes, then create a new theme again.', after => { expect(canCreate(after)).toBe(false); expect(canChoose(after)).toBe(true) }),
       conflict: recovers('default', 'create', 'The workspace default changed elsewhere. Reload themes, then create a new theme again.', after => expect(canCreate(after)).toBe(false)),
     }, kind => fails(`The workspace default could not be read. ${reason(kind)}`, after => expect(canCreate(after)).toBe(true))),
   },
@@ -440,6 +442,16 @@ describe('theme editor state model', () => {
   it.each(outcomes)('%s → %s with a stale token is ignored', (name, outcome) => {
     const before = PENDING[name]
     expect(transition(before, eventFor(name, outcome, before.pending!.token - 1))).toBe(before)
+  })
+})
+
+// AEON-870: the Load more control and the reducer share one condition, so the
+// control is never enabled for a press that does nothing.
+describe('theme editor pagination control', () => {
+  it.each(Object.keys(STATES))('%s: Load more is enabled exactly when pagination starts', name => {
+    const before = STATES[name]!, after = transition(before, { type: 'more' })
+    expect(canLoadMore(before)).toBe(after !== before)
+    if (after !== before) expect(after.pending?.op).toEqual({ kind: 'more', after: before.cursor })
   })
 })
 

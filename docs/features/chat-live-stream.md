@@ -59,8 +59,9 @@ migration or release version change is required for this server slice.
 
 ## Daemon relay (AEON-1074)
 
-agentd relays the chat of its own runs. A Claude, Codex or Pi run that accepts
-inbox input registers with the `chat` capability. The server's chat-only
+agentd relays the chat of its own runs. A run whose harness supplies the S1
+stream and may hold a chat binding (Claude, Codex, Pi, Cursor or Grok)
+registers with the `chat` capability. The server's chat-only
 registration check admits such a managed run, or an unmanaged registration with
 `inbox`, under the same conditions: the caller is the session's agent
 principal with its private worker lease, an owner person is set, and the
@@ -86,12 +87,12 @@ the run.
 Claude this is the SDK `result` of a successful turn. For Codex it is the last
 completed agent message of the owned turn, released by that turn's successful
 `turn/completed`; commentary-phase messages are skipped. Deltas are never
-assembled into a final. Pi has no such marker, so Pi runs deliver live frames
-only. Each final carries a client message ID derived from the session and
+assembled into a final. Pi and the ACP harnesses have no such marker, so their
+runs deliver live frames only. Each final carries a client message ID derived from the session and
 stream sequence, so a retried final persists once.
 
-**Person inputs** are read from the worker outbox and written to the harness
-only while it is idle, through the same journaled inbox control as other
+**Person inputs** are read from the worker outbox and, for runs that accept
+inbox input, written to the harness only while it is idle, through the same journaled inbox control as other
 harness input, so a crash never re-injects one. **Delivered** is reported when
 the harness starts a turn after that write, **read** when that turn completes.
 Fetching or queueing an input is no evidence. If no turn starts within two

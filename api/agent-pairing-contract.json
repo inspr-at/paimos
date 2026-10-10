@@ -453,6 +453,35 @@
       "events_per_subscriber": 32
     },
     "unknown_frames": "Valid but unsupported or invalid chat shapes are discarded and counted per owned wire process; no payload is logged. Malformed JSON and transport bounds retain existing fail-closed lifecycle handling.",
-    "ownership": "Codex frames must match the owned thread and turn. Claude forwards only main-session output. Pi is scoped to its owned RPC child. Subscribing grants no control authority and never acknowledges or resolves permission requests."
+    "ownership": "Codex frames must match the owned thread and turn. Claude forwards only main-session output. Pi is scoped to its owned RPC child. Subscribing grants no control authority and never acknowledges or resolves permission requests.",
+    "adapters": {
+      "cursor": {
+        "protocol": "ACP",
+        "steer": "queue",
+        "interrupt": "owned session/cancel acknowledgement",
+        "deltas": true
+      },
+      "opencode": {
+        "protocol": "ACP",
+        "steer": "queue",
+        "interrupt": "owned session/cancel acknowledgement",
+        "deltas": true
+      },
+      "gemini": {
+        "protocol": "ACP",
+        "steer": "queue",
+        "interrupt": "owned session/cancel acknowledgement; never implicit interrupt-and-replace",
+        "deltas": true
+      },
+      "grok": {
+        "protocol": "pinned confined native ACP on macOS",
+        "steer": "queue",
+        "interrupt": false,
+        "deltas": true,
+        "tools": "Unavailable; tool and permission requests retain the existing confinement failure."
+      }
+    },
+    "queued_input": "Cursor, OpenCode, Gemini and Grok retain the authorized inbox lease or steer control while a turn is busy. A clean turn end wakes delivery on the same owned session. Existing durable content-free receipts prevent reinjection after a lost completion or ambiguous vendor acknowledgement; state transitions and text remain live-only. Waiting input does not block stop or interrupt. Unsupported actions return an explicit refusal. Gemini replacement is not inferred from steer: no lossy replacement action is exposed by this slice.",
+    "acp_projection": "Only exact owned session/update text content and bounded tool identity/status are projected. Display titles, arguments, results, user echoes and reasoning are excluded. Tool titles use static categories; at most 128 identities are retained per turn. Permission requests emit requires_action, never approval authority. Running/idle state follows the owned prompt lifecycle."
   }
 }

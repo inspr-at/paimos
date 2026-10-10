@@ -137,6 +137,7 @@ type owned struct {
 	capacityPending map[string]capacity.Reading
 	vendorLimit     *capacity.LimitHit
 	inboxCapable    bool
+	queueInput      bool // Owned ACP transport; input is applied only after turn end.
 	pending         []HarnessControl
 	process         Process
 	tools           *managedToolServer
@@ -1262,7 +1263,8 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if profile.Harness != Grok && !review {
 		caps = append(caps, "interrupt")
 	}
-	entry.inboxCapable = !verification && !review && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi || profile.Harness == Gemini || profile.Harness == OpenCode)
+	entry.queueInput = queuedChatHarness(profile.Harness)
+	entry.inboxCapable = !verification && !review && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi || entry.queueInput)
 	if entry.inboxCapable {
 		caps = append(caps, "inbox")
 		if !managedPolicy {
@@ -1273,7 +1275,10 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		caps = append(caps, servicetier.Capability)
 	}
 	relayAPI, relayable := s.api.(ChatRelayAPI)
-	if relayable && entry.inboxCapable && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi) && s.chatGate.enabled() {
+	// Advertise chat only for an S1-streaming harness the server's chat
+	// registration admits; person input additionally needs inbox delivery.
+	chatHarness := profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi || profile.Harness == Cursor || profile.Harness == Grok
+	if relayable && !verification && !review && chatHarness && sessionChatCapabilities(profile.Harness, caps).Deltas && s.chatGate.enabled() {
 		caps = append(caps, chatCapability)
 	}
 	registration := HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB, AccountLabel: route.AccountLabel, DisplayLabel: run.RecoveryLabel}
@@ -1983,9 +1988,24 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 		if err != nil {
 			return err
 		}
-		entry.pending = append(entry.pending, controls...)
-		for len(entry.pending) > 0 {
-			control := entry.pending[0]
+		for _, control := range controls {
+			if !slices.ContainsFunc(entry.pending, func(pending HarnessControl) bool { return pending.ID == control.ID }) {
+				entry.pending = append(entry.pending, control)
+			}
+		}
+		for index := 0; index < len(entry.pending); {
+			control := entry.pending[index]
+			entry.mu.Lock()
+			queued := entry.queueInput && control.Kind == "steer"
+			busy := entry.harness.Activity == "busy"
+			entry.mu.Unlock()
+			expired := !control.deadline.IsZero() && time.Until(control.deadline) <= 0
+			if queued && busy && !expired {
+				// Keep the original authorization and let interrupt/stop controls
+				// pass waiting input. An idle wake revisits this same control.
+				index++
+				continue
+			}
 			outcome, reason := "applied", "agentd_applied"
 			stopNow := control.Kind == "stop" && control.RequestPayload != nil && control.RequestPayload.StopNow
 			operation := control.Kind
@@ -2005,7 +2025,7 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 			}
 			_, err := s.control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
 				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: operation, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt, deadline: control.deadline}, true)
-			if (entry.managedPolicy || control.Kind == "tier") && operation != "force_stop" {
+			if (entry.managedPolicy || control.Kind == "tier" || queued) && operation != "force_stop" {
 				switch {
 				case errors.Is(err, ErrControlExpired):
 					outcome, reason, err = "rejected", "authorization_expired", nil
@@ -2034,6 +2054,12 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 			if errors.Is(err, ErrUnsupported) || errors.Is(err, ErrNotOwned) || errors.Is(err, ErrGeneration) {
 				outcome, reason, err = "rejected", "child_unavailable", nil
 			}
+			if errors.Is(err, ErrControlExpired) {
+				outcome, reason, err = "rejected", "authorization_expired", nil
+			}
+			if queued && outcome == "applied" {
+				reason = "queued_next_turn"
+			}
 			if errors.Is(err, ErrGracefulTimeout) {
 				outcome, reason, err = "rejected", "graceful_stop_timeout", nil
 			}
@@ -2058,7 +2084,7 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 			// different outcome. Retrying the same completion forever leaves
 			// every later control for this run stuck behind it.
 			if err := s.api.CompleteHarnessControl(ctx, entry.harness, control.ID, outcome, reason); err != nil && !errors.Is(err, ErrControlTerminal) {
-				if !errors.Is(err, ErrHarnessArchived) && (entry.managedPolicy || control.Kind == "force_stop" || control.Kind == "stop") {
+				if !errors.Is(err, ErrHarnessArchived) && (entry.managedPolicy || queued || control.Kind == "force_stop" || control.Kind == "stop") {
 					return ErrControlUnconfirmed
 				}
 				return err
@@ -2066,14 +2092,18 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 			if err := s.forgetSettledControl(entry, control.ID); err != nil {
 				return err
 			}
-			entry.pending = entry.pending[1:]
+			entry.pending = append(entry.pending[:index], entry.pending[index+1:]...)
 		}
 	}
 	if entry.inboxCapable {
 		// A drain returns at most one leased message and replays it until completed.
 		entry.mu.Lock()
 		busy := entry.harness.Activity == "busy"
+		queueInput := entry.queueInput
 		entry.mu.Unlock()
+		if busy && queueInput {
+			return nil // No lease is consumed and no busy prompt is replaced.
+		}
 		var items []HarnessDelivery
 		var err error
 		if api, ok := s.api.(interface {
@@ -2096,7 +2126,7 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 			entry.mu.Unlock()
 			// Keep the lease replayable until the active turn ends. Controls are
 			// serviced on every wake; waiting input never blocks that loop.
-			if busy && item.Level != "steer" {
+			if busy && (item.Level != "steer" || queueInput) {
 				continue
 			}
 			messageText := inboxMessageText(item)
@@ -2292,6 +2322,17 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	if inbox && (!entry.inboxCapable || entry.stopRequested || entry.protocolFailed || entry.budgetStopReason() != "") {
 		return Receipt{}, ErrNotOwned
 	}
+	if entry.queueInput && req.Operation == "steer" {
+		if entry.stopRequested || entry.protocolFailed || entry.budgetStopReason() != "" {
+			return Receipt{}, ErrNotOwned
+		}
+		if fromRecoveryQueue && !req.deadline.IsZero() && time.Until(req.deadline) <= 0 {
+			return Receipt{}, ErrControlExpired
+		}
+		if entry.harness.Activity == "busy" {
+			return Receipt{}, fmt.Errorf("%w: this harness accepts input after the current turn; use queued delivery", ErrUnsupported)
+		}
+	}
 	// Ordinary input cannot consume emergency control headroom. Recovery
 	// stop/interrupt remain available when ordinary replay slots are full.
 	emergency := req.Operation == "stop" || req.Operation == "interrupt" || req.Operation == "force_stop"
@@ -2337,7 +2378,8 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		ctx, cancel = context.WithDeadline(ctx, req.deadline)
 		defer cancel()
 	}
-	if inbox {
+	queuedInput := inbox || entry.queueInput && req.Operation == "steer"
+	if queuedInput {
 		// Persist uncertainty before touching the child. A crash or lost vendor
 		// response must never authorize reinjection of the same lease.
 		entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true}
@@ -2398,11 +2440,11 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		entry.mu.Lock()
 	}
 	if err != nil {
-		if inbox || ((entry.managedPolicy || req.Operation == "tier") && fromRecoveryQueue) {
+		if queuedInput || ((entry.managedPolicy || req.Operation == "tier") && fromRecoveryQueue) {
 			entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true, SettingRejected: errors.Is(err, ErrSettingRejected)}
 			_ = s.journal.Put(entry.record)
 		}
-		if inbox {
+		if queuedInput {
 			return Receipt{}, ErrControlUnconfirmed
 		}
 		return Receipt{}, err

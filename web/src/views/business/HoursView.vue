@@ -597,7 +597,7 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
 .summary-skeleton { display: inline-block; width: 260px; }
 .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-height: 48px; margin-bottom: 12px; }
 .view-seg button { gap: 6px; }
-.badge { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: var(--gold); color: var(--surface-highlight); font: 700 10px/1 var(--mono); }
+.badge { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: var(--gold); color: var(--gold-on); font: 700 10px/1 var(--mono); }
 .person-btn { gap: 7px; }
 .chev { color: var(--ink-3); }
 .week-nav { display: inline-flex; align-items: center; gap: 6px; }

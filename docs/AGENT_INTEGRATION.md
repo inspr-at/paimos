@@ -154,10 +154,12 @@ stores. Rendering preserves exact bytes; installing a preview remains explicit.
 The closed reporter harness enum changes the declared status/heartbeat contract
 from `harness-session/1.9` to `harness-session/2.0`. Existing fields and routes keep
 their shape. `Aeon-Contract` is a response header, not a required request header:
-historical registration and heartbeat bodies still work without it. Pharos and
-Janus do not decode the harness-session enum, so no coordinated rollout is
-required for their existing reporters. The worker does not update those
-repositories or deploy this draft.
+historical registration and heartbeat bodies still work without it. Historical
+PHAROS and JANUS reporters do not decode the harness-session enum. Their retired
+stage contract is separate from the [planned public tool integrations](features/web-workspace.md#planned-work)
+(AEON-820 and AEON-819): PHAROS and JANUS have their own repositories and releases,
+and PAIMOS will reach them through request → policy → approval if needed →
+execution → receipt. This harness change does not update those products or deploy them.
 
 ### Default worker launch
 
@@ -271,7 +273,13 @@ Use `--workspace-role ROLEKEY` when the agent needs workspace access. This binds
 
 Scopes are an outer ceiling. An empty list grants nothing. Unknown names and permissions that are not agent-grantable are rejected. Typical scopes are registry keys such as `nodes.read`, `nodes.write`, `inbox.send`, `intake.write`, `approvals.request`, `work_orders.write`, `run.create`, `run.claim`, `run.telemetry`, `harness.write`, and `account.manage`. For HTTP key creation, the creating principal must hold every requested scope. The operator-only `paimos agent-key create` command runs on the host and requires `--creator-id` naming an active person in the same tenant. It can create an agent principal and does not perform the HTTP creator-permission check. It validates requested scopes against the registry and records that person as creator, so the key follows their live permission ceiling.
 
-The HTTP middleware applies that ceiling before module handlers run. Routes with no agent mapping answer 403. Person sessions are governed by role instead. An approval grant cannot exceed the key. The INSPR Flow and its gate-granting operator commands are retired (AEON-723). Historic API paths retain their authenticated error envelope and reporter contract headers, but return 410. A key that already holds a registry prefix covers dotted refinements of that prefix (`nodes.read` covers `nodes.read.fields`).
+The HTTP middleware applies that ceiling before module handlers run. Routes with no agent mapping answer 403. Person sessions are governed by role instead. An approval grant cannot exceed the key. A key that already holds a registry prefix covers dotted refinements of that prefix (`nodes.read` covers `nodes.read.fields`).
+
+The historical INSPR Flow / Journey and its gate-granting operator commands
+are retired (AEON-723, [Direct Dome](https://github.com/inspr-at/paimos/releases/tag/v261007035250.0.0)).
+Historic API paths retain their authenticated error envelope and reporter
+contract headers, but return 410. [Flow 2 (AEON-821) is planned](features/web-workspace.md#planned-work)
+on the delivery engine; it grants no access through these retired commands.
 
 ## Operator project access
 
@@ -528,6 +536,10 @@ AEON-723 retires stage launches and the compiled PHAROS/JANUS stage plugins.
 The historic routes return authenticated 410 errors, retaining their reporter
 contract headers. Stored handoffs and evidence remain preserved for a later
 contract-phase migration. Work orders and harness sessions remain independent.
+
+The [planned PHAROS/JANUS tool integrations and Flow 2](features/web-workspace.md#planned-work)
+use new contracts over the delivery engine; these retired routes provide no
+launch, gate or tool execution.
 
 ## MCP
 
