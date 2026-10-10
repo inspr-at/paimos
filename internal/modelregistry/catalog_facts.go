@@ -84,8 +84,8 @@ func ResolveCatalogFacts(in []CatalogFact, route string) map[string]CatalogFact 
 			continue
 		}
 		old, ok := out[f.Fact]
-		known := len(f.Value) > 0 && string(f.Value) != "null"
-		oldKnown := len(old.Value) > 0 && string(old.Value) != "null"
+		known := !isNull(f.Value)
+		oldKnown := !isNull(old.Value)
 		if !ok || known && !oldKnown || known == oldKnown && (factRank(f.SourceKind) > factRank(old.SourceKind) || factRank(f.SourceKind) == factRank(old.SourceKind) && (f.FetchedAt.After(old.FetchedAt) || f.FetchedAt.Equal(old.FetchedAt) && f.Source < old.Source)) {
 			out[f.Fact] = f
 		}

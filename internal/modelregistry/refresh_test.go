@@ -481,6 +481,15 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestVendorListBoundsPaginationRedirectionAndSanitizedErrors(t *testing.T) {
+	// A tiny row repeated beyond the limit must be rejected before model
+	// identifiers are processed; the error cannot be an invalid-ID failure.
+	tooMany := []byte(`{"data":[` + strings.Repeat(`{},`, maxDiscoveryModels) + `{}` + `]}`)
+	if _, err := ParseProviderCatalog("openai", tooMany, time.Now()); err == nil || err.Error() != "model list identifier limit" {
+		t.Fatalf("collection limit not enforced before processing: %v", err)
+	}
+	if _, err := ParseProviderCatalog("openai", []byte(`{"data":[],"data":[]}`), time.Now()); err == nil || err.Error() != "duplicate catalog key" {
+		t.Fatalf("ambiguous source fields accepted: %v", err)
+	}
 	calls := 0
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		calls++

@@ -2,8 +2,10 @@
 package modelregistry
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -38,7 +40,9 @@ func rawField(row map[string]json.RawMessage, path string) json.RawMessage {
 	return rawField(child, parts[1])
 }
 func rawString(raw json.RawMessage) string { var s string; _ = json.Unmarshal(raw, &s); return s }
-func isNull(raw json.RawMessage) bool      { return len(raw) == 0 || string(raw) == "null" }
+func isNull(raw json.RawMessage) bool {
+	return len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+}
 
 func catalogLevels(raw json.RawMessage) ([]string, error) {
 	if isNull(raw) {
@@ -58,6 +62,66 @@ func catalogLevels(raw json.RawMessage) ([]string, error) {
 	return levels, nil
 }
 
+// Decode collection limits before materializing maps or slices. A small
+// JSON response can otherwise contain millions of empty model objects.
+func boundedCatalogObject(raw []byte, limit int) (map[string]json.RawMessage, error) {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	token, err := d.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, errors.New("invalid catalog object")
+	}
+	out := map[string]json.RawMessage{}
+	for d.More() {
+		if len(out) >= limit {
+			return nil, errors.New("catalog object limit")
+		}
+		token, err := d.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			return nil, errors.New("invalid catalog key")
+		}
+		if _, exists := out[key]; exists {
+			return nil, errors.New("duplicate catalog key")
+		}
+		var value json.RawMessage
+		if err := d.Decode(&value); err != nil {
+			return nil, errors.New("invalid catalog value")
+		}
+		out[key] = value
+	}
+	if token, err = d.Token(); err != nil || token != json.Delim('}') || d.Decode(new(any)) != io.EOF {
+		return nil, errors.New("invalid catalog object end")
+	}
+	return out, nil
+}
+
+func boundedCatalogRows(raw []byte) ([]map[string]json.RawMessage, error) {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	token, err := d.Token()
+	if err != nil || token != json.Delim('[') {
+		return nil, errors.New("invalid model list")
+	}
+	rows := []map[string]json.RawMessage{}
+	for d.More() {
+		if len(rows) >= maxDiscoveryModels {
+			return nil, errors.New("model list identifier limit")
+		}
+		var rawRow json.RawMessage
+		if err := d.Decode(&rawRow); err != nil || len(rawRow) > 1<<20 {
+			return nil, errors.New("model row limit")
+		}
+		row, err := boundedCatalogObject(rawRow, 256)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, row)
+	}
+	if token, err = d.Token(); err != nil || token != json.Delim(']') || d.Decode(new(any)) != io.EOF {
+		return nil, errors.New("invalid model list end")
+	}
+	return rows, nil
+}
+
 // ParseProviderCatalog decodes only documented, public fields. Booleans such
 // as Google's thinking support are not expanded into token budgets or levels.
 func ParseProviderCatalog(source string, raw []byte, at time.Time) (ProviderCatalog, error) {
@@ -69,9 +133,15 @@ func ParseProviderCatalog(source string, raw []byte, at time.Time) (ProviderCata
 	if !ok {
 		return out, errors.New("unsupported source")
 	}
-	var root map[string]json.RawMessage
-	if json.Unmarshal(raw, &root) != nil || root == nil {
-		return out, errors.New("invalid model list")
+	rootLimit := 128
+	if source == "modelsdev" {
+		rootLimit = 512
+	} else if source == "litellm" {
+		rootLimit = maxDiscoveryModels + 1 // Includes sample_spec.
+	}
+	root, err := boundedCatalogObject(raw, rootLimit)
+	if err != nil {
+		return out, err
 	}
 	type entry struct {
 		provider, id string
@@ -92,19 +162,24 @@ func ParseProviderCatalog(source string, raw []byte, at time.Time) (ProviderCata
 	case "modelsdev":
 		keys := sortedRawKeys(root)
 		for _, p := range keys {
-			var provider struct {
-				Models map[string]map[string]json.RawMessage `json:"models"`
+			provider, err := boundedCatalogObject(root[p], 128)
+			if err != nil {
+				return out, err
 			}
-			if json.Unmarshal(root[p], &provider) != nil || provider.Models == nil {
-				return out, errors.New("invalid provider catalog")
+			models, err := boundedCatalogObject(provider["models"], maxDiscoveryModels-len(entries))
+			if err != nil {
+				return out, err
 			}
-			ids := make([]string, 0, len(provider.Models))
-			for id := range provider.Models {
+			ids := make([]string, 0, len(models))
+			for id := range models {
 				ids = append(ids, id)
 			}
 			sort.Strings(ids)
 			for _, id := range ids {
-				row := provider.Models[id]
+				row, err := boundedCatalogObject(models[id], 256)
+				if err != nil {
+					return out, err
+				}
 				if rowID := rawString(row["id"]); rowID != "" {
 					id = rowID
 				}
@@ -118,9 +193,9 @@ func ParseProviderCatalog(source string, raw []byte, at time.Time) (ProviderCata
 			if id == "sample_spec" {
 				continue
 			}
-			var row map[string]json.RawMessage
-			if json.Unmarshal(root[id], &row) != nil {
-				return out, errors.New("invalid LiteLLM model")
+			row, err := boundedCatalogObject(root[id], 256)
+			if err != nil {
+				return out, err
 			}
 			mode := rawString(row["mode"])
 			if mode != "chat" && mode != "responses" {
@@ -146,9 +221,9 @@ func ParseProviderCatalog(source string, raw []byte, at time.Time) (ProviderCata
 		if source == "google" {
 			list = root["models"]
 		}
-		var rows []map[string]json.RawMessage
-		if json.Unmarshal(list, &rows) != nil || rows == nil || len(rows) > maxDiscoveryModels {
-			return out, errors.New("invalid model list")
+		rows, err := boundedCatalogRows(list)
+		if err != nil {
+			return out, err
 		}
 		for _, row := range rows {
 			id := rawString(row["id"])
@@ -243,6 +318,9 @@ func ParseProviderCatalog(source string, raw []byte, at time.Time) (ProviderCata
 			fields["max_output_tokens"] = "max_output_tokens"
 		}
 		levelsRaw := rawField(e.row, fields["native_levels"])
+		if len(levelsRaw) > 8192 || len(rawField(e.row, "capabilities.effort")) > 8192 {
+			return out, errors.New("model capability limit")
+		}
 		if source == "anthropic" {
 			fields["native_levels"] = "capabilities.effort.*.supported"
 			var opts map[string]json.RawMessage
