@@ -246,6 +246,91 @@ test('the runtime probe pulls by digest and rejects a malformed digest before Do
   assert.equal(readFileSync(log, 'utf8'), '');
 });
 
+test('AEON-1107 compatibility keeps latest-release reads and the below-floor activated refusal', () => {
+  // Risk: once the latest release supports account-use, testing its refusal
+  // falsely fails compatibility; replacing it must not lose the latest reads
+  // or accept an unrelated refusal from a different/untested binary. Each
+  // activated probe must use an independent fixture even for the same image.
+  const source = readFileSync(new URL('./migration-compat.sh', import.meta.url), 'utf8');
+  const rollbackTag = 'v261009095632.0.0';
+  const rollbackDigest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c';
+  const latestTag = 'v261010123154.0.0', latestDigest = 'sha256:' + 'a'.repeat(64);
+  for (const sameImage of [false, true]) {
+    const dir = mkdtempSync(join(tmpdir(), 'aeon-1107-compat-'));
+    const scripts = join(dir, 'scripts'), bin = join(dir, 'bin'), log = join(dir, 'calls.jsonl');
+    mkdirSync(scripts); mkdirSync(bin);
+    const script = join(scripts, 'migration-compat.sh');
+    writeFileSync(script, source);
+    const fixture = `#!/usr/bin/env python3
+import json, os, sys
+tool = os.path.basename(sys.argv[0])
+args = sys.argv[1:]
+with open(os.environ['AEON_COMPAT_CALLS'], 'a') as output:
+    output.write(json.dumps([tool, *args]) + '\\n')
+if tool == 'docker':
+    if args[:2] == ['image', 'ls']:
+        print('sha256:' + ('1' if args[-1].endswith('${rollbackDigest}') else '2') * 64)
+    elif args[:1] == ['port']:
+        print('127.0.0.1:55433' if args[-1] == '5432/tcp' else '127.0.0.1:18080')
+elif tool == 'python3':
+    if args[1] == 'account-use':
+        mode = 'refusal' if '--require-refusal' in args else 'latest'
+        if os.environ.get('AEON_COMPAT_REFUSE_FAIL') == mode:
+            sys.exit(23)
+`;
+    // Use the real Python interpreter in the wrapper shebang to avoid calling
+    // the mocked python3 recursively. No database/container/build is started.
+    const python = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], {encoding: 'utf8'}).trim();
+    for (const tool of ['docker', 'go', 'python3', 'trash'])
+      writeFileSync(join(bin, tool), fixture.replace('#!/usr/bin/env python3', '#!' + python), {mode: 0o700});
+    const tag = sameImage ? rollbackTag : latestTag, digest = sameImage ? rollbackDigest : latestDigest;
+    const options = {env: {...process.env, PATH: `${bin}:${process.env.PATH}`, AEON_COMPAT_CALLS: log, GITHUB_STEP_SUMMARY: ''}, encoding: 'utf8', timeout: 15000};
+    const stdout = execFileSync('bash', [script, tag, digest], options);
+    const calls = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    const probes = calls.filter(call => call[0] === 'python3' && call[1] === 'scripts/migration-compat-probe.py');
+    const modes = probes.map(call => call[2]);
+    assert.deepEqual(modes, ['wait-ready', 'seed', 'wait-ready', 'check', 'wait-ready', 'account-use',
+      'wait-ready', 'check', 'account-use']);
+    const version = call => call[call.indexOf('--version') + 1];
+    const checks = probes.filter(call => call[2] === 'check');
+    assert.deepEqual(checks.map(version), [tag.slice(1), rollbackTag.slice(1)]);
+    assert.equal(version(probes.at(-1)), rollbackTag.slice(1));
+    const activations = probes.filter(call => call[2] === 'account-use');
+    assert.deepEqual(activations.map(version), [tag.slice(1), rollbackTag.slice(1)]);
+    assert.deepEqual(activations.map(call => call.includes('--require-refusal')), [false, true]);
+    assert.equal(activations[0].includes('--database'), false);
+    assert.equal(activations[1][activations[1].indexOf('--database') + 1], 'aeon_legacy');
+    const pulls = calls.filter(call => call[0] === 'docker' && call[1] === 'pull');
+    assert.deepEqual(pulls.map(call => call.at(-1)), sameImage ? [`ghcr.io/inspr-at/aeon@${rollbackDigest}`] :
+      [`ghcr.io/inspr-at/aeon@${latestDigest}`, `ghcr.io/inspr-at/aeon@${rollbackDigest}`]);
+    const starts = calls.filter(call => call[0] === 'docker' && call[1] === 'run' && call.includes('256m'));
+    assert.deepEqual(starts.map(call => call.at(-1)), sameImage ? Array(4).fill('sha256:' + '1'.repeat(64)) :
+      ['sha256:' + '2'.repeat(64), 'sha256:' + '2'.repeat(64), 'sha256:' + '2'.repeat(64), 'sha256:' + '1'.repeat(64)]);
+    const databaseStart = calls.find(call => call[0] === 'docker' && call[1] === 'run' && call.includes('POSTGRES_USER=postgres'));
+    const databaseContainer = databaseStart[databaseStart.indexOf('--name') + 1];
+    assert.deepEqual(starts.map(call => call.find(arg => arg.startsWith('AEON_DATABASE_URL='))),
+      ['aeon', 'aeon', 'aeon', 'aeon_legacy'].map(database =>
+        `AEON_DATABASE_URL=postgres://aeon:aeon@${databaseContainer}:5432/${database}?sslmode=disable`));
+    const migration = calls.findIndex(call => call[0] === 'go');
+    const candidateCheck = calls.findIndex((call, i) => i > migration && call[2] === 'check');
+    const activated = calls.findIndex(call => call[2] === 'account-use');
+    assert.ok(migration > 0 && candidateCheck > migration && activated > candidateCheck);
+    const copies = calls.filter(call => call.includes('CREATE DATABASE aeon_legacy WITH TEMPLATE aeon OWNER aeon'));
+    assert.equal(copies.length, 1);
+    const copy = calls.indexOf(copies[0]);
+    assert.ok(copy > candidateCheck && copy < activated);
+    assert.deepEqual(calls[copy - 2].slice(0, 4), ['docker', 'stop', '--time', '30']);
+    assert.deepEqual(calls[copy - 1].slice(0, 3), ['docker', 'container', 'rm']);
+    assert.match(stdout, /Account-use rollback boundary passed/);
+    for (const mode of ['latest', 'refusal']) {
+      assert.throws(() => execFileSync('bash', [script, tag, digest], {
+        ...options, env: {...options.env, AEON_COMPAT_REFUSE_FAIL: mode},
+      }), error => error.status === 23 && !error.stdout.includes('Account-use rollback boundary passed') &&
+        !error.stdout.includes('Migration compatibility passed'));
+    }
+  }
+});
+
 test('marker must name an expansion release and ticket before SQL', () => {
   assert.equal(contractMarker(marker + 'DROP TABLE nodes;'), true);
   for (const sql of [
