@@ -842,6 +842,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestProjectLookupPreservesQueryFailure","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestQueueWaitBatchScansAndFreshClaimFences","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaHintsNeedPersonConfirmationForExactAccounts","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaWarningDedupeRecoveryAndReset","tier":"GATED-FULL"}
