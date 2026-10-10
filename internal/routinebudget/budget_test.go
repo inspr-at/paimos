@@ -70,11 +70,14 @@ func setup(t *testing.T, mode string, paid bool) *fixture {
 	f.agent.TenantID = f.owner.TenantID
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Owner') RETURNING id::text`, f.owner.TenantID).Scan(&f.owner.ID))
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Worker') RETURNING id::text`, f.owner.TenantID).Scan(&f.agent.ID))
+	f.agent.KeyCreatorID = f.owner.ID
 	dbtest.BindRole(t, f.d, f.owner.TenantID, f.owner.ID, "owner")
 	dbtest.BindRole(t, f.d, f.owner.TenantID, f.agent.ID, "admin")
 	node := func(kind string, parent *string) string {
 		var id string
-		must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,position) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Budget fixture',$2,1024 FROM node_kinds k WHERE tenant_id=$1 AND slug=$3 RETURNING id::text`, f.owner.TenantID, parent, kind).Scan(&id))
+		must(t, f.tx(func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,position) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Budget fixture',$2,1024 FROM node_kinds k WHERE tenant_id=$1 AND slug=$3 RETURNING id::text`, f.owner.TenantID, parent, kind).Scan(&id)
+		}))
 		return id
 	}
 	f.project = node("project", nil)
@@ -160,7 +163,9 @@ func (f *fixture) attempt(role string, maximum Amount) Reservation {
 	var run, order, attempt string
 	// Fixture-only initial holder; later actors are explicit siblings under the
 	// generated work. Production child creation is tested through CreateDeferred.
-	must(f.t, f.d.Admin.QueryRow(f.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,position) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Actor order',$2,1024 FROM node_kinds k WHERE tenant_id=$1 AND slug='work_order' RETURNING id::text`, f.owner.TenantID, f.work).Scan(&order))
+	must(f.t, f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(f.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,position) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Actor order',$2,1024 FROM node_kinds k WHERE tenant_id=$1 AND slug='work_order' RETURNING id::text`, f.owner.TenantID, f.work).Scan(&order)
+	}))
 	f.exec(`INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,assignee_principal_id) VALUES($1,$2,$3,$4)`, f.owner.TenantID, order, f.owner.ID, f.agent.ID)
 	must(f.t, f.d.Admin.QueryRow(f.t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,account_id,status) VALUES($1,$2,$3,$4,$5,'queued') RETURNING id::text`, f.owner.TenantID, order, f.agent.ID, f.profile, f.account).Scan(&run))
 	must(f.t, f.d.Admin.QueryRow(f.t.Context(), `INSERT INTO routine_attempts(tenant_id,run_id,attempt_key,role,agent_run_id,principal_id,assignment_digest) SELECT tenant_id,id,gen_random_uuid()::text,$2,$3,$4,assignment_digest FROM routine_runs WHERE id=$1 RETURNING id::text`, f.run, role, run, f.agent.ID).Scan(&attempt))
@@ -169,7 +174,7 @@ func (f *fixture) attempt(role string, maximum Amount) Reservation {
 func reserve(t *testing.T, f *fixture, pool *pgxpool.Pool, ctx context.Context, in Reservation) (Grant, error) {
 	t.Helper()
 	var g Grant
-	err := db.InTenant(dbtest.Seed(ctx), pool, f.owner.TenantID, func(tx pgx.Tx) error { var err error; g, err = f.broker.ReserveTx(ctx, tx, f.owner, in); return err })
+	err := db.InTenant(tenant.WithPrincipal(ctx, f.owner), pool, f.owner.TenantID, func(tx pgx.Tx) error { var err error; g, err = f.broker.ReserveTx(ctx, tx, f.owner, in); return err })
 	return g, err
 }
 func wantError(t *testing.T, err error, want string) {
@@ -367,6 +372,9 @@ func TestRoutineBudgetAdmissionAndOwnership(t *testing.T) {
 	must(t, f.tx(func(tx pgx.Tx) error {
 		return agentaccounts.ValidateReservedCapacity(t.Context(), tx, in.AgentRunID, in.AccountID, f.broker.StartCheck(f.agent))
 	}))
+	var administrator string
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Remaining administrator') RETURNING id::text`, f.owner.TenantID).Scan(&administrator))
+	dbtest.BindRole(t, f.d, f.owner.TenantID, administrator, "owner")
 	// Revoke on a real tenant fence before a competing provider-call transaction.
 	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(q string) bool { return strings.HasPrefix(q, "UPDATE principals SET status=") })
 	revoked := make(chan error, 1)
@@ -375,7 +383,7 @@ func TestRoutineBudgetAdmissionAndOwnership(t *testing.T) {
 			if err := db.LockCurrentTree(ctx, tx); err != nil {
 				return err
 			}
-			_, err := tx.Exec(ctx, `UPDATE principals SET status='disabled' WHERE id=$1`, f.owner.ID)
+			_, err := tx.Exec(ctx, `UPDATE principals SET status='deactivated' WHERE id=$1`, f.owner.ID)
 			return err
 		})
 	}()

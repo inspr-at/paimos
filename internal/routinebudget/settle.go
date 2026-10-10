@@ -44,16 +44,17 @@ func (b Broker) SubgrantTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, p
 	if err != nil {
 		return Grant{}, err
 	}
-	if balance.TokenCeiling != nil && used.Tokens+pending.Tokens >= root.Maximum.Tokens {
+	current, err := used.add(pending)
+	if err != nil {
+		return Grant{}, err
+	}
+	if balance.TokenCeiling != nil && root.Maximum.Tokens > 0 && current.Tokens >= root.Maximum.Tokens {
 		return Grant{}, workorders.Fail(409, "token_budget_exhausted")
 	}
-	if balance.MoneyCeiling != nil && used.PaidMicroUSD+pending.PaidMicroUSD >= root.Maximum.PaidMicroUSD {
+	if balance.MoneyCeiling != nil && root.Maximum.PaidMicroUSD > 0 && current.PaidMicroUSD >= root.Maximum.PaidMicroUSD {
 		return Grant{}, workorders.Fail(409, "money_budget_exhausted")
 	}
-	total, err := used.add(pending)
-	if err == nil {
-		total, err = total.add(in.Maximum)
-	}
+	total, err := current.add(in.Maximum)
 	if err != nil {
 		return Grant{}, err
 	}
