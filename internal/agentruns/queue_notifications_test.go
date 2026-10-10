@@ -4,6 +4,7 @@ package agentruns_test
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,6 +65,38 @@ func TestQueuedRunNotificationsWakeAndRecheckExactKey(t *testing.T) {
 		if got := frame(); got != "event: queue.wake\ndata: {}" {
 			t.Fatalf("%s did not wake: %s", typ, got)
 		}
+	}
+	// Count the queue-channel commit hints directly: ordinary probe events must
+	// never cause the daemon stream to spend a transaction checking relevance.
+	listener, err := pgx.ConnectConfig(ctx, f.d.App.Config().ConnConfig.Copy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close(context.Background())
+	if _, err := listener.Exec(ctx, "LISTEN "+events.QueueHintChannel); err != nil {
+		t.Fatal(err)
+	}
+	var queuedEvent int64
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := events.Append(t.Context(), tx, f.person, events.Change{Type: "account.probed", After: map[string]string{"id": uuid()}}); err != nil {
+			return err
+		}
+		e, err := events.Append(t.Context(), tx, f.person, events.Change{NodeID: &o.NodeID, Type: "run.created", After: run})
+		queuedEvent = e.ID
+		return err
+	})
+	notice, err := listener.WaitForNotification(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hint struct {
+		ID int64 `json:"id"`
+	}
+	if json.Unmarshal([]byte(notice.Payload), &hint) != nil || hint.ID != queuedEvent {
+		t.Fatal("probe event leaked onto the queue hint channel")
+	}
+	if got := frame(); got != "event: queue.wake\ndata: {}" {
+		t.Fatalf("queued event did not wake: %s", got)
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE principal_id=$1`, f.agent.ID)
