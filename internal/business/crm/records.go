@@ -608,45 +608,75 @@ func (m *module) listContacts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, e)
 		return
 	}
+	q := r.URL.Query()
+	limit := 50
+	if q.Has("limit") {
+		limit, e = strconv.Atoi(q.Get("limit"))
+	}
+	after := q.Get("after_id")
+	_, afterOK := parseUUID(after)
+	if e != nil || limit < 1 || limit > 100 || len(q["limit"]) > 1 || len(q["after_id"]) > 1 || (after != "" && !afterOK) {
+		writeErr(w, errInvalid("invalid contact page"))
+		return
+	}
 	out := []ContactRecord{}
+	next := ""
 	e = m.run(r, p, fence.PermViewsProvide, func(tx pgx.Tx) error {
 		if _, e := customer(r.Context(), tx, id, false); e != nil {
 			return e
 		}
-		rows, e := tx.Query(r.Context(), `SELECT c.contact_node_id::text FROM crm_contact_profiles c JOIN nodes n ON n.tenant_id=c.tenant_id AND n.id=c.contact_node_id WHERE c.organisation_node_id=$1::uuid AND n.deleted_at IS NULL ORDER BY n.title,n.id`, id)
+		var cursorName *string
+		if after != "" {
+			var name string
+			if err := tx.QueryRow(r.Context(), `SELECT n.title FROM crm_contact_profiles p JOIN nodes n ON n.tenant_id=p.tenant_id AND n.id=p.contact_node_id WHERE p.organisation_node_id=$1 AND p.contact_node_id=$2 AND n.deleted_at IS NULL`, id, after).Scan(&name); err != nil {
+				return errInvalid("invalid contact cursor")
+			}
+			cursorName = &name
+		}
+		rows, e := tx.Query(r.Context(), `SELECT n.id::text,n.key,n.title,n.fields,p.revision,p.organisation_node_id::text,coalesce(o.primary_contact_node_id=n.id,false)
+            FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+            JOIN crm_contact_profiles p ON p.tenant_id=n.tenant_id AND p.contact_node_id=n.id
+            JOIN crm_organisation_profiles o ON o.tenant_id=p.tenant_id AND o.organisation_node_id=p.organisation_node_id
+            WHERE p.organisation_node_id=$1 AND k.slug='contact' AND n.deleted_at IS NULL
+            AND ($2::text IS NULL OR (n.title,n.id)>($2,$3::uuid))
+            ORDER BY n.title,n.id LIMIT $4`, id, cursorName, nullableContact(after), limit+1)
 		if e != nil {
 			return e
 		}
-		var ids []string
+		defer rows.Close()
 		for rows.Next() {
-			var cid string
-			if e = rows.Scan(&cid); e != nil {
+			var c ContactRecord
+			var raw []byte
+			if e := rows.Scan(&c.ID, &c.Key, &c.Name, &raw, &c.Revision, &c.OrganisationNodeID, &c.Primary); e != nil {
+				return e
+			}
+			if len(out) == limit {
+				next = out[limit-1].ID
 				break
 			}
-			ids = append(ids, cid)
-		}
-		if e == nil {
-			e = rows.Err()
-		}
-		rows.Close()
-		if e != nil {
-			return e
-		}
-		for _, cid := range ids {
-			c, e := contact(r.Context(), tx, cid, false)
-			if e != nil {
+			if e := json.Unmarshal(raw, &c.ContactFields); e != nil {
 				return e
 			}
 			out = append(out, c)
 		}
-		return nil
+		return rows.Err()
 	})
 	if e != nil {
 		writeErr(w, e)
 		return
 	}
+	if next != "" {
+		w.Header().Set("X-Next-Cursor", next)
+	}
 	httpapi.WriteJSON(w, 200, out)
 }
+func nullableContact(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 func (m *module) getContact(w http.ResponseWriter, r *http.Request) {
 	p, ok := m.actor(w, r, false)
 	if !ok {

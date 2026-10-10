@@ -25,7 +25,7 @@ import { toast } from '../lib/toast'
 import { settledNavigation } from '../lib/navigation'
 import { command, consume, run } from '../lib/commands'
 import { remember } from '../lib/recents'
-import { apiParams, clearedFilters, effectiveSort, facetOptions, filtersFromQuery, filtersFromView, filtersToQuery, groupFacet, groupRows, hasFilters, orderByStatus, rowTags, sameListState, suggestName, toggleIn, toggleOut, totalFrom, valueLabel, WORK_KINDS, type DateFilter, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
+import { apiParams, clearedFilters, effectiveSort, facetOptions, levelOf, toggleMembers, filtersFromQuery, filtersFromView, filtersToQuery, groupFacet, groupRows, hasFilters, orderByStatus, rowTags, sameListState, suggestName, toggleIn, toggleOut, totalFrom, valueLabel, WORK_KINDS, type DateFilter, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
 import type { TicketGraphState } from '../lib/ticketGraphRenderer'
 import { useTicketList } from '../lib/useTicketList'
 import { useLiveList } from '../lib/useLiveList'
@@ -80,6 +80,7 @@ import { filtersFromQuery as knowledgeFiltersFrom, filtersToQuery as knowledgeQu
 import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
 
 const RecurringWorkCard = defineAsyncComponent(() => import('../components/recurrences/RecurringWorkCard.vue'))
+const ProjectWorkContextCard = defineAsyncComponent(() => import('../components/settings/ProjectWorkContextCard.vue'))
 // Knowledge loads with its tab, not with every project page.
 const KnowledgeTab = defineAsyncComponent(() => import('../components/knowledge/KnowledgeTab.vue'))
 const KnowledgeEntryPage = defineAsyncComponent(() => import('../components/knowledge/KnowledgeEntryPage.vue'))
@@ -452,30 +453,51 @@ function options(dimension: Dimension) {
   if (graphActive.value) {
     const counts: Record<string, number> = {}
     for (const node of graphState.value.visible.nodes) {
-      const value = dimension === 'status' ? node.status : dimension === 'priority' ? node.priority ?? 'none' : node.type
+      const level = levelOf({ is_leaf: node.is_leaf, depth: node.depth, kind_slug: node.type })
+      const value = dimension === 'status' ? node.status : dimension === 'priority' ? node.priority ?? 'none' : dimension === 'type' ? level
+        : dimension === 'shape' ? level === 'leaf' ? 'leaf' : 'parent' : dimension === 'depth' ? String(node.depth ?? 1) : node.type
       counts[value] = (counts[value] ?? 0) + 1
     }
-    return facetOptions(dimension, counts, filters.value[dimension], list.names, undefined, { workName: vocabulary.leaf.name }).filter(option => dimension !== 'type' || option.value !== 'task')
+    return facetOptions(dimension, counts, filters.value[dimension], list.names, undefined, { workName: vocabulary.leaf.name, vocabulary: vocabulary.value })
   }
-  const result = facetOptions(dimension, list.counts(dimension), filters.value[dimension].filter(value => value !== 'queued' && value !== '!queued'), list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value, workName: vocabulary.leaf.name })
+  const result = facetOptions(dimension, list.counts(dimension), filters.value[dimension].filter(value => value !== 'queued' && value !== '!queued'), list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value, workName: vocabulary.leaf.name, vocabulary: vocabulary.value })
   return dimension === 'status' ? [{ value: 'queued', label: 'Queued', count: queueSnapshot.value?.items.length ?? 0, hint: 'Open + a place' }, ...result] : result
 }
 function chipLabel(dimension: Dimension, value: string) {
-  return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value, workName: vocabulary.leaf.name })
+  return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value, workName: vocabulary.leaf.name, vocabulary: vocabulary.value })
 }
 // What a menu needs before it opens: names, label counts or the project's epics.
+// Type also needs the workspace's names. Only the newest menu's wait counts.
 const facetLoading = ref(false)
+let facetWait = 0
 function needOptions(dimension: Dimension) {
-  if (dimension === 'assignee') { void list.resolveNames(options('assignee').map(o => o.value)); return }
-  if (dimension === 'epic') { facetLoading.value = true; void list.loadEpics().finally(() => { facetLoading.value = false }); return }
-  const facet = dimension === 'tag' ? 'tag' : dimension === 'cost' ? 'cost_unit' : dimension === 'release' ? 'release' : dimension === 'human_check' ? 'human_check' : null
-  if (facet && !filters.value[dimension].length) { facetLoading.value = true; void list.requestFacet(facet).finally(() => { facetLoading.value = false }) }
+  const work: Promise<unknown>[] = []
+  if (dimension === 'assignee') void list.resolveNames(options('assignee').map(o => o.value))
+  if (dimension === 'epic') work.push(list.loadEpics())
+  if (dimension === 'type') work.push(vocabulary.load())
+  const facet = dimension === 'tag' ? 'tag' : dimension === 'cost' ? 'cost_unit' : dimension === 'release' ? 'release' : dimension === 'human_check' ? 'human_check'
+    : dimension === 'type' ? 'level' : dimension === 'shape' ? 'shape' : dimension === 'depth' ? 'depth' : null
+  // An applied filter's own counts come without it, with the newest load.
+  if (!graphActive.value && facet && !filters.value[dimension].length) work.push(list.requestFacet(facet))
+  else if (!graphActive.value && filters.value[dimension].length) work.push(list.settled())
+  const request = ++facetWait
+  facetLoading.value = work.length > 0
+  if (work.length) void Promise.allSettled(work).then(() => { if (request === facetWait) facetLoading.value = false })
 }
+// The sheet shows its filters once their names and counts are in (an applied
+// filter's own counts with the newest load), so a late answer moves nothing.
+const sheetLoading = ref(false)
+let sheetWait = 0
 function sheetOpened() {
-  if (graphActive.value) return
-  void list.resolveNames(options('assignee').map(o => o.value))
-  void list.loadEpics()
-  for (const facet of ['tag', 'cost_unit', 'release', 'human_check']) void list.requestFacet(facet)
+  const request = ++sheetWait
+  const work: Promise<unknown>[] = [vocabulary.load()]
+  if (!graphActive.value) {
+    void list.resolveNames(options('assignee').map(o => o.value))
+    work.push(list.settled(), list.loadEpics())
+    for (const facet of ['tag', 'cost_unit', 'release', 'human_check', 'level']) work.push(list.requestFacet(facet))
+  }
+  sheetLoading.value = true
+  void Promise.allSettled(work).then(() => { if (request === sheetWait) sheetLoading.value = false })
 }
 // Chips name epics by title, so the epics load when an epic filter is on.
 watch(() => filters.value.epic.length > 0 && !!projectId.value, on => { if (on) void list.loadEpics() }, { immediate: true })
@@ -550,12 +572,20 @@ async function setView(view: string) {
     else { settled.stop(); return }
   }
 }
+// A Type option stands for every level with its name: they go on and off together.
+function members(dimension: Dimension, value: string): string[] | undefined {
+  return dimension === 'type' ? options('type').find(option => option.value === value)?.members : undefined
+}
 function toggleValue(dimension: Dimension, value: string) {
-  const next = toggleIn(filters.value[dimension], value)
+  const group = members(dimension, value)
+  const next = group ? toggleMembers(filters.value[dimension], group, 'in') : toggleIn(filters.value[dimension], value)
   const patch: Partial<ListFilters> = { [dimension]: next }
   update(patch)
 }
-function excludeValue(dimension: Dimension, value: string) { update({ [dimension]: toggleOut(filters.value[dimension], value) }) }
+function excludeValue(dimension: Dimension, value: string) {
+  const group = members(dimension, value)
+  update({ [dimension]: group ? toggleMembers(filters.value[dimension], group, 'out') : toggleOut(filters.value[dimension], value) })
+}
 function clearFilters() { update(clearedFilters()) }
 function setDate(date: DateFilter | null) { update({ date }) }
 function sortBy(field: SortField, additive: boolean) { update({ sort: cycleSort(filters.value.sort, field, additive) }) }
@@ -1836,7 +1866,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         </div>
       </div>
 
-      <RecurringWorkCard v-if="settingsActive" :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" />
+      <template v-if="settingsActive">
+        <RecurringWorkCard :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" />
+        <ProjectWorkContextCard :key="project.id" :project="{ id: project.id, title: project.title }" />
+      </template>
       <DeliveryView v-else-if="deliveryActive" :key="`${project.id}/${me?.id ?? ''}`" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" />
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
@@ -1897,7 +1930,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :derived="statusMenu.row.status_derived" :children-count="statusMenu.row.work_children_count" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
-        ref="filterSheet" :summary="project" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
+        ref="filterSheet" :summary="project" :filters="filters" :options="options" :loading="sheetLoading" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
         :density="density" :columns="toolbarColumns" :project-header="ticketsHeader"
         @sort="setSort" @density="setDensity" @columns="saveColumns" @columns-reset="resetColumns"
         @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"

@@ -43,6 +43,9 @@ func (m *Module) previewDraft(w http.ResponseWriter, r *http.Request) {
 		if err = in.normalize(now); err != nil {
 			return workorders.Fail(400, err.Error())
 		}
+		if err = authorizeSources(r.Context(), tx, p, in); err != nil {
+			return err
+		}
 		if err = validateTarget(r.Context(), tx, in, false); err != nil {
 			return err
 		}

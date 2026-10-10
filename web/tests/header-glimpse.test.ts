@@ -59,7 +59,9 @@ test('the shared context pages the Tickets query and drops links outside its mem
       assert.deepEqual(query.get('state')?.split(','), ['in_progress', 'in-progress'])
       assert.equal(query.get('priority'), 'high')
       assert.equal(query.get('q'), 'body match')
-      assert.equal(query.get('kind'), 'ticket')
+      // Type narrows by work level over every work kind (AEON-974): a legacy ticket is a leaf.
+      assert.equal(query.get('level'), 'leaf')
+      assert.equal(query.get('kind'), 'work,ticket,task,epic')
     }
     assert.deepEqual(result.visible.nodes.map(node => node.id), ['a', 'b'])
     assert.deepEqual(result.visible.links, [{ source: 'a', target: 'b' }])

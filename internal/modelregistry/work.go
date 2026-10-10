@@ -259,7 +259,7 @@ func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 			if len(profiles) == 0 {
 				out.Trace.Fallback = "preferred profile unavailable"
 			}
-			health, err := agentaccounts.HarnessHealthAt(ctx, tx, now)
+			health, err := agentaccounts.HarnessHealthAt(ctx, tx, now, q.ProjectID)
 			if err != nil {
 				return out, err
 			}

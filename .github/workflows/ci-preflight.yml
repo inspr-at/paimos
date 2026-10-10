@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       local-result:
-        description: 'Value-free Go/unit receipt produced on mbp2606 for this SHA'
+        description: 'Value-free Go/unit receipt produced on the configured approved runner for this SHA'
         required: true
         type: string
 

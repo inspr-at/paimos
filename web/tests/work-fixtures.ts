@@ -91,7 +91,7 @@ export function fixtures(options: MockOptions = {}) {
     return full
   }
   const epic = add({ id: 'n-epic', key: 'PHAROS-10', kind_slug: 'epic', title: 'Guarded multi-cloud provisioning', state: 'backlog', project: 'p-pharos', fields: { priority: 'high' }, updated_at: ago(40) })
-  add({ id: 'n-1', key: 'PHAROS-11', kind_slug: 'ticket', title: 'Connect Hetzner Cloud for managed provisioning', state: 'in-progress', project: 'p-pharos', parent_id: epic.id, fields: { priority: 'high', assignee: me.id, release: { id: 5668, label: 'v4.7.8' }, tags: [{ id: 16, name: 'CUSTOMERPORTAL', color: 'blue' }, { id: 5, name: 'hsb8', color: 'green' }] }, updated_at: ago(1), body: '## Acceptance\n\n- [x] Token stored in the vault\n- [ ] Cleanup runs => nothing left behind\n\n`a => b`' })
+  add({ id: 'n-1', key: 'PHAROS-11', kind_slug: 'ticket', title: 'Connect Hetzner Cloud for managed provisioning', state: 'in-progress', project: 'p-pharos', parent_id: epic.id, fields: { priority: 'high', assignee: me.id, release: { id: 5668, label: 'v4.7.8' }, tags: [{ id: 16, name: 'CUSTOMERPORTAL', color: 'blue' }, { id: 5, name: 'worker-8', color: 'green' }] }, updated_at: ago(1), body: '## Acceptance\n\n- [x] Token stored in the vault\n- [ ] Cleanup runs => nothing left behind\n\n`a => b`' })
   const parentTicket = add({ id: 'n-2', key: 'PHAROS-12', kind_slug: 'ticket', title: 'Add an Oracle Cloud connector', state: 'backlog', project: 'p-pharos', parent_id: epic.id, fields: { priority: 'medium' }, updated_at: ago(3) })
   add({ id: 'n-3', key: 'PHAROS-13', kind_slug: 'task', title: 'Run the disposable Hetzner end-to-end check', state: 'qa', project: 'p-pharos', parent_id: parentTicket.id, fields: { priority: 'low', assignee: mira.id, tags: [{ id: 11, name: 'BUG', color: 'red' }] }, updated_at: ago(6) })
   add({ id: 'n-4', key: 'PHAROS-14', kind_slug: 'ticket', title: 'Visual acceptance of the version pill', state: 'new', project: 'p-pharos', fields: {}, updated_at: ago(12) })
@@ -618,9 +618,12 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       // Shape is canonical even for old payloads that omit is_leaf. Count only
       // work children, and retain explicit shape for fixtures with hidden work.
       const workParents = new Set(data.nodes.filter(n => ['work', 'epic', 'ticket', 'task'].includes(n.kind_slug)).map(n => n.parent_id))
+      const levelOf = (n: MockNode) => (n.is_leaf ?? !workParents.has(n.id)) ? 'leaf' : String(n.depth ?? 1)
       let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
         .filter(n => passes(listParam(query, 'shape'), v => v === ((n.is_leaf ?? !workParents.has(n.id)) ? 'leaf' : 'parent')))
         .filter(n => passes(listParam(query, 'depth'), v => v === String(n.depth ?? 1)))
+        // AEON-974: Type levels are the leaf, else a parent's depth.
+        .filter(n => passes(listParam(query, 'level'), v => v === levelOf(n)))
         .filter(n => !onlyIds.length || onlyIds.includes(n.id))
         .filter(n => passes(states, v => v === n.state))
         .filter(n => passes(listParam(query, 'work_state'), v => v === canonicalWorkStatus(n.state)))
@@ -684,7 +687,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       for (const facet of listParam(query, 'facets')) {
         facets[facet] = {}
         for (const n of rows) {
-          const values = facet === 'human_check' ? [n.human_check?.trim() ? 'pending' : 'none'] : facet === 'tag' ? (tagNames(n).length ? tagNames(n).map(t => t.name) : ['none'])
+          const values = facet === 'level' ? [levelOf(n)] : facet === 'human_check' ? [n.human_check?.trim() ? 'pending' : 'none'] : facet === 'tag' ? (tagNames(n).length ? tagNames(n).map(t => t.name) : ['none'])
             : facet === 'cost_unit' ? [costUnit(n) || 'none'] : facet === 'release' ? [release(n) || 'none']
             : [facet === 'state' ? n.state : facet === 'kind' ? n.kind_slug : facet === 'priority' ? (typeof n.fields.priority === 'string' ? n.fields.priority : 'none') : (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')]
           for (const value of values) facets[facet][value] = (facets[facet][value] ?? 0) + 1

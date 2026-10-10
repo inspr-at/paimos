@@ -1,0 +1,8 @@
+{"method":"turn/started","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"inProgress"}}}
+{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","delta":"Hello "}}
+{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","delta":"world"}}
+{"method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"call-1","type":"commandExecution","command":"PRIVATE_SENTINEL"}}}
+{"method":"item/commandExecution/requestApproval","id":7,"params":{"threadId":"thread-1","turnId":"turn-1","itemId":"call-1","reason":"PRIVATE_SENTINEL"}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"call-1","type":"commandExecution","status":"completed","aggregatedOutput":"PRIVATE_SENTINEL"}}}
+{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}}
+{"method":"future","params":{"payload":"PRIVATE_SENTINEL"}}

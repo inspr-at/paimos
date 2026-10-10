@@ -116,11 +116,15 @@ func respond(w http.ResponseWriter, status int, value any, err error) {
 	}
 	httpapi.WriteJSON(w, status, value)
 }
+
+type quoteAuthorityKey struct{}
+
 func caller(r *http.Request) (tenant.Principal, error) {
 	p, ok := tenant.PrincipalFrom(r.Context())
 	if !ok || !uuidRe.MatchString(p.TenantID) || !uuidRe.MatchString(p.ID) {
 		return p, denied()
 	}
+	*r = *r.WithContext(context.WithValue(r.Context(), quoteAuthorityKey{}, r.Pattern))
 	return p, nil
 }
 func person(p tenant.Principal) bool { return p.Kind == tenant.Person }
@@ -164,6 +168,25 @@ func decode(r *http.Request, v any) error {
 }
 func (m *Module) tx(ctx context.Context, p tenant.Principal, perm string, write bool, fn func(pgx.Tx) error) error {
 	return db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if write {
+			if err := lockQuoteTree(ctx, tx); err != nil {
+				return err
+			}
+			pattern, _ := ctx.Value(quoteAuthorityKey{}).(string)
+			authority, known := authz.PermissionForPattern(pattern)
+			allowed := false
+			if known {
+				for _, permission := range strings.Split(authority, "|") {
+					if authz.RequireTx(ctx, tx, p, permission, authz.Scope{}) == nil {
+						allowed = true
+						break
+					}
+				}
+			}
+			if !allowed {
+				return denied()
+			}
+		}
 		if err := m.enabled(ctx, tx, p.TenantID, perm, write); err != nil {
 			return err
 		}
@@ -281,7 +304,31 @@ type createWrite struct {
 	ProfileID         string `json:"profile_id,omitempty"`
 }
 
+func lockQuoteTree(ctx context.Context, tx pgx.Tx) error {
+	var locked string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`).Scan(&locked); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`)
+	return err
+}
+
 func readQuote(ctx context.Context, tx pgx.Tx, id string, lock bool) (quote, error) {
+	if lock {
+		// Draft edits and imports share tenant -> tree -> node -> quote order.
+		// A quote edit must never hold q while waiting for an importer-held node.
+		if err := lockQuoteTree(ctx, tx); err != nil {
+			return quote{}, err
+		}
+		var locked string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM nodes WHERE id=$1::uuid FOR UPDATE`, id).Scan(&locked); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return quote{}, missing()
+			}
+			return quote{}, err
+		}
+	}
+
 	q := `SELECT quote_node_id::text,coalesce(project_node_id::text,''),customer_org_node_id::text,current_version,state,revision,coalesce(offer_no,''),archived_at IS NOT NULL,project_ref FROM business_quotes WHERE quote_node_id=$1::uuid AND deleted_at IS NULL`
 	if lock {
 		q += ` FOR UPDATE`

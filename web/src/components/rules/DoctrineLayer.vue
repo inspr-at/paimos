@@ -6,7 +6,7 @@ import DoctrineFileCard from './DoctrineFileCard.vue'
 import DoctrineSourceDialog from './DoctrineSourceDialog.vue'
 import DoctrineProposalDialog from './DoctrineProposalDialog.vue'
 import DoctrineProposals from './DoctrineProposals.vue'
-import DoctrineInbox from './DoctrineInbox.vue'
+import { doctrineInbox } from '../../lib/doctrineInbox'
 import { can } from '../../lib/authz'
 import { toast } from '../../lib/toast'
 import { useSession } from '../../stores/session'
@@ -30,7 +30,7 @@ const canPropose = computed(() => !!layer.value?.proposals_enabled && can('rules
 function proposed(proposal: DoctrineProposal) { latestProposal.value = proposal; proposing.value = undefined; toast('Pull request created') }
 // Agent-proposed changes waiting for a person (AEON-444).
 const person = computed(() => session.identity?.principal.kind === 'person')
-const waiting = ref(0)
+const waiting = computed(() => doctrineInbox.pending)
 
 const canManage = computed(() => session.identity?.principal.kind !== 'agent' && can('settings.manage'))
 const sources = computed(() => layer.value?.sources ?? [])
@@ -75,7 +75,7 @@ onMounted(load)
     <header class="head">
       <span class="mark" aria-hidden="true"><BizIcon name="book" :size="15" /></span>
       <div class="titles">
-        <h3 id="doctrine-title">Doctrine<RouterLink v-if="waiting" class="waiting" :to="{ hash: '#doctrine-inbox' }" :aria-label="`${waiting} proposed ${waiting === 1 ? 'change' : 'changes'}`" :data-tip="`${waiting} proposed ${waiting === 1 ? 'change waits' : 'changes wait'} for review`">{{ waiting }}</RouterLink></h3>
+        <h3 id="doctrine-title">Doctrine<RouterLink v-if="waiting" class="waiting" to="/decision-desk" :aria-label="`${waiting} proposed ${waiting === 1 ? 'change' : 'changes'}`" :data-tip="`${waiting} proposed ${waiting === 1 ? 'change waits' : 'changes wait'} for review`">{{ waiting }}</RouterLink></h3>
         <p>Pinned in git. Agents get it through their harness files.</p>
       </div>
       <button v-if="canManage && sources.length" type="button" class="btn sm ghost" @click="editing = {}"><BizIcon name="plus" :size="14" />Link repository</button>
@@ -88,7 +88,7 @@ onMounted(load)
       <button type="button" class="btn sm" @click="editing = {}"><BizIcon name="link" :size="14" />Link repository</button>
     </div>
 
-    <DoctrineInbox v-if="layer?.proposals_enabled && person" :sources="sources" @proposed="p => latestProposal = p" @count="n => waiting = n" />
+    <p v-if="layer?.proposals_enabled && person" id="doctrine-inbox" class="quiet">Agent proposals are reviewed in <RouterLink to="/decision-desk">Decision Desk</RouterLink>.</p>
 
     <div v-for="source in sources" :key="source.id" class="source">
       <div class="source-head">

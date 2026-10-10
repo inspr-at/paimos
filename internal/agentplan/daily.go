@@ -125,6 +125,7 @@ func percent(v float64) bool    { return !math.IsNaN(v) && !math.IsInf(v, 0) && 
 func Number(v float64) *float64 { return &v }
 
 type DailyAccount struct {
+	Contexts           any        `json:"contexts,omitempty"`
 	AccountID          string     `json:"account_id"`
 	Label              string     `json:"label"`
 	Order              int        `json:"order"`

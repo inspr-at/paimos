@@ -155,7 +155,7 @@ func (m *Module) runNow(w http.ResponseWriter, r *http.Request) {
 		}
 		key, name, version := "manual:"+in.Key, "", ""
 		if in.ReleaseKey != "" {
-			if item.Trigger.Kind != "event" {
+			if item.Trigger.Kind != "event" || item.Trigger.Event != "release.published" {
 				return workorders.Fail(400, "release_key requires an event trigger")
 			}
 			choices, _, err := m.releases(r.Context(), tx, item, now)
@@ -193,6 +193,10 @@ func httpError(w http.ResponseWriter, status int, message string) {
 // have finished. A failure rolls the entire transaction back; the durable key
 // and count are committed atomically, including overlap skips.
 func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence, key string, at time.Time, eventID *int64, name, version string, forceOverlap ...bool) (Occurrence, error) {
+	return occurSource(ctx, tx, actor, r, key, at, eventID, name, version, nil, forceOverlap...)
+}
+
+func occurSource(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence, key string, at time.Time, eventID *int64, name, version string, source *EventContext, forceOverlap ...bool) (Occurrence, error) {
 	// Normalize historical definitions defensively as well as migrating storage.
 	switch r.Template.Type {
 	case "epic", "ticket", "task":
@@ -242,6 +246,13 @@ func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence,
 	if reason == "" {
 		title := render(r.Template.Title, o.Number, at, r.Trigger, name, version)
 		body := render(r.Template.Description, o.Number, at, r.Trigger, name, version)
+		if source != nil {
+			raw, err := json.Marshal(source)
+			if err != nil || len(raw) > 4096 {
+				return Occurrence{}, workorders.Fail(400, "trigger context exceeds limits")
+			}
+			body += "\n\nTrigger context (source identifiers):\n```json\n" + string(raw) + "\n```"
+		}
 		criteria := make([]string, len(r.Template.Criteria))
 		for i, c := range r.Template.Criteria {
 			criteria[i] = render(c, o.Number, at, r.Trigger, name, version)

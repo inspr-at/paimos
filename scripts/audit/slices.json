@@ -77,8 +77,11 @@
         "internal/auth/full_access_test.go",
         "internal/db/full_access_migration_test.go",
         "internal/accountuse/**",
+        "internal/modelactivation/**",
         "internal/agentpairing/ledger.go",
-        "internal/agentpairing/ledger_test.go"
+        "internal/agentpairing/ledger_test.go",
+        "cmd/aeon-agentd/ledger.go",
+        "cmd/aeon-agentd/ledger_test.go"
       ]
     },
     {
@@ -120,7 +123,19 @@
         "internal/delivery/**",
         "internal/engineadmission/**",
         "internal/agentsetup/ledger.go",
-        "internal/agentsetup/ledger_test.go"
+        "internal/agentsetup/ledger_test.go",
+        "internal/agentsetup/shared_ledger.go",
+        "internal/agentsetup/shared_ledger_test.go",
+        "internal/agentsetup/instances.go",
+        "internal/agentsetup/instances_test.go",
+        "internal/agentd/shared_ledger.go",
+        "internal/agentd/shared_ledger_test.go",
+        "internal/agentd/ledger_exit_unix.go",
+        "internal/agentd/ledger_exit_other.go",
+        "internal/agentdwire/ledger_test.go",
+        "internal/agentd/chat_normalize.go",
+        "internal/agentd/chat_stream.go",
+        "internal/agentd/chat_stream_test.go"
       ]
     },
     {
@@ -144,6 +159,12 @@
       "title": "Rules, doctrine and knowledge",
       "paths": [
         "internal/rules/**",
+        "internal/rules/doctrine/default_source.go",
+        "internal/rules/doctrine/delivery_external_test.go",
+        "internal/rules/doctrine/mirror.go",
+        "internal/rules/doctrine/mirror_fs_unix.go",
+        "internal/rules/doctrine/mirror_fs_unsupported.go",
+        "internal/rules/doctrine/source_modes_test.go",
         "internal/doctrinerepo/**",
         "internal/rulesimport/**",
         "internal/rulescompare/**",
@@ -197,7 +218,9 @@
         "internal/statusautopilot/**",
         "internal/recurrences/**",
         "internal/usagedashboard/**",
-        "internal/activity/**"
+        "internal/activity/**",
+        "internal/decisiondesk/cutover_test.go",
+        "internal/questions/lock_order_test.go"
       ]
     },
     {
@@ -248,7 +271,9 @@
         "web/src/components/work/AttentionGroupMenu.vue",
         "web/src/components/work/AttentionBulkPreview.vue",
         "web/src/components/agents/ChatCodeBlock.vue",
-        "web/src/components/lead/LeadAdoption.vue"
+        "web/src/components/lead/LeadAdoption.vue",
+        "web/src/components/agents/AgentChores.vue",
+        "web/src/components/agents/DecisionDeskPanel.vue"
       ]
     },
     {
@@ -264,7 +289,8 @@
         "web/public/**",
         "web/src/lib/displayLanguage.ts",
         "web/tests/lead-adoption.unit.test.ts",
-        "web/tests/lead-adoption.spec.ts"
+        "web/tests/lead-adoption.spec.ts",
+        "web/src/stores/decisionDesk.ts"
       ],
       "exclude": [
         "web/src/views/**",

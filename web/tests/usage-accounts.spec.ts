@@ -16,8 +16,8 @@ async function setup(page: Page, theme: 'light' | 'dark', extra = false) {
   const world = capacityWorld()
   const keep = new Set([ACCOUNTS.main, ACCOUNTS.claude, ACCOUNTS.cursor])
   const accounts = world.accounts.filter(a => keep.has(a.id))
-  accounts.find(a => a.id === ACCOUNTS.main)!.label = 'admin@augmentoring.com'
-  accounts.find(a => a.id === ACCOUNTS.claude)!.label = 'markus.barta@augmentoring.com'
+  accounts.find(a => a.id === ACCOUNTS.main)!.label = 'admin@example.com'
+  accounts.find(a => a.id === ACCOUNTS.claude)!.label = 'markus.barta@example.com'
   accounts.find(a => a.id === ACCOUNTS.claude)!.last_probe_ok = false
   accounts.find(a => a.id === ACCOUNTS.cursor)!.label = 'markus@barta.com'
   const computer = {
@@ -44,7 +44,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await expect(band.locator('.account-line')).toHaveCount(3)
     await expect(band.locator('.meta')).toHaveText('2 of 3 accounts ready')
     await expect(band.locator('[data-pool="codex"] .left')).toContainText('42%')
-    await expect(band.locator(`[data-account="${ACCOUNTS.main}"]`)).toContainText('admin@augmentoring.com')
+    await expect(band.locator(`[data-account="${ACCOUNTS.main}"]`)).toContainText('admin@example.com')
     const cursor = band.locator('[data-pool="cursor"]')
     await expect(cursor).toContainText('Usage unknown · reserve not enforceable')
     await expect(cursor.getByRole('meter')).toHaveCount(0)

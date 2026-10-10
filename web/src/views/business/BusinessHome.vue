@@ -3,7 +3,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getNode } from '../../lib/api'
-import { listEntries, listPeriods, type CostRate, type TimeEntry, type TimePeriod } from '../../lib/business'
+import { listEntries, listPeriods, PERIOD_HISTORY_START, type CostRate, type TimeEntry, type TimePeriod } from '../../lib/business'
 import { plural } from '../../lib/work'
 import { addDays, dayKey, isoWeek, periodLabel, startOfWeek, weekDays, weekLabel, WEEKDAYS } from '../../lib/week'
 import { formatClock, formatSpan } from '../../components/business/duration'
@@ -42,7 +42,7 @@ async function loadHours() {
   hoursError.value = ''
   try {
     const start = week.getTime(), end = addDays(week, 7).getTime()
-    const mine = await listPeriods(me.value)
+    const mine = await listPeriods(me.value, { since: new Date(start).toISOString(), until: new Date(end).toISOString() })
     const overlapping = mine.filter(p => Date.parse(p.starts_at) < end && Date.parse(p.ends_at) > start)
     const found = (await Promise.all(overlapping.map(p => listEntries({ period_id: p.id })))).flat()
     entries.value = found.filter(e => Date.parse(e.started_at) >= start && Date.parse(e.started_at) < end)
@@ -50,7 +50,7 @@ async function loadHours() {
     const resolved = await Promise.all(ids.map(id => getNode(id).then(n => [id, { key: n.key, title: n.title }] as const).catch(() => [id, { key: '—', title: 'Deleted node' }] as const)))
     nodes.value = new Map(resolved)
     if (business.admin) {
-      periods.value = await listPeriods()
+      periods.value = await listPeriods(undefined, { since: PERIOD_HISTORY_START })
       const waiting = periods.value.filter(p => p.state === 'open' && Date.parse(p.ends_at) <= now.value)
       const sums = await Promise.all(waiting.map(async p => [p.id, (await listEntries({ period_id: p.id })).reduce((s, e) => s + e.duration_seconds, 0)] as const))
       periodSeconds.value = new Map(sums)

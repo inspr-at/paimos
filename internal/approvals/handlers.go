@@ -13,8 +13,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 // Approval is one permission request and, once a person has decided, that decision.
@@ -53,6 +55,44 @@ type proposal struct {
 type decisionWrite struct {
 	Decision string  `json:"decision"`
 	Reason   *string `json:"reason"`
+}
+
+func (m *Module) handleGet(w http.ResponseWriter, r *http.Request) {
+	p, ok := requirePrincipal(w, r)
+	if !ok {
+		return
+	}
+	if p.Kind != tenant.Person && p.Kind != tenant.Agent {
+		writeError(w, 403, "forbidden")
+		return
+	}
+	id := r.PathValue("approvalId")
+	if !uuidPattern.MatchString(id) {
+		writeError(w, 404, "approval not found")
+		return
+	}
+	var item Approval
+	err := m.inTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		item, err = loadApproval(r.Context(), tx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fail(404, "approval not found")
+		}
+		if err != nil {
+			return err
+		}
+		if p.Kind == tenant.Agent && item.AgentPrincipalID != p.ID {
+			return fail(404, "approval not found")
+		}
+		if err = approvalVisible(r.Context(), tx, p, item); err != nil {
+			if errors.Is(err, authz.ErrForbidden) {
+				return fail(404, "approval not found")
+			}
+			return err
+		}
+		return exposeAgentName(r.Context(), tx, p, &item)
+	})
+	writeResult(w, 200, item, err)
 }
 
 func (m *Module) handleList(w http.ResponseWriter, r *http.Request) {

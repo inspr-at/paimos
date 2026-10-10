@@ -187,6 +187,8 @@ type LocalDaemon interface {
 	Status(context.Context, string) (LocalStatus, error)
 }
 type Engine struct {
+	PrepareLedger      func(context.Context, RuntimeConfig) error
+	LeaveLedger        func(context.Context) error
 	Hooks              *HookInstaller
 	Enclave            agentsecurity.Signer
 	Store              *Store
@@ -196,6 +198,8 @@ type Engine struct {
 	ClaudeDependencies ClaudeDependencies
 	Now                func() time.Time
 	GrokProbe          func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
+	// InstallMethod is the detected add-harness entry point (see InstallMethod).
+	InstallMethod string
 }
 type Options struct {
 	Origin, TenantID, TenantSlug, ComputerName, Workspace string
@@ -448,7 +452,7 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 	if publicKey != "" {
 		s.LocalAuthKeyID = Hash([]byte(e.Store.Path())) + "/" + id
 	}
-	s.Request = DeviceRequest{RequestID: id, TenantID: o.TenantID, TenantSlug: o.TenantSlug, DeviceHash: Hash([]byte(device)), RuntimeHash: Hash([]byte(runtimeSecret)), LifecycleHash: Hash([]byte(life)), Details: Details{LocalAuthPublicKey: publicKey, ComputerName: o.ComputerName, Platform: o.Platform.OS, Arch: o.Platform.Arch, Workspace: o.Workspace, Capabilities: []string{"managed_runs"}}}
+	s.Request = DeviceRequest{RequestID: id, TenantID: o.TenantID, TenantSlug: o.TenantSlug, DeviceHash: Hash([]byte(device)), RuntimeHash: Hash([]byte(runtimeSecret)), LifecycleHash: Hash([]byte(life)), Details: Details{LocalAuthPublicKey: publicKey, ComputerName: o.ComputerName, Platform: o.Platform.OS, Arch: o.Platform.Arch, Workspace: o.Workspace, Capabilities: []string{"managed_runs", LedgerCapability}}}
 	for _, c := range o.Candidates {
 		key, err := uuid()
 		if err != nil {
@@ -651,11 +655,11 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 			code = "private_storage_failed"
 		}
 		proof := e.proof(s)
-		proof.Progress = reportRelease(s.View, &SetupProgress{State: state, ErrorCode: code})
+		proof.Progress = e.reportInstall(s.View, reportRelease(s.View, &SetupProgress{State: state, ErrorCode: code}))
 		_, _ = e.API.Reconcile(ctx, proof)
 	}()
 	proof := e.proof(s)
-	proof.Progress = reportRelease(s.View, &SetupProgress{State: "provisioning"})
+	proof.Progress = e.reportInstall(s.View, reportRelease(s.View, &SetupProgress{State: "provisioning"}))
 	observed, err := e.API.Reconcile(ctx, proof)
 	if err != nil {
 		return e.progress(s), err
@@ -723,6 +727,11 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 	raw, _ := json.Marshal(config)
 	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
 		return e.progress(s), err
+	}
+	if e.PrepareLedger != nil {
+		if err := e.PrepareLedger(ctx, config); err != nil {
+			return e.progress(s), err
+		}
 	}
 	if s.StartService {
 		if e.Services == nil {

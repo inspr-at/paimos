@@ -61,7 +61,14 @@ func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 // admission fence before fn can lock resources. WithKeyScopeUse adds target
 // keys to the sorted admission batch for operations that touch several keys.
 func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
-	return inTenant(ctx, pool, tenantID, pgx.TxOptions{}, true, fn)
+	return InTenantWithBootstrap(ctx, ctx, pool, tenantID, fn)
+}
+
+// InTenantWithBootstrap bounds acquisition, BEGIN and authorization setup with
+// bootstrap. Established transactions use ctx, including COMMIT and ROLLBACK;
+// callers can retain an uncanceled cleanup context with server SQL timeouts.
+func InTenantWithBootstrap(ctx, bootstrap context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
+	return inTenant(ctx, bootstrap, pool, tenantID, pgx.TxOptions{}, true, fn)
 }
 
 // InTenantReadSnapshot reads permissions, canonical identity and response data
@@ -78,16 +85,16 @@ func InTenantReadSnapshot(ctx context.Context, pool *pgxpool.Pool, tenantID stri
 	if guarded || keyed && p.Kind == tenant.Agent && p.KeyID != "" {
 		options.AccessMode = pgx.ReadWrite
 	}
-	return inTenant(ctx, pool, tenantID, options, false, fn)
+	return inTenant(ctx, ctx, pool, tenantID, options, false, fn)
 }
 
-func inTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, options pgx.TxOptions, deriveWorkStatus bool, fn func(pgx.Tx) error) error {
+func inTenant(ctx, bootstrap context.Context, pool *pgxpool.Pool, tenantID string, options pgx.TxOptions, deriveWorkStatus bool, fn func(pgx.Tx) error) error {
 	var tx pgx.Tx
 	var err error
 	if parent, ok := ctx.Value(transactionContextKey{}).(pgx.Tx); ok {
-		tx, err = parent.Begin(ctx)
+		tx, err = parent.Begin(bootstrap)
 	} else {
-		tx, err = beginTx(ctx, pool, options)
+		tx, err = beginTx(bootstrap, pool, options)
 	}
 	if err != nil {
 		return err
@@ -99,42 +106,42 @@ func inTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, options 
 	p, hasPrincipal := tenant.PrincipalFrom(ctx)
 	keyed := hasPrincipal && p.TenantID == tenantID && p.Kind == tenant.Agent && p.KeyID != ""
 	if keyed {
-		if _, err := tx.Exec(ctx, `SELECT set_config($1,$2,true)`, TenantSetting, tenantID); err != nil {
+		if _, err := tx.Exec(bootstrap, `SELECT set_config($1,$2,true)`, TenantSetting, tenantID); err != nil {
 			return fmt.Errorf("set tenant: %w", err)
 		}
-	} else if err := enterTenant(ctx, tx, tenantID); err != nil {
+	} else if err := enterTenant(bootstrap, tx, tenantID); err != nil {
 		return fmt.Errorf("set tenant: %w", err)
 	}
 	if limit, ok := ctx.Value(readLimitKey{}).(*readLimit); ok {
-		if err := SetLocalStatementTimeout(ctx, tx, limit.duration); err != nil {
+		if err := SetLocalStatementTimeout(bootstrap, tx, limit.duration); err != nil {
 			return fmt.Errorf("set read statement timeout: %w", err)
 		}
 	}
-	if err := lockAgentScopeUse(ctx, tx, tenantID); err != nil {
+	if err := lockAgentScopeUse(bootstrap, tx, tenantID); err != nil {
 		return err
 	}
 	if keyed {
-		if err := ValidateKeyCreatorTx(ctx, tx, p); err != nil {
+		if err := ValidateKeyCreatorTx(bootstrap, tx, p); err != nil {
 			return err
 		}
-		if err := enterTenant(ctx, tx, tenantID); err != nil {
+		if err := enterTenant(bootstrap, tx, tenantID); err != nil {
 			return fmt.Errorf("set tenant visibility: %w", err)
 		}
 	}
 	var active bool
 	if deriveWorkStatus {
-		active, err = beginWorkStatus(ctx, tx)
+		active, err = beginWorkStatus(bootstrap, tx)
 		if err != nil {
 			return err
 		}
 	}
 	if guard, ok := ctx.Value(tenantGuardKey{}).(TenantGuard); ok {
-		if err := guard(ctx, tx, tenantID); err != nil {
+		if err := guard(bootstrap, tx, tenantID); err != nil {
 			return err
 		}
 		// The guard may have waited behind an access change. Recompute project
 		// visibility under its fence rather than retaining the pre-lock snapshot.
-		if err := enterTenant(ctx, tx, tenantID); err != nil {
+		if err := enterTenant(bootstrap, tx, tenantID); err != nil {
 			return fmt.Errorf("refresh guarded tenant: %w", err)
 		}
 	}

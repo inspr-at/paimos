@@ -80,7 +80,10 @@ func QualifyingAccountIDs(ctx context.Context, tx pgx.Tx, profileID, harness, pr
 	if err != nil {
 		return nil, err
 	}
-	accounts = applyFence(accounts, fences, projectID)
+	accounts, err = applyUse(ctx, tx, applyFence(accounts, fences, projectID), projectID)
+	if err != nil {
+		return nil, err
+	}
 	kept := []Account{}
 	for _, a := range accounts {
 		if a.Harness != harness {
@@ -128,7 +131,10 @@ func ResidencyProfileRouteCounts(ctx context.Context, tx pgx.Tx, profiles map[st
 			if err != nil {
 				return nil, err
 			}
-			candidates = applyFence(accounts, fs, projectID)
+			candidates, err = applyUse(ctx, tx, applyFence(accounts, fs, projectID), projectID)
+			if err != nil {
+				return nil, err
+			}
 			byHarness[harness] = candidates
 		}
 		for _, a := range candidates {

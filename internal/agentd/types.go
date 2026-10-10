@@ -283,6 +283,8 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
+	// Chat is transient output. It must never enter run telemetry or journals.
+	Chat         *ChatUpdate
 	ModelReports []modelreport.Observation
 	HarnessTier  string
 	Doing        string
@@ -393,6 +395,7 @@ type AccountMetadata struct {
 }
 
 type EnrolledAccount struct {
+	VerifiedIdentity string // local verified login ID; never sent to another server
 	ID, Key, Harness string
 	Metadata         *AccountMetadata
 	// DependencyBlocked means this enrollment's interpreter pin is missing,

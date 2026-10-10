@@ -77,7 +77,21 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
 
   // pageSize 1 fetches counts and facets only (the Outline builds its own rows then).
   let pageSize = 200
-  async function load(options: { pageSize?: number } = {}) {
+  let latest: Promise<void> = Promise.resolve()
+  function load(options: { pageSize?: number } = {}): Promise<void> {
+    const run = loadOnce(options)
+    latest = run
+    return run
+  }
+  // Resolves once the newest load has its rows and all its counts, also the
+  // unfiltered ones of a filtered dimension; a load started meanwhile is awaited too.
+  async function settled() {
+    for (let run = latest; ; run = latest) {
+      await run
+      if (run === latest) return
+    }
+  }
+  async function loadOnce(options: { pageSize?: number }) {
     const within = projectId.value
     if (!within) return
     pageSize = options.pageSize ?? 200
@@ -341,5 +355,5 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     if (state?.[row.state] && !row.estimate?.is_parent) state[row.state]--
   }
 
-  return { rows, cursor, edge, loading, loadingMore, error, moreError, facets, names, colors, loadedOnce, reads, load, loadMore, loadAll, counts, refreshCounts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }
+  return { rows, cursor, edge, loading, loadingMore, error, moreError, facets, names, colors, loadedOnce, reads, load, settled, loadMore, loadAll, counts, refreshCounts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }
 }

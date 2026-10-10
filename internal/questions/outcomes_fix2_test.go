@@ -17,21 +17,25 @@ import (
 
 // Observe actual PostgreSQL lock waits, not a goroutine-start signal. The
 // deadline only bounds a broken test; a positive database sample is mandatory.
-func waitTenantWaiters(t *testing.T, f *deliveryFixture, want int) {
+// Follow the canonical pairing/tree/tenant chain to the held transaction. Every
+// contender must be blocked behind this exact barrier, directly or transitively.
+func waitFenceWaiters(t *testing.T, f *deliveryFixture, blocker uint32, want int) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	last := 0
 	for {
 		var n int
-		err := f.d.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database()
- AND query LIKE 'SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE%'
- AND cardinality(pg_blocking_pids(pid))>0`).Scan(&n)
+		err := f.d.Admin.QueryRow(ctx, `WITH RECURSIVE blocked(pid,path) AS (
+ SELECT pid,ARRAY[pid] FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))
+ UNION ALL SELECT a.pid,b.path||a.pid FROM blocked b JOIN pg_stat_activity a ON b.pid=ANY(pg_blocking_pids(a.pid))
+ WHERE a.datname=current_database() AND NOT a.pid=ANY(b.path) AND cardinality(b.path)<16
+) SELECT count(DISTINCT pid) FROM blocked`, blocker).Scan(&n)
 		if err != nil {
 			if ctx.Err() != nil {
-				t.Fatalf("timed out waiting for %d tenant waiters (last observed %d): %v", want, last, ctx.Err())
+				t.Fatalf("timed out waiting for %d fence waiters (last observed %d): %v", want, last, ctx.Err())
 			}
-			t.Fatalf("querying tenant waiters (wanted %d, last observed %d): %v", want, last, err)
+			t.Fatalf("querying fence waiters (wanted %d, last observed %d): %v", want, last, err)
 		}
 		last = n
 		if n >= want {

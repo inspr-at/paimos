@@ -279,6 +279,21 @@ func TestV2UpgradePreservesPinsCustomRoutesAndOverrides(t *testing.T) {
 			if eventCount(t, p, "model.catalog_upgraded") != 1 {
 				t.Fatal("upgrade not idempotent")
 			}
+			var securityProfile Profile
+			inRegistry(t, p, func(tx pgx.Tx) error {
+				steps, err := loadLadder(t.Context(), tx, "review-gate-security")
+				if err != nil {
+					return err
+				}
+				for _, step := range steps {
+					if step.Profile.Family == "openai" {
+						securityProfile = step.Profile
+						break
+					}
+				}
+				return nil
+			})
+			minimalAccount(t, p, securityProfile)
 			gate := decode[Resolution](t, &p, "GET", "/api/models/resolve?role=review-gate-security&author_family=xai", "", 200)
 			if gate.Profile == nil || gate.Profile.Family != "openai" || !strings.Contains(gate.CommandTemplate, "--sandbox read-only") {
 				t.Fatalf("security route: %+v", gate)

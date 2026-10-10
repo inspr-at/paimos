@@ -70,6 +70,7 @@ type SetupProgress struct {
 	HarnessStatuses map[string]string        `json:"harness_statuses,omitempty"`
 	State           string                   `json:"state"`
 	ErrorCode       string                   `json:"error_code,omitempty"`
+	InstallMethod   string                   `json:"install_method,omitempty"`
 }
 
 // reportRelease uses the normal lifecycle response as capability negotiation.
@@ -266,9 +267,9 @@ func (c HTTPClient) Reconcile(ctx context.Context, r ProofRequest) (View, error)
 	// Strict legacy decoding rejects the additive field before any mutation;
 	// retry that request once with only the old lifecycle shape.
 	var apiErr *APIError
-	if r.Progress != nil && r.Progress.AgentRelease != nil && errors.As(e, &apiErr) && apiErr.Code == "invalid_request" {
+	if r.Progress != nil && (r.Progress.AgentRelease != nil || r.Progress.InstallMethod != "") && errors.As(e, &apiErr) && apiErr.Code == "invalid_request" {
 		progress := *r.Progress
-		progress.AgentRelease = nil
+		progress.AgentRelease, progress.InstallMethod = nil, ""
 		r.Progress = &progress
 		e = c.call(ctx, "POST", "/reconcile", "", r, &v)
 	}

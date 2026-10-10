@@ -38,11 +38,6 @@ async function checkResult() {
     if (answer && own === epoch && props.session.id === s.id) { tiers.errors[s.id] = ''; tiers.follow(s) }
   } catch { /* Keep the visible error until a read confirms the result. */ }
 }
-async function decide(decision: 'approve' | 'decline') {
-  const s = props.session, q = request.value
-  if (!q || q.state !== 'pending') return
-  await tiers.change(s, props.name, q.tier, { request: q, decision, withUndo: decision === 'approve' })
-}
 </script>
 <template>
   <section class="service-tier block" aria-label="Service tier">
@@ -52,8 +47,7 @@ async function decide(decision: 'approve' | 'decline') {
     <div v-if="request" class="tier-request" :class="{ settled: request.state !== 'pending' }" role="note">
       <!-- Actions retain their boxes when the outcome appears below them. -->
       <div class="request-actions">
-        <button v-if="permitted" type="button" class="btn sm primary" :disabled="request.state !== 'pending' || !canOpen || !offeredTier(options.find(t => t.tier === request?.tier))" @click="decide('approve')">Approve {{ TIER_NAME[request.tier] }}</button>
-        <button v-if="permitted" type="button" class="btn sm ghost" :disabled="request.state !== 'pending' || tiers.busy[session.id] || !session.process_ownership" @click="decide('decline')">Decline</button>
+        <RouterLink v-if="permitted" class="btn sm" :to="{ path: '/decision-desk', query: { item: `t:${request.id}` } }">Review in Decision Desk</RouterLink>
         <span v-if="!permitted">Waiting for a person</span>
       </div>
       <strong><AppIcon name="shield" :size="14" />{{ request.state === 'pending' ? `${tiers.canAsk(session) ? 'You asked' : name + ' asks'} for ${TIER_NAME[request.tier]}` : `${request.state === 'approved' ? 'Approved' : 'Declined'} · ${TIER_NAME[request.tier]}` }}</strong>
@@ -80,7 +74,7 @@ async function decide(decision: 'approve' | 'decline') {
   </section>
 </template>
 <style scoped>
-.service-tier{margin-top:24px;min-width:0}.tier-title{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:32px;margin-bottom:10px}.tier-title h3{margin:0}.tier-head{margin-top:10px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;min-height:32px}.tier-head strong{font-size:13px}.tier-head>span{font-size:12px;color:var(--ink-2)}.paid{color:var(--warn-ink)}.tier-change{margin-left:auto}.tier-applies{margin-top:6px;font-size:12.5px;line-height:1.45}.compare{margin-top:14px;border-top:1px solid var(--line)}.compare-head,.compare-row{display:grid;grid-template-columns:84px minmax(0,1fr) 100px;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}.compare-head{height:28px;padding:0;font:500 9.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}.compare-row{min-height:52px}.compare-row.current{background:var(--row-selected);border-radius:8px;margin-inline:-8px;padding-inline:8px}.compare-row.off{color:var(--ink-3)}.compare-name{display:flex;align-items:center;gap:8px;font-weight:600}.compare-row small{display:block;margin-top:3px;font:11px/1.4 var(--mono);overflow-wrap:anywhere;color:var(--ink-3)}.basis,.source,.rights{margin-top:10px;color:var(--ink-3);font-size:11.5px;line-height:1.45;overflow-wrap:anywhere}.source{padding-top:10px;border-top:1px solid var(--line)}.tier-request{display:grid;gap:6px;margin-top:14px;padding:12px;background:var(--gold-wash);border-radius:10px;box-shadow:inset 0 0 0 1px var(--line-2);font-size:12.5px;overflow-wrap:anywhere}.request-actions{display:flex;gap:6px;min-height:32px}.request-actions>.btn{width:126px;height:32px}.tier-request strong{display:flex;align-items:center;gap:6px}.tier-request p{margin:0}.settled{background:var(--surface-2)}.tier-error{margin-top:10px;font-size:12px;color:var(--danger)}
+.service-tier{margin-top:24px;min-width:0}.tier-title{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:32px;margin-bottom:10px}.tier-title h3{margin:0}.tier-head{margin-top:10px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;min-height:32px}.tier-head strong{font-size:13px}.tier-head>span{font-size:12px;color:var(--ink-2)}.paid{color:var(--warn-ink)}.tier-change{margin-left:auto}.tier-applies{margin-top:6px;font-size:12.5px;line-height:1.45}.compare{margin-top:14px;border-top:1px solid var(--line)}.compare-head,.compare-row{display:grid;grid-template-columns:84px minmax(0,1fr) 100px;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}.compare-head{height:28px;padding:0;font:500 9.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}.compare-row{min-height:52px}.compare-row.current{background:var(--row-selected);border-radius:8px;margin-inline:-8px;padding-inline:8px}.compare-row.off{color:var(--ink-3)}.compare-name{display:flex;align-items:center;gap:8px;font-weight:600}.compare-row small{display:block;margin-top:3px;font:11px/1.4 var(--mono);overflow-wrap:anywhere;color:var(--ink-3)}.basis,.source,.rights{margin-top:10px;color:var(--ink-3);font-size:11.5px;line-height:1.45;overflow-wrap:anywhere}.source{padding-top:10px;border-top:1px solid var(--line)}.tier-request{display:grid;gap:6px;margin-top:14px;padding:12px;background:var(--gold-wash);border-radius:10px;box-shadow:inset 0 0 0 1px var(--line-2);font-size:12.5px;overflow-wrap:anywhere}.request-actions{display:flex;gap:6px;min-height:32px}.request-actions>.btn{min-height:32px;max-width:100%;white-space:normal}.tier-request strong{display:flex;align-items:center;gap:6px}.tier-request p{margin:0}.settled{background:var(--surface-2)}.tier-error{margin-top:10px;font-size:12px;color:var(--danger)}
 </style>
 
 <style scoped>

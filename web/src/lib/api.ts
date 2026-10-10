@@ -246,6 +246,8 @@ export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets }
 export interface ListQuery {
  shape?: string[]; depth?: string[]
+  // Work levels: leaf, else a parent's depth (AEON-974).
+  level?: string[]
   human_check?: string[]
   within?: string; kind?: string[]; state?: string[]; priority?: string[]; assignee?: string[]
   tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]

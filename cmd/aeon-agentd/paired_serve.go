@@ -44,7 +44,7 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	accounts := []agentd.EnrolledAccount{}
 	for _, a := range c.Accounts {
 		block, isBlocked := blocked[a.AccountID]
-		accounts = append(accounts, agentd.EnrolledAccount{ID: a.AccountID, Key: a.Key, Harness: a.Harness, DependencyBlocked: isBlocked, PinReason: block.Reason, PinFix: block.Fix.Kind})
+		accounts = append(accounts, agentd.EnrolledAccount{ID: a.AccountID, Key: a.Key, Harness: a.Harness, VerifiedIdentity: a.Identity, DependencyBlocked: isBlocked, PinReason: block.Reason, PinFix: block.Fix.Kind})
 		if isBlocked {
 			continue
 		}
@@ -216,6 +216,13 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	if s.TenantID() != c.TenantID || s.PrincipalID() != c.PrincipalID {
 		return errors.New("runtime identity differs from approved pairing")
 	}
+	ledgerConfig, err := ledgerConfig(root, c)
+	if err != nil {
+		return err
+	}
+	if err = s.RefreshLedger(ctx, ledgerConfig); err != nil {
+		return fmt.Errorf("ledger enrollment unconfirmed: %w", err)
+	}
 	diagnostic("", "", "daemon_ready", "")
 	watches, err := pairedAttach(root, c, remote)
 	if err != nil {
@@ -318,6 +325,13 @@ func pairedPollIteration(ctx context.Context, s *agentd.Supervisor, root string,
 			return c, errors.Join(err, s.ProbeOnce(ctx))
 		}
 		return c, err
+	}
+	config, configErr := ledgerConfig(root, c)
+	if configErr != nil {
+		return c, configErr
+	}
+	if ledgerErr := s.RefreshLedger(ctx, config); ledgerErr != nil {
+		return c, ledgerErr
 	}
 	next, _, err := agentsetup.ReadRuntime(root)
 	if err != nil {
@@ -579,8 +593,22 @@ func syncPairing(ctx context.Context, root, origin string, s *agentd.Supervisor)
 		return err
 	}
 	defer store.Close()
-	e := agentsetup.Engine{Store: store, API: agentsetup.HTTPClient{Origin: origin}, Local: localPairing{root: root, supervisor: s}}
+	e := agentsetup.Engine{Store: store, API: agentsetup.HTTPClient{Origin: origin}, Local: localPairing{root: root, supervisor: s}, InstallMethod: installMethod()}
 	return e.SyncFences(ctx)
+}
+
+// installMethod reports which add-harness entry point reaches this daemon, so
+// Settings can offer the matching command. Empty when none provably does.
+func installMethod() string {
+	executable, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return agentsetup.InstallMethod(executable, home)
 }
 
 // pairedPreflight injects the public lifecycle transport in cold-start tests.
@@ -593,7 +621,7 @@ func pairedPreflight(ctx context.Context, root, origin string, api agentsetup.Pa
 	if api == nil {
 		api = agentsetup.HTTPClient{Origin: origin}
 	}
-	e := agentsetup.Engine{Store: store, API: api, Local: localPairing{root: root}}
+	e := agentsetup.Engine{Store: store, API: api, Local: localPairing{root: root}, InstallMethod: installMethod()}
 	if err = e.SyncFences(ctx); err != nil {
 		return false, err
 	}

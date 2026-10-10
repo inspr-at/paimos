@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON owns this bridge process and one documented Agent SDK Query handle.
-// Lifecycle events are content-free. The explicit native_message frame carries
-// bounded send arguments transiently to the owner; it is never journaled.
+// Lifecycle events are content-free. Chat projections and native_message send
+// arguments are bounded, transient frames to the owner; never journal them.
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -283,6 +283,46 @@ function observeTool(message) {
   if (!Array.isArray(blocks)) return;
   for (const block of blocks) if (block?.type === 'tool_use') {
     emit({ kind: 'tool_started', activity_text: toolActivity(block.name, block.input) });
+  }
+}
+
+// Keep only bounded tool identities; no transcript, inputs, results or reasoning.
+const chatTools = new Map();
+function observeChat(message) {
+  const dropped = () => emit({ kind: "chat_dropped" });
+  const publish = (update) => emit({ kind: "chat", update });
+  if (message?.parent_tool_use_id) return; // Subagent output is not this chat.
+  if (message?.type === "stream_event") {
+    const event = message.event;
+    if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
+      const text = event.delta.text;
+      if (typeof text !== "string" || text.length === 0 || Buffer.byteLength(text) > 65536 || text.includes("\0")) { dropped(); return; }
+      publish({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      return;
+    }
+    if (!["message_start", "message_delta", "message_stop", "content_block_start", "content_block_delta", "content_block_stop", "ping"].includes(event?.type)) { dropped(); return; }
+  } else if (!["assistant", "user", "system", "result", "rate_limit_event", "tool_progress", "tool_use_summary", "auth_status"].includes(message?.type)) {
+    dropped(); return;
+  }
+  const blocks = message?.type === "assistant" || message?.type === "user" ? message.message?.content :
+    message?.type === "stream_event" && message.event?.type === "content_block_start" ? [message.event.content_block] : [];
+  if (!Array.isArray(blocks)) return;
+  for (const block of blocks) {
+    if (block?.type === "tool_use") {
+      if (!validID(block.id) || !validID(block.name, 128) || Buffer.byteLength(block.id) > 256 || Buffer.byteLength(block.name) > 128) { dropped(); continue; }
+      if (chatTools.has(block.id)) continue; // stream start then assistant snapshot
+      if (chatTools.size >= 256) { dropped(); continue; }
+      chatTools.set(block.id, block.name);
+      publish({ sessionUpdate: "tool_call", toolCallId: block.id, title: block.name, status: "in_progress" });
+      if (block.name === "mcp__aeon__aeon_request_approval") {
+        publish({ sessionUpdate: "state", state: "requires_action" });
+      }
+    } else if (block?.type === "tool_result") {
+      const title = chatTools.get(block.tool_use_id);
+      if (!title) { dropped(); continue; }
+      chatTools.delete(block.tool_use_id);
+      publish({ sessionUpdate: "tool_call", toolCallId: block.tool_use_id, title, status: block.is_error === true ? "failed" : "completed" });
+    }
   }
 }
 
@@ -618,6 +658,7 @@ try {
     observeTurnActivity(message);
     observeReaction(message);
     observeTool(message);
+    observeChat(message);
     if (message?.type === "result") {
       turnActive = false;
       finishCapacity();

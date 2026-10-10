@@ -4,7 +4,9 @@ import { parseEstimate } from './estimates'
 
 export interface RecurrenceTrigger {
   kind: 'time' | 'event'; rrule?: string; time_of_day?: string; timezone?: string; start_date?: string
-  event?: 'release.published'; event_start?: 'now' | 'hour' | 'morning'; event_timezone?: string
+  event?: 'release.published' | 'node.done' | 'knowledge.changed' | 'external.tag' | 'external.deploy'; event_start?: 'now' | 'hour' | 'morning'; event_timezone?: string
+  filter?: { project_ids?: string[]; has_release_copy?: boolean; exclude_hidden?: boolean; entry_id?: string; knowledge_type?: string; tag?: string }
+  external?: { principal_id: string; public_key: string }
 }
 export interface RecurrenceTemplate {
   name?: string; title: string; description: string; acceptance_criteria: string[]; estimate_hours: number
@@ -32,14 +34,14 @@ export interface RecurrenceHistoryEntry {
 export interface RecurrenceRelease { key: string; name: string; version: string; published_at: string; receipt?: RecurrenceResult }
 export type HistoryFilter = 'all' | 'created' | 'skipped' | 'changes'
 export interface RecurrencePreview { times: string[]; trigger_kind: 'time' | 'event' }
-export const copyRecurrenceInput = (value: RecurrenceInput): RecurrenceInput => ({ ...value, template: { ...value.template, tags: [...value.template.tags], acceptance_criteria: [...value.template.acceptance_criteria] }, trigger: { ...value.trigger } })
+export const copyRecurrenceInput = (value: RecurrenceInput): RecurrenceInput => ({ ...value, template: { ...value.template, tags: [...value.template.tags], acceptance_criteria: [...value.template.acceptance_criteria] }, trigger: { ...value.trigger, ...(value.trigger.filter ? { filter: { ...value.trigger.filter, ...(value.trigger.filter.project_ids ? { project_ids: [...value.trigger.filter.project_ids] } : {}) } } : {}), ...(value.trigger.external ? { external: { ...value.trigger.external } } : {}) } })
 export const recurrenceName = (item: Pick<Recurrence, 'template'>) => item.template.name || item.template.title
 export const recurrenceZone = (trigger: RecurrenceTrigger) => trigger.timezone || trigger.event_timezone || 'UTC'
 export const weekdays = [['MO', 'Monday'], ['TU', 'Tuesday'], ['WE', 'Wednesday'], ['TH', 'Thursday'], ['FR', 'Friday'], ['SA', 'Saturday'], ['SU', 'Sunday']] as const
 export const zones = ['Europe/Vienna', 'Europe/London', 'UTC', 'America/New_York', 'America/Los_Angeles', 'Asia/Tokyo', 'Australia/Sydney']
 export function ruleParts(rule = ''): Record<string, string> { return Object.fromEntries(rule.split(';').map(part => part.split('='))) }
 export function triggerWords(trigger: RecurrenceTrigger) {
-  if (trigger.kind === 'event') return 'After every release is published' + (trigger.event_start === 'hour' ? ', an hour later' : trigger.event_start === 'morning' ? ', next morning at 06:00' : '')
+  if (trigger.kind === 'event') return ({ 'release.published': 'After every release is published', 'node.done': 'After matching work reaches Done', 'knowledge.changed': 'After matching knowledge changes', 'external.tag': 'After a signed external tag', 'external.deploy': 'After a signed external deploy' }[trigger.event || 'release.published']) + (trigger.event_start === 'hour' ? ', an hour later' : trigger.event_start === 'morning' ? ', next morning at 06:00' : '')
   const rule = ruleParts(trigger.rrule)
   let words = 'Every day'
   if (rule.FREQ === 'WEEKLY') words = `Every ${weekdays.filter(([day]) => rule.BYDAY?.split(',').includes(day)).map(([, label]) => label).join(', ') || 'week'}`
@@ -82,7 +84,7 @@ export function templateProblems(input: RecurrenceInput, estimate: string): stri
   const values = [t.title, t.description, t.pill_en, t.pill_de, t.benefit_en, t.benefit_de, ...t.acceptance_criteria].join('\n')
   const rest = values.replace(/\{\{(occurrence|date|release_name|release_version)\}\}/g, '')
   if (rest.includes('{{') || rest.includes('}}')) problems.push('Use Number, Date or Release for template variables.')
-  if (input.trigger.kind === 'time' && /\{\{release_(name|version)\}\}/.test(values)) problems.push('Release only has a value with the Event trigger. Remove it or switch to Event.')
+  if ((input.trigger.kind !== 'event' || input.trigger.event !== 'release.published') && /\{\{release_(name|version)\}\}/.test(values)) problems.push('Release variables require a release trigger.')
   if (input.trigger.kind === 'time' && input.trigger.rrule?.startsWith('FREQ=WEEKLY') && !ruleParts(input.trigger.rrule).BYDAY) problems.push('Pick at least one day.')
   if (estimate.trim() && recurrenceEstimate(estimate) === null) problems.push('Use an estimate such as 20 min or 2 h, up to 200 hours.')
   if (input.queue_each && (!(t.estimate_hours > 0) || !t.acceptance_criteria.length)) problems.push('To queue each one, add an estimate and criteria.')

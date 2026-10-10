@@ -4,10 +4,17 @@ paths:
     get:
       operationId: listTimePeriods
       summary: List time periods
+      description: "Bounded keyset page. The array shape is preserved; X-Next-Cursor explicitly indicates more results."
       security: *auth
-      parameters: [{name: principal_id, in: query, schema: {type: string, format: uuid}}]
+      parameters:
+        - {name: principal_id, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: after_id, in: query, schema: {type: string, format: uuid}, description: "Previous page X-Next-Cursor; retain the other selectors."}
+        - {name: since, in: query, schema: {type: string, format: date-time}, description: "Inclusive lower date bound; periods default to the past year."}
+        - {name: until, in: query, schema: {type: string, format: date-time}, description: "Exclusive upper date bound."}
       responses:
-        '200': {description: Periods, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TimePeriod'}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '200': {description: "Periods", headers: {X-Next-Cursor: {description: "More rows available; send this UUID as after_id.", schema: {type: string, format: uuid}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TimePeriod'}}}}}
     post:
       operationId: createTimePeriod
       summary: Open a time period for one principal

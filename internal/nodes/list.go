@@ -148,6 +148,10 @@ type listQuery struct {
 	// Only these nodes, with every other filter still applied: a live list
 	// refetches the rows that changed through its own query (AEON-326).
 	IDs []string `json:"ids,omitempty"`
+	// Levels name a work row by its shape: "leaf", else the parent's depth
+	// ("1", "2", …), the rule the workspace vocabulary names (AEON-974).
+	Levels    []string `json:"levels,omitempty"`
+	LevelsNot []string `json:"levels_not,omitempty"`
 	// seen and the lead thresholds are filled by listNodes. They are not
 	// request input and stay out of the cursor fingerprint (unexported).
 	seen        assigneeSeen
@@ -173,7 +177,10 @@ type treeQuery struct {
 const maxListIDs = 200
 
 var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true, "model": true, "tokens": true, "list_cost": true, "paid": true}
-var validFacet = map[string]bool{"shape": true, "depth": true, "state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "human_check": true}
+var validFacet = map[string]bool{"shape": true, "depth": true, "level": true, "state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "human_check": true}
+
+// levelSQL is a work row's level from its shape s: "leaf", else the depth.
+const levelSQL = `CASE WHEN s.is_leaf THEN 'leaf' ELSE s.depth::text END`
 
 // dateFieldKeys maps date_field to the fields key of dates kept in node fields.
 var dateFieldKeys = map[string]string{"start": "start_date", "end": "end_date", "accepted": "accepted_at"}
@@ -275,6 +282,18 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 	}
 	if len(out.Depths)+len(out.DepthsNot) > 32 {
 		return out, badRequest("too many depths")
+	}
+	if out.Levels, out.LevelsNot, err = negatedList(r, "level", func(v string) (string, bool) {
+		if v == "leaf" {
+			return v, true
+		}
+		n, e := strconv.Atoi(v)
+		return strconv.Itoa(n), e == nil && n >= 1 && n <= 50000
+	}); err != nil {
+		return out, err
+	}
+	if len(out.Levels)+len(out.LevelsNot) > 33 {
+		return out, badRequest("too many levels")
 	}
 	if out.Kinds, out.KindsNot, err = negatedList(r, "kind", nil); err != nil {
 		return out, err
@@ -1188,13 +1207,14 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		p := arg(q.KindsNot)
 		conditions += " AND NOT (k.slug=ANY(" + p + "::text[]) OR (k.slug='work' AND " + p + "::text[] && ARRAY['epic','ticket','task']) OR n.kind_id::text=ANY(" + p + "::text[]))"
 	}
-	if len(q.Shapes)+len(q.ShapesNot)+len(q.Depths)+len(q.DepthsNot) > 0 {
+	if len(q.Shapes)+len(q.ShapesNot)+len(q.Depths)+len(q.DepthsNot)+len(q.Levels)+len(q.LevelsNot) > 0 {
 		shape := `(SELECT CASE WHEN s.is_leaf THEN 'leaf' ELSE 'parent' END FROM aeon_work_shape(n.id) s)`
 		depth := `(SELECT s.depth::text FROM aeon_work_shape(n.id) s)`
+		level := `(SELECT ` + levelSQL + ` FROM aeon_work_shape(n.id) s)`
 		for _, f := range []struct {
 			expr    string
 			in, out []string
-		}{{shape, q.Shapes, q.ShapesNot}, {depth, q.Depths, q.DepthsNot}} {
+		}{{shape, q.Shapes, q.ShapesNot}, {depth, q.Depths, q.DepthsNot}, {level, q.Levels, q.LevelsNot}} {
 			if len(f.in) > 0 {
 				conditions += " AND " + f.expr + "=ANY(" + arg(f.in) + "::text[])"
 			}
@@ -1464,6 +1484,9 @@ func facetSQL(q listQuery) (string, []any) {
 	}
 	if want("depth") {
 		extra += ` UNION ALL SELECT 'depth',s.depth::text FROM filtered f CROSS JOIN LATERAL aeon_work_shape(f.id) s`
+	}
+	if want("level") {
+		extra += ` UNION ALL SELECT 'level',` + levelSQL + ` FROM filtered f CROSS JOIN LATERAL aeon_work_shape(f.id) s`
 	}
 	if want("human_check") {
 		extra += `

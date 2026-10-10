@@ -598,7 +598,7 @@ func backfillAccountModelSuccessors(ctx context.Context, tx pgx.Tx) error {
 	// visibility). The audit insert and its retry check touch workspace events
 	// (node_id NULL), which the events SELECT policy shows only to system code,
 	// so the backfill runs as system code over workspace rows (release 127
-	// incident: RLS 42501 on csb1, AEON P0).
+	// incident: RLS 42501 on prod-1, AEON P0).
 	sys := NoProjects(ctx, "migration 1296: account successor audit")
 	for _, id := range ids {
 		if err := enterTenant(sys, tx, id); err != nil {

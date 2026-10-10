@@ -20,7 +20,7 @@ import (
 func TestGroupFenceHoldsAndExclusiveWaits(t *testing.T) {
 	reset(t)
 	admin, runner, profile, token, mod := groupFixture(t)
-	member := groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "mbp2607")
+	member := groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "build-7")
 	outside := groupAccount(t, mod, admin, runner, token, "outside", "daemon-a", "Outside", "studio")
 	project, run := insertProjectRun(t, admin, runner, profile, "Client")
 	var group AccountGroup
@@ -36,7 +36,7 @@ func TestGroupFenceHoldsAndExclusiveWaits(t *testing.T) {
 
 	reset(t)
 	admin, runner, profile, token, mod = groupFixture(t)
-	member = groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "mbp2607")
+	member = groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "build-7")
 	outside = groupAccount(t, mod, admin, runner, token, "outside", "daemon-a", "Outside", "studio")
 	project, run = insertProjectRun(t, admin, runner, profile, "Client")
 	callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/groups", encoded(t, map[string]any{
@@ -62,7 +62,7 @@ func TestGroupFenceHoldsAndExclusiveWaits(t *testing.T) {
 func TestSharedQuotaCountsOnce(t *testing.T) {
 	reset(t)
 	admin, runner, profile, token, mod := groupFixture(t)
-	first := groupAccount(t, mod, admin, runner, token, "door-a", "daemon-a", "Spare", "mbp2607")
+	first := groupAccount(t, mod, admin, runner, token, "door-a", "daemon-a", "Spare", "build-7")
 	second := groupAccount(t, mod, admin, runner, token, "door-b", "daemon-b", "Spare", "studio")
 	fp := strings.Repeat("ab", 32)
 	seed(t, admin, func(tx pgx.Tx) error {
@@ -121,7 +121,7 @@ func TestGroupScheduleSitsBetweenAccountAndPool(t *testing.T) {
 func TestUseAccountPayloadHasNoPath(t *testing.T) {
 	reset(t)
 	admin, runner, _, token, mod := groupFixture(t)
-	first := groupAccount(t, mod, admin, runner, token, "door-a", "daemon-a", "Spare", "mbp2607")
+	first := groupAccount(t, mod, admin, runner, token, "door-a", "daemon-a", "Spare", "build-7")
 	second := groupAccount(t, mod, admin, runner, token, "door-b", "daemon-b", "Spare", "studio")
 	fp := strings.Repeat("cd", 32)
 	seed(t, admin, func(tx pgx.Tx) error {
@@ -159,7 +159,7 @@ func TestUseAccountPayloadHasNoPath(t *testing.T) {
 func TestTicketPinDoesNotCrossAFence(t *testing.T) {
 	reset(t)
 	admin, runner, profile, token, mod := groupFixture(t)
-	member := groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "mbp2607")
+	member := groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "build-7")
 	outside := groupAccount(t, mod, admin, runner, token, "outside", "daemon-a", "Outside", "studio")
 	project, ticket, run := insertTicketRun(t, admin, runner, profile)
 	var group AccountGroup

@@ -210,6 +210,9 @@ func prepareProfileBundle(bundle ProfileBundle) (in profileWrite, assets map[str
 		return nil
 	}
 	for i := range in.Definition.Fonts {
+		if strings.TrimSpace(in.Definition.Fonts[i].AssetID) == "" {
+			return in, nil, nil, fmt.Errorf("definition.fonts[%d].asset_id: required", i)
+		}
 		if err := use(&in.Definition.Fonts[i].AssetID); err != nil {
 			return in, nil, nil, err
 		}
@@ -360,7 +363,7 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 				}
 			}
 		}
-		definition := in.Definition.normalized()
+		definition := in.Definition.Normalized()
 		// Never nil: a nil slice is stored as null and crashed the quote page (AEON-274).
 		definition.Fonts = append([]profileFont{}, in.Definition.Fonts...)
 		definition.Cover = make(map[string]string, len(in.Definition.Cover))
@@ -368,7 +371,11 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 			definition.Cover[k] = v
 		}
 		for i := range definition.Fonts {
-			definition.Fonts[i].AssetID = assets[definition.Fonts[i].AssetID].id
+			asset, ok := assets[definition.Fonts[i].AssetID]
+			if !ok || asset == nil || asset.id == "" {
+				return fmt.Errorf("definition.fonts[%d].asset_id: missing asset", i)
+			}
+			definition.Fonts[i].AssetID = asset.id
 		}
 		if ref := definition.Cover["brand_asset_id"]; ref != "" {
 			definition.Cover["brand_asset_id"] = assets[ref].id

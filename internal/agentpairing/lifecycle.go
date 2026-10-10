@@ -367,17 +367,24 @@ func (m *Module) cleanup(ctx context.Context, tx pgx.Tx, computer string, in pro
 				release = reported
 			}
 		}
+		// The daemon names the add-harness entry point that reaches it. A value
+		// this server does not know stays unknown rather than failing the report.
+		install := ""
+		switch in.Progress.InstallMethod {
+		case "homebrew", "nix", "direct":
+			install = in.Progress.InstallMethod
+		}
 		// A legacy daemon omits reports. Clear stale state after a downgrade.
 		// Last-seen moves on every report; the event fires only when setup or a
 		// harness report actually changes, so a heartbeat does not flood the stream.
 		var progressChanged bool
 		err = tx.QueryRow(ctx, `
 WITH prev AS (
-  SELECT id, setup_state, setup_error, harness_statuses, harness_details, agent_protocol, agent_version, agent_version_scheme
+  SELECT id, setup_state, setup_error, harness_statuses, harness_details, agent_protocol, agent_version, agent_version_scheme, install_method
   FROM agent_pairing_computers WHERE id=$1 AND state='connected'
 )
 UPDATE agent_pairing_computers c
-SET setup_state=$2, setup_error=$3, harness_statuses=$4, harness_details=$5, agent_protocol=$6, agent_version=$7, agent_version_scheme=$8, last_seen_at=clock_timestamp()
+SET setup_state=$2, setup_error=$3, harness_statuses=$4, harness_details=$5, agent_protocol=$6, agent_version=$7, agent_version_scheme=$8, install_method=nullif($9,''), last_seen_at=clock_timestamp()
 FROM prev WHERE c.id=prev.id
 RETURNING prev.setup_state IS DISTINCT FROM c.setup_state
   OR prev.setup_error IS DISTINCT FROM c.setup_error
@@ -385,7 +392,8 @@ RETURNING prev.setup_state IS DISTINCT FROM c.setup_state
   OR prev.harness_details IS DISTINCT FROM c.harness_details
   OR prev.agent_protocol IS DISTINCT FROM c.agent_protocol
   OR prev.agent_version IS DISTINCT FROM c.agent_version
-  OR prev.agent_version_scheme IS DISTINCT FROM c.agent_version_scheme`, computer, in.Progress.State, in.Progress.ErrorCode, statuses, details, release.Protocol, release.Version, release.VersionScheme).Scan(&progressChanged)
+  OR prev.agent_version_scheme IS DISTINCT FROM c.agent_version_scheme
+  OR prev.install_method IS DISTINCT FROM c.install_method`, computer, in.Progress.State, in.Progress.ErrorCode, statuses, details, release.Protocol, release.Version, release.VersionScheme, install).Scan(&progressChanged)
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = nil
 		}

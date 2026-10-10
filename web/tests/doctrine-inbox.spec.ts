@@ -3,7 +3,11 @@
 // with a word diff, a dot on Settings and Agent rules, and one toast each.
 import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { watchErrors } from './work-fixtures'
+import { mockDecisionDesk } from './decision-desk-fixtures'
+import { expectStableControls } from './helpers/stable'
+import { mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { mockRules } from './rules-fixtures'
@@ -51,11 +55,15 @@ const REVIEWED = item({
 interface Inbox { items: Record<string, unknown>[]; calls: { method: string; path: string; body?: unknown }[]; proposals: Record<string, unknown>[] }
 
 async function setup(page: Page, items: Record<string, unknown>[]): Promise<Inbox> {
-  await mockWork(page, fixtures())
+  await mockDecisionDesk(page)
   await mockSettings(page, settingsData())
   await mockRules(page)
   const inbox: Inbox = { items: [...items], calls: [], proposals: [] }
   const notified = new Set<string>()
+  await page.route('**/api/decision-desk/projection?**', route => route.fulfill({ json: {
+    items: inbox.items.map(i => ({ id: i.id, kind: 'doctrine', revision: 1, title: i.label, held: false, can_decide: true, created_at: i.created_at, href: `/decision-desk?item=r:${i.id}`, source: `/settings/agent-rules#${i.id}` })),
+    counts: { open: inbox.items.length, held: 0, chores: 0 }, has_more: false, as_of: new Date().toISOString(),
+  } }))
   await page.route('**/api/me/permissions**', route => {
     const url = new URL(route.request().url())
     const answer = mockEffectivePermissions('admin', url.searchParams.get('project_id') ?? undefined)
@@ -90,104 +98,92 @@ async function setup(page: Page, items: Record<string, unknown>[]): Promise<Inbo
 }
 
 const doctrine = (page: Page) => page.getByRole('region', { name: 'Doctrine' })
-const inboxRegion = (page: Page) => page.getByRole('region', { name: /Proposed changes/ })
-
-test('agent proposals wait in the doctrine inbox with a diff, a dot and one toast each', async ({ page }) => {
-  const errors = watchErrors(page)
-  const mock = await setup(page, [ESTIMATE, REVIEWED])
+test('native doctrine proposals retain diff, notices, source links and protected settlement in one desk', async ({ page }) => {
+  const errors = watchErrors(page), mock = await setup(page, [ESTIMATE, REVIEWED])
   await page.goto('/settings/agent-rules')
-
-  // One toast for the new proposals, with a way to review them.
-  const toast = page.getByText('2 doctrine changes proposed')
-  await expect(toast).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Review', exact: true })).toBeVisible()
-  // A neutral dot on Settings (the gear) and on the Agent rules tab.
+  await expect(page.getByText('2 doctrine changes proposed')).toBeVisible()
   await expect(page.getByRole('button', { name: 'App and workspace, 2 doctrine proposals wait' })).toBeVisible()
-  await expect(page.getByRole('navigation', { name: 'Settings sections' }).getByRole('img', { name: '2 doctrine proposals wait' })).toBeVisible()
-
-  const layer = doctrine(page)
-  await expect(layer.getByRole('link', { name: '2 proposed changes' })).toHaveText('2')
-  const inbox = inboxRegion(page)
-  await expect(inbox.getByRole('heading', { name: 'Proposed changes · 2' })).toBeVisible()
-  const estimate = inbox.getByRole('article', { name: 'Estimate before work, and report a live ETA in every heartbeat' })
-  await expect(estimate.locator('ins')).toContainText('and a written estimate')
-  await expect(estimate.getByText('builder')).toBeVisible()
-  await expect(estimate.getByRole('link', { name: 'INSPR-491' })).toHaveAttribute('href', '/p/INSPR/INSPR-491')
-  await expect(estimate.getByText(/an estimate before work makes every heartbeat ETA honest/)).toBeVisible()
-  const reviewed = inbox.getByRole('article', { name: 'Keep commits small and reviewed' })
-  await expect(reviewed.locator('del')).toContainText('- Small')
-
-  if (process.env.DOCTRINE_SHOTS) {
-    for (const width of [1600, 390]) {
-      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
-      for (const theme of ['light', 'dark'] as const) {
-        await page.emulateMedia({ colorScheme: theme })
-        await layer.scrollIntoViewIfNeeded()
-        await page.screenshot({ path: `${process.env.DOCTRINE_SHOTS}/settings__${width}__${theme}.png` })
-        await inbox.screenshot({ path: `${process.env.DOCTRINE_SHOTS}/inbox__${width}__${theme}.png` })
-      }
-    }
-    await page.setViewportSize({ width: 1600, height: 1000 })
-    await page.emulateMedia({ colorScheme: 'light' })
-  }
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
-  expect(overflow).toBeLessThanOrEqual(1)
-  const axe = await new AxeBuilder({ page }).include('#doctrine-inbox').analyze()
+  await expect(doctrine(page).getByRole('link', { name: '2 proposed changes' })).toHaveAttribute('href', '/decision-desk')
+  await expect(page.getByRole('button', { name: /^Propose PR for/ })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Review', exact: true }).click()
+  await expect(page).toHaveURL('/decision-desk')
+  await page.getByTestId(`desk-row-r:${ESTIMATE.id}`).click()
+  const details = page.getByRole('region', { name: 'Rule proposal details', exact: true })
+  await expect(page.getByRole('link', { name: 'Open source record', exact: true })).toHaveAttribute('href', `/settings/agent-rules#${ESTIMATE.id}`)
+  await expect(details.locator('ins')).toContainText('and a written estimate')
+  await expect(details).toContainText('Proposed by builder')
+  await expect(page.getByTestId('desk-body')).toContainText('every heartbeat ETA honest')
+  const axe = await new AxeBuilder({ page }).include('.desk-dialog').analyze()
   expect(axe.violations.map(v => v.id)).toEqual([])
-
-  // Claimed once on the server, never again: a reload shows no toast.
+  // A bookmarked source reopens on reload; opening an overview row is local
+  // round state and does not change the overview's URL.
+  await page.goto(`/decision-desk?item=r:${ESTIMATE.id}`)
+  await expect(details).toBeVisible()
   await page.reload()
-  await expect(inboxRegion(page).getByRole('heading', { name: 'Proposed changes · 2' })).toBeVisible()
+  await expect(details).toBeVisible()
   await expect(page.getByText('2 doctrine changes proposed')).toHaveCount(0)
-
-  // Dismiss needs a reason; it goes back to the proposer.
-  const again = inboxRegion(page).getByRole('article', { name: 'Keep commits small and reviewed' })
-  await again.getByRole('button', { name: 'Dismiss Keep commits small and reviewed' }).click()
-  const reason = again.getByRole('textbox', { name: 'Why dismiss it' })
-  await expect(again.getByRole('button', { name: 'Dismiss', exact: true })).toBeDisabled()
-  if (process.env.DOCTRINE_SHOTS) await again.screenshot({ path: `${process.env.DOCTRINE_SHOTS}/dismiss__1600__light.png` })
-  await reason.fill('Review size belongs in the git pack.')
-  await again.getByRole('button', { name: 'Dismiss', exact: true }).click()
-  await expect(inboxRegion(page).getByRole('heading', { name: 'Proposed changes · 1' })).toBeVisible()
+  await page.goto(`/decision-desk?item=r:${REVIEWED.id}`)
+  await expect(details.locator('del')).toContainText('- Small')
+  await page.getByTestId('choice-1').click()
+  const reason = page.getByRole('textbox', { name: 'Reason', exact: true })
+  await reason.fill('Review size belongs in the git pack.'); await reason.press('Enter')
+  await page.getByTestId('desk-decide').click()
+  await expect(page.getByTestId('desk-announcement')).toContainText('Decision recorded')
   expect(mock.calls.find(c => c.path.endsWith('/dismiss'))?.body).toEqual({ reason: 'Review size belongs in the git pack.' })
-
-  // Propose PR sends it to git through the normal proposal path.
-  await inboxRegion(page).getByRole('button', { name: 'Propose PR for Estimate before work, and report a live ETA in every heartbeat' }).click()
-  await expect(page.getByText('Pull request created')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Decision Desk, 1 open', exact: true })).toBeVisible()
+  await page.goto(`/decision-desk?item=r:${ESTIMATE.id}`)
+  await page.getByTestId('desk-decide').click()
+  await expect(page.getByTestId('desk-announcement')).toContainText('Decision recorded')
   expect(mock.calls.find(c => c.path.endsWith('/pull-request'))?.body).toEqual({})
-  await expect(inboxRegion(page)).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'Decision Desk, 0 open', exact: true })).toBeVisible()
+  await page.goto('/settings/agent-rules')
   await expect(doctrine(page).getByRole('link', { name: 'inspr-modules · PR #17' })).toBeVisible()
-  await expect(page.getByRole('navigation', { name: 'Settings sections' }).getByRole('img', { name: /doctrine proposal/ })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'App and workspace', exact: true })).toBeVisible()
   expect(errors).toEqual([])
 })
 
-test('edit then propose replaces the agent text; an outdated proposal needs an edit', async ({ page }) => {
-  const outdated = { ...REVIEWED, outdated: true, base: '- Small commits, one topic each.' }
-  const mock = await setup(page, [ESTIMATE, outdated])
-  await page.goto('/settings/agent-rules')
-  const inbox = inboxRegion(page)
-  const stale = inbox.getByRole('article', { name: 'Keep commits small and reviewed' })
-  await expect(stale.getByText('The rule changed since this was proposed.', { exact: false })).toBeVisible()
-  await expect(stale.getByRole('button', { name: /^Propose PR/ })).toBeDisabled()
-
-  await inbox.getByRole('button', { name: 'Edit Estimate before work, and report a live ETA in every heartbeat, then propose' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Edit, then propose' })
-  await expect(dialog.getByRole('textbox', { name: 'Rule', exact: true })).toHaveValue(ESTIMATE.proposed as string)
-  await expect(dialog.getByRole('textbox', { name: 'Why this change' })).toHaveValue(ESTIMATE.why as string)
-  if (process.env.DOCTRINE_SHOTS) {
-    for (const width of [1600, 390]) {
-      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
-      for (const theme of ['light', 'dark'] as const) {
-        await page.emulateMedia({ colorScheme: theme })
-        await dialog.screenshot({ path: `${process.env.DOCTRINE_SHOTS}/edit__${width}__${theme}.png` })
-      }
-    }
-  }
-  await dialog.getByRole('textbox', { name: 'TL;DR · English' }).fill('Estimate before work.')
-  await dialog.getByRole('button', { name: 'Create pull request' }).click()
-  await expect(dialog).toHaveCount(0)
-  const body = mock.calls.find(c => c.path.endsWith('/pull-request'))?.body as Record<string, unknown>
-  expect(body).toMatchObject({ source: ESTIMATE.proposed, why: ESTIMATE.why, rule_sha256: TESTS_SHA, tldr: { en: 'Estimate before work.' } })
-  await expect(inbox.getByRole('heading', { name: 'Proposed changes · 1' })).toBeVisible()
-})
+for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+  test(`native Edit then propose and outdated protection ${width} ${theme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 }); await page.emulateMedia({ colorScheme: theme })
+    const outdated = { ...REVIEWED, outdated: true, base: '- Small commits, one topic each.' }
+    const mock = await setup(page, [ESTIMATE, outdated])
+    await page.goto(`/decision-desk?item=r:${REVIEWED.id}`)
+    await expect(page.getByTestId('desk-body')).toContainText('The rule changed since this was proposed.')
+    await expect(page.getByTestId('choice-0')).toBeDisabled()
+    await expect(page.getByTestId('desk-decide')).toBeDisabled()
+    await page.getByTestId('choice-1').click(); await expect(page.getByTestId('desk-decide')).toBeEnabled()
+    expect(mock.calls.filter(c => c.method === 'POST' && !c.path.endsWith('/notified'))).toHaveLength(0)
+    await page.goto(`/decision-desk?item=r:${ESTIMATE.id}`)
+    const edit = page.getByTestId('desk-edit-rule')
+    await expect(edit).toBeEnabled()
+    await edit.click()
+    const dialog = page.getByRole('dialog', { name: 'Edit, then propose' })
+    await expect(dialog.getByRole('textbox', { name: 'Rule', exact: true })).toHaveValue(ESTIMATE.proposed as string)
+    await expect(dialog.getByRole('textbox', { name: 'Why this change' })).toHaveValue(ESTIMATE.why as string)
+    await expectStableControls({ controls: { cancel: dialog.getByRole('button', { name: 'Cancel', exact: true }), submit: dialog.getByRole('button', { name: 'Create pull request' }), ...(width < 600 ? { frame: dialog } : {}) }, scrollAreas: { body: dialog.locator('.body') }, interactions: [
+      { name: 'edit the English summary', run: async () => { await dialog.getByRole('textbox', { name: 'TL;DR · English' }).fill('Estimate before work.') } },
+      { name: 'show the German translation below the controls', run: async () => { await dialog.getByText('German TL;DR', { exact: true }).click(); await dialog.getByRole('textbox', { name: 'TL;DR · German' }).fill('Vor Arbeitsbeginn den Aufwand und die voraussichtliche Fertigstellung nachvollziehbar dokumentieren.') } },
+    ] })
+    const dir = process.env.AEON_DESK_SHOTS || testInfo.outputPath('desk-shots'); await mkdir(dir, { recursive: true })
+    await page.screenshot({ path: join(dir, `doctrine-edit-${width}-${theme}.png`) })
+    let release!: () => void, entered!: () => void
+    const responseGate = new Promise<void>(resolve => { release = resolve })
+    const received = new Promise<void>(resolve => { entered = resolve })
+    await page.route(`**/api/rules/doctrine/inbox/${ESTIMATE.id}/pull-request`, async route => { entered(); await responseGate; await route.fallback() })
+    const submit = dialog.getByRole('button', { name: /Create pull request|Creating PR|Retry proposal/ })
+    try {
+      await expectStableControls({ controls: { cancel: dialog.getByRole('button', { name: 'Cancel', exact: true }), submit, ...(width < 600 ? { frame: dialog } : {}) }, interactions: [{ name: 'hold the native proposal response while recording', run: async () => {
+        await submit.click(); await received
+        await expect(submit).toHaveAccessibleName('Creating PR…')
+        await expect(submit).toBeDisabled()
+        await expect(dialog).toBeVisible()
+        expect(mock.calls.filter(c => c.path.endsWith('/pull-request'))).toHaveLength(0)
+      } }] })
+    } finally { release() }
+    await expect(dialog).toHaveCount(0)
+    const body = mock.calls.find(c => c.path.endsWith('/pull-request'))?.body as Record<string, unknown>
+    expect(body).toMatchObject({ source: ESTIMATE.proposed, why: ESTIMATE.why, rule_sha256: TESTS_SHA, tldr: { en: 'Estimate before work.' } })
+    await expect(page.getByTestId('desk-decide')).toHaveText(/Next/)
+    await expect(page.getByRole('link', { name: 'Decision Desk, 1 open', exact: true })).toBeVisible()
+  })
+}

@@ -342,6 +342,11 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	projectID := r.URL.Query().Get("project_id")
+	if projectID != "" && !uuidRE.MatchString(projectID) {
+		writeErr(w, fail(400, "invalid project id"))
+		return
+	}
 	harness, daemon, profile := r.URL.Query().Get("harness"), r.URL.Query().Get("daemon_id"), r.URL.Query().Get("model_profile_id")
 	if !validHarness(harness) || len(daemon) > 128 || profile != "" && !uuidRE.MatchString(profile) {
 		writeErr(w, fail(400, "invalid capacity query"))
@@ -389,6 +394,16 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 			if a.Harness == harness && (daemon == "" || a.DaemonID == daemon) && (!ownOnly || a.RegisteredBy == p.ID || bound[a.ID]) {
 				accounts = append(accounts, a)
 			}
+		}
+		before := len(accounts)
+		accounts, err = applyUse(r.Context(), tx, accounts, projectID)
+		if err != nil {
+			return err
+		}
+		if before > 0 && len(accounts) == 0 {
+			out = CapacityNext{Harness: harness, Accounts: []CapacityChoice{}, Wait: waitFor("context")}
+			out.Wait.Context = projectID
+			return nil
 		}
 		now, err := dbNow(r.Context(), tx)
 		if err != nil {

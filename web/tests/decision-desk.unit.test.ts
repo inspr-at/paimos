@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
-import { answerFor, arrivals, CUSTOM_ANSWER, draftFor, macPlatform, newRound, outcomeUnavailable, roundCounts, submitModifier, type DeskDraft } from '../src/lib/decisionDesk'
+import { answerFor, arrivals, CUSTOM_ANSWER, deskLinkItem, draftFor, macPlatform, newRound, outcomeUnavailable, roundCounts, submitModifier, type DeskDraft } from '../src/lib/decisionDesk'
 import { commitDesk, emptySources, loadDesk, loadMoreQuestions, readQuestions, questionItem, approvalItem, actionItem, nativeTierAdapter, ruleItem, type DeskRead, type Question } from '../src/lib/decisionDeskApi'
 
 const question = (): Question => ({ id: 'q1', project_id: 'project', revision: 1, state: 'open', suggested_outcome: 'once', suggestion_reason: 'ticket_default',
@@ -14,6 +14,22 @@ function continuationRead(): DeskRead {
 }
 const heldRequest = (id: string) => ({ id, sender_principal_id: 'agent', recipient_principal_id: 'person', to: 'person', body: 'Please steer', sent_event_id: 1,
   is_action_request: true, expects_reply: true, delivery_level: 'simple' as const, status: 'held' as const, reply_obligation: 'open' as const })
+it('keeps canonical membership and order when native history and Open pages continue', async () => {
+  const first = continuationRead(), action = actionItem(heldRequest('held'), 'project', 'Aeon')
+  first.canonical = true
+  first.items.unshift(action)
+  first.hasMore.answered = true
+  first.questionPositions.answered = { pages: 1, cursors: ['two'], nextCursor: 'two' }
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => Response.json({ items: [
+    { ...question(), id: 'next', state: new URL(path, 'https://test.invalid').searchParams.get('state') === 'answered' ? 'answered' : 'open' },
+  ], has_more: false })))
+  const history = await loadMoreQuestions(first, 'answered')
+  expect(history.items.map(item => item.id)).toEqual(['m:held', 'q:q1', 'q:next'])
+  expect(history.items[2]!.decided).toBe(true)
+  const open = await loadMoreQuestions(first, 'open')
+  expect(open.items.map(item => item.id)).toEqual(['m:held', 'q:q1'])
+  expect(first.items.map(item => item.id)).toEqual(['m:held', 'q:q1'])
+})
 it('removes projected action requests from both items and sources on continuation', async () => {
   const first = continuationRead(), projected = heldRequest('projected'), unrelated = heldRequest('unrelated')
   for (const message of [projected, unrelated]) {
@@ -213,15 +229,48 @@ it('freezes round IDs while arrivals and decided/skipped counts remain distinct'
   expect(round).toEqual(['q:q1', 'q:two'])
   expect(roundCounts([{ ...one, decided: true }, two], round, new Set(['q:q1', 'q:two']))).toEqual({ decided: 1, skipped: 1, open: 0 })
 })
+it('accepts source-only links and rejects arrays, destinations and injected selectors', () => {
+  expect(deskLinkItem('m:request-1')).toBe('m:request-1')
+  expect(deskLinkItem(['q:one', 'a:two'])).toBe('')
+  expect(deskLinkItem('https://elsewhere.example')).toBe('')
+  expect(deskLinkItem('q:one\"] button')).toBe('')
+})
+it('uses canonical membership and order while retaining decided approval history', async () => {
+  const q = question(), approval = { id: 'approved', agent_principal_id: 'agent', scope: 'nodes.read', resource_kind: 'tenant', rationale: '', proposed_at: '', expires_at: '2999-01-01T00:00:00Z', decision: 'approved' }
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const body = url.startsWith('/api/projects?') ? { items: [], next_cursor: null }
+      : url.startsWith('/api/decision-desk?') ? { items: url.includes('state=answered') ? [] : [q], has_more: false }
+      : url.startsWith('/api/approvals?') ? [approval] : { items: [], has_more: false, pending: 0 }
+    return new Response(JSON.stringify(body))
+  }))
+  const result = await loadDesk(undefined, {}, { items: [{ id: 'q1', kind: 'question', revision: 1, title: 'Which index?', created_at: '', held: false, href: '/decision-desk?item=q:q1', source: '/api/questions/q1' }], counts: { open: 1, held: 0, chores: 0 }, has_more: false, as_of: '' })
+  expect(result.items.map(item => item.id)).toEqual(['q:q1', 'a:approved'])
+  expect(result.items[0]).toMatchObject({ held: false, source: '/api/questions/q1' })
+  expect(result.items[1]?.decided).toBe(true)
+  expect(result.warnings).toEqual([])
+})
 it('preserves custom answers on correction and separates the P.S. from the answer', () => {
   const item = questionItem(question(), 'Aeon'), draft = { ...draftFor(item), optionId: CUSTOM_ANSWER, answer: '  Keep it tenant-scoped. ', reason: 'Separate note' }
   expect(answerFor(item, draft)).toBe('Keep it tenant-scoped.')
   const decided = { ...item, decided: true, optionId: CUSTOM_ANSWER, answer: 'Earlier answer', reason: 'Earlier reason' }
   expect(draftFor(decided)).toMatchObject({ optionId: CUSTOM_ANSWER, answer: 'Earlier answer', reason: 'Earlier reason', dirty: false })
 })
-it('leaves publishing and every protected action outside ordinary Always answers', () => {
-  const item = questionItem(question(), 'Aeon')
-  for (const outcome of ['always', 'requirement', 'doctrine'] as const) expect(outcomeUnavailable(item, outcome)).toContain('not available')
+it('hydrates a canonical approval beyond the history page and retains native read-only authority', async () => {
+  const approval = { id: 'old-pending', agent_principal_id: 'agent', scope: 'nodes.read', resource_kind: 'tenant', rationale: 'Original request', proposed_at: '', expires_at: '2999-01-01T00:00:00Z', decision: null }
+  const fetch = vi.fn(async (url: string) => {
+    const body = url === '/api/approvals/old-pending' ? approval : url.startsWith('/api/approvals?') ? [] : { items: [], has_more: false, pending: 0 }
+    return new Response(JSON.stringify(body))
+  }); vi.stubGlobal('fetch', fetch)
+  const result = await loadDesk(undefined, {}, { items: [{ id: approval.id, kind: 'approval', revision: 1, title: 'Approval', created_at: '', held: false, can_decide: false, href: '/decision-desk?item=a:old-pending', source: '/api/approvals/old-pending' }], counts: { open: 1, held: 0, chores: 0 }, has_more: false, as_of: '' })
+  expect(result.items).toHaveLength(1)
+  expect(result.items[0]).toMatchObject({ id: 'a:old-pending', context: 'Original request', unavailable: 'This person may read this request but cannot decide it.' })
+  expect(result.sources.approvals.get('a:old-pending')).toEqual(approval)
+  expect(fetch.mock.calls.some(([url]) => url === '/api/approvals/old-pending')).toBe(true)
+})
+it('keeps server-denied outcomes and protected actions outside ordinary Always answers', () => {
+  const q = question(); q.outcomes = ['always', 'requirement', 'doctrine'].map(outcome => ({ outcome, available: false, why: 'Permission denied by the source.' })) as Question['outcomes']
+  const item = questionItem(q, 'Aeon')
+  for (const outcome of ['always', 'requirement', 'doctrine'] as const) expect(outcomeUnavailable(item, outcome)).toBe('Permission denied by the source.')
   for (const kind of ['approval', 'action', 'rule', 'tier'] as const) expect(outcomeUnavailable({ ...item, kind }, 'once')).toContain('protected')
 })
 it('reports dispatched and failed delivery honestly, retaining reuse provenance', () => {
@@ -302,6 +351,28 @@ it('formats delivery deadlines and keeps a rule proposal PR link', () => {
   q.pending = [{ id: 'p', revision: 2, kind: 'inbox', state: 'pending', deliver_after: '2026-10-02T08:00:00Z' }]
   expect(questionItem(q, 'Aeon').delivery).not.toContain('2026-10-02T08:00:00Z')
   expect(ruleItem({ id: 'r', pr_url: 'https://github.com/inspr-at/inspr-modules/pull/123' } as never)).toHaveProperty('prUrl', 'https://github.com/inspr-at/inspr-modules/pull/123')
+})
+it('keeps native approval and rule facts frozen while the source objects change', () => {
+  const approval = { id: 'approval', agent_principal_id: 'agent', agent_name: 'Harbor Clerk', scope: 'nodes.read', resource_kind: 'tenant', rationale: 'Original rationale', proposed_at: '', expires_at: '2999-01-01T00:00:00Z', decision: null }
+  const rule = { id: 'rule', label: 'Original rule', proposer: 'builder', base: 'Original pinned text', proposed: 'Original proposal', outdated: false }
+  const approvalMemo = approvalItem(approval), ruleMemo = ruleItem(rule as never)
+  approval.agent_name = 'Another agent'; approval.rationale = 'Changed rationale'
+  rule.base = 'New pinned text'; rule.proposed = 'Changed proposal'; rule.outdated = true
+  expect(approvalMemo.approval).toMatchObject({ id: 'approval', agent_name: 'Harbor Clerk', rationale: 'Original rationale' })
+  expect(ruleMemo.rule).toMatchObject({ id: 'rule', base: 'Original pinned text', proposed: 'Original proposal', outdated: false })
+})
+it('rechecks current outdated doctrine before publication and sends no request', async () => {
+  const rule = { id: 'rule', label: 'A pending change', proposed: 'Updated rule', outdated: false }
+  const item = ruleItem(rule as never), sources = emptySources(), fetch = vi.fn()
+  sources.rules.set(item.id, rule as never); vi.stubGlobal('fetch', fetch)
+  // A refresh changes the source after the person selected the original memo.
+  sources.rules.set(item.id, { ...rule, outdated: true } as never)
+  expect(item.choices[0]?.unavailable).toBeUndefined()
+  await expect(commitDesk(item, { ...draftFor(item), optionId: 'propose' }, sources, 'operation', false)).rejects.toThrow('Edit against the current rule first')
+  expect(fetch).not.toHaveBeenCalled()
+  const refreshed = ruleItem({ ...rule, outdated: true } as never)
+  expect(refreshed.choices.find(choice => choice.id === 'propose')?.unavailable).toContain('Edit against the current rule first')
+  expect(refreshed.choices.find(choice => choice.id === 'dismiss')?.unavailable).toBeUndefined()
 })
 it('warns when the approvals read reaches its 200-row cap', async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url.includes('/approvals?') ? Array.from({ length: 200 }, (_, at) => ({ id: `a-${at}`, resource_kind: 'tenant', proposed_at: '', expires_at: '', decision: null })) : { items: [], has_more: false }))))

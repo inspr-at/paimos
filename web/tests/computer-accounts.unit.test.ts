@@ -16,10 +16,10 @@ const COMPUTER = 'c0000000-0000-4000-8000-000000000001'
 function computer(over: Partial<PairingView> = {}): PairingView {
   return {
     request_id: 'r1', tenant_id: 't1', tenant_name: 'Barta', state: 'redeemed', request_digest: 'd', expires_at: '2026-10-02T00:00:00Z',
-    computer_name: 'mbp2607', platform: 'darwin', arch: 'arm64', workspace_path: '/Users/markus/Code', capabilities: [], requested_accounts: [], verification: null,
+    computer_name: 'build-7', platform: 'darwin', arch: 'arm64', workspace_path: '/Users/markus/Code', capabilities: [], requested_accounts: [], verification: null,
     computer_id: COMPUTER, computer_state: 'connected', principal_id: 'p1', daemon_id: 'd1', runtime_prefix: null, local_cleanup: 'pending', local_processes: 'unconfirmed',
     enrollments: [
-      { account_id: CODEX, account_key: 'k1', harness: 'codex', label: 'admin@augmentoring.com', model_profile_id: '', state: 'connected', local_cleanup: 'pending', verification_run_id: null, active_run_ids: [] },
+      { account_id: CODEX, account_key: 'k1', harness: 'codex', label: 'admin@example.com', model_profile_id: '', state: 'connected', local_cleanup: 'pending', verification_run_id: null, active_run_ids: [] },
       { account_id: CURSOR, account_key: 'k2', harness: 'cursor', label: 'markus@barta.com', model_profile_id: '', state: 'connected', local_cleanup: 'pending', verification_run_id: null, active_run_ids: [] },
     ],
     setup_state: 'connected', connectivity: 'online', last_seen_at: new Date(NOW - 20_000).toISOString(),
@@ -29,8 +29,8 @@ function computer(over: Partial<PairingView> = {}): PairingView {
 }
 function inputs(connectivity: 'online' | 'offline'): AccountInput[] {
   return [
-    { id: CODEX, label: 'admin@augmentoring.com', harness: 'codex', host: 'mbp2607', state: 'available', last_probe_ok: true, connectivity },
-    { id: CURSOR, label: 'markus@barta.com', harness: 'cursor', host: 'mbp2607', state: 'available', last_probe_ok: true, connectivity },
+    { id: CODEX, label: 'admin@example.com', harness: 'codex', host: 'build-7', state: 'available', last_probe_ok: true, connectivity },
+    { id: CURSOR, label: 'markus@barta.com', harness: 'cursor', host: 'build-7', state: 'available', last_probe_ok: true, connectivity },
   ]
 }
 function weekly(left: number): CapacityWindow {
@@ -74,7 +74,7 @@ describe('offline computer', () => {
     expect(card.accounts.map(a => a.readiness.text)).toEqual(['Paused · computer offline', 'Paused · computer offline'])
   })
   it('the header pill names the computer', () => {
-    expect(readySummary(cards)).toEqual({ text: '0 of 2 ready · mbp2607 offline', tone: 'warn' })
+    expect(readySummary(cards)).toEqual({ text: '0 of 2 ready · build-7 offline', tone: 'warn' })
   })
 })
 
@@ -84,7 +84,7 @@ describe('online, no readings yet', () => {
   it('is online, seen just now, with the full identities', () => {
     expect(cards[0].status).toEqual({ text: 'Online · seen just now', tone: 'ok', live: true })
     expect(cards[0].notice).toBeNull()
-    expect(cards[0].accounts.map(a => [a.vendor, a.identity])).toEqual([['Codex', 'admin@augmentoring.com'], ['Cursor', 'markus@barta.com']])
+    expect(cards[0].accounts.map(a => [a.vendor, a.identity])).toEqual([['Codex', 'admin@example.com'], ['Cursor', 'markus@barta.com']])
   })
   it('each account is ready, and capacity says honestly that nothing was read', () => {
     expect(cards[0].accounts.map(a => a.readiness.kind)).toEqual(['ready', 'ready'])
@@ -214,7 +214,7 @@ describe('one state per account', () => {
   it('revoked computers stay out of the cards; accounts without a listed computer group by host', () => {
     const rows = buildRows([...inputs('online'), { id: 'ac000000-0000-4000-8000-000000000009', label: 'ops@barta.com', harness: 'claude', host: 'studio', state: 'available', last_probe_ok: true }], capacity())
     const cards = buildComputerCards({ computers: [computer(), computer({ computer_id: 'c2', computer_name: 'old', computer_state: 'revoked', enrollments: [] })], rows, now: NOW })
-    expect(cards.map(c => c.name)).toEqual(['mbp2607', 'studio'])
+    expect(cards.map(c => c.name)).toEqual(['build-7', 'studio'])
     expect(cards[1].computer).toBeNull()
   })
 })
@@ -226,8 +226,8 @@ describe('words', () => {
     const s = { ...defaultSchedule('Europe/Vienna'), week: defaultSchedule('UTC').week.map(d => ({ ...d, on: true })), reserve: 'fixed' as const, reserve_percent: 10, nights: true }
     expect(pacingSummary(s)).toBe('7 days · keep 10% · nights 22–08')
     expect(pacingSummary(defaultSchedule('UTC'))).toBe('5 days · keep auto · no nights')
-    expect(middleEllipsis('admin@augmentoring.com', 40)).toBe('admin@augmentoring.com')
-    expect(middleEllipsis('admin@augmentoring.com', 15)).toBe('admin@a…ing.com')
+    expect(middleEllipsis('admin@example.com', 40)).toBe('admin@example.com')
+    expect(middleEllipsis('admin@example.com', 15)).toBe('admin@e…ple.com')
   })
 })
 

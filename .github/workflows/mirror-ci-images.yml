@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# OPS-287: mirror CI images to avoid Docker Hub's anonymous pull limit.
+# PR-B pins CI consumers to the verified mirror digests recorded in the summary.
+name: Mirror CI images
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        with:
+          # Registry-only copies do not need a BuildKit container.
+          driver: docker
+          cache-binary: false
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Copy and verify multi-architecture images
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          printf '| Source | Destination | Digest |\n| --- | --- | --- |\n' >> "$GITHUB_STEP_SUMMARY"
+          for tag in pg18 0.8.6-pg18; do
+            source="docker.io/pgvector/pgvector:$tag"
+            destination="ghcr.io/inspr-at/paimos-ci/pgvector:$tag"
+            digest="$(docker buildx imagetools inspect "$source" | awk '$1 == "Digest:" {print $2}')"
+            if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+              echo "::error::Invalid upstream index digest for $source: $digest" >&2
+              exit 1
+            fi
+
+            docker buildx imagetools create --tag "$destination" "$source@$digest"
+            mirrored_digest="$(docker buildx imagetools inspect "$destination" | awk '$1 == "Digest:" {print $2}')"
+            if [[ "$mirrored_digest" != "$digest" ]]; then
+              echo "::error::Digest mismatch for $destination: expected $digest, got $mirrored_digest" >&2
+              exit 1
+            fi
+            printf '| `%s` | `%s` | `%s` |\n' "$source" "$destination" "$digest" >> "$GITHUB_STEP_SUMMARY"
+          done

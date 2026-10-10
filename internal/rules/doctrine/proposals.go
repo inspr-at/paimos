@@ -276,7 +276,7 @@ func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, i
 			return fail(422, "unsupported_repository", "Only the deployment-configured doctrine repositories accept proposals; their visibility must match.")
 		}
 		if source.CredentialRef != "" {
-			if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
+			if err := m.credentials.authorizeSource(source, actor.TenantID); err != nil {
 				return err
 			}
 		}

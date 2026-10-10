@@ -13,6 +13,7 @@ type Handler = (path: string, init: RequestInit) => Promise<unknown>
 const http = vi.hoisted(() => ({ handler: (async () => ({})) as Handler }))
 vi.mock('../src/lib/api', () => ({ api: (path: string, init: RequestInit = {}) => http.handler(path, init) }))
 import * as registry from '../src/lib/modelRegistry'
+import * as accountUse from '../src/lib/accountUse'
 import * as identityScope from '../src/lib/identityScope'
 
 type Profile = registry.RegistryProfile
@@ -72,6 +73,7 @@ const modules: Record<string, unknown> = {
   '../../../lib/workKinds': { listWorkKinds: async () => ({ items: [] }) },
   '../../../stores/session': { useSession: () => session },
   '../../../lib/modelRegistry': registry,
+  '../../../lib/accountUse': accountUse,
 }
 interface Card {
   lines: Vue.ComputedRef<registry.RegistryLine[]>; draft: Vue.Ref<registry.LineDraft>; editing: Vue.Ref<string | null>; saving: Vue.Ref<boolean>
