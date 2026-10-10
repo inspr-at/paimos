@@ -129,10 +129,14 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	daily := modelsDailyAdmission{principal: p, snapshots: map[string]agentplan.Snapshot{}, unknown: map[string]bool{}}
 	seen := map[string]bool{}
 	for _, order := range d.Steps {
-		if seen[order.Line] || slices.Contains(d.Not, order.Line) {
+		key := order.Line
+		if order.Stage == "quick" {
+			key = "quick:" + key
+		}
+		if seen[key] || order.Stage != "quick" && slices.Contains(d.Not, order.Line) {
 			continue
 		}
-		seen[order.Line] = true
+		seen[key] = true
 		profiles := modelsRouteCandidates(c.profiles[order.Line], order.Effort, order.Level, review)
 		if len(profiles) == 0 {
 			d.Held = append(d.Held, modelprefs.HeldLine{Line: order.Line, Reason: "no registered route for this line"})
