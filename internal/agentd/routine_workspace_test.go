@@ -226,7 +226,15 @@ func TestRoutineWorkspacesSeparateAndRetainWriters(t *testing.T) {
 	}
 }
 
-type routineQualifiedFixture struct{ fakeAdapter }
+type routineQualifiedFixture struct {
+	fakeAdapter
+	requests []StartRequest
+}
+
+func (a *routineQualifiedFixture) Start(ctx context.Context, request StartRequest, observe func(AdapterEvent)) (Process, error) {
+	a.requests = append(a.requests, request)
+	return a.fakeAdapter.Start(ctx, request, observe)
+}
 
 func (*routineQualifiedFixture) RoutineExecutionSupported(agentsetup.RoutineGrant) bool { return true }
 
@@ -280,7 +288,7 @@ func TestRoutineCheckoutDisablesEffectiveFilterConfiguration(t *testing.T) {
 				git("config", "extensions.worktreeConfig", "true")
 				git("config", "--worktree", "include.path", config)
 			case "destination-include":
-				git("config", "includeIf.gitdir:"+filepath.Join(repository, ".git", "worktrees", "checkout")+"/.path", config)
+				git("config", "includeIf.gitdir:"+filepath.Join(repository, ".git", "worktrees", "checkout")+".path", config)
 			}
 			if _, err := routineGit(t.Context(), repository, "worktree", "add", "-b", "routine/fixture", destination, "HEAD"); err != nil {
 				t.Fatal(err)
@@ -349,7 +357,7 @@ func routineSupervisorFixture(t *testing.T) (*Supervisor, *routineReplayAPI, *fa
 		}
 		return &routineLeaseFixture{environment: []string{"AEON_RUN_ID=" + owner.RunID, "AEON_RUN_DATABASE=aeon_run_" + strings.Repeat("a", 32), "AEON_RUN_APP_PORT=31001", "AEON_RUN_POSTGRES_PORT=31002", "AEON_RUN_TEMP_DIR=" + tmp, "TMPDIR=" + tmp, "TMP=" + tmp, "TEMP=" + tmp}}, nil
 	}}
-	s, err := NewSupervisor(t.Context(), Config{API: api, StateRoot: filepath.Join(root, "state"), DaemonID: grant.DaemonID, Workspace: repository, Adapters: []Adapter{&routineQualifiedFixture{fakeAdapter{proc: process}}}, Accounts: []EnrolledAccount{{ID: grant.AccountID, Key: "local", Harness: Codex, VerifiedIdentity: "routine-login"}}, RoutineWorkspaces: config})
+	s, err := NewSupervisor(t.Context(), Config{API: api, StateRoot: filepath.Join(root, "state"), DaemonID: grant.DaemonID, Workspace: repository, Adapters: []Adapter{&routineQualifiedFixture{fakeAdapter: fakeAdapter{proc: process}}}, Accounts: []EnrolledAccount{{ID: grant.AccountID, Key: "local", Harness: Codex, VerifiedIdentity: "routine-login"}}, EstimatedUnits: map[string]int64{"requests": 1}, RoutineWorkspaces: config})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,9 +442,20 @@ func TestRoutineContinuationRetainsOriginalCheckout(t *testing.T) {
 		prior.record = record
 		prior.process.(*routineExitedFixture).fixturesExited = true
 	}
-	recovered, err := s.prepareRoutineWorkspace(t.Context(), next, nextGrant, repository)
-	if err != nil {
-		t.Fatal("continuation allocation failed", err)
+	api.grant = nextGrant
+	next.RoutineLaunchID = &api.grant.LaunchID
+	next.Trace, _ = json.Marshal(map[string]any{"routine_launch": nextGrant, "routine_run_id": nextGrant.RoutineRunID})
+	api.run = next
+	if err := s.StartRun(t.Context(), next); err != nil {
+		t.Fatal("supervisor continuation failed", err)
+	}
+	entry := s.runs[next.ID]
+	entry.mu.Lock()
+	recovered := entry.record.RoutineWorkspace
+	entry.mu.Unlock()
+	requests := s.adapters[Codex].(*routineQualifiedFixture).requests
+	if recovered == nil || len(requests) != 1 || requests[0].Workspace != w.Path {
+		t.Fatal("adapter did not launch in retained workspace", requests)
 	}
 	if recovered.Path != w.Path || recovered.ID != w.ID || recovered.Branch != w.Branch || recovered.Grant.LaunchID != nextGrant.LaunchID {
 		t.Fatal("continuation replaced retained checkout", recovered)
