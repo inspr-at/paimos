@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -85,6 +86,10 @@ func handle[Input any](m *Module, op func(*http.Request, pgx.Tx, tenant.Principa
 			raw, err := readBody(ctx, w, r)
 			if err != nil {
 				workorders.WriteError(w, err)
+				return
+			}
+			if !utf8.Valid(raw) {
+				httpapi.WriteError(w, 400, "invalid UTF-8 request body")
 				return
 			}
 			r.Body = io.NopCloser(bytes.NewReader(raw))

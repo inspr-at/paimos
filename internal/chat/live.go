@@ -222,7 +222,8 @@ func (m *Module) publishLive(r *http.Request, tx pgx.Tx, p tenant.Principal, in 
 		Type    string             `json:"type"`
 		Update  *agentd.ChatUpdate `json:"update"`
 		Dropped uint64             `json:"dropped_events"`
-	}{"update", e.Update, e.DroppedEvents})
+		Source  uint64             `json:"source_sequence"`
+	}{"update", e.Update, e.DroppedEvents, e.Sequence})
 	return map[string]any{"contract": "chat-live-v1", "accepted": accepted}, err
 }
 
@@ -263,10 +264,6 @@ func (m *Module) streamLive(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 401, "unauthorized")
 		return
 	}
-	if err := m.liveAuthorized(r, p, nil, nil); err != nil {
-		liveError(w, err)
-		return
-	}
 	token := r.URL.Query().Get("after")
 	if header := r.Header.Get("Last-Event-ID"); header != "" {
 		if token != "" && token != header {
@@ -274,6 +271,14 @@ func (m *Module) streamLive(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		token = header
+	}
+	if len(token) > 4096 {
+		httpapi.WriteError(w, 400, "invalid live chat cursor")
+		return
+	}
+	if err := m.liveAuthorized(r, p, nil, nil); err != nil {
+		liveError(w, err)
+		return
 	}
 	c, wake, unsubscribe, err := m.live.subscribe(liveCursor{Tenant: p.TenantID, Person: p.ID, Thread: r.PathValue("id")}, token)
 	if err != nil {
@@ -304,6 +309,13 @@ func (m *Module) streamLive(w http.ResponseWriter, r *http.Request) {
 	defer end.Stop()
 	for {
 		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-end.C:
+				return
+			default:
+			}
 			f, exists, nextErr := m.live.next(c)
 			if nextErr != nil {
 				_ = m.liveAuthorized(r, p, nil, func() error { return send("resync", c, []byte(`{"reason":"replay_gap"}`)) })

@@ -140,6 +140,7 @@ func TestChatLiveViewersReplayFinalOnlyAndReceipts(t *testing.T) {
 			t.Fatal("unreadable thread disclosed data")
 		}
 		expect(t, f.call(p, "GET", path+"/outbox", nil, ""), 404)
+		expect(t, f.call(p, "POST", path+"/outbox", outboxSend{ClientID: "forged", Body: "forged input"}, ""), 404)
 	}
 	wrong := proof
 	wrong.BindingEpoch = "2"
@@ -175,6 +176,15 @@ func TestChatLiveViewersReplayFinalOnlyAndReceipts(t *testing.T) {
 		t.Fatal("receipt regressed")
 	}
 	reply := finalSend{proof, outboxSend{ClientID: "reply-1", Body: "final answer", ReplyTo: &sent.Message.ID}}
+	// Current stored key scopes, rather than the principal snapshot, decide
+	// final writes even when an earlier request already had chat.send.
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['chat.receive','harness.worker','inbox.send'] WHERE principal_id=$1`, f.agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	expect(t, f.call(f.agent, "POST", "/api/chat-deliveries/final", reply, lease), 404)
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE agent_keys SET scopes=$2 WHERE principal_id=$1`, f.agent.ID, f.agent.Scopes); err != nil {
+		t.Fatal(err)
+	}
 	final := decode[outboxResult](t, f.call(f.agent, "POST", "/api/chat-deliveries/final", reply, lease))
 	if decode[outboxResult](t, f.call(f.agent, "POST", "/api/chat-deliveries/final", reply, lease)).Message.ID != final.Message.ID {
 		t.Fatal("duplicate final reply")
@@ -196,12 +206,39 @@ func TestChatLiveViewersReplayFinalOnlyAndReceipts(t *testing.T) {
 	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM inbox_messages WHERE chat_thread_id=$1`, thread.ID).Scan(&stored); err != nil || stored != 2 {
 		t.Fatal("invalid/retried message wrote transcript")
 	}
+	raw := []byte(`{"client_message_id":"invalid-utf8","body":"`)
+	raw = append(raw, 0xff)
+	raw = append(raw, []byte(`"}`)...)
+	request := httptest.NewRequest("POST", path+"/outbox", strings.NewReader(string(raw))).WithContext(tenant.WithPrincipal(t.Context(), f.alice))
+	recorder := httptest.NewRecorder()
+	f.mux.ServeHTTP(recorder, request)
+	expect(t, recorder, 400)
+	if !strings.Contains(recorder.Body.String(), "invalid UTF-8") {
+		t.Fatal("invalid text rejected for the wrong reason")
+	}
+	// Old RAM cursors must fail explicitly after byte/count eviction.
+	for sequence := uint64(6); sequence < 76; sequence++ {
+		publish(sequence, "bounded-replay")
+	}
+	expired := f.call(f.alice, "GET", path+"/live?after="+firstA.id, nil, "")
+	expect(t, expired, 409)
+	if !strings.Contains(expired.Body.String(), "reload final history") {
+		t.Fatal("expired cursor rejected for the wrong reason")
+	}
+	a.cancel()
+	a.response.Body.Close()
+	b.cancel()
+	b.response.Body.Close()
+	a, b = openLive(t, server, thread.ID, ""), openLive(t, server, thread.ID, "")
+	if a.next(t).kind != "ready" || b.next(t).kind != "ready" {
+		t.Fatal("revocation subscriber barrier missing")
+	}
 	// Revocation is established before publication; the active viewers must
 	// close before disclosing any subsequent normalized content.
 	if _, err := f.d.Admin.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.alice.ID); err != nil {
 		t.Fatal(err)
 	}
-	publish(5, "revoked-live-canary")
+	publish(76, "revoked-live-canary")
 	for _, stream := range []*liveTestStream{a, b} {
 		for stream.scanner.Scan() {
 			if strings.Contains(stream.scanner.Text(), "revoked-live-canary") {
