@@ -107,6 +107,7 @@
         "internal/agentplan/**",
         "internal/sessionusage/**",
         "internal/agentruns/**",
+        "internal/agentruns/routine_preparation.go",
         "internal/agentactivity/**",
         "internal/agentcompat/**",
         "internal/runkind/**",
