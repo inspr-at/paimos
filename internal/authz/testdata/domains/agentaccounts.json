@@ -27,6 +27,7 @@
     "POST /api/agent-accounts/capacity/preview": "account.read",
     "POST /api/agent-accounts/groups": "account.manage",
     "POST /api/agent-accounts/route": "account.route",
+    "POST /api/agent-accounts/probes": "account.probe",
     "POST /api/agent-accounts/runs/{runId}/target": "run.create",
     "POST /api/agent-accounts/{accountId}/archive": "account.manage",
     "POST /api/agent-accounts/{accountId}/capacity/approve": "account.manage",

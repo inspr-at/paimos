@@ -301,12 +301,12 @@ func BenchmarkWorkAggregatesRLS(b *testing.B) {
 					if err := db.InTenant(dbtest.Seed(ctx), appPool, tenantID, func(tx pgx.Tx) error {
 						var leaves int
 						if mode == "total" {
-							return tx.QueryRow(ctx, `SELECT leaf_count FROM aeon_work_aggregates(ARRAY[$1::uuid])`, root).Scan(&leaves)
+							return tx.QueryRow(ctx, `SELECT leaf_count FROM (`+eta.AggregateSQL("ARRAY[$1::uuid]")+`) aggregate`, root).Scan(&leaves)
 						}
 						column := map[string]string{"progress_sort": "progress_pct", "estimate_sort": "hours", "eta_sort": "eta_ready_at"}[mode]
 						// Scope discovery is performed once; all requested sort values are one batch.
 						return tx.QueryRow(ctx, `WITH targets AS MATERIALIZED(SELECT id FROM aeon_work_scope(ARRAY[$1::uuid])),
-      values AS MATERIALIZED(SELECT * FROM aeon_work_aggregates(ARRAY(SELECT id FROM targets))),
+      values AS MATERIALIZED(`+eta.AggregateSQL("ARRAY(SELECT id FROM targets)")+`),
       page AS(SELECT id FROM values ORDER BY `+column+` DESC NULLS LAST,id LIMIT 50)
       SELECT count(*)::int FROM page`, root).Scan(&leaves)
 					}); err != nil {
@@ -488,16 +488,19 @@ func TestListEstimateSortBoundedConcurrentMatchesBaseline(t *testing.T) {
 		sql, args := listSQL(q, nil)
 		functions := listSortPlanFunctions(t, ctx, w.admin.TenantID, sql, args)
 		if enabled {
-			if functions["aeon_work_scope"] != 1 || functions["aeon_work_aggregates"] != 0 || functions["aeon_leaf_eta"] != 0 || functions["aeon_node_completion"] != 0 {
+			if functions["aeon_work_scope"] != 1 || functions["aeon_work_aggregates"] != 0 || functions["aeon_leaf_eta"] != 0 || functions["aeon_node_completion"] != 0 || functions["CTE sessions"] != 0 || functions["CTE leaf_facts"] != 0 {
 				t.Fatalf("estimate sort still reads session evidence: %v", functions)
 			}
-		} else if functions["aeon_work_aggregates"] != 1 {
-			t.Fatalf("baseline aggregate missing: %v", functions)
+		} else if functions["aeon_work_scope"] != 1 || functions["aeon_work_aggregates"] != 0 || functions["aeon_leaf_eta"] != 0 || functions["aeon_node_completion"] != 0 || functions["CTE sessions"] != 1 || functions["CTE leaf_facts"] != 1 {
+			// The default path now batches full session facts in the shared
+			// projection; the estimate-only opt-in must still omit that work.
+			t.Fatalf("baseline aggregate facts are not shared once: %v", functions)
 		}
 		t.Logf("estimate sort opt-in=%v: 1005 visible work rows, 2000 historical sessions; function loops=%v", enabled, functions)
 	}
-	// Every root's value is compared before paging, including out-of-page
-	// descendants, excluded closed leaves and null estimates.
+	// Every root's value is compared to the published SQL function before
+	// paging, including out-of-page descendants, excluded closed leaves and
+	// null estimates. Page parity below also covers the shared default projection.
 	values := func(enabled bool) map[string]*string {
 		prefix, args := listFilterSQL(q, false)
 		cte := `, work_values AS MATERIALIZED (SELECT * FROM aeon_work_aggregates(ARRAY(SELECT id FROM filtered)))`
@@ -692,6 +695,9 @@ func listSortPlanFunctions(t *testing.T, ctx context.Context, tenantID, sql stri
 		var visit func(map[string]any)
 		visit = func(plan map[string]any) {
 			if name, ok := plan["Function Name"].(string); ok {
+				functions[name] += int(plan["Actual Loops"].(float64))
+			}
+			if name, _ := plan["Subplan Name"].(string); name == "CTE sessions" || name == "CTE leaf_facts" {
 				functions[name] += int(plan["Actual Loops"].(float64))
 			}
 			for _, child := range planChildren(plan) {

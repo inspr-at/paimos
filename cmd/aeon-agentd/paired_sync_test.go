@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
@@ -136,7 +137,8 @@ func TestPairedSyncTombstoneProbesAndFailureDiagnostics(t *testing.T) {
 	}
 	api := &syncProbeAPI{repinIdentityAPI: repinIdentityAPI{c: c}, probes: map[string]int{}}
 	root := e.Store.Path()
-	s, err := agentd.NewSupervisor(t.Context(), agentd.Config{API: api, StateRoot: filepath.Join(root, "daemon"), DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters})
+	now := time.Now()
+	s, err := agentd.NewSupervisor(t.Context(), agentd.Config{Now: func() time.Time { return now }, API: api, StateRoot: filepath.Join(root, "daemon"), DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +153,8 @@ func TestPairedSyncTombstoneProbesAndFailureDiagnostics(t *testing.T) {
 	diagnostics := pairedDiagnostics{}
 	tick := func() error {
 		var err error
-		c, err = pairedPollIteration(t.Context(), s, root, c, &diagnostics)
+		now = now.Add(5 * time.Second)
+		c, err = pairedPollIteration(t.Context(), s, root, c, &diagnostics, s.PollScheduledOnce)
 		return err
 	}
 	if err := tick(); err != nil {
