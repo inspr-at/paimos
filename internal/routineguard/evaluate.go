@@ -40,6 +40,9 @@ type EvaluationRequirement struct {
 	DifferentFamily bool   `json:"different_family"`
 }
 type Decision struct {
+	// Only S08's verified verdict path in this package may set this latch.
+	// Serialized or reconstructed metadata cannot grant action execution.
+	evaluationVerified  bool
 	Checkpoint          string                 `json:"checkpoint"`
 	Result              Outcome                `json:"result"`
 	DeterministicResult Outcome                `json:"deterministic_result"`
@@ -54,7 +57,7 @@ type Decision struct {
 // CanExecute is fail closed. S08 must verify and bind the independent verdict
 // before action execution; a deterministic allow never substitutes for it.
 func (d Decision) CanExecute() bool {
-	return d.Checkpoint == "action" && d.Result == Allow && d.RequiredEvaluation == nil && d.HardVersion == HardVersion && len(d.Findings) > 0 && len(d.PolicyDigest) == 64 && len(d.ContextDigest) == 64
+	return d.evaluationVerified && d.Checkpoint == "action" && d.Result == Allow && d.RequiredEvaluation != nil && d.RequiredEvaluation.RuleID == "hard.different_family_v1" && d.RequiredEvaluation.Version == HardVersion && d.RequiredEvaluation.PolicyDigest == d.PolicyDigest && d.RequiredEvaluation.ContextDigest == d.ContextDigest && d.HardVersion == HardVersion
 }
 func validatePath(p string) error {
 	if p == "" || len(p) > MaxPathBytes || !utf8.ValidString(p) || strings.ContainsAny(p, "\\\x00\r\n:%?#") || strings.HasPrefix(p, "/") || path.Clean(p) != p {
@@ -110,7 +113,7 @@ func contextPaths(c Context) []string {
 }
 func protected(p string) bool {
 	p = strings.ToLower(p)
-	for _, prefix := range []string{"internal/routineguard", "internal/auth", "internal/authz", "internal/db/migrations", "api/areas/recurrences.yaml", "scripts/ci", "scripts/ci-static.mjs", "internal/recurrences/guardrails.go", "scripts/test-tiers", "scripts/audit", ".github/workflows", ".aeon", ".inspr"} {
+	for _, prefix := range []string{"internal/routineguard", "internal/routineactions", "internal/recurrences", "internal/agentd", "internal/auth", "internal/authz", "internal/db/migrations", "api/areas/recurrences.yaml", "scripts/ci", "scripts/ci-static.mjs", "scripts/check-migrations.mjs", "scripts/check-attached-policy-mutations.py", "claudeassets", "internal/recurrences/guardrails.go", "scripts/test-tiers", "scripts/audit", ".github/workflows", ".aeon", ".inspr"} {
 		if p == prefix || strings.HasPrefix(p, prefix+"/") {
 			return true
 		}

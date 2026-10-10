@@ -85,6 +85,7 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
     put:
       operationId: putRoutineGuardrails
       description: 'Person-only revisioned policy edit. Tenant and project policies require a current administrator in that scope; user policies require their canonical owner. Removing or weakening non-hard rules also requires a current administrator and a reason. The server binds identity, inherited digest, prior revision and rule digest; callers cannot supply approval or replace compiled script hashes. Changes save policy only and grant no execution.'

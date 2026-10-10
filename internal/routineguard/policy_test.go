@@ -78,6 +78,9 @@ func TestGuardrailFloorScopeEvidenceAndBoundedCheckpoints(t *testing.T) {
 	if err != nil || d.Result != Allow || d.CanExecute() {
 		t.Fatal("save result granted action execution")
 	}
+	if (Decision{Checkpoint: "action", Result: Allow, HardVersion: HardVersion, PolicyDigest: strings.Repeat("a", 64), ContextDigest: strings.Repeat("b", 64), Findings: []Finding{{RuleID: "fake", Result: Allow}}}).CanExecute() {
+		t.Fatal("serialized metadata without verified hard evaluation authorized execution")
+	}
 	if (Decision{Result: Allow}).CanExecute() {
 		t.Fatal("absent hard evidence authorized execution")
 	}
