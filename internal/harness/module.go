@@ -74,6 +74,7 @@ import (
 type Module struct {
 	sessionRecovery SessionRecovery
 	leadAdmission   LeadAdmission
+	routineRuntime  modelregistry.ExecutionRuntimeReader
 	planningStart   func(context.Context, pgx.Tx, string, string) error
 	pool            *pgxpool.Pool
 	controlText     controlRelay
@@ -115,6 +116,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		fn             func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
 	}{
 		{"GET /api/projects/{projectId}/lead", "harness.read", false, 200, m.readLead},
+		{"GET /api/projects/{projectId}/routine-execution-settings", "harness.read", false, 200, m.readRoutineExecution},
+		{"PUT /api/projects/{projectId}/routine-execution-settings", "harness.control", false, 200, m.writeRoutineExecution},
 		{"POST /api/projects/{projectId}/lead", "harness.control", false, 200, m.startLead},
 		{"DELETE /api/projects/{projectId}/lead", "harness.control", false, 200, m.removeLead},
 		{"GET /api/projects/{projectId}/lead/candidates", "harness.read", false, 200, m.leadCandidates},

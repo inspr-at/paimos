@@ -346,6 +346,6 @@ func saveDefinition(ctx context.Context, tx pgx.Tx, p tenant.Principal, id strin
 		assignment = raw
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO recurrence_definitions(tenant_id,recurrence_id,scope_type,scope_project_id,owner_principal_id,output_project_id,output_parent_id,assignment)
- VALUES($1,$2,$3,nullif($4,'')::uuid,$5,$6,$7,$8) ON CONFLICT(tenant_id,recurrence_id) DO UPDATE SET assignment=EXCLUDED.assignment,execute_consent=false,consent_revision=0,consented_by_principal_id=NULL,consented_at=NULL`, p.TenantID, id, d.Scope.Kind, d.Scope.ProjectID, d.OwnerPrincipalID, in.ProjectID, in.ParentID, assignment)
+ VALUES($1,$2,$3,nullif($4,'')::uuid,$5,$6,$7,$8) ON CONFLICT(tenant_id,recurrence_id) DO UPDATE SET assignment=EXCLUDED.assignment,execute_consent=false,consent_revision=0,consented_by_principal_id=NULL,consented_at=NULL,consent_policy_digest=NULL,consent_qualification_id=NULL`, p.TenantID, id, d.Scope.Kind, d.Scope.ProjectID, d.OwnerPrincipalID, in.ProjectID, in.ParentID, assignment)
 	return err
 }

@@ -43,6 +43,7 @@ type Input struct {
 	Definition    *Definition `json:"definition,omitempty"`
 }
 type Recurrence struct {
+	ExecutionPolicy *ExecutionPolicy `json:"execution_policy,omitempty"`
 	Input
 	ID              string     `json:"id"`
 	Paused          bool       `json:"paused"`

@@ -48,7 +48,8 @@
     "POST /api/recurrences/{recurrenceId}/pause": "recurrences.manage",
     "POST /api/recurrences/{recurrenceId}/resume": "recurrences.manage",
     "POST /api/recurrences/{recurrenceId}/run-now": "recurrences.manage",
-    "PUT /api/recurrences/{recurrenceId}": "recurrences.manage"
+    "PUT /api/recurrences/{recurrenceId}": "recurrences.manage",
+    "PUT /api/recurrences/{recurrenceId}/execution-consent": "recurrences.manage"
   },
   "words": {
     "resources": {

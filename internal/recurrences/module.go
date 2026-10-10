@@ -22,7 +22,8 @@ import (
 )
 
 type Module struct {
-	pool *pgxpool.Pool
+	pool             *pgxpool.Pool
+	executionRuntime ExecutionRuntimeReader
 	// now is an injected database-clock substitute for deterministic tests only.
 	now     func(context.Context, pgx.Tx) (time.Time, error)
 	history []Publication
@@ -50,6 +51,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/recurrences/preview", m.previewDraft)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}", m.get)
 	mux.HandleFunc("PUT /api/recurrences/{recurrenceId}", m.update)
+	mux.HandleFunc("PUT /api/recurrences/{recurrenceId}/execution-consent", m.writeExecutionConsent)
 	mux.HandleFunc("DELETE /api/recurrences/{recurrenceId}", m.remove)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/history", m.listHistory)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/releases", m.listReleases)
@@ -201,6 +203,9 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		out.Definition = in.Definition
+		if err := m.projectExecutionPolicy(r.Context(), tx, p.TenantID, &out); err != nil {
+			return err
+		}
 		return record(r.Context(), tx, p, out.ProjectID, "recurrence.created", nil, out)
 	})
 	reply(w, 201, out, err)
@@ -229,6 +234,9 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if err = readDefinition(r.Context(), tx, p, out.Input); err != nil {
+			return err
+		}
+		if err := m.projectExecutionPolicy(r.Context(), tx, p.TenantID, &out); err != nil {
 			return err
 		}
 		return results(r.Context(), tx, []Recurrence{out}, func(items []Recurrence) { out = items[0] })
@@ -295,6 +303,11 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		rows.Close()
 		if err := definitions(r.Context(), tx, items, func(out []Recurrence) { items = out }); err != nil {
 			return err
+		}
+		for i := range items {
+			if err := m.projectExecutionPolicy(r.Context(), tx, p.TenantID, &items[i]); err != nil {
+				return err
+			}
 		}
 		return results(r.Context(), tx, items, func(out []Recurrence) { items = out })
 	})
@@ -388,6 +401,9 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		out.Definition = in.Definition
+		if err := m.projectExecutionPolicy(r.Context(), tx, p.TenantID, &out); err != nil {
+			return err
+		}
 		return record(r.Context(), tx, p, out.ProjectID, "recurrence.updated", before, out)
 	})
 	reply(w, 200, out, err)
@@ -466,6 +482,9 @@ func (m *Module) setPaused(w http.ResponseWriter, r *http.Request, paused, retir
 		if paused {
 			typ = "recurrence.paused"
 		}
+		if err := m.projectExecutionPolicy(r.Context(), tx, p.TenantID, &out); err != nil {
+			return err
+		}
 		return record(r.Context(), tx, p, out.ProjectID, typ, before, out)
 	})
 	if retire && err == nil {
@@ -490,6 +509,7 @@ func (m *Module) preview(w http.ResponseWriter, r *http.Request) {
 	}
 	var times []time.Time
 	var trigger string
+	var policy *ExecutionPolicy
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		item, err := load(r.Context(), tx, r.PathValue("recurrenceId"), false)
 		if err != nil {
@@ -509,10 +529,18 @@ func (m *Module) preview(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		trigger = item.Trigger.Kind
+		if err := m.projectExecutionPolicy(r.Context(), tx, p.TenantID, &item); err != nil {
+			return err
+		}
+		policy = item.ExecutionPolicy
 		times, err = Preview(item.Trigger, now, count)
 		return err
 	})
-	reply(w, 200, map[string]any{"times": times, "trigger_kind": trigger}, err)
+	out := map[string]any{"times": times, "trigger_kind": trigger}
+	if policy != nil {
+		out["execution_policy"] = policy
+	}
+	reply(w, 200, out, err)
 }
 func record(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, typ string, before, after any) error {
 	id := ""

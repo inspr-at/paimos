@@ -6212,6 +6212,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestRemoveStaleUsesAcceptedHeartbeatAndIsIdempotent","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestRoutineExecutionSettingsRequirePersonAndExactQualification","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestRulesClientReportsAreOptionalLeaseBoundAndDowngradeSafe","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestRulesReceiptAppendCASPreservesInstructionProvenance","tier":"GATED-FULL"}
@@ -8101,6 +8103,10 @@
     {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceWriteLockOrderWithTreeWriters","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRollbackUniqueKeyAndInvalidTarget","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineConsentBindsQualificationAndScopedIdentity","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineConsentRechecksOwnerBehindAccessFence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineDefinitionScopeAuthorityAndInertRoundTrip","tier":"ESSENTIAL"}
     ,
