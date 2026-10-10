@@ -465,7 +465,7 @@ func (m *Module) putSettings(w http.ResponseWriter, r *http.Request) {
 			if in.AutoAddProfiles {
 				rules.NewModels = "allow"
 			} else {
-				rules.NewModels = "shipped_only"
+				rules.NewModels = "deny"
 			}
 			if _, err := accountuse.WriteRules(r.Context(), tx, p, *in.AccountUseRevision, rules.RuleValues); err != nil {
 				var conflict *accountuse.Error

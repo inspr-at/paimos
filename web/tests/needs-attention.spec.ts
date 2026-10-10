@@ -12,8 +12,8 @@ const row = (index: number, extra: Partial<AttentionItem> = {}): AttentionItem =
   from: index % 2 ? 'backlog' : 'new', to: index % 2 ? 'cancelled' : 'backlog',
   reason: 'Untouched in this project; review the current suggestion.', at: '2026-10-03T08:00:00Z', editable: true, applicable: true, ...extra,
 })
-async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fail?: boolean; partial?: boolean; held?: Promise<void>; received?: () => void; groups?: 'absent'; canManage?: boolean } = {}) {
-  await mockWork(page, fixtures())
+async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fail?: boolean; partial?: boolean; held?: Promise<void>; received?: () => void; groups?: 'absent'; canManage?: boolean; work?: ReturnType<typeof fixtures> } = {}) {
+  await mockWork(page, options.work ?? fixtures())
   await mockBusiness(page, businessData({ role: options.canManage ? 'admin' : 'member' }), { role: options.canManage ? 'admin' : 'member' })
   const preferences = new Map<string, unknown>()
   await page.route('**/api/preferences/needs-attention*', async route => {
@@ -58,6 +58,39 @@ async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fa
 }
 const table = (page: Page) => page.getByRole('grid', { name: 'Tickets needing attention' })
 const first = (page: Page) => table(page).locator('#row-attention-1')
+
+test('attention row links and both open actions use imported and native canonical ticket routes', async ({ page }) => {
+  const work = fixtures()
+  const imported = work.projects.find(project => project.id === 'p-pharos')!
+  imported.key = 'PRJ-6'; imported.classic = 'PAI'
+  const native = work.projects.find(project => project.id === 'p-aeon')!
+  native.key = 'AEON'; native.classic = ''
+  const nodes = [imported, native].map((project, index) => {
+    const node = work.nodes.find(node => node.project === project.id && node.kind_slug === 'ticket')!
+    node.key = index === 0 ? 'PAI-185' : 'AEON-1148'
+    return node
+  })
+  await setup(page, nodes.map((node, index) => row(index, { node_id: node.id, key: node.key, title: node.title, project_id: node.project })), { work })
+  for (const [index, routeKey] of ['PAI', 'AEON'].entries()) {
+    await page.goto('/tickets?view=needs-attention')
+    const node = nodes[index]!, ticket = table(page).locator(`#row-attention-${index + 1}`)
+    const path = `/p/${routeKey}/${node.key}`
+    await expect(ticket.locator('.attention-title')).toHaveText(node.title)
+    const guard = await controlStability(page, { search: page.getByRole('searchbox'), row: ticket, actions: ticket.locator('.action-stack') })
+    await guard.check(async () => { await ticket.hover() })
+    guard.done()
+    // Capture the real new-tab address without opening an unmocked second page.
+    await page.evaluate(() => {
+      const opened: string[] = []
+      Object.assign(window, { attentionOpened: opened })
+      window.open = (url?: string | URL) => { opened.push(String(url)); return null }
+    })
+    await ticket.getByRole('button', { name: `Open ${node.key} in a new tab` }).click()
+    expect(await page.evaluate(() => (window as unknown as { attentionOpened: string[] }).attentionOpened)).toEqual([path])
+    await ticket.locator('.attention-title').click()
+    await expect(page).toHaveURL(new RegExp(`${path}$`))
+  }
+})
 // R3/R17/R18: whole-group writes, partial results, revision-bound settings
 // Undo, and stable controls. Keep real pending rows and resolution history so
 // assertions cannot pass by treating aggregate counts as row identities.

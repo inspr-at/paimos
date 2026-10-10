@@ -9336,6 +9336,8 @@
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"attention keys select a range, preserve native field shortcuts, skip inapplicable Apply and retain confirmed Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"attention row links and both open actions use imported and native canonical ticket routes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"bulk Apply has no glow and keeps visible keyboard focus at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"bulk Apply has no glow and keeps visible keyboard focus at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -15336,6 +15338,8 @@
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"binds undo from undo_of on the resolution-type page","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"builds canonical ticket links for imported, native and escaped project keys","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"builds capped groups from the list cursor and stops at the page cap","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"fills kind totals from the list counts and project names from facets","tier":"ESSENTIAL"}
@@ -15343,6 +15347,8 @@
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"ignores failed or incomplete release receipts","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"keeps server order across a live cursor and sorts the loaded window only when the cursor ends","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"opens attention rows in the same tab and a new tab with their canonical project route key","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"orders every group by open flags and every row by kind then newest without mutating the visit","tier":"ESSENTIAL"}
     ,

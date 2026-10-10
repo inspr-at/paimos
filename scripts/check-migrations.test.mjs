@@ -475,8 +475,13 @@ test('the current tree requires all exact-byte contract exceptions', () => {
   const baseline = JSON.parse(readFileSync(new URL('./migration-policy-baseline.json', import.meta.url), 'utf8'));
   const exceptions = loadMigrationExceptions();
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
-  assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
-  const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
+  // The frozen policy baseline still pins historical bytes and exceptions.
+  // Later contract phases must prove their expansion against a real release
+  // reachable from this tree, rather than against that older policy fixture.
+  const previousTag = execFileSync('git', ['describe', '--tags', '--match', 'v[0-9]*.0.0', '--abbrev=0', 'HEAD'], {encoding: 'utf8'}).trim();
+  assert.match(previousTag, /^v\d{12}\.0\.0$/);
+  assert.deepEqual(checkMigrations(files, published, previousTag.slice(1), {baseline, exceptions, previousTag}), []);
+  const withoutException = checkMigrations(files, published, previousTag.slice(1), {baseline, previousTag});
   assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), migrationExceptionFiles());
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });

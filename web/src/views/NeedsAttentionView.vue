@@ -12,7 +12,7 @@ import { usePreference } from '../lib/preferences'
 import { filtersFromQuery, type RowGroup, type TicketRow } from '../lib/ticketList'
 import type { ColumnDef, ListPrefs } from '../lib/columns'
 import { toast, dismiss, toastBottomClearance } from '../lib/toast'
-import { absoluteTime, statusMeta, relativeTime } from '../lib/work'
+import { absoluteTime, statusMeta, relativeTime, ticketPath } from '../lib/work'
 import { useSession } from '../stores/session'
 import { useProjects } from '../stores/projects'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
@@ -86,7 +86,7 @@ const titleFor = (row: Row) => row.to === 'release' ? row.release_title || words
 const rowID = (row: AttentionItem) => `attention-${row.event_id}`
 function ticketRow(row: Row): TicketRow {
   const group = groupRows.value.find(group => group.project_id === row.project_id), known = projects.byId(row.project_id)
-  const key = group?.key || known?.routeKey || row.key.replace(/-\d+$/, '')
+  const key = known?.routeKey || group?.key || row.key.replace(/-\d+$/, '')
   return { id: rowID(row), key: row.key, title: row.failure || row.title, kind_id: '', kind_slug: 'work', kind_label: 'Work item', is_leaf: true, body: '', fields: {}, state: row.from, priority: null, assignee: null, parent: null, parent_id: null, children_count: 0, position: '', created_at: row.at, updated_at: row.revision, project_key: key, project: { id: row.project_id, key, title: group?.title || known?.title || key } }
 }
 const rowsById = computed(() => new Map(rows.value.map(row => [rowID(row), ticketRow(row)])))
@@ -456,9 +456,9 @@ function openGroupDestination() {
   closeOverlay(false)
   void router.push(group.project_id ? { path: `/p/${encodeURIComponent(group.key || group.project_id)}/tickets`, query: { ...(query.q ? { q: query.q } : {}), ...(query.assignee ? { assignee: query.assignee } : {}) } } : '/settings/autopilot')
 }
-function openRow(row: TicketRow) { void router.push(`/projects/${encodeURIComponent(row.project_key!)}/tickets/${encodeURIComponent(row.key)}`) }
+function openRow(row: TicketRow) { void router.push(ticketPath(row.project_key!, row.key)) }
 function copyKey(row: TicketRow) { void navigator.clipboard.writeText(row.key).catch(() => toast('The key could not be copied.', { tone: 'error' })) }
-function newTab(row: TicketRow) { window.open(`/projects/${encodeURIComponent(row.project_key!)}/tickets/${encodeURIComponent(row.key)}`, '_blank', 'noopener') }
+function newTab(row: TicketRow) { window.open(ticketPath(row.project_key!, row.key), '_blank', 'noopener') }
 function navigation() { return groups.value.flatMap(group => [ ...(grouping.value === 'none' ? [] : [`group-${group.key}`]), ...(!collapsed.value.has(group.key) ? group.rows.map(row => row.id) : []) ]) }
 function focusCursor(id: string) { cursor.value = id; table.value?.focusGrid(); void nextTick(() => table.value?.scrollToRow(id)) }
 function keys(event: KeyboardEvent) {

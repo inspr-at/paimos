@@ -5406,6 +5406,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestResetMigrationExpansionRollbackOldWriterAndRLS","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestRetiredModelAutoUpdateMigrationIsTenantScopedAndIdempotent","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestRoadmapPublicationMigrationPreservesCustomSchema","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestRowVersionInstallationBoundsLockWaitAndRetries","tier":"GATED-FULL"}
@@ -7277,6 +7279,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestProfileLine","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestProjectQualifiedResolvePreservesLegacyLadder","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestRefreshAutoUpdateUsesCanonicalModelRule","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRefreshBoundsProfileAdditionsAndRejectsDisabledDiscoveryResults","tier":"GATED-FULL"}
     ,
