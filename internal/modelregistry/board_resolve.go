@@ -113,7 +113,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	}
 	if review && d.Automatic {
 		d.Steps = automaticReviewSteps(c, q.AuthorFamily)
-		out.Trace.OrderMode = "automatic"
+		out.Trace.OrderMode = reviewOrderLegacy
 	}
 	if roleName == "scout" || roleName == "mechanical" {
 		quick, err := quickJobSteps(ctx, tx, c, role.effort)
@@ -203,9 +203,16 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			if len(reasons) == 0 && len(ids) == 0 {
 				reasons = append(reasons, "no qualified account with available capacity")
 			}
-			candidate := Candidate{ProfileID: profile.ID, SkipReasons: reasons, Stage: order.Stage}
+			stage := order.Stage
+			if stage == "quick" || stage == "automatic" {
+				stage = "column"
+			}
+			candidate := Candidate{ProfileID: profile.ID, SkipReasons: reasons, Stage: stage}
 			if len(reasons) == 0 {
 				candidate.Selected, out.OwnerRequired = true, false
+				if order.Stage == "quick" {
+					out.Trace.Prefs = "quick jobs"
+				}
 				out.Profile, out.Trace.QualifyingAccountIDs = &profile, ids
 				d.Selected, d.Lock = order.Line, d.Locks[order.Line]
 				if order.Stage == "column" {

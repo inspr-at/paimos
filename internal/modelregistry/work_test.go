@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
@@ -397,7 +398,7 @@ func TestModelsV2RolesRoutesAndWait(t *testing.T) {
 				t.Fatalf("%s unknown quota: %+v", tc.role, got)
 			}
 			if tc.role == "scout" || tc.role == "mechanical" {
-				if got.Profile.Model != "gpt-6-luna" || got.Ladder[len(got.Ladder)-1].Stage != "quick" {
+				if got.Profile.Model != "gpt-6-luna" || got.Ladder[len(got.Ladder)-1].Stage != "column" || got.Trace.Prefs != "quick jobs" {
 					t.Fatalf("cheapest fast: %+v", got)
 				}
 			}
@@ -424,13 +425,34 @@ func TestModelsV2RolesRoutesAndWait(t *testing.T) {
 			return err
 		}
 		until = end
+		plan, _ := json.Marshal(agentplan.Plan{Total: 5, Limits: map[string]agentplan.Limit{}, Daily: map[string]agentplan.DailySettings{"claude": {Pace: agentplan.DailyPace{Mode: "pace"}, AtLimit: "wait"}}})
+		if _, err := tx.Exec(ctx, `INSERT INTO user_preferences(tenant_id,principal_id,key,value) VALUES($1,$2,'agents.working',$3) ON CONFLICT(tenant_id,principal_id,key) DO UPDATE SET value=EXCLUDED.value`, admin.TenantID, admin.ID, plan); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source) VALUES($1,$2,$3,$4,'percent',100,50,'unrestricted',$5,true,'weekly','daily','harness')`, admin.TenantID, accounts["claude"], start, end.Add(5*24*time.Hour), now); err != nil {
+			return err
+		}
 		for _, reading := range []struct {
 			at   time.Time
 			used float64
 		}{{start.Add(time.Minute), 40}, {now, 50}} {
-			if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','',10080,$3,$4,$5,'harness')`, admin.TenantID, accounts["claude"], reading.used, end.Add(5*24*time.Hour), reading.at); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','daily',10080,$3,$4,$5,'harness')`, admin.TenantID, accounts["claude"], reading.used, end.Add(5*24*time.Hour), reading.at); err != nil {
 				return err
 			}
+		}
+
+		snapshot, err := agentaccounts.ReadDailyPolicyTx(ctx, tx, admin.TenantID, admin.ID, now)
+		if err != nil {
+			return err
+		}
+		capped := false
+		for _, account := range snapshot.DailyState["claude"].Accounts {
+			if account.AccountID == accounts["claude"] && agentplan.DailyAccountReason(account, now) == "daily_limit" {
+				capped = true
+			}
+		}
+		if !capped {
+			t.Fatalf("fixture did not establish the daily cap: %+v", snapshot.DailyState["claude"])
 		}
 
 		got, err := ResolveWork(ctx, tx, admin, WorkQuery{Role: "build"}, now)

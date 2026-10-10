@@ -10,4 +10,4 @@ Review uses an explicit Review situation of the author’s kind, or the automati
 
 The reversible design decisions are `modelprefs.ModelsSmallSituation` (currently `small`, while rows remain `first`) and `modelregistry.ModelsReviewHighestNative` (currently true). Ticket estimates and fix rounds select situations; CLI resolution without a ticket uses Default, situation `first`, and the key’s canonical person. Ticket resolution uses the ticket’s placement fields.
 
-S1 provides the resolver and in-memory end/per-step effort controls. S2/S3 own persistence migration, new situation/order writes, cause-code fields and the public v2 contract. No migration or endpoint is added here.
+S1 provides the resolver and in-memory end/per-step effort controls. S2/S3 own persistence migration, new situation/order writes, cause-code fields and the public v2 contract. The existing resolution description and trace situation enum receive minimal contract updates. No migration or endpoint is added here.
