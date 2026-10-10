@@ -31,6 +31,13 @@ jobs:
           GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
+          # This non-required preview reports missing PR verdicts until review is posted.
+          # Main merge commits carry no direct verdict; PR/queue heads are the review targets.
+          if [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/main' ]]; then
+            echo 'gate/policy-preview: main push skipped; review verdicts are checked on PR and merge-group heads (non-required diagnostic)' >> "$GITHUB_STEP_SUMMARY"
+            echo '::notice::gate/policy-preview: main push skipped; review verdicts are checked on PR and merge-group heads (non-required diagnostic)'
+            exit 0
+          fi
           [[ "$GATE_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'Invalid gate base commit'; exit 1; }
           # First installation skips this diagnostic preview until the coordinator lands this policy.
           # Subsequent PRs cannot add themselves to the allowlist or change their checker.

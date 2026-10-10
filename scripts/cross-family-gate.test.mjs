@@ -187,6 +187,8 @@ test("PR events reject stale heads and head changes, while main may advance inde
   const api = { pull: async () => pr, statuses };
   const options = { eventName: "pull_request", event, config, repository, git: f.git, api };
   assert.equal((await checkEvent(options))[0].reviewed, f.reviewed);
+  await assert.rejects(checkEvent({ ...options, api: { ...api, statuses: async () => [] } }),
+    /PR #411: no trusted gate\/verdict; a new branch commit requires review/);
   await assert.rejects(checkEvent({ ...options, event: { ...event, pull_request: f.pr(f.head) } }), /changed since/);
   assert.equal((await checkEvent({ ...options, api: { ...api, pull: async () => ({ ...pr, base: { ...pr.base, sha: f.base } }) } }))[0].reviewed, f.reviewed);
   let calls = 0;
@@ -234,6 +236,7 @@ test("diagnostic workflow is PR/queue-only, unconditional and cannot emit the Ap
   assert.match(gate, /fetch-depth: 0/);
   assert.match(gate, /git show "\$GATE_BASE_SHA:scripts\/cross-family-gate.mjs"/);
   assert.match(gate, /git show "\$GATE_BASE_SHA:.github\/gate-posters.json"/);
+  assert.match(gate, /non-required preview reports missing PR verdicts until review is posted/);
   assert.doesNotMatch(gate, /: write|continue-on-error|node --test|pull_request_target/);
   const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   assert.doesNotMatch(ci, /gate\/cross-family/);
@@ -255,14 +258,15 @@ assert.deepEqual(policy.posters, ${JSON.stringify(config.posters)});
 console.log('trusted base gate ran');
 process.exit(policy.fixtureExitCode);
 `;
-  function run(files, baseOverride) {
+  function run(files, baseOverride, eventName = "pull_request", ref = "refs/pull/411/merge") {
     const runner = mkdtempSync(join(tmpdir(), "aeon-preview-runner-"));
     const summary = join(runner, "summary.txt");
     writeFileSync(summary, "existing summary\n");
     const base = f.commit(files, [f.main]);
     const result = spawnSync("bash", ["-c", shell], {
       cwd: f.cwd, encoding: "utf8", timeout: 10_000,
-      env: { PATH: process.env.PATH, GATE_BASE_SHA: baseOverride ?? base, RUNNER_TEMP: runner, GITHUB_STEP_SUMMARY: summary },
+      env: { PATH: process.env.PATH, GATE_BASE_SHA: baseOverride ?? base, RUNNER_TEMP: runner, GITHUB_STEP_SUMMARY: summary,
+        GITHUB_EVENT_NAME: eventName, GITHUB_REF: ref },
     });
     assert.ifError(result.error);
     assert.equal(result.signal, null);
@@ -290,6 +294,65 @@ process.exit(policy.fixtureExitCode);
   assert.equal(invalid.status, 1, invalid.stderr);
   assert.equal(invalid.stdout, "Invalid gate base commit\n");
   assert.equal(invalid.summary, "existing summary\n");
+  // A main push has no PR base SHA. Skip it explicitly before base-policy reads,
+  // even if the installed checker would otherwise report a missing verdict.
+  const pushNotice = "gate/policy-preview: main push skipped; review verdicts are checked on PR and merge-group heads (non-required diagnostic)";
+  const installed = { [checkerPath]: checker, [policyPath]: JSON.stringify({ ...config, fixtureExitCode: 7 }) };
+  const skipped = run(installed, "", "push", "refs/heads/main");
+  assert.equal(skipped.status, 0, skipped.stderr);
+  assert.equal(skipped.stdout, `::notice::${pushNotice}\n`);
+  assert.equal(skipped.summary, `existing summary\n${pushNotice}\n`);
+  assert.equal(existsSync(join(skipped.runner, "cross-family-gate.mjs")), false);
+  assert.equal(existsSync(join(skipped.runner, "gate-posters.json")), false);
+  // A main ref alone, a push to another branch, and queue events cannot skip
+  // an installed checker's diagnostic failure.
+  for (const [eventName, ref] of [["pull_request", "refs/heads/main"], ["push", "refs/heads/feature"],
+    ["merge_group", "refs/heads/gh-readonly-queue/main/pr-411-fixture"]]) {
+    const checked = run(installed, undefined, eventName, ref);
+    assert.equal(checked.status, 7, checked.stderr);
+    assert.equal(checked.stdout, "trusted base gate ran\n");
+    assert.equal(checked.summary, "existing summary\n");
+  }
+  // The actual CLI also handles main-push invocations without config, Git or
+  // read credentials; it emits a skip notice, never claims a gate passed.
+  const runner = mkdtempSync(join(tmpdir(), "aeon-preview-cli-"));
+  const eventPath = join(runner, "event.json");
+  const summary = join(runner, "summary.txt");
+  const configPath = join(runner, "policy.json");
+  const push = { repository: { full_name: repository }, ref: "refs/heads/main", after: f.merge(f.main, f.reviewed) };
+  writeFileSync(eventPath, JSON.stringify(push));
+  writeFileSync(summary, "existing summary\n");
+  const env = { PATH: process.env.PATH, GITHUB_EVENT_NAME: "push", GITHUB_EVENT_PATH: eventPath,
+    GITHUB_REPOSITORY: repository, GITHUB_STEP_SUMMARY: summary };
+  const runCLI = (changes = {}) => spawnSync(process.execPath,
+    [new URL("./cross-family-gate.mjs", import.meta.url).pathname, configPath],
+    { cwd: runner, encoding: "utf8", timeout: 10_000, env: { ...env, ...changes } });
+  const cli = runCLI();
+  assert.ifError(cli.error);
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.equal(cli.stdout, `::notice::${pushNotice}\n`);
+  assert.equal(cli.stderr, "");
+  assert.equal(readFileSync(summary, "utf8"), `existing summary\n${pushNotice}\n`);
+  assert.equal(existsSync(configPath), false);
+  const withoutSummary = runCLI({ GITHUB_STEP_SUMMARY: "" });
+  assert.ifError(withoutSummary.error);
+  assert.equal(withoutSummary.status, 0, withoutSummary.stderr);
+  assert.equal(withoutSummary.stdout, `::notice::${pushNotice}\n`);
+  // The skip is confined to main pushes from the configured repository.
+  writeFileSync(configPath, JSON.stringify(config));
+  for (const [event, eventName, expected] of [
+    [{ ...push, ref: "refs/heads/feature" }, "push", /only accepts pull_request or merge_group/],
+    [push, "workflow_dispatch", /only accepts pull_request or merge_group/],
+    [{ ...push, repository: { full_name: "fork/paimos" } }, "push", /event repository mismatch/],
+  ]) {
+    writeFileSync(eventPath, JSON.stringify(event));
+    const rejected = runCLI({ GITHUB_EVENT_NAME: eventName, GH_TOKEN: "fixture-token" });
+    assert.ifError(rejected.error);
+    assert.equal(rejected.status, 1, rejected.stderr);
+    assert.equal(rejected.stdout, "");
+    assert.match(rejected.stderr, expected);
+    assert.equal(readFileSync(summary, "utf8"), `existing summary\n${pushNotice}\n`);
+  }
 });
 
 test("required status binds to the external App, preserving the existing ruleset separately", () => {
