@@ -4900,6 +4900,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestWorkTypeAliasesUseCanonicalIDAndExposeShape","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestWriteRenderedAcceptsSymlinkWorkspaceRoot","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestWriteRenderedCleansUpOnRenameFailure","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestWriteRenderedConcurrentAtomicReplacement","tier":"GATED-FULL"}
