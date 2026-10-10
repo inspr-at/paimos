@@ -61,8 +61,8 @@ migration or release version change is required for this server slice.
 
 agentd relays the chat of its own runs. A run whose harness supplies the S1
 stream, may hold a chat binding and names the input each turn consumes
-(Claude, Codex, Cursor or Grok) registers with the `chat` capability. The server's chat-only
-registration check admits such a managed run, or an unmanaged registration with
+(Claude, Codex, Cursor or Grok) registers with the `chat` capability. The
+server's chat-only registration check admits such a managed run, or an unmanaged registration with
 `inbox`, under the same conditions: the caller is the session's agent
 principal with its private worker lease, an owner person is set, and the
 session is live with a heartbeat younger than two minutes. Other harness
@@ -102,9 +102,8 @@ minutes, the input stays `sent`. Person read evidence remains the read markers.
 **Pi** is not relayed. Its turn markers do not say which queued input started
 a turn, so agentd neither advertises `chat` for a Pi run nor writes person
 chat input to it; its chat has no live view, as with a daemon that predates
-the relay. Ordinary
-inbox and steering input to Pi works as before. Live chat for Pi follows in
-AEON-1095. The same holds for any harness added later until its turn start
+the relay. Ordinary inbox and steering input to Pi works as before. Live chat
+for Pi follows in AEON-1095. The same holds for any harness added later until its turn start
 names the input it consumes.
 
 ## Upgrade order and reverse proxies
