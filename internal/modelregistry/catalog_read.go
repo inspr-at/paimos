@@ -10,7 +10,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -74,6 +76,17 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 
 	out := catalogPage{Models: []catalogModelView{}}
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		if err := preferenceFence(r.Context(), tx, p); err != nil {
+			return err
+		}
+		current, err := workorders.CurrentKeyPrincipal(r, tx, p, "models.read")
+		if err != nil {
+			return err
+		}
+		if err := authz.RequireTx(r.Context(), tx, current, "models.read", authz.Scope{}); err != nil {
+			return err
+		}
+
 		rows, err := tx.Query(r.Context(), `SELECT DISTINCT provider,model_id FROM model_catalog_facts WHERE (provider,model_id)>($1,$2) ORDER BY provider,model_id LIMIT $3`, after[0], after[1], limit+1)
 		if err != nil {
 			return err

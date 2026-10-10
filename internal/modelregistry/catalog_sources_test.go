@@ -53,6 +53,12 @@ func fixtureCatalogClient(t *testing.T, seen *[]string) *http.Client {
 
 // Risk: an aggregator, missing native field, or old seed invents model levels.
 func TestCatalogSourcesPreserveNativePrecedenceAndUnknown(t *testing.T) {
+	for _, seed := range seedModels {
+		if !validHarness(seed.Harness) || !modelRE.MatchString(seed.ID) {
+			t.Fatalf("offline seed is not a model identity: %+v", seed)
+		}
+	}
+
 	at := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
 	native, err := ParseProviderCatalog("anthropic", catalogFixture(t, "anthropic"), at)
 	if err != nil {
