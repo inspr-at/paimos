@@ -456,10 +456,18 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 	if got := send(agent, o, 200); got.Added != 0 {
 		t.Fatal("added duplicate profile")
 	}
+	foundHarness := false
 	for _, profile := range decode[[]Profile](t, &p, "GET", "/api/models", "", 200) {
-		if profile.Model == o.Model && (profile.Source != "auto" || profile.Origin != "harness") {
+		if profile.Model != o.Model {
+			continue
+		}
+		foundHarness = true
+		if profile.Source != "auto" || profile.Origin != "harness" {
 			t.Fatal("harness discovery lost its origin", profile)
 		}
+	}
+	if !foundHarness {
+		t.Fatal("reported model missing")
 	}
 }
 
@@ -619,10 +627,18 @@ func TestDiscoveryVaultIsAccountBoundAndOutageKeepsPolicy(t *testing.T) {
 	if len(current) != len(profiles)+1 {
 		t.Fatal("advertised API profiles missing")
 	}
+	foundProvider := false
 	for _, profile := range current {
-		if profile.Model == "gpt-future" && (profile.Source != "auto" || profile.Origin != "provider") {
+		if profile.Model != "gpt-future" {
+			continue
+		}
+		foundProvider = true
+		if profile.Source != "auto" || profile.Origin != "provider" {
 			t.Fatal("provider discovery lost its origin", profile)
 		}
+	}
+	if !foundProvider {
+		t.Fatal("provider model missing")
 	}
 	send(p, "POST", "/api/models/refresh", "{}", 429)
 	outage = true
