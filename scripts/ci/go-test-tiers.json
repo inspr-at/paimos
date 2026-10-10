@@ -572,6 +572,8 @@
     ,
     {"kind":"go","package":"internal/accountuse","name":"TestAccountUseLegacyEntryGuardEmptyAndPopulatedPools","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/accountuse","name":"TestAccountUseSwitchChangesAreAuditedWithPersistedValues","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/activity","name":"TestAuthorsSayWhetherTheyHaveAPicture","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/activity","name":"TestCommentLifecycleAuthorizationIsolationAndConcurrency","tier":"ESSENTIAL"}

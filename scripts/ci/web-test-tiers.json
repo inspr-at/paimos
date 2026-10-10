@@ -68,6 +68,8 @@
   "policy": "ESSENTIAL runs on PRs and merge groups plus changed-area cases. GATED-FULL preserves the prior Go/unit/browser gate. NIGHTLY includes never-gated browser cases. Runtime reconciliation warns, defaults new cases to NIGHTLY and drops stale entries. Known-flaky cases and deletion candidates cannot be ESSENTIAL; AEON-679 rule B removes reviewed low-value categories; protected candidates stay available."
   ,
   "postGateCases": [
+    "browser:tests/account-use-matrix.spec.ts:screenshots of the matrix, light and dark"
+    ,
     "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
     ,
     "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › keeps sort actions and the other blocks still when a sort key is added or removed (±0.5px)"
@@ -4672,6 +4674,32 @@
     ,
     {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 400 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"a competing change answers 409: nothing is claimed as saved and the server state is shown","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"a refused write takes its tick back at once, even when the matrix cannot be read again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"archive sends the revision the menu opened on: a rename meanwhile is refused, never overwritten","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"bulk, tri-state rows and columns, single cells and Undo all save with the matrix revision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"context menu sets \"never\" for new accounts; confirmation and running work outside stay explicit","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"controls never move while cells, rows, switches and Undo are used (desktop and phone)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"grid keyboard: arrows move between boxes and Space toggles; U never fires inside a text field","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"leaving the migrated model value keeps the switch and everything after it in place (desktop and phone)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"project settings choose the context; an unmapped project says no account works there","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"project settings find a context past the first page and count its accounts on every page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"screenshots of the matrix, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"switch changes save all four persisted rules with the revision; keyboard moves within a switch","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"the pairing review shows the rows the rule pre-fills","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/accounts-card-fit.spec.ts","name":"accounts and computers fit every width, panel open and closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 1020 to 950px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8922,6 +8950,8 @@
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"an agent key never gets registry controls, even with the permissions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"auto-update without account.use.manage is shown but cannot change; a competing rule change says nothing was saved","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"auto-update writes the whole settings object and a failed save puts the switch back","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"controls stay put: the strip, the entry that was used and its form buttons do not move (±0.5 px)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -12879,6 +12909,26 @@
     {"kind":"node","file":"tests/account-resets.test.ts","name":"the reserved plan slot is at least as wide as every line the card can show","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/account-resets.test.ts","name":"the summary counts credits per expiry day and never hides later ones","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-use.test.ts","name":"a conflict says nothing was saved; other failures never claim success","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-use.test.ts","name":"a page starts exactly at a context: the cursor is the id just before it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-use.test.ts","name":"a partial or malformed matrix is rejected rather than shown","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-use.test.ts","name":"a project summary says when the account count is incomplete","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-use.test.ts","name":"a save and its Undo restore exactly the earlier set","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-use.test.ts","name":"columns: default first, then by name; Unassigned never takes ticks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-use.test.ts","name":"refusals for a context read \"Not allowed for X\"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-use.test.ts","name":"switches offer two values; a migrated \"only with updates\" model rule stays visible but is never offered fresh","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-use.test.ts","name":"the pairing preview matches T3: ask first ticks nothing, allow skips \"never\" and Unassigned","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/account-use.test.ts","name":"tri-state rows and columns resolve to one value; anything but all becomes allowed","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/accounts-overview.test.ts","name":"accounts overview merges only a canonical shared quota identity within one harness","tier":"ESSENTIAL"}
     ,

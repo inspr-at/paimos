@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
+import PairingUsePreview from '../components/agents/PairingUsePreview.vue'
 import { resilientFetch } from '../lib/api'
 import { brand } from '../lib/brand'
 import { harnessLabel } from '../lib/agentState'
@@ -668,6 +669,8 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
         </label>
         <p v-if="verify && terms && !blockedLabels.length && verificationWarning(terms)" class="problem" role="alert">{{ verificationWarning(terms) }}</p>
         <p v-if="verify && !verifyLocked && !current.verification" class="problem">The server did not include verification terms. Leave verification off, or look the code up again.</p>
+
+        <PairingUsePreview />
 
         <fieldset>
           <legend>After connecting</legend>
