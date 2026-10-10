@@ -76,6 +76,13 @@ func TestRoutineHoldIsExactPersonOwnedAndRevocable(t *testing.T) {
 		if live {
 			t.Fatal("routine hold enlarged ordinary mutation authority")
 		}
+		if err != nil {
+			return err
+		}
+		live, err = LiveRoutineHoldTx(t.Context(), tx, f.agentA, hold.ID, f.nodeA, "nodes.write", digest, now.Add(2*time.Hour))
+		if live {
+			t.Fatal("expired person hold remained live")
+		}
 		return err
 	})
 	if w := f.do(f.personA, "", "POST", "/api/approvals/"+hold.ID+"/revoke", ""); w.Code != 200 {

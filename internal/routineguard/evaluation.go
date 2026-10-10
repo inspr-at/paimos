@@ -31,21 +31,23 @@ const (
 )
 
 var ErrEvaluationBudgetUnavailable = errors.New("budget_enforcement_unavailable")
+var errEvaluationUnavailable = errors.New("evaluation_evidence_unavailable")
 
 // ActionBinding is supplied by the typed action broker under its final write
 // fence. PayloadDigest covers the complete typed payload, including the exact
 // repository/head for PR and pipeline actions, not just a prose summary.
 type ActionBinding struct {
-	TenantID       string `json:"tenant_id"`
-	RunID          string `json:"run_id"`
-	ActionID       string `json:"action_id"`
-	AuthorRunID    string `json:"author_run_id"`
-	ProjectID      string `json:"project_id"`
-	TargetID       string `json:"target_id"`
-	TargetRevision int64  `json:"target_revision"`
-	Kind           string `json:"kind"`
-	PayloadDigest  string `json:"payload_digest"`
-	HeadSHA        string `json:"head_sha,omitempty"`
+	TenantID        string    `json:"tenant_id"`
+	RunID           string    `json:"run_id"`
+	ActionID        string    `json:"action_id"`
+	AuthorRunID     string    `json:"author_run_id"`
+	ProjectID       string    `json:"project_id"`
+	TargetID        string    `json:"target_id"`
+	TargetRevision  int64     `json:"target_revision"`
+	TargetUpdatedAt time.Time `json:"target_updated_at"`
+	Kind            string    `json:"kind"`
+	PayloadDigest   string    `json:"payload_digest"`
+	HeadSHA         string    `json:"head_sha,omitempty"`
 }
 
 func validDigest(s string) bool {
@@ -66,7 +68,7 @@ func (b ActionBinding) valid() bool {
 			return false
 		}
 	}
-	if b.TargetRevision < 1 || !validDigest(b.PayloadDigest) {
+	if b.TargetRevision < 1 || b.TargetUpdatedAt.IsZero() || !validDigest(b.PayloadDigest) {
 		return false
 	}
 	switch b.Kind {
@@ -112,7 +114,7 @@ type EvaluationRequest struct {
 
 func (r EvaluationRequest) digest() string { r.Digest = ""; return Digest(r) }
 func (r EvaluationRequest) valid() bool {
-	if !r.Binding.valid() || !validDigest(r.ContextDigest) || !validDigest(r.PolicyDigest) || !r.FamilyPolicy.Valid() || r.Capability != EvaluationCapability || r.CreatedAt.IsZero() || r.Deadline.Sub(r.CreatedAt) != MaxEvaluationTime || r.Digest != r.digest() {
+	if len(r.Harness) > 32 || len(r.Model) > 256 || len(r.Author.Harness) > 32 || len(r.Author.RequestedModel) > 256 || len(r.Author.EffectiveModel) > 256 || len(r.Author.Evidence) > 32 || !r.Binding.valid() || !validDigest(r.ContextDigest) || !validDigest(r.PolicyDigest) || !r.FamilyPolicy.Valid() || r.Capability != EvaluationCapability || r.CreatedAt.IsZero() || r.Deadline.Sub(r.CreatedAt) != MaxEvaluationTime || r.Digest != r.digest() {
 		return false
 	}
 	author, err := r.Author.Family()
@@ -271,8 +273,10 @@ func lockEvaluationAction(ctx context.Context, tx pgx.Tx, p tenant.Principal, b 
  FROM routine_runs r JOIN recurrences d ON d.tenant_id=r.tenant_id AND d.id=r.recurrence_id
  JOIN recurrence_definitions x ON x.tenant_id=r.tenant_id AND x.recurrence_id=r.recurrence_id
  WHERE r.tenant_id=$1 AND r.id=$2 AND d.revision=r.definition_revision AND x.owner_principal_id=r.owner_principal_id
+ AND x.assignment=r.assignment AND x.scope_type=r.scope_type AND x.scope_project_id IS NOT DISTINCT FROM r.scope_project_id
+ AND r.assignment->'allowed_actions' ? $4::text
  AND (r.agent_run_id=$3 OR EXISTS(SELECT 1 FROM routine_attempts a WHERE a.tenant_id=r.tenant_id AND a.run_id=r.id AND a.agent_run_id=$3))
- FOR NO KEY UPDATE OF r`, p.TenantID, b.RunID, b.AuthorRunID).Scan(&target.recurrence, &target.owner, &target.scopeKind, &target.scopeProject, &outputProject, &target.revision); err != nil {
+ FOR NO KEY UPDATE OF r`, p.TenantID, b.RunID, b.AuthorRunID, b.Kind).Scan(&target.recurrence, &target.owner, &target.scopeKind, &target.scopeProject, &outputProject, &target.revision); err != nil {
 		return target, nil, err
 	}
 	if outputProject != b.ProjectID {
@@ -283,7 +287,7 @@ func lockEvaluationAction(ctx context.Context, tx pgx.Tx, p tenant.Principal, b 
 		return target, nil, err
 	}
 	var targetProject string
-	if err := tx.QueryRow(ctx, `SELECT coalesce(project_id,id)::text FROM nodes WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL FOR NO KEY UPDATE`, b.TenantID, b.TargetID).Scan(&targetProject); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT coalesce(project_id,id)::text FROM nodes WHERE tenant_id=$1 AND id=$2 AND updated_at=$3 AND deleted_at IS NULL FOR NO KEY UPDATE`, b.TenantID, b.TargetID, b.TargetUpdatedAt).Scan(&targetProject); err != nil {
 		return target, nil, err
 	}
 	if targetProject != b.ProjectID {
@@ -306,7 +310,12 @@ func lockEvaluationAction(ctx context.Context, tx pgx.Tx, p tenant.Principal, b 
 // network call, model launch or budget reservation happens in this transaction.
 // Executable evaluation remains off even when a reviewer route is available.
 func PrepareEvaluationTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b ActionBinding, c Context, now time.Time) (EvaluationRequest, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	r := EvaluationRequest{}
+	if now.IsZero() {
+		return r, errors.New("evaluation clock is required")
+	}
 	target, sources, err := lockEvaluationAction(ctx, tx, p, b, c)
 	if err != nil {
 		return r, err
@@ -415,45 +424,55 @@ func loadEvaluationRecord(ctx context.Context, tx pgx.Tx, b ActionBinding) (eval
 func evaluationEvidence(ctx context.Context, tx pgx.Tx, r EvaluationRequest, runID string) (string, modelregistry.VerifiedModel, EvaluationGrant, error) {
 	model, grant := modelregistry.VerifiedModel{}, EvaluationGrant{}
 	status := ""
-	if !uuid.MatchString(runID) {
-		return status, model, grant, errors.New("invalid evaluator run")
+	if !r.valid() || !uuid.MatchString(runID) {
+		return status, model, grant, errEvaluationUnavailable
 	}
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT a.status,p.harness,a.requested_model,coalesce(a.effective_model,''),a.model_evidence,attempt.process_receipt
  FROM routine_attempts attempt JOIN agent_runs a ON a.tenant_id=attempt.tenant_id AND a.id=attempt.agent_run_id
  JOIN model_profiles p ON p.tenant_id=a.tenant_id AND p.id=a.model_profile_id
  WHERE attempt.tenant_id=$1 AND attempt.run_id=$2 AND attempt.agent_run_id=$3 AND attempt.role='evaluation' AND attempt.assignment_digest=$4
- AND a.model_profile_id=$5 AND coalesce(a.account_id,a.requested_account_id)=$6`, r.Binding.TenantID, r.Binding.RunID, runID, r.Digest, r.ProfileID, r.AccountID).Scan(&status, &model.Harness, &model.RequestedModel, &model.EffectiveModel, &model.Evidence, &raw)
+ AND a.model_profile_id=$5 AND coalesce(a.account_id,a.requested_account_id)=$6
+ AND EXISTS(SELECT 1 FROM work_orders w WHERE w.tenant_id=a.tenant_id AND w.node_id=a.work_order_id AND w.kind='review')`, r.Binding.TenantID, r.Binding.RunID, runID, r.Digest, r.ProfileID, r.AccountID).Scan(&status, &model.Harness, &model.RequestedModel, &model.EffectiveModel, &model.Evidence, &raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return status, model, grant, errEvaluationUnavailable
+	}
 	if err != nil {
 		return status, model, grant, err
 	}
 	if len(raw) > 65536 {
-		return status, model, grant, errors.New("evaluator reservation exceeds limits")
+		return status, model, grant, errEvaluationUnavailable
 	}
 	var receipt struct {
 		Grant EvaluationGrant `json:"evaluation_grant"`
 	}
 	if err = json.Unmarshal(raw, &receipt); err != nil {
-		return status, model, grant, err
+		return status, model, grant, errEvaluationUnavailable
 	}
 	if !receipt.Grant.valid(r) {
-		return status, model, grant, errors.New("evaluator has no exact pre-reserved allowance")
+		return status, model, grant, errEvaluationUnavailable
 	}
 	return status, model, receipt.Grant, nil
 }
 
 func currentEvaluationPolicy(ctx context.Context, tx pgx.Tx, r EvaluationRequest) (reviewgate.FamilyPolicy, error) {
+	if !r.valid() {
+		return reviewgate.FamilyPolicy{}, errEvaluationUnavailable
+	}
 	settings, err := reviewgate.LoadFamilyPolicyTx(ctx, tx, &r.Binding.ProjectID)
 	if err != nil {
 		return reviewgate.FamilyPolicy{}, err
 	}
 	var enabled bool
 	err = tx.QueryRow(ctx, `SELECT enabled AND harness=$2 AND model=$3 AND family=$4 FROM model_profiles WHERE id=$1`, r.ProfileID, r.Harness, r.Model, r.Family).Scan(&enabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return settings.Effective, errEvaluationUnavailable
+	}
 	if err != nil {
 		return settings.Effective, err
 	}
 	if !enabled {
-		return settings.Effective, errors.New("evaluator profile is unavailable")
+		return settings.Effective, errEvaluationUnavailable
 	}
 	return settings.Effective, nil
 }
@@ -464,6 +483,8 @@ func currentEvaluationPolicy(ctx context.Context, tx pgx.Tx, r EvaluationRequest
 // The caller holds tenant/tree, supplies only broker-validated typed context,
 // rolls back errors, and flushes pending events LAST after all other writes.
 func RecordEvaluationTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b ActionBinding, c Context, evaluatorRunID string, output []byte, now time.Time, pending *[]events.Change) (Decision, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	if len(output) > MaxEvaluationOutput || pending == nil {
 		return Decision{}, errors.New("invalid evaluation result input")
 	}
@@ -482,6 +503,11 @@ func RecordEvaluationTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Ac
 	verdict, verdictErr := ParseEvaluationResult(output)
 	status, evidence, _, evidenceErr := evaluationEvidence(ctx, tx, record.Request, evaluatorRunID)
 	policy, policyErr := currentEvaluationPolicy(ctx, tx, record.Request)
+	for _, lookupErr := range []error{evidenceErr, policyErr} {
+		if lookupErr != nil && !errors.Is(lookupErr, errEvaluationUnavailable) {
+			return d, lookupErr
+		}
+	}
 	reason := "evaluation_result_unavailable"
 	verified := false
 	if verdictErr == nil && evidenceErr == nil && policyErr == nil {
@@ -537,6 +563,8 @@ func RecordEvaluationTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Ac
 // current person's authority. true resolves only the person hold; it is never
 // launch, budget, mutation, merge or deployment authority.
 func CheckPersonHoldTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b ActionBinding, c Context, now time.Time) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	_, sources, err := lockEvaluationAction(ctx, tx, p, b, c)
 	if err != nil {
 		return false, err

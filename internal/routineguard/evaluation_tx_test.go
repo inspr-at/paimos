@@ -76,7 +76,7 @@ func TestEvaluationRequestPersistsBeforeDispatchAndRechecksOwner(t *testing.T) {
 		return out.Body.Bytes()
 	}
 	call("GET", "/api/models", nil, 200)
-	input := recurrences.Input{ProjectID: project, ParentID: parent, Template: recurrences.Template{Title: "Inspect assigned source", Description: "Read code", Criteria: []string{"Report findings"}, EstimateHours: 1, Priority: "normal", Type: "work"}, Trigger: recurrences.Trigger{Kind: "time", RRULE: "FREQ=WEEKLY;BYDAY=MO", TimeOfDay: "09:00", Timezone: "Europe/Vienna"}, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one", Definition: &recurrences.Definition{Scope: recurrences.DefinitionScope{Kind: "project", ProjectID: project}, OwnerPrincipalID: p.ID, Assignment: &recurrences.Assignment{Goal: "Review assigned source", Role: "build", WorkKindID: workKind, Sources: []recurrences.SourceReference{}, AllowedActions: []string{"pr.open"}, RuntimeRequirements: recurrences.RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"}, Budget: recurrences.DefinitionBudget{Mode: "off"}}}}
+	input := recurrences.Input{ProjectID: project, ParentID: parent, Template: recurrences.Template{Title: "Inspect assigned source", Description: "Read code", Criteria: []string{"Report findings"}, EstimateHours: 1, Priority: "high", Type: "work"}, Trigger: recurrences.Trigger{Kind: "time", RRULE: "FREQ=WEEKLY;BYDAY=MO", TimeOfDay: "09:00", Timezone: "Europe/Vienna"}, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one", Definition: &recurrences.Definition{Scope: recurrences.DefinitionScope{Kind: "project", ProjectID: project}, OwnerPrincipalID: p.ID, Assignment: &recurrences.Assignment{Goal: "Review assigned source", Role: "build", WorkKindID: workKind, Sources: []recurrences.SourceReference{}, AllowedActions: []string{"pr.open"}, RuntimeRequirements: recurrences.RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"}, Budget: recurrences.DefinitionBudget{Mode: "off"}}}}
 	var recurrence recurrences.Recurrence
 	if err := json.Unmarshal(call("POST", "/api/recurrences", input, 201), &recurrence); err != nil {
 		t.Fatal(err)
@@ -90,6 +90,9 @@ func TestEvaluationRequestPersistsBeforeDispatchAndRechecksOwner(t *testing.T) {
 	}
 	b := routineguard.ActionBinding{TenantID: p.TenantID, RunID: occurrence.Run.ID, AuthorRunID: *occurrence.Run.AgentRunID, ProjectID: project, TargetID: *occurrence.NodeID, TargetRevision: 1, Kind: "pr.open", PayloadDigest: strings.Repeat("a", 64), HeadSHA: strings.Repeat("b", 40)}
 	in(func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT updated_at FROM nodes WHERE id=$1`, b.TargetID).Scan(&b.TargetUpdatedAt); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET model_profile_id=(SELECT id FROM model_profiles WHERE harness='codex' AND enabled ORDER BY created_at,id LIMIT 1),requested_model=(SELECT model FROM model_profiles WHERE harness='codex' AND enabled ORDER BY created_at,id LIMIT 1),effective_model=(SELECT model FROM model_profiles WHERE harness='codex' AND enabled ORDER BY created_at,id LIMIT 1),model_evidence='vendor_reported' WHERE id=$1`, b.AuthorRunID); err != nil {
 			return err
 		}
@@ -148,6 +151,16 @@ func TestEvaluationRequestPersistsBeforeDispatchAndRechecksOwner(t *testing.T) {
 		return err
 	})
 	in(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET updated_at=updated_at+interval '1 second' WHERE id=$1`, b.TargetID)
+		return err
+	})
+	if _, err = prepare(now.Add(4 * time.Second)); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("changed live target wrong failure: %v", err)
+	}
+	in(func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT updated_at FROM nodes WHERE id=$1`, b.TargetID).Scan(&b.TargetUpdatedAt); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, p.ID)
 		return err
 	})

@@ -19,6 +19,7 @@ func TestIndependentEvaluationBindsEvidenceAndCannotBootstrap(t *testing.T) {
 	now := time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)
 	id := func(n string) string { return "10000000-0000-4000-8000-00000000000" + n }
 	b := ActionBinding{TenantID: id("1"), RunID: id("2"), ActionID: id("3"), AuthorRunID: id("4"), ProjectID: id("5"), TargetID: id("6"), TargetRevision: 7, Kind: "pr.open", PayloadDigest: strings.Repeat("a", 64), HeadSHA: strings.Repeat("b", 40)}
+	b.TargetUpdatedAt = now
 	c := Context{Checkpoint: "action", Action: b.Kind, Text: "Update the assigned source", Paths: []string{"ordinary/source.go"}, PayloadBytes: 100}
 	d, err := Evaluate(nil, c)
 	if err != nil {
@@ -85,7 +86,16 @@ func TestIndependentEvaluationBindsEvidenceAndCannotBootstrap(t *testing.T) {
 			req, binding, context, model, verdict, policy, at, status := r, b, c, evidence, v, r.FamilyPolicy, now, "completed"
 			mutate(&req, &binding, &context, &model, &verdict, &policy, &at, &status)
 			got, err := verify(req, binding, context, model, verdict, policy, at, status)
-			if err == nil || got.CanExecute() || got.Result == Allow {
+			want := "binding or policy changed"
+			switch name {
+			case "wrong effective provider", "unverified model", "weaker pin":
+				want = "effective model or family is unverified"
+			case "missing verdict", "wrong request":
+				want = "explicit bound structured result"
+			case "timeout", "unfinished":
+				want = "incomplete or timed out"
+			}
+			if err == nil || !strings.Contains(err.Error(), want) || got.CanExecute() || got.Result == Allow {
 				t.Fatalf("false approval: %+v %v", got, err)
 			}
 		})

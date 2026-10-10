@@ -44,7 +44,7 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) A
  AND ($2='' OR $2='question' AND q.node_id=$3::uuid)
 ), approvals(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
  SELECT r.id,'approval'::text,coalesce(n.project_id,wn.project_id),1::bigint,
- 'Approval · '||r.scope,r.proposed_at,r.expires_at,
+ CASE WHEN r.scope LIKE '%.routine\_%' ESCAPE '\' THEN 'Routine action approval' ELSE 'Approval · '||r.scope END,r.proposed_at,r.expires_at,
  (n.id IS NOT NULL AND n.deleted_at IS NULL AND coalesce(n.state,'') NOT IN ('done','delivered','cancelled','canceled','closed')
   AND (nw.node_id IS NULL OR nw.status NOT IN ('done','cancelled'))
   AND (nk.slug IN ('ticket','task','epic','work_order') OR nk.field_schema->>'issue_family'='true'))
