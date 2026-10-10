@@ -1016,6 +1016,90 @@
     {
       "classification": "personal",
       "columns": {
+        "created_at": "personal",
+        "held_microusd": "personal",
+        "held_ms": "personal",
+        "held_tokens": "personal",
+        "mode": "metadata",
+        "money_ceiling_microusd": "metadata",
+        "owner_principal_id": "personal",
+        "recovery_ceiling_ms": "metadata",
+        "run_id": "metadata",
+        "settled_microusd": "personal",
+        "settled_ms": "personal",
+        "settled_tokens": "personal",
+        "tenant_id": "metadata",
+        "token_ceiling": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "owner_principal_id"
+      },
+      "table": "routine_budget_balances"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "account_id": "metadata",
+        "action_id": "metadata",
+        "agent_run_id": "metadata",
+        "attempt_id": "metadata",
+        "billing_mode": "metadata",
+        "created_at": "personal",
+        "grant_key": "metadata",
+        "harness": "metadata",
+        "id": "metadata",
+        "maximum_microusd": "metadata",
+        "maximum_ms": "metadata",
+        "maximum_tokens": "metadata",
+        "owner_principal_id": "personal",
+        "parent_id": "metadata",
+        "pending_receipt": "personal",
+        "run_id": "metadata",
+        "settled_at": "personal",
+        "state": "metadata",
+        "tenant_id": "metadata",
+        "used_microusd": "personal",
+        "used_ms": "personal",
+        "used_tokens": "personal"
+      },
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "owner_principal_id"
+      },
+      "table": "routine_budget_grants"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "run_id": "metadata",
+        "tenant_id": "metadata",
+        "work_order_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "routine_budget_orders"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "created_at": "personal",
+        "event_key": "metadata",
+        "evidence_digest": "personal",
+        "grant_id": "metadata",
+        "receipt_digest": "personal",
+        "run_id": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "routine_budget_settlements"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "action_id": "metadata",
         "created_at": "personal",
         "effect_key": "metadata",

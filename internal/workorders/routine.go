@@ -1,0 +1,113 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package workorders
+
+import (
+	"context"
+	"errors"
+
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+)
+
+// routineParent finds active budget lineage with a bounded ancestor walk.
+// No balance exists before qualified enablement; legacy/off installations keep
+// their ordinary order behavior. Truncated ancestry fails closed.
+func routineParent(ctx context.Context, tx pgx.Tx, parent *string) (string, error) {
+	if parent == nil {
+		return "", nil
+	}
+	var run *string
+	var truncated bool
+	err := tx.QueryRow(ctx, `WITH RECURSIVE ancestors AS (
+ SELECT id,parent_id,1 AS depth FROM nodes WHERE id=$1 AND deleted_at IS NULL
+ UNION ALL SELECT n.id,n.parent_id,a.depth+1 FROM ancestors a JOIN nodes n ON n.id=a.parent_id WHERE a.depth<64 AND n.deleted_at IS NULL
+ ) SELECT (SELECT r.id::text FROM ancestors a JOIN routine_runs r ON r.work_node_id=a.id JOIN routine_budget_balances b ON b.run_id=r.id ORDER BY a.depth LIMIT 1),
+ EXISTS(SELECT 1 FROM ancestors WHERE depth=64 AND parent_id IS NOT NULL)`, *parent).Scan(&run, &truncated)
+	if err != nil {
+		return "", err
+	}
+	if truncated {
+		return "", Fail(409, "routine_ancestry_incomplete")
+	}
+	if run == nil {
+		return "", nil
+	}
+	return *run, nil
+}
+
+func requireRoutineChild(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateInput) error {
+	run, err := routineParent(ctx, tx, in.Parent)
+	if err != nil {
+		return err
+	}
+	if run == "" && in.RoutineRunID == "" {
+		return nil
+	}
+	if run == "" || run != in.RoutineRunID {
+		return Fail(409, "routine_child_binding_required")
+	}
+	var project, owner, principal string
+	err = tx.QueryRow(ctx, `SELECT r.output_project_id::text,r.owner_principal_id::text,coalesce(r.execution_principal_id::text,'') FROM routine_runs r JOIN routine_budget_balances b ON b.run_id=r.id WHERE r.id=$1`, run).Scan(&project, &owner, &principal)
+	if err != nil {
+		return err
+	}
+	if p.ID != owner && p.ID != principal {
+		return authz.ErrForbidden
+	}
+	return authz.RequireTx(ctx, tx, p, "work_orders.write", authz.Scope{ProjectID: project})
+}
+
+// BindRoutineOrderTx binds an existing queued order in the budget transaction.
+// It does not create a ceiling, change assignment or authorize execution.
+func BindRoutineOrderTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID, agentRunID string) error {
+	var order, project string
+	var parent *string
+	err := tx.QueryRow(ctx, `SELECT ar.work_order_id::text,n.parent_id,n.project_id::text FROM agent_runs ar JOIN nodes n ON n.tenant_id=ar.tenant_id AND n.id=ar.work_order_id WHERE ar.id=$1 AND ar.status='queued' AND n.deleted_at IS NULL`, agentRunID).Scan(&order, &parent, &project)
+	if err != nil {
+		return err
+	}
+	root, err := routineParent(ctx, tx, parent)
+	if err != nil {
+		return err
+	}
+	if root != runID {
+		return Fail(409, "routine_order_outside_lineage")
+	}
+	if err := authz.RequireTx(ctx, tx, p, "work_orders.write", authz.Scope{ProjectID: project}); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO routine_budget_orders(tenant_id,run_id,work_order_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, p.TenantID, runID, order)
+	if err != nil {
+		return err
+	}
+	var bound string
+	if err := tx.QueryRow(ctx, `SELECT run_id::text FROM routine_budget_orders WHERE work_order_id=$1`, order).Scan(&bound); err != nil {
+		return err
+	}
+	if bound != runID {
+		return Fail(409, "routine_order_binding_conflict")
+	}
+	return nil
+}
+
+// GuardRoutineRunTx is shared by account reservation and final claim. It
+// rejects legacy retry/review callers that omit the original shared binding.
+func GuardRoutineRunTx(ctx context.Context, tx pgx.Tx, agentRunID string) error {
+	var parent *string
+	var order string
+	err := tx.QueryRow(ctx, `SELECT n.parent_id,n.id::text FROM agent_runs ar JOIN nodes n ON n.tenant_id=ar.tenant_id AND n.id=ar.work_order_id WHERE ar.id=$1`, agentRunID).Scan(&parent, &order)
+	if err != nil {
+		return err
+	}
+	run, err := routineParent(ctx, tx, parent)
+	if err != nil || run == "" {
+		return err
+	}
+	var bound string
+	err = tx.QueryRow(ctx, `SELECT run_id::text FROM routine_budget_orders WHERE work_order_id=$1`, order).Scan(&bound)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && bound != run {
+		return Fail(409, "routine_child_binding_required")
+	}
+	return err
+}

@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+components:
+  schemas:
+    RoutineBudgetAmount:
+      type: object
+      additionalProperties: false
+      required: [tokens, paid_microusd, recovery_ms]
+      description: 'Checked integral resource amounts. Money is actual paid micro-USD, never subscription list price. Recovery milliseconds remain independent of token and money modes.'
+      properties:
+        tokens: {type: integer, format: int64, minimum: 0}
+        paid_microusd: {type: integer, format: int64, minimum: 0}
+        recovery_ms: {type: integer, format: int64, minimum: 0}
+    RoutineBudgetGrant:
+      type: object
+      required: [id, run_id, attempt_id, action_id, grant_key, agent_run_id, account_id, maximum, state, usage, billing_mode]
+      description: 'Internal broker receipt only. A subgrant consumes its parent allowance and creates no new run ceiling. Held or unknown root grants retain their process slot. This schema adds no public grant or launch endpoint.'
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        attempt_id: {type: string, format: uuid}
+        action_id: {type: string, format: uuid}
+        grant_key: {type: string, maxLength: 128}
+        parent_id: {type: string, format: uuid}
+        agent_run_id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        maximum: {$ref: '#/components/schemas/RoutineBudgetAmount'}
+        state: {type: string, enum: [held, unknown, settled]}
+        usage: {$ref: '#/components/schemas/RoutineBudgetAmount'}
+        billing_mode: {type: string}
+    RoutineBudgetSettlement:
+      type: object
+      additionalProperties: false
+      required: [event_key, usage, usage_complete, tokens_known, paid_cost_known, exit_confirmed, proven_unused, evidence_digest]
+      description: 'Qualified adapter evidence. Unknown or partial usage and unknown process exit retain holds. A proven unused intent must demonstrably never have reached a provider or process. Replayed receipts settle once; changed receipts conflict.'
+      properties:
+        event_key: {type: string, maxLength: 128}
+        usage: {$ref: '#/components/schemas/RoutineBudgetAmount'}
+        usage_complete: {type: boolean}
+        tokens_known: {type: boolean}
+        paid_cost_known: {type: boolean}
+        exit_confirmed: {type: boolean}
+        proven_unused: {type: boolean}
+        evidence_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
