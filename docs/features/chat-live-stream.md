@@ -93,6 +93,15 @@ daemon/UI integration acceptance requirements, not a tested compatibility claim
 for the server ingress alone. Until those prerequisites and both mixed-version
 tests are complete, this slice does not establish an end-to-end live-chat rollout.
 
+The compatibility matrix below records the current coverage. Passing the S1
+and S2 package tests independently does not verify a daemon-to-server relay.
+
+| Daemon / server | Evidence | Remaining acceptance |
+| --- | --- | --- |
+| New daemon / new server | S1 owned-stream and S2 ingress/SSE fixtures are separate. Managed registrations are deliberately rejected by the server binding test. | Binding handoff, authenticated relay, explicit final/receipt sources, daemon retry/backoff and bounded relay queue; the end-to-end latency and final-once test remain blocked. |
+| New daemon / release 128 server | No relay is wired, so no daemon missing-route fallback has been exercised. | Detect missing routes, disable only the relay, emit one content-free diagnostic, and prove runs, verification and existing final delivery continue. |
+| Older daemon / new server | `TestDurableIdentityAndPrivateRoleHandover` verifies that a bound, unqualified receiver returns a successful thread response with `readiness.state=unavailable` and no capabilities. | Browser wording, absence of execution errors and existing final delivery with an actual older daemon remain untested. |
+
 The live endpoint returns `text/event-stream` and flushes each frame. Keepalives
 arrive every 15 seconds; set proxy idle timeouts above 15 seconds. Each stream
 ends after five minutes, so the client reconnects using its last cursor through
@@ -127,6 +136,14 @@ after the fix round.
 The locked `ci-static --merge-main` check passed all 42 checks without skips;
 ownership, test-tier and web-shard checks also passed. No migration was added,
 and existing pinned response schemas remain unchanged.
+
+AEON-1074 reboot recovery preserved commit `9754945cb` and reran the
+`internal/chat`, `internal/agentd` and `internal/reportercontract` packages with
+`-count=1` on the approved remote lane; all three passed. The locked
+`ci-static --merge-main` run against that source snapshot exited 0 with 42
+checks passed and no optional skips. The recovery change adds only the
+compatibility evidence matrix above. Daemon relay delivery and both mixed-version
+acceptance cases remain blocked; these passing checks do not establish them.
 
 Remote snapshot preparation must generate the ignored OpenAPI bundle with
 `node api/generate.mjs --write` before running contract tests. Maintenance
