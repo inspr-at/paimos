@@ -123,7 +123,8 @@ func (b Broker) settleTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 	if err := tx.QueryRow(ctx, `SELECT agent_principal_id::text FROM agent_runs WHERE id=$1`, g.AgentRunID).Scan(&agent); err != nil {
 		return Grant{}, err
 	}
-	permission := "run.report"
+	// The assigned daemon reports through the existing run telemetry grant.
+	permission := "run.telemetry"
 	if p.ID != agent {
 		if p.ID != r.owner && p.ID != r.principal {
 			return Grant{}, authz.ErrForbidden

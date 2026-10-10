@@ -66,7 +66,7 @@ func (f *fixture) call(method, path string, in, out any) {
 }
 func setup(t *testing.T, mode string, paid bool) *fixture {
 	t.Helper()
-	f := &fixture{t: t, d: dbtest.Open(t), mux: http.NewServeMux(), owner: tenant.Principal{Kind: tenant.Person, BrowserSession: true}, agent: tenant.Principal{Kind: tenant.Agent, Scopes: []string{"run.claim", "run.report"}}}
+	f := &fixture{t: t, d: dbtest.Open(t), mux: http.NewServeMux(), owner: tenant.Principal{Kind: tenant.Person, BrowserSession: true}, agent: tenant.Principal{Kind: tenant.Agent, Scopes: []string{"run.claim", "run.telemetry"}}}
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('routine-budget','Budget') RETURNING id::text`).Scan(&f.owner.TenantID))
 	f.agent.TenantID = f.owner.TenantID
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Owner') RETURNING id::text`, f.owner.TenantID).Scan(&f.owner.ID))
@@ -600,7 +600,7 @@ func TestRoutineBudgetDaemonSettlementKeepsLedgerPrivate(t *testing.T) {
 	missingScope := f.agent
 	missingScope.Scopes = []string{"run.claim"}
 	if err := report(missingScope, child.ID, settlement("missing-scope", Amount{})); !errors.Is(err, authz.ErrForbidden) {
-		t.Fatalf("missing run.report scope: %v", err)
+		t.Fatalf("missing run.telemetry scope: %v", err)
 	}
 	other := f.agent
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Other reporter') RETURNING id::text`, f.owner.TenantID).Scan(&other.ID))
