@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -21,7 +22,7 @@ func lockFile(root *os.Root, name string, create bool) (*os.File, error) {
 	if create {
 		flags |= os.O_CREATE
 	}
-	f, err := root.OpenFile(name, flags|unix.O_NOFOLLOW, 0600)
+	f, err := openLock(root, name, flags, create)
 	if err != nil {
 		return nil, err
 	}
@@ -46,6 +47,32 @@ func lockFile(root *os.Root, name string, create bool) (*os.File, error) {
 		return nil, err
 	}
 	return f, nil
+}
+
+func openLock(root *os.Root, name string, flags int, create bool) (*os.File, error) {
+	if create && runtime.GOOS == "darwin" {
+		// Darwin's simultaneous O_CREAT|O_NOFOLLOW opens can return ENOENT
+		// for a present directory. A fresh directory descriptor serializes
+		// creation only, following agentsetup.Store's established guard.
+		guard, err := root.Open(".")
+		if err != nil {
+			return nil, err
+		}
+		defer guard.Close()
+		for {
+			err = unix.Flock(int(guard.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+			if !errors.Is(err, unix.EINTR) {
+				break
+			}
+		}
+		if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
+			return nil, ErrBusy
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return root.OpenFile(name, flags|unix.O_NOFOLLOW, 0600)
 }
 
 func waitLock(ctx context.Context, root *os.Root, name string) (*os.File, error) {

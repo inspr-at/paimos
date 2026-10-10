@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -48,12 +50,16 @@ func TestIsolationAllocationAndOrphanReport(t *testing.T) {
 		}
 	})
 	ports := map[int]bool{}
-	for range 2 {
-		r := <-results
+	completed := []result{<-results, <-results}
+	for _, r := range completed {
+		if r.lease != nil {
+			leases = append(leases, r.lease)
+		}
+	}
+	for _, r := range completed {
 		if r.err != nil {
 			t.Fatal(r.err)
 		}
-		leases = append(leases, r.lease)
 		for _, port := range r.lease.Record.Ports {
 			if ports[port] {
 				t.Fatal("parallel workers shared a port")
@@ -64,8 +70,8 @@ func TestIsolationAllocationAndOrphanReport(t *testing.T) {
 				listener.Close()
 				t.Fatal("allocated socket was not reserved")
 			}
-			if err == nil {
-				t.Fatal("missing socket collision evidence")
+			if !errors.Is(err, syscall.EADDRINUSE) {
+				t.Fatalf("socket collision failed for wrong reason: %v", err)
 			}
 		}
 	}
@@ -216,6 +222,8 @@ func TestIsolationAllocationAndOrphanReport(t *testing.T) {
 func TestIsolationControllerCrashCleansOnlyOwnedFixtures(t *testing.T) {
 	for _, mode := range []string{"finish", "cancel", "crash"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Setenv("AEON_RUN_DATABASE", "inherited-database-must-be-replaced")
+			t.Setenv("AEON_RUN_APP_PORT", "inherited-port-must-be-replaced")
 			fixture := processtest.New(t)
 			unrelated := processtest.New(t)
 			otherCtx, stopOther := context.WithCancel(t.Context())
@@ -227,7 +235,13 @@ func TestIsolationControllerCrashCleansOnlyOwnedFixtures(t *testing.T) {
 			unrelated.Ready(t)
 			root := filepath.Join(t.TempDir(), "registry")
 			owner := Owner{"tenant", "account", "host", "attempt-" + mode}
-			request := Request{Root: root, Owner: owner, Directory: t.TempDir(), Command: []string{"sh", "-c", fixture.Script}}
+			// The actual child must consume the run's resources instead of the
+			// controller's inherited fixture settings before releasing readiness.
+			script := fmt.Sprintf(`[ "$AEON_RUN_ID" = %q ] && [ "$TMPDIR" = "$AEON_RUN_TEMP_DIR" ] && [ -d "$TMPDIR" ] && [ "$AEON_RUN_APP_PORT" != "$AEON_RUN_POSTGRES_PORT" ] || exit 23
+case "$AEON_RUN_DATABASE" in aeon_run_*) ;; *) exit 23 ;; esac
+case "$AEON_RUN_APP_PORT" in ''|*[!0-9]*) exit 23 ;; esac
+%s`, owner.RunID, fixture.Script)
+			request := Request{Root: root, Owner: owner, Directory: t.TempDir(), Command: []string{"sh", "-c", script}}
 			executable, err := os.Executable()
 			if err != nil {
 				t.Fatal(err)
@@ -264,8 +278,14 @@ func TestIsolationControllerCrashCleansOnlyOwnedFixtures(t *testing.T) {
 				if mode == "finish" && err != nil {
 					t.Fatalf("normal completion: %v", err)
 				}
-				if mode != "finish" && err == nil {
-					t.Fatal("crash/cancel incorrectly reported success")
+				if mode == "cancel" && !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancel failed for wrong reason: %v", err)
+				}
+				if mode == "crash" {
+					var exit *exec.ExitError
+					if !errors.As(err, &exit) || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
+						t.Fatalf("crash failed for wrong reason: %v", err)
+					}
 				}
 			case <-time.After(10 * time.Second):
 				t.Fatal("guardian cleanup hung")
