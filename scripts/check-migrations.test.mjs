@@ -272,6 +272,10 @@ if tool == 'docker':
         print('sha256:' + ('1' if args[-1].endswith('${rollbackDigest}') else '2') * 64)
     elif args[:1] == ['port']:
         print('127.0.0.1:55433' if args[-1] == '5432/tcp' else '127.0.0.1:18080')
+elif tool == 'git':
+    if args != ['show', '${rollbackTag}:internal/db/visibility.go']:
+        sys.exit(19)
+    print('func enterTenant() {}')
 elif tool == 'python3':
     if args[1] == 'account-use':
         mode = 'refusal' if '--require-refusal' in args else 'latest'
@@ -281,7 +285,7 @@ elif tool == 'python3':
     // Use the real Python interpreter in the wrapper shebang to avoid calling
     // the mocked python3 recursively. No database/container/build is started.
     const python = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], {encoding: 'utf8'}).trim();
-    for (const tool of ['docker', 'go', 'python3', 'trash'])
+    for (const tool of ['docker', 'go', 'python3', 'git', 'trash'])
       writeFileSync(join(bin, tool), fixture.replace('#!/usr/bin/env python3', '#!' + python), {mode: 0o700});
     const tag = sameImage ? rollbackTag : latestTag, digest = sameImage ? rollbackDigest : latestDigest;
     const options = {env: {...process.env, PATH: `${bin}:${process.env.PATH}`, AEON_COMPAT_CALLS: log, GITHUB_STEP_SUMMARY: ''}, encoding: 'utf8', timeout: 15000};
@@ -313,6 +317,7 @@ elif tool == 'python3':
     assert.deepEqual(starts.map(call => call.find(arg => arg.startsWith('AEON_DATABASE_URL='))),
       ['aeon', 'aeon', 'aeon', 'aeon_legacy'].map(database =>
         `AEON_DATABASE_URL=postgres://aeon:aeon@${databaseContainer}:5432/${database}?sslmode=disable`));
+    assert.deepEqual(calls.filter(call => call[0] === 'git'), [['git', 'show', `${rollbackTag}:internal/db/visibility.go`]]);
     const migration = calls.findIndex(call => call[0] === 'go');
     const candidateCheck = calls.findIndex((call, i) => i > migration && call[2] === 'check');
     const activated = calls.findIndex(call => call[2] === 'account-use');

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import uuid
 from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('migration_compat_probe', Path(__file__).with_name('migration-compat-probe.py'))
@@ -76,10 +77,14 @@ elif tool == 'python3':
                 sys.exit('legacy refusal must remain unconditional')
         elif args[args.index('--release-tag') + 1] != 'v261010123154.0.0':
             sys.exit('latest account-use policy must use its pinned release')
+elif tool == 'git':
+    if args != ['show', 'v261009095632.0.0:internal/db/visibility.go']:
+        sys.exit('unexpected git call')
+    print('func enterTenant() {}')
 elif tool not in ('go', 'trash'):
     sys.exit('unexpected tool')
 '''
-            for name in ('docker', 'python3', 'go', 'trash'):
+            for name in ('docker', 'python3', 'go', 'git', 'trash'):
                 executable = tools / name
                 executable.write_text('#!' + sys.executable + '\n' + fake)
                 executable.chmod(0o755)
@@ -528,6 +533,100 @@ class ProbeTest(unittest.TestCase):
             self.probe.refused(path, status=409, message='account_not_allowed_for_context')
 
 
+class MigrationCompatHarnessTest(unittest.TestCase):
+    # Risk: after the capability ships, the latest image legitimately enters
+    # activated tenants. Migration reads still need that image, while every
+    # rollback-floor assertion needs a real published image below the floor.
+    latest_tag = 'v261010123154.0.0'
+    latest_digest = 'sha256:' + 'a' * 64
+    legacy_tag = 'v261009095632.0.0'
+    legacy_digest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
+
+    def run_harness(self, legacy_entry='func enterTenant() {}', legacy_pull_rc=0):
+        with tempfile.TemporaryDirectory(prefix='aeon-migration-harness-') as directory:
+            root = Path(directory)
+            scripts, tools = root / 'scripts', root / 'bin'
+            scripts.mkdir()
+            tools.mkdir()
+            script = scripts / 'migration-compat.sh'
+            script.write_text(Path(module.__file__).with_name('migration-compat.sh').read_text())
+            log = root / 'calls.jsonl'
+            stub = f'''#!{sys.executable}
+import json
+from pathlib import Path
+import sys
+tool, args = Path(sys.argv[0]).name, sys.argv[1:]
+with Path({str(log)!r}).open('a') as output:
+    output.write(json.dumps([tool, *args]) + '\\n')
+if tool == 'docker':
+    if args[:1] == ['pull'] and args[-1].endswith({self.legacy_digest!r}):
+        sys.exit({legacy_pull_rc})
+    elif args[:2] == ['image', 'ls']:
+        print('sha256:' + ('a' if args[-1].endswith({self.latest_digest!r}) else 'b') * 64)
+    elif args[:1] == ['port']:
+        print('127.0.0.1:' + ('18080' if args[-1] == '8080/tcp' else '15432'))
+elif tool == 'git':
+    if args == ['show', {self.legacy_tag!r} + ':internal/db/visibility.go']:
+        print({legacy_entry!r})
+    else:
+        sys.exit(19)
+'''
+            for name in ('docker', 'go', 'python3', 'git', 'trash'):
+                path = tools / name
+                path.write_text(stub)
+                path.chmod(0o700)
+            # Only the subprocess's PATH changes; neither Docker nor a binary
+            # runs. The real shell orchestrator must select both immutable IDs.
+            completed = subprocess.run(['bash', str(script), self.latest_tag, self.latest_digest],
+                env={**os.environ, 'PATH': str(tools) + os.pathsep + os.environ['PATH'],
+                     'GITHUB_STEP_SUMMARY': str(root / 'summary')},
+                capture_output=True, text=True, timeout=15, check=False)
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            return completed, calls
+
+    def test_latest_image_reads_and_below_floor_image_refusals_both_run(self):
+        completed, calls = self.run_harness()
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        pulls = [call[-1] for call in calls if call[:2] == ['docker', 'pull']]
+        self.assertEqual(pulls, ['ghcr.io/inspr-at/aeon@' + self.latest_digest,
+                                 'ghcr.io/inspr-at/aeon@' + self.legacy_digest])
+        boots = [call[-1] for call in calls if call[:2] == ['docker', 'run'] and '--memory' in call]
+        # The latest binary restarts after copying the inactive fixture into
+        # aeon_legacy; the floor binary then reads that independent database.
+        self.assertEqual(boots, ['sha256:' + 'a' * 64] * 3 + ['sha256:' + 'b' * 64])
+        probes = [call for call in calls if call[:2] == ['python3', 'scripts/migration-compat-probe.py']]
+        modes = [call[2] for call in probes]
+        self.assertEqual(modes, ['wait-ready', 'seed', 'wait-ready', 'check',
+                                 'wait-ready', 'account-use', 'wait-ready', 'check', 'account-use'])
+        checks = [call[call.index('--version') + 1] for call in probes if call[2] == 'check']
+        self.assertEqual(checks, [self.latest_tag[1:], self.legacy_tag[1:]])
+        activations = [call for call in probes if call[2] == 'account-use']
+        self.assertEqual(len(activations), 2)
+        latest_activation, activation = activations
+        self.assertEqual(latest_activation[latest_activation.index('--version') + 1], self.latest_tag[1:])
+        self.assertEqual(latest_activation[latest_activation.index('--release-tag') + 1], self.latest_tag)
+        self.assertNotIn('--release-tag', activation)
+        self.assertEqual(activation[activation.index('--version') + 1], self.legacy_tag[1:])
+        self.assertIn(['git', 'show', self.legacy_tag + ':internal/db/visibility.go'], calls)
+        migration = next(i for i, call in enumerate(calls) if call[:2] == ['go', 'run'])
+        self.assertLess(migration, calls.index(probes[modes.index('check')]))
+        self.assertLess(calls.index(probes[modes.index('check')]), calls.index(latest_activation))
+        self.assertLess(calls.index(latest_activation), calls.index(probes[-2]))
+        self.assertLess(calls.index(probes[-2]), calls.index(activation))
+
+    def test_a_capable_pin_cannot_satisfy_the_rollback_floor_probe(self):
+        completed, calls = self.run_harness(legacy_entry='func enterTenant() { aeon.account_use_capable }')
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn('Pinned rollback image must predate the account-use capability', completed.stderr)
+        self.assertFalse(any(call[:3] == ['python3', 'scripts/migration-compat-probe.py', 'account-use'] for call in calls))
+
+    def test_a_failed_rollback_image_pull_cannot_report_a_pass(self):
+        completed, calls = self.run_harness(legacy_pull_rc=19)
+        self.assertEqual(completed.returncode, 19)
+        self.assertNotIn('Account-use rollback floor passed:', completed.stdout)
+        self.assertFalse(any(call[:3] == ['python3', 'scripts/migration-compat-probe.py', 'account-use'] for call in calls))
+
+
 class MigrationHarnessTest(unittest.TestCase):
     def test_latest_compatibility_and_legacy_capability_use_distinct_images(self):
         # Risk: once the latest release understands account use, expecting it
@@ -563,6 +662,10 @@ if name == 'docker':
         print('127.0.0.1:8080' if args[-1] == '8080/tcp' else '127.0.0.1:5432')
     elif args[0] == 'exec' and '-i' in args:
         sys.stdin.read()
+elif name == 'git':
+    if args != ['show', 'v261009095632.0.0:internal/db/visibility.go']:
+        sys.exit('unexpected git call')
+    print('func enterTenant() {}')
 elif name == 'go':
     state['migrated'] = True
 elif name == 'python3':
@@ -588,7 +691,7 @@ elif name == 'python3':
             sys.exit(23)
 state_path.write_text(json.dumps(state))
 '''
-            for name in ('docker', 'python3', 'go', 'trash'):
+            for name in ('docker', 'python3', 'go', 'git', 'trash'):
                 executable = bin_dir / name
                 executable.write_text('#!' + sys.executable + '\n' + command)
                 executable.chmod(0o755)
@@ -675,6 +778,11 @@ if tool == 'docker':
             sys.exit('snapshot requires an inactive fixture with no server connected')
         (root / 'fixture-aeon_legacy').write_text((root / 'fixture-aeon').read_text())
         record(['copy-fixture'])
+elif tool == 'git':
+    if args == ['show', 'v261009095632.0.0:internal/db/visibility.go']:
+        print('func enterTenant() {}')
+    else:
+        sys.exit('unexpected git call')
 elif tool == 'go':
     (root / 'fixture-aeon').write_text('inactive')
     record(['migrate'])
@@ -714,7 +822,7 @@ elif tool == 'python3':
             if os.environ['AEON_COMPAT_TEST_LEGACY_FAILS'] == 'true':
                 sys.exit('legacy refusal gate failed')
 '''
-                for name in ('docker', 'go', 'python3', 'trash'):
+                for name in ('docker', 'go', 'python3', 'git', 'trash'):
                     executable = commands / name
                     executable.write_text(driver)
                     executable.chmod(0o700)
@@ -734,9 +842,11 @@ elif tool == 'python3':
                 self.assertEqual([event for event in events if event[:2] == ['probe', 'account-use']],
                     [['probe', 'account-use', latest_id, latest_version]] +
                     ([] if latest_fails else [['probe', 'account-use', floor_id, floor_version]]))
+                # Both immutable images are resolved before activation, so
+                # even a failing latest probe has already pulled the floor.
                 self.assertEqual([event for event in events if event[0] == 'pull'],
-                    [['pull', 'ghcr.io/inspr-at/aeon@' + latest_digest]] +
-                    ([] if latest_fails else [['pull', 'ghcr.io/inspr-at/aeon@' + floor_digest]]))
+                    [['pull', 'ghcr.io/inspr-at/aeon@' + latest_digest],
+                     ['pull', 'ghcr.io/inspr-at/aeon@' + floor_digest]])
                 self.assertLess(events.index(['migrate']), events.index(checks[0]))
                 self.assertLess(events.index(checks[0]), events.index(['copy-fixture']))
                 self.assertLess(events.index(['copy-fixture']), events.index(['activated-latest', str(latest_capable).lower()]))

@@ -95,6 +95,19 @@ AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=di
 start_image "$image_id"
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 echo "Previous release reads passed: $tag on the candidate schema"
+# Verify the pinned source remains below the capability floor before any
+# activated probe, even when the ordinary release is the same image.
+legacy_entry="$(git show "$legacy_tag:internal/db/visibility.go")"
+[[ "$legacy_entry" == *"func enterTenant("* && "$legacy_entry" != *"aeon.account_use_capable"* ]] || {
+  echo 'Pinned rollback image must predate the account-use capability' >&2; exit 1;
+}
+legacy_image_id="$previous_image_id"
+if [[ "$digest" != "$legacy_digest" ]]; then
+  echo "Account-use rollback fixture: $legacy_tag; image: $legacy_image"
+  docker pull --platform linux/amd64 "$legacy_image"
+  legacy_image_id="$(docker image ls --quiet --no-trunc "$legacy_image" | sort -u)"
+  [[ "$legacy_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable legacy image ID' >&2; exit 1; }
+fi
 
 # Each binary gets the same inactive candidate-schema fixture. Stop all app
 # connections before copying it; activation is never undone or shared between
@@ -112,13 +125,6 @@ python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$t
 docker stop --time 30 "$app" >/dev/null
 docker container rm "$app" >/dev/null
 echo "Account-use rollback boundary release: $legacy_tag"
-legacy_image_id="$previous_image_id"
-if [[ "$digest" != "$legacy_digest" ]]; then
-  echo "Account-use rollback fixture: $legacy_tag; image: $legacy_image"
-  docker pull --platform linux/amd64 "$legacy_image"
-  legacy_image_id="$(docker image ls --quiet --no-trunc "$legacy_image" | sort -u)"
-  [[ "$legacy_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable legacy image ID' >&2; exit 1; }
-fi
 database='aeon_legacy'
 start_image "$legacy_image_id"
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}"
