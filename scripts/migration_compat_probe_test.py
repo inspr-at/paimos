@@ -19,6 +19,86 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 
+class MigrationCompatImagesTest(unittest.TestCase):
+    # Risk: once the latest stable binary supports account-use, an unconditional
+    # rollback-floor probe against that binary fails despite a sound DB fence.
+    # Mock only process boundaries; execute the real shell orchestration and
+    # retain strict refusals against an independently pinned incapable binary.
+    def test_capable_previous_release_keeps_the_incapable_rollback_probe(self):
+        latest_tag = 'v261010123154.0.0'
+        latest_digest = 'sha256:' + 'a' * 64
+        floor_digest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / 'scripts'
+            scripts.mkdir()
+            script = scripts / 'migration-compat.sh'
+            script.write_text(Path(__file__).with_name(script.name).read_text())
+            tools = root / 'tools'
+            tools.mkdir()
+            fake = '''import json, os, sys
+from pathlib import Path
+tool, args = Path(sys.argv[0]).name, sys.argv[1:]
+root = Path(os.environ['COMPAT_FIXTURE_ROOT'])
+with (root / 'calls.jsonl').open('a') as log:
+    log.write(json.dumps([tool, args]) + '\\n')
+latest_id, floor_id = 'sha256:' + '1' * 64, 'sha256:' + '2' * 64
+active = root / 'active-image'
+if tool == 'docker':
+    if args[:2] == ['image', 'ls']:
+        print(floor_id if args[-1].endswith(os.environ['COMPAT_FLOOR_DIGEST']) else latest_id)
+    elif args[0] == 'port':
+        print('127.0.0.1:5432' if args[-1] == '5432/tcp' else '127.0.0.1:8080')
+    elif args[0] == 'run' and args[-1] in (latest_id, floor_id):
+        active.write_text(args[-1])
+elif tool == 'python3':
+    mode = args[1]
+    if mode == 'seed':
+        Path(args[args.index('--state') + 1]).write_text('{}')
+    if mode in ('seed', 'check', 'account-use'):
+        version = args[args.index('--version') + 1]
+        expected = '261009095632.0.0' if active.read_text() == floor_id else '261010123154.0.0'
+        if version != expected:
+            sys.exit('tested binary does not match the previous release')
+    if mode == 'account-use' and active.read_text() != floor_id:
+        sys.exit('activated previous binary returned HTTP 200')
+elif tool not in ('go', 'trash'):
+    sys.exit('unexpected tool')
+'''
+            for name in ('docker', 'python3', 'go', 'trash'):
+                executable = tools / name
+                executable.write_text('#!' + sys.executable + '\n' + fake)
+                executable.chmod(0o755)
+            summary = root / 'summary'
+            environment = os.environ.copy()
+            environment.update({
+                'PATH': str(tools) + os.pathsep + environment['PATH'],
+                'COMPAT_FIXTURE_ROOT': str(root),
+                'COMPAT_FLOOR_DIGEST': floor_digest,
+                'GITHUB_STEP_SUMMARY': str(summary),
+            })
+            completed = subprocess.run(
+                ['bash', str(script), latest_tag, latest_digest], env=environment,
+                capture_output=True, text=True, timeout=15, check=False)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            calls = [json.loads(line) for line in (root / 'calls.jsonl').read_text().splitlines()]
+            boots = [args[-1] for tool, args in calls
+                     if tool == 'docker' and args[0] == 'run' and args[-1].startswith('sha256:')]
+            self.assertEqual(boots, ['sha256:' + '1' * 64] * 2 + ['sha256:' + '2' * 64])
+            probes = [(args[1], args[args.index('--version') + 1]) for tool, args in calls
+                      if tool == 'python3' and '--version' in args]
+            self.assertEqual(probes, [
+                ('seed', latest_tag[1:]), ('check', latest_tag[1:]),
+                ('check', '261009095632.0.0'), ('account-use', '261009095632.0.0')])
+            pulls = [args[-1] for tool, args in calls if tool == 'docker' and args[0] == 'pull']
+            self.assertEqual(pulls, ['ghcr.io/inspr-at/aeon@' + latest_digest,
+                                     'ghcr.io/inspr-at/aeon@' + floor_digest])
+            self.assertIn('registry image ghcr.io/inspr-at/aeon@' + latest_digest +
+                          '; loaded image sha256:' + '1' * 64, summary.read_text())
+            self.assertIn('registry image ghcr.io/inspr-at/aeon@' + floor_digest +
+                          '; loaded image sha256:' + '2' * 64, summary.read_text())
+
+
 class ProbeTest(unittest.TestCase):
     def setUp(self):
         self.requests = []
