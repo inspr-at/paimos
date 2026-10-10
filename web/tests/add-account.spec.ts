@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { capacityWorld, NOW, TZ } from './capacity-fixtures'
+import { expectStableControls } from './helpers/stable'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 
 test.use({ timezoneId: TZ })
@@ -28,7 +29,8 @@ const CREDENTIAL = 'Every sign-in stays on its computer. PAIMOS stores status an
 const CONNECT = 'Connect a computer'
 const accountsList = (page: Page) => page.getByRole('region', { name: /^Accounts \d+$/ })
 
-async function setup(page: Page, options: { manage?: boolean; desk?: boolean; computers?: Computers } = {}) {
+// installs: computer name → reported install_method ('' = not reported). Unknown names clone studio without enrollments.
+async function setup(page: Page, options: { manage?: boolean; desk?: boolean; computers?: Computers; installs?: Record<string, string> } = {}) {
   if (options.desk) await page.clock.setSystemTime(NOW)
   await mockWork(page, fixtures(), { admin: true })
   const data = agentData(world)
@@ -40,6 +42,18 @@ async function setup(page: Page, options: { manage?: boolean; desk?: boolean; co
   }
   await mockAgents(page, data, options.desk ? { capacity } : {})
   let mode: Computers = options.computers ?? 'ready'
+  let computers = capacity.computers
+  if (options.installs) {
+    const template = capacity.computers.find(item => item.computer_name === 'studio')!
+    const extra = Object.keys(options.installs).filter(name => !capacity.computers.some(item => item.computer_name === name)).map((name, index) => ({
+      ...template, computer_name: name, enrollments: [],
+      computer_id: `c0000000-0000-4000-8000-00000000073${index}`, request_id: `e0000000-0000-4000-8000-00000000073${index}`,
+    }))
+    computers = [...capacity.computers, ...extra].map(item => {
+      const reported = options.installs![item.computer_name]
+      return reported ? { ...item, install_method: reported } : item
+    })
+  }
   let releaseHold = () => {}
   const held = new Promise<void>(resolve => { releaseHold = resolve })
   if (!options.desk) {
@@ -48,7 +62,7 @@ async function setup(page: Page, options: { manage?: boolean; desk?: boolean; co
       if (mode === 'hold') await held
       if (mode === 'error') return route.fulfill({ status: 500, json: { error: 'down' } })
       if (mode === 'empty' || mode === 'hold') return route.fulfill({ json: { computers: [] } })
-      return route.fulfill({ json: { computers: capacity.computers } })
+      return route.fulfill({ json: { computers } })
     })
   }
   await page.route('**/api/me/permissions*', route => {
@@ -68,7 +82,7 @@ async function shoot(page: Page, name: string, locator: Locator) {
   for (const theme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: theme })
     await page.evaluate(choice => { document.documentElement.dataset.theme = choice }, theme)
-    for (const width of [1600, 390] as const) {
+    for (const width of [1440, 1024, 390] as const) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await locator.scrollIntoViewIfNeeded()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
@@ -150,6 +164,94 @@ test('the steps name the machine, the known sign-in, and a path-proof add-harnes
   await expect(page.getByLabel('Enroll command')).toHaveValue(direct('pi'))
   await open.click()
   await expect(panel).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('the selected machine decides Installed with; an override stays with that machine', async ({ page }) => {
+  const errors = watchErrors(page)
+  await setup(page, { installs: { 'build-7': 'homebrew', studio: 'nix', 'mini-3': 'direct', 'old-4': '' } })
+  await page.goto('/settings/accounts')
+  await page.getByRole('button', { name: 'Add an account' }).click()
+  const panel = page.getByRole('region', { name: 'Add an account' })
+  const machine = panel.getByRole('combobox', { name: 'Machine' })
+  const harness = panel.getByRole('combobox', { name: 'Harness' })
+  const installed = panel.getByRole('combobox', { name: 'Installed with' })
+  const enroll = panel.getByLabel('Enroll command')
+  const note = panel.locator('[data-install-source]')
+  const steps = panel.getByRole('listitem')
+  await expect(machine.locator('option')).toHaveText(['build-7', 'mini-3', 'old-4', 'studio'])
+  await expect(installed.locator('option')).toHaveText(['Homebrew (reported)', 'Nix profile', 'Direct download'])
+  await expect(installed).toHaveValue('homebrew')
+  await expect(enroll).toHaveValue(homebrew('pi'))
+  await expect(note).toHaveText('build-7 reports that aeon-agentd came from Homebrew.')
+
+  const pick = (label: string) => async () => { await machine.selectOption({ label }) }
+  await expectStableControls({
+    controls: {
+      machine, harness, installed,
+      'sign-in copy': steps.nth(0).getByRole('button', { name: 'Copy' }),
+      'enroll copy': steps.nth(1).getByRole('button', { name: 'Copy' }),
+    },
+    interactions: [
+      { name: 'Nix machine', run: async () => {
+        await pick('studio')()
+        await expect(installed).toHaveValue('nix')
+        await expect(installed.locator('option')).toHaveText(['Homebrew', 'Nix profile (reported)', 'Direct download'])
+        await expect(enroll).toHaveValue(nix('claude'))
+        await expect(note).toHaveText('studio reports that aeon-agentd came from a Nix profile.')
+      } },
+      { name: 'direct machine', run: async () => {
+        await pick('mini-3')()
+        await expect(installed).toHaveValue('direct')
+        await expect(enroll).toHaveValue(direct('codex'))
+        await expect(note).toHaveText('mini-3 reports that aeon-agentd came from the direct download.')
+      } },
+      { name: 'machine without a report', run: async () => {
+        await pick('old-4')()
+        await expect(installed.locator('option')).toHaveText(['Homebrew', 'Nix profile', 'Direct download'])
+        await expect(installed).toHaveValue('homebrew')
+        await expect(enroll).toHaveValue(homebrew('codex'))
+        await expect(note).toHaveText('old-4 has not reported how aeon-agentd was installed. Check Installed with before copying.')
+      } },
+      { name: 'explicit choice without a report', run: async () => {
+        await installed.selectOption('nix')
+        await expect(enroll).toHaveValue(nix('codex'))
+        await expect(note).toHaveText('Your choice for old-4. It has not reported how aeon-agentd was installed.')
+      } },
+      { name: 'override on the Homebrew machine', run: async () => {
+        await pick('build-7')()
+        await expect(installed).toHaveValue('homebrew')
+        await installed.selectOption('direct')
+        await expect(enroll).toHaveValue(direct('pi'))
+        await expect(note).toHaveText('Your choice for build-7. It reports that aeon-agentd came from Homebrew.')
+      } },
+      { name: 'the override does not leak to another machine', run: async () => {
+        await pick('studio')()
+        await expect(installed).toHaveValue('nix')
+        await expect(enroll).toHaveValue(nix('claude'))
+      } },
+    ],
+  })
+
+  await page.reload()
+  await page.getByRole('button', { name: 'Add an account' }).click()
+  await expect(installed).toHaveValue('direct')
+  await expect(enroll).toHaveValue(direct('pi'))
+  await pick('old-4')()
+  await expect(installed).toHaveValue('nix')
+  // Picking the reported install again forgets the override.
+  await pick('build-7')()
+  await installed.selectOption('homebrew')
+  await expect(note).toHaveText('build-7 reports that aeon-agentd came from Homebrew.')
+  expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('aeon.addAccountInstall:') && key.endsWith(':d0000000-0000-4000-8000-000000000001')).length)).toBe(0)
+  expect(await noBar(page)).toBe(0)
+  await installed.selectOption('direct')
+  await shoot(page, 'install-override', panel)
+  await installed.selectOption('homebrew')
+  await shoot(page, 'install-reported', panel)
+  await pick('old-4')()
+  await installed.selectOption('direct')
+  await shoot(page, 'install-unreported-choice', panel)
   expect(errors).toEqual([])
 })
 

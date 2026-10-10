@@ -593,8 +593,22 @@ func syncPairing(ctx context.Context, root, origin string, s *agentd.Supervisor)
 		return err
 	}
 	defer store.Close()
-	e := agentsetup.Engine{Store: store, API: agentsetup.HTTPClient{Origin: origin}, Local: localPairing{root: root, supervisor: s}}
+	e := agentsetup.Engine{Store: store, API: agentsetup.HTTPClient{Origin: origin}, Local: localPairing{root: root, supervisor: s}, InstallMethod: installMethod()}
 	return e.SyncFences(ctx)
+}
+
+// installMethod reports which add-harness entry point reaches this daemon, so
+// Settings can offer the matching command. Empty when none provably does.
+func installMethod() string {
+	executable, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return agentsetup.InstallMethod(executable, home)
 }
 
 // pairedPreflight injects the public lifecycle transport in cold-start tests.

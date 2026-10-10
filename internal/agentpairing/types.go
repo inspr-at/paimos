@@ -87,6 +87,7 @@ type SetupProgress struct {
 	HarnessStatuses map[string]string                   `json:"harness_statuses,omitempty"`
 	State           string                              `json:"state"`
 	ErrorCode       string                              `json:"error_code,omitempty"`
+	InstallMethod   string                              `json:"install_method,omitempty"`
 }
 
 type proofRequest struct {
@@ -142,6 +143,7 @@ type View struct {
 	LocalAuthPinned           *bool                               `json:"local_auth_pinned,omitempty"`
 	AgentRelease              agentcompat.Release                 `json:"agent_release"`
 	AgentCompatibility        agentcompat.Result                  `json:"agent_compatibility"`
+	InstallMethod             string                              `json:"install_method,omitempty"`
 	HarnessDetails            map[string]agentsetup.HarnessDetail `json:"harness_details,omitempty"`
 	HarnessStatuses           map[string]string                   `json:"harness_statuses,omitempty"`
 	VerificationCapabilities  map[string]VerificationCapability   `json:"verification_capabilities"`

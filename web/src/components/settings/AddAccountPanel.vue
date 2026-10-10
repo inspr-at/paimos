@@ -2,40 +2,64 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
 import {
-  AGENTD_INSTALLS, addHarnessCommand, harnessChoices, isAgentdInstall, signInStep,
+  AGENTD_INSTALLS, addHarnessCommand, chosenInstall, harnessChoices, isAgentdInstall, readInstallOverride, signInStep, writeInstallOverride,
   type AddMachine, type AgentdInstall,
 } from '../../lib/addAccount'
 import { brand } from '../../lib/brand'
+import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 
 // Two copyable steps on the machine the person picks. The vendor password stays there.
 const props = defineProps<{ machines: AddMachine[] }>()
 
-const INSTALL_KEY = 'aeon.addAccountInstall'
+const session = useSession()
+const owner = computed(() => `${session.identity?.tenant.id ?? ''}/${session.identity?.principal.id ?? ''}`)
 const machineId = ref('')
 const choiceId = ref('')
-const install = ref<AgentdInstall>(readInstall())
 const copied = ref('')
 const fallback = ref('')
 let copyTimer: ReturnType<typeof setTimeout> | undefined
 
+// Overrides persist per person and machine; memory keeps them for this panel
+// when storage is disabled. revision re-reads after a write.
+const memory = new Map<string, string>()
+const memoryStore = { getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => { memory.set(key, value) }, removeItem: (key: string) => { memory.delete(key) } }
+const revision = ref(0)
+function local(): Storage | null { try { return localStorage } catch { return null } }
+// The pre-AEON-733 choice was shared by every machine; it must not leak into one.
+try { sessionStorage.removeItem('aeon.addAccountInstall') } catch { /* Storage may be disabled. */ }
+
 const machine = computed(() => props.machines.find(item => item.id === machineId.value) ?? props.machines[0] ?? null)
 const choices = computed(() => machine.value ? harnessChoices(machine.value.harnesses) : [])
 const choice = computed(() => choices.value.find(item => item.id === choiceId.value) ?? choices.value[0] ?? null)
+const installed = computed(() => {
+  void revision.value
+  const current = machine.value
+  if (!current) return { install: 'homebrew' as AgentdInstall, source: 'unknown' as const }
+  return chosenInstall(current, readInstallOverride(local(), owner.value, current) ?? readInstallOverride(memoryStore, owner.value, current))
+})
+const install = computed(() => installed.value.install)
 const signIn = computed(() => choice.value ? signInStep(choice.value.harness) : null)
 const enroll = computed(() => choice.value ? addHarnessCommand(choice.value.harness, install.value) : null)
 
-function readInstall(): AgentdInstall {
-  try {
-    const stored = sessionStorage.getItem(INSTALL_KEY) ?? ''
-    if (isAgentdInstall(stored)) return stored
-  } catch { /* Storage may be disabled. */ }
-  return 'homebrew'
-}
+const SENTENCE_NAME: Record<AgentdInstall, string> = { homebrew: 'Homebrew', nix: 'a Nix profile', direct: 'the direct download' }
+const installNote = computed(() => {
+  const current = machine.value
+  if (!current) return ''
+  const reports = current.install ? `reports that aeon-agentd came from ${SENTENCE_NAME[current.install]}` : ''
+  switch (installed.value.source) {
+    case 'reported': return `${current.name} ${reports}.`
+    case 'chosen': return reports ? `Your choice for ${current.name}. It ${reports}.` : `Your choice for ${current.name}. It has not reported how aeon-agentd was installed.`
+    default: return `${current.name} has not reported how aeon-agentd was installed. Check Installed with before copying.`
+  }
+})
+
 function setInstall(value: string) {
-  if (!isAgentdInstall(value)) return
-  install.value = value
-  try { sessionStorage.setItem(INSTALL_KEY, value) } catch { /* Storage may be disabled. */ }
+  const current = machine.value
+  if (!current || !isAgentdInstall(value)) return
+  writeInstallOverride(local(), owner.value, current, value)
+  writeInstallOverride(memoryStore, owner.value, current, value)
+  revision.value++
 }
 function onMachine(event: Event) { machineId.value = (event.target as HTMLSelectElement).value }
 function onChoice(event: Event) { choiceId.value = (event.target as HTMLSelectElement).value }
@@ -74,7 +98,7 @@ onBeforeUnmount(() => clearTimeout(copyTimer))
       </label>
       <label>Installed with
         <select class="field" :value="install" aria-label="Installed with" @change="onInstall">
-          <option v-for="item in AGENTD_INSTALLS" :key="item.id" :value="item.id">{{ item.label }}</option>
+          <option v-for="item in AGENTD_INSTALLS" :key="item.id" :value="item.id">{{ item.id === machine?.install ? `${item.label} (reported)` : item.label }}</option>
         </select>
       </label>
     </div>
@@ -90,6 +114,7 @@ onBeforeUnmount(() => clearTimeout(copyTimer))
         <button type="button" class="btn sm" @click="copy('enroll', enroll, $event)"><AppIcon :name="copied === 'enroll' ? 'check' : 'copy'" :size="13" />{{ copied === 'enroll' ? 'Copied' : 'Copy' }}</button>
       </li>
     </ol>
+    <p v-if="choices.length && enroll" class="calm" :data-install-source="installed.source">{{ installNote }}</p>
     <p v-if="fallback" class="calm" role="status">Clipboard unavailable. The step is selected; copy it from the field.</p>
   </div>
 </template>

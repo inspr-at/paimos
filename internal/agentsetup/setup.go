@@ -198,6 +198,8 @@ type Engine struct {
 	ClaudeDependencies ClaudeDependencies
 	Now                func() time.Time
 	GrokProbe          func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
+	// InstallMethod is the detected add-harness entry point (see InstallMethod).
+	InstallMethod string
 }
 type Options struct {
 	Origin, TenantID, TenantSlug, ComputerName, Workspace string
@@ -653,11 +655,11 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 			code = "private_storage_failed"
 		}
 		proof := e.proof(s)
-		proof.Progress = reportRelease(s.View, &SetupProgress{State: state, ErrorCode: code})
+		proof.Progress = e.reportInstall(s.View, reportRelease(s.View, &SetupProgress{State: state, ErrorCode: code}))
 		_, _ = e.API.Reconcile(ctx, proof)
 	}()
 	proof := e.proof(s)
-	proof.Progress = reportRelease(s.View, &SetupProgress{State: "provisioning"})
+	proof.Progress = e.reportInstall(s.View, reportRelease(s.View, &SetupProgress{State: "provisioning"}))
 	observed, err := e.API.Reconcile(ctx, proof)
 	if err != nil {
 		return e.progress(s), err

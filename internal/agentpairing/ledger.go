@@ -14,6 +14,10 @@ import (
 )
 
 const LedgerCapability = "ledger-v1"
+
+// InstallCapability tells a daemon that setup progress may carry
+// install_method (homebrew, nix or direct). Older servers reject the field.
+const InstallCapability = "agent-install-v1"
 const LedgerGenerationHeader = "X-Aeon-Ledger-Generation"
 
 // LedgerMode is tenant-wide, including computers which have never enrolled.

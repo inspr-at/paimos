@@ -166,6 +166,7 @@ func (e *Engine) SyncFences(ctx context.Context) (resultErr error) {
 			proof.Progress = observedProgress(s.View, local)
 		}
 	}
+	proof.Progress = e.reportInstall(s.View, proof.Progress)
 	cause = PairingServerUnavailable
 	v, err := e.API.Reconcile(ctx, proof)
 	if err != nil {

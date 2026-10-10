@@ -5,7 +5,10 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { addHarnessCommand, harnessChoices, machinesForAdd, signInStep, type AddMachineSource, type AgentdInstall } from '../src/lib/addAccount.ts'
+import {
+  addHarnessCommand, chosenInstall, harnessChoices, installOverrideKey, machinesForAdd, readInstallOverride, signInStep, writeInstallOverride,
+  type AddMachine, type AddMachineSource, type AgentdInstall,
+} from '../src/lib/addAccount.ts'
 import { LOGIN_COMMAND } from '../src/lib/capacity.ts'
 
 const machine = (overrides: Partial<AddMachineSource> & Pick<AddMachineSource, 'computer_id' | 'computer_name' | 'computer_state'>): AddMachineSource => ({
@@ -116,7 +119,7 @@ test('only a connected computer is offered, and a revoked enrollment is free aga
       ],
     }),
   ])
-  assert.deepEqual(rows, [{ id: 'c-live', name: 'build-7', harnesses: ['codex', 'claude'] }])
+  assert.deepEqual(rows, [{ id: 'c-live', name: 'build-7', harnesses: ['codex', 'claude'], install: null }])
 })
 
 test('duplicate machine names keep the platform, and a blank name is Paired machine', () => {
@@ -146,4 +149,78 @@ test('missing harnesses come first, then another account of a vendor that allows
     'Another Codex account', 'Another Claude account', 'Another Grok account', 'Another Cursor account', 'Another Pi account',
     'Another Gemini CLI account', 'Another OpenCode account',
   ])
+})
+
+/** Storage stand-in; a Map is what the browser's Storage holds. */
+function memoryStorage() {
+  const items = new Map<string, string>()
+  return { items, getItem: (key: string) => items.get(key) ?? null, setItem: (key: string, value: string) => { items.set(key, value) }, removeItem: (key: string) => { items.delete(key) } }
+}
+const enrollCommand = (row: AddMachine, override: AgentdInstall | null = null) => addHarnessCommand('codex', chosenInstall(row, override).install)
+
+test('each machine starts at the install its agentd reports, so the copied command matches it', () => {
+  const rows = machinesForAdd([
+    machine({ computer_id: 'brew', computer_name: 'brew-box', computer_state: 'connected', install_method: 'homebrew' }),
+    machine({ computer_id: 'nix', computer_name: 'nix-box', computer_state: 'connected', install_method: 'nix' }),
+    machine({ computer_id: 'direct', computer_name: 'plain-box', computer_state: 'connected', install_method: 'direct' }),
+  ])
+  assert.deepEqual(rows.map(row => [row.name, row.install]), [['brew-box', 'homebrew'], ['nix-box', 'nix'], ['plain-box', 'direct']])
+  assert.deepEqual(rows.map(row => chosenInstall(row, null)), [
+    { install: 'homebrew', source: 'reported' }, { install: 'nix', source: 'reported' }, { install: 'direct', source: 'reported' },
+  ])
+  assert.deepEqual(rows.map(row => enrollCommand(row)), [
+    'env "$(brew --prefix)/bin/aeon-agentd" add-harness --harness codex',
+    'env "$HOME/.nix-profile/bin/aeon-agentd" add-harness --harness codex',
+    'env "$HOME/.local/bin/aeon-agentd" add-harness --harness codex',
+  ])
+})
+
+test('a missing or unrecognised report stays usable through an explicit choice', () => {
+  const rows = machinesForAdd([
+    machine({ computer_id: 'old', computer_name: 'old-agentd', computer_state: 'connected' }),
+    machine({ computer_id: 'odd', computer_name: 'odd-agentd', computer_state: 'connected', install_method: 'winget' }),
+    machine({ computer_id: 'shell', computer_name: 'shell-agentd', computer_state: 'connected', install_method: '$(id)' }),
+  ])
+  assert.deepEqual(rows.map(row => row.install), [null, null, null])
+  for (const row of rows) {
+    assert.deepEqual(chosenInstall(row, null), { install: 'homebrew', source: 'unknown' }, row.name)
+    assert.deepEqual(chosenInstall(row, 'nix'), { install: 'nix', source: 'chosen' }, row.name)
+    assert.equal(enrollCommand(row, 'direct'), 'env "$HOME/.local/bin/aeon-agentd" add-harness --harness codex')
+  }
+  const reported = machinesForAdd([machine({ computer_id: 'brew', computer_name: 'brew-box', computer_state: 'connected', install_method: 'homebrew' })])[0]
+  assert.deepEqual(chosenInstall(reported, 'homebrew'), { install: 'homebrew', source: 'reported' })
+})
+
+test('an override belongs to one machine and one person, and a new report replaces it', () => {
+  const storage = memoryStorage()
+  const [brew, nix] = machinesForAdd([
+    machine({ computer_id: 'm-brew', computer_name: 'brew-box', computer_state: 'connected', install_method: 'homebrew' }),
+    machine({ computer_id: 'm-nix', computer_name: 'nix-box', computer_state: 'connected', install_method: 'nix' }),
+  ])
+  const ada = 't-1/p-ada', bo = 't-1/p-bo', otherTenant = 't-2/p-ada'
+  writeInstallOverride(storage, ada, brew, 'direct')
+  assert.equal(readInstallOverride(storage, ada, brew), 'direct')
+  assert.equal(enrollCommand(brew, readInstallOverride(storage, ada, brew)), 'env "$HOME/.local/bin/aeon-agentd" add-harness --harness codex')
+  assert.equal(readInstallOverride(storage, ada, nix), null, 'another machine')
+  assert.equal(readInstallOverride(storage, bo, brew), null, 'another person')
+  assert.equal(readInstallOverride(storage, otherTenant, brew), null, 'another tenant')
+  assert.deepEqual(chosenInstall(nix, readInstallOverride(storage, ada, nix)), { install: 'nix', source: 'reported' })
+
+  // The machine now reports something else: the old correction no longer applies.
+  assert.equal(readInstallOverride(storage, ada, { ...brew, install: 'nix' }), null)
+  assert.equal(readInstallOverride(storage, ada, { ...brew, install: null }), null)
+
+  // Choosing the reported install forgets the override.
+  writeInstallOverride(storage, ada, brew, 'homebrew')
+  assert.equal(storage.items.has(installOverrideKey(ada, brew.id)), false)
+  assert.equal(readInstallOverride(storage, ada, brew), null)
+
+  // Garbage and disabled storage read as no override.
+  storage.setItem(installOverrideKey(ada, brew.id), '{"install":"rm -rf","reported":"homebrew"}')
+  assert.equal(readInstallOverride(storage, ada, brew), null)
+  storage.setItem(installOverrideKey(ada, brew.id), 'not json')
+  assert.equal(readInstallOverride(storage, ada, brew), null)
+  assert.equal(readInstallOverride({ getItem() { throw new Error('blocked') } }, ada, brew), null)
+  writeInstallOverride({ setItem() { throw new Error('blocked') }, removeItem() { throw new Error('blocked') } }, ada, brew, 'nix')
+  assert.equal(readInstallOverride(null, ada, brew), null)
 })
