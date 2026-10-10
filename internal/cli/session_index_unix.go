@@ -47,38 +47,43 @@ func sessionIndexRoot() (string, error) {
 }
 
 func lookupSessionIndex(vendor string) (string, string, sessionIndexResult) {
+	id, label, _, result := lookupSessionIndexState(vendor)
+	return id, label, result
+}
+
+func lookupSessionIndexState(vendor string) (string, string, string, sessionIndexResult) {
 	source := strings.ToLower(strings.TrimSpace(vendor))
 	if !validUUID(source) {
-		return "", "", sessionIndexAbsent
+		return "", "", "", sessionIndexAbsent
 	}
 	root, err := sessionIndexRoot()
 	if err != nil {
-		return "", "", sessionIndexAbsent
+		return "", "", "", sessionIndexAbsent
 	}
 	dirfd, err := openValidatedIndexDir(root)
 	if errors.Is(err, os.ErrNotExist) {
-		return "", "", sessionIndexAbsent
+		return "", "", "", sessionIndexAbsent
 	}
 	if err != nil {
-		return "", "", sessionIndexRejected
+		return "", "", "", sessionIndexRejected
 	}
 	defer unix.Close(dirfd)
 	raw, err := readIndexFileAt(dirfd, source, 4096)
 	if errors.Is(err, os.ErrNotExist) {
-		return "", "", sessionIndexAbsent
+		return "", "", "", sessionIndexAbsent
 	}
 	if err != nil {
-		return "", "", sessionIndexRejected
+		return "", "", "", sessionIndexRejected
 	}
 	entry, ok := parseSessionIndexEntry(raw)
 	if !ok || !ownerAlive(entry.OwnerPID, entry.OwnerStart) {
-		return "", "", sessionIndexRejected
+		return "", "", "", sessionIndexRejected
 	}
 	id, label, bound := readBoundGeneration(entry.StateDir)
 	if !bound {
-		return "", "", sessionIndexRejected
+		return "", "", "", sessionIndexRejected
 	}
-	return id, label, sessionIndexBound
+	return id, label, entry.StateDir, sessionIndexBound
 }
 
 type sessionIndexEntry struct {

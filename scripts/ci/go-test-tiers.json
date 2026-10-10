@@ -4328,6 +4328,26 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestClaudeCoordinatorRegistersChildrenEndToEnd","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookCancellation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookEndToEnd","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookLargeStopPayload","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookLifecycle","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookNoOp","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookResume","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookResumeDuringMaintenance","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookRetries","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookStopBeforeResumeReset","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookStopDuringRegistration","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestClaudeTitleSkipsOversizedLine","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestCodexCachedGrowthSurvivesSingleScan","tier":"GATED-FULL"}
