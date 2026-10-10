@@ -138,6 +138,10 @@ func TestStaleWorkReleaseRetainsAdmissionUntilExit(t *testing.T) {
 				return nil
 			})
 			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, blocked, daemon, []Account{target}, map[string]int64{"requests": 1}), 409, nil)
+			status, raw := call(t, mod, &admin, "", "DELETE", "/api/agent-accounts/"+first.ID, "")
+			if status != 409 || !strings.Contains(string(raw), "account_busy") {
+				t.Fatalf("unconfirmed writer lost account removal protection: %d %s", status, raw)
+			}
 			if scalar(t, admin, `SELECT count(*) FROM agent_runs WHERE id=$1 AND account_id IS NOT NULL`, blocked) != 0 || scalar(t, admin, `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, held) != 1 {
 				t.Fatal("blocked admission changed assignment or retained reservation")
 			}

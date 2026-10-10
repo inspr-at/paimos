@@ -558,6 +558,22 @@ func TestPairingStaleWorkReleaseRetainsCapacityAndDrain(t *testing.T) {
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true',w.reserved,w.used FROM agent_runs r JOIN account_allowance_windows w ON w.account_id=r.account_id WHERE r.id=$1`, *e.VerificationRunID).Scan(&retained, &reserved, &used); err != nil || retained || reserved != 0 || used != 1 {
 		t.Fatalf("exit settlement: retained=%t reserved=%d used=%d err=%v", retained, reserved, used, err)
 	}
+	t.Run("immediate revocation retains unsettled removal guard", func(t *testing.T) {
+		f := newFixture(t)
+		p := f.propose("claude")
+		f.approve(p, "one_per_harness")
+		v := f.redeem(p)
+		e := v.Enrollments[0]
+		key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+		f.probe(v, e, key, 200)
+		f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+		if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_runs SET status='ownership_lost',ended_at=clock_timestamp(),trace='{"work_lifecycle_release":{"exit_unconfirmed":true}}' WHERE id=$1`, *e.VerificationRunID); err != nil {
+			t.Fatal(err)
+		}
+		f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "", 200)
+		retryErrorCode(t, f.call("DELETE", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 409), "runs_unsettled")
+		retryErrorCode(t, f.call("DELETE", "/api/agent-accounts/"+e.AccountID, nil, true, "", 409), "account_busy")
+	})
 }
 
 func TestPairingImmediateRevokeRetainsActiveAccounting(t *testing.T) {
