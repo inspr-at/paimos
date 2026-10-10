@@ -4506,6 +4506,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatInvalidStatusValuesNeverFailBeat","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestHeartbeatKnownProjectBypassesProjection","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatLegacyStateBackfillsBoundTicket","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatModelAcknowledgementAndRestart","tier":"GATED-FULL"}
@@ -5983,6 +5985,8 @@
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatCommitDiffValidationAndStorage","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatEstimateWarningMatrix","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestHeartbeatIsolationCommitAndAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatLabelAndMetadataHistory","tier":"GATED-FULL"}
     ,

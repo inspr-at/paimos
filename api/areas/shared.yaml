@@ -706,7 +706,7 @@ components:
       type: object
       required: [code, hint]
       properties:
-        code: {type: string, enum: [missing_progress, missing_eta, ticket_without_estimate]}
+        code: {type: string, enum: [missing_progress, missing_eta, ticket_without_estimate, projection_unavailable]}
         hint: {type: string}
     HarnessHandover:
       type: object
