@@ -697,6 +697,36 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				j = normalizeParallelWebSetup(t, jobs)
 			}
 			j = cloneStep(t, j)
+			if id == "release-check-run" || id == "e2e-run" {
+				// AEON-582 pins the remaining v7 actions. Assert the exact pins
+				// before restoring their historical tags for the unchanged CI
+				// fixture; every other job field remains covered by its hash.
+				pins := map[string]string{
+					"actions/checkout@v7":   "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+					"actions/setup-node@v7": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+				}
+				if id == "e2e-run" {
+					pins["actions/setup-go@v7"] = "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+				}
+				restored := make(map[string]bool)
+				for _, value := range reuseSteps(j) {
+					step := treeMap(value)
+					uses, _ := step["uses"].(string)
+					for tag, pin := range pins {
+						if !strings.HasPrefix(uses, strings.SplitN(tag, "@", 2)[0]+"@") {
+							continue
+						}
+						if uses != pin || restored[tag] {
+							t.Fatalf("%s must retain one exact AEON-582 action pin for %s", id, tag)
+						}
+						step["uses"] = tag
+						restored[tag] = true
+					}
+				}
+				if len(restored) != len(pins) {
+					t.Fatalf("%s is missing an AEON-582 action pin", id)
+				}
+			}
 			if id == "go-static" {
 				// AEON-1061 adds one public-source guard. Prove its exact command,
 				// shape and placement before comparing every older field to the

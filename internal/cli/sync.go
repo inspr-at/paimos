@@ -211,7 +211,7 @@ func upsertRenderedSkill(workspace string, entry renderedSkillEntry) error {
 		return err
 	}
 	raw = append(raw, '\n')
-	return writeRendered(path, string(raw))
+	return writeRenderedInWorkspace(workspace, path, string(raw))
 }
 
 func discoverRenderedSkills(workspace, projectKey string) ([]renderedSkillEntry, error) {
