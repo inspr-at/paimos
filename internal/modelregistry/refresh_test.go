@@ -13,12 +13,78 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/linkvault"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// AEON-1148: the Models switch must persist the same allow/deny rule as
+// Accounts. A legacy shipped_only rule is read as off; stale writes stay fenced.
+func TestRefreshAutoUpdateUsesCanonicalModelRule(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "canonical-auto-update", "person", "Owner", []string{"admin"})
+	decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
+	read := func() (accountuse.Rules, RefreshSettings) {
+		t.Helper()
+		var rules accountuse.Rules
+		var refresh RefreshSettings
+		inRegistry(t, p, func(tx pgx.Tx) (err error) {
+			rules, err = accountuse.ReadRules(t.Context(), tx)
+			if err == nil {
+				refresh, err = settings(t.Context(), tx)
+			}
+			return err
+		})
+		return rules, refresh
+	}
+	for _, on := range []bool{false, true} {
+		before, refresh := read()
+		refresh.AutoAddProfiles = on
+		refresh.APIEnabled = false
+		body, err := json.Marshal(struct {
+			RefreshSettings
+			Revision int64 `json:"account_use_revision"`
+		}{refresh, before.Revision})
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved := decode[RefreshSettings](t, &p, "PUT", "/api/models/refresh/settings", string(body), 200)
+		after, stored := read()
+		want := "deny"
+		if on {
+			want = "allow"
+		}
+		if after.NewModels != want || after.Revision != before.Revision+1 || stored.AutoAddProfiles != on || saved != stored {
+			t.Fatalf("on=%t: saved %+v, stored %+v, rules %+v", on, saved, stored, after)
+		}
+		refresh.AutoAddProfiles = !on
+		stale, err := json.Marshal(struct {
+			RefreshSettings
+			Revision int64 `json:"account_use_revision"`
+		}{refresh, before.Revision})
+		if err != nil {
+			t.Fatal(err)
+		}
+		decode[RefreshSettings](t, &p, "PUT", "/api/models/refresh/settings", string(stale), 409)
+		unchanged, unchangedRefresh := read()
+		if !reflect.DeepEqual(unchanged, after) || unchangedRefresh != stored {
+			t.Fatal("stale toggle changed the stored setting")
+		}
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE account_use_rules SET new_models='shipped_only'; SELECT set_config('aeon.account_use_rule_write','on',true); UPDATE model_refresh_settings SET auto_add_profiles=false`)
+		return err
+	})
+	legacy := decode[struct {
+		Settings RefreshSettings `json:"settings"`
+	}](t, &p, "GET", "/api/models/refresh", "", 200)
+	if legacy.Settings.AutoAddProfiles {
+		t.Fatal("legacy shipped_only read as on")
+	}
+}
 
 func inRegistry(t *testing.T, p tenant.Principal, fn func(pgx.Tx) error) {
 	t.Helper()
