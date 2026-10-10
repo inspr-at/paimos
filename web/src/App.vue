@@ -1,9 +1,11 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { displayLanguage } from './lib/displayLanguage'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { isNavigationFailure, useRoute, useRouter } from 'vue-router'
 import AppHeader from './components/AppHeader.vue'
 import ConfirmHost from './components/ConfirmHost.vue'
+import PauseDialog from './components/agents/PauseDialog.vue'
 import DoneGateHost from './components/DoneGateHost.vue'
 import ToastHost from './components/ToastHost.vue'
 import TooltipHost from './components/TooltipHost.vue'
@@ -14,6 +16,7 @@ import ShortcutSheet from './components/work/ShortcutSheet.vue'
 import StatusHelpSheet from './components/work/StatusHelpSheet.vue'
 import AppIcon from './components/AppIcon.vue'
 import TicketPeekHost from './components/TicketPeekHost.vue'
+import LeadOverlays from './components/lead/LeadOverlays.vue'
 import { command, consume } from './lib/commands'
 import { clearFatal, fatal } from './lib/fatal'
 import { provideTicketPeek } from './lib/ticketPeek'
@@ -23,14 +26,12 @@ import { brand } from './lib/brand'
 import { toast } from './lib/toast'
 import { getRelease, releaseTitle } from './lib/releases'
 import { updateToast } from './lib/codenames'
-import { useProfile } from './stores/profile'
 import { headerFolded } from './lib/chrome'
 import { usePoller } from './lib/usePolledData'
 import { sessionFreezeApplies } from './lib/agentPairing'
 
 const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
 const session = useSession()
-const profile = useProfile()
 const route = useRoute()
 const router = useRouter()
 const ticketPeek = provideTicketPeek()
@@ -42,10 +43,10 @@ const bare = computed(() => !!route.meta.bare && !fatal.value)
 const sessionEndedHere = computed(() => sessionFreezeApplies(route.path, session.requiresSignIn))
 // Keep the mounted page readable and copyable after a 401, while every editor
 // and action control becomes inert. The observer covers controls rendered after
-// an in-flight request settles.
+// an in-flight request settles. The lead panel and sheets live in the shell, not the page.
 function freezePage() {
   if (!sessionEndedHere.value) return
-  for (const root of document.querySelectorAll<HTMLElement>('.page-flow, .sheet-root')) {
+  for (const root of document.querySelectorAll<HTMLElement>('.page-flow, .sheet-root, .lead-panel, .lead-sheet')) {
     for (const field of root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select')) {
       if (field instanceof HTMLSelectElement || (field instanceof HTMLInputElement && ['checkbox', 'radio', 'file', 'button', 'submit'].includes(field.type))) {
         if (!field.disabled) field.disabled = true
@@ -159,7 +160,7 @@ watch(() => releases.available, async version => {
   // The new server knows what the release was about; say it in its reading form.
   const release = await getRelease(version)
   if (version !== releases.available) return
-  const title = release ? releaseTitle(release, profile.profile?.locale) : ''
+  const title = release ? releaseTitle(release, displayLanguage()) : ''
   const about = title ? `: ${title}` : ''
   // The marketing name leads; the calendar version shows on hover, and stands in only for a release with no known name.
   const { message, release: named } = updateToast(brand.value.wordmark, version, release?.codename, about)
@@ -170,13 +171,7 @@ watch(() => releases.available, async version => {
 })
 
 // ---------- Footer: on phones it folds away while reading down and returns on the way up ----------
-// A project flow pill lives in the footer, so the bar stays while that pill is shown.
 const footerHidden = ref(false)
-const flowPillShown = ref(false)
-function onFlowPill(shown: boolean) {
-  flowPillShown.value = shown
-  if (shown) footerHidden.value = false
-}
 const phoneQuery = window.matchMedia('(max-width: 600px)')
 let lastTop = 0, travel = 0, settleUntil = 0
 function scrolled() {
@@ -185,7 +180,6 @@ function scrolled() {
   const top = el.scrollTop
   const delta = top - lastTop
   lastTop = top
-  if (flowPillShown.value) { footerHidden.value = false; travel = 0; return }
   if (!phoneQuery.matches || Date.now() < settleUntil) return
   // Near the end of the page the footer stays: it is where the page ends.
   const nearEnd = el.scrollHeight - el.clientHeight - top < 48
@@ -235,11 +229,13 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
       </div>
     </main>
     <!-- A row of the shell: the page, docked panels and toasts all end above it. -->
-    <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openRunningRelease" @pill="onFlowPill" />
+    <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openRunningRelease" />
     <ReleasesSheet v-if="releasesOpen" ref="releasesSheet" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
     <TicketPeekHost v-if="ticketPeek.openKey.value && !releasesOpen" :ref="ticketPeek.bind" :ticket-key="ticketPeek.openKey.value" :back-label="ticketPeek.backLabel.value" @close="ticketPeek.close()" />
+    <LeadOverlays v-if="session.identity && !bare && !fatal" />
     <ToastHost />
     <ConfirmHost />
+    <PauseDialog />
     <DoneGateHost />
     <ShortcutSheet ref="shortcuts" />
     <StatusHelpSheet />

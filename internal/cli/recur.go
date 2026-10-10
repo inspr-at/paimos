@@ -293,13 +293,17 @@ func (rt *runtime) recurList() *Command {
 func (rt *runtime) recurAction(action string) *Command {
 	var revision, count int
 	count = 5
-	var key, after string
+	var key, after, releaseKey string
+	var forceOverlap bool
 	return &Command{Name: action, Short: action + " a recurrence", Use: "recur " + action + " <recurrence-id>", minArgs: 1, maxArgs: 1, addFlags: func(fs *flagSet) {
 		switch action {
 		case "pause", "resume":
 			fs.int(&revision, "revision", "expected revision; defaults to the current GET result")
 		case "run-now":
 			fs.string(&key, "idempotency-key", 0, "required retry-safe manual occurrence key")
+			fs.string(&releaseKey, "release-key", 0, "trusted published release key from the recurrence releases API")
+			fs.bool(&forceOverlap, "force-overlap", 0, "explicitly create despite an open previous occurrence")
+			fs.int(&revision, "revision", "optional expected definition revision")
 		case "preview":
 			fs.int(&count, "count", "number of future occurrences (1..100)")
 			fs.string(&after, "after", 0, "RFC3339 anchor, default database clock")
@@ -333,11 +337,21 @@ func (rt *runtime) recurAction(action string) *Command {
 			}
 			return rt.printRecurrence(out)
 		case "run-now":
-			if key == "" || len(key) > 128 {
+			if key == "" || len(key) > 128 || len(releaseKey) > 256 || revision < 0 {
 				return usagef("--idempotency-key is required (1..128 bytes)")
 			}
 			var out recurrences.Occurrence
-			if err := rt.do(http.MethodPost, path+"/run-now", map[string]string{"idempotency_key": key}, &out); err != nil {
+			body := map[string]any{"idempotency_key": key}
+			if releaseKey != "" {
+				body["release_key"] = releaseKey
+			}
+			if forceOverlap {
+				body["force_overlap"] = true
+			}
+			if revision > 0 {
+				body["expected_revision"] = revision
+			}
+			if err := rt.do(http.MethodPost, path+"/run-now", body, &out); err != nil {
 				return err
 			}
 			if rt.jsonOut {

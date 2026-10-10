@@ -6,6 +6,9 @@
 # cannot be exercised by an isolated, disposable Postgres fixture.
 set -euo pipefail
 
+# OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
+pgvector_image="${PGVECTOR_IMAGE:-ghcr.io/inspr-at/paimos-ci/pgvector:0.8.6-pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a}"
+
 for tool in docker curl python3 openssl; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
@@ -75,7 +78,7 @@ if [[ -n "${AEON_SMOKE_IMAGE:-}" ]]; then
   echo 'Using prebuilt release image for smoke gate'
 else
   echo 'Building release image for smoke gate'
-  docker build --build-arg "VERSION=${AEON_SMOKE_VERSION:-dev}" -t "$image" .
+  node scripts/assemble-image.mjs "$image"
 fi
 docker run --rm --entrypoint /bin/sh "$image" -c '
   test -s /usr/share/doc/aeon/NOTICE &&
@@ -87,7 +90,7 @@ docker network create "$network" >/dev/null
 docker run -d --name "$db" --network "$network" \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD_FILE=/run/secrets/db-super \
   -v "$tmp/secrets:/run/secrets:ro" -v "$tmp/initdb:/docker-entrypoint-initdb.d:ro" \
-  pgvector/pgvector:0.8.6-pg18 >/dev/null
+  "$pgvector_image" >/dev/null
 ready=0
 for _ in {1..45}; do
   if docker exec "$db" pg_isready -h 127.0.0.1 -U postgres -d aeon >/dev/null 2>&1; then ready=1; break; fi
@@ -142,15 +145,23 @@ start_app() {
 start_app prod
 SMOKE_BASE="$base" python3 - <<'PY'
 import os
+import re
 import urllib.request
 u = os.environ['SMOKE_BASE']
-with urllib.request.urlopen(u + '/') as response:
-    assert response.status == 200
-    assert response.headers['Content-Security-Policy'] == "default-src 'self'; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
-    assert response.headers['X-Content-Type-Options'] == 'nosniff'
-    assert response.headers['X-Frame-Options'] == 'DENY'
-    assert response.headers['Referrer-Policy'] == 'no-referrer'
-    assert b'<html' in response.read().lower()
+base_csp = "default-src 'self'; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+spa_csp = re.compile(re.escape(base_csp) + r"; script-src 'self' 'nonce-([A-Za-z0-9+/]{32})'; style-src 'self' 'nonce-\1'")
+nonces = set()
+for _ in range(2):
+    with urllib.request.urlopen(u + '/') as response:
+        assert response.status == 200
+        match = spa_csp.fullmatch(response.headers['Content-Security-Policy'])
+        assert match, 'unexpected SPA Content-Security-Policy'
+        assert match.group(1) not in nonces, 'SPA CSP nonce reused across requests'
+        nonces.add(match.group(1))
+        assert response.headers['X-Content-Type-Options'] == 'nosniff'
+        assert response.headers['X-Frame-Options'] == 'DENY'
+        assert response.headers['Referrer-Policy'] == 'no-referrer'
+        assert b'<html' in response.read().lower()
 print('prod: embedded web and security headers OK')
 PY
 docker container rm -f "$app" >/dev/null

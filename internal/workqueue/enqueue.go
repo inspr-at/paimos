@@ -24,7 +24,21 @@ func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID st
 	if err != nil {
 		return nil, err
 	}
-	ready := Check(kind, state, title, body, Fields(fields), false)
+	// AEON-653 / AEON-652 integration seam: recurring occurrences are new
+	// work leaves. Keep the shared legacy readiness vocabulary until 652 lands,
+	// and establish leaf shape under the caller's tree lock before using it.
+	readyKind := kind
+	if kind == "work" {
+		var parent bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds k ON k.tenant_id=c.tenant_id AND k.id=c.kind_id WHERE c.parent_id=$1 AND c.deleted_at IS NULL AND k.slug='work')`, nodeID).Scan(&parent); err != nil {
+			return nil, err
+		}
+		if parent {
+			return nil, fmt.Errorf("recurrence queue target must be a leaf")
+		}
+		readyKind = "ticket"
+	}
+	ready := Check(readyKind, state, title, body, Fields(fields), false)
 	if !ready.Ready {
 		return nil, fmt.Errorf("recurrence ticket is not ready for the queue")
 	}

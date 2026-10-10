@@ -1,0 +1,1744 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/rules/doctrine
+paths:
+  /rules/budget:
+    get:
+      operationId: "getRuleBudget"
+      description: "AEON-432. rules.read. The workspace's always-on budget for one merged session file (default 12,000 bytes; 2,000 to 500,000) and optional per-layer caps. Recent client capabilities describe delivery; they never block saving a budget."
+      responses:
+        "200":
+          description: "The workspace budget"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleBudgetView"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+    put:
+      operationId: "setRuleBudget"
+      description: "AEON-432. settings.manage in the workspace; people only. Sets the total budget (2,000 to 500,000 bytes; older clients never block saving) and optional per-layer caps (500 bytes to the total; omit or 0 for none). Outside the product bounds returns 400 invalid_budget, including 500,001. Refused with 422 when a session file served now would no longer fit. Each client receives whole rules within min(budget, its reported limit), retaining all locked rules or failing closed. Publication and explanation use the workspace budget. The store caps (2,000 rules, 2 MiB) are separate and unchanged."
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        "200":
+          description: "The saved budget"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleBudgetView"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Ambiguous same-rank rule identity in the published session context","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"A session file served now would exceed the new budget","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/RuleBudget"
+  /rules/channels:
+    get:
+      operationId: getRuleChannels
+      description: "rules.read. Delivery channels for rules (AEON-320). releases names each pinned doctrine repository (repository, ref, commit) and carries no doctrine text. duplicates lists only published Aeon rules whose set scope the caller may read (rules.read and scoped ownership), including the exact project. A copy matches a git-backed rule by: the same trimmed text, or a source identity or reference equal to that rule's identity (repository/path#anchor, AEON-318). The session file omits those rules and states the pin as a pointer. At most 100 duplicates, ordered by Aeon identity."
+      responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "200":
+          description: Doctrine pins and published copies
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/RuleChannels"}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/comparisons:
+    get:
+      operationId: listRulesComparisons
+      description: "rules.read in the named project. Latest stored comparison per harness. Hashes, statuses and counts only; no instruction text or paths."
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Latest comparison per harness
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [comparisons]
+                properties:
+                  comparisons:
+                    type: array
+                    maxItems: 8
+                    items: {"$ref": "#/components/schemas/RulesComparison"}
+        "400": {"description":"Invalid project","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Project unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+    post:
+      operationId: createRulesComparison
+      description: "rules.write in the named project. Stores one comparison summary. The server rejects instruction text, paths and unknown fields. The person is the caller or the agent key's creator."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"$ref": "#/components/schemas/RulesComparisonUpload"}
+      responses:
+        "200":
+          description: Stored comparison summary
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/RulesComparison"}
+        "400": {"description":"Comparison rejected","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or agent binding denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Project unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "413": {"description":"Comparison is larger than 256 KiB","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/doctrine:
+    get:
+      operationId: getDoctrineLayer
+      description: "rules.read (person or agent key). The INSPR doctrine as a git-backed, read-only rule layer (AEON-318): every repository this workspace indexes, at its pinned commit. Git is the source of truth. Each rule's identity is its repository, file and heading anchor; source is the exact bytes of its lines at the pinned commit, and url opens those lines. TL;DRs come from a .tldr.yaml sidecar in git and are only displayed. Aeon holds no doctrine text beyond a cache keyed by the pinned commit. Edits are proposed as PRs; the pinned source remains unchanged. Credential-backed sources require an operator-provisioned tenant/repository grant even when reading cached files; unavailable grants show the source as failed with a generic credential error and no cached files."
+      responses:
+        "200":
+          description: The doctrine layer
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/doctrine/analysis:
+    get:
+      operationId: listDoctrineOutcomeAnalysis
+      description: "Person-only, workspace rules.read, outcome.read and knowledge.read. Up to 100 deterministic outcome findings, including internal notes refused by the public leak guard. Evidence stays inside the workspace. Daily analysis defaults to a 14-day window, 3 occurrences, 5 open drafts and 5 draft attempts per UTC day. No LLM calls or token consumption. Metrics are descriptive, not causal; after measurements require instruction provenance matching the changed file, in the same harness and ticket kind. Missing provenance leaves the comparison pending. The job never publishes (AEON-444): each proposal waits in the doctrine inbox, proposed by the System principal, until a person sends it to git or dismisses it; a dismissal closes the finding, a promotion or a merge starts the after measurement."
+      responses:
+        "200":
+          description: Findings and proposal measurements
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [findings]
+                properties:
+                  findings: {type: array, items: {"$ref": "#/components/schemas/DoctrineFinding"}}
+        "403": {description: Person with workspace rules.read required}
+  /rules/doctrine/inbox:
+    get:
+      operationId: listDoctrineInbox
+      description: "rules.read. The doctrine inbox (AEON-444). A person (not a key) sees every waiting proposal; an agent or key sees its own proposals in any state, with the dismissal reason. Each item carries the rule heading, the waiting text, a word diff against the rule at the current pin, the proposer's name and kind, the linked ticket and the why. outdated means the pinned rule changed since the proposal; Propose PR then needs Edit then propose. A private source whose credential grant is unavailable shows neither text nor diff. Each read also sweeps: waiting text of a proposal that left the inbox is deleted, and a proposal waiting longer than 30 days is dismissed with the reason expired (an hourly sweep does the same)."
+      responses:
+        "200":
+          description: The inbox
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pending, items]
+                properties:
+                  pending: {type: integer, minimum: 0}
+                  items: {type: array, items: {"$ref": "#/components/schemas/DoctrineInboxItem"}}
+    post:
+      operationId: proposeDoctrineInboxChange
+      description: "Workspace rules.write (person or agent key). Records a waiting doctrine proposal against the rule at the pinned commit; nothing is written to GitHub. The editor's checks apply before anything is stored: exactly one rule in the same section with its marker, a valid TL;DR sidecar, the size budget (rule 8000 bytes, why 2000, TL;DR 300 per language), credential and public-identity text, Unicode and Latin-only rules for the public repository, and the private quotation guard. Locked rules (before or after the change) are person-only (403 locked_rule). Without tldr the rule keeps its current TL;DR. The ticket must be readable by the caller. One waiting proposal per proposer and rule (409 rule_proposal_open; the identical proposal is returned), at most 10 waiting per proposer and 50 per workspace (409 inbox_full). The same request_id replays its proposal. The waiting text is held in Aeon until a person sends it to git or dismisses it, then deleted; the proposal row keeps references only."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"$ref": "#/components/schemas/DoctrineInboxInput"}
+      responses:
+        "200":
+          description: The waiting proposal
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+        "400": {description: "Invalid edit, no change, or a rule without a TL;DR"}
+        "403": {description: "Permission denied, or a locked rule (locked_rule)"}
+        "404": {description: Unknown source or ticket}
+        "409": {description: "Stale rule or pin, request id conflict, an open proposal for this rule (rule_proposal_open), or a full inbox (inbox_full)"}
+        "422": {description: "Credential, identity, non-Latin, ambiguous Unicode or private-quotation text refused the proposal"}
+        "503": {description: App or quotation guard not configured}
+  /rules/doctrine/inbox/summary:
+    get:
+      operationId: getDoctrineInboxSummary
+      description: "rules.read. The waiting count and headlines (id, label, created_at, notified) for the Settings dot and the proposal toast; no rule text. Same visibility as the inbox. notified is true once the caller claimed the proposal's toast (claimDoctrineInboxNotice)."
+      responses:
+        "200":
+          description: Waiting proposals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pending, items]
+                properties:
+                  pending: {type: integer, minimum: 0}
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, label, created_at, notified]
+                      properties:
+                        id: {type: string, format: uuid}
+                        label: {type: string, description: "The proposed English TL;DR, else the rule heading"}
+                        created_at: {type: string, format: date-time}
+                        notified: {type: boolean, description: "The caller already claimed this proposal's toast"}
+  /rules/doctrine/inbox/{proposalId}/dismiss:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: dismissDoctrineInboxProposal
+      description: "Person-only workspace rules.write. Closes a waiting proposal as dismissed with a reason (1 to 500 bytes, no credential-shaped text). The reason goes back to the proposer: on the proposal they list and as a comment on the linked ticket. The waiting text is deleted. Repeating it is a no-op."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: {type: string, minLength: 1, maxLength: 500}
+      responses:
+        "200":
+          description: The dismissed proposal
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+        "403": {description: A person with workspace rules.write dismisses proposals}
+        "409": {description: The proposal is not waiting}
+  /rules/doctrine/inbox/{proposalId}/notified:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: claimDoctrineInboxNotice
+      description: "Person-only (not a key) workspace rules.read. Claims the toast for a waiting proposal: claimed is true only for the first call per person and proposal, across tabs, devices and reloads, so a proposal toasts once. The claim is atomic and idempotent; every later call, and a call for a proposal that is no longer waiting (dismissed, expired, sent to git or promoted), returns claimed false. A claim racing a dismissal waits for it. Claims are deleted once the proposal leaves the inbox."
+      responses:
+        "200":
+          description: Whether this call claimed the toast
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [claimed]
+                properties:
+                  claimed: {type: boolean}
+        "403": {description: Agents and keys are not notified}
+        "400": {description: Not a proposal UUID}
+  /rules/doctrine/inbox/{proposalId}/pull-request:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: submitDoctrineInboxProposal
+      description: "Person-only workspace rules.write (Propose PR). Sends a waiting proposal to git through the AEON-319 path with every check of proposeDoctrineChange, run as the submitting person; the proposer stays recorded. Any of source, tldr and why make it Edit then propose: the person's text replaces the waiting text, and rule_sha256 names the pinned rule they edited against. An outdated proposal without edits is 409 stale_rule. A proposal dismissed, expired or promoted before publication starts is 409 not_pending and nothing reaches GitHub. The transaction that records the PR deletes the waiting text. Repeating the request recovers an interrupted PR; a branch left by an attempt with other text or another base is 409 request_conflict."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                source: {type: string, maxLength: 8000}
+                tldr:
+                  type: object
+                  additionalProperties: false
+                  required: [en]
+                  properties:
+                    en: {type: string, maxLength: 300}
+                    de: {type: string, maxLength: 300}
+                why: {type: string, maxLength: 2000}
+                rule_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+      responses:
+        "200":
+          description: The proposal with its pull request
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+        "403": {description: A person with workspace rules.write sends proposals to git}
+        "409": {description: "Not waiting, busy, stale rule or source, or a conflicting earlier attempt"}
+        "422": {description: "Refused text, as for proposeDoctrineChange"}
+        "503": {description: App not configured or outcome uncertain; repeat the request}
+  /rules/doctrine/proposals:
+    get:
+      operationId: listDoctrineProposals
+      description: "rules.read. Workspace proposal references only; proposed text lives in git. At most 100 recent proposals."
+      responses:
+        "200":
+          description: Proposal history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [proposals]
+                properties:
+                  proposals: {type: array, items: {"$ref": "#/components/schemas/DoctrineProposal"}}
+    post:
+      operationId: proposeDoctrineChange
+      description: "Workspace rules.write, by a person only (AEON-444): agents and person-created API keys get 403 forbidden and propose through POST /rules/doctrine/inbox, where a person sends the change to git. Locked rules change only through a person (403 locked_rule). Requires a server-configured GitHub App, operator-acknowledged DCO contribution policy and its designated tenant. The App key reference requires an operator-owned tenant/exact-repository allowlist grant, checked before key use for each proposal, refresh or approval. Tokens are narrowed to the owning repository; all GitHub requests use https://api.github.com with redirects disabled. Commit authorship and sign-off use the verified App bot identity. The source determines the owning repository; only the host-configured AEON_DOCTRINE_PUBLIC_REPOSITORY and AEON_DOCTRINE_PRIVATE_REPOSITORY pair is writable, with matching source and App repository visibility. Unset variables retain the INSPR defaults; an explicitly empty public variable makes public packs read-only in a private-only deployment. Before any token mint or GitHub call, the changed rule, its TLDR entry and explanation are normalized with the versioned Unicode default-ignorable/NFKD/casefold/confusables pipeline and checked for identity patterns and quotations from the indexed private doctrine. Ambiguous Unicode compatibility/visual forms are refused (422 ambiguous_text). Public proposal letters must be Latin, including German umlauts and ß, and digits must be ASCII (422 non_latin). Quotation exemptions use only blobs identical to the independently resolved main tree cached during public source indexing, never the configured pin, a proposal branch or an unmerged SHA. The cache expires after five minutes; a private match with a missing or stale cache returns 422 public_main_unavailable without fetching. Reindex the public source to refresh it. Proposals without a private match need no guard network reads. Normal PR preparation still checks main and refuses stale exemptions with 409 stale_source. The private guard is an HMAC keyed by the server secret AEON_DOCTRINE_GUARD_KEY_FILE; a missing guard or mismatched normalizer/table/binary-policy version returns 422 private_index_unavailable until reindex or the startup rebuild. Every non-UTF-8 or control-bearing private file blocks the guard unless its exact path and SHA-256 are in the reviewed host binary allowlist (empty by default). Public proposals require an available, authorized private index; unchanged file content is not scanned. GitHub I/O holds no database locks: short authorized transactions reserve a per-proposal lease and compare the saved version before applying results. Source, main-file blob and rule digest must match. Reuse request_id with identical input to recover a timeout; another input returns 409. No draft prose is retained in Aeon. A ref that lands after authority is revoked is stored as branch with orphaned true and a doctrine.branch_observed event."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"$ref": "#/components/schemas/DoctrineProposalInput"}
+      responses:
+        "200":
+          description: Created or recovered proposal
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+        "400": {description: Invalid edit}
+        "403": {description: "Permission or tenant denied; an agent or API key (forbidden); a locked rule changed without a person (locked_rule)"}
+        "409": {description: Stale source or request id conflict}
+        "422": {description: "Credential, non-Latin public text (non_latin), ambiguous Unicode text (ambiguous_text), private quotation (private_doctrine), a missing or incompatible private guard (private_index_unavailable), or a missing or stale public main cache (public_main_unavailable) refused the proposal"}
+        "503": {description: App not configured or outcome uncertain; retry the same request id}
+  /rules/doctrine/proposals/{proposalId}/approve:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: approveDoctrineProposal
+      description: "Person-only workspace rules.publish, no agent/key approval. Body head_sha must match the recorded and live PR head. Requires protected main, clean mergeability, and the configured independent gate account's latest APPROVED review on that exact head with explicit ok, checks_green, and distinct author/reviewer families. GitHub enforces required checks at merge; the App must not bypass protections. Record the approval before attempting the SHA-guarded merge. Dispatch doctrine-release to the owning repo after merge (idempotency key proposal id); the repo reserves CalVer3 under its own flow. Refresh observes the published release; dispatch alone is never released. Repeating approval recovers uncertain merge/dispatch outcomes. A merge observed outside Aeon is recorded as an observation, never attributed to the observing person as approver; without an existing Aeon approval, release must be requested in the owning repository."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [head_sha]
+              properties:
+                head_sha: {type: string, pattern: "^[0-9a-f]{40}$"}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        "200":
+          description: Proposal after approval attempt
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+        "403": {description: A person with workspace publication authority must approve}
+        "409": {description: Head changed or checks/review gate not green}
+  /rules/doctrine/proposals/{proposalId}/pins:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: reportDoctrineProposalPin
+      description: "Person-only settings.manage. Record an operator-verified machine pin, never change one. machine_key is a SHA-256 of a stable machine identity (no hostname); commit must equal this proposal's verified release_commit. Upserts the machine's observation for this repository, so newer pins stop counting toward older releases. UI explicitly labels counts as reported."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [machine_key, commit]
+              properties:
+                machine_key: {type: string, pattern: "^[0-9a-f]{64}$"}
+                commit: {type: string, pattern: "^[0-9a-f]{40}$"}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        "200":
+          description: Updated reported pin count
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+  /rules/doctrine/proposals/{proposalId}/refresh:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: refreshDoctrineProposal
+      description: "Workspace rules.write. Observe PR/check/review/release state from GitHub; never merge or dispatch. An unchanged refresh emits no event. A release is accepted only with owning-repo provenance for this proposal and merge, and a tag resolving to that merge or its descendant."
+      responses:
+        "200":
+          description: Current proposal
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+  /rules/doctrine/sources:
+    post:
+      operationId: addDoctrineSource
+      description: "settings.manage; person only. Adds a repository to the doctrine layer, pinned to a commit. The server resolves ref (or checks commit) through the configured reader before anything is stored, then indexes the pinned commit; a failed index is recorded on the source (state failed, error), the pin stays. A private repository names a credential reference; the server requires an operator-owned tenant/repository grant before fetching with a token file, the GitHub App, or a read-only host mirror and never stores, logs or returns it. Tenant owners cannot grant credential access. GitHub reads use only https://api.github.com and never follow redirects. At most 8 repositories per workspace."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"$ref": "#/components/schemas/DoctrineSourceInput"}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        "200":
+          description: The doctrine layer after the change
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "400": {"description":"Invalid repository, ref, commit, paths or credential reference","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied; agent keys never configure doctrine","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"The repository is already configured, the limit is reached, or ref does not name commit (code ref_mismatch)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"GitHub or the credential could not be used (code git_unavailable); nothing was stored","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/doctrine/sources/{sourceId}:
+    parameters:
+      - {name: sourceId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: pinDoctrineSource
+      description: "settings.manage; person only. Replaces a source's pin and selection. The repository cannot change. A new commit restarts pinned_at, drops the cached bytes of the old commit and indexes the new one. Responses as for addDoctrineSource; 404 when the source is not in this workspace."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"$ref": "#/components/schemas/DoctrineSourceInput"}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        "200":
+          description: The doctrine layer after the change
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "400": {"description":"Invalid input","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Source unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"ref does not name commit (code ref_mismatch)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"GitHub or the credential could not be used; nothing changed","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+    delete:
+      operationId: removeDoctrineSource
+      description: "settings.manage; person only. Stops indexing a repository and deletes its cached bytes. Git is not touched."
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        "200":
+          description: The doctrine layer after the change
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Source unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/doctrine/sources/{sourceId}/index:
+    parameters:
+      - {name: sourceId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: indexDoctrineSource
+      description: "For host-mirror, reindex resolves the current host commit marker and updates the pin and both indexes together. settings.manage; person only. Reads the source again at its pinned commit and replaces the cache. A failure keeps the files of the last successful index at this commit and sets error. An unavailable credential grant prevents fetching and hides cached files until the operator authorizes this workspace/repository again."
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        "200":
+          description: The doctrine layer after the attempt
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Source unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/explained:
+    get:
+      operationId: "explainAgentRules"
+      description: "AEON-314. The session file for the same selectors and authorization as /rules/merged, explained for people: every served rule with its set, layer and explanation (TL;DR), per-layer bytes against the workspace budget, and the exact file. Never sent to agents and records no served manifest. A budget or floor problem is reported in problem instead of failing, so people can see what to fix."
+      responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "200":
+          description: "The explained session file"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ExplainedRules"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules. A named-agent preview the caller could already see may return not_key_creator, key_revoked, key_expired, or agent_inactive (as GET /rules/merged); every other caller receives forbidden.","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"The snapshots for this session exceed 2,000 rules or 2 MiB of rule text","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "project_id"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        -
+          name: "person_id"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        -
+          name: "agent_id"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            format: "uuid"
+        -
+          name: "role"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+        -
+          name: "harness"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+        -
+          name: "task_id"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            format: "uuid"
+  /rules/layers:
+    get:
+      operationId: "listRuleLayers"
+      description: "rules.read; only authorized project/owner layers. Coordinator keys require live coordinator role grants and effective node access on a project, capped by their human creator's node and rules access. After permission checks, rules reads refuse operator-created keys without a human creator with 403 rules_owner_required; create the key as a signed-in person to retain scoped ownership."
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                properties:
+                  layers:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/RuleLayer"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+    post:
+      operationId: "createRuleLayer"
+      description: "rules.write; scoped owner; company requires person workspace rules.publish"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleLayer"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/RuleScope"
+  /rules/merged:
+    get:
+      operationId: "mergeAgentRules"
+      description: "rules.read in exact project; tenant from authentication; person must be caller or agent key creator; named agent must be caller or owner controlled; role/harness are exact requested selectors, not permission grants; fails closed on ambiguous identities; no HTTP cache. The rendered file stays within the workspace budget (GET /rules/budget; default 12000, maximum 500000 UTF-8 bytes) and its per-layer caps. Explanations (tldr) and details are never included. Git-backed doctrine rules are omitted from that file; when a doctrine release is pinned, body names the release and does not repeat its text. The budget counts this session file only, separate from the harness doctrine. Loading the snapshots for that one file stops at the same store caps as publication: 2,000 rules or 2 MiB of rule text (422 budget_check_too_large). The 1,000 session-file cap remains on batch publication."
+      responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/MergedRules"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules. GET /rules/merged and GET /rules/explained are the only rules routes that return not_key_creator, key_revoked, key_expired, or agent_inactive, and only when the caller could already see that agent (members.read, so GET /members lists it, or they created its key). Every other caller, and a missing agent, receives forbidden.","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap, or the snapshots for this session exceed 2,000 rules or 2 MiB of rule text","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        - {name: X-Aeon-Max-Session-File-Bytes, in: header, required: false, schema: {type: integer, minimum: 2000, maximum: 512000}, description: "Requesting client limit; omission means 12000. Larger files get a deterministic whole-rule compatibility cut: locked rules first, then company, project, person, agent role, named agent, task; identity ascending within each priority. Includes an upgrade note (also bounded for the legacy 512-KiB cache); locked rules are never omitted (422 if they cannot fit)."}
+        -
+          name: "project_id"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        -
+          name: "person_id"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        -
+          name: "agent_id"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            format: "uuid"
+        -
+          name: "role"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+        -
+          name: "harness"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+        -
+          name: "task_id"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            format: "uuid"
+  /rules/publish:
+    post:
+      operationId: "publishRuleSets"
+      description: "Batch publication under one person approval (AEON-263). rules.publish; person only, agents always 403; every set needs the same authority as its single publish (company sets need the workspace publisher). Rules writes take the tenant row lock that access changes take and decide permissions under it, so a concurrent demotion is either seen or waits. All sets are authorized, then revision and rules are checked, before any write. Atomic: one transaction, so any failure (403, 404, 409 revision or version conflict, 422 budget) writes nothing. Set ids must be canonical lowercase UUIDs, each at most once. Each set gets its own immutable snapshot and rules.published event carrying the shared batch_id. After the writes, every session file that includes one of the batch's sets is rendered with every existing contribution (projects with published project rules and a project without any; every person with person or agent rules, other owners' private layers included; each owner's named agents and tasks; every role and harness); files the batch does not touch are not judged. 422 when one exceeds the workspace budget: with actual_bytes for a file whose every layer the caller may read now (rules.read, decided under the access lock), otherwise a generic message without size or identity. 422 budget_check_too_large when the batch touches more than 1,000 session files, or the rule store holds more than 2,000 rules or 2 MiB of rule text, for one check. The body (at most 2 MiB, 413 above) is read before any lock; lock waits, statements, the budget work and the whole transaction (server-side transaction_timeout) are bounded by the request deadline, and nothing commits after it (503 busy, nothing changed). When COMMIT was sent but its answer was lost, the server looks for this request's stored answer on a fresh connection, independent of the caller's current access: 200 with that answer if it is there, otherwise 503 outcome_unknown (the COMMIT may still land; repeating the same request is safe because an identical batch returns its stored answer). Every other rules write answers an unacknowledged COMMIT with 503 outcome_unknown and reload-first wording, without reconciliation. The complete answer is stored with the writes; an exact replay of the same request by the same person returns that stored answer after re-checking authorization and writes nothing. A new request never reuses a stored version (409). The single-set publish route is unchanged. A rule that copies a git-backed doctrine rule is 409 doctrine_duplicate and names Propose a change; the batch writes nothing."
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "200":
+          description: "Every set published, in request order"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleBatchResult"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or a rule that copies git-backed doctrine (doctrine_duplicate; Propose a change)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Credential-shaped text in snapshot fields or notes is refused (credential_text, no matched values returned); otherwise: Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/RuleBatchPublish"
+  /rules/sets:
+    get:
+      operationId: "listRuleSets"
+      description: "rules.read; scope ownership"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                properties:
+                  sets:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/RuleSet"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "layer_id"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+    post:
+      operationId: "createRuleSet"
+      description: "rules.write; scope ownership"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleSet"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              properties:
+                layer_id:
+                  type: "string"
+                  format: "uuid"
+                name:
+                  type: "string"
+              required: ["layer_id", "name"]
+  /rules/sets/{setId}:
+    get:
+      operationId: "getRuleSet"
+      description: "rules.read; scope ownership; includes on-demand draft details"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleSet"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "setId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+  /rules/sets/{setId}/draft:
+    put:
+      operationId: "replaceRuleDraft"
+      description: "rules.write; scoped owner; atomic full replacement using revision"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleSet"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "setId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/RuleDraft"
+  /rules/sets/{setId}/publish:
+    post:
+      operationId: "publishRuleSet"
+      description: "rules.publish; person only; company requires workspace publisher; exact replay of the same version and note returns the original snapshot. A rule that copies a git-backed doctrine rule is refused (409 doctrine_duplicate) and names Propose a change."
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleSnapshot"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or a rule that copies git-backed doctrine (doctrine_duplicate; Propose a change)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Credential-shaped text in snapshot fields or notes is refused (credential_text, no matched values returned); otherwise: Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "setId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/RulePublish"
+  /rules/sets/{setId}/restore:
+    post:
+      operationId: "restoreRuleSet"
+      description: "rules.publish; person only; publishes previous rules at a NEW version; optional note applies only to that new version. Restoring a copy of a git-backed doctrine rule is refused (409 doctrine_duplicate) and names Propose a change."
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleSnapshot"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or a rule that copies git-backed doctrine (doctrine_duplicate; Propose a change)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Credential-shaped text in snapshot fields or notes is refused (credential_text, no matched values returned); otherwise: Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "setId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/RuleRestore"
+  /rules/sets/{setId}/tldr:
+    put:
+      operationId: "draftRuleTLDRs"
+      description: "AEON-314. rules.write with the same scoped ownership as a draft (agents only where they may draft). Writes explanations (TL;DR, English and optional German) for the set and its rules into the draft and changes nothing else; the revision increases and the event is rules.tldr_drafted. Every written explanation is stamped as fitting the current text. Explanations are published with the normal person approval and are never part of what agents receive. An unchanged request returns the set without a new revision."
+      responses:
+        "200":
+          description: "The set with its draft explanations"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleSet"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "setId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/RuleTLDRInput"
+  /rules/sets/{setId}/versions:
+    get:
+      operationId: "listRuleVersions"
+      description: "rules.read; immutable history includes on-demand details"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                properties:
+                  versions:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/RuleSnapshot"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "setId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+  /rules/sets/{setId}/versions/{version}:
+    get:
+      operationId: "getRuleVersion"
+      description: "rules.read; immutable historical snapshot"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleSnapshot"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "setId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        -
+          name: "version"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+components:
+  schemas:
+    AgentRule:
+      type: "object"
+      additionalProperties: false
+      properties:
+        identity:
+          type: "string"
+          pattern: "^[a-z][a-z0-9._-]{0,95}$"
+        text:
+          type: "string"
+          maxLength: 512
+          description: "Required nonempty single line; <=512 UTF-8 bytes"
+        why:
+          type: "string"
+          maxLength: 1024
+          description: "Required nonempty single line; <=1024 UTF-8 bytes"
+        details:
+          type: "string"
+          maxLength: 16384
+          description: "On demand only; <=16384 UTF-8 bytes"
+        strength:
+          description: "Locked rules must be enabled and non-expiring; company locked rules are unconditional."
+          type: "string"
+          enum: ["normal", "locked"]
+        enabled:
+          type: "boolean"
+        expires_at:
+          type: ["string", "null"]
+          format: "date-time"
+        roles:
+          type: "array"
+          items:
+            type: "string"
+            enum: ["coordinator", "builder", "reviewer", "operator"]
+          uniqueItems: true
+        harnesses:
+          type: "array"
+          items:
+            type: "string"
+            enum: ["claude-code", "codex", "grok", "pi", "cursor", "gemini", "opencode"]
+          uniqueItems: true
+        source:
+          type: "object"
+          required: ["reference"]
+          additionalProperties: false
+          properties:
+            reference:
+              type: "string"
+              maxLength: 512
+            revision:
+              type: "string"
+              maxLength: 128
+            identity:
+              type: "string"
+              maxLength: 96
+            edited_here:
+              type: "boolean"
+        tldr:
+          "$ref": "#/components/schemas/RuleTLDR"
+      required: ["identity", "text", "why", "strength", "enabled", "source"]
+    DoctrineFile:
+      type: object
+      additionalProperties: false
+      required: [path, blob_sha, sha256, bytes, kind, layer, url, sets, rules]
+      properties:
+        path: {type: string}
+        blob_sha: {type: string, pattern: "^[0-9a-f]{40}$"}
+        sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        bytes: {type: integer, minimum: 0}
+        kind: {type: string}
+        layer: {type: string}
+        url: {type: string, format: uri}
+        tldr: {"$ref": "#/components/schemas/DoctrineTLDR"}
+        sets: {type: array, items: {"$ref": "#/components/schemas/DoctrineSet"}}
+        rules: {type: array, items: {"$ref": "#/components/schemas/DoctrineRule"}}
+        sidecar:
+          type: object
+          additionalProperties: false
+          required: [path, url]
+          properties:
+            path: {type: string}
+            url: {type: string, format: uri}
+            problem: {type: string}
+            unmatched: {type: array, maxItems: 50, items: {type: string}}
+        problem: {type: string, description: "Set when the file could not be indexed"}
+    DoctrineFinding:
+      type: object
+      required: [id, pattern, title, count, rules_version, harness, ticket_kind, status, evidence, before, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        pattern: {type: string}
+        title: {type: string}
+        count: {type: integer, minimum: 1}
+        rules_version: {type: string}
+        harness: {type: string}
+        ticket_kind: {type: string}
+        status: {type: string, enum: [pending, draft, awaiting_use, internal_note, observed, closed], description: "draft: the proposal waits in the doctrine inbox or as a person's PR"}
+        reason: {type: string, description: Value-free reason for an internal note or pending retry}
+        proposal_id: {type: string, format: uuid}
+        pr_url: {type: string}
+        rule_label: {type: string}
+        before: {"$ref": "#/components/schemas/DoctrineMetric"}
+        metrics: {type: array, items: {"$ref": "#/components/schemas/DoctrineMetric"}, description: "Baseline context for review and fix rounds, CI failures, reverts, exception votes and time to done; missing observations are omitted"}
+        after: {"$ref": "#/components/schemas/DoctrineMetric"}
+        delta: {type: number, description: After mean minus before mean; lower is the intended direction}
+        evidence:
+          type: array
+          items:
+            type: object
+            required: [id, ticket_id, ticket_key, href, kind]
+            properties:
+              id: {type: string}
+              ticket_id: {type: string, format: uuid}
+              ticket_key: {type: string}
+              href: {type: string}
+              kind: {type: string}
+        created_at: {type: string, format: date-time}
+    DoctrineInboxInput:
+      type: object
+      additionalProperties: false
+      required: [request_id, path, rule_key, source, why]
+      properties:
+        request_id: {type: string, format: uuid}
+        source_id: {type: string, format: uuid, description: "The doctrine source; or name it by repository"}
+        repository: {type: string, description: "inspr-modules, inspr-doctrine-private, or the full owner/name"}
+        path: {type: string, maxLength: 300}
+        rule_key: {type: string, maxLength: 200}
+        rule_sha256: {type: string, pattern: "^[0-9a-f]{64}$", description: "The pinned rule the change is against; defaults to the current pin"}
+        source: {type: string, maxLength: 8000, description: "Replacement rule source, including its explicit marker if present"}
+        tldr:
+          type: object
+          additionalProperties: false
+          required: [en]
+          properties:
+            en: {type: string, maxLength: 300}
+            de: {type: string, maxLength: 300}
+        why: {type: string, maxLength: 2000, description: Why this change; it becomes the PR description}
+        ticket: {type: string, pattern: "^[A-Z][A-Z0-9]{0,15}-[1-9][0-9]{0,8}$"}
+    DoctrineInboxItem:
+      allOf:
+        - {"$ref": "#/components/schemas/DoctrineProposal"}
+        - type: object
+          required: [heading, label, base, diff, proposer, proposer_kind]
+          properties:
+            heading: {type: string, description: The rule's heading at the pin}
+            strength: {type: string, enum: [normal, locked]}
+            label: {type: string, description: "The proposed English TL;DR, else the heading"}
+            base: {type: string, description: The rule at the current pin; empty when it is gone}
+            base_sha256: {type: string}
+            proposed: {type: string}
+            tldr:
+              type: object
+              properties:
+                en: {type: string}
+                de: {type: string}
+            why: {type: string}
+            diff:
+              type: array
+              description: "Word diff from base to proposed; the eq and del runs restore base, the eq and ins runs restore proposed"
+              items:
+                type: object
+                required: [op, text]
+                properties:
+                  op: {type: string, enum: [eq, del, ins]}
+                  text: {type: string}
+            outdated: {type: boolean, description: The pinned rule changed since the proposal}
+            proposer: {type: string, description: The proposer's name}
+            proposer_kind: {type: string, enum: [person, agent]}
+            ticket_href: {type: string}
+    DoctrineLayer:
+      type: object
+      additionalProperties: false
+      required: [sources]
+      properties:
+        sources: {type: array, maxItems: 8, items: {"$ref": "#/components/schemas/DoctrineSource"}}
+        proposals_enabled: {type: boolean, description: Whether this workspace has a server-provisioned proposal App and quotation guard key}
+        proposals_disabled_reason: {type: string, description: Admin-visible reason proposal creation is disabled; contains no key material or host path}
+    DoctrineMetric:
+      type: object
+      required: [name, rules_version, samples, value, from, until]
+      properties:
+        name: {type: string}
+        rules_version: {type: string}
+        samples: {type: integer, minimum: 1}
+        value: {type: number}
+        from: {type: string, format: date-time}
+        until: {type: string, format: date-time}
+    DoctrineProposal:
+      type: object
+      required: [id, source_id, repository, path, rule_key, state, head_sha, pr_number, pr_url, proposed_by, created_at, gate_ready, pinned_machines]
+      properties:
+        id: {type: string, format: uuid}
+        source_id: {type: string, format: uuid}
+        repository: {type: string}
+        path: {type: string}
+        rule_key: {type: string}
+        state: {type: string, enum: [proposed, in_review, merged, released, pinned, closed, pending, dismissed, promoted], description: "pending, dismissed and promoted belong to the doctrine inbox (AEON-444). promoted is final: the pinned doctrine contains the proposed rule."}
+        head_sha: {type: string}
+        pr_number: {type: integer}
+        pr_url: {type: string}
+        proposed_by: {type: string, format: uuid}
+        approved_by: {type: string, format: uuid}
+        merge_commit: {type: string}
+        release: {type: string}
+        release_commit: {type: string}
+        release_url: {type: string}
+        release_requested: {type: boolean}
+        gate_ready: {type: boolean}
+        gate_reason: {type: string}
+        pinned_machines: {type: integer, minimum: 0, description: "Operator-reported, not live machine inventory"}
+        branch: {type: string, description: "Proposal branch name when the GitHub ref exists"}
+        orphaned: {type: boolean, description: "True when that branch exists without a pull request because authority was revoked during the ref write. An admin should delete the branch."}
+        created_at: {type: string, format: date-time}
+        draft: {type: boolean, description: "Automatic outcome proposals are created as GitHub drafts; only a person may make them ready on GitHub."}
+        automatic: {type: boolean, description: Generated by the deterministic outcome analysis}
+        inbox: {type: boolean, description: "Proposed through the doctrine inbox (AEON-444)"}
+        base_rule_sha256: {type: string, description: SHA-256 of the pinned rule the proposal changes}
+        proposed_rule_sha256: {type: string, description: "SHA-256 of the proposed rule bytes; a pin whose index holds them and the proposed TL;DR closes the proposal as promoted"}
+        proposed_tldr_sha256: {type: string, description: "SHA-256 of the proposed TL;DR (English, NUL, German, each trimmed); promotion needs it at the pin too"}
+        ticket: {type: string, description: Linked ticket key}
+        ticket_id: {type: string, format: uuid}
+        submitted_by: {type: string, format: uuid, description: The person who sent it to git}
+        edited_by: {type: string, format: uuid, description: The person who edited it before sending}
+        dismissed_by: {type: string, format: uuid}
+        dismiss_reason: {type: string, maxLength: 500}
+        promoted_commit: {type: string, description: The pinned commit that contains the change}
+        approved_file_sha256: {type: string, description: "SHA-256 of the rule file as a person sent it to git, then as the promoting pin holds it; outcome measurement follows these bytes"}
+    DoctrineProposalInput:
+      type: object
+      additionalProperties: false
+      required: [request_id, source_id, path, rule_key, rule_sha256, source, tldr, explanation]
+      properties:
+        request_id: {type: string, format: uuid}
+        source_id: {type: string, format: uuid}
+        path: {type: string, maxLength: 300}
+        rule_key: {type: string, maxLength: 200}
+        rule_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        source: {type: string, maxLength: 8000, description: "Replacement rule source, including its explicit marker if present. Must still parse as exactly one rule in the same set."}
+        tldr:
+          type: object
+          additionalProperties: false
+          required: [en]
+          properties:
+            en: {type: string, maxLength: 300}
+            de: {type: string, maxLength: 300}
+        explanation: {type: string, maxLength: 2000, description: Why this change; stored only in the PR body}
+    DoctrineRule:
+      type: object
+      additionalProperties: false
+      required: [key, identity, set, heading_path, anchor, start_line, end_line, source, sha256, text, strength, url]
+      properties:
+        key: {type: string, description: "The rule's aeon-rule id, or its text key (t-…) without one; TL;DR sidecars refer to it"}
+        identity: {type: string, description: "repository/path#anchor"}
+        set: {type: string}
+        heading_path: {type: string}
+        anchor: {type: string, description: "GitHub anchor of the heading the rule sits under"}
+        start_line: {type: integer, minimum: 1}
+        end_line: {type: integer, minimum: 1}
+        source: {type: string, description: "The exact bytes of lines start_line..end_line at the pinned commit"}
+        sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        text: {type: string, description: "The rule line as the importer reads it"}
+        strength: {type: string, enum: [normal, locked]}
+        url: {type: string, format: uri, description: "The file at the pinned commit, opened at these lines"}
+        tldr: {"$ref": "#/components/schemas/DoctrineTLDR"}
+    DoctrineSet:
+      type: object
+      additionalProperties: false
+      required: [set, title, anchor]
+      properties:
+        set: {type: string}
+        title: {type: string}
+        anchor: {type: string}
+        tldr: {"$ref": "#/components/schemas/DoctrineTLDR"}
+    DoctrineSkip:
+      type: object
+      additionalProperties: false
+      required: [path, reason]
+      properties:
+        path: {type: string}
+        reason: {type: string}
+    DoctrineSource:
+      type: object
+      additionalProperties: false
+      required: [id, repository, visibility, commit, pinned_at, paths, url, state, files, skipped]
+      properties:
+        proposals_enabled: {type: boolean, description: "Whether this deployment and workspace permit proposals to this source; false for read-only packs and mismatched visibility. Publication still requires person authority and all server guards."}
+        id: {type: string, format: uuid}
+        repository: {type: string, description: "owner/name on GitHub"}
+        visibility: {type: string, enum: [public, private]}
+        ref: {type: string, description: "The release tag the pin was set from"}
+        commit: {type: string, pattern: "^[0-9a-f]{40}$"}
+        committed_at: {type: string, format: date-time}
+        pinned_at: {type: string, format: date-time, description: "When this commit was pinned in Aeon"}
+        paths: {type: array, minItems: 1, maxItems: 20, items: {type: string}}
+        credential_ref: {type: string, description: "Host credential name, github-app, or host-mirror; never a token"}
+        url: {type: string, format: uri}
+        state: {type: string, enum: [ready, not_indexed, failed]}
+        error: {type: string, maxLength: 300, description: "Read or freshness warning. An authorized indexed host-mirror pin remains ready with its cached files when the host marker advances; error marks it stale until reindex. Revoked grants or invalid mirrors hide cached files. Public proposals still require a fresh private quotation guard."}
+        indexed_at: {type: string, format: date-time}
+        files: {type: array, items: {"$ref": "#/components/schemas/DoctrineFile"}}
+        skipped: {type: array, maxItems: 50, items: {"$ref": "#/components/schemas/DoctrineSkip"}}
+    DoctrineSourceInput:
+      type: object
+      additionalProperties: false
+      required: [visibility]
+      description: "Commit is the pin. ref names the release tag; alone it is resolved to the commit it names now, with commit it must name that commit. paths default to docs/AGENTS-*.md; a wildcard never selects AGENTS-PROFILE*.md. repository is required when adding and must match when pinning."
+      properties:
+        repository: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$"}
+        visibility: {type: string, enum: [public, private]}
+        ref: {type: string, maxLength: 128}
+        commit: {type: string, pattern: "^[0-9a-f]{40}$"}
+        paths: {type: array, maxItems: 20, items: {type: string, maxLength: 200}}
+        credential_ref: {type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$", description: "Required for a private repository. Names a token file under AEON_DOCTRINE_CREDENTIALS_DIR with a tenant/repository allowlist, or github-app for a short-lived exact-repository contents:read token using the App key allowlist, or host-mirror for an allowlisted read-only host tree under AEON_DOCTRINE_MIRROR_DIR. Host policy is never tenant-editable"}
+    DoctrineTLDR:
+      type: object
+      additionalProperties: false
+      required: [en]
+      description: "An explanation for people, read from git (AEON-314 shape). check is true when the sidecar's basis no longer matches the text."
+      properties:
+        en: {type: string, maxLength: 300}
+        de: {type: string, maxLength: 300}
+        check: {type: boolean}
+    ExplainedRules:
+      type: "object"
+      additionalProperties: false
+      properties:
+        context:
+          "$ref": "#/components/schemas/RuleContext"
+        version: {type: string}
+        sha256: {type: string}
+        body: {type: string, description: "The exact file agents receive for this context"}
+        byte_size: {type: integer}
+        budget:
+          "$ref": "#/components/schemas/RuleBudget"
+        usage:
+          "$ref": "#/components/schemas/RuleLayerBytes"
+        sets:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            properties:
+              set_id: {type: string, format: uuid}
+              name: {type: string}
+              scope:
+                "$ref": "#/components/schemas/RuleScope"
+              version: {type: string}
+              tldr:
+                "$ref": "#/components/schemas/RuleTLDR"
+              bytes: {type: integer}
+            required: ["set_id", "name", "scope", "version", "bytes"]
+        rules:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            properties:
+              identity: {type: string}
+              text: {type: string}
+              line: {type: string, description: "The exact line in the file, without its newline"}
+              set_id: {type: string, format: uuid}
+              layer: {type: string, enum: [company, project, person, agent]}
+              strength: {type: string, enum: [normal, locked]}
+              tldr:
+                "$ref": "#/components/schemas/RuleTLDR"
+              bytes: {type: integer}
+            required: ["identity", "text", "line", "set_id", "layer", "strength", "bytes"]
+        problem:
+          "$ref": "#/components/schemas/RuleError"
+      required: ["context", "version", "sha256", "body", "byte_size", "budget", "usage", "sets", "rules"]
+    MergedRules:
+      type: "object"
+      additionalProperties: false
+      properties:
+        context:
+          "$ref": "#/components/schemas/RuleContext"
+        versions:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            properties:
+              set_id:
+                type: "string"
+                format: "uuid"
+              version:
+                type: "string"
+                pattern: "^[1-9][0-9]{11}\\.0\\.0$"
+                description: "Calendar coordinate YYMMDDhhmmss.0.0 (inspr-calver-3; inspr-calendar-v2 for history); valid Gregorian UTC, immutable within set"
+              sha256:
+                type: "string"
+            required: ["set_id", "version", "sha256"]
+        version:
+          type: "string"
+          description: "Latest participating calendar version, or floor-only"
+        sha256:
+          type: "string"
+        body:
+          type: "string"
+          description: "Exact always-on rendered bytes; within the workspace budget (default 12000, never above 500000 UTF-8 bytes); details and explanations excluded"
+        byte_size:
+          type: "integer"
+          maximum: 512000
+        rules:
+          type: "array"
+          maxItems: 10000
+          items:
+            "$ref": "#/components/schemas/AgentRule"
+        floor:
+          type: "string"
+          description: "Locked company floor lines present in body. A floor rule delivered through doctrine is represented by its identity and immutable commit, never repeated text. Changing the independently retained floor pin requires explicit review."
+        valid_until:
+          type: ["string", "null"]
+          format: "date-time"
+      required: ["context", "versions", "version", "sha256", "body", "byte_size", "rules", "floor", "valid_until"]
+    RuleBatchPublish:
+      type: "object"
+      additionalProperties: false
+      properties:
+        items:
+          type: "array"
+          minItems: 1
+          maxItems: 100
+          items:
+            type: "object"
+            additionalProperties: false
+            properties:
+              set_id:
+                type: "string"
+                format: "uuid"
+                pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                description: "Canonical lowercase UUID; other spellings are refused (400)"
+              expected_revision:
+                type: "integer"
+                minimum: 1
+              version:
+                type: "string"
+                pattern: "^(auto|[1-9][0-9]{11}\\.0\\.0)$"
+                description: "auto (the server assigns the next calendar coordinate, strictly later than the set's current publication) or an explicit valid UTC calendar coordinate"
+            required: ["set_id", "expected_revision", "version"]
+        note:
+          type: "string"
+          maxLength: 500
+          description: "Optional note stored on every new snapshot of the batch. Empty or omitted stores no note."
+      required: ["items"]
+    RuleBatchResult:
+      type: "object"
+      additionalProperties: false
+      properties:
+        batch_id:
+          type: "string"
+          format: "uuid"
+          description: "Shared id recorded in each set's rules.published event; a replay returns the stored answer with the same id"
+        versions:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/RuleSnapshot"
+        max_bytes:
+          type: "integer"
+          description: "Largest merged file, in UTF-8 bytes, among the checked files whose every layer the caller may read (rules.read); 0 when there is none"
+      required: ["batch_id", "versions", "max_bytes"]
+    RuleBudget:
+      type: "object"
+      additionalProperties: false
+      properties:
+        max_bytes: {type: integer, minimum: 2000, maximum: 500000}
+        layer_max_bytes:
+          "$ref": "#/components/schemas/RuleLayerBytes"
+      required: ["max_bytes"]
+    RuleBudgetBlocker:
+      type: object
+      required: [host, harness, max_session_file_bytes]
+      properties:
+        host: {type: string}
+        harness: {type: string}
+        version: {type: string}
+        max_session_file_bytes: {type: integer}
+        delivered_max_bytes: {type: integer, description: "Delivery allowance: min(workspace budget, reported client limit). Whole-rule delivery may use fewer bytes; locked rules are never omitted."}
+        truncated: {type: boolean, description: "The client's allowance is below the workspace budget."}
+    RuleBudgetView:
+      type: "object"
+      additionalProperties: false
+      properties:
+        max_bytes: {type: integer}
+        layer_max_bytes:
+          "$ref": "#/components/schemas/RuleLayerBytes"
+        default_bytes: {type: integer}
+        min_bytes: {type: integer}
+        ceiling_bytes: {type: integer, description: "Product budget ceiling: 500000, independent of recent client reports."}
+        blocking_clients:
+          type: array
+          description: "Recent client delivery inventory (historical field name retained), grouped by host/harness/version/limit, at most 50, including stopped/archived sessions active within seven days. Only people with workspace settings.manage receive these tenant-wide details. Clients never block budget changes."
+          maxItems: 50
+          items: {$ref: '#/components/schemas/RuleBudgetBlocker'}
+        blocking_clients_more: {type: integer, minimum: 0, description: "Additional recent clients omitted after the first 50. Present only together with blocking_clients, and only for settings.manage."}
+        min_layer_bytes: {type: integer}
+      required: ["max_bytes", "layer_max_bytes", "default_bytes", "min_bytes", "ceiling_bytes", "min_layer_bytes"]
+    RuleChannels:
+      type: object
+      additionalProperties: false
+      required: [releases, duplicates]
+      description: "Doctrine pins and published Aeon rules that copy them (AEON-320). No doctrine text."
+      properties:
+        releases:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            additionalProperties: false
+            required: [repository, commit]
+            properties:
+              repository: {type: string}
+              ref: {type: string}
+              commit: {type: string, pattern: "^[0-9a-f]{40}$"}
+        duplicates:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [identity, doctrine]
+            properties:
+              identity: {type: string, maxLength: 96, description: "Aeon rule identity"}
+              doctrine: {type: string, maxLength: 300, description: "repository/path#anchor from the doctrine index"}
+    RuleContext:
+      type: "object"
+      additionalProperties: false
+      properties:
+        tenant_id:
+          type: "string"
+          format: "uuid"
+        project_id:
+          type: "string"
+          format: "uuid"
+        person_id:
+          type: "string"
+          format: "uuid"
+        agent_id:
+          type: "string"
+          format: "uuid"
+        role:
+          type: "string"
+          enum: ["coordinator", "builder", "reviewer", "operator"]
+        harness:
+          type: "string"
+          enum: ["claude-code", "codex", "grok", "pi", "cursor", "gemini", "opencode"]
+        task_id:
+          type: "string"
+          format: "uuid"
+      required: ["tenant_id", "project_id", "person_id", "role", "harness"]
+    RuleDraft:
+      type: "object"
+      additionalProperties: false
+      properties:
+        expected_revision:
+          type: "integer"
+          minimum: 1
+        name:
+          type: "string"
+          maxLength: 128
+        rules:
+          type: "array"
+          maxItems: 100
+          items:
+            "$ref": "#/components/schemas/AgentRule"
+        tldr:
+          description: "AEON-314. The set explanation. Absent keeps the current one; null removes it."
+          oneOf:
+            - "$ref": "#/components/schemas/RuleTLDR"
+            - type: "null"
+      required: ["expected_revision", "name", "rules"]
+    RuleLayer:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        scope:
+          "$ref": "#/components/schemas/RuleScope"
+      required: ["id", "scope"]
+    RuleLayerBytes:
+      type: "object"
+      additionalProperties: false
+      properties:
+        company: {type: integer, minimum: 0, maximum: 500000}
+        project: {type: integer, minimum: 0, maximum: 500000}
+        person: {type: integer, minimum: 0, maximum: 500000}
+        agent: {type: integer, minimum: 0, maximum: 500000}
+    RulePublish:
+      type: "object"
+      additionalProperties: false
+      properties:
+        expected_revision:
+          type: "integer"
+          minimum: 1
+        version:
+          type: "string"
+          pattern: "^[1-9][0-9]{11}\\.0\\.0$"
+          description: "Calendar coordinate YYMMDDhhmmss.0.0 (inspr-calver-3; inspr-calendar-v2 for history); valid Gregorian UTC, immutable within set"
+        note:
+          type: "string"
+          maxLength: 500
+          description: "Optional note stored on the new immutable snapshot. Empty or omitted stores no note."
+      required: ["expected_revision", "version"]
+    RuleRestore:
+      type: "object"
+      additionalProperties: false
+      properties:
+        expected_revision:
+          type: "integer"
+          minimum: 1
+        version:
+          type: "string"
+          pattern: "^[1-9][0-9]{11}\\.0\\.0$"
+          description: "Calendar coordinate YYMMDDhhmmss.0.0 (inspr-calver-3; inspr-calendar-v2 for history); valid Gregorian UTC, immutable within set"
+        new_version:
+          type: "string"
+          pattern: "^[1-9][0-9]{11}\\.0\\.0$"
+          description: "Calendar coordinate YYMMDDhhmmss.0.0 (inspr-calver-3; inspr-calendar-v2 for history); valid Gregorian UTC, immutable within set"
+        note:
+          type: "string"
+          maxLength: 500
+          description: "Optional note for the new version only. It does not rewrite the source version's note."
+      required: ["expected_revision", "version", "new_version"]
+    RuleScope:
+      type: "object"
+      additionalProperties: false
+      properties:
+        layer:
+          type: "string"
+          enum: ["company", "project", "person", "agent"]
+        project_id:
+          type: "string"
+          format: "uuid"
+        owner_id:
+          type: "string"
+          format: "uuid"
+        agent_id:
+          type: "string"
+          format: "uuid"
+        role:
+          type: "string"
+          enum: ["coordinator", "builder", "reviewer", "operator"]
+        task_id:
+          type: "string"
+          format: "uuid"
+      required: ["layer"]
+    RuleSet:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        layer_id:
+          type: "string"
+          format: "uuid"
+        scope:
+          "$ref": "#/components/schemas/RuleScope"
+        name:
+          type: "string"
+          maxLength: 128
+        revision:
+          type: "integer"
+          minimum: 1
+        rules:
+          type: "array"
+          maxItems: 100
+          items:
+            "$ref": "#/components/schemas/AgentRule"
+        published_version:
+          type: "string"
+        tldr:
+          "$ref": "#/components/schemas/RuleTLDR"
+      required: ["id", "layer_id", "scope", "name", "revision", "rules", "published_version"]
+    RuleSnapshot:
+      type: "object"
+      additionalProperties: false
+      properties:
+        set_id:
+          type: "string"
+          format: "uuid"
+        scope:
+          "$ref": "#/components/schemas/RuleScope"
+        name:
+          type: "string"
+        revision:
+          type: "integer"
+        version:
+          type: "string"
+          pattern: "^[1-9][0-9]{11}\\.0\\.0$"
+          description: "Calendar coordinate YYMMDDhhmmss.0.0 (inspr-calver-3; inspr-calendar-v2 for history); valid Gregorian UTC, immutable within set"
+        sha256:
+          type: "string"
+          pattern: "^[a-f0-9]{64}$"
+        rules:
+          type: "array"
+          maxItems: 100
+          items:
+            "$ref": "#/components/schemas/AgentRule"
+        published_at:
+          type: "string"
+          format: "date-time"
+        note:
+          type: "string"
+          maxLength: 500
+          description: "Optional publish note. Absent when empty. A non-empty note is part of the immutable snapshot and its sha256; an empty or omitted note does not change the digest of a snapshot that has no note."
+        tldr:
+          "$ref": "#/components/schemas/RuleTLDR"
+      required: ["set_id", "scope", "name", "revision", "version", "sha256", "rules", "published_at"]
+    RuleTLDR:
+      type: "object"
+      additionalProperties: false
+      description: "AEON-314. A short technical explanation for people. Part of the draft and of every published snapshot (versioned with history); never part of what agents receive."
+      properties:
+        en:
+          type: "string"
+          maxLength: 300
+          description: "Required nonempty single line; <=300 UTF-8 bytes"
+        de:
+          type: "string"
+          maxLength: 300
+          description: "Optional German; single line; <=300 UTF-8 bytes"
+        basis:
+          type: "string"
+          pattern: "^[a-f0-9]{16}$"
+          description: "Fingerprint of the text the explanation was written for; the server stamps it when omitted"
+        check:
+          type: "boolean"
+          readOnly: true
+          description: "Derived on read, never stored: the text changed after the explanation was written"
+      required: ["en"]
+    RuleTLDRInput:
+      type: "object"
+      additionalProperties: false
+      properties:
+        expected_revision:
+          type: "integer"
+          minimum: 1
+        set:
+          description: "Absent keeps the set explanation; null removes it"
+          oneOf:
+            - "$ref": "#/components/schemas/RuleTLDRText"
+            - type: "null"
+        rules:
+          type: "object"
+          description: "Rule identity to its new explanation; null removes one; identities left out are unchanged"
+          additionalProperties:
+            oneOf:
+              - "$ref": "#/components/schemas/RuleTLDRText"
+              - type: "null"
+      required: ["expected_revision"]
+    RuleTLDRText:
+      type: "object"
+      additionalProperties: false
+      properties:
+        en:
+          type: "string"
+          maxLength: 300
+        de:
+          type: "string"
+          maxLength: 300
+      required: ["en"]
+    RulesComparison:
+      type: object
+      additionalProperties: false
+      required: [id, harness, role, project_id, repo_sha256, merge_sha256, merge_version, local_set_sha256, counts, rules, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        harness: {type: string, enum: [claude-code, codex]}
+        role: {type: string, enum: [coordinator, builder, reviewer, operator]}
+        project_id: {type: string, format: uuid}
+        repo_name: {type: string, maxLength: 128}
+        repo_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        merge_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        merge_version: {type: string, maxLength: 128}
+        local_set_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        counts: {"$ref": "#/components/schemas/RulesComparisonCounts"}
+        rules:
+          type: array
+          maxItems: 500
+          items: {"$ref": "#/components/schemas/RulesComparisonRule"}
+        gaps:
+          type: array
+          maxItems: 16
+          description: "Comparison limits. Tokens only; no paths or instruction text."
+          items: {type: string, pattern: "^[a-z][a-z0-9_]{0,63}$"}
+        created_at: {type: string, format: date-time}
+    RulesComparisonCounts:
+      type: object
+      additionalProperties: false
+      required: [both, only_local, only_merged, differs, files]
+      properties:
+        both: {type: integer, minimum: 0}
+        only_local: {type: integer, minimum: 0}
+        only_merged: {type: integer, minimum: 0}
+        differs: {type: integer, minimum: 0}
+        files: {type: integer, minimum: 0, maximum: 64}
+    RulesComparisonRule:
+      type: object
+      additionalProperties: false
+      required: [identity, status]
+      properties:
+        identity: {type: string, pattern: "^[a-z][a-z0-9._-]{0,95}$"}
+        status: {type: string, enum: [both, only_local, only_merged, differs]}
+        local_text_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        merged_text_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        changed:
+          type: array
+          maxItems: 4
+          items: {type: string, enum: [text, why, strength, enabled, local_conflict]}
+    RulesComparisonUpload:
+      type: object
+      additionalProperties: false
+      required: [harness, role, project_id, repo_sha256, merged, local, rules, counts]
+      properties:
+        harness: {type: string, enum: [claude-code, codex]}
+        role: {type: string, enum: [coordinator, builder, reviewer, operator]}
+        project_id: {type: string, format: uuid}
+        agent_id: {type: string, format: uuid}
+        repo_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        repo_name: {type: string, maxLength: 128}
+        merged:
+          type: object
+          additionalProperties: false
+          required: [version, sha256, rule_count]
+          properties:
+            version: {type: string, maxLength: 128}
+            sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+            rule_count: {type: integer, minimum: 0, maximum: 500}
+        local:
+          type: object
+          additionalProperties: false
+          required: [set_sha256, rule_count]
+          properties:
+            set_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+            rule_count: {type: integer, minimum: 0, maximum: 500}
+        rules:
+          type: array
+          maxItems: 500
+          items: {"$ref": "#/components/schemas/RulesComparisonRule"}
+        counts: {"$ref": "#/components/schemas/RulesComparisonCounts"}
+        gaps:
+          type: array
+          maxItems: 16
+          description: "Comparison limits. Tokens only; no paths or instruction text."
+          items: {type: string, pattern: "^[a-z][a-z0-9_]{0,63}$"}

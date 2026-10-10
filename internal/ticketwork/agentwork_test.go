@@ -193,7 +193,9 @@ func TestTicketAgentWork(t *testing.T) {
 	f.node(t, hiddenTicket, "ticket", "TW1-8", "Hidden ticket", hiddenProject)
 	f.bindGuest(t, f.project)
 
-	s1, s2, s3 := uid(), uid(), uid()
+	// s3 starts with the digits of a sibling's token count. Random ids reach
+	// that prefix now and then, so the fixture keeps it on every run.
+	s1, s2, s3 := uid(), uid(), "4242b618-e676-6050-dcac-3f40b46e3bd0"
 	s4, s5, s6, sHidden := uid(), uid(), uid(), uid()
 	past := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	f.session(t, s1, f.project, epic, "codex", "gpt-test", "high", past, past.Add(150*time.Second), past, "stopped")
@@ -257,7 +259,7 @@ func TestTicketAgentWork(t *testing.T) {
 	if numberField.Match(raw) {
 		t.Fatalf("token or cost encoded as a JSON number: %s", raw)
 	}
-	if regexp.MustCompile(`4242|999999|"777"`).Match(raw) {
+	if regexp.MustCompile(`4242|999999|"777"`).Match(withoutGeneratedText(raw)) {
 		t.Fatalf("sibling, other tenant or hidden project usage leaked: %s", raw)
 	}
 
@@ -459,11 +461,16 @@ func TestTicketAgentWorkThroughAuthMiddleware(t *testing.T) {
 	f.node(t, f.project, "project", "TW1-1", "Visible", "")
 	ticket := uid()
 	f.node(t, ticket, "ticket", "TW1-2", "Ticket", f.project)
-	_, _, emptyKey, err := auth.OperatorCreateAgentKey(t.Context(), f.db.App, f.person.TenantID, "tw1-empty", f.agent.ID, []string{}, nil)
+	// Keys are issued by the current binary, which only runs on a fully
+	// migrated schema; the retained fixture nodes are upgraded in place.
+	if err := db.MigrateWithHook(t.Context(), f.db.App, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, _, emptyKey, err := auth.OperatorCreateAgentKey(t.Context(), f.db.App, f.person.TenantID, "tw1-empty", f.agent.ID, []string{}, nil, f.person.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, readKey, err := auth.OperatorCreateAgentKey(t.Context(), f.db.App, f.person.TenantID, "tw1-reader", f.agent.ID, []string{"nodes.read"}, nil)
+	_, _, readKey, err := auth.OperatorCreateAgentKey(t.Context(), f.db.App, f.person.TenantID, "tw1-reader", f.agent.ID, []string{"nodes.read"}, nil, f.person.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +500,8 @@ func TestTicketAgentWorkSkipsRunTelemetry(t *testing.T) {
 	f.node(t, f.project, "project", "TW1-1", "Visible", "")
 	f.node(t, ticket, "ticket", "TW1-2", "Ticket", f.project)
 	f.node(t, order, "work_order", "TW1-9", "Order", f.project)
-	run, sid := uid(), uid()
+	// The session id carries the digits of the run counters on every run.
+	run, sid := uid(), "99999988-7777-4666-8666-888888666666"
 	past := time.Date(2020, 1, 3, 0, 0, 0, 0, time.UTC)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, f.person.TenantID, order, f.person.ID); err != nil {
@@ -510,12 +518,44 @@ func TestTicketAgentWorkSkipsRunTelemetry(t *testing.T) {
 	f.managedSession(t, sid, f.project, ticket, run, past)
 	f.usage(t, f.person, sid, "gpt-test", "12", "3", "1", "0.010000000000", false, "1", "api", "")
 	raw := f.body(t, f.person, ticket, "")
-	if regexp.MustCompile(`999999|888888|777777|666666`).Match(raw) {
+	if regexp.MustCompile(`999999|888888|777777|666666`).Match(withoutGeneratedText(raw)) {
 		t.Fatalf("managed run telemetry was added to session usage: %s", raw)
 	}
 	report := f.get(t, f.person, ticket, "")
 	if report.Totals.SessionCount != 1 || str(report.Totals.InputTokens) != "12" || str(report.Totals.OutputTokens) != "3" || str(report.Totals.EstimatedCostUSD) != "0.010000000000" || report.Totals.DurationSeconds == nil || *report.Totals.DurationSeconds != 30 {
 		t.Fatalf("usage-only totals %+v", report.Totals)
+	}
+}
+
+// generatedText matches what a fixture draws at random or from the clock:
+// UUIDs and RFC 3339 timestamps. Their digits are not counters or money.
+var generatedText = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\d{4}-\d\d-\d\dT[0-9:.]+(?:Z|[+-]\d\d:\d\d)`)
+
+// withoutGeneratedText lets the leak patterns below see counters and money
+// only. A random id such as 4242b618-… must not read as a leaked 4242.
+func withoutGeneratedText(raw []byte) []byte {
+	return generatedText.ReplaceAll(raw, []byte("~"))
+}
+
+func TestLeakPatternsIgnoreGeneratedIDsAndTimestamps(t *testing.T) {
+	leak := regexp.MustCompile(`4242|999999|"777"`)
+	for _, clean := range []string{
+		`{"id":"4242b618-e676-6050-dcac-3f40b46e3bd0","input_tokens":"50"}`,
+		`{"id":"3f40b46e-4242-4999-9999-999999999999"}`,
+		`{"started_at":"2026-10-08T05:42:42.424242Z","ended_at":"2026-10-08T07:39:51.999999+02:00"}`,
+	} {
+		if leak.Match(withoutGeneratedText([]byte(clean))) {
+			t.Fatalf("generated text read as a leaked figure: %s", clean)
+		}
+	}
+	for _, leaked := range []string{
+		`{"id":"4242b618-e676-6050-dcac-3f40b46e3bd0","input_tokens":"4242"}`,
+		`{"started_at":"2026-10-08T05:25:30Z","input_tokens":"999999"}`,
+		`{"input_tokens":"777"}`,
+	} {
+		if !leak.Match(withoutGeneratedText([]byte(leaked))) {
+			t.Fatalf("a real leaked figure was scrubbed away: %s", leaked)
+		}
 	}
 }
 
@@ -531,7 +571,12 @@ type workFixture struct {
 
 func newWorkFixture(t *testing.T) *workFixture {
 	t.Helper()
-	f := &workFixture{db: dbtest.Open(t), mux: http.NewServeMux(), project: uid()}
+	return newWorkFixtureWithDB(t, oldWorkDatabase(t))
+}
+
+func newWorkFixtureWithDB(t *testing.T, d *dbtest.DB) *workFixture {
+	t.Helper()
+	f := &workFixture{db: d, mux: http.NewServeMux(), project: uid()}
 	f.person = tenant.Principal{ID: uid(), TenantID: uid(), Kind: tenant.Person}
 	f.guest = tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
 	f.agent = tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Agent}

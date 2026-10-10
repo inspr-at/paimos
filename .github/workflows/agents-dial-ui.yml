@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Agents dial UI
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/agents-dial-ui.yml'
+      - 'web/src/components/agents/AgentsWorking.vue'
+      - 'web/src/lib/agentsWorking.ts'
+      - 'web/src/lib/useAgentPlan.ts'
+      - 'web/tests/agents-working.unit.test.ts'
+      - 'web/tests/agents-plan-save.unit.test.ts'
+      - 'web/tests/agents-dial.spec.ts'
+      - 'web/tests/accounts-computers.spec.ts'
+      - 'web/tests/no-shift.spec.ts'
+      - 'web/tests/agents-fixtures.ts'
+permissions:
+  contents: read
+jobs:
+  agents-dial-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - name: Dial persistence and projection regressions
+        run: npx vitest run tests/agents-working.unit.test.ts tests/agents-plan-save.unit.test.ts --maxWorkers=1 --no-file-parallelism
+        working-directory: web
+      - name: Install Playwright system dependencies
+        timeout-minutes: 13
+        working-directory: web
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install --with-deps chromium
+      - name: Approved five-state matrix, accounts and stability regressions
+        run: npm test -- tests/agents-dial.spec.ts tests/accounts-computers.spec.ts tests/no-shift.spec.ts --workers=1
+        working-directory: web
+        env:
+          AEON_540_SHOTS: ${{ runner.temp }}/aeon-540a-shots
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: aeon-540a-dial-shots
+          path: |
+            ${{ runner.temp }}/aeon-540a-shots
+            web/test-results
+          if-no-files-found: warn
+          retention-days: 14

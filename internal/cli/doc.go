@@ -25,14 +25,13 @@
 // Owner exit and SIGTERM mark that session stopped. A failed owner check at
 // start exits non-zero and does not leave a new session starting. A closed
 // generation explains itself and does not resume. A Claude transcript path
-// posts cumulative usage to the existing session usage route.
+// posts cumulative usage to the existing session usage route. Start model/effort
+// flags are initial values; bounded reads of the session Claude transcript or
+// Codex rollout/app-server capture report changes on the same generation.
+// Missing or malformed records preserve the last accepted identity.
 // CP3 adds relation add, project create/show/update and resource reads, tag
 // catalog commands, attachment upload/list/get/rm, declarative apply, schema,
-// doctor, and authenticated curl. External-stage request/pull/report/result
-// call Aeon's server-fenced stage handoff API. Classic one-time credentials,
-// reporter registrations and launch admission cannot grant Aeon authority;
-// those commands return exit 3 and point to first-party plugins and journey
-// approvals. rules-compare is an offline one-time report of explicit doctrine
+// doctor, and authenticated curl. The retired external-stage CLI is removed. rules-compare is an offline one-time report of explicit doctrine
 // files, an optional saved AR1 merge document and optional AEON-219 receipt
 // hashes. It does not contact the network, wait, or replace instruction files.
 // The coordinator wires the CLI constructor into cmd/aeon.

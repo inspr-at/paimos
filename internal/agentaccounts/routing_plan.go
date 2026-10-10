@@ -46,11 +46,17 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 	p := ranked{account: a, windows: windows, cap: 100, slots: a.MaxParallel - slots}
 	var short, long *time.Time
 	for _, w := range windows {
+		if w.usagePosture != "" {
+			p.posture = w.usagePosture
+		}
 		if w.capacityPresence {
 			p.presence = true
 		}
 		if !synthetic(w) {
 			end := w.EndsAt
+			if p.soonest == nil || end.Before(*p.soonest) {
+				p.soonest = &end
+			}
 			dest := &short
 			if w.capacityKind == "weekly" || w.capacityKind == "monthly" {
 				dest = &long
@@ -59,7 +65,22 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 				*dest = &end
 			}
 		}
-		available := float64(allowedUnits(w.Allowance, paceFraction(w.PaceModel, elapsedFraction(now, w.StartsAt, w.EndsAt), w.BurstRatio)) - w.Used - w.Reserved)
+		if synthetic(w) {
+			if len(w.recoveryPermits) > 0 {
+				p.slots = min(p.slots, 1)
+			}
+			continue
+		}
+		available := float64(allowedUnits(w.Allowance, windowPaceFraction(w, now)) - w.Used - w.Reserved)
+		if w.usageCeiling != nil {
+			available = math.Min(available, float64(*w.usageCeiling-w.Used-w.Reserved))
+		}
+		if w.Allowance > 0 {
+			projected, ok := addUsage(w.Used, w.Reserved, max(1, windowEstimate(w, estimates)))
+			if ok {
+				p.projected = math.Max(p.projected, float64(projected)/float64(w.Allowance))
+			}
+		}
 		if w.capacityBudget != nil {
 			available = math.Min(available, *w.capacityBudget-float64(w.Reserved))
 		}
@@ -100,26 +121,92 @@ func fingerprintPrimary(picks []ranked) map[string]int {
 	}
 	return primary
 }
+
+// orderPicks ranks each account by its own posture and does not rewrite
+// ranked.reset. That field is the long-window reset published as
+// CapacityRouting.ResetsAt. Max out is ordered by its own soonest active
+// window. Every other account keeps presence ahead of that long reset, and
+// Careful's projected use ahead of presence. The groups are sorted apart and
+// then merged: projected use is not a time, so one comparison over a mixed
+// pool is not a transitive order.
 func orderPicks(picks []ranked) {
-	sort.Slice(picks, func(i, j int) bool {
-		a, b := picks[i], picks[j]
-		if a.presence != b.presence {
-			return !a.presence
+	if len(picks) < 2 {
+		return
+	}
+	var maxout, rest []ranked
+	careful := false
+	for _, p := range picks {
+		if p.posture == "maxout" {
+			maxout = append(maxout, p)
+			continue
 		}
-		if a.reset == nil && b.reset != nil {
-			return false
-		}
-		if a.reset != nil && b.reset == nil {
-			return true
-		}
-		if a.reset != nil && b.reset != nil && !a.reset.Equal(*b.reset) {
-			return a.reset.Before(*b.reset)
-		}
-		if a.cap != b.cap {
-			return a.cap > b.cap
-		}
-		return a.account.ID < b.account.ID
+		careful = careful || p.posture == "careful"
+		rest = append(rest, p)
+	}
+	sort.Slice(rest, func(i, j int) bool { return lessRest(rest[i], rest[j], careful) })
+	sort.Slice(maxout, func(i, j int) bool {
+		return lessInstant(maxout[i].soonest, maxout[j].soonest, maxout[i], maxout[j])
 	})
+	copy(picks, mergeRanked(rest, maxout))
+}
+
+func lessRest(a, b ranked, careful bool) bool {
+	if careful && a.projected != b.projected {
+		return a.projected < b.projected
+	}
+	if a.presence != b.presence {
+		return !a.presence
+	}
+	return lessInstant(a.reset, b.reset, a, b)
+}
+
+func lessInstant(ar, br *time.Time, a, b ranked) bool {
+	if ar == nil && br != nil {
+		return false
+	}
+	if ar != nil && br == nil {
+		return true
+	}
+	if ar != nil && br != nil && !ar.Equal(*br) {
+		return ar.Before(*br)
+	}
+	if a.cap != b.cap {
+		return a.cap > b.cap
+	}
+	return a.account.ID < b.account.ID
+}
+
+func mergeRanked(rest, maxout []ranked) []ranked {
+	out := make([]ranked, 0, len(rest)+len(maxout))
+	i, j := 0, 0
+	for i < len(rest) && j < len(maxout) {
+		if maxoutBefore(maxout[j], rest[i]) {
+			out = append(out, maxout[j])
+			j++
+			continue
+		}
+		out = append(out, rest[i])
+		i++
+	}
+	out = append(out, rest[i:]...)
+	out = append(out, maxout[j:]...)
+	return out
+}
+
+func maxoutBefore(m, r ranked) bool {
+	if m.soonest == nil {
+		return false
+	}
+	if r.reset == nil {
+		return true
+	}
+	if !m.soonest.Equal(*r.reset) {
+		return m.soonest.Before(*r.reset)
+	}
+	if m.cap != r.cap {
+		return m.cap > r.cap
+	}
+	return m.account.ID < r.account.ID
 }
 
 func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile string, run runRow, now time.Time) (map[string]CapacityRouting, error) {
@@ -141,7 +228,7 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 	estimates := map[string]int64{"requests": 1, "tokens": 1, "cost_micros": 1}
 	for _, a := range accounts {
 		var allowed bool
-		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$1 AND ($2='' OR id::text=$2) AND ($3::uuid[] IS NULL OR id=ANY($3::uuid[])))`, a.Harness, profile, a.AllowedProfileIDs).Scan(&allowed)
+		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$1 AND ($2='' OR id::text=$2) AND aeon_account_allows_profile($1,$3::uuid[],id))`, a.Harness, profile, a.AllowedProfileIDs).Scan(&allowed)
 		if err != nil {
 			return nil, err
 		}
@@ -180,7 +267,10 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 }
 
 // NextForRun is also used by the vendor-stop handoff. It preserves the original
-// requested-account fence and the owning principal/daemon; it writes nothing.
+// requested-account fence and writes nothing. A daemon_id string is chosen by
+// the caller and is visible to other principals, so it is not authority.
+// Keep a candidate only when the daemon and harness match and this run's agent
+// registered the account or a connected enrollment binds it to that agent.
 func NextForRun(ctx context.Context, tx pgx.Tx, runID, daemonID, only, exclude string, now time.Time, residency ...string) (CapacityNext, error) {
 	run, err := loadWaitRun(ctx, tx, runID)
 	if err != nil {
@@ -201,9 +291,16 @@ func NextForRun(ctx context.Context, tx pgx.Tx, runID, daemonID, only, exclude s
 	if err != nil {
 		return CapacityNext{}, err
 	}
+	bound, err := computerAccountIDs(ctx, tx, run.AgentID)
+	if err != nil {
+		return CapacityNext{}, err
+	}
 	kept := []Account{}
 	for _, a := range accounts {
-		if a.RegisteredBy != run.AgentID || a.DaemonID != daemonID || a.Harness != harness || a.ID == exclude || only != "" && a.ID != only {
+		if a.DaemonID != daemonID || a.Harness != harness || a.ID == exclude || only != "" && a.ID != only {
+			continue
+		}
+		if a.RegisteredBy != run.AgentID && !bound[a.ID] {
 			continue
 		}
 		kept = append(kept, a)
@@ -245,6 +342,11 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	projectID := r.URL.Query().Get("project_id")
+	if projectID != "" && !uuidRE.MatchString(projectID) {
+		writeErr(w, fail(400, "invalid project id"))
+		return
+	}
 	harness, daemon, profile := r.URL.Query().Get("harness"), r.URL.Query().Get("daemon_id"), r.URL.Query().Get("model_profile_id")
 	if !validHarness(harness) || len(daemon) > 128 || profile != "" && !uuidRE.MatchString(profile) {
 		writeErr(w, fail(400, "invalid capacity query"))
@@ -281,10 +383,27 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		accounts := []Account{}
+		bound := map[string]bool{}
+		if ownOnly {
+			bound, err = computerAccountIDs(r.Context(), tx, p.ID)
+			if err != nil {
+				return err
+			}
+		}
 		for _, a := range all {
-			if a.Harness == harness && (daemon == "" || a.DaemonID == daemon) && (!ownOnly || a.RegisteredBy == p.ID) {
+			if a.Harness == harness && (daemon == "" || a.DaemonID == daemon) && (!ownOnly || a.RegisteredBy == p.ID || bound[a.ID]) {
 				accounts = append(accounts, a)
 			}
+		}
+		before := len(accounts)
+		accounts, err = applyUse(r.Context(), tx, accounts, projectID)
+		if err != nil {
+			return err
+		}
+		if before > 0 && len(accounts) == 0 {
+			out = CapacityNext{Harness: harness, Accounts: []CapacityChoice{}, Wait: waitFor("context")}
+			out.Wait.Context = projectID
+			return nil
 		}
 		now, err := dbNow(r.Context(), tx)
 		if err != nil {
@@ -304,14 +423,62 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 
+// A daemon string alone is not authority over another registrar's account.
+// Connected pairing enrollments bind all of the computer's accounts to its
+// runtime principal, including accounts enrolled by a different registrar.
+func computerAccountIDs(ctx context.Context, tx pgx.Tx, principal string) (map[string]bool, error) {
+	rows, err := tx.Query(ctx, `SELECT e.account_id::text FROM agent_pairing_enrollments e
+ JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
+ JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id
+ WHERE c.principal_id=$1 AND c.state='connected' AND e.state='connected' AND a.daemon_id=c.daemon_id LIMIT 1025`, principal)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+		if len(out) > 1024 {
+			return nil, fail(503, "too many enrolled computer accounts")
+		}
+	}
+	return out, rows.Err()
+}
+
 // VendorRetryAt returns vendor truth when a stop includes a reset, otherwise a
 // bounded backoff. This value is frozen on the stopped run, so polling cannot
 // slide a long-reset handoff into the short-wait branch.
 func VendorRetryAt(ctx context.Context, tx pgx.Tx, accountID, runID string, now time.Time) (time.Time, bool, error) {
-	// A stop without a reading from this run retains its bounded backoff;
-	// another run's older reading is not evidence for this stop's reset.
+	// Retry advice follows the same persisted resource waits as reservation;
+	// another daemon poll cannot restart a one-hour timer or shorten backoff.
+	a, err := getAccount(ctx, tx, accountID)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	facts, err := loadReadinessFacts(ctx, tx, a, now)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	var next *time.Time
+	for _, f := range facts {
+		if recoverableFact(f) && f.NextAttemptAt != nil && (next == nil || f.NextAttemptAt.After(*next)) {
+			next = f.NextAttemptAt
+		}
+	}
+	if next != nil {
+		return *next, false, nil
+	}
+	// Only this stopped run can identify its named reset. A prior run's
+	// sibling reading still blocks admission, but never names this stop.
 	var until *time.Time
-	err := tx.QueryRow(ctx, `SELECT max(resets_at) FROM (SELECT DISTINCT ON(window_kind,bucket) resets_at,used_percent,ordinary_usage_allowed FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`) AND run_id=$3 AND source<>'estimate' ORDER BY window_kind,bucket,read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END) r WHERE (ordinary_usage_allowed=false OR used_percent>=100) AND resets_at>$2`, accountID, now, runID).Scan(&until)
+	err = tx.QueryRow(ctx, `SELECT max(reset) FROM (
+      SELECT max(resets_at) AS reset FROM (SELECT DISTINCT ON(window_kind,bucket) resets_at,used_percent,ordinary_usage_allowed FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`) AND run_id=$3 AND source<>'estimate' ORDER BY window_kind,bucket,read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END) r WHERE (ordinary_usage_allowed=false OR used_percent>=100) AND resets_at>$2
+      UNION ALL SELECT max(limit_resets_at) FROM run_telemetry WHERE run_id=$3 AND error_code='vendor_limit' AND limit_resets_at>$2
+    ) named`, accountID, now, runID).Scan(&until)
 	if err != nil {
 		return time.Time{}, false, err
 	}

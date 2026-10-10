@@ -1,0 +1,170 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix5",
+  "recorded_at": "2026-10-04T21:03:54.903843+00:00",
+  "branch": "work/aeon-648-int",
+  "reviewed_commit": "ca3f2015071522e9ba4d2aa33fa48d730dad3066",
+  "review": "review-int648r4.out",
+  "completion": "Blocked: the sole review finding requires a coordinator-owned shared-ledger write outside this worktree. Worker validation finished; the finding is not resolved.",
+  "findings": [
+    {
+      "severity": "P3",
+      "description": "Migration 1238 reservation remains missing from the shared ledger.",
+      "status": "unresolved",
+      "resolved": false,
+      "owner": "coordinator / AEON-655",
+      "required_action": "Coordinator records 1238 AEON-655 (work vocabulary) and attaches the actual ledger line number and resulting SHA-256.",
+      "expected_line": "1238 AEON-655 (work vocabulary)",
+      "observed_ledger": {
+        "path": "/private/tmp/claude-501/-Users-markus-Code-aithema/af3ab8bf-63f6-4fb5-bccf-086eb11c043e/scratchpad/aeon/migration-ledger.txt",
+        "sha256": "849007af43ae78c35d917d5ed4ff9399c5aee06a19cc70c7562497356e9b71c9",
+        "line_count": 110,
+        "matching_lines": []
+      },
+      "migration": {
+        "path": "internal/db/migrations/1238_work_vocabulary.sql",
+        "sha256": "27eaf2c0851a1b633ae7f070a9f5283d3d1b7a3eace74a792bed4dace5c789c4",
+        "original_commit": "d15114c1a98d24c72448ee5caea712416bc6a7c9",
+        "matches_original": true
+      },
+      "ownership_constraints": [
+        "worker-common.md: Work ONLY in your worktree and branch (named in your brief).",
+        "review-int648r4.out: Fix: coordinator records 1238 AEON-655 (work vocabulary) and attaches the actual ledger line and resulting SHA-256.",
+        "User: Preserve all safety and ownership constraints."
+      ],
+      "worker_result": "Read-only verification confirms the same missing entry. No ledger write, proposed append or handoff is reported as a fix; no SQL change is needed."
+    }
+  ],
+  "changes": {
+    "retained": "Only this fix5 evidence document. Temporary remote web adapter removed.",
+    "production": 0,
+    "tests": 0,
+    "sql": 0,
+    "behavior_fixes": 0,
+    "new_migrations": 0,
+    "regression_requirement": "No behavior fix exists this round, so no new regression against ca3f2015 applies. Existing assertions and regressions remain unchanged."
+  },
+  "validation": {
+    "origin_main": {
+      "live_sha": "a3ca8c475a94ce1de6da1398182abe3dfe98eb9f",
+      "verified_with": "git ls-remote origin refs/heads/main",
+      "is_ancestor": true,
+      "merge_required": false
+    },
+    "go": {
+      "result": "pass",
+      "exit_code": 0,
+      "commit": "ca3f2015071522e9ba4d2aa33fa48d730dad3066",
+      "transport": "Coordinator-approved remote-test.sh; approved temporary non-production test ref.",
+      "packages": [
+        "internal/releases",
+        "internal/db",
+        "internal/authz"
+      ],
+      "log": "web/test-results/aeon-648-int-fix5/logs/go-remote.log"
+    },
+    "web": {
+      "result": "pass",
+      "exit_code": 0,
+      "commit": "fdf452d4d5e7f4339baedcc52eb35bf1b7556289",
+      "transport": "Prior-round temporary Go adapter reused through remote-test.sh; removed from final tree.",
+      "build": "pass",
+      "lint": "pass",
+      "npm_run_test_unit": "pass",
+      "node_unit_cases": 764,
+      "vitest_cases": 2772,
+      "vitest_files": 99,
+      "log": "web/test-results/aeon-648-int-fix5/logs/web-remote.log"
+    },
+    "migration_guard": {
+      "result": "pass",
+      "exit_code": 0,
+      "base_ref": "v261003095616.0.0",
+      "unique_numbers": 258,
+      "log": "web/test-results/aeon-648-int-fix5/logs/migration-guard.log"
+    },
+    "browser": {
+      "result": "not run: approved launcher refused",
+      "exit_code": 3,
+      "reason": "Remote browser lane unavailable: OPS-247 bootstrap and approved launcher are pending. Use draft PR hosted CI; no SSH, dependency or browser installation, or local fallback.",
+      "owner": "coordinator / OPS-247",
+      "requested_specs": [
+        "work-integration.spec.ts",
+        "morning-briefing.spec.ts",
+        "journey-imported.spec.ts",
+        "ticket-placement.spec.ts"
+      ],
+      "log": "web/test-results/aeon-648-int-fix5/logs/browser-remote.log",
+      "linux_chromium_pass_claimed": false,
+      "hosted_ci_claimed": false
+    },
+    "prior_evidence": {
+      "verified_artifact_hashes": 14,
+      "evidence_documents": [
+        "docs/qa/aeon-648-int-fix3-evidence.json",
+        "docs/qa/aeon-648-int-fix4-evidence.json"
+      ],
+      "proof": "web/test-results/aeon-648-int-fix5/logs/prior-artifacts.json"
+    },
+    "source_equivalence": "After removing the temporary adapter, git diff ca3f2015 -- . :!docs/qa is empty. Production, tests, contracts, migrations, dependency manifests, CI policy and assertions remain identical to the reviewed head."
+  },
+  "artifacts": [
+    {
+      "path": "web/test-results/aeon-648-int-fix5/logs/browser-remote.exit",
+      "sha256": "1121cfccd5913f0a63fec40a6ffd44ea64f9dc135c66634ba001d10bcf4302a2"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix5/logs/browser-remote.log",
+      "sha256": "773e28199e77ad2bac9a833bff42ef9ee0e895acc3fd79d293ced00421a420e2"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix5/logs/go-remote.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix5/logs/go-remote.log",
+      "sha256": "3e118a3d8160f812474544458d8328e9a670c2a8fdea93387bf410694332d12c"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix5/logs/migration-guard.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix5/logs/migration-guard.log",
+      "sha256": "bc1d2249cb2c0bb89af89c17f06096c7c8a5cb6da82683a83bc6d79fd267d82c"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix5/logs/prior-artifacts.json",
+      "sha256": "513c90095c74cf6bffd9d4f23f0ca306faa2b0d9d2fd0000cd98d66c822b9d72"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix5/logs/web-remote.commit",
+      "sha256": "c2283b095f70693611010ee5e476b602ae530127aac5f0e44813b4401f2fdce4"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix5/logs/web-remote.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix5/logs/web-remote.log",
+      "sha256": "2360f59c7ed892617aa65eb79e61c4cbba78a33a9ea12938b82a9e4ca5881380"
+    }
+  ],
+  "safety": {
+    "origin_push": false,
+    "approved_remote_temporary_test_refs_only": true,
+    "deploy": false,
+    "production_access": false,
+    "shared_ledger_modified": false,
+    "other_worktrees_modified": false,
+    "ticket_status_changed": false,
+    "historical_migrations_modified": false,
+    "credentials_read_or_displayed": false,
+    "subagents_or_model_reviews": false,
+    "generated_build_output_committed": false
+  },
+  "remaining": [
+    "Coordinator-owned AEON-655 ledger reservation and actual line/hash evidence.",
+    "OPS-247 browser launcher or coordinator-owned hosted CI for the requested specs."
+  ]
+}

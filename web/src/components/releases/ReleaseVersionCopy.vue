@@ -23,7 +23,7 @@ watchEffect(() => {
   void dark.value
   off?.(); off = undefined
   if (!pretty.value || !full.value || !trigger.value) return
-  const options = { config: display, interactive: false, brand: getComputedStyle(pretty.value).getPropertyValue('--gold-ink').trim() }
+  const options = { config: display, interactive: false, brand: getComputedStyle(pretty.value).getPropertyValue('--secondary-ink').trim() }
   renderVersion(pretty.value, canonical.value, CALENDAR_DISPLAY_SCHEME, { ...options, mode: 'pretty' })
   renderVersion(full.value, canonical.value, CALENDAR_DISPLAY_SCHEME, { ...options, mode: 'reduced' })
   off = attachVersionCrossfade(pretty.value, full.value, trigger.value)
@@ -65,11 +65,12 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.release-version { position: relative; display: inline-flex; align-items: center; min-width: 0; }
-.version-copy { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 6px; margin: -6px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: 500 13px/1.5 var(--mono); cursor: copy; }
+.release-version { position: relative; display: inline-flex; align-items: center; min-width: 0; max-width: 100%; }
+.version-copy { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; min-height: 44px; padding: 0 6px; margin: -6px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: 500 13px/1.5 var(--mono); cursor: copy; }
 .version-copy:hover { background: var(--row-hover); }
 .version-copy:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
-.version-layers { display: inline-grid; align-items: center; }
+/* Different fonts and sizes share a text baseline, not the centre of their line boxes. */
+.version-layers { display: inline-grid; align-items: baseline; min-width: 0; }
 .version-layers > span { grid-area: 1 / 1; }
 .version-pretty { color: var(--ink-2); }
 /* Keep the renderer's 80% time weight legible on the glass dock. */

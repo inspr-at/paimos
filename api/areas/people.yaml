@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/profile
+paths:
+  /people/{principalId}/avatar/{size}:
+    parameters:
+      - {name: principalId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: size, in: path, required: true, schema: {type: integer, enum: [32, 64, 128, 256]}}
+    get:
+      operationId: getPersonAvatar
+      summary: Content-addressed PNG avatar; use profile initials and avatar_color if absent
+      security: *auth
+      responses:
+        '200': {description: PNG with strong ETag; immutable cache only with matching v hash query}
+        '304': {description: ETag matched}
+        '404': {description: Person or avatar missing}
+components:

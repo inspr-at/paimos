@@ -25,9 +25,9 @@ import (
 func TestOIDCTenantSelection(t *testing.T) {
 	reset(t)
 	insertTenant(t, "inspr", "INSPR")
-	insertTenant(t, "augmentoring", "Augmentoring")
+	insertTenant(t, "example-business", "Example Business")
 	issuer := startFakeOIDC(t, "aeon-public")
-	if _, err := tenantbootstrap.BindOIDC(t.Context(), appPool, "augmentoring", issuer.issuer, "shared-subject", "Customer", "customer"); err != nil {
+	if _, err := tenantbootstrap.BindOIDC(t.Context(), appPool, "example-business", issuer.issuer, "shared-subject", "Customer", "customer"); err != nil {
 		t.Fatal(err)
 	}
 	mod := newMod(t, Config{Env: envDev, OIDCIssuer: issuer.issuer,
@@ -36,7 +36,7 @@ func TestOIDCTenantSelection(t *testing.T) {
 	app := startApp(t, mod)
 	mod.cfg.PublicURL = app.URL
 	c := newHTTPClient()
-	login, err := c.Get(app.URL + "/api/auth/login?tenant=augmentoring")
+	login, err := c.Get(app.URL + "/api/auth/login?tenant=example-business")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestOIDCTenantSelection(t *testing.T) {
 	if err := json.Unmarshal(body, &me); err != nil {
 		t.Fatal(err)
 	}
-	if me.Tenant.Slug != "augmentoring" || len(me.Principal.Roles) != 1 || me.Principal.Roles[0] != "customer" {
+	if me.Tenant.Slug != "example-business" || len(me.Principal.Roles) != 1 || me.Principal.Roles[0] != "customer" {
 		t.Fatalf("wrong tenant membership: %+v", me)
 	}
 	// AEON-431: a workspace without a brand answers exactly as before (me/1.0 readers).
@@ -93,6 +93,7 @@ func TestOIDCTenantSelection(t *testing.T) {
 func TestOIDCSessionLifecycle(t *testing.T) {
 	reset(t)
 	insertTenant(t, "inspr", "INSPR")
+	bootstrapPrincipals := scalar(t, adminPool, `SELECT count(*) FROM principals`)
 	issuer := startFakeOIDC(t, "aeon-public")
 	mod := newMod(t, Config{
 		Env:                 envDev,
@@ -144,7 +145,7 @@ func TestOIDCSessionLifecycle(t *testing.T) {
 	if n := scalar(t, adminPool, `SELECT count(*) FROM identities`); n != 0 {
 		t.Fatalf("identities %d", n)
 	}
-	if n := scalar(t, adminPool, `SELECT count(*) FROM principals`); n != 0 {
+	if n := scalar(t, adminPool, `SELECT count(*) FROM principals`); n != bootstrapPrincipals {
 		t.Fatalf("principals %d", n)
 	}
 
@@ -586,7 +587,7 @@ func TestAgentKeyRLS(t *testing.T) {
 		t.Fatalf("original bearer %d", status)
 	}
 
-	other, err := mod.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantB, Roles: []string{"admin"}}, "b", "", nil, nil)
+	other, err := mod.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantB, KeyCreatorID: keyTestPerson(t, mod.pool, tenantB), Roles: []string{"admin"}}, "b", "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -603,8 +604,8 @@ func TestAgentKeyRLS(t *testing.T) {
 
 	err = testInTenant(t.Context(), appPool, tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `
-			INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash)
-			VALUES ($1::uuid, $2::uuid, 'x', 'cross-prefix-should-fail', 'hash')
+			INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash,created_by_principal_id)
+			VALUES ($1::uuid, $2::uuid, 'x', 'cross-prefix-should-fail', 'hash',(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))
 		`, tenantB, created.PrincipalID)
 		return err
 	})

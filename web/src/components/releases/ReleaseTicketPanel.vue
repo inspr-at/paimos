@@ -162,7 +162,7 @@ defineExpose({
 <template>
   <div class="peek" :class="layout">
     <TicketWorkspace
-      ref="ws" :item="item" :ticket-key="item?.key ?? ref_?.key ?? current" :resolving="resolving" :resolve-error="error" :position="null" :now="now" mode="panel"
+      :key="`${me?.id ?? ''}/${current}`" ref="ws" :item="item" :ticket-key="item?.key ?? ref_?.key ?? current" :resolving="resolving" :resolve-error="error" :position="null" :now="now" mode="panel"
       :project="{ id: projectId ?? '', routeKey: project?.routeKey ?? '' }" :names="list.names" :me="me" :people="people" :trail="trail"
       :can-write="can('nodes.write', scope)" :can-delete="can('nodes.delete', scope)" :can-move="can('nodes.move', scope)"
       :can-link="can('relations.write', scope)" :can-unlink="can('relations.delete', scope)" :can-comment="can('comments.write', scope)"
@@ -171,7 +171,7 @@ defineExpose({
       @close="requestClose" @expand="expand" @new-tab="newTab" @open-key="openKey" @trail-back="trailBack" @retry="resolve"
       @open-in-project="goToProject" @status="anchor => { statusAnchor = anchor }" @removed="emit('close')"
     />
-    <StatusMenu :project-id="projectId ?? undefined" v-if="statusAnchor && item" :anchor="statusAnchor" :current="item.state" :known-states="knownStates" :ticket-key="item.key" @choose="chooseStatus" @close="closeStatus" />
+    <StatusMenu :project-id="projectId ?? undefined" v-if="statusAnchor && item" :anchor="statusAnchor" :derived="item.status_derived" :children-count="item.work_children_count" :current="item.state" :known-states="knownStates" :ticket-key="item.key" @choose="chooseStatus" @close="closeStatus" />
   </div>
 </template>
 

@@ -1,142 +1,204 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Agents working (AEON-499, the approved fragment on top of Accounts and
-// computers): how many agents run now, by model or by ticket area, against the
-// person's own targets. Running counts come from the live sessions; the targets
-// are the person's preference. Nothing starts or stops an agent from here yet:
-// Autopilot (AEON-451) is what will start work up to these targets, so the
-// words never claim that it does.
-import { HARNESS_NAME, POOL_ORDER } from './capacity.ts'
+// AEON-540: the one start ceiling. Counts belong to the server's canonical
+// owner snapshot; limits are independent ceilings, never reservations.
+import { buildPools, HARNESS_NAME, hidesCapacityLimit, POOL_ORDER, type AccountRow } from './capacity.ts'
+import type { CapacityWait } from './capacityWait.ts'
+import { cloneDaily, type DailyMap, type DailyPlanFields } from './dailyLimits.ts'
 
-export type WorkingView = 'area' | 'model'
-export interface WorkingPreference { cap?: number; view?: WorkingView; area?: Record<string, number>; model?: Record<string, number> }
-export const CAP_MIN = 1
-export const CAP_MAX = 12
-/** A session holds a slot while it works, waits on a person, starts, or is throttled. */
-export const RUNNING_GROUPS = ['working', 'needs', 'awaiting', 'throttled'] as const
-
-export const AREAS = ['backend', 'frontend', 'full-stack', 'infra', 'design', 'docs'] as const
-const AREA_LABEL: Record<string, string> = { backend: 'Backend', frontend: 'Frontend', 'full-stack': 'Full stack', infra: 'Infrastructure', design: 'Design', docs: 'Docs', '': 'No area set' }
-const AREA_HINT: Record<string, string> = { backend: 'Server, data and APIs', frontend: 'The web app', 'full-stack': 'Both sides of a change', infra: 'Builds, deploys, hosts', design: 'UI and UX', docs: 'Docs and copy', '': 'Tickets without an area' }
-
-export interface RunningSession { harness: string; model: string; area: string }
-export interface WorkingRow {
-  key: string; label: string; initial: string; sub: string
-  running: number; target: number
-  /** Filled dots run, rings are free target slots. */
-  dots: boolean[]
-  canDec: boolean; canInc: boolean
+export const CAP_MAX = 30
+export const DEFAULT_TOTAL = 15
+export type HarnessLimit = 'no_limit' | 'off' | number
+export type LimitMode = 'none' | 'max' | 'off'
+/** `daily` rides along only on a write that changes a daily setting; older dial writes omit it and the server keeps it. */
+export interface WorkingPreference { total: number; limits: Record<string, HarnessLimit>; daily?: DailyMap }
+export interface PlanSnapshot extends WorkingPreference, DailyPlanFields {
+  principal_id: string; running: Record<string, number>; running_total: number
+  source: 'default' | 'legacy' | 'plan'; updated_at: string | null
 }
-export interface WorkingPlan {
-  /** The person's total; null until they choose one, and nothing stands in for it. */
-  cap: number | null
-  running: number; view: WorkingView
-  unset: boolean
-  /** Where a first step starts while no total is set: what runs now. */
-  from: number
-  canFewer: boolean; canMore: boolean
-  /** Every agent of the total is assigned: no row takes another. */
+export interface WaitingWork { harness?: string; reason?: string }
+export interface WorkingAccountRoom {
+  room: Record<string, number | null>
+  reasons: Record<string, string>
+  total: number | null
+  incomplete: boolean
   full: boolean
-  /** Areas with no work and no target, offered as quiet "+ Area" choices. */
-  spare: { key: string; label: string }[]
-  runningLine: string
-  capDots: boolean[]
-  rows: WorkingRow[]
-  assigned: number; flexible: number
-  footLine: string
+  noAccounts: boolean
 }
-
-const clampCap = (n: number) => Math.max(CAP_MIN, Math.min(CAP_MAX, Math.round(n)))
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
-const dotsOf = (running: number, target: number) => Array.from({ length: Math.max(running, target) }, (_, i) => i < running)
-
-/** "2 slots free", "every slot busy", "3 over your target". */
-export function freeLine(cap: number, running: number): string {
-  if (running < cap) return plural(cap - running, 'slot free', 'slots free')
-  if (running === cap) return 'every slot busy'
-  return `${running - cap} over your target`
+const accountBlockers: Record<CapacityWait['code'], string> = {
+  schedule: 'outside scheduled hours', reserve: 'kept for personal use', reading: 'not measured yet — a current reading is missing',
+  vendor: 'the vendor has stopped new starts', offline: 'the computer or account check is unavailable', sign_in: 'sign-in is required',
+  hold: 'on hold', approval: 'ongoing agent use needs approval', capacity: 'all start slots are occupied', allowance: 'the account allowance is exhausted',
+  models: 'no model is granted for this account', state: 'agent use is paused', residency: 'no account within the allowed providers',
+  context: 'no account is allowed for this project’s context',
 }
-
-/**
- * The control's words and dots. Model rows are the harnesses with accounts or
- * work; area rows are the ticket areas. Targets inside a view never add up to
- * more than the total; what is left over is flexible.
- */
-export function workingPlan(input: { pref: WorkingPreference | null; sessions: RunningSession[]; harnesses: string[]; capacityKnown: boolean; roomNow: number | null }): WorkingPlan {
-  const pref = input.pref ?? {}
-  const running = input.sessions.length
-  const unset = pref.cap === undefined
-  const cap = unset ? null : clampCap(pref.cap!)
-  // A step without a total starts from what runs now; a row target then fixes that total.
-  const from = cap ?? running
-  const limit = clampCap(from)
-  const view: WorkingView = pref.view === 'model' ? 'model' : 'area'
-  const targets = (view === 'area' ? pref.area : pref.model) ?? {}
-  const count = (key: string) => input.sessions.filter(s => (view === 'area' ? s.area : s.harness) === key).length
-  const order = (h: string) => { const i = POOL_ORDER.indexOf(h); return i < 0 ? 99 : i }
-  // Areas show where work runs or a target is set; the rest wait as "+ Area" choices.
-  const used = (key: string) => count(key) > 0 || (targets[key] ?? 0) > 0
-  const keys = view === 'area'
-    ? [...AREAS.filter(used), ...(used('') ? [''] : [])]
-    : [...new Set([...input.harnesses, ...input.sessions.map(s => s.harness), ...Object.keys(targets).filter(k => (targets[k] ?? 0) > 0)])].sort((a, b) => order(a) - order(b) || a.localeCompare(b))
-  const assigned = keys.reduce((sum, key) => sum + Math.max(0, targets[key] ?? 0), 0)
-  const rows = keys.map(key => {
-    const n = count(key)
-    const target = Math.max(0, targets[key] ?? 0)
-    const models = [...new Set(input.sessions.filter(s => s.harness === key && s.model).map(s => s.model))]
-    const sub = view === 'area'
-      ? `${n} running · ${AREA_HINT[key] ?? key}`
-      : `${n} running${models.length ? ` · ${models.slice(0, 2).join(', ')}${models.length > 2 ? ` +${models.length - 2}` : ''}` : ''}`
-    const label = view === 'area' ? AREA_LABEL[key] ?? key : HARNESS_NAME[key] ?? key
-    return { key, label, initial: label.slice(0, 1).toUpperCase(), sub, running: n, target, dots: dotsOf(n, target), canDec: target > 0, canInc: assigned < limit }
-  })
-  const flexible = cap === null ? 0 : Math.max(0, cap - assigned)
-  const capacity = input.roomNow !== null ? `the accounts have room for ${plural(input.roomNow, 'more agent', 'more agents')} now` : input.capacityKnown ? '' : 'no capacity readings yet, so the limits are yours, not the accounts’'
-  // Without a total there is nothing to assign against: only the accounts' room is said.
-  const foot = [
-    cap === null ? '' : `${assigned} of ${cap} assigned`,
-    flexible ? `${flexible} flexible: any ${view === 'area' ? 'area' : 'model'} takes them` : '',
-    capacity,
-  ].filter(Boolean).join(' · ')
-  const footLine = foot.charAt(0).toUpperCase() + foot.slice(1)
-  const spare = view === 'area' ? AREAS.filter(key => !used(key)).map(key => ({ key, label: AREA_LABEL[key] })) : []
-  return {
-    cap, running, view, unset, from,
-    // Without a total, − sets one below what runs now and + one above.
-    canFewer: from > CAP_MIN, canMore: from < CAP_MAX,
-    full: assigned >= limit, spare,
-    runningLine: cap === null ? 'no target set yet' : freeLine(cap, running),
-    // Rings are free slots of a chosen total; without one only what runs is drawn.
-    capDots: dotsOf(running, cap ?? 0), rows, assigned, flexible, footLine,
-  }
-}
-
-/** The next preference after a step on the total; row targets above the new total shrink from the last row. */
-export function stepCap(pref: WorkingPreference | null, delta: number, from: number): WorkingPreference {
-  const next: WorkingPreference = { ...(pref ?? {}), cap: clampCap((pref?.cap ?? from) + delta) }
-  for (const view of ['area', 'model'] as const) {
-    const targets = { ...(next[view] ?? {}) }
-    let over = Object.values(targets).reduce((a, b) => a + b, 0) - next.cap!
-    for (const key of Object.keys(targets).reverse()) {
-      if (over <= 0) break
-      const cut = Math.min(over, targets[key])
-      targets[key] -= cut
-      over -= cut
+/** Start advice and usage measurements are different facts. Only the server
+ * decides eligibility; neither Ready nor a missing reading invents slots. */
+export function workingAccountRoom(accounts: AccountRow[], now: number, current: boolean, configured: string[] = []): WorkingAccountRoom {
+  const room: WorkingAccountRoom['room'] = {}, reasons: WorkingAccountRoom['reasons'] = {}
+  const pools = buildPools(accounts, now)
+  // Shared-quota aliases carry no gauge of their own; the canonical row does.
+  const byId = new Map(pools.flatMap(p => p.rows).map(r => [r.id, r]))
+  const known = new Set(['codex', 'claude', 'cursor', ...configured, ...accounts.map(a => a.harness)])
+  let incomplete = !current
+  for (const harness of POOL_ORDER.filter(h => known.has(h))) {
+    const matching = pools.filter(p => p.mark === harness).flatMap(p => p.rows)
+    if (!current) {
+      room[harness] = null
+      reasons[harness] = 'not measured yet — account information is unavailable'
+      continue
     }
-    if (next[view]) next[view] = targets
+    if (!matching.length) {
+      room[harness] = 0
+      reasons[harness] = 'no linked accounts'
+      continue
+    }
+    const unknown = matching.some(a => !a.routing || a.routing.wait?.code === 'reading')
+    const slots = matching.reduce((n, a) => n + (a.routing?.available_slots ?? 0), 0)
+    room[harness] = unknown && slots === 0 ? null : slots
+    incomplete ||= unknown
+    const notes = matching.flatMap(a => {
+      if (!a.routing) return ['not measured yet — start advice is unavailable']
+      const notes = a.routing.wait ? [accountBlockers[a.routing.wait.code]] : []
+      const gauge = (a.sameQuotaAs && byId.get(a.sameQuotaAs)) || a
+      if (a.routing.wait?.code !== 'reading' && (!gauge.primary || gauge.primary.freshness !== 'fresh' || gauge.primary.reading.source === 'estimate' || gauge.awaitingReading)) {
+        notes.push(hidesCapacityLimit(a.harness) ? 'quota not measured yet — the harness does not report usage' : 'quota not measured yet — a managed run must report current usage')
+      }
+      return notes
+    })
+    reasons[harness] = [...new Set(notes)].join('; ')
   }
-  return next
+  const slots = Object.values(room).reduce<number>((n, value) => n + (value ?? 0), 0)
+  return { room, reasons, total: (incomplete || accounts.length === 0) && slots === 0 ? null : slots, incomplete,
+    full: current && accounts.length > 0 && accounts.every(a => a.routing?.wait?.code === 'capacity'),
+    noAccounts: current && accounts.length === 0 }
 }
-
-/** One step on a row's target, kept within the total. */
-export function stepRow(pref: WorkingPreference | null, view: WorkingView, key: string, delta: number, from: number): WorkingPreference {
-  // A row target needs a total: without one it fixes what runs now, so the two never disagree.
-  const base: WorkingPreference = { ...(pref ?? {}), cap: clampCap(pref?.cap ?? from) }
-  const cap = base.cap!
-  const targets = { ...(base[view] ?? {}) }
-  const assigned = Object.values(targets).reduce((a, b) => a + b, 0)
-  const now = targets[key] ?? 0
-  const want = Math.max(0, now + delta)
-  if (delta > 0 && assigned >= cap) return pref ?? base
-  targets[key] = want
-  return { ...base, [view]: targets }
+export function accountRoomCopy(accounts: WorkingAccountRoom): string {
+  if (accounts.noAccounts) return 'No linked accounts.'
+  if (accounts.total === null) return 'Account room is not measured yet; see the reasons below.'
+  if (accounts.total > 0) return `Room for ${accounts.incomplete ? 'at least ' : ''}${accounts.total} more right now.`
+  return accounts.full ? 'Full right now: all start slots are occupied.' : 'No account starts are available right now.'
+}
+/** What one harness's accounts say about room, without the harness name. */
+export function accountRoomWords(accounts: WorkingAccountRoom, harness: string): string {
+  const slots = accounts.room[harness], reason = accounts.reasons[harness]
+  let value = ''
+  if (slots === null || slots === undefined) value = reason?.startsWith('not measured yet') ? '' : 'not measured yet'
+  else if (slots > 0) value = `room for ${slots} more`
+  else if (!reason) value = 'no start slots available'
+  return [value, reason].filter(Boolean).join(' — ')
+}
+export function accountRoomDetail(accounts: WorkingAccountRoom, harness: string): string {
+  return `${HARNESS_NAME[harness] ?? harness} ${accountRoomWords(accounts, harness)}`
+}
+export const limitMode = (limit: HarnessLimit | undefined): LimitMode => limit === 'off' ? 'off' : typeof limit === 'number' ? 'max' : 'none'
+const clamp = (n: number) => Math.max(0, Math.min(CAP_MAX, n))
+export const planValue = (snapshot: WorkingPreference): WorkingPreference => ({ total: snapshot.total, limits: { ...snapshot.limits }, ...(snapshot.daily ? { daily: cloneDaily(snapshot.daily) } : {}) })
+/** The total and the limits only: a read never turns the server's effective daily map into the next write. */
+export const basePlan = (snapshot: WorkingPreference): WorkingPreference => ({ total: snapshot.total, limits: { ...snapshot.limits } })
+export function stepTotal(plan: WorkingPreference, delta: number): WorkingPreference {
+  return { ...planValue(plan), total: clamp(plan.total + delta) }
+}
+export function setLimit(plan: WorkingPreference, harness: string, limit: HarnessLimit): WorkingPreference {
+  return { ...planValue(plan), limits: { ...plan.limits, [harness]: limit } }
+}
+export function stepLimit(plan: WorkingPreference, harness: string, effective: number, delta: number): WorkingPreference {
+  return setLimit(plan, harness, stepHarnessLimit(plan.limits[harness], effective, delta))
+}
+// One ladder in both views: off · 1 … 30 · no own limit. A stored API zero
+// remains visible until edited; it is not rewritten by an unrelated change.
+export function stepHarnessLimit(limit: HarnessLimit | undefined, effective: number, delta: number): HarnessLimit {
+  if (delta === 0) return limit ?? 'no_limit'
+  if (limitMode(limit) === 'none') return delta > 0 ? 'no_limit' : effective <= 1 ? 'off' : clamp(effective - 1)
+  if (limit === 'off') return delta > 0 ? 1 : 'off'
+  const shown = limit as number
+  if (delta > 0) return shown >= CAP_MAX ? 'no_limit' : clamp(shown + 1)
+  return shown <= 0 ? shown : shown <= 1 ? 'off' : clamp(shown - 1)
+}
+export const nextLimitMode = (limit: HarnessLimit | undefined): LimitMode => ({ none: 'max', max: 'off', off: 'none' } as const)[limitMode(limit)]
+export function modeLimit(limit: HarnessLimit | undefined, mode: LimitMode, remembered = 2): HarnessLimit {
+  return mode === 'none' ? 'no_limit' : mode === 'off' ? 'off' : Math.max(1, clamp(typeof limit === 'number' ? limit : remembered))
+}
+export function typedTotal(input: string): number | undefined {
+  if (input.length > 64) return undefined
+  const value = input.trim()
+  return /^\d+$/.test(value) ? clamp(Number(value)) : undefined
+}
+export function typedLimit(input: string): HarnessLimit | undefined {
+  if (input.length > 64) return undefined
+  if (!input.trim()) return 'no_limit'
+  const value = typedTotal(input)
+  return value === undefined ? undefined : value === 0 ? 'off' : value
+}
+export function effectiveLimit(total: number, running: number, room: number | null): number {
+  // Unknown account room never becomes an invented zero or a claim of capacity.
+  return room === null ? total : Math.min(total, running + room)
+}
+export function noOwnTip(harness: string, total: number): string {
+  const name = HARNESS_NAME[harness] ?? harness
+  return total === 0 ? `${name} has no limit of its own; with 0 at once, nothing new starts.` : `${name} has no limit of its own; the ${total} at once and ${name}'s accounts cap it.`
+}
+export function liveCopy(total: number, running: number, room: number | null, full = false) {
+  const prefix = `${running} running`
+  if (total === 0) return `${prefix} · nothing new starts`
+  if (running > total) return `${prefix} · winding down to ${total}`
+  if (running === total) return `${prefix} · all ${total} in use`
+  if (room === null) return `${prefix} · account room not measured yet`
+  if (room === 0) return `${prefix} · ${full ? 'accounts full' : 'no account starts available'}`
+  return `${prefix} · room for ${Math.min(total - running, room)} more`
+}
+export function statusCopy(total: number, running: number, room: number | null, full = false) {
+  if (total === 0) return running ? `Start nothing new: the ${running} ${running === 1 ? 'agent' : 'agents'} running finish their work.` : 'Start nothing new. Nothing is running.'
+  if (running > total) return `Winding down to ${total}: no new starts until below ${total}; running agents finish.`
+  if (running === total) return `All ${total} in use: no further starts until one finishes.`
+  if (room === 0) return `Room for ${total - running} more in the total; ${full ? 'all account start slots are occupied' : 'no account starts are available right now'}.`
+  return room === null ? `Room for ${total - running} more in the total; account room is not measured yet.` : `Room for ${total - running} more: starts as work and accounts allow.`
+}
+export function nowCopy(total: number, running: number, room: number | null): string {
+  const are = running === 1 ? 'is' : 'are'
+  if (total === 0) return running ? `Nothing new starts. The ${running} running ${running === 1 ? 'finishes its' : 'finish their'} work.` : 'Nothing new starts, and nothing is running.'
+  if (running > total) return `${running} ${are} running, ${running - total} more than ${total} at once; they finish before anything new starts.`
+  if (running === total) return `${running} ${are} running, all ${total} at once; no further starts until one finishes.`
+  if (room === null) return `${running} ${are} running; ${total - running} more would fit the ${total} at once. Account room is not measured yet.`
+  if (room === 0) return `${running} ${are} running; ${total - running} more would fit the ${total} at once, but no account starts are available right now.`
+  if (room < total - running) return `${running} ${are} running; ${total - running} more would fit the ${total} at once, but the accounts have room for ${room}.`
+  return `${running} ${are} running; ${total - running} more can start as work comes in.`
+}
+export function waitingCopy(plan: WorkingPreference, snapshot: PlanSnapshot, room: Record<string, number | null>, waiting: WaitingWork[] | null, reasons: Record<string, string> = {}): string {
+  if (waiting === null) return 'Waiting work is not available yet.'
+  if (!waiting.length) return 'No work queued.'
+  const groups = new Map<string, number>()
+  for (const item of waiting) {
+    let why: string
+    if (plan.total === 0) why = '0 at once, nothing new starts'
+    else if (snapshot.running_total > plan.total) why = 'winding down first'
+    else if (snapshot.running_total === plan.total) why = `all ${plan.total} at once are in use`
+    else {
+      const candidates = item.harness ? [item.harness] : Object.keys(room)
+      const usable = candidates.filter(h => plan.limits[h] !== 'off' && (typeof plan.limits[h] !== 'number' || (snapshot.running[h] ?? 0) < (plan.limits[h] as number)))
+      if (!usable.length && item.harness) why = plan.limits[item.harness] === 'off' ? `${HARNESS_NAME[item.harness] ?? item.harness} is off` : `${HARNESS_NAME[item.harness] ?? item.harness} is at its limit`
+      else if (!usable.length && candidates.length) why = 'every harness is off or at its limit'
+      // Only confirmed positive room is ready; unknown room is never a start.
+      else if (usable.some(h => (room[h] ?? 0) > 0)) why = item.reason || 'ready for a start'
+      else if (usable.length && usable.every(h => room[h] === 0)) why = item.reason || usable.map(h => reasons[h] ? `${HARNESS_NAME[h] ?? h}: ${reasons[h]}` : '').filter(Boolean).join('; ') || 'room on an account'
+      else if (usable.every(h => room[h] === null || room[h] === undefined)) why = item.reason || 'account room is not measured yet'
+      else why = item.reason || usable.map(h => `${HARNESS_NAME[h] ?? h}: ${reasons[h] || (room[h] === 0 ? 'no start slots available' : 'account room not measured yet')}`).join('; ')
+    }
+    groups.set(why, (groups.get(why) ?? 0) + 1)
+  }
+  return [...groups].map(([why, n]) => why === 'room on an account' ? `${n} waiting for room on an account` : `${n} waiting: ${why}`).join(' · ')
+}
+export function workingRows(plan: WorkingPreference, snapshot: PlanSnapshot, room: Record<string, number | null>, waiting: WaitingWork[] | null) {
+  const known = new Set(['codex', 'claude', 'cursor', ...Object.keys(room), ...Object.keys(snapshot.running), ...Object.keys(plan.limits)])
+  return POOL_ORDER.filter(h => known.has(h)).map(key => {
+    const limit = plan.limits[key], mode = limitMode(limit), running = snapshot.running[key] ?? 0
+    const effective = effectiveLimit(plan.total, running, room[key] ?? null)
+    const shown = mode === 'off' ? 0 : typeof limit === 'number' ? limit : effective
+    const count = waiting?.filter(w => w.harness === key).length ?? 0
+    const tail = mode === 'off' ? (running ? `${running} running, finishing` : 'none running') : typeof limit === 'number' && running > limit ? `${running} running, ${running - limit} above, finishing` : `${running} running`
+    return { key, label: HARNESS_NAME[key] ?? key, mode, limit, running, effective, shown,
+      sub: tail + (count ? ` · ${count} waiting` : ''),
+      words: mode === 'off' ? 'no new starts' : mode === 'none' ? `no own limit · up to ${effective} now` : `at most ${shown}`,
+      summary: mode === 'none' ? 'no own limit' : mode === 'off' ? 'off' : `at most ${shown}`,
+    }
+  })
 }

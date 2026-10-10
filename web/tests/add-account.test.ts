@@ -106,7 +106,7 @@ test('only a connected computer is offered, and a revoked enrollment is free aga
     machine({ computer_id: '', computer_name: 'blank', computer_state: 'connected' }),
     machine({ computer_id: 'c-revoked', computer_name: 'revoked-box', computer_state: 'revoked' }),
     machine({
-      computer_id: 'c-live', computer_name: 'mbp2607', computer_state: 'connected', platform: 'darwin',
+      computer_id: 'c-live', computer_name: 'build-7', computer_state: 'connected', platform: 'darwin',
       enrollments: [
         { harness: 'codex', state: 'connected' },
         { harness: 'codex', state: 'connected' },
@@ -116,7 +116,7 @@ test('only a connected computer is offered, and a revoked enrollment is free aga
       ],
     }),
   ])
-  assert.deepEqual(rows, [{ id: 'c-live', name: 'mbp2607', harnesses: ['codex', 'claude'] }])
+  assert.deepEqual(rows, [{ id: 'c-live', name: 'build-7', harnesses: ['codex', 'claude'] }])
 })
 
 test('duplicate machine names keep the platform, and a blank name is Paired machine', () => {

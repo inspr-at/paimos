@@ -4,23 +4,63 @@ package agentd
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
+	"strings"
+	"time"
 )
 
 const (
-	launchPrepared  = "not_attempted"
-	launchAttempted = "attempted"
-	launchRefused   = "verification_unavailable"
+	launchRoutePending = "route_pending"
+	launchPrepared     = "not_attempted"
+	launchAttempted    = "attempted"
+	launchRefused      = "verification_unavailable"
 )
 
 var errClaimUnconfirmed = errors.New("claim settlement unconfirmed; no local launch attempted")
 
 func noLocalProcess(r Record) bool {
-	return r.ExitObserved || r.LaunchState == launchPrepared || r.LaunchState == launchRefused
+	return r.ExitObserved || r.LaunchState == launchRoutePending || r.LaunchState == launchPrepared || r.LaunchState == launchRefused
 }
 
 func validateLaunchRecord(r Record) error {
+	if r.LedgerGroup != "" {
+		if len(r.LedgerGroup) != 32 || !uuidPattern.MatchString(r.LedgerGeneration) {
+			return errors.New("invalid durable ledger coordinates")
+		}
+		if _, err := hex.DecodeString(r.LedgerGroup); err != nil {
+			return errors.New("invalid durable ledger coordinates")
+		}
+	} else if r.LedgerGeneration != "" {
+		return errors.New("invalid durable ledger coordinates")
+	}
+	if len(r.RouteCandidates) > 64 {
+		return errors.New("invalid durable ledger subset")
+	}
+	seen := map[string]bool{}
+	for _, c := range r.RouteCandidates {
+		if c.AccountID == "" || seen[c.AccountID] || len(c.Login.Harness) == 0 || len(c.Login.Harness) > 32 || strings.ContainsAny(c.Login.Harness, "\x00\r\n") {
+			return errors.New("invalid durable ledger subset")
+		}
+		seen[c.AccountID] = true
+		if c.Login.Identity != "unknown" {
+			if len(c.Login.Identity) != 64 {
+				return errors.New("invalid durable ledger subset")
+			}
+			if _, err := hex.DecodeString(c.Login.Identity); err != nil {
+				return errors.New("invalid durable ledger subset")
+			}
+		}
+	}
+	if r.ProcessGroupID != 0 && (r.ProcessGroupID != r.PID || r.PID < 1 || r.ProcessStartedAt.IsZero()) {
+		return errors.New("invalid durable process group")
+	}
+
 	switch r.LaunchState {
+	case launchRoutePending:
+		if r.PID == 0 && r.ClaimRoute == nil && r.Sequence == 0 && len(r.Pending) == 0 && ((r.State == "route_pending" && len(r.RouteCandidates) > 0 && len(r.RouteCandidates) <= 64 && r.LedgerGroup != "" && r.LedgerGeneration != "") || ((r.State == "completed" || r.State == "failed" || r.State == "cancelled") && len(r.RouteCandidates) == 0 && r.LedgerGroup == "")) {
+			return nil
+		}
 	case "", launchAttempted:
 		return nil
 	case launchRefused:
@@ -45,6 +85,7 @@ func (s *Supervisor) refuseVerification(run Run, reason string) error {
 	s.mu.Lock()
 	s.runs[run.ID] = &owned{record: r}
 	s.mu.Unlock()
+	s.verificationDiagnosticFor(run.ID, run.requestedAccount(), run.Purpose, "refused", reason)
 	return nil
 }
 
@@ -82,12 +123,19 @@ func (s *Supervisor) reconcileUnlaunched(ctx context.Context, entry *owned) erro
 	if run.ID != record.RunID || run.WorkOrderID != record.WorkOrderID || run.AgentPrincipalID != record.PrincipalID {
 		return ErrScope
 	}
-	if run.Status == "queued" && run.AccountID == "" && record.ExecutionMode == "managed" && record.Generation == s.generation {
+	if run.Status == "queued" && run.AccountID == "" && record.ExecutionMode == "managed" && (record.Generation == s.generation || s.ledger != nil) {
 		// A server-observed release invalidates the route, never launch evidence.
 		// Keep the prior binding until a new validated route is durably stored.
 		entry.mu.Lock()
 		defer entry.mu.Unlock()
 		next := entry.record
+		if s.ledger != nil {
+			if err := s.releaseLedger(next); err != nil {
+				return err
+			}
+			next.LedgerGroup, next.LedgerGeneration = "", ""
+			next.RouteCandidates = nil
+		}
 		next.RouteReleased = true
 		if err := s.journal.Put(next); err != nil {
 			return err
@@ -104,7 +152,7 @@ func (s *Supervisor) reconcileUnlaunched(ctx context.Context, entry *owned) erro
 		// generation is never silently replaced across a restart: an earlier
 		// HTTP request may still commit. Server expiry can cancel unclaimed
 		// verification; until then its accounting remains explicitly pending.
-		if record.Generation != s.generation {
+		if record.Generation != s.generation && s.ledger == nil {
 			return errClaimUnconfirmed
 		}
 		return nil
@@ -151,13 +199,61 @@ func (s *Supervisor) hasUnresolvedOldClaim(account string) bool {
 	for _, entry := range s.runs {
 		entry.mu.Lock()
 		r := entry.record
-		pending := r.AccountID == account && r.Generation != s.generation && r.LaunchState == launchPrepared && (r.State == "claim_pending" || len(r.Pending) > 0 || r.SettlementGap)
+		// Exit proves process ownership, not server settlement. Preserve the
+		// claim's authority until its outbox and disputed usage are reconciled.
+		pending := r.AccountID == account && r.Generation != s.generation &&
+			(len(r.Pending) > 0 || r.SettlementGap || r.LaunchState == launchPrepared && r.State == "claim_pending" && (!r.RouteReleased || s.ledger == nil))
 		entry.mu.Unlock()
 		if pending {
 			return true
 		}
 	}
 	return false
+}
+
+// reconcileOldSettlement requires independent accounting and local exit
+// evidence. It never adopts a PID, rotates claim authority or posts telemetry.
+// Caller holds entry.mu, serializing this read and checkpoint with its outbox.
+func (s *Supervisor) reconcileOldSettlement(ctx context.Context, entry *owned) error {
+	r := entry.record
+	if r.Generation == s.generation || !r.SettlementGap || !noLocalProcess(r) || entry.process != nil {
+		return nil
+	}
+	// A still-retryable outbox retains its exact original-claim delivery path.
+	// Read-only reconciliation repairs gaps after delivery or permanent parking.
+	if len(r.Pending) > 0 && !r.ReportParked {
+		return nil
+	}
+	switch r.State {
+	case "completed", "failed", "cancelled":
+	default:
+		return errSettlementParked
+	}
+	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	run, err := s.api.GetRun(readCtx, r.RunID)
+	if err != nil {
+		// The nested read deadline is not the poll deadline. Join only the
+		// parent context so one hung run detail cannot skip other accounts,
+		// queued work, or the unsettled_previous_run diagnostic.
+		return errors.Join(errSettlementParked, ctx.Err())
+	}
+	if run.ID != r.RunID || run.WorkOrderID != r.WorkOrderID || run.AgentPrincipalID != r.PrincipalID ||
+		run.AccountID != r.AccountID || run.Purpose != r.ExecutionMode || run.Status != r.State ||
+		run.ReservationsSettled == nil || !*run.ReservationsSettled {
+		return errSettlementParked
+	}
+	next := r
+	// Parked reports were never accepted. Keep them as evidence, without
+	// relabeling disputed usage as server-applied or replaying a terminal run.
+	next.DeadLetters = append(append([]Telemetry(nil), r.DeadLetters...), r.Pending...)
+	next.Pending = nil
+	next.SettlementGap = false
+	if err := s.journal.Put(next); err != nil {
+		return err
+	}
+	entry.record = next
+	return nil
 }
 
 // A durable refusal is retried on each queue receipt, including after restart.

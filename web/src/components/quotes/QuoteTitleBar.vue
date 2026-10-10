@@ -225,8 +225,8 @@ function menuKeys(event: KeyboardEvent) {
 .titlebar:not(.compact) .save-state { min-width: 124px; }
 .save-state svg { flex-shrink: 0; color: var(--ink-3); }
 .save.ok .save-state svg { color: color-mix(in oklab, var(--ok), var(--ink) 20%); }
-.save.warn .save-state { color: var(--gold-ink); }
-.save.warn .save-state svg { color: var(--gold-ink); }
+.save.warn .save-state { color: var(--warn-ink); }
+.save.warn .save-state svg { color: var(--warn-ink); }
 .save.bad .save-state, .save.bad .save-state svg { color: var(--danger); }
 .dirty-dot { flex-shrink: 0; width: 8px; height: 8px; margin: 0 3px; border-radius: 50%; background: var(--gold); }
 /* The action: always in the same place; ready (teal) only when there is something to save. */

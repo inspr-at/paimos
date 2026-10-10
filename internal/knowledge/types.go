@@ -28,6 +28,7 @@ var specs = []spec{
 	{Type: "memory", Kind: "memory", Label: "Memory", Prefix: "MEM"},
 	{Type: "external-system", Kind: "external_system", Label: "External system", Prefix: "EXT"},
 	{Type: "related-project", Kind: "related_project", Label: "Related project", Prefix: "RPR"},
+	{Type: "decision", Kind: "decision", Label: "Decision", Prefix: "DCS"},
 }
 
 func kindSlugs() []string {

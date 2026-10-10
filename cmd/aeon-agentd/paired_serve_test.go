@@ -27,6 +27,176 @@ import (
 	"github.com/inspr-at/paimos/internal/localjournal"
 )
 
+// Risk: a durable, unconfirmed Route makes paired startup exit before its
+// authenticated socket exists. Exercise real startup twice with isolated state.
+func TestPairedServeRestartsWithUnconfirmedLedgerIntent(t *testing.T) {
+	root, err := os.MkdirTemp("", "al-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(root)
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const tenant = "11111111-1111-4111-8111-111111111111"
+	const computer = "22222222-2222-4222-8222-222222222222"
+	const principal = "33333333-3333-4333-8333-333333333333"
+	const request = "44444444-4444-4444-8444-444444444444"
+	const account = "55555555-5555-4555-8555-555555555555"
+	view := agentsetup.View{RequestID: request, TenantID: tenant, ComputerID: computer, PrincipalID: principal, DaemonID: "ledger-fixture", ComputerName: "fixture", Workspace: root, ComputerState: "connected", Revision: 1, LedgerMode: true, ServerCapabilities: []string{agentsetup.LedgerCapability}}
+	var viewMu sync.Mutex
+	var attempts atomic.Int32
+	polled := make(chan struct{}, 4)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/agent-pairing/reconcile", "/api/agent-pairing/self":
+			viewMu.Lock()
+			defer viewMu.Unlock()
+			_ = json.NewEncoder(w).Encode(view)
+		case "/api/agent-pairing/self/ledger":
+			var body struct {
+				Generation string `json:"generation"`
+			}
+			if r.Method != "POST" || json.NewDecoder(r.Body).Decode(&body) != nil || body.Generation == "" {
+				t.Error("invalid ledger enrollment")
+				w.WriteHeader(400)
+				return
+			}
+			viewMu.Lock()
+			defer viewMu.Unlock()
+			view.LedgerGeneration = &body.Generation
+			_ = json.NewEncoder(w).Encode(view)
+		case "/api/me":
+			_ = json.NewEncoder(w).Encode(map[string]any{"tenant": map[string]string{"id": tenant}, "principal": map[string]string{"id": principal, "tenant_id": tenant, "kind": "agent"}})
+		case "/api/agent-accounts/route":
+			attempts.Add(1)
+			w.WriteHeader(409)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "allowance exceeded"})
+		case "/api/runs/stuck":
+			_ = json.NewEncoder(w).Encode(agentd.Run{ID: "stuck", AgentPrincipalID: principal, WorkOrderID: "order", Status: "queued"})
+		case "/api/agent-pairing/attach":
+			w.WriteHeader(409)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "fixture attach disabled"})
+		case "/api/runs/queued":
+			_ = json.NewEncoder(w).Encode([]any{})
+			select {
+			case polled <- struct{}{}:
+			default:
+			}
+		case "/api/agent-accounts", "/api/harness-recoveries/claim":
+			_ = json.NewEncoder(w).Encode([]any{})
+		case "/api/agent-accounts/" + account + "/probe":
+			w.WriteHeader(204)
+		default:
+			t.Errorf("unexpected ledger fixture route: %s", r.URL.Path)
+			w.WriteHeader(404)
+		}
+	}))
+	defer server.Close()
+	priorTransport := http.DefaultTransport
+	http.DefaultTransport = server.Client().Transport
+	defer func() { http.DefaultTransport = priorTransport }()
+	proof := strings.Repeat("1", 64)
+	c := agentsetup.RuntimeConfig{Schema: "aeon.agent-runtime.v1", Origin: server.URL, TenantID: tenant, PrincipalID: principal, ComputerID: computer, DaemonID: view.DaemonID, Workspace: root,
+		Accounts: []agentsetup.RuntimeAccount{{Harness: "claude", Key: "fixture", AccountID: account, Home: root, Path: filepath.Join(root, "unavailable-claude")}}}
+	store, err := agentsetup.OpenStore(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := map[string]any{"schema": "aeon.agent-setup.private.v1", "origin": server.URL, "request": map[string]string{"request_id": request, "computer_name": "fixture", "workspace_path": root}, "response": map[string]string{"tenant_id": tenant}, "view": view, "device_secret": proof, "runtime_secret": proof, "lifecycle_secret": proof}
+	for name, value := range map[string]any{"pairing.json": snapshot, agentsetup.RuntimeName: c} {
+		raw, _ := json.Marshal(value)
+		if err := store.Write(name, raw, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Write("runtime.key", []byte("aeon_fixture_"+proof), true); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	accounts, adapters, err := pairedAdapters(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(root, "daemon")
+	seed, err := agentd.NewSupervisor(t.Context(), agentd.Config{API: agentd.NewRemote(server.URL, "aeon_fixture_"+proof), StateRoot: state, DaemonID: c.DaemonID, Workspace: root, Accounts: accounts, Adapters: adapters})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := agentd.LedgerConfig{Path: filepath.Join(root, "ledger"), Root: root, Label: "cm.aeon.agentd", Origin: server.URL}
+	if err := seed.EnableLedger(t.Context(), config); err != nil {
+		t.Fatal(err)
+	}
+	generation := seed.Generation()
+	if err := seed.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := agentsetup.OpenSharedLedger(config.Path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ledger.Close()
+	data, members, err := ledger.Snapshot()
+	if err != nil || len(members) != 1 {
+		t.Fatal("fixture member missing", err)
+	}
+	gid, err := agentsetup.LedgerID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	subset, err := ledger.Acquire(members[0].ID, data.Generation, gid, []agentsetup.LedgerCandidate{{AccountID: account, Login: agentsetup.LedgerLogin{Harness: "claude", Identity: agentsetup.LedgerFingerprint(data.Generation, "login/claude", "")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, err := localjournal.Open(localjournal.Config[agentd.Record]{Directory: state, Prefix: "aeon-agentd-" + c.DaemonID, Version: agentd.RecordSchemaVersion, MaxBytes: 4 << 20, MaxRecords: 4096, Key: func(r agentd.Record) (string, error) { return r.RunID, nil }, Validate: func(agentd.Record) error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := agentd.Record{TenantID: tenant, PrincipalID: principal, RunID: "stuck", WorkOrderID: "order", Generation: generation, ExecutionMode: "managed", State: "route_pending", LaunchState: "route_pending", LedgerGroup: gid, LedgerGeneration: data.Generation, RouteCandidates: subset}
+	if err := j.Put(intent); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- servePairedContext(ctx, root, time.Hour) }()
+		func() {
+			defer func() {
+				cancel()
+				select {
+				case err := <-done:
+					if err != nil {
+						t.Errorf("paired restart failed: %v", err)
+					}
+				case <-time.After(10 * time.Second):
+					t.Error("paired restart failed to stop")
+				}
+			}()
+			select {
+			case <-polled:
+			case err := <-done:
+				done <- err
+				t.Fatalf("pending Route crash-looped startup: %v", err)
+			case <-time.After(10 * time.Second):
+				t.Fatal("pending Route blocked normal queue polling")
+			}
+			local, err := agentdwire.OpenClient(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, err := local.Lifecycle(t.Context(), "")
+			if err != nil || status.DaemonID != c.DaemonID {
+				t.Fatal("restart did not serve authenticated local control", err)
+			}
+		}()
+	}
+	data, _, err = ledger.Snapshot()
+	if err != nil || len(data.Groups) != 1 || data.Groups[gid].State != "pending" || attempts.Load() < 2 {
+		t.Fatal("restart lost unresolved owner occupancy", data, err)
+	}
+}
+
 func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 	for _, tc := range []struct {
 		name, message string
@@ -54,12 +224,21 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 			const request = "44444444-4444-4444-8444-444444444444"
 			const account = "55555555-5555-4555-8555-555555555555"
 			view := agentsetup.View{RequestID: request, TenantID: tenantID, ComputerID: computer, PrincipalID: principal, DaemonID: "skew-fixture", ComputerName: "fixture", Workspace: root, ComputerState: "connected", Revision: 1}
-			var registrations atomic.Int32
+			var registrations, negotiations atomic.Int32
 			var updated atomic.Bool
 			polled := make(chan struct{}, 4)
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/api/agent-pairing/reconcile":
+					_ = json.NewEncoder(w).Encode(view)
+				case "/api/agent-pairing/self":
+					// Host-capacity negotiation: the released server serves this
+					// view without host_capacity, so starts stay on the legacy
+					// path and /self/capacity must never be called (default case).
+					if r.Method != http.MethodGet {
+						t.Errorf("host-capacity negotiation used %s", r.Method)
+					}
+					negotiations.Add(1)
 					_ = json.NewEncoder(w).Encode(view)
 				case "/api/me":
 					_ = json.NewEncoder(w).Encode(map[string]any{"tenant": map[string]string{"id": tenantID}, "principal": map[string]string{"id": principal, "tenant_id": tenantID, "kind": "agent"}})
@@ -93,8 +272,24 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 					case polled <- struct{}{}:
 					default:
 					}
+				case "/api/agent-accounts":
+					if r.Method != http.MethodGet || r.URL.RawQuery != "include_checks=true" {
+						t.Error("capacity check poll did not use the scoped contract")
+					}
+					_ = json.NewEncoder(w).Encode([]any{})
 				case "/api/agent-accounts/" + account + "/probe":
 					w.WriteHeader(204)
+				case "/api/harness-recoveries/claim":
+					// The runtime polls recovery commands with its own daemon
+					// identity; nothing is pending for this fixture.
+					var claim struct{ DaemonID, Generation string }
+					if r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&struct {
+						DaemonID   *string `json:"daemon_id"`
+						Generation *string `json:"generation"`
+					}{&claim.DaemonID, &claim.Generation}) != nil || claim.DaemonID != view.DaemonID || claim.Generation == "" {
+						t.Error("recovery claim poll did not carry the paired daemon identity")
+					}
+					_ = json.NewEncoder(w).Encode([]any{})
 				default:
 					t.Errorf("unexpected paired runtime route: %s", r.URL.Path)
 					w.WriteHeader(404)
@@ -136,6 +331,7 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 			store.Close()
 			for _, afterUpdate := range []bool{false, true} {
 				updated.Store(afterUpdate)
+				negotiated := negotiations.Load()
 				ctx, cancel := context.WithCancel(t.Context())
 				done := make(chan error, 1)
 				go func() { done <- servePairedContext(ctx, root, time.Hour) }()
@@ -160,6 +356,10 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 						case <-time.After(10 * time.Second):
 							t.Fatal("paired serve stopped polling work")
 						}
+					}
+					// Each poll negotiates host capacity before reading the queue.
+					if negotiations.Load() == negotiated {
+						t.Fatal("paired serve polled work without negotiating host capacity")
 					}
 					local, err := agentdwire.OpenClient(filepath.Join(root, "daemon"))
 					if err != nil {
@@ -389,7 +589,7 @@ func TestColdRevokedDaemonReconcilesWithoutRuntimeAuthentication(t *testing.T) {
 					t.Fatal(err)
 				}
 				s.Close()
-				j, err := localjournal.Open(localjournal.Config[agentd.Record]{Directory: state, Prefix: "aeon-agentd-fixture", Version: 2, MaxBytes: 4 << 20, MaxRecords: 4096, Key: func(r agentd.Record) (string, error) { return r.RunID, nil }, Validate: func(agentd.Record) error { return nil }})
+				j, err := localjournal.Open(localjournal.Config[agentd.Record]{Directory: state, Prefix: "aeon-agentd-fixture", Version: agentd.RecordSchemaVersion, MaxBytes: 4 << 20, MaxRecords: 4096, Key: func(r agentd.Record) (string, error) { return r.RunID, nil }, Validate: func(agentd.Record) error { return nil }})
 				if err != nil {
 					t.Fatal(err)
 				}

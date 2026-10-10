@@ -344,35 +344,35 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 </template>
 
 <style scoped>
-.ed { position: absolute; z-index: 30; display: flex; flex-direction: column; width: 620px; max-width: calc(100vw - 24px); max-height: min(720px, calc(100dvh - 96px)); border-radius: 16px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); color: var(--ink); text-align: left; }
-.ed.night { width: 580px; }
+.ed { position: absolute; z-index: 30; display: flex; flex-direction: column; width: clamp(620px, 50vw, 1040px); max-width: calc(100vw - 24px); max-height: min(720px, calc(100dvh - 96px)); border-radius: 16px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); color: var(--ink); text-align: left; }
+.ed.night { width: clamp(580px, 44vw, 960px); }
 .grab { width: 36px; height: 5px; margin: 8px auto 0; border-radius: 3px; background: var(--line-2); }
 .ed-head { display: flex; align-items: center; gap: 10px; padding: 14px 12px 2px 20px; }
 .ed-head h3 { margin: 0 auto 0 0; font: 600 16px/1.3 var(--font); color: var(--ink); }
 .ed-head h3:focus, .ed-head h3:focus-visible { outline: none; box-shadow: none; }
-.ed-body { flex: 1; scrollbar-gutter: stable; align-content: start; display: grid; gap: 16px; padding: 2px 20px 18px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.ed-body { flex: 1; scrollbar-gutter: stable; align-content: start; display: grid; gap: 16px; padding: 16px 20px 28px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .ed p { margin: 0; }
 .ed-help { color: var(--ink-3); font-size: 12.5px; line-height: 1.45; }
 .ed-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .ed-foot .sp { flex: 1; }
 .ed-foot .btn.primary { min-width: 88px; }
-.ed-err { flex: 0 1 110px; height: 38px; overflow: auto; color: var(--gold-ink); font-size: 12.5px; font-weight: 600; }
+.ed-err { flex: 0 1 110px; height: 38px; overflow: auto; color: var(--warn-ink); font-size: 12.5px; font-weight: 600; }
 .btn:disabled { opacity: .5; cursor: default; filter: none; }
 .sec-t { display: flex; align-items: center; gap: 10px; color: var(--ink); font-size: 13px; font-weight: 650; }
 .sec-t .aside { margin-left: auto; color: var(--ink-3); font-weight: 450; font-size: 12.5px; }
 .off-t, .big-t { margin-bottom: 8px; }
 .off-help { margin-top: 6px; }
 .chk { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; color: var(--ink-2); font-size: 12.5px; font-weight: 550; cursor: pointer; }
-.chk input { width: 16px; height: 16px; margin: 0; accent-color: #0e6f6c; }
+.chk input { width: 16px; height: 16px; margin: 0; accent-color: var(--primary); }
 .sel { -webkit-appearance: none; appearance: none; height: 30px; padding: 0 24px 0 9px; border: 0; border-radius: 8px; background: var(--field-bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%237a8c8d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4.5 6.3 3.5 3.5 3.5-3.5'/%3E%3C/svg%3E") no-repeat right 7px center / 11px; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink); font: 500 12.5px var(--mono); font-variant-numeric: tabular-nums; cursor: pointer; }
 .sel:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .dash { color: var(--ink-3); }
 .same-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 /* Day switches: small, quiet, the same pill as the card's night toggle. */
-.tog { position: relative; display: inline-flex; align-items: center; width: 32px; height: 18px; padding: 0; border: 0; border-radius: 999px; background: var(--line-2); box-shadow: inset 0 1px 2px rgba(0, 0, 0, .12); cursor: pointer; }
-.tog::after { content: ''; position: absolute; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .28); transition: transform .18s ease; }
-.tog[aria-checked="true"] { background: linear-gradient(180deg, #1a8683, #0e6f6c); }
-.tog[aria-checked="true"]::after { transform: translateX(14px); }
+.tog { position: relative; display: inline-flex; align-items: center; width: 32px; height: 18px; padding: 0; border: 0; border-radius: 999px; background: var(--line-2); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-black) 12%, transparent); cursor: pointer; }
+.tog::after { content: ''; position: absolute; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--switch-knob); box-shadow: 0 1px 3px color-mix(in srgb, var(--shadow-black) 28%, transparent); transition: transform .18s ease; }
+.tog[aria-checked="true"] { background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo)); }
+.tog[aria-checked="true"]::after { background: var(--switch-knob); transform: translateX(14px); }
 .tog:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .tog::before { content: ''; position: absolute; inset: -9px -4px; }
 @media (prefers-reduced-motion: reduce) { .tog::after { transition: none; } }
@@ -407,7 +407,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 .models legend { margin-bottom: 8px; padding: 0; color: var(--ink); font-size: 13px; font-weight: 650; }
 .model { position: relative; display: grid; gap: 1px; align-content: start; min-height: 58px; padding: 10px 12px 10px 38px; border-radius: 12px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); cursor: pointer; }
 @media (hover: hover) { .model:hover { background: var(--row-hover); } }
-.model input { position: absolute; left: 13px; top: 12px; width: 16px; height: 16px; margin: 0; accent-color: #0e6f6c; }
+.model input { position: absolute; left: 13px; top: 12px; width: 16px; height: 16px; margin: 0; accent-color: var(--primary); }
 .model:has(input:checked) { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .model:has(input:focus-visible) { box-shadow: inset 0 0 0 1px var(--chip-teal-line), var(--focus-ring); }
 .model input:focus-visible { outline: none; box-shadow: none; }
@@ -417,7 +417,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 .drow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 36px; color: var(--ink-2); font-size: 13px; }
 .drow .nm { width: 58px; color: var(--ink); font-weight: 650; }
 .drow .gap { width: 8px; }
-.drow input[type="range"] { width: 150px; accent-color: #0e6f6c; }
+.drow input[type="range"] { width: 150px; accent-color: var(--primary); }
 .drow output { min-width: 38px; color: var(--teal-ink); font: 600 12.5px var(--mono); font-variant-numeric: tabular-nums; }
 .paint { display: flex; gap: 1px; height: 40px; border-radius: 10px; overflow: hidden; background: var(--surface-raised); touch-action: none; user-select: none; }
 .paint .hr { flex: 1; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; cursor: crosshair; }

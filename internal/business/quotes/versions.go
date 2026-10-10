@@ -73,7 +73,10 @@ func appendEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, kind st
 	if id != "" {
 		nodeID = &id
 	}
-	_, err := events.Append(ctx, tx, p, events.Change{NodeID: nodeID, Type: kind, Before: before, After: after})
+	event, err := events.Append(ctx, tx, p, events.Change{NodeID: nodeID, Type: kind, Before: before, After: after})
+	if err == nil {
+		events.RecordMutation(ctx, event.ID)
+	}
 	return err
 }
 func validateVersion(in versionWrite) error {

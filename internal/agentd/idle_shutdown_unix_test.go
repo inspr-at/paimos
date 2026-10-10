@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -36,9 +35,8 @@ func TestSIGTERMEndsIdleManagedCodex(t *testing.T) {
 		t.Fatal(err)
 	}
 	status := filepath.Join(root, "status")
-	pidPath := filepath.Join(root, "vendor.pid")
 	cmd := exec.Command(exe, "-test.run=^TestSIGTERMEndsIdleManagedCodex$", "-test.timeout=60s", "-test.count=1")
-	cmd.Env = append(os.Environ(), "AEON_AGENTD_IDLE_CHILD=1", "AEON_AGENTD_IDLE_STATUS="+status, "AEON_AGENTD_IDLE_PID="+pidPath)
+	cmd.Env = append(os.Environ(), "AEON_AGENTD_IDLE_CHILD=1", "AEON_AGENTD_IDLE_STATUS="+status)
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
@@ -46,18 +44,17 @@ func TestSIGTERMEndsIdleManagedCodex(t *testing.T) {
 		t.Fatal(err)
 	}
 	waited := make(chan error, 1)
-	go func() { waited <- cmd.Wait() }()
+	joined := make(chan struct{})
+	go func() { waited <- cmd.Wait(); close(joined) }()
 	t.Cleanup(func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		if raw, err := os.ReadFile(pidPath); err == nil {
-			pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-			if err == nil && pid > 1 {
-				_ = syscall.Kill(-pid, syscall.SIGKILL)
-			}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := stopIdleChild(ctx, cmd.Process.Signal, joined); err != nil {
+			t.Errorf("join owned child fixture: %v", err)
 		}
 	})
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		select {
@@ -70,11 +67,10 @@ func TestSIGTERMEndsIdleManagedCodex(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("managed Codex run did not go idle: %s", output.String())
+			t.Fatal("managed Codex run did not go idle")
 		}
-		time.Sleep(20 * time.Millisecond)
+		<-tick.C
 	}
-	started := time.Now()
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
@@ -84,23 +80,80 @@ func TestSIGTERMEndsIdleManagedCodex(t *testing.T) {
 			t.Fatalf("idle agentd exit after SIGTERM: %v\n%s", err, output.String())
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatalf("SIGTERM did not finish an idle managed Codex run within 5s\n%s", output.String())
+		t.Fatal("SIGTERM did not finish an idle managed Codex run within 5s")
 	}
-	if elapsed := time.Since(started); elapsed > 5*time.Second {
-		t.Fatalf("shutdown took %s", elapsed)
-	}
+	<-joined
 	raw, err := os.ReadFile(status)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.TrimSpace(string(raw)); got != "completed" {
+	if got := strings.TrimSpace(string(raw)); got != "completed;vendor-cleanup-confirmed" {
 		t.Fatalf("settlement %q\n%s", got, output.String())
+	}
+}
+
+// The parent owns only its child fixture. Vendor cleanup stays inside that
+// child, where the adapter still owns the vendor's verified Lifetime.
+func stopIdleChild(ctx context.Context, signal func(os.Signal) error, joined <-chan struct{}) error {
+	select {
+	case <-joined:
+		return nil
+	default:
+	}
+	if err := signal(syscall.SIGTERM); err != nil {
+		select {
+		case <-joined:
+			return nil
+		default:
+			return err
+		}
+	}
+	select {
+	case <-joined:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestIdleChildDelayedCleanupNeverSignalsReleasedIdentity(t *testing.T) {
+	joined := make(chan struct{})
+	close(joined) // The child already reaped its vendor and the parent joined it.
+	signals := 0
+	signal := func(os.Signal) error { signals++; return nil }
+	if err := stopIdleChild(t.Context(), signal, joined); err != nil || signals != 0 {
+		t.Fatalf("delayed cleanup signalled a released identity: signals=%d err=%v", signals, err)
+	}
+}
+
+func TestIdleChildCleanupStopsAndJoinsItsOwnedChild(t *testing.T) {
+	joined := make(chan struct{})
+	signalled := make(chan os.Signal, 1)
+	done := make(chan error, 1)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	go func() { done <- stopIdleChild(ctx, func(s os.Signal) error { signalled <- s; return nil }, joined) }()
+	select {
+	case s := <-signalled:
+		if s != syscall.SIGTERM {
+			t.Fatalf("cleanup signal: %v", s)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("cleanup returned before joining: %v", err)
+	default:
+	}
+	close(joined)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 
 func runIdleManagedCodexChild(t *testing.T) {
 	status := os.Getenv("AEON_AGENTD_IDLE_STATUS")
-	pidPath := os.Getenv("AEON_AGENTD_IDLE_PID")
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer stop()
 	root, err := filepath.EvalSymlinks(t.TempDir())
@@ -123,10 +176,41 @@ func runIdleManagedCodexChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		stop()
+		s.mu.Lock()
+		entry := s.runs["run"]
+		s.mu.Unlock()
+		if entry != nil {
+			entry.mu.Lock()
+			proc, exited := entry.process, entry.record.ExitObserved
+			entry.mu.Unlock()
+			if proc != nil && !exited {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := proc.Stop(ctx); err != nil {
+					t.Errorf("clean up owned vendor lifetime: %v", err)
+				}
+				// Stop may return after sending its escalation. Join the adapter's
+				// existing waiter before this fixture releases its resources.
+				if codex, ok := proc.(*codexProcess); ok {
+					select {
+					case <-codex.waitDone:
+					case <-ctx.Done():
+						t.Errorf("join owned vendor lifetime: %v", ctx.Err())
+					}
+				} else {
+					t.Error("idle fixture did not own a Codex process")
+				}
+			}
+		}
+	})
 	if err := s.PollOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(15 * time.Second)
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
 	var entry *owned
 	for {
 		s.mu.Lock()
@@ -135,19 +219,15 @@ func runIdleManagedCodexChild(t *testing.T) {
 		if entry != nil {
 			entry.mu.Lock()
 			activity := entry.harness.Activity
-			pid := entry.record.PID
 			entry.mu.Unlock()
 			if activity == "idle" {
-				if pid > 1 {
-					_ = os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0600)
-				}
 				break
 			}
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("child did not observe idle")
 		}
-		time.Sleep(20 * time.Millisecond)
+		<-tick.C
 	}
 	if err := os.WriteFile(status, []byte("idle"), 0600); err != nil {
 		t.Fatal(err)
@@ -162,7 +242,7 @@ func runIdleManagedCodexChild(t *testing.T) {
 			if err == nil {
 				break
 			}
-			time.Sleep(200 * time.Millisecond)
+			<-tick.C
 			continue
 		}
 		select {
@@ -187,7 +267,7 @@ func runIdleManagedCodexChild(t *testing.T) {
 	if !exited || finished.Status != "completed" || finished.ErrorCode != "" || len(stops) != 1 || stops[0] != "process_exited" {
 		t.Fatalf("settlement status=%s code=%s exited=%t stops=%v", finished.Status, finished.ErrorCode, exited, stops)
 	}
-	if err := os.WriteFile(status, []byte("completed"), 0600); err != nil {
+	if err := os.WriteFile(status, []byte("completed;vendor-cleanup-confirmed"), 0600); err != nil {
 		t.Fatal(err)
 	}
 }

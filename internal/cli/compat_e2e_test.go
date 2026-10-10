@@ -24,6 +24,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
@@ -160,7 +161,7 @@ func TestCompatEndToEnd(t *testing.T) {
 	}
 
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "get", key}, "")
-	if code != 0 || !strings.Contains(out, key+"  Calendar compat") || !strings.Contains(out, "type:     ticket") || !strings.Contains(out, "status:   open") || !strings.Contains(out, "priority: high") {
+	if code != 0 || !strings.Contains(out, key+"  Calendar compat") || !strings.Contains(out, "type:     work") || !strings.Contains(out, "status:   open") || !strings.Contains(out, "priority: high") {
 		t.Fatalf("get code %d out %q err %q", code, out, errOut)
 	}
 
@@ -200,7 +201,7 @@ func TestCompatEndToEnd(t *testing.T) {
 		t.Fatalf("json get %+v", got)
 	}
 
-	// AEON-256: CLI uses the same server gate; hidden tickets cannot bypass it.
+	// AEON-256/655: the ticket alias creates work; hiding it cannot bypass the server gate.
 	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "update", key, "--status", "done", "--hide-from-release-notes", "true"}, "")
 	if code == 0 || !strings.Contains(errOut, "benefit_de") {
 		t.Fatalf("missing benefits accepted: %d %s", code, errOut)
@@ -219,7 +220,7 @@ func TestCompatEndToEnd(t *testing.T) {
 	}
 
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "search", "Calendar", "-p", "AEON"}, "")
-	if code != 0 || !strings.Contains(out, "KEY           TYPE     STATUS         TITLE") || !strings.Contains(out, key) || !strings.Contains(out, "ticket") {
+	if code != 0 || !strings.Contains(out, "KEY           TYPE     STATUS         TITLE") || !strings.Contains(out, key) || !strings.Contains(out, "work") {
 		t.Fatalf("search code %d out %q err %q", code, out, errOut)
 	}
 
@@ -240,6 +241,51 @@ func TestCompatEndToEnd(t *testing.T) {
 		t.Fatalf("knowledge update code %d out %q err %q", code, out, errOut)
 	}
 
+	// Launch templates require enrolled accounts; seed the catalog through the
+	// same API before giving the fixture live accounts for both native harnesses.
+	status, raw := doJSON(t, &http.Client{}, http.MethodGet, srv.URL+"/api/models", "", http.Header{"Authorization": {"Bearer " + worker.Token}})
+	if status != http.StatusOK {
+		t.Fatalf("models %d %s", status, raw)
+	}
+	if err := db.InTenant(dbtest.Seed(ctx), opened.App, worker.TenantID, func(tx pgx.Tx) error {
+		var owner string
+		if err := tx.QueryRow(ctx, `SELECT created_by_principal_id::text FROM agent_keys WHERE principal_id=$1`, worker.PrincipalID).Scan(&owner); err != nil {
+			return err
+		}
+		for _, harness := range []string{"codex", "claude"} {
+			var account string
+			if err := tx.QueryRow(ctx, `
+				INSERT INTO agent_accounts (tenant_id, account_key, harness, daemon_id,
+					registered_by_principal_id, label, last_probe_at, last_probe_ok,
+					last_daemon_generation, capacity_owner, owner_person_id, linked_at,
+					allowed_model_profile_ids)
+				SELECT $1, $2, $2, 'compat-fixture', $3, 'Compat fixture', now(), true,
+					'fixture-generation', $4, $4, now(), array_agg(id)
+				FROM model_profiles WHERE harness=$2 AND enabled
+				RETURNING id::text`, worker.TenantID, harness, worker.PrincipalID, owner).Scan(&account); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_allowance_windows
+				(tenant_id, account_id, starts_at, ends_at, unit, allowance, pace_model)
+				VALUES ($1, $2, now()-interval '1 hour', now()+interval '1 day', 'requests', 1000, 'unrestricted')`, worker.TenantID, account); err != nil {
+				return err
+			}
+			schedule := capacity.DefaultSchedule()
+			schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
+			scheduleJSON, err := json.Marshal(schedule)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_schedules
+				(tenant_id, principal_id, scope, scope_key, account_id, schedule)
+				VALUES ($1, $2, 'account', $3::uuid::text, $3, $4)`, worker.TenantID, owner, account, scheduleJSON); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "model", "resolve", "build"}, "")
 	if code != 0 || !strings.Contains(out, " — ") || !strings.Contains(out, "'{prompt}'") || !strings.Contains(out, "selected") {
 		t.Fatalf("resolve code %d out %q err %q", code, out, errOut)
@@ -307,6 +353,12 @@ func TestCompatEndToEnd(t *testing.T) {
 	bundleRT := &runtime{program: "paimos", stdout: &bundleOut, stderr: &bytes.Buffer{}, configPath: missing, jsonOut: true}
 	if err := bundleRT.harnessSessionFull("AEON", "worker", "json", session.ID); err != nil || !strings.Contains(bundleOut.String(), key) {
 		t.Fatalf("full bundle %s: %v", bundleOut.String(), err)
+	}
+	_, groups := decodeSessionBundle(t, bundleOut.Bytes())
+	for _, name := range []string{"work", "tickets", "tasks", "epics"} {
+		if len(groups[name]) != 1 || groups[name][0]["key"] != key || groups[name][0]["kind"] != "work" {
+			t.Fatalf("migrated full bundle %s: %#v", name, groups[name])
+		}
 	}
 
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "onboard", "--project", "AEON", "--agent", "worker"}, "")

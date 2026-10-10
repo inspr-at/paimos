@@ -1,0 +1,293 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/usagedashboard
+paths:
+  /projects/{projectId}/lead:
+    get:
+      summary: Read the project's explicitly owned lead
+      description: Requires harness.read. Returns none until a person explicitly requests a lead; existing coordinator registrations are never automatically adopted. Project members see only generation, state and redacted reason codes.
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: Lead lifecycle snapshot
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectLead'}
+    post:
+      summary: Request a project lead without launching a process
+      description: Person-only harness.control and run.create. Requires expected_revision (zero for none). Creates an explicit owned intent; queue presence grants no authority. Automatic production launch stays disabled pending AEON-603. Idle or stopped leads restart through admission.
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision]
+              additionalProperties: false
+              properties:
+                expected_revision: {type: integer, minimum: 0}
+      responses:
+        '200': {description: 'Explicit lead intent, with unavailable gates shown as waiting_for_room'}
+        '403': {description: Person or live owner permission required}
+        '409': {description: Revision conflict or predecessor exit is unconfirmed}
+    delete:
+      summary: Remove a project lead that never started
+      description: 'Person-only harness.control, rechecked inside the final transaction under the same project fence as start and claim. Requires the displayed expected_revision. Refuses any lead with a session, a nonzero generation or generation history, even after it stopped. Deletes the unclaimed intent and appends lead.removed with the previous lead snapshot atomically. Queued work remains queued; no process is launched or stopped.'
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision]
+              additionalProperties: false
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: 'Lead removed; the project has no lead'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectLead'}
+        '403': {description: 'Person with current harness.control permission required'}
+        '409': {description: 'Revision conflict or the lead has already started'}
+  /projects/{projectId}/lead/candidates:
+    get:
+      summary: List the person's eligible running root coordinators
+      description: 'Person-only harness.read, harness.control and run.create. Returns only same-project canonical-person-owned root coordinators with reporting no more than two minutes old, no archive, stop or pending pause. Keyset pages are bounded at 200. No private session reference or worker lease is returned.'
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {in: query, name: cursor, schema: {type: string, maxLength: 2048}}
+      responses:
+        '200':
+          description: 'Eligible sessions; eligibility is checked again at confirmation and claim'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/LeadCandidate'}}
+                  next_cursor: {type: [string, 'null']}
+        '403': {description: 'Person and current project authority required'}
+  /projects/{projectId}/lead/adopt:
+    post:
+      summary: Confirm a running coordinator for adoption without restarting it
+      description: 'Person-only harness.control and run.create, checked inside the final fenced write. expected_revision is zero without a record. Creates the lead intent with the confirming canonical person as owner, or selects a candidate for an existing unbound intent of that owner. A live or historical bound lead requires ordinary succession instead; paused intents require explicit restart. The exact selected session must then claim with its existing worker lease. Until then the state is waiting_for_room with reason adoption_pending and no generation or dispatch authority is granted. Emits lead.adoption_requested. No process or worker is launched, stopped or reparented.'
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, session_id]
+              properties:
+                expected_revision: {type: integer, minimum: 0}
+                session_id: {type: string, format: uuid}
+      responses:
+        '200': {description: 'Confirmed selection awaiting the exact session lease proof'}
+        '403': {description: 'Person, owner or eligible owned root coordinator required'}
+        '409': {description: 'Stale revision, ineligible session or ordinary succession required'}
+  /projects/{projectId}/lead/adopt/cancel:
+    post:
+      summary: Clear an unclaimed adoption without touching the running session
+      description: 'Person-only harness.control and run.create inside the final fenced write. expected_revision must match. Only an unclaimed adoption_pending selection is cleared. session_id becomes null, generation stays 0 and reason becomes selection_cleared. The harness session is not paused, stopped or reparented and no cooperative control is written. Another adoption or an explicit start can proceed. A claimed generation is rejected. Emits lead.adoption_cancelled.'
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision]
+              properties:
+                expected_revision: {type: integer, minimum: 0}
+      responses:
+        '200': {description: 'Selection cleared and the running session left untouched'}
+        '403': {description: 'Person and current project authority required'}
+        '409': {description: 'Stale revision or no unclaimed adoption'}
+  /projects/{projectId}/lead/claim:
+    post:
+      summary: Bind a proven coordinator generation to the project lead intent
+      description: "Agent-only harness.worker. X-Aeon-Worker-Lease proves the named session; its canonical person owner must match the explicit intent. The session heartbeat (or creation before its first heartbeat) must be no more than two minutes old and not future-dated, allowing the default 50-second CLI reporting cadence plus a missed beat. Every claim rechecks server-side dial, harness, account room and host-load evidence, each at most 30 seconds old. Missing, stale or unreadable evidence waits. Competing claims serialize. Existing coordinator registrations migrate only through this explicit ID and proof, without adopting or reparenting workers. Succession requires confirmed predecessor stop, fresh session reference and lease, and the same owner. The authenticating agent key becomes the generation's dispatch credential, so fair-turn scheduling qualifies exactly that key and never another key of the same principal; a proven pickup through a different live key rebinds it. No process is launched. A person-confirmed adoption_pending selection binds only that exact session after its lease proof; adoption counts the already running process and does not run launch admission. All future launches and dispatch still require their ordinary live gates. The private harness_session_ref may replace session_id for CLI resolution; it is never returned. A selection_cleared lead is not claimable until an explicit start or a new person-confirmed adoption."
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - {in: header, name: X-Aeon-Worker-Lease, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision]
+              additionalProperties: false
+              oneOf:
+                - required: [session_id]
+                - required: [harness_session_ref]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                session_id: {type: string, format: uuid}
+                harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
+      responses:
+        '200': {description: Bound generation or truthful admission wait}
+        '403': {description: 'Lease, live authority or owned intent rejected'}
+        '409': {description: 'Concurrent claim, unconfirmed stop or revision conflict'}
+  /projects/{projectId}/lead/pause:
+    post:
+      summary: Checkpoint and cooperatively pause the current lead
+      description: Person owner with harness.control, or the current lead with harness.worker and X-Aeon-Worker-Lease. Requires expected_revision and generation. Stops new dispatch immediately and reuses the harness wrap-up/handover controls. A live process keeps its slot until confirmed stopped. A worker may request idle pause only for its own generation; no workers are reassigned. An unclaimed adoption_pending selection is rejected before any session control and the running session is left untouched.
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, generation]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                generation: {type: integer, minimum: 0}
+      responses:
+        '200': {description: Dispatch fenced; existing graceful handover pending confirmed exit}
+        '403': {description: Owner or generation proof required}
+        '409': {description: Stale revision or generation}
+  /projects/{projectId}/lead/usage:
+    get:
+      operationId: getProjectLeadUsage
+      summary: Redacted measured lead, worker, review and fix totals (AEON-738)
+      description: >-
+        Forward-only usage lineage identifies the original lead harness generation, independently of
+        subsequent reparenting or succession. The range selects sessions started in [from,to) and
+        contribution segments first worked in [from,to); their cumulative measurements are not interval
+        spend. Current session/model counters supply lead tokens; AEON-689 contribution segments supply
+        worker/review/fix measurements, never overlapping run telemetry or episode totals.
+        Null measurements are unknown. Missing source permissions, legacy lineage and missing episode
+        evidence make the result partial. At most 1000 sessions, 5000 contributions, 200 model rows per lead session
+        and 1000 reservations are read. Missing lead-generation storage returns 503.
+        Holds remain separate from measured usage and retain their native window unit. Only the account
+        owner, subject to pooled-account privacy, sees hold details. Holds are attributed reservations,
+        never an exclusive lead quota. No agent-hour-to-quota conversion or finish prediction is made.
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: generation, in: query, schema: {type: integer, minimum: 1}, description: 'Original lead generation; omitted selects all generations in the project.'}
+        - {name: from, in: query, schema: {type: string}, description: 'RFC3339 or YYYY-MM-DD; both bounds or neither (last 30 UTC days).'}
+        - {name: to, in: query, schema: {type: string}, description: 'Exclusive end, at most 366 days after from.'}
+      responses:
+        '200':
+          description: Bounded aggregate with explicit coverage and private holds
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LeadUsage'}
+        '400': {description: Invalid or oversized query}
+        '401': {description: Unauthorized}
+        '403': {description: Source-project access denied}
+        '404': {description: Project or generation not found}
+        '503': {description: Lead-generation contract unavailable}
+  /projects/{projectId}/lead/yield:
+    post:
+      summary: Yield an idle lead's slot through checkpoint and confirmed exit
+      description: Agent-only harness.worker and the current generation lease. Requires expected_revision and generation. The server checks the existing Queue under the tree fence. An idle lead, a lead with a routed worker waiting, or one whose bounded project turn has ended requests the existing cooperative checkpoint/pause. No slot is freed until confirmed exit. Routed assignments retain this generation and can start after worker-priority yield and confirmed exit through all four live gates. Other pauses remain fenced. Restart is explicit and uses ordinary admission; eligible workers precede restart. Automatic production launch remains disabled pending AEON-603.
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - {in: header, name: X-Aeon-Worker-Lease, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, generation]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                generation: {type: integer, minimum: 1}
+      responses:
+        '200': {description: 'Cooperative checkpoint requested; process remains counted until exit'}
+        '403': {description: 'Current worker lease, live harness.worker permission, or live owner authority rejected'}
+        '409': {description: 'Stale identity, useful current turn, unavailable scheduling evidence or unavailable handover delivery'}
+components:
+  schemas:
+    LeadCandidate:
+      type: object
+      required: [id, display_label, harness, host, management_mode, reported_at]
+      properties:
+        id: {type: string, format: uuid}
+        display_label: {type: [string, 'null']}
+        harness: {type: string}
+        host: {type: string}
+        management_mode: {type: string, enum: [managed, unmanaged]}
+        reported_at: {type: string, format: date-time}
+    LeadUsage:
+      type: object
+      required: [project_id, generation, from, to, basis, partial, truncated, gaps, total, lead, worker, review, fix, held, finish_forecast]
+      properties:
+        project_id: {type: string, format: uuid}
+        generation: {type: [integer, 'null'], minimum: 1}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        basis: {type: string, enum: [cumulative_for_sessions_and_segments_started_in_range]}
+        partial: {type: boolean}
+        truncated: {type: boolean}
+        gaps: {type: array, items: {type: string}}
+        total: {$ref: '#/components/schemas/LeadUsageTotals'}
+        lead: {$ref: '#/components/schemas/LeadUsageTotals'}
+        worker: {$ref: '#/components/schemas/LeadUsageTotals'}
+        review: {$ref: '#/components/schemas/LeadUsageTotals'}
+        fix: {$ref: '#/components/schemas/LeadUsageTotals'}
+        finish_forecast: {type: string, enum: [estimate_unavailable]}
+        held:
+          type: object
+          required: [state, scope, windows]
+          properties:
+            state: {type: string, enum: [available, withheld, partial]}
+            scope: {type: string, enum: [attributed_run_reservations_not_exclusive_quota]}
+            windows:
+              type: array
+              items:
+                type: object
+                required: [window_id, unit, reserved_units, settled_units, unknown_settlements]
+                properties:
+                  window_id: {type: string, format: uuid}
+                  unit: {type: string}
+                  reserved_units: {type: string, pattern: '^[0-9]+$'}
+                  settled_units: {type: [string, 'null'], pattern: '^[0-9]+$'}
+                  unknown_settlements: {type: integer, minimum: 0}
+    LeadUsageMeasure:
+      type: object
+      required: [measured, known, unknown]
+      properties:
+        measured: {type: [string, 'null'], pattern: '^[0-9]+$'}
+        known: {type: integer, minimum: 0}
+        unknown: {type: integer, minimum: 0}
+    LeadUsageTotals:
+      type: object
+      required: [contributions, attempts, tokens, active_ms, waiting_ms]
+      properties:
+        contributions: {type: integer, minimum: 0}
+        attempts: {type: integer, minimum: 0}
+        tokens: {$ref: '#/components/schemas/LeadUsageMeasure'}
+        active_ms: {$ref: '#/components/schemas/LeadUsageMeasure'}
+        waiting_ms: {$ref: '#/components/schemas/LeadUsageMeasure'}
+    ProjectLead:
+      type: object
+      required: [project_id, revision, generation, state, reason, process_active]
+      properties:
+        project_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 0}
+        generation: {type: integer, minimum: 0}
+        session_id: {type: [string, 'null'], format: uuid}
+        state: {type: string, enum: [none, starting, working, waiting_for_room, paused, cannot_start]}
+        reason: {type: string, description: Redacted machine-readable reason; contains no account or credential details}
+        process_active: {type: boolean, description: True until the bound harness generation has confirmed stopped; heartbeat loss and archive do not prove exit}

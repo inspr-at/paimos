@@ -9,6 +9,44 @@ import (
 	"testing"
 )
 
+func TestReviewWebhookSecretFile(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "webhook-fixture")
+	for _, tc := range []struct {
+		name, raw string
+		mode      os.FileMode
+		valid     bool
+	}{
+		{"valid", strings.Repeat("x", 32) + "\n", 0600, true},
+		{"short", "fixture", 0600, false},
+		{"oversized", strings.Repeat("x", 4097), 0600, false},
+		{"readable", strings.Repeat("x", 32), 0644, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(file, []byte(tc.raw), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(file, tc.mode); err != nil {
+				t.Fatal(err)
+			}
+			_, err := reviewWebhookSecret(file)
+			if (err == nil) != tc.valid {
+				t.Fatal("unexpected host key validation result")
+			}
+		})
+	}
+	link := filepath.Join(dir, "symlink")
+	if err := os.Symlink(file, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reviewWebhookSecret(link); err == nil {
+		t.Fatal("symlink accepted")
+	}
+}
+
 func TestDoctrineBinaryAllowlist(t *testing.T) {
 	hash := strings.Repeat("a", 64)
 	good := `{"assets/logo.png":"` + hash + `"}`
@@ -263,6 +301,61 @@ func TestMissingDoctrineGuardFileDoesNotPreventStartup(t *testing.T) {
 			}
 			if cfg.DatabaseURL != "postgres://example" {
 				t.Fatal("unrelated configuration changed")
+			}
+		})
+	}
+}
+
+// R11/R14: bad host policy must not start or silently restore public writes.
+func TestDoctrineRepositoriesFromEnv(t *testing.T) {
+	t.Setenv("AEON_DATABASE_URL", "postgres://example")
+	t.Setenv("AEON_ENV", "prod")
+	t.Setenv("AEON_DOCTRINE_APP_TENANT_ID", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	t.Setenv("AEON_DOCTRINE_MIRROR_DIR", "/host/mirrors")
+	for _, name := range []string{"AEON_DOCTRINE_GUARD_KEY_FILE", "AEON_MESSAGING_KEY_FILE", "AEON_LINK_KEY_FILE", "AEON_REVIEW_WEBHOOK_SECRET_FILE", "AEON_PHONE_PUSH_VAPID_FILE", "AEON_DATABASE_PASSWORD_FILE"} {
+		t.Setenv(name, "")
+	}
+	for _, tc := range []struct {
+		name, public, private, wantPublic, wantPrivate, refusal string
+		unset                                                   bool
+	}{
+		{name: "unchanged defaults", unset: true, wantPublic: "inspr-at/inspr-modules", wantPrivate: "inspr-at/inspr-doctrine-private"},
+		{name: "custom pair", public: "team/shared-doctrine", private: "team/private-doctrine", wantPublic: "team/shared-doctrine", wantPrivate: "team/private-doctrine"},
+		{name: "private only", private: "example-business-team/agm-doctrine", wantPrivate: "example-business-team/agm-doctrine"},
+		{name: "canonical case preserved", public: "TEAM/Shared", private: "TEAM/Private", wantPublic: "TEAM/Shared", wantPrivate: "TEAM/Private"},
+		{name: "same repository", public: "team/doctrine", private: "TEAM/Doctrine", refusal: "must be different"},
+		{name: "no private guard", public: "team/shared", refusal: "PRIVATE_REPOSITORY"},
+		{name: "both disabled", refusal: "PRIVATE_REPOSITORY"},
+		{name: "URL", public: "https://github.com/team/shared", private: "team/private", refusal: "PUBLIC_REPOSITORY"},
+		{name: "path escape", public: "team/..", private: "team/private", refusal: "PUBLIC_REPOSITORY"},
+		{name: "whitespace", private: " team/private", refusal: "PRIVATE_REPOSITORY"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AEON_DOCTRINE_PUBLIC_REPOSITORY", tc.public)
+			t.Setenv("AEON_DOCTRINE_PRIVATE_REPOSITORY", tc.private)
+			if tc.unset {
+				if err := os.Unsetenv("AEON_DOCTRINE_PUBLIC_REPOSITORY"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Unsetenv("AEON_DOCTRINE_PRIVATE_REPOSITORY"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := FromEnv()
+			if tc.refusal != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.refusal) {
+					t.Fatal("bad repository policy did not fail startup for the expected reason")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.DoctrineRepositories == nil || cfg.DoctrineRepositories.Public() != tc.wantPublic || cfg.DoctrineRepositories.Private() != tc.wantPrivate {
+				t.Fatal("deployment proposal repositories not loaded")
+			}
+			if cfg.DoctrineDefaultSource != !tc.unset || cfg.DoctrineMirrorDir != "/host/mirrors" {
+				t.Fatal("host default requires an explicit private repository and preserves mirror policy")
 			}
 		})
 	}

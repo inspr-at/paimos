@@ -67,18 +67,18 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
   color: var(--signal); overflow: visible;
 }
 .wings, .body, .antennae, .smile, .joy { stroke: currentColor; stroke-width: calc(1.5px * var(--art-stroke, 1)); stroke-linecap: round; stroke-linejoin: round; }
-.wings { fill: color-mix(in srgb, currentColor 16%, var(--surface-raised, #fffefa)); transform-origin: 16px 16px; }
-.body { fill: color-mix(in srgb, currentColor 7%, var(--surface-raised, #fffefa)); }
+.wings { fill: color-mix(in srgb, currentColor 16%, var(--surface-raised)); transform-origin: 16px 16px; }
+.body { fill: color-mix(in srgb, currentColor 7%, var(--surface-raised)); }
 .antennae, .smile, .joy { fill: none; }
 .lantern { fill: currentColor; opacity: .36; }
-.eyes { fill: var(--ink, #203c3d); transform-origin: 16px 12.7px; }
+.eyes { fill: var(--ink); transform-origin: 16px 12.7px; }
 .stale .eyes { fill: currentColor; }
 .joy { opacity: 0; }
 .flashing.lead .eyes { opacity: 0; }
 .flashing.lead .joy { opacity: 1; }
-.clock { fill: var(--surface-raised, #fffefa); stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.clock { fill: var(--surface-raised); stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .clock path { fill: none; }
-.glint { fill: #c9a24a; animation: sprite-flash .6s ease-out both; }
+.glint { fill: var(--secondary-line); animation: sprite-flash .6s ease-out both; }
 .sparks { transform-origin: 16px 22px; }
 @media (prefers-reduced-motion: no-preference) {
   .working.lead .wings { animation: sprite-wings 1.4s ease-in-out infinite; animation-delay: var(--phase); }

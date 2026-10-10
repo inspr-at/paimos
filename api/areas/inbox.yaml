@@ -1,0 +1,320 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/harness
+# aeon:owner internal/inbox
+paths:
+  /inbox/feedback-recipient:
+    get:
+      operationId: getFeedbackRecipient
+      summary: Who receives feedback sent from the help menu
+      description: 'AEON-312. The longest-standing active workspace owner other than the caller; the app sends the feedback itself with sendInboxMessage. 404 when the caller is the only owner. Same permission as sending (inbox.send).'
+      security: *auth
+      responses:
+        '200':
+          description: The recipient
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [principal_id, name]
+                properties:
+                  principal_id: {type: string, format: uuid}
+                  name: {type: string}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /inbox/message-status:
+    get:
+      operationId: getInboxMessageStatus
+      summary: Delivery progress of the caller's own sent messages
+      description: 'AEON-280. Sender only, same permission as the receipt (inbox.receipt). Unknown ids, other senders'' messages and messages without a receipt are omitted, never an error. sent = accepted; delivered = handed to the recipient by a pull, drain, stream or adapter claim; read = the recipient confirmed it (receipt handed_off); not_delivered = the receipt failed, with reason deadline, attempts, session_ended, no_listener or an adapter reason. Live changes arrive on /events/stream as inbox.message_fetched, inbox.receipt_handed_off, inbox.receipt_failed and inbox.delivery_failed.'
+      security: *auth
+      parameters:
+        - {name: ids, in: query, required: true, description: 'Comma-separated message ids, at most 100.', schema: {type: string}}
+      responses:
+        '200':
+          description: Status per visible message, in send order
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/InboxMessageStatus'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /inbox/messages:
+    get:
+      operationId: listenInbox
+      summary: List or long-poll the caller's durable inbox
+      description: Only the caller's principal is readable. Cursor is an exclusive sent event ID; wait_ms=0 returns immediately. Expired messages are omitted. Unacked messages may be delivered again. Returned messages count as delivered to their sender (AEON-280). With session, the pull records that generation as listening (hook for wait_ms=0, long_poll when waiting).
+      security: *auth
+      parameters:
+        - {name: after, in: query, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: session, in: query, description: 'Only this active session of the caller plus unbound principal broadcasts. Omit to retain the principal inbox.', schema: {type: string, format: uuid}}
+        - {name: exact_session, in: query, description: 'AEON-280. With session, true returns only messages bound to that session and leaves out unbound principal broadcasts (for turn-boundary hooks). Requires session; omitted or false keeps the default.', schema: {type: boolean, default: false}}
+        - {name: wait_ms, in: query, schema: {type: integer, minimum: 0, maximum: 30000, default: 0}}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200': {description: Inbox page, content: {application/json: {schema: {$ref: '#/components/schemas/InboxPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {description: 'session_ended — This session has ended.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
+    post:
+      operationId: sendInboxMessage
+      summary: Send one durable message to a principal
+      description: Requires inbox.send scope for agents. Idempotency key is unique per sender and must replay the same body, recipient and reply target; an exact retry returns the same message id. Reply target must be visible to the sender. One inbox.sent event is written in the same transaction, without message body in event snapshots.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InboxSend'}}}}
+      responses:
+        '201': {description: Sent message or content-free attached note metadata, content: {application/json: {schema: {$ref: '#/components/schemas/InboxSendResponse'}}}}
+        '429': {description: Attached note quota exceeded, headers: {Retry-After: {schema: {type: integer}, description: Seconds before retry}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /inbox/messages/{messageId}/ack:
+    post:
+      operationId: ackInboxMessage
+      summary: Acknowledge a message addressed to the caller
+      description: Idempotent for the same recipient. Acknowledgement and inbox.acked event commit together. A message whose delivery already failed (AEON-280) answers 409 not_delivered and is neither acknowledged nor returned.
+      security: *auth
+      parameters: [{name: messageId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Acknowledged message, content: {application/json: {schema: {$ref: '#/components/schemas/InboxMessage'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: 'session_ended — This session has ended. not_delivered — the delivery already failed.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
+  /inbox/messages/{messageId}/cancel:
+    post:
+      operationId: cancelAttachedNote
+      tags: [inbox]
+      summary: Cancel an owner note only while queued
+      description: Interactive same-origin computer owner only. Serialized with the first offer; cancellation cannot recall an offered note. Works offline and with messaging disabled.
+      parameters:
+        - {name: messageId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Cancelled without releasing text}
+        '403': {description: Interactive computer owner required}
+        '404': {description: No matching attached note}
+        '409': {description: Offer or terminal outcome already won}
+  /inbox/messages/{messageId}/receipt:
+    get:
+      operationId: getInboxReceipt
+      summary: Read the sender's hand-off receipt
+      description: Sender principal only, with inbox.receipt permission in the workspace or the message's project; agents also require the inbox.receipt key scope. Every authenticated caller without access receives the same 404 as a missing message. Messages created before receipt recording have no receipt and return 404; their historical delivery state is not inferred. New receipts are queued on acceptance. Direct inbox acknowledgement by the recipient, or explicit confirmation by a managed receiver adapter, advances a receipt to handed_off. Acceptance and wake hints do not confirm hand-off. handed_off and failed are terminal; handed_off_at is RFC3339 and is set once at confirmation. An exact idempotent send replay retains its message_id and receipt.
+      security: *auth
+      parameters: [{name: messageId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Hand-off receipt or separate attached note evidence, content: {application/json: {schema: {$ref: '#/components/schemas/InboxReceiptResponse'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /inbox/session-binding:
+    post:
+      operationId: resolveInboxSessionBinding
+      summary: Resolve the caller's active generation from a harness-native session reference
+      description: Requires inbox.send. The reference is write-only and is matched as a digest against the caller's active harness_session_ref or vendor_session_ref. Exactly one active generation returns its Aeon session id. None or several is 404, including another principal's row. Stopped and archived generations are excluded.
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [harness_session_ref]
+              properties:
+                harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
+      responses:
+        '200':
+          description: The caller's active generation
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [session_id]
+                properties:
+                  session_id: {type: string, format: uuid}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /inbox/stream:
+    get:
+      operationId: streamInbox
+      summary: SSE of messages addressed to the caller
+      description: Last-Event-ID is the sent event ID. Replay durable messages after that ID before listening; NOTIFY is only a wake hint. Each message event has its sent event ID as id and InboxMessage JSON as data. Heartbeats carry no message. With session, the stream also carries messages bound to that active generation (with their session fields) and records the session as listening via stream on connect, on every wake and on every keepalive; a stopped session answers 409 or ends the stream.
+      security: *auth
+      parameters:
+        - {name: after, in: query, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: session, in: query, description: 'Only this active session of the caller plus unbound principal broadcasts. Omit to retain the principal inbox.', schema: {type: string, format: uuid}}
+        - {name: exact_session, in: query, description: 'AEON-280. With session, true returns only messages bound to that session and leaves out unbound principal broadcasts (for turn-boundary hooks). Requires session; omitted or false keeps the default.', schema: {type: boolean, default: false}}
+        - {name: Last-Event-ID, in: header, schema: {type: integer, format: int64, minimum: 0}}
+      responses:
+        '200': {description: Inbox event stream, content: {text/event-stream: {schema: {type: string}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {description: 'session_ended — This session has ended.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
+  /inbox/targets:
+    get:
+      operationId: listInboxTargets
+      security: *auth
+      responses:
+        '200': {description: Caller delivery targets, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/InboxTarget'}}}}}
+    post:
+      operationId: createInboxTarget
+      description: Webhook targets require admin or the recipient principal. HTTPS URL must pass public-address and redirect checks on every wake; POST carries only message ID and event ID. A pull target is unique per principal.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InboxTargetWrite'}}}}
+      responses:
+        '201': {description: Target, content: {application/json: {schema: {$ref: '#/components/schemas/InboxTarget'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /inbox/targets/{targetId}:
+    delete:
+      operationId: deleteInboxTarget
+      security: *auth
+      parameters: [{name: targetId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {description: Target disabled}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    AttachedInboxMessage:
+      description: Content-free attached note acceptance metadata. Text is volatile and never returned by this response or ordinary inbox reads.
+      type: object
+      additionalProperties: false
+      required: [id, sender_principal_id, recipient_principal_id, recipient_session_id, body, idempotency_key, sent_event_id, created_at, acked_at, content_mode, message_deadline]
+      properties:
+        id: {type: string, format: uuid}
+        sender_principal_id: {type: string, format: uuid}
+        recipient_principal_id: {type: string, format: uuid}
+        recipient_session_id: {type: string, format: uuid}
+        sender_label: {type: string, description: Frozen owner or agent label}
+        body: {type: string, const: 'Attached-session note; text not retained', description: Fixed stored placeholder; never the note text}
+        idempotency_key: {type: string}
+        expires_at: {type: string, format: date-time}
+        sent_event_id: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+        acked_at: {type: 'null'}
+        content_mode: {type: string, enum: [attached_volatile, attached_notification]}
+        message_grant_id: {type: string, format: uuid}
+        recipient_message_generation: {type: string, format: uuid}
+        message_deadline: {type: string, format: date-time}
+    AttachedInboxReceipt:
+      description: Attached note receipt; separate from the pinned durable receipt. Acceptance and uncertainty never imply a hand-off.
+      type: object
+      additionalProperties: false
+      required: [message_id, idempotency_key, tenant, sender_principal_id, recipient_principal_id, target_id, target_version, adapter, address, effective_level, state, handed_off_at, failure_reason, attached]
+      properties:
+        attached: {$ref: '#/components/schemas/AttachedMessageStatus'}
+        message_id: {type: string, format: uuid}
+        idempotency_key: {type: string}
+        tenant: {type: string, description: Tenant slug}
+        sender_principal_id: {type: string, format: uuid}
+        recipient_principal_id: {type: string, format: uuid}
+        target_id: {type: [string, 'null'], format: uuid, description: 'Receiver target, null for direct inbox messages'}
+        target_version: {type: [integer, 'null'], minimum: 1}
+        adapter: {type: string, description: 'Receiver adapter, for example grok_bot_routine'}
+        address: {type: string}
+        effective_level: {type: string, description: Empty for a direct inbox acknowledgement; simple or steer for a managed adapter hand-off}
+        state: {type: string, enum: [queued, handed_off, failed]}
+        handed_off_at: {type: [string, 'null'], format: date-time, description: 'RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms'}
+        failure_reason: {type: string}
+    AttachedMessageStatus:
+      type: object
+      required: [protocol, outcome, content_mode]
+      properties:
+        protocol: {type: string, const: attached_messages_v1}
+        outcome: {type: string, enum: [queued, notification_only, offered, shown, completed, not_delivered, cancelled, expired, uncertain, revoked]}
+        offered_at: {type: [string, 'null'], format: date-time}
+        shown_at: {type: [string, 'null'], format: date-time, description: Hook-reported stdout handoff only}
+        completed_at: {type: [string, 'null'], format: date-time, description: Transport settled; not task completion}
+        offer_deadline: {type: [string, 'null'], format: date-time}
+        content_mode: {type: string, enum: [attached_volatile, attached_notification]}
+        message_generation: {type: string, format: uuid}
+    InboxMessage:
+      allOf:
+        - {$ref: '#/components/schemas/InboxSend'}
+        - type: object
+          required: [id, sender_principal_id, sent_event_id, created_at, acked_at]
+          properties:
+            id: {type: string, format: uuid}
+            sender_principal_id: {type: string, format: uuid}
+            sender_label: {type: string, description: Frozen at send time; returned for session-aware reads}
+            sent_event_id: {type: integer, format: int64}
+            created_at: {type: string, format: date-time}
+            acked_at: {type: [string, 'null'], format: date-time}
+    InboxMessageStatus:
+      type: object
+      additionalProperties: false
+      required: [message_id, status, delivered_at, read_at, deliver_by]
+      properties:
+        attached: {$ref: '#/components/schemas/AttachedMessageStatus'}
+        cancelled: {type: boolean, description: "True when a never-offered session message was cancelled by its sender."}
+        message_id: {type: string, format: uuid}
+        status: {type: string, enum: [sent, delivered, read, not_delivered]}
+        reason: {type: string, description: 'Present only for not_delivered: deadline, attempts, session_ended, no_listener or an adapter reason.'}
+        delivered_at: {type: [string, 'null'], format: date-time, description: First hand-over to the recipient.}
+        read_at: {type: [string, 'null'], format: date-time, description: Receiver confirmation (receipt handed_off_at).}
+        deliver_by: {type: [string, 'null'], format: date-time, description: The deadline; null for messages to people and for messages sent before deadlines existed.}
+    InboxPage:
+      type: object
+      required: [items, next_after]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/InboxMessage'}}
+        next_after: {type: integer, format: int64}
+    InboxReceipt:
+      type: object
+      additionalProperties: false
+      required: [message_id, idempotency_key, tenant, sender_principal_id, recipient_principal_id, target_id, target_version, adapter, address, effective_level, state, handed_off_at, failure_reason]
+      properties:
+        message_id: {type: string, format: uuid}
+        idempotency_key: {type: string}
+        tenant: {type: string, description: Tenant slug}
+        sender_principal_id: {type: string, format: uuid}
+        recipient_principal_id: {type: string, format: uuid}
+        target_id: {type: [string, 'null'], format: uuid, description: 'Receiver target, null for direct inbox messages'}
+        target_version: {type: [integer, 'null'], minimum: 1}
+        adapter: {type: string, description: 'Receiver adapter, for example grok_bot_routine'}
+        address: {type: string}
+        effective_level: {type: string, description: Empty for a direct inbox acknowledgement; simple or steer for a managed adapter hand-off}
+        state: {type: string, enum: [queued, handed_off, failed]}
+        handed_off_at: {type: [string, 'null'], format: date-time, description: 'RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms'}
+        failure_reason: {type: string}
+    InboxReceiptResponse:
+      oneOf:
+        - {$ref: '#/components/schemas/InboxReceipt'}
+        - {$ref: '#/components/schemas/AttachedInboxReceipt'}
+    InboxSend:
+      type: object
+      required: [recipient_principal_id, body, idempotency_key]
+      properties:
+        recipient_principal_id: {type: string, format: uuid}
+        recipient_session_id: {type: string, format: uuid, description: 'Optional exact active recipient generation; stopped or archived sessions return 409.'}
+        recipient_message_generation: {type: string, format: uuid, description: 'Required for attached owner notes. Explicit generations are refused when messaging is disabled; requests without a generation retain ordinary inbox routing in that mode. Cannot be inherited by a new grant. Attached sends use 5-minute volatile payloads and may return 429 with Retry-After.'}
+        sender_session_id: {type: string, format: uuid, description: 'Optional active session owned by the authenticated sender; freezes its label.'}
+        body: {type: string, minLength: 1, maxLength: 65536}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+        reply_to_id: {type: string, format: uuid}
+        expires_at: {type: string, format: date-time}
+    InboxSendResponse:
+      oneOf:
+        - allOf:
+            - {$ref: '#/components/schemas/InboxMessage'}
+            - not: {required: [content_mode]}
+        - {$ref: '#/components/schemas/AttachedInboxMessage'}
+    InboxTarget:
+      allOf:
+        - {$ref: '#/components/schemas/InboxTargetWrite'}
+        - type: object
+          required: [id, enabled, created_at]
+          properties:
+            id: {type: string, format: uuid}
+            enabled: {type: boolean}
+            created_at: {type: string, format: date-time}
+    InboxTargetWrite:
+      type: object
+      required: [principal_id, kind]
+      properties:
+        principal_id: {type: string, format: uuid}
+        kind: {type: string, enum: [pull, webhook]}
+        webhook_url: {type: string, format: uri, pattern: '^https://'}

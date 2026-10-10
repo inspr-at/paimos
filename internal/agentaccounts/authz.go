@@ -32,22 +32,33 @@ func presentedSecret(r *http.Request) (prefix, secret string, ok bool) {
 }
 
 func keyScopes(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal) ([]string, error) {
+	return readKeyScopes(ctx, tx, r, p, false)
+}
+
+func readKeyScopes(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal, lockKey bool) ([]string, error) {
 	prefix, secret, ok := presentedSecret(r)
 	if !ok {
 		return nil, fail(http.StatusForbidden, "agent key required")
 	}
 	sum := sha256.Sum256([]byte(secret))
 	var scopes []string
-	err := tx.QueryRow(ctx, `
-		SELECT scopes FROM agent_keys
+	var fullAccess bool
+	query := `
+		SELECT scopes,coalesce(full_access,false) FROM agent_keys
 		WHERE prefix = $1 AND hash = $2 AND principal_id = $3::uuid
 		  AND revoked_at IS NULL
-		  AND (expires_at IS NULL OR expires_at > now())`,
-		prefix, hex.EncodeToString(sum[:]), p.ID).Scan(&scopes)
+		  AND (expires_at IS NULL OR expires_at > now())`
+	if lockKey {
+		// Person key revocation locks this row without the pairing fence.
+		// Hold its live scope ceiling through the final evidence mutation.
+		query += ` FOR SHARE`
+	}
+	err := tx.QueryRow(ctx, query,
+		prefix, hex.EncodeToString(sum[:]), p.ID).Scan(&scopes, &fullAccess)
 	if err != nil {
 		return nil, fail(http.StatusForbidden, "agent key required")
 	}
-	return scopes, nil
+	return authz.ResolveKeyScopes(scopes, fullAccess), nil
 }
 
 func hasScope(scopes []string, want string) bool {

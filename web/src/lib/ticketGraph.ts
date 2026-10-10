@@ -3,11 +3,12 @@
 // TicketGraphView consume this bounded, body-free projection without writes.
 import { api } from './api.ts'
 
-export type TicketGraphType = 'ticket' | 'epic'
+export type TicketGraphType = 'work' | 'ticket' | 'epic' | 'task'
 export type TicketStatusCategory = 'open' | 'doing' | 'done'
 export type TicketGraphLinkKind = 'blocks' | 'relates' | 'implements' | 'duplicates' | 'parent'
 
 export interface TicketGraphNode {
+ is_leaf?: boolean; depth?: number; level_name?: string; level_icon?: string
   id: string
   key: string
   title: string

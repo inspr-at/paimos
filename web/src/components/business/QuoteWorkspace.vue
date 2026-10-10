@@ -51,9 +51,22 @@ const paper = ref<InstanceType<typeof QuoteDocument> | null>(null)
 // ---------- The live quote ----------
 const scope = computed<Scope | null>(() => identity.identity ? { tenantId: identity.identity.tenant.id, principalId: identity.identity.principal.id } : null)
 const live = shallowRef<LiveQuote | null>(null)
+const versionDocs = shallowRef(new Map<number, QuoteVersion>())
+const busy = ref('')
+const profileBusy = ref(false)
+const printing = ref(false)
+let generation = 0
+const viewerKey = () => `${scope.value?.tenantId ?? ''}/${scope.value?.principalId ?? ''}`
+function capture() {
+  const id = props.quoteId, viewer = viewerKey(), request = generation, quote = live.value
+  return { id, quote, current: () => request === generation && id === props.quoteId && viewer === viewerKey() && quote === live.value && !!scope.value && identity.authenticationCurrent?.() !== false }
+}
 let held: { scope: Scope; quote: LiveQuote } | null = null
 function hold() {
   if (held) { if (held.quote.canSaveNow === numericValid) held.quote.canSaveNow = null; releaseQuote(held.scope, held.quote) }
+  generation++; busy.value = ''; profileBusy.value = false; printing.value = false
+  versionDocs.value = new Map()
+  profiles.value = null; profileNames.value = new Map()
   held = null; live.value = null; viewing.value = null
   if (!scope.value) return
   const quote = acquireQuote(scope.value, props.quoteId)
@@ -61,8 +74,10 @@ function hold() {
   held = { scope: scope.value, quote }; live.value = quote
 }
 const viewing = ref<number | null>(null)
-watch(() => [props.quoteId, scope.value?.principalId], hold, { immediate: true })
-onBeforeUnmount(() => { if (held) { if (held.quote.canSaveNow === numericValid) held.quote.canSaveNow = null; releaseQuote(held.scope, held.quote) }; held = null })
+const profiles = ref<QuoteProfile[] | null>(null)
+const profileNames = ref(new Map<string, string>())
+watch(() => [props.quoteId, scope.value?.tenantId, scope.value?.principalId], hold, { immediate: true, flush: 'sync' })
+onBeforeUnmount(() => { generation++; if (held) { if (held.quote.canSaveNow === numericValid) held.quote.canSaveNow = null; releaseQuote(held.scope, held.quote) }; held = null })
 
 const view = computed(() => live.value?.view.value ?? null)
 const projection = computed(() => live.value?.projection.value ?? null)
@@ -79,13 +94,14 @@ const staff = computed(() => business.staff)
 const publicUrl = ref('')
 let linkRead = 0
 async function loadPublicLink() {
+  const action = capture()
   const current = ++linkRead
   publicUrl.value = ''
   const version = projection.value?.current_version
   if (!admin.value || isDraft.value || !version) return
   try {
-    const link = await getLink(props.quoteId, version)
-    if (current === linkRead) publicUrl.value = link?.path ? linkUrl(link) : ''
+    const link = await getLink(action.id, version)
+    if (current === linkRead && action.current()) publicUrl.value = link?.path ? linkUrl(link) : ''
   } catch { /* The document remains printable without a customer link. */ }
 }
 watch(() => [props.quoteId, projection.value?.current_version, projection.value?.state, admin.value], () => { void loadPublicLink() }, { immediate: true })
@@ -113,7 +129,6 @@ const saveHint = computed(() => {
 })
 const editable = computed(() => isDraft.value && viewing.value === null && !!view.value && view.value.local !== 'read-only' && view.value.local !== 'loading' && staff.value)
 // An older version picked in Details, the frozen current version once issued, else the draft.
-const versionDocs = shallowRef(new Map<number, QuoteVersion>())
 const document = computed<QuoteDocumentData | null>(() => {
   if (viewing.value !== null) return versionDocs.value.get(viewing.value)?.document ?? null
   if (!isDraft.value && (projection.value?.current_version ?? 0) > 0) return frozen.value?.document ?? null
@@ -127,11 +142,8 @@ const editor = computed(() => {
   return quote.editor
 })
 // ---------- The document profile (U19): picked on a draft, frozen on a version ----------
-const profiles = ref<QuoteProfile[] | null>(null)
-const profileBusy = ref(false)
 const currentProfile = computed(() => document.value?.profile ?? null)
 // Names as they were at the revision the quote holds (a profile may be renamed later).
-const profileNames = ref(new Map<string, string>())
 const profileName = computed(() => {
   const p = currentProfile.value
   if (!p) return ''
@@ -139,33 +151,42 @@ const profileName = computed(() => {
 })
 watch(currentProfile, async p => {
   if (!p || profileNames.value.has(`${p.id}:${p.revision}`)) return
-  try { const at = await getProfile(p.id, p.revision); profileNames.value = new Map(profileNames.value).set(`${p.id}:${p.revision}`, at.name) } catch { /* the list's name stands in */ }
+  const action = capture()
+  try { const at = await getProfile(p.id, p.revision); if (!action.current()) return; profileNames.value = new Map(profileNames.value).set(`${p.id}:${p.revision}`, at.name) } catch { /* the list's name stands in */ }
 }, { immediate: true })
 async function loadProfiles() {
   if (!staff.value) return
-  try { profiles.value = await listProfiles() } catch { profiles.value = [] }
+  const action = capture()
+  try { const loaded = await listProfiles(); if (action.current()) profiles.value = loaded } catch { if (action.current()) profiles.value = [] }
 }
 watch(() => [props.quoteId, isDraft.value], () => { if (isDraft.value) void loadProfiles() }, { immediate: true })
 // Choosing saves pending edits first, then takes the profile's current revision.
-async function chooseProfile(profileId: string, undoing = false) {
-  const quote = live.value
+async function chooseProfile(profileId: string, undoing = false, expectedRevision?: number) {
+  const action = capture(), quote = action.quote
   if (!quote || !editable.value || profileBusy.value) return
   const before = currentProfile.value
+  if (expectedRevision !== undefined && quote.view.value?.baseRevision !== expectedRevision) { toast('The profile changed since. Review it before undoing.', { tone: 'error' }); return }
   if ((before?.id ?? '') === profileId && !undoing && (profiles.value?.find(p => p.id === profileId)?.revision ?? 0) <= (before?.revision ?? 0)) return
   profileBusy.value = true
   try {
     if (canSave.value) {
       await quote.session.save()
-      if (view.value?.local !== 'clean') { toast('Save the draft before choosing another profile.', { tone: 'error' }); return }
+      if (!action.current()) return
+      if (quote.view.value?.local !== 'clean') { toast('Save the draft before choosing another profile.', { tone: 'error' }); return }
     }
-    await selectQuoteProfile(props.quoteId, view.value?.baseRevision ?? 0, profileId)
+    if (!action.current()) return
+    await selectQuoteProfile(action.id, quote.view.value?.baseRevision ?? 0, profileId)
+    if (!action.current()) return
     await quote.session.reload(true)
+    if (!action.current()) return
+    const undoRevision = quote.view.value?.baseRevision
     const name = profileId ? profiles.value?.find(p => p.id === profileId)?.name ?? 'the profile' : 'the standard document'
-    if (!undoing) toast(`This draft now uses ${name}.`, { action: { label: 'Undo', run: () => void chooseProfile(before?.id ?? '', true) }, timeout: 8000 })
+    if (!undoing) toast(`This draft now uses ${name}.`, { action: { label: 'Undo', run: () => { if (action.current()) void chooseProfile(before?.id ?? '', true, undoRevision); else toast('Open the original quote to undo its profile change.') } }, timeout: 8000 })
     else toast(`Back to ${before ? profileName.value || 'the earlier profile' : 'the standard document'}.`)
   } catch (e) {
+    if (!action.current()) return
     toast(lifecycleError(e, 'The profile was not changed.'), { tone: 'error' })
-  } finally { profileBusy.value = false }
+  } finally { if (action.current()) profileBusy.value = false }
 }
 
 // On its own page the tab and the breadcrumb name the quote.
@@ -239,11 +260,13 @@ async function reviseWithWork() {
   if (!revised) return
   // The new draft opens in a fresh session; the work lands once it has, and replaces
   // any copy that session found (it came from before the revision).
-  const quote = live.value
-  if (!quote) return
+  const quote = revised.quote
+  if (!quote || !revised.current()) return
   await quote.ready
+  if (!revised.current()) return
   quote.recovery.value = null
   const outcome = await quote.session.adopt(stored)
+  if (!revised.current()) return
   if (outcome === 'applied') toast(`Revising version ${nextVersion.value - 1} with your unsaved work. It saves as you go.`)
   else if (outcome === 'review') { reviewOpen.value = true; toast('Your work and the issued version changed the same places. Choose what to keep.') }
   else toast('The revision is open, but your earlier work could not be applied. Download it to keep a copy.', { tone: 'error' })
@@ -313,7 +336,6 @@ let rootSizer: ResizeObserver | undefined
 watch(root, el => { rootSizer?.disconnect(); if (el) { width.value = contentBox(el).width; rootSizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); rootSizer.observe(el) } }, { flush: 'post' })
 
 // ---------- PDF: save first, then the browser's print (or Save as PDF) ----------
-const printing = ref(false)
 // Opened from the list's PDF action: print once the paper is laid out.
 watch(() => props.autoPrint && !!document.value && !!paper.value, ready => {
   if (!ready) return
@@ -321,53 +343,61 @@ watch(() => props.autoPrint && !!document.value && !!paper.value, ready => {
   void nextTick(() => print())
 }, { immediate: true })
 async function print() {
+  const action = capture()
   if (printing.value) return
   if (!numericValid()) return
   printing.value = true
   try {
-    if (canSave.value) await live.value?.session.save()
+    if (canSave.value) await action.quote?.session.save()
+    if (!action.current()) return
     if (isDraft.value && view.value?.local !== 'clean') { toast('Save the quote before printing it.', { tone: 'error' }); return }
     if (!isDraft.value && admin.value && !publicUrl.value) await loadPublicLink()
+    if (!action.current()) return
     await paper.value?.whenReady()
     await nextTick()
-    window.print()
-  } finally { printing.value = false }
+    if (action.current()) window.print()
+  } finally { if (action.current()) printing.value = false }
 }
 
 // ---------- Lifecycle: issue, revise, duplicate, archive ----------
-const busy = ref('')
 async function issue() {
-  const quote = live.value, current = projection.value
+  const action = capture(), quote = action.quote, current = projection.value
   if (!quote || !current || busy.value) return
   if (!numericValid()) return
   const next = current.current_version + 1
   const ok = await confirmAction(issueConfirm(offerNo.value, next))
-  if (!ok) return
+  if (!ok || !action.current()) return
   busy.value = 'issue'
   try {
     if (canSave.value) await quote.session.save()
+    if (!action.current()) return
     if (quote.view.value?.local !== 'clean') { toast('Save the quote before issuing it.', { tone: 'error' }); return }
-    const draft = await getDraft(props.quoteId)
+    const draft = await getDraft(action.id)
+    if (!action.current()) return
     if (draft.draft_revision !== quote.view.value.baseRevision) { toast('Someone saved a newer draft. Review it before issuing.', { tone: 'error' }); await quote.session.check(); return }
-    await finalizeQuote(props.quoteId, { expected_quote_revision: current.revision, expected_draft_revision: draft.draft_revision, expected_document_sha256: draft.document_sha256 })
+    await finalizeQuote(action.id, { expected_quote_revision: current.revision, expected_draft_revision: draft.draft_revision, expected_document_sha256: draft.document_sha256 })
+    if (!action.current()) return
     await quote.refresh()
-    quotes.patch(props.quoteId, { state: 'issued', classic_status: 'sent', current_version: next })
+    if (!action.current()) return
+    quotes.patch(action.id, { state: 'issued', classic_status: 'sent', current_version: next })
     openPane('details')
     toast(`Issued as version ${next}. Share it with a customer link.`)
   } catch (e) {
+    if (!action.current()) return
     toast(issueError(e), { tone: 'error' })
     void quote.refresh().catch(() => {})
-  } finally { busy.value = '' }
+  } finally { if (action.current()) busy.value = '' }
 }
-async function revise(withWork = false): Promise<boolean> {
-  const quote = live.value, current = projection.value, version = frozen.value
-  if (!quote || !current || !version || busy.value || !scope.value) return false
+async function revise(withWork = false): Promise<ReturnType<typeof capture> | null> {
+  const action = capture(), quote = action.quote, current = projection.value, version = frozen.value
+  if (!quote || !current || !version || busy.value || !scope.value) return null
   const ok = await confirmAction(reviseConfirm(current.current_version, status.value === 'accepted'))
-  if (!ok) return false
+  if (!ok || !action.current()) return null
   busy.value = 'revise'
   try {
-    await branchQuote(props.quoteId, { expected_quote_revision: current.revision, expected_version: current.current_version, expected_content_sha256: version.content_sha256 })
-    quotes.patch(props.quoteId, { state: 'draft', classic_status: 'draft' })
+    await branchQuote(action.id, { expected_quote_revision: current.revision, expected_version: current.current_version, expected_content_sha256: version.content_sha256 })
+    if (!action.current()) return null
+    quotes.patch(action.id, { state: 'draft', classic_status: 'draft' })
     // A new draft needs a new edit session: the issued one was read-only for good.
     const done = held
     held = null
@@ -375,76 +405,86 @@ async function revise(withWork = false): Promise<boolean> {
     hold()
     openPane('format')
     if (!withWork) toast(`You are revising version ${current.current_version}. Issue it when it is ready.`)
-    return true
-  } catch (e) { toast(lifecycleError(e, 'The quote could not be revised. Nothing changed.'), { tone: 'error' }); return false }
-  finally { busy.value = '' }
+    return capture()
+  } catch (e) { if (!action.current()) return null; toast(lifecycleError(e, 'The quote could not be revised. Nothing changed.'), { tone: 'error' }); return null }
+  finally { if (action.current()) busy.value = '' }
 }
 async function duplicate() {
-  const current = projection.value
+  const action = capture(), current = projection.value
   if (!current || busy.value) return
   busy.value = 'duplicate'
   try {
-    const copy = await duplicateQuote(props.quoteId, current.revision)
+    const copy = await duplicateQuote(action.id, current.revision)
+    if (!action.current()) return
     void quotes.load(true)
     toast(`Duplicated as ${copy.offer_no ?? 'a new draft'}.`, {
-      action: { label: 'Undo', run: () => { void undoQuote(copy.quote_node_id, ['quote.duplicated']).then(() => { void quotes.load(true); if (props.quoteId === copy.quote_node_id) emit('open', current.quote_node_id) }).catch(e => toast(e instanceof Error ? e.message : 'Undo did not work.', { tone: 'error' })) } },
+      action: { label: 'Undo', run: () => { void undoQuote(copy).then(() => { void quotes.load(true); if (props.quoteId === copy.quote_node_id) emit('open', current.quote_node_id) }).catch(e => toast(e instanceof Error ? e.message : 'Undo did not work.', { tone: 'error' })) } },
       timeout: 8000,
     })
     emit('open', copy.quote_node_id)
-  } catch (e) { toast(lifecycleError(e, 'The quote was not duplicated.'), { tone: 'error' }) }
-  finally { busy.value = '' }
+  } catch (e) { if (action.current()) toast(lifecycleError(e, 'The quote was not duplicated.'), { tone: 'error' }) }
+  finally { if (action.current()) busy.value = '' }
 }
 async function archive() {
-  const quote = live.value, current = projection.value
+  const action = capture(), quote = action.quote, current = projection.value
   if (!quote || !current || busy.value) return
   const archiving = !current.archived
   const id = props.quoteId, name = offerNo.value || 'The quote'
   busy.value = 'archive'
   try {
     // No question first: it keeps everything, and the toast undoes it.
-    await setArchived(id, current.revision, archiving)
+    const receipt = await setArchived(id, current.revision, archiving)
+    if (!action.current()) return
     await quote.refresh()
+    if (!action.current()) return
     quotes.patch(id, { archived: archiving })
     toast(archiving ? `${name} is archived. It keeps its versions, evidence and files.` : `${name} is back in the list.`, {
-      action: { label: 'Undo', run: () => { void undoQuote(id, ['quote.visibility_changed']).then(async () => { await quote.refresh(); quotes.patch(id, { archived: !archiving }) }).catch(e => toast(e instanceof Error ? e.message : 'Undo did not work.', { tone: 'error' })) } },
+      action: { label: 'Undo', run: () => { void undoQuote(receipt).then(async () => { await quote.refresh(); quotes.patch(id, { archived: !archiving }) }).catch(e => toast(e instanceof Error ? e.message : 'Undo did not work.', { tone: 'error' })) } },
       timeout: 8000,
     })
-  } catch (e) { toast(lifecycleError(e, 'That did not work.'), { tone: 'error' }) }
-  finally { busy.value = '' }
+  } catch (e) { if (action.current()) toast(lifecycleError(e, 'That did not work.'), { tone: 'error' }) }
+  finally { if (action.current()) busy.value = '' }
 }
 async function copyNumber() {
   try { await navigator.clipboard.writeText(offerNo.value); toast(`Copied ${offerNo.value}.`) } catch { toast('Copying did not work here.', { tone: 'error' }) }
 }
+let versionRead = 0
 async function showVersion(version: number | null) {
+  const action = capture(), request = ++versionRead
   if (version === null) { viewing.value = null; return }
   if (!versionDocs.value.has(version)) {
     try {
-      const loaded = await getVersion(props.quoteId, version)
+      const loaded = await getVersion(action.id, version)
+      if (!action.current() || request !== versionRead) return
       versionDocs.value = new Map(versionDocs.value).set(version, loaded)
-    } catch (e) { toast(lifecycleError(e, 'That version could not be opened.'), { tone: 'error' }); return }
+    } catch (e) { if (action.current() && request === versionRead) toast(lifecycleError(e, 'That version could not be opened.'), { tone: 'error' }); return }
   }
-  viewing.value = version
+  if (action.current() && request === versionRead) viewing.value = version
 }
 
 // ---------- Reviewing a newer draft ----------
 const reviewOpen = ref(false)
 watch(() => view.value?.review ?? null, review => { if (!review) reviewOpen.value = false })
 async function review() {
-  const quote = live.value
+  const action = capture(), quote = action.quote
   if (!quote) return
   if (quote.view.value?.local === 'clean' && !quote.view.value.review) { await quote.session.reload(); return }
   if (!quote.view.value?.review) await quote.session.reviewChanges()
-  reviewOpen.value = true
+  if (action.current()) reviewOpen.value = true
 }
 async function resolve(choices: ConflictChoices) {
-  const saved = await live.value?.session.acceptReview(choices)
+  const action = capture()
+  const saved = await action.quote?.session.acceptReview(choices)
+  if (!action.current()) return
   reviewOpen.value = false
   if (saved) toast('Merged and saved.')
 }
 async function discard() {
+  const action = capture()
   if (!await confirmAction({ title: 'Discard your changes?', confirmLabel: 'Discard and reload', danger: true, body: 'Your edits since the last save are replaced by the newer draft. Download your copy first if you might need it.' })) return
+  if (!action.current()) return
   reviewOpen.value = false
-  await live.value?.session.reload(true)
+  await action.quote?.session.reload(true)
 }
 
 // ---------- Keys ----------
@@ -502,7 +542,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }), issue, r
 </script>
 
 <template>
-  <section ref="root" class="quote-ws" :class="[`layout-${layout}`, `side-${sideMode}`, { 'side-open': !!pane && !!document, compact }]" :aria-label="layout === 'dock' ? `Quote ${offerNo}`.trim() : 'Quote editor'" tabindex="-1">
+  <section ref="root" class="quote-ws" :data-recovery-ready="live?.recoveryReady.value ?? false" :class="[`layout-${layout}`, `side-${sideMode}`, { 'side-open': !!pane && !!document, compact }]" :aria-label="layout === 'dock' ? `Quote ${offerNo}`.trim() : 'Quote editor'" tabindex="-1">
     <QuoteTitleBar
       class="quote-titlebar" :offer-no="offerNo" :status="status" :archived="!!projection?.archived" :revising="revising" :local="viewing !== null ? 'read-only' : view?.local ?? 'loading'"
       :can-save="saveReady" :save-hint="saveHint" :can-undo="canUndo" :can-redo="canRedo" :zoom="effectiveZoom" :percent="percent" :pane="pane" :can-format="canFormat"
@@ -604,7 +644,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }), issue, r
 .notice svg { flex-shrink: 0; color: var(--ink-3); }
 .notice span { flex: 1; min-width: 12em; text-wrap: pretty; }
 .notice.warn { background: var(--gold-wash); }
-.notice.warn svg { color: var(--gold-ink); }
+.notice.warn svg { color: var(--warn-ink); }
 .notice.bad { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .notice.bad svg { color: var(--danger); }
 /* A refused save: what to fix, each with the way to it. */

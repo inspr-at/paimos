@@ -1,0 +1,29 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "audit.read"
+    ],
+    "owner": [
+      "audit.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": false,
+      "description": "Read audit",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Audit",
+      "key": "audit.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "words": {
+    "resources": {
+      "audit": "the access log"
+    }
+  }
+}

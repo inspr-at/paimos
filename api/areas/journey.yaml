@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/journey
+paths:
+  /journey/next-actions:
+    get:
+      deprecated: true
+      operationId: listJourneyNextActions
+      summary: Read derived next actions for a batch of projects
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
+      security: *auth
+      parameters:
+        - {name: project_ids, in: query, required: true, schema: {type: string}, description: 'Comma-separated unique project UUIDs; at most 100.'}
+      responses:
+        '410': {$ref: '#/components/responses/Error'}
+        '200': {description: Current actions, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {type: object, required: [project_node_id, next_action], properties: {project_node_id: {type: string, format: uuid}, next_action: {$ref: '#/components/schemas/JourneyNextAction'}}}}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+components:

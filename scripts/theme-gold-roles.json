@@ -1,0 +1,1518 @@
+{
+  "ticket": "AEON-752",
+  "source": "AEON-719 inventory and AEON-717 theme-settings-d7.html",
+  "uses": [
+    {
+      "file": "web/src/components/CommandPalette.vue",
+      "selector": ".kind.epic",
+      "original": "var(--gold)",
+      "role": "fixed-category",
+      "replacement": "var(--kind-parent)",
+      "reason": "Work kind is a fixed category"
+    },
+    {
+      "file": "web/src/components/MarkdownBody.vue",
+      "selector": ".markdown-body :deep(a:not(.ticket-link))",
+      "original": "var(--gold)",
+      "role": "highlight",
+      "replacement": "var(--secondary-line)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/AppHeader.vue",
+      "selector": ".needs-badge",
+      "original": "var(--gold-2)",
+      "role": "warning",
+      "replacement": "var(--gold-2)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/AppFooter.vue",
+      "selector": ".new-badge",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/AppFooter.vue",
+      "selector": ".new-dot",
+      "original": "var(--gold)",
+      "role": "highlight",
+      "replacement": "var(--secondary-line)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/AppFooter.vue",
+      "selector": ".card-new",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/views/AgentsView.vue",
+      "selector": ".freshness.stale",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/views/AgentsView.vue",
+      "selector": ".freshness.stale .live-mark",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/views/KnowledgeView.vue",
+      "selector": ".k-status.proposed",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/views/KnowledgeView.vue",
+      "selector": ".k-status.proposed",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/views/business/HoursView.vue",
+      "selector": ".badge",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/views/business/HoursView.vue",
+      "selector": ".conflict",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/views/business/HoursView.vue",
+      "selector": ".conflict > svg",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/views/business/BusinessHome.vue",
+      "selector": ".r-none",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/views/business/CustomerView.vue",
+      "selector": ".unsaved",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/views/business/CostUnitsView.vue",
+      "selector": ".form-note.warn",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/settings/AccountsSection.vue",
+      "selector": ".dot.wait",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/releases/ReleasesSheet.vue",
+      "selector": ".status-dot",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/releases/ReleasesSheet.vue",
+      "selector": ".row.fresh",
+      "original": "var(--gold-wash)",
+      "role": "highlight",
+      "replacement": "var(--secondary-tint-3)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/ReleasesSheet.vue",
+      "selector": ".new-tag",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/ReleasesSheet.vue",
+      "selector": ".new-tag",
+      "original": "var(--gold-wash)",
+      "role": "highlight",
+      "replacement": "var(--secondary-tint-3)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/ReleaseDetail.vue",
+      "selector": ".chip.new",
+      "original": "var(--gold-wash)",
+      "role": "highlight",
+      "replacement": "var(--secondary-tint-3)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/ReleaseDetail.vue",
+      "selector": ".chip.new",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/ReleaseChanges.vue",
+      "selector": ".fixes .g-icon",
+      "original": "var(--gold-wash)",
+      "role": "highlight",
+      "replacement": "var(--secondary-tint-3)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/ReleaseChanges.vue",
+      "selector": ".fixes .g-icon",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/ReleaseChanges.vue",
+      "selector": ".fixes .change-glyph",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/StatViz.vue",
+      "selector": ".trend",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/StatViz.vue",
+      "selector": ".fix",
+      "original": "var(--gold)",
+      "role": "highlight",
+      "replacement": "var(--secondary-line)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/StatViz.vue",
+      "selector": ".wait",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/StatViz.vue",
+      "selector": ".now",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/StatViz.vue",
+      "selector": ".bracket",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/StatViz.vue",
+      "selector": ".marker",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/StatViz.vue",
+      "selector": ".label-gold",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/ReleaseCadence.vue",
+      "selector": ".avg",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/releases/ReleaseCadence.vue",
+      "selector": ".avg-label",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/access/StatusChip.vue",
+      "selector": ".wait",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/access/StatusChip.vue",
+      "selector": ".wait .pip",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/access/RiskBadge.vue",
+      "selector": ".risk.medium",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/quotes/QuoteTitleBar.vue",
+      "selector": ".save.warn .save-state",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/quotes/QuoteTitleBar.vue",
+      "selector": ".save.warn .save-state svg",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/quotes/QuoteTitleBar.vue",
+      "selector": ".dirty-dot",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/quotes/QuoteProfilePicker.vue",
+      "selector": ".newer-dot",
+      "original": "var(--gold)",
+      "role": "highlight",
+      "replacement": "var(--secondary-line)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/projects/ProjectRow.vue",
+      "selector": ".state-chip.frozen",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/projects/ProjectCard.vue",
+      "selector": ".state-chip.frozen",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/projects/LiveBot.vue",
+      "selector": ".event-caption",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/crm/NotesSection.vue",
+      "selector": ".f-note.warn",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/crm/NotesSection.vue",
+      "selector": ".f-note.warn svg",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/business/LogTimeBar.vue",
+      "selector": ".log-status.warn",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/business/QuoteWorkspace.vue",
+      "selector": ".notice.warn",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/business/QuoteWorkspace.vue",
+      "selector": ".notice.warn svg",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/business/SetupCard.vue",
+      "selector": ".area-needs",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/business/QuoteLines.vue",
+      "selector": ".line.problem .c-pos",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/business/QuoteLines.vue",
+      "selector": ".no-rate",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/business/QuoteLines.vue",
+      "selector": ".rate-hint.warn",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/ScheduleEditor.vue",
+      "selector": ".ed-err",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/DecisionDeskMemo.vue",
+      "selector": ".stamp.selected.stamp-requirement, .large-stamp.stamp-requirement",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/agents/ApprovalQueue.vue",
+      "selector": ".attach-terminal",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/ApprovalQueue.vue",
+      "selector": "/* Something waits: a warm full tint and a soft gold ring, never an edge bar. */\n.queue:not(.clear)",
+      "original": "var(--gold-2)",
+      "role": "warning",
+      "replacement": "var(--gold-2)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/ApprovalQueue.vue",
+      "selector": "/* Something waits: a warm full tint and a soft gold ring, never an edge bar. */\n.queue:not(.clear)",
+      "original": "var(--gold-2)",
+      "role": "warning",
+      "replacement": "var(--gold-2)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/ApprovalQueue.vue",
+      "selector": "/* Something waits: a warm full tint and a soft gold ring, never an edge bar. */\n.queue:not(.clear)",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/ApprovalQueue.vue",
+      "selector": ".queue:not(.clear) .item + .item",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/ApprovalQueue.vue",
+      "selector": ".item.medium .mark",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/ApprovalQueue.vue",
+      "selector": ".item.medium .mark",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/ApprovalQueue.vue",
+      "selector": ".expiry.soon",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/CapacityGauge.vue",
+      "selector": ".ahead .g-spent",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/CapacityGauge.vue",
+      "selector": ".ahead .g-tick",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/SessionList.vue",
+      "selector": ".group-row.attention .group-label",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/SessionList.vue",
+      "selector": ".row.needs .state-label",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/SessionList.vue",
+      "selector": ".role",
+      "original": "var(--gold-wash)",
+      "role": "highlight",
+      "replacement": "var(--secondary-tint-3)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/agents/SessionList.vue",
+      "selector": ".role",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/agents/SessionPanel.vue",
+      "selector": ".state-text.needs",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/SessionPanel.vue",
+      "selector": ".callout",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/SessionPanel.vue",
+      "selector": ".callout",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/AttachApproval.vue",
+      "selector": ".memo-kind.held, .park, .soon",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/AccountsComputers.vue",
+      "selector": "/* Warning text is --warn-ink: --gold-ink on this tint is about 4:1 in light, under 4.5:1. */\n.pill.warn",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/AccountsComputers.vue",
+      "selector": ".pill.warn .dot",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/AccountsComputers.vue",
+      "selector": ".notice",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/AccountsComputers.vue",
+      "selector": ".n-icon",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/ServiceTierBlock.vue",
+      "selector": ".tier-request",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/CapacityCard.vue",
+      "selector": ".plan.ahead :deep(.n)",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/CapacityCard.vue",
+      "selector": ".dot.signin",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/CapacityCard.vue",
+      "selector": ".dot.signin",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/CapacityCard.vue",
+      "selector": ".left.kept b",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/agents/CapacityCard.vue",
+      "selector": ".today.ahead b",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/CapacityCard.vue",
+      "selector": ".today.kept",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/agents/ConnectedComputers.vue",
+      "selector": ".dot[data-state=\"Draining\"], .dot[data-state=\"Offline\"]",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/AccountsCard.vue",
+      "selector": ".dot.signin",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/AccountsCard.vue",
+      "selector": ".account.signin .state",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/AccountsCard.vue",
+      "selector": ".name-it",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/agents/AccountsCard.vue",
+      "selector": ".name-it",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/usage/CapacityBand.vue",
+      "selector": ".partial-notice",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/usage/CapacityBand.vue",
+      "selector": ".sentence.ahead :deep(.n)",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/model-prefs/ProvidersPanel.vue",
+      "selector": ".provider-warning",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/model-prefs/ModelChip.vue",
+      "selector": ".model-chip.warning",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/journey/ReleaseTickets.vue",
+      "selector": ".grp-h",
+      "original": "var(--gold)",
+      "role": "highlight",
+      "replacement": "var(--secondary-line)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/ReleaseTickets.vue",
+      "selector": ".rid",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/GateApprovals.vue",
+      "selector": ".risk-chip.medium",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/journey/GateApprovals.vue",
+      "selector": ".risk-chip.high",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/journey/GateApprovals.vue",
+      "selector": ".expiry.soon",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/journey/DeployStage.vue",
+      "selector": ".target-note",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/journey/DeployStage.vue",
+      "selector": ".check-mark.wait",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/journey/DeployStage.vue",
+      "selector": ".check-mark.wait",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/journey/JourneyRail.vue",
+      "selector": ".rail",
+      "original": "var(--gold)",
+      "role": "highlight",
+      "replacement": "var(--secondary-line)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/JourneyRail.vue",
+      "selector": "/* What comes next: fades in while the rail is hovered or focused. */\n.hint",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/JourneyRail.vue",
+      "selector": "li.done .n",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/JourneyRail.vue",
+      "selector": "li.done .n",
+      "original": "var(--gold-wash)",
+      "role": "highlight",
+      "replacement": "var(--secondary-tint-3)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/JourneyRail.vue",
+      "selector": "li.here .step:hover",
+      "original": "var(--gold)",
+      "role": "highlight",
+      "replacement": "var(--secondary-line)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/JourneyRail.vue",
+      "selector": "li.done .link",
+      "original": "var(--gold-2)",
+      "role": "highlight",
+      "replacement": "var(--secondary-tint)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/JourneyRail.vue",
+      "selector": "li.done .link",
+      "original": "var(--gold)",
+      "role": "highlight",
+      "replacement": "var(--secondary-line)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/JourneyRail.vue",
+      "selector": "li.done .link",
+      "original": "var(--gold-2)",
+      "role": "highlight",
+      "replacement": "var(--secondary-tint)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/JourneyRail.vue",
+      "selector": "li.done .link::after",
+      "original": "var(--gold)",
+      "role": "highlight",
+      "replacement": "var(--secondary-line)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/HistoryFold.vue",
+      "selector": ".history-mark",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/HistoryFold.vue",
+      "selector": ".history-mark",
+      "original": "var(--gold-wash)",
+      "role": "highlight",
+      "replacement": "var(--secondary-tint-3)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/WalkerBar.vue",
+      "selector": ".rid",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/JourneyView.vue",
+      "selector": ".state-chip.blocked",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/journey/JourneyView.vue",
+      "selector": ".state-chip.blocked",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/journey/ReleaseWalker.vue",
+      "selector": ".divide",
+      "original": "var(--gold)",
+      "role": "highlight",
+      "replacement": "var(--secondary-line)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/ReleaseWalker.vue",
+      "selector": ".knob",
+      "original": "var(--gold)",
+      "role": "highlight",
+      "replacement": "var(--secondary-line)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/ReleaseWalker.vue",
+      "selector": ".knob",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/ReleaseWalker.vue",
+      "selector": ".info-text b",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/ReleaseWalker.vue",
+      "selector": ".jump-h",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/journey/GateCard.vue",
+      "selector": ".gate-card.blocked",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/journey/GateCard.vue",
+      "selector": ".blocked .gate-eyebrow",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/journey/ExistingTicketPicker.vue",
+      "selector": ".title :deep(mark)",
+      "original": "var(--gold)",
+      "role": "highlight",
+      "replacement": "var(--secondary-line)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/recurrences/RecurringPill.vue",
+      "selector": ".recurring-pill",
+      "original": "var(--gold)",
+      "role": "marker",
+      "replacement": "var(--marker)",
+      "reason": "Recurring ticket marker"
+    },
+    {
+      "file": "web/src/components/recurrences/RecurringPill.vue",
+      "selector": ".recurring-pill",
+      "original": "var(--gold-wash)",
+      "role": "marker",
+      "replacement": "color-mix(in srgb, var(--marker) 10%, transparent)",
+      "reason": "Recurring ticket marker"
+    },
+    {
+      "file": "web/src/components/recurrences/RecurringPill.vue",
+      "selector": ".recurring-pill svg",
+      "original": "var(--gold)",
+      "role": "marker",
+      "replacement": "var(--marker)",
+      "reason": "Recurring ticket marker"
+    },
+    {
+      "file": "web/src/components/recurrences/RecurringPill.vue",
+      "selector": "a.recurring-pill:hover",
+      "original": "var(--gold)",
+      "role": "marker",
+      "replacement": "var(--marker)",
+      "reason": "Recurring ticket marker"
+    },
+    {
+      "file": "web/src/components/recurrences/RecurringPill.vue",
+      "selector": ".recurring-pill:focus-visible",
+      "original": "var(--gold)",
+      "role": "marker",
+      "replacement": "var(--marker)",
+      "reason": "Recurring ticket marker"
+    },
+    {
+      "file": "web/src/components/knowledge/KnowledgeTab.vue",
+      "selector": ".k-status.proposed",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/knowledge/KnowledgeTab.vue",
+      "selector": ".k-status.proposed",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/knowledge/KnowledgeTab.vue",
+      "selector": ".k-banner",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/knowledge/KnowledgeTab.vue",
+      "selector": ".k-banner svg",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/knowledge/KnowledgeEntryPage.vue",
+      "selector": ".unsaved",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/knowledge/KnowledgeEntryPage.vue",
+      "selector": ".k-status.proposed",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/knowledge/KnowledgeEntryPage.vue",
+      "selector": ".k-status.proposed",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/knowledge/KnowledgeEntryPage.vue",
+      "selector": ".e-note.proposed",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/knowledge/KnowledgeEntryPage.vue",
+      "selector": ".e-note.proposed svg",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/knowledge/KnowledgeEntryPage.vue",
+      "selector": ".e-rename",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/knowledge/KnowledgeEntryPage.vue",
+      "selector": ".e-rename > svg",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/knowledge/KnowledgeEntryPage.vue",
+      "selector": ".e-conflict",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/knowledge/KnowledgeEntryPage.vue",
+      "selector": ".conflict-icon",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/work/FilterMenu.vue",
+      "selector": ".lead.epic",
+      "original": "var(--gold)",
+      "role": "fixed-category",
+      "replacement": "var(--kind-parent)",
+      "reason": "Work kind is a fixed category"
+    },
+    {
+      "file": "web/src/components/work/StatusHelpSheet.vue",
+      "selector": ".hc-sample",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/work/StatusHelpSheet.vue",
+      "selector": ".hc-sample",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/work/StatusHelpSheet.vue",
+      "selector": ".hc-sample svg",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/work/ViewBar.vue",
+      "selector": ".star",
+      "original": "var(--gold)",
+      "role": "highlight",
+      "replacement": "var(--secondary-line)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/work/ViewBar.vue",
+      "selector": ".view-tab[aria-current=\"page\"] .star",
+      "original": "var(--gold)",
+      "role": "highlight",
+      "replacement": "var(--secondary-line)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/work/LabelMenu.vue",
+      "selector": ".tag-dot[data-color=\"yellow\"], .tag-dot[data-color=\"orange\"]",
+      "original": "var(--gold)",
+      "role": "fixed-category",
+      "replacement": "var(--label-yellow)",
+      "reason": "Label identity is independent of theme accents"
+    },
+    {
+      "file": "web/src/components/work/QuickCreateRow.vue",
+      "selector": ".kind.epic",
+      "original": "var(--gold)",
+      "role": "fixed-category",
+      "replacement": "var(--kind-parent)",
+      "reason": "Work kind is a fixed category"
+    },
+    {
+      "file": "web/src/components/work/ListFreshness.vue",
+      "selector": ".list-freshness.stale",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/work/ListFreshness.vue",
+      "selector": ".stale .live-mark",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/work/TicketProperties.vue",
+      "selector": ".kind.epic",
+      "original": "var(--gold)",
+      "role": "fixed-category",
+      "replacement": "var(--kind-parent)",
+      "reason": "Work kind is a fixed category"
+    },
+    {
+      "file": "web/src/components/work/HumanCheck.vue",
+      "selector": ".human-check",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/work/HumanCheck.vue",
+      "selector": ".human-check",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/work/HumanCheck.vue",
+      "selector": ".hc-icon",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/work/QueueAction.vue",
+      "selector": ".q-btn.unready::after",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/work/TicketTable.vue",
+      "selector": ".kind-glyph.epic",
+      "original": "var(--gold)",
+      "role": "fixed-category",
+      "replacement": "var(--kind-parent)",
+      "reason": "Work kind is a fixed category"
+    },
+    {
+      "file": "web/src/components/work/TicketTable.vue",
+      "selector": ".parent-chip.epic svg",
+      "original": "var(--gold)",
+      "role": "fixed-category",
+      "replacement": "var(--kind-parent)",
+      "reason": "Work kind is a fixed category"
+    },
+    {
+      "file": "web/src/components/work/TicketTable.vue",
+      "selector": ".tag-dot[data-color=\"yellow\"], .tag-dot[data-color=\"orange\"]",
+      "original": "var(--gold)",
+      "role": "fixed-category",
+      "replacement": "var(--label-yellow)",
+      "reason": "Label identity is independent of theme accents"
+    },
+    {
+      "file": "web/src/components/work/TicketTable.vue",
+      "selector": ".epic-glyph",
+      "original": "var(--gold)",
+      "role": "fixed-category",
+      "replacement": "var(--kind-parent)",
+      "reason": "Work kind is a fixed category"
+    },
+    {
+      "file": "web/src/components/work/OptionMenu.vue",
+      "selector": ".kind-icon.epic",
+      "original": "var(--gold)",
+      "role": "fixed-category",
+      "replacement": "var(--kind-parent)",
+      "reason": "Work kind is a fixed category"
+    },
+    {
+      "file": "web/src/components/work/FacetOptions.vue",
+      "selector": ".kind.epic",
+      "original": "var(--gold)",
+      "role": "fixed-category",
+      "replacement": "var(--kind-parent)",
+      "reason": "Work kind is a fixed category"
+    },
+    {
+      "file": "web/src/components/work/FacetOptions.vue",
+      "selector": ".tag-dot[data-color=\"yellow\"], .tag-dot[data-color=\"orange\"]",
+      "original": "var(--gold)",
+      "role": "fixed-category",
+      "replacement": "var(--label-yellow)",
+      "reason": "Label identity is independent of theme accents"
+    },
+    {
+      "file": "web/src/components/work/TicketHeaderBar.vue",
+      "selector": ".key-chip .epic",
+      "original": "var(--gold)",
+      "role": "fixed-category",
+      "replacement": "var(--kind-parent)",
+      "reason": "Work kind is a fixed category"
+    },
+    {
+      "file": "web/src/components/work/TicketHeaderBar.vue",
+      "selector": ".unsaved",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/work/TicketTypeIcon.vue",
+      "selector": ".kind-glyph.epic",
+      "original": "var(--gold)",
+      "role": "fixed-category",
+      "replacement": "var(--kind-parent)",
+      "reason": "Work kind is a fixed category"
+    },
+    {
+      "file": "web/src/components/work/TicketTypeIcon.vue",
+      "selector": ".recurrence-dot",
+      "original": "var(--gold)",
+      "role": "marker",
+      "replacement": "var(--marker)",
+      "reason": "Recurring ticket marker"
+    },
+    {
+      "file": "web/src/components/work/TicketTypeIcon.vue",
+      "selector": ".recurrence-dot",
+      "original": "var(--gold-on)",
+      "role": "marker",
+      "replacement": "var(--marker-on)",
+      "reason": "Recurring ticket marker"
+    },
+    {
+      "file": "web/src/components/work/TicketTypeIcon.vue",
+      "selector": ".ticket-type-icon:focus-visible",
+      "original": "var(--gold)",
+      "role": "marker",
+      "replacement": "var(--marker)",
+      "reason": "Recurring ticket marker"
+    },
+    {
+      "file": "web/src/components/header/AppMenu.vue",
+      "selector": ".new-count",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/components/header/AppMenu.vue",
+      "selector": ".status-state.degraded .dot",
+      "original": "var(--gold)",
+      "role": "warning",
+      "replacement": "var(--gold)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/quotes/collaboration/QuoteConflictDialog.vue",
+      "selector": ".head-icon",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/quotes/collaboration/QuoteConflictDialog.vue",
+      "selector": ".head-icon",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/quotes/list/QuoteTable.vue",
+      "selector": ".day.soon",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/settings/profiles/ProfileColors.vue",
+      "selector": ".ratio.large",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/settings/profiles/ProfileColors.vue",
+      "selector": ".ratio.large",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/components/settings/profiles/ProfileColors.vue",
+      "selector": ".warn",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/styles/journey.css",
+      "selector": ".j-checks .warn",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/styles/journey.css",
+      "selector": ".j-stat.warn b",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/styles/journey.css",
+      "selector": ".j-timeline .dot.gold",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/styles/journey.css",
+      "selector": ".j-chip.gold",
+      "original": "var(--gold-wash)",
+      "role": "highlight",
+      "replacement": "var(--secondary-tint-3)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/styles/journey.css",
+      "selector": ".j-chip.gold",
+      "original": "var(--gold-ink)",
+      "role": "highlight",
+      "replacement": "var(--secondary-ink)",
+      "reason": "Decorative emphasis, release history, favourite or measured reference"
+    },
+    {
+      "file": "web/src/styles/journey.css",
+      "selector": "0%, 40%",
+      "original": "var(--gold-wash)",
+      "role": "warning",
+      "replacement": "var(--gold-wash)",
+      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
+    },
+    {
+      "file": "web/src/views/settings/DocumentProfilesView.vue",
+      "selector": ".head-titles .dirty",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Fixed document/quote status or unsaved warning"
+    },
+    {
+      "file": "web/src/components/settings/QuoteSettingsCard.vue",
+      "selector": ".unsaved",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Fixed document/quote status or unsaved warning"
+    },
+    {
+      "file": "web/src/components/quotes/QuoteStatusIcon.vue",
+      "selector": "<template v-else-if=\"status === 'expired'\"><circle cx=\"7\" cy=\"7\" r=\"5.1\" stroke=\"var(--gold-ink)\" stroke-width=\"1.6\" /><path d=\"M7 4.3V7l1.9 1.3\" stroke=\"var(--gold-ink)\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" /></template>",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Fixed document/quote status or unsaved warning"
+    },
+    {
+      "file": "web/src/components/quotes/QuoteStatusIcon.vue",
+      "selector": "<template v-else-if=\"status === 'expired'\"><circle cx=\"7\" cy=\"7\" r=\"5.1\" stroke=\"var(--gold-ink)\" stroke-width=\"1.6\" /><path d=\"M7 4.3V7l1.9 1.3\" stroke=\"var(--gold-ink)\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" /></template>",
+      "original": "var(--gold-ink)",
+      "role": "warning",
+      "replacement": "var(--warn-ink)",
+      "reason": "Fixed document/quote status or unsaved warning"
+    },
+    {
+      "file": "web/src/components/releases/ReleaseVersionCopy.vue",
+      "selector": "version copy brand option",
+      "original": "getPropertyValue('--gold-ink')",
+      "role": "highlight",
+      "replacement": "getPropertyValue('--secondary-ink')",
+      "reason": "Decorative release version presentation"
+    }
+  ]
+}

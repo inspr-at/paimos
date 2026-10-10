@@ -1,0 +1,69 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "authz.read"
+    ],
+    "customer": [
+      "authz.read"
+    ],
+    "guest": [
+      "authz.read"
+    ],
+    "member": [
+      "authz.read"
+    ],
+    "owner": [
+      "authz.read"
+    ],
+    "viewer": [
+      "authz.read"
+    ]
+  },
+  "project_filtered": {
+    "GET /api/me/permissions": true
+  },
+  "project_self_permissions": [
+    "authz.read"
+  ],
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Read authz",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Access",
+      "key": "authz.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "routes": {
+    "DELETE /api/members/invites/{id}": "members.manage",
+    "DELETE /api/members/{principal_id}/aliases/{from_principal_id}": "members.manage",
+    "DELETE /api/projects/{projectId}/members/{principal_id}": "members.manage",
+    "DELETE /api/roles/{id}": "roles.manage",
+    "GET /api/audit": "audit.read",
+    "GET /api/authz/permissions": "roles.read",
+    "GET /api/me/permissions": "authz.read",
+    "GET /api/members": "members.read",
+    "GET /api/projects/{projectId}/members": "members.read",
+    "GET /api/roles": "roles.read",
+    "PATCH /api/roles/{id}": "roles.manage",
+    "POST /api/members/agents": "keys.manage",
+    "POST /api/members/invites": "members.manage",
+    "POST /api/members/invites/{id}/provision": "members.manage",
+    "POST /api/members/{principal_id}/aliases": "members.manage",
+    "POST /api/members/{principal_id}/deactivate": "members.manage",
+    "POST /api/members/{principal_id}/reactivate": "members.manage",
+    "POST /api/roles": "roles.manage",
+    "PUT /api/members/{principal_id}/workspace-role": "members.manage",
+    "PUT /api/projects/{projectId}/members/{principal_id}": "members.manage"
+  },
+  "words": {
+    "resources": {
+      "authz": "their own access"
+    }
+  }
+}

@@ -79,7 +79,112 @@ func TestAttachTicketRefusalIsOpaqueWithoutOwningDaemon(t *testing.T) {
 	in.Snapshot.TicketID = actualTicket
 	in.Snapshot.Harness = "claude"
 	in.Digest = in.Snapshot.Digest()
-	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 409), "")
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 409), attachwatch.RefusalEnrollment)
+}
+
+func TestAttachStatusOnlyClaudeDrainRefusal(t *testing.T) {
+	for _, state := range []string{"draining", "revoked"} {
+		t.Run(state, func(t *testing.T) {
+			f, key, in := watchFixtureWithHarness(t, "", "claude")
+			in.Snapshot.Mode, in.Snapshot.Transcript, in.Snapshot.FileID = attachwatch.ModeLease, "", ""
+			in.Digest = in.Snapshot.Digest()
+			otherKey, _ := extraWatchComputer(t, f, in)
+			// A running external process is represented by the same pinned snapshot
+			// throughout. Only its server enrollment state changes.
+			if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_enrollments SET state=$2 WHERE computer_id=$1`, in.ComputerID, state); err != nil {
+				t.Fatal(err)
+			}
+			cause := attachwatch.RefusalDraining
+			if state == "revoked" {
+				cause = attachwatch.RefusalEnrollment
+			}
+			w := f.call("POST", "/api/agent-pairing/attach", in, false, key, 409)
+			refusalCause(t, w, cause)
+			var body struct{ Code, Error string }
+			decodeResult(t, w, &body)
+			if body.Code != "conflict" || body.Error != "project, ticket or harness enrollment changed" {
+				t.Fatal("legacy refusal contract changed")
+			}
+			refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, otherKey, 403), "")
+			bad := in
+			bad.PollKey = nonce()
+			refusalCause(t, f.call("POST", "/api/agent-pairing/attach", bad, false, key, 403), "")
+			var count int
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM harness_attach_requests WHERE id=$1`, in.RequestID).Scan(&count); err != nil || count != 0 {
+				t.Fatal("refused attach created a request", err)
+			}
+			// Model fresh authorized enrollment, not a daemon-side fence bypass.
+			if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_enrollments SET state='connected' WHERE computer_id=$1`, in.ComputerID); err != nil {
+				t.Fatal(err)
+			}
+			v := activateWatch(t, f, key, &in)
+			if v.State != "active" || v.SessionID == nil || v.Snapshot.Mode != attachwatch.ModeLease {
+				t.Fatal("fresh approval did not activate status-only attach")
+			}
+		})
+	}
+}
+
+func TestAttachServerRestartSignalsLostRegistrationOnlyForValidEnrollment(t *testing.T) {
+	f, key, in := leaseFixture(t)
+	// Rebuild the HTTP server/module over the same database, preserving the
+	// ordinary bearer/cookie authentication while discarding only process memory.
+	f.rebuildHandler()
+	// The restarted fixture must retain account-link signing and all ordinary
+	// modules, not just the attach route and bearer/cookie middleware.
+	var account string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT account_id::text FROM agent_pairing_enrollments WHERE computer_id=$1`, in.ComputerID).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	var link struct {
+		Code string `json:"user_code"`
+	}
+	decodeResult(t, f.call("POST", accountLinkPath, map[string]string{"operation": "offer", "account_id": account, "device_proof": in.DeviceProof}, false, key, 200), &link)
+	if len(link.Code) != 7 {
+		t.Fatal("restart lost account-link signing configuration")
+	}
+	f.call("GET", "/api/agent-accounts", nil, true, "", 200)
+	// Only a connected, authorized enrollment may recover lost poll authority.
+	for _, state := range []string{"connected", "draining"} {
+		if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_enrollments SET state=$2 WHERE computer_id=$1`, in.ComputerID, state); err != nil {
+			t.Fatal(err)
+		}
+		w := f.call("POST", "/api/agent-pairing/attach", in, false, key, 403)
+		cause := ""
+		if state == "connected" {
+			cause = attachwatch.RefusalPollKeyUnknown
+		}
+		refusalCause(t, w, cause)
+		var body struct{ Code, Error string }
+		decodeResult(t, w, &body)
+		if body.Code != "forbidden" || body.Error != "daemon poll key rejected" {
+			t.Fatal("server restart did not reproduce the missing-registration refusal")
+		}
+	}
+	// A daemon restart's registration restores only its poll authority. It
+	// cannot override drain or revive any approval.
+	in.PollKey = nonce()
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: in.PollKey, AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: attachwatch.LocalConsentProofVersion}, false, key, 200)
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 409), attachwatch.RefusalDraining)
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_enrollments SET state='connected' WHERE computer_id=$1`, in.ComputerID); err != nil {
+		t.Fatal(err)
+	}
+	v := requestWatch(t, f, key, in)
+	if v.State != "pending" || v.SessionID != nil {
+		t.Fatal("restart reused approval or failed to request fresh consent")
+	}
+}
+
+func TestAttachComputerDrainCauseRequiresOwningPollKey(t *testing.T) {
+	f, key, in := leaseFixture(t)
+	otherKey, _ := extraWatchComputer(t, f, in)
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_computers SET state='draining' WHERE id=$1`, in.ComputerID); err != nil {
+		t.Fatal(err)
+	}
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 403), attachwatch.RefusalDraining)
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, otherKey, 403), "")
+	in.PollKey = nonce()
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 403), "")
 }
 
 func TestAttachCodeExpiryCausePreservesTheEndedRequest(t *testing.T) {

@@ -7,14 +7,15 @@
 // Filter values may carry a leading "!" (excluded). Within one filter the plain
 // values are alternatives and every excluded value must not match; filters
 // combine with AND. That is classic Paimos's model, and the list API's.
+import { HIDE_STATES, hiddenStates, parseHiddenStates, type HideState } from './hideStates.ts'
 import { estimateHours } from './estimates.ts'
 import { compareModelSort, planningSortValue } from './planning.ts'
-import type { Facets, ListItem, ListQuery } from './api.ts'
+import type { Facets, ListItem, ListQuery, WorkCountBucket } from './api.ts'
 import { normalizeColumnIds, PINNED, type ColumnId } from './columns.ts'
 import { DEFAULT_SORT, KINDS, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
 
-export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release' | 'human_check'
-export type GroupBy = 'none' | 'status' | 'assignee' | 'priority' | 'type' | 'epic' | 'tag'
+export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release' | 'human_check' | 'shape' | 'depth'
+export type GroupBy = 'none' | 'status' | 'assignee' | 'priority' | 'type' | 'epic' | 'tag' | 'project'
 export type DateField = 'updated' | 'created' | 'start' | 'end' | 'accepted'
 export type DatePreset = 'today' | '7d' | '30d' | '90d' | 'month' | 'year'
 // A date filter: one field, and a relative preset (kept relative in saved views)
@@ -22,8 +23,12 @@ export type DatePreset = 'today' | '7d' | '30d' | '90d' | 'month' | 'year'
 export interface DateFilter { field: DateField; preset: DatePreset | null; from: string | null; to: string | null }
 export interface FacetOption { value: string; label: string; count?: number; hint?: string; color?: string }
 export interface ListFilters {
+  mode: 'list' | 'outline' | 'graph'
   q: string
   status: string[]
+  // Header filters use canonical statuses or exact server work buckets. Kept
+  // with URL/saved-view state; ordinary facet edits return to exact spellings.
+  statusScope?: 'canonical' | 'open' | 'in_progress' | 'done' | 'closed'
   priority: string[]
   assignee: string[]
   type: string[]
@@ -32,8 +37,13 @@ export interface ListFilters {
   cost: string[]
   release: string[]
   human_check: string[]
+  shape: string[]
+  depth: string[]
   date: DateFilter | null
   showClosed: boolean
+  hideStates?: HideState[]
+  // A temporary status-selection override, distinct from a manual Hide toggle.
+  hideRestore?: boolean
   sort: SortKey[]
   group: GroupBy
   // An explicit column set (free columns in order; Key and Title always lead).
@@ -46,23 +56,25 @@ export const DIMENSIONS: DimensionDef[] = [
   { key: 'status', title: 'Status', facet: 'state', primary: true, none: '' },
   { key: 'priority', title: 'Priority', facet: 'priority', primary: true, none: 'No priority' },
   { key: 'assignee', title: 'Assignee', facet: 'assignee', primary: true, none: 'Unassigned' },
-  { key: 'type', title: 'Type', facet: 'kind', primary: true, none: '' },
+  { key: 'shape', title: 'Parents / Leaves', facet: 'shape', primary: true, none: '' },
+  { key: 'depth', title: 'Depth', facet: 'depth', primary: false, none: '' },
+  { key: 'type', title: 'Legacy type', facet: 'kind', primary: true, none: '' },
   { key: 'tag', title: 'Labels', facet: 'tag', primary: false, none: 'No labels' },
   { key: 'human_check', title: 'Human check', facet: 'human_check', primary: false, none: 'No human check' },
-  { key: 'epic', title: 'Epic', facet: null, primary: false, none: 'No epic' },
+  { key: 'epic', title: 'Parent', facet: null, primary: false, none: 'No parent' },
   { key: 'cost', title: 'Cost unit', facet: 'cost_unit', primary: false, none: 'No cost unit' },
-  // Imported fields.release only. The ticket Release column reads native journey membership.
+  // Imported fields.release only. The ticket Release column reads native release membership.
   { key: 'release', title: 'Imported release', facet: 'release', primary: false, none: 'No imported release' },
 ]
 export const DIMENSION_BY_KEY = new Map(DIMENSIONS.map(d => [d.key, d]))
 export const DIMENSION_KEYS = DIMENSIONS.map(d => d.key)
 // The counts every page carries; the others are asked for when a menu opens.
 export const LIST_FACETS = ['state', 'priority', 'assignee', 'kind']
-export const WORK_KINDS = ['ticket', 'task', 'epic']
+export const WORK_KINDS = ['work', 'ticket', 'task', 'epic']
 export const PAGE_SIZE = 200
 export const GROUPS: { value: GroupBy; label: string }[] = [
   { value: 'none', label: 'None' }, { value: 'status', label: 'Status' }, { value: 'assignee', label: 'Assignee' }, { value: 'priority', label: 'Priority' },
-  { value: 'type', label: 'Type' }, { value: 'epic', label: 'Epic' }, { value: 'tag', label: 'Label' },
+  { value: 'project', label: 'Project' }, { value: 'type', label: 'Type' }, { value: 'epic', label: 'Epic' }, { value: 'tag', label: 'Label' },
 ]
 export const DATE_FIELDS: { value: DateField; label: string }[] = [
   { value: 'updated', label: 'Updated' }, { value: 'created', label: 'Created' }, { value: 'start', label: 'Start' }, { value: 'end', label: 'End' }, { value: 'accepted', label: 'Accepted' },
@@ -113,17 +125,22 @@ export function serializeDate(date: DateFilter): string {
 }
 function parseCols(raw: unknown): ColumnId[] | null {
   if (typeof raw !== 'string') return null
-  const ids = normalizeColumnIds(list(raw)).filter(id => !PINNED.includes(id))
-  return ids.length ? ids : null
+  const valid = normalizeColumnIds(list(raw))
+  return valid.length ? valid.filter(id => !PINNED.includes(id)) : null
 }
 const VIEW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
   const group = GROUPS.find(g => g.value === query.group)?.value ?? 'none'
   return {
+    mode: query.view === 'outline' || query.view === 'graph' ? query.view : 'list',
     q: typeof query.q === 'string' ? query.q : '',
     status: list(query.status),
+    ...(list(query.status).length && ['canonical', 'open', 'in_progress', 'done', 'closed'].includes(String(query.status_scope))
+      ? { statusScope: query.status_scope as ListFilters['statusScope'] } : {}),
     priority: list(query.priority),
     assignee: list(query.assignee),
+    shape: list(query.shape).filter(v => ['parent', 'leaf'].includes(bare(v))),
+    depth: list(query.depth).filter(v => /^[1-9][0-9]{0,4}$/.test(bare(v)) && Number(bare(v)) <= 50000),
     type: list(query.type).filter(kind => WORK_KINDS.includes(bare(kind))),
     tag: list(query.tag),
     epic: list(query.epic).filter(value => /^[\w-]{1,64}$/.test(bare(value))),
@@ -132,6 +149,8 @@ export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
     human_check: list(query.human_check).filter(value => ['pending', 'none'].includes(bare(value))),
     date: parseDate(query.date),
     showClosed: query.closed === '1',
+    ...(typeof query.hide_states === 'string' ? { hideStates: parseHiddenStates(query.hide_states) } : {}),
+    ...(query.hide_restore === '1' && query.closed === '1' && list(query.status).length ? { hideRestore: true } : {}),
     sort: parseSort(typeof query.sort === 'string' ? query.sort : ''),
     group,
     cols: parseCols(query.cols),
@@ -140,13 +159,17 @@ export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
 }
 export function filtersToQuery(filters: ListFilters): Record<string, string> {
   const out: Record<string, string> = {}
+  if (filters.status.length && filters.statusScope) out.status_scope = filters.statusScope
   if (filters.q.trim()) out.q = filters.q.trim()
   for (const key of DIMENSION_KEYS) if (filters[key].length) out[key] = filters[key].join(',')
   if (filters.date) out.date = serializeDate(filters.date)
+  if (hiddenStates(filters.hideStates).length !== HIDE_STATES.length) out.hide_states = hiddenStates(filters.hideStates).join(',')
   if (filters.showClosed) out.closed = '1'
+  if (filters.showClosed && filters.hideRestore && filters.status.length) out.hide_restore = '1'
   if (filters.sort.length) out.sort = serializeSort(filters.sort)
   if (filters.group !== 'none') out.group = filters.group
-  if (filters.cols?.length) out.cols = filters.cols.join(',')
+  if (filters.cols) out.cols = filters.cols.length ? filters.cols.join(',') : PINNED.join(',')
+  if (filters.mode !== 'list') out.view = filters.mode
   if (filters.view) out.v = filters.view
   return out
 }
@@ -160,22 +183,25 @@ export function hasFilters(filters: ListFilters): boolean {
 }
 // Everything a person can clear with "Clear all": search, filters and the date.
 export function clearedFilters(): Partial<ListFilters> {
-  return { q: '', status: [], priority: [], assignee: [], type: [], tag: [], epic: [], cost: [], release: [], human_check: [], date: null }
+  return { q: '', status: [], statusScope: undefined, hideRestore: undefined, priority: [], assignee: [], type: [], tag: [], epic: [], cost: [], release: [], human_check: [], shape: [], depth: [], date: null }
 }
 
 // ---------- Saved views: the same state, without the view marker ----------
-export interface ViewShape { filters: Record<string, string>; sort_keys: string[]; group_by: GroupBy; columns: ColumnId[] }
+export interface ViewShape { filters: Record<string, string>; sort_keys: string[]; group_by: GroupBy; columns: ColumnId[]; mode: ListFilters['mode'] }
 export function viewShape(filters: ListFilters): ViewShape {
-  const { sort, group: _group, cols: _cols, v: _v, ...rest } = filtersToQuery(filters)
-  return { filters: rest, sort_keys: sort ? sort.split(',') : [], group_by: filters.group, columns: filters.cols ?? [] }
+  const { sort, group: _group, cols: _cols, v: _v, view: _mode, ...rest } = filtersToQuery(filters)
+  // No column choice stays empty and reloads as automatic. An explicit set, including
+  // pinned-only, keeps Key and Title so it does not collapse back into the person's columns.
+  return { filters: rest, sort_keys: sort ? sort.split(',') : [], group_by: filters.group, columns: filters.cols == null ? [] : [...PINNED, ...filters.cols], mode: filters.mode }
 }
-export function filtersFromView(view: { id: string; filters: Record<string, unknown>; sort_keys: string[]; group_by: string; columns: string[] }): ListFilters {
+export function filtersFromView(view: { id: string; filters: Record<string, unknown>; sort_keys: string[]; group_by: string; columns: string[]; mode?: ListFilters['mode'] }): ListFilters {
   const query: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(view.filters ?? {})) if (typeof value === 'string') query[key] = value
   query.sort = view.sort_keys.join(',')
   query.group = view.group_by
   query.cols = view.columns.join(',')
   query.v = view.id
+  query.view = view.mode ?? 'list'
   return filtersFromQuery(query)
 }
 // The list looks as the view says (a view with changes shows a dot and Save).
@@ -284,8 +310,12 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
   const bounds = dateBounds(filters.date, options.now)
   return {
     within,
-    kind: omit === 'type' ? WORK_KINDS : kindsFor(filters.type),
-    state: [...stateSpellings(included(status)), ...stateSpellings(excluded(status)).map(s => `!${s}`)],
+    shape: take('shape'), depth: take('depth'),
+    kind: omit === 'type' ? WORK_KINDS : [...kindsFor(filters.type), ...excluded(filters.type).map(kind => `!${kind}`)],
+    state: filters.statusScope && omit !== 'status' ? [] : [...stateSpellings(included(status)), ...stateSpellings(excluded(status)).map(s => `!${s}`)],
+    ...(status.length && filters.statusScope === 'canonical' ? { work_state: status } : {}),
+    ...(status.length && filters.statusScope && filters.statusScope !== 'canonical'
+      ? { work_bucket: filters.statusScope === 'closed' ? ['cancelled', 'archived'] as WorkCountBucket[] : [filters.statusScope] } : {}),
     priority: take('priority'),
     assignee: take('assignee'),
     tag: take('tag'),
@@ -296,6 +326,7 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
     ...(filters.date ? { date_field: filters.date.field, date_from: bounds?.from ?? undefined, date_to: bounds?.to ?? undefined } : {}),
     q: filters.q.trim(),
     hide_closed: !filters.showClosed,
+    ...(hiddenStates(filters.hideStates).length !== HIDE_STATES.length ? { hide_states: hiddenStates(filters.hideStates) } : {}),
     facets: options.facets,
     sort: serializeSort(effectiveSort(filters)),
     limit: options.limit ?? PAGE_SIZE,
@@ -304,13 +335,13 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
 }
 
 export function totalFrom(facets: Facets | undefined): number | null {
-  const kinds = facets?.kind
-  return kinds ? Object.values(kinds).reduce((sum, count) => sum + count, 0) : null
+  const counts = facets?.state ?? facets?.kind
+  return counts ? Object.values(counts).reduce((sum, count) => sum + count, 0) : null
 }
 
 // ---------- Facet options ----------
 export interface EpicOption { id: string; key: string; title: string; state?: string }
-export interface OptionContext { names?: Map<string, string>; me?: string; colors?: Map<string, string>; epics?: EpicOption[] }
+export interface OptionContext { names?: Map<string, string>; me?: string; colors?: Map<string, string>; epics?: EpicOption[]; workName?: string }
 // Labels (tags, cost units, releases) are counted by spelling; one label is one option.
 function labelOptions(dimension: Dimension, counts: Record<string, number>, selected: string[], colors: Map<string, string> = new Map()): FacetOption[] {
   const byName = new Map<string, FacetOption>()
@@ -357,15 +388,17 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
     return [...PRIORITIES.map(p => ({ value: p.value as string, label: p.label as string })), { value: 'none', label: 'No priority' }]
       .map(option => ({ ...option, count: counts[option.value] ?? 0 }))
   }
-  if (dimension === 'type') return KINDS.map(kind => ({ value: kind.value, label: kind.label, count: counts[kind.value] ?? 0 }))
+  if (dimension === 'shape') return [{ value: 'parent', label: 'Parents', count: counts.parent ?? 0 }, { value: 'leaf', label: 'Leaves', count: counts.leaf ?? 0 }]
+  if (dimension === 'depth') return [...new Set([...Object.keys(counts), ...selected, '1', '2', '3'])].sort((a,b) => Number(a)-Number(b)).map(value => ({ value, label: `Level ${value}`, count: counts[value] ?? 0 }))
+  if (dimension === 'type') return KINDS.map(kind => ({ value: kind.value, label: kind.value === 'work' && context.workName ? context.workName : kind.label, count: counts[kind.value] ?? 0 }))
   if (dimension === 'tag' || dimension === 'cost' || dimension === 'release') return labelOptions(dimension, counts, selectedValues, context.colors)
   if (dimension === 'epic') {
     const epics = context.epics ?? []
     const known = new Set(epics.map(e => e.id))
     return [
-      { value: 'none', label: 'No epic' },
+      { value: 'none', label: 'No parent' },
       ...epics.map(e => ({ value: e.id, label: e.title, hint: e.key })),
-      ...selected.filter(id => id !== 'none' && !known.has(id)).map(id => ({ value: id, label: names.get(id) ?? 'Epic', hint: '' })),
+      ...selected.filter(id => id !== 'none' && !known.has(id)).map(id => ({ value: id, label: names.get(id) ?? 'Parent', hint: '' })),
     ]
   }
   const ids = [...new Set([...Object.keys(counts), ...selected])].filter(id => id !== 'none')
@@ -382,9 +415,11 @@ export function valueLabel(dimension: Dimension, value: string, context: OptionC
     case 'human_check': return value === 'pending' ? 'Needs a human check' : 'No human check'
     case 'status': return value === 'queued' ? 'Queued' : statusMeta(value).label
     case 'priority': return priorityLabel(value)
-    case 'type': return kindLabel(value)
+    case 'shape': return value === 'parent' ? 'Parents' : 'Leaves'
+    case 'depth': return `Level ${value}`
+    case 'type': return value === 'work' && context.workName ? context.workName : kindLabel(value)
     case 'assignee': return value === context.me ? 'Me' : context.names?.get(value) ?? 'Someone'
-    case 'epic': return context.epics?.find(e => e.id === value)?.title ?? context.names?.get(value) ?? 'An epic'
+    case 'epic': return context.epics?.find(e => e.id === value)?.title ?? context.names?.get(value) ?? 'A parent'
     default: return value
   }
 }
@@ -459,7 +494,7 @@ export function epicOf(row: ListItem, byId: Map<string, ListItem>): EpicRef | nu
   if (row.epic !== undefined) return row.epic
   let parent = row.parent
   for (let depth = 0; parent && depth < 8; depth++) {
-    if (parent.kind_slug === 'epic') return { id: parent.id, key: parent.key, title: parent.title }
+    if (['work','epic'].includes(parent.kind_slug)) return { id: parent.id, key: parent.key, title: parent.title }
     const loaded = byId.get(parent.id)
     parent = loaded?.parent ?? null
   }
@@ -480,16 +515,19 @@ export function rowTags(row: ListItem): { name: string; color: string }[] {
   })
 }
 
+export type TicketRow = ListItem & { project_key?: string }
 export interface RowGroup {
-  key: string; label: string; rows: ListItem[]; total: number
+  key: string; label: string; rows: TicketRow[]; total: number
+  project?: { id: string; key: string; title: string }; icon?: string
+  loaded?: number; hasMore?: boolean; loadingMore?: boolean; moreError?: string
   state?: string; epic?: EpicRef; person?: { id: string; name: string }; priority?: string; kind?: string; tag?: { name: string; color: string }
 }
 // Counts are the list API's facet for the grouped dimension (state, assignee,
 // priority, kind or tag), so a group shows its whole size while pages load.
 // layout gives the values a row is grouped by (a live list holds them while an
 // update waits); the group still lists the row itself.
-export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string; layout?: (row: ListItem) => ListItem } = {}): RowGroup[] {
-  if (group === 'none') return [{ key: 'all', label: '', rows, total: rows.length }]
+export function groupRows(rows: TicketRow[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string; layout?: (row: ListItem) => ListItem; workName?: string } = {}): RowGroup[] {
+  if (group === 'none') return [{ key: 'all', label: '', rows, total: rows.length, loaded: rows.length, hasMore: false }]
   const layout = options.layout ?? (row => row)
   if (group === 'status') {
     const groups = new Map<string, RowGroup>()
@@ -509,10 +547,26 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
     }
     return [...groups.values()].sort((a, b) => statusMeta(a.state!).order - statusMeta(b.state!).order)
   }
+  if (group === 'project') {
+    const groups = new Map<string, RowGroup>()
+    for (const row of rows) {
+      const placed = layout(row) as TicketRow
+      const project = placed.project ?? (placed.project_key ? { id: placed.project_key, key: placed.project_key, title: placed.project_key } : null)
+      const key = project?.id ?? 'none'
+      if (!groups.has(key)) groups.set(key, { key, label: project?.title ?? 'No project', ...(project ? { project } : {}), rows: [], total: 0 })
+      groups.get(key)!.rows.push(row)
+    }
+    for (const entry of groups.values()) {
+      entry.loaded = entry.rows.length
+      entry.total = Math.max(counts[entry.key] ?? 0, entry.loaded)
+      entry.hasMore = entry.loaded < entry.total
+    }
+    return [...groups.values()].sort((a, b) => Number(!a.project) - Number(!b.project) || (a.project?.key ?? '').localeCompare(b.project?.key ?? '') || a.key.localeCompare(b.key))
+  }
   if (group === 'epic') {
     const byId = new Map(rows.map(row => [row.id, row]))
     const groups = new Map<string, RowGroup>()
-    const none: RowGroup = { key: 'none', label: 'No epic', rows: [], total: 0 }
+    const none: RowGroup = { key: 'none', label: 'No parent', rows: [], total: 0 }
     for (const row of rows) {
       const placed = layout(row)
       const epic = epicOf(placed, byId)
@@ -539,7 +593,7 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
       const value = placed.priority && placed.priority !== 'none' ? placed.priority : 'none'
       put(value, () => ({ key: value, label: priorityLabel(value), priority: value }), row)
     } else if (group === 'type') {
-      put(placed.kind_slug, () => ({ key: placed.kind_slug, label: kindLabel(placed.kind_slug), kind: placed.kind_slug }), row)
+      put(placed.kind_slug, () => ({ key: placed.kind_slug, label: placed.kind_slug === 'work' && options.workName ? options.workName : kindLabel(placed.kind_slug), kind: placed.kind_slug }), row)
     } else {
       // A ticket with several labels shows under each of them.
       const tags = rowTags(placed)
@@ -555,7 +609,7 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
     if (entry.key === 'none') return [9, '']
     if (group === 'assignee') return [entry.key === options.me ? 0 : 1, entry.label.toLowerCase()]
     if (group === 'priority') return [1, PRIORITY_RANK[entry.key] ?? 3]
-    if (group === 'type') return [1, WORK_KINDS.indexOf(entry.key) === -1 ? 9 : ['epic', 'ticket', 'task'].indexOf(entry.key)]
+    if (group === 'type') return [1, WORK_KINDS.indexOf(entry.key) === -1 ? 9 : ['work', 'epic', 'ticket', 'task'].indexOf(entry.key)]
     return [1, entry.label.toLowerCase()]
   }
   return out.sort((a, b) => {
@@ -566,4 +620,15 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
 // The facet whose counts give a grouping its totals.
 export function groupFacet(group: GroupBy): string | null {
   return ({ status: 'state', assignee: 'assignee', priority: 'priority', type: 'kind', tag: 'tag' } as Partial<Record<GroupBy, string>>)[group] ?? null
+}
+
+// Hosts own selection. Use this same bounded loaded-row update for a group
+// checkbox; folded rows count, unloaded rows do not. Other groups stay selected.
+export function selectLoadedGroup(group: RowGroup, selected: ReadonlySet<string>, on: boolean): Set<string> {
+  const next = new Set(selected)
+  for (const row of group.rows) {
+    if (!on) next.delete(row.id)
+    else if (next.size < 100) next.add(row.id)
+  }
+  return next
 }

@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/portal
+paths:
+  /portal/cells:
+    put:
+      operationId: putPortalCell
+      summary: Save one comparison cell and clear its approval when the fact changes
+      description: settings.manage, people only. yes, no and partial need a short quote, an https page and the day it was read. An unchanged cell does not add a revision.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCellWrite'}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Stored cell, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCell'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/cells/{cellId}/approve:
+    post:
+      operationId: approvePortalCell
+      summary: Approve a sourced cell for the public comparison
+      description: settings.manage, people only. An empty JSON object is the whole body. Approving again is unchanged. A yes, no or partial cell without a quote, https page and read date is refused.
+      security: [{session: []}]
+      parameters: [{name: cellId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Approved cell, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCell'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    PortalCellWrite:
+      type: object
+      additionalProperties: false
+      required: [aspect_id, competitor_id, stance]
+      properties:
+        aspect_id: {type: string, format: uuid}
+        competitor_id: {type: string, format: uuid}
+        stance: {type: string, enum: [unknown, 'yes', 'no', partial]}
+        quote: {type: string, maxLength: 400}
+        source_url: {type: string, maxLength: 500}
+        retrieved_on: {type: string, format: date}

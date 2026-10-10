@@ -1,0 +1,551 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/auth
+# aeon:owner internal/greetings
+# aeon:owner internal/phoneapprovals
+# aeon:owner internal/profile
+# aeon:owner internal/themes
+paths:
+  /me:
+    get:
+      operationId: getMe
+      summary: Acting principal, tenant and identity
+      description: >-
+        Requires a valid session or agent key, with no additional permission or
+        key scope. Project-only and empty-scope keys may read their own identity.
+        Returns only the caller's principal and roles, tenant identity and public
+        brand, and linked identity display fields; no other workspace data or
+        credentials. Other profile routes retain their own permission checks.
+      security:
+        - session: []
+        - agentKey: []
+      responses:
+        "200":
+          description: Caller
+          headers: {Aeon-Contract: {$ref: '#/components/headers/MeContract'}}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeUnauthorized"
+  /me/agent-pause-settings:
+    get:
+      tags: [Harness sessions]
+      summary: Read this person's default pause level in this workspace
+      responses:
+        '200': {description: Personal settings, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseSettings'}}}}
+    put:
+      tags: [Harness sessions]
+      summary: Set this person's default pause level in this workspace
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseSettings'}}}}
+      responses:
+        '200': {description: Saved personal settings, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseSettings'}}}}
+  /me/avatar:
+    post:
+      operationId: uploadMyAvatar
+      summary: Upload an image and a square crop (x, y, size)
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, crop]
+              properties:
+                file: {type: string, format: binary, description: 'PNG, JPEG or WebP up to 8 MiB, 4194304 pixels and 4096 pixels per side; dimensions and crop are checked before decoding'}
+                crop: {$ref: '#/components/schemas/AvatarCrop'}
+      responses:
+        '200': {description: Updated profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfile'}}}}
+        '400': {description: 'Invalid crop or image; at most 4,194,304 pixels, 4096 pixels per side and a square crop up to 2048 pixels per side'}
+        '413': {description: Upload too large}
+    delete:
+      operationId: deleteMyAvatar
+      summary: Remove avatar and use initials fallback
+      security: *auth
+      responses:
+        '200': {description: Updated profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfile'}}}}
+  /me/greeting:
+    get:
+      operationId: getMeGreeting
+      summary: Draw a personal greeting for this page load
+      description: Uses the timezone preference, then X-Timezone, then UTC. Draws uniformly from context-matching lines outside the last 300 shown. History is private ephemeral state and creates no tenant event.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: X-Timezone, in: header, description: IANA timezone used when no valid timezone preference exists, schema: {type: string}}
+      responses:
+        '200':
+          description: Greeting
+          content: {application/json: {schema: {$ref: '#/components/schemas/Greeting'}}}
+        '401': {description: Authentication required}
+  /me/host-labels:
+    get:
+      operationId: listOwnHostLabels
+      description: Person only. Overrides for the authenticated person; host identity is the registered host, scoped to this tenant.
+      responses:
+        '200': {description: Own overrides, content: {application/json: {schema: {type: array, items: {type: object, required: [host, label], properties: {host: {type: string}, label: {type: string}}}}}}}
+        '403': {description: Person required}
+    put:
+      operationId: setOwnHostLabel
+      description: Save an override for yourself. A null label resets it to the registered host. Owner is always taken from authentication.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host, label]
+              properties:
+                host: {type: string, minLength: 1, maxLength: 128}
+                label: {type: [string, 'null'], minLength: 1, maxLength: 128}
+      responses:
+        '200': {description: Effective label, content: {application/json: {schema: {type: object, required: [host, label], properties: {host: {type: string}, label: {type: string}}}}}}
+        '400': {description: Invalid host or label}
+        '403': {description: Person required}
+        '404': {description: Host is not visible}
+  /me/leaving-at:
+    get:
+      tags: [Harness sessions]
+      summary: Read this person's durable leaving deadline and per-agent plans
+      responses:
+        '200': {description: Deadline and current plans, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessLeavingReport'}}}}
+    put:
+      tags: [Harness sessions]
+      summary: Schedule selected running work to stop by a deadline
+      description: 'People with harness.control only. Selects owned sessions in authorized projects. Fresh finish estimates choose Wrap up first when under ten minutes and with one minute to spare. Otherwise Pause starts at T minus ten minutes; fresh handover and command timing choose Pause quickly when the full handover cannot fit. With missing timing, escalation starts two minutes before the level deadline. Current uninterruptible commands keep cooperative Pause. Pause and Wrap up have a ten-minute cap from their actual start; Pause quickly has a three-minute cap. Each deadline is the earlier of the leave instant and the level cap; Stop now is queued at that deadline through the existing generation-fenced stop channel. Agents without inbox support keep running until T. Repeating the same deadline and selection is idempotent. More than 200 eligible sessions returns 409 without partial scheduling. A changed deadline or selection replaces pending plans; already paused sessions stay paused. Host scope is stored for downstream launcher admission integration. No server-side process signal or closure is inferred from a stop request.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [deadline_at]
+              properties:
+                deadline_at: {type: string, format: date-time, description: 'Future UTC deadline within 24 hours, evaluated using the database clock.'}
+                reason: {type: string, maxLength: 240}
+                note: {type: string, maxLength: 2000}
+                hosts: {$ref: '#/components/schemas/HarnessWindDownHosts'}
+                agents: {type: array, maxItems: 200, items: {type: string, format: uuid}, description: 'Explicit session selection, independent of hosts; ended or unauthorized sessions are ignored. Omission selects running sessions on the chosen hosts.'}
+      responses:
+        '200': {description: Durable deadline and plans, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessLeavingReport'}}}}
+        '409': {description: Too many sessions or a stop already in flight}
+    delete:
+      tags: [Harness sessions]
+      summary: Turn off leaving mode and withdraw pending requests
+      description: Cancels only requests belonging to this person's current leaving deadline. Already paused sessions stay paused. A stop already claimed by its executor cannot be recalled and is reported in the result.
+      responses:
+        '200': {description: Cancelled deadline and preserved handovers, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessLeavingReport'}}}}
+  /me/permissions:
+    get:
+      operationId: getMyPermissions
+      summary: Effective workspace and optional project permissions
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Effective grants, content: {application/json: {schema: {$ref: '#/components/schemas/EffectivePermissions'}}}}
+        '403': {description: Permission denied}
+  /me/phone-approvals:
+    get:
+      operationId: getPhoneApprovalSettings
+      description: Own passkeys, subscription IDs and quiet hours; never returns push endpoints or private keys.
+      security: [{session: []}]
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneApprovalSettings'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/passkeys:
+    post:
+      operationId: finishPhonePasskey
+      description: Verify and persist a fresh platform registration.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneCredentialProof'}}}}
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhonePasskey'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/passkeys/options:
+    post:
+      operationId: beginPhonePasskey
+      description: Platform passkey enrollment with required user verification, bound to authenticated person.
+      security: [{session: []}]
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneCeremony'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/passkeys/{credentialId}:
+    delete:
+      operationId: revokePhonePasskey
+      description: Revoke own passkey and invalidate outstanding challenges.
+      security: [{session: []}]
+      parameters: [{name: credentialId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {description: Revoked}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/settings:
+    put:
+      operationId: setPhoneApprovalPreferences
+      description: Person-only opt-in preferences. Escalation changes notification recipients only.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneApprovalPreferences'}}}}
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneApprovalPreferences'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/subscriptions:
+    post:
+      operationId: subscribePhoneApprovals
+      description: Person-scoped Web Push opt-in; allowlisted public push providers only.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhonePushSubscription'}}}}
+      responses:
+        '200': {description: Success, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneSubscription'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/phone-approvals/subscriptions/{subscriptionId}:
+    delete:
+      operationId: revokePhoneSubscription
+      description: Revoke own subscription.
+      security: [{session: []}]
+      parameters: [{name: subscriptionId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {description: Revoked}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /me/profile:
+    get:
+      operationId: getMyProfile
+      summary: Current person's tenant profile and read-only identity email
+      security: &auth [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfile'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+    patch:
+      operationId: updateMyProfile
+      summary: Update the current person's profile; every change is undoable
+      security: *auth
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfilePatch'}}}
+      responses:
+        '200': {description: Profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfile'}}}}
+        '400': {description: Validation errors keyed by field, content: {application/json: {schema: {$ref: '#/components/schemas/ProfileValidationError'}}}}
+        '409': {description: Short name already used in this tenant}
+  /me/security/session-watching:
+    get:
+      operationId: getSessionWatchingSecurity
+      summary: Read the signed-in person's session watching consent and reported computers
+      responses:
+        '200':
+          description: >-
+            Per-person setting plus advisory capability for connected computers this person approved.
+            With no saved choice, consent_mode is local_auth when any connected computer has a browser-pinned
+            local confirmation key. That key exists only on a Darwin pairing. A pending approval on that computer
+            uses local_auth and requires the pinned key's signature; the capability report cannot select aeon.
+            The snapshot platform must match the platform stored at pairing. Linux and pairings without a pinned
+            key stay on aeon. consent_saved is false for that default. A saved local_auth applies to every upgraded
+            computer and fails closed where confirmation cannot run. A saved aeon keeps Aeon approval where the
+            snapshot platform matches. The capability report is advisory and never authorizes a watch.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionWatchingSecurityView'}
+        '403': {description: Signed-in person required}
+    put:
+      operationId: setSessionWatchingSecurity
+      summary: Change consent for future approvals without changing active watches
+      description: Same-origin person only. Legacy pairings use Aeon approval until re-paired. Saving local_auth is allowed when no computer can confirm; upgraded pairings then fail closed, while older pairings keep Aeon approval. The response lists advisory daemon capability and never treats that report as confirmation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
+      responses:
+        '200':
+          description: Saved per-person setting and advisory computer capability. consent_saved is true.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionWatchingSecurityView'}
+        '400': {description: Invalid mode}
+        '403': {description: Same-origin signed-in person required}
+  /me/theme:
+    get:
+      operationId: getActiveTheme
+      description: >-
+        Read the active theme, selection revision and deletion notice. Requires
+        profile.read or profile.portal_read. No saved choice (revision 0) follows the
+        default. Agents may read this endpoint and receive the workspace default.
+        Linked identities retain their original theme ownership and choice rows.
+        The canonical person's saved choice wins, including an explicit default;
+        otherwise the linked person's choice with the lowest principal UUID wins.
+        Edits update that winning choice row, preserving other choices for unlink.
+        A choice that becomes private after unlink resolves to the default without
+        exposing the inaccessible theme ID or name; its revision remains usable.
+        Accent dark null means derived by the appearance consumer (AEON-644);
+        agent ring/size null retain the style's existing drawn defaults (AEON-643).
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Active theme, content: {application/json: {schema: {$ref: '#/components/schemas/ActiveTheme'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: selectTheme
+      description: >-
+        Person-only own choice with profile.write or profile.portal_write and
+        revision/CAS; a null theme_id follows the workspace default. Selected themes
+        must be visible and not deleted. Appends theme.selected when changed.
+        Events support undo with current authorization and snapshot conflict checks.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ThemeSelectionInput'}}}}
+      responses:
+        '200': {description: Active theme after commit, content: {application/json: {schema: {$ref: '#/components/schemas/ActiveTheme'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Selection revision changed}
+        '408': {description: Request body was not read within 10 seconds}
+        '413': {description: Request exceeds 8 KiB}
+components:
+  headers:
+    MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.4']}}
+  schemas:
+    ActiveTheme:
+      type: object
+      required: [theme, default_theme_id, selected_theme_id, revision, fallback_notice]
+      properties:
+        theme: {$ref: '#/components/schemas/Theme'}
+        default_theme_id: {type: string, format: uuid}
+        selected_theme_id: {type: [string, 'null'], format: uuid}
+        revision: {type: integer, minimum: 0, maximum: 9007199254740991, description: 'Opaque selection generation, independent of theme and physical row revisions. Zero means no choice row yet. Saved choices and undone absence have unique generations, including explicit default. Undo restores alias inheritance without reusing a generation. Link/unlink can change the winning generation.'}
+        fallback_notice:
+          type: [object, 'null']
+          required: [deleted_theme_id, deleted_theme_name]
+          properties:
+            deleted_theme_id: {type: string, format: uuid}
+            deleted_theme_name: {type: string}
+    AvatarCrop:
+      type: object
+      additionalProperties: false
+      required: [x, y, size]
+      properties:
+        x: {type: integer, minimum: 0}
+        y: {type: integer, minimum: 0}
+        size: {type: integer, minimum: 1, maximum: 2048}
+    EffectivePermissions:
+      type: object
+      required: [workspace, project]
+      properties:
+        workspace:
+          type: object
+          required: [role, permissions]
+          properties:
+            role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
+            permissions: {type: array, items: {type: string}}
+        project:
+          oneOf:
+            - {type: 'null'}
+            - {type: object, required: [id, role, permissions], properties: {id: {type: string, format: uuid}, role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}, permissions: {type: array, items: {type: string}}}}
+    Greeting:
+      type: object
+      additionalProperties: false
+      required: [salutation, name, message, id]
+      properties:
+        salutation: {type: string, enum: [Good morning, Morning, Good afternoon, Good evening, Hello, Welcome back]}
+        name: {type: string, description: Preferred first name or first word of the principal name}
+        message: {type: string, maxLength: 80}
+        id: {type: string, description: Stable short hash of normalized message text}
+    HarnessLeavingReport:
+      type: object
+      required: [deadline_at, request_id, items, stop_in_flight]
+      properties:
+        owner_principal_id: {type: string, format: uuid, readOnly: true, description: 'Canonical person whose deadline and plans this report describes, including when signed in through a linked identity.'}
+        deadline_at: {type: [string, 'null'], format: date-time}
+        request_id: {type: [string, 'null'], format: uuid}
+        items: {type: array, items: {$ref: '#/components/schemas/HarnessSession'}}
+        stop_in_flight: {type: boolean}
+        hosts: {$ref: '#/components/schemas/HarnessWindDownHosts'}
+        agents: {type: array, items: {type: string, format: uuid}}
+    HarnessPauseSettings:
+      type: object
+      additionalProperties: false
+      required: [default_level]
+      properties:
+        default_level: {$ref: '#/components/schemas/HarnessPauseLevel', default: pause}
+    HarnessWindDownHosts:
+      description: 'Host identities as reported by sessions, or all. Defaults to all. Stored separately from the explicit agents selected to wind down, for launcher admission integration.'
+      oneOf:
+        - {type: string, const: all}
+        - {type: array, maxItems: 200, items: {type: string, minLength: 1, maxLength: 128}}
+    MeUnauthorized:
+      type: object
+      required: [error, dev_mode]
+      properties:
+        error: {type: string, enum: [unauthorized]}
+        dev_mode: {type: boolean, description: True only when AEON_ENV is explicitly dev.}
+        oidc_display_name: {type: string, maxLength: 48, description: Sanitised public provider name from AEON_OIDC_DISPLAY_NAME; empty means neutral sign-in copy.}
+    PersonalProfile:
+      type: object
+      additionalProperties: false
+      required: [principal_id, email, first_name, last_name, preferred_name, short_name, initials, timezone, locale, greeting_enabled, avatar_color, avatar_hashes, week_start, revision]
+      properties:
+        principal_id: {type: string, format: uuid}
+        email: {type: [string, 'null'], format: email, readOnly: true}
+        first_name: {type: string}
+        last_name: {type: string}
+        preferred_name: {type: string}
+        short_name: {type: string}
+        initials: {type: string}
+        timezone: {type: string}
+        locale: {type: string}
+        greeting_enabled: {type: boolean}
+        avatar_color: {type: string, description: One of twelve muted palette tokens}
+        avatar_hashes: {type: object, additionalProperties: {type: string, pattern: '^[a-f0-9]{64}$'}}
+        week_start: {type: integer, minimum: 0, maximum: 6, description: '0=Sunday, 1=Monday'}
+        revision: {type: integer, minimum: 0}
+    PersonalProfilePatch:
+      type: object
+      additionalProperties: false
+      properties:
+        first_name: {type: string, maxLength: 100}
+        last_name: {type: string, maxLength: 100}
+        preferred_name: {type: string, maxLength: 100}
+        short_name: {type: string, pattern: '^(?:[a-z0-9._-]{2,24})?$', description: Empty clears the handle}
+        initials: {type: string, maxLength: 3, description: Optional override; empty derives initials}
+        timezone: {type: string, description: IANA time zone}
+        locale: {type: string, description: BCP 47 language tag}
+        greeting_enabled: {type: boolean}
+    PhoneApprovalPreferences:
+      type: object
+      additionalProperties: false
+      required: [enabled, time_zone, quiet_start, quiet_end, escalation_minutes]
+      properties:
+        enabled: {type: boolean}
+        time_zone: {type: string, maxLength: 100}
+        quiet_start: {type: integer, minimum: 0, maximum: 1439, description: Local minute of day; equal endpoints disable quiet hours.}
+        quiet_end: {type: integer, minimum: 0, maximum: 1439}
+        escalation_minutes: {type: integer, minimum: 5, maximum: 1440}
+    PhoneApprovalSettings:
+      type: object
+      required: [available, push_available, preferences, passkeys, subscriptions]
+      properties:
+        available: {type: boolean}
+        push_available: {type: boolean}
+        vapid_public_key: {type: string}
+        preferences: {$ref: '#/components/schemas/PhoneApprovalPreferences'}
+        passkeys: {type: array, items: {$ref: '#/components/schemas/PhonePasskey'}}
+        subscriptions: {type: array, items: {$ref: '#/components/schemas/PhoneSubscription'}}
+    PhoneCredentialProof:
+      type: object
+      additionalProperties: false
+      required: [challenge_id, credential]
+      properties:
+        challenge_id: {type: string, format: uuid}
+        credential: {type: object, description: Serialized PublicKeyCredential registration or assertion.}
+    PhonePasskey:
+      type: object
+      required: [id, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+    PhonePushSubscription:
+      type: object
+      additionalProperties: false
+      required: [endpoint, keys]
+      properties:
+        endpoint: {type: string, format: uri, maxLength: 2048}
+        keys:
+          type: object
+          additionalProperties: false
+          required: [auth, p256dh]
+          properties:
+            auth: {type: string, maxLength: 64}
+            p256dh: {type: string, maxLength: 128}
+    PhoneSubscription:
+      type: object
+      required: [id, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        endpoint_hash: {type: string, pattern: '^[a-f0-9]{64}$', description: 'SHA-256 of the JSON-encoded endpoint; matches this browser without exposing the push address.'}
+    ProfileValidationError:
+      type: object
+      required: [errors]
+      properties:
+        errors: {type: object, additionalProperties: {type: string}}
+    SessionWatchingSecurity:
+      type: object
+      additionalProperties: false
+      required: [consent_mode]
+      properties:
+        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon}
+    SessionWatchingSecurityView:
+      type: object
+      additionalProperties: false
+      required: [consent_mode, local_auth_computers]
+      description: >-
+        Consent plus the advisory capability last reported by each connected computer this person approved.
+        The report never authorizes a watch. consent_saved is false when consent_mode is the unsaved default:
+        local_auth if any connected computer has a pinned local confirmation key, otherwise aeon. That key
+        exists only for a Darwin pairing. Pending approvals on an upgraded computer use local_auth regardless
+        of the capability report, and the snapshot platform must match the platform stored at pairing. Other
+        computers keep aeon until a choice is saved. A saved local_auth applies to upgraded pairings and fails
+        closed where confirmation cannot run. Pairings without a pinned key keep aeon until re-paired.
+      properties:
+        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon, description: "Unsaved default is local_auth when any connected computer has a pinned local confirmation key. That key exists only for a Darwin pairing. Otherwise aeon. A capability report cannot select aeon for an upgraded computer, and the snapshot platform must match the paired platform."}
+        consent_saved: {type: boolean, description: "False when consent_mode is the unsaved default. True after this person saves a choice."}
+        local_auth_computers:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [computer_id, name, capability]
+            properties:
+              computer_id: {type: string, format: uuid}
+              name: {type: string, maxLength: 128}
+              pairing_upgraded: {type: boolean, description: A browser-approved pairing has pinned the local confirmation public key; older pairings use Aeon approval}
+              capability: {type: string, enum: [available, unsupported, unsigned, no_gui, policy, unreported]}
+    ThemeSelectionInput:
+      type: object
+      additionalProperties: false
+      required: [theme_id, revision]
+      properties:
+        theme_id: {type: [string, 'null'], format: uuid}
+        revision: {type: integer, minimum: 0, maximum: 9007199254740991, description: 'Opaque selection generation from GET /api/me/theme. Use the returned value unchanged; do not increment it.'}

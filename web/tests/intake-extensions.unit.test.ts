@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { createSSRApp, h } from 'vue'
 import { renderToString } from '@vue/server-renderer'
-import ExtensionData from '../src/components/journey/ExtensionData.vue'
+import ExtensionData from '../src/components/work/ExtensionData.vue'
 
 describe('Aithema extension disclosures', () => {
   it('retains unknown namespaces and coexisting majors as plain text', async () => {

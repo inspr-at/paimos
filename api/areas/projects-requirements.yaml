@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/requirements
+paths:
+  /projects/{projectId}/requirements:
+    get:
+      deprecated: true
+      operationId: listJourneyRequirements
+      summary: List project requirements
+      security: *auth
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '410': {$ref: '#/components/responses/Error'}
+        '200': {description: Requirements and generated node links, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/JourneyRequirement'}}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      deprecated: true
+      operationId: createJourneyRequirement
+      summary: Add a draft requirement
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
+      security: [{session: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyRequirementCreate'}}}}
+      responses:
+        '410': {$ref: '#/components/responses/Error'}
+        '201': {description: Requirement, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyRequirement'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/requirements/agree:
+    post:
+      deprecated: true
+      operationId: agreeJourneyRequirements
+      summary: Agree a requirements revision
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
+      security: [{session: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RequirementsAgreement'}}}}
+      responses:
+        '410': {$ref: '#/components/responses/Error'}
+        '200': {description: Agreed requirements, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/JourneyRequirement'}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    JourneyRequirement:
+      type: object
+      required: [node_id, project_node_id, kind, revision, status, title]
+      properties:
+        node_id: {type: string, format: uuid}
+        project_node_id: {type: string, format: uuid}
+        kind: {type: string, enum: [functional, nonfunctional]}
+        revision: {type: integer, minimum: 1}
+        status: {type: string, enum: [draft, agreed, superseded]}
+        title: {type: string}
+        feature_node_id: {type: [string, 'null'], format: uuid, description: Epic node for an agreed functional requirement}
+        generated_ticket_ids: {type: array, items: {type: string, format: uuid}}
+    JourneyRequirementCreate:
+      type: object
+      additionalProperties: false
+      required: [kind, title, body, expected_revision, idempotency_key]
+      properties:
+        kind: {type: string, enum: [functional, nonfunctional]}
+        title: {type: string, minLength: 1}
+        body: {type: string}
+        expected_revision: {type: integer, minimum: 1}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+    RequirementsAgreement:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, approval_request_id, idempotency_key]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        approval_request_id: {type: string, format: uuid}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { displayLanguage } from './displayLanguage.ts'
 // A workspace's own brand in the header (AEON-431): a logo, an optional logo for
 // dark mode, and a short name, from the session payload (GET /api/me,
 // tenant.brand). The product's names stay in lib/brand.ts and the footer.
@@ -15,7 +16,7 @@ export interface SVGCleanup { removed_attribute_count: number; removed_attribute
 // The upload report contains names only; toast renders this message as text.
 export function logoCleanupMessage(settings: Pick<BrandSettings, 'cleaned' | 'svg_cleanup'>, locale?: string | null) {
   if (!settings.cleaned) return ''
-  const de = locale?.toLowerCase().startsWith('de') ?? false
+  const de = displayLanguage(locale) === 'de'
   const report = settings.svg_cleanup
   if (report?.removed_attribute_count) {
     const count = report.removed_attribute_count

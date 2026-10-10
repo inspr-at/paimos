@@ -171,7 +171,7 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 	exchange := func(_ context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
 		sent = append(sent, in)
 		if failNetwork {
-			return attachwatch.View{}, errors.New("offline")
+			return attachwatch.View{}, ErrAttachExchange
 		}
 		state := "pending"
 		var until *time.Time
@@ -280,18 +280,21 @@ func TestAttachRefusalNamesOwnerCausesAndClearsLocalState(t *testing.T) {
 		err  error
 		want string
 	}{
-		"full list":      {&client.StatusError{Status: 429, Message: attachwatch.LiveLimitMessage}, "attach requests already wait for approval in Aeon"},
-		"other limit":    {&client.StatusError{Status: 429, Message: "computer attach limit reached"}, "paired instance refused attach"},
-		"other status":   {&client.StatusError{Status: 403, Message: attachwatch.LiveLimitMessage}, "paired instance refused attach"},
-		"offline":        {errors.New("offline"), "paired instance refused attach"},
-		"version":        {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalVersion}, "Update Aeon and paimos-agentd"},
-		"pairing":        {&client.StatusError{Status: 403, AttachRefusal: attachwatch.RefusalPairing}, "pair this computer again"},
-		"revoked bearer": {&client.StatusError{Status: 401, Message: "unauthorized"}, "pairing no longer authenticates"},
-		"ticket":         {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalTicket}, "Check the ticket belongs to the selected project"},
-		"ticket access":  {&client.StatusError{Status: 403, AttachRefusal: attachwatch.RefusalTicket}, "owner has project access"},
-		"expired":        {&client.StatusError{Status: 410, AttachRefusal: attachwatch.RefusalExpired}, "approve the new code"},
-		"wrong status":   {&client.StatusError{Status: 403, AttachRefusal: attachwatch.RefusalVersion}, "paired instance refused attach"},
-		"unrecognized":   {&client.StatusError{Status: 409, AttachRefusal: "private arbitrary server payload"}, "paired instance refused attach"},
+		"full list":         {&client.StatusError{Status: 429, Message: attachwatch.LiveLimitMessage}, "attach requests already wait for approval in Aeon"},
+		"other limit":       {&client.StatusError{Status: 429, Message: "computer attach limit reached"}, "Stop an attached helper"},
+		"other status":      {&client.StatusError{Status: 403, Message: attachwatch.LiveLimitMessage}, "approve or decline one"},
+		"offline":           {errors.Join(ErrAttachExchange, errors.New("private transport failure")), "Check the connection"},
+		"registration lost": {&client.StatusError{Status: 403, Message: "daemon poll key rejected"}, "restart agentd"},
+		"draining":          {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalDraining}, "let owned work finish"},
+		"enrollment":        {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalEnrollment}, "aeon-agentd add-harness"},
+		"version":           {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalVersion}, "Update Aeon and paimos-agentd"},
+		"pairing":           {&client.StatusError{Status: 403, AttachRefusal: attachwatch.RefusalPairing}, "pair this computer again"},
+		"revoked bearer":    {&client.StatusError{Status: 401, Message: "unauthorized"}, "pairing no longer authenticates"},
+		"ticket":            {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalTicket}, "Check the ticket belongs to the selected project"},
+		"ticket access":     {&client.StatusError{Status: 403, AttachRefusal: attachwatch.RefusalTicket}, "owner has project access"},
+		"expired":           {&client.StatusError{Status: 410, AttachRefusal: attachwatch.RefusalExpired}, "approve the new code"},
+		"wrong status":      {&client.StatusError{Status: 403, AttachRefusal: attachwatch.RefusalVersion}, "inspect the attach request in the server logs"},
+		"unrecognized":      {&client.StatusError{Status: 409, AttachRefusal: "private arbitrary server payload"}, "inspect the attach request in the server logs"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := attachFixtureFile(t, "old turns\n")

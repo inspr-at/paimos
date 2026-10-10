@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch, type Directive } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, useId, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import mark from '../../assets/brand/aeon-mark.svg'
-import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
+import { brand, setOverlayTitle } from '../../lib/brand'
 import { codenameOf } from '../../lib/codenames'
 import { useDeveloperSettings } from '../../lib/developerSettings'
-import { groupByDay, isCalendarVersion, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, releaseView, span, technicalLine, ticketsOf, visibleReleases, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { groupByDay, isCalendarVersion, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, releaseView, span, ticketsOf, visibleReleases, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { clockSince } from '../../lib/releaseStats'
 import { useProfile } from '../../stores/profile'
 import { useSession } from '../../stores/session'
@@ -24,7 +24,13 @@ import ReleaseDetail from './ReleaseDetail.vue'
 import ReleaseStats from './ReleaseStats.vue'
 import ReleaseTicketPanel from './ReleaseTicketPanel.vue'
 import ReleaseVersionCopy from './ReleaseVersionCopy.vue'
+import TicketLink from './TicketLink.vue'
+import { onAccessChange, permissionsRevoked } from '../../lib/authz'
+import { appendPendingChanges, getPendingChanges, pendingLine, type PendingChanges } from '../../lib/releasePending'
+import { plainSubject, shortCommit } from '../../lib/releases'
 import { TICKET_PEEK } from '../../lib/ticketPeek'
+import { atRisk, planned, releasesFooter } from '../../lib/footerProviders'
+import { useFooterSummary } from '../../lib/footerSummary'
 
 // The release history: a full-screen sheet over the page. Releases by day on the
 // left, the selected one (or a comparison of two) on the right; on phones the
@@ -87,11 +93,11 @@ function switchKeys(event: KeyboardEvent, current: string, options: readonly str
 
 const dialog = ref<HTMLDialogElement>()
 const listbox = ref<HTMLElement>()
-const detailPane = ref<HTMLElement>()
+const detailScroll = ref<HTMLElement>()
 const searchInput = ref<HTMLInputElement>()
 const detail = ref<InstanceType<typeof ReleaseDetail>>()
 const now = ref(Date.now())
-const filter = reactive({ q: '', features: false, fixes: false, tickets: false })
+const filter = reactive({ q: '', features: false, fixes: false, other: false })
 const cursor = ref<string | null>(null)
 const mode = ref<'browse' | 'compare'>('browse')
 const compareFrom = ref<string | null>(null)
@@ -143,6 +149,12 @@ const releases = computed(() => [...(history.value?.releases ?? [])].sort((a, b)
 const eligible = computed(() => visibleReleases(releases.value, showReservedVersions.value))
 // Result counts and statistics describe the full history, even when rows are hidden.
 const matching = computed(() => releases.value.filter(r => matches(r, filter, locale.value, view.value)))
+const resultId = useId()
+const historySummary = computed(() => {
+  const count = (state: Release['state']) => releases.value.filter(release => release.state === state).length
+  const candidates = count('candidate')
+  return `${count('published')} published · ${count('reserved')} reserved${candidates ? ` · ${candidates} candidate${candidates === 1 ? '' : 's'}` : ''}`
+})
 const visible = computed(() => visibleReleases(matching.value, showReservedVersions.value))
 const days = computed(() => groupByDay(visible.value, now.value))
 const order = computed(() => days.value.flatMap(d => d.releases))
@@ -162,8 +174,7 @@ const runningSince = computed(() => runningHere.value === current.value ? histor
 const currentKnown = computed(() => byVersion.value.has(current.value))
 // The published release before the one the server runs: where a rollback would go.
 const rollbackTarget = computed(() => currentKnown.value ? releases.value.find(r => r.state === 'published' && r.version < current.value)?.version ?? null : null)
-const filtering = computed(() => !!filter.q.trim() || filter.features || filter.fixes || filter.tickets)
-const reservedCount = computed(() => releases.value.filter(r => r.state === 'reserved').length)
+const filtering = computed(() => !!filter.q.trim() || filter.features || filter.fixes || filter.other)
 const compareTo = computed(() => mode.value === 'compare' && cursor.value && cursor.value !== compareFrom.value ? cursor.value : null)
 // One notice. An outdated page says a newer version is live; it does not also
 // warn that this build's history lacks that version. The server is chosen once:
@@ -172,58 +183,36 @@ const server = computed(() => liveServer(current.value, store.available))
 const notice = computed(() => releaseNotice(pageRuns.value, server.value, missing.value))
 // The title (AEON-488) is the release live on the server, by its codename: the
 // newer of what the server and this page know. The eyebrow names the product;
-// Details adds the generation and the counts.
+// The content owns the generation and counts; the header stays steady.
 const hero = computed(() => { const v = liveServer(server.value, pageRuns.value); return isCalendarVersion(v) ? v : '' })
 const heroName = computed(() => byVersion.value.get(hero.value)?.codename)
-const eyebrow = computed(() => view.value === 'details'
-  ? [generationLabel.value, `${brand.value.short_name} releases`, ...(releases.value.length ? [`${releases.value.length - reservedCount.value} published`] : []), ...(reservedCount.value ? [`${reservedCount.value} reserved`] : [])].join(' · ')
-  : `${brand.value.wordmark} · Release`)
+const eyebrow = computed(() => `${brand.value.wordmark} · RELEASE`)
 // One status line under it: since when it runs here, or that this page is older.
 const liveAt = computed(() => runningSince.value ? Date.parse(runningSince.value) : NaN)
 const liveLine = computed(() => Number.isNaN(liveAt.value) ? 'Live here' : `Live here since ${clockSince(liveAt.value, now.value)} · ${span(Math.max(60_000, now.value - liveAt.value))}`)
+const selectedIndex = computed(() => cursor.value ? indexOf.value.get(cursor.value) ?? -1 : -1)
+const behindLine = computed(() => {
+  const published = releases.value.filter(r => r.state === 'published')
+  const behind = published.findIndex(r => r.version === cursor.value) - published.findIndex(r => r.version === current.value)
+  const liveName = byVersion.value.get(current.value)?.codename || codenameOf(current.value) || current.value
+  return `${Math.max(0, behind)} ${behind === 1 ? 'release' : 'releases'} behind live · back to ${liveName}`
+})
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
 
-// Fit each badge's own text, keeping state labels ahead of the New hint.
-// Measure in the real font so a wider version or a narrow rail changes only
-// the labels that cannot fit beside the name's ellipsis and the other badges.
-const badgeFits = new WeakMap<HTMLElement, { fit: () => void; stop: () => void }>()
-const vFitBadges: Directive<HTMLElement> = {
-  mounted(identity) {
-    const fit = () => {
-      if (!identity.isConnected || !identity.getBoundingClientRect().width) return
-      const tags = [...identity.querySelectorAll<HTMLElement>('.tag')]
-      if (!tags.length) return
-      tags.forEach(tag => tag.classList.remove('compact'))
-      const widths = tags.map(tag => tag.getBoundingClientRect().width)
-      const name = identity.querySelector<HTMLElement>('.rn-name')!
-      const ellipsis = document.createElement('span')
-      ellipsis.textContent = '…'
-      ellipsis.style.cssText = 'position:absolute;white-space:nowrap'
-      name.append(ellipsis)
-      const minimumName = ellipsis.getBoundingClientRect().width
-      ellipsis.remove()
-      const style = getComputedStyle(identity)
-      const dotWidth = parseFloat(style.getPropertyValue('--compact-badge-width'))
-      let available = identity.getBoundingClientRect().width - minimumName - parseFloat(style.columnGap) * tags.length - dotWidth * tags.length
-      // Reserve a dot for every sibling before admitting a full label.
-      const priority = tags.map((tag, index) => ({ tag, index })).sort((a, b) => Number(a.tag.classList.contains('new-tag')) - Number(b.tag.classList.contains('new-tag')))
-      for (const { tag, index } of priority) {
-        const extra = widths[index]! - dotWidth
-        const fits = extra <= available
-        tag.classList.toggle('compact', !fits)
-        if (fits) available -= extra
-      }
-    }
-    const observer = new ResizeObserver(fit)
-    observer.observe(identity)
-    document.fonts.addEventListener('loadingdone', fit)
-    void document.fonts.ready.then(fit)
-    badgeFits.set(identity, { fit, stop: () => { observer.disconnect(); document.fonts.removeEventListener('loadingdone', fit) } })
-    fit()
-  },
-  updated(identity) { badgeFits.get(identity)?.fit() },
-  beforeUnmount(identity) { badgeFits.get(identity)?.stop(); badgeFits.delete(identity) },
-}
+// While the sheet is open it speaks in the footer: releases on their way (reserved or
+// tagged, not yet published) and the one whose checks failed. Hidden reservations stay uncounted (AEON-785).
+// The page footer sits under this full-screen dialog, so the same summary is pinned inside the sheet.
+const releaseSummary = computed(() => {
+  if (!history.value && store.error) return null
+  const coming = eligible.value.filter(planned)
+  return releasesFooter({
+    loaded: !!history.value, planned: coming.length, atRisk: coming.filter(atRisk).length,
+    // Choose the row. Publishing the address alone is treated as an echo and leaves the cursor where it was.
+    act: { risk: () => { const version = eligible.value.filter(planned).filter(atRisk)[0]?.version; if (version) choose(version) } },
+  })
+})
+useFooterSummary(() => releaseSummary.value)
+function openRisk() { releaseSummary.value?.action?.() }
 
 // ---------- Selection ----------
 // `releases=all` (the header) stays on the list with nothing selected. `releases=current`
@@ -271,7 +260,7 @@ watch(cursor, async (value, old) => {
   if (mode.value === 'browse') publishSelection(value)
   await nextTick()
   document.getElementById(optionId(value))?.scrollIntoView({ block: 'nearest' })
-  if (detailPane.value && old) detailPane.value.scrollTop = 0
+  if (detailScroll.value && old) detailScroll.value.scrollTop = 0
 })
 // A filter that hides the selection moves it to the first match.
 watch(order, list => { if (list.length && cursor.value && !indexOf.value.has(cursor.value) && mode.value === 'browse' && !hiddenReserved.value) cursor.value = list[0].version })
@@ -333,21 +322,78 @@ async function focusSearch() { showDetail.value = false; help.value = false; awa
 function searchKeys(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     event.preventDefault(); event.stopPropagation()
-    if (filter.q) filter.q = ''
-    else listbox.value?.focus({ preventScroll: true })
+    searchInput.value?.blur()
+    listbox.value?.focus({ preventScroll: true })
   } else if (event.key === 'Enter' || event.key === 'ArrowDown') {
     event.preventDefault()
     if (order.value[0] && (!cursor.value || !indexOf.value.has(cursor.value))) cursor.value = order.value[0].version
     listbox.value?.focus({ preventScroll: true })
   }
 }
-function clearFilters() { Object.assign(filter, { q: '', features: false, fixes: false, tickets: false }) }
+function clearFilters() { Object.assign(filter, { q: '', features: false, fixes: false, other: false }) }
 function marked(text: string) {
   const q = filter.q.trim().toLowerCase()
   if (!q) return [{ text, hit: false }]
   const i = text.toLowerCase().indexOf(q)
   return i === -1 ? [{ text, hit: false }] : [{ text: text.slice(0, i), hit: false }, { text: text.slice(i, i + q.length), hit: true }, { text: text.slice(i + q.length), hit: false }]
 }
+
+// The compare pins the live source commit and main head. A newer person or
+// live release invalidates both the count and every in-flight page.
+const waiting = ref<PendingChanges | null>(null)
+const waitingError = ref('')
+const waitingLoading = ref(false)
+const showWaiting = ref(false)
+const waitingClose = ref<HTMLButtonElement>()
+let waitingOpener: HTMLElement | null = null
+async function openWaiting(event: MouseEvent) { waitingOpener = event.currentTarget as HTMLElement; showWaiting.value = true; await nextTick(); waitingClose.value?.focus() }
+function closeWaiting() { showWaiting.value = false; void nextTick(() => { waitingOpener?.focus({ preventScroll: true }); waitingOpener = null }) }
+function waitingKeys(event: KeyboardEvent) {
+  event.stopPropagation()
+  if (event.key === 'Escape') keydown(event)
+}
+const waitingLabel = computed(() => pendingLine(waiting.value, waitingLoading.value, waitingError.value))
+let waitingRequest: AbortController | undefined
+let waitingEpoch = 0
+async function loadWaiting(more = false) {
+  if (waitingLoading.value || !current.value || !session.identity || permissionsRevoked()) return
+  if (more && (!waiting.value?.next_cursor || waiting.value.changes.length >= 250)) return
+  const focused = document.activeElement instanceof HTMLElement && document.activeElement.closest('.pending-controls') ? document.activeElement : null
+  const before = waiting.value
+  const cursor = more ? before?.next_cursor ?? undefined : undefined
+  waitingRequest?.abort()
+  const controller = waitingRequest = new AbortController()
+  const epoch = ++waitingEpoch
+  const live = current.value
+  waitingLoading.value = true
+  waitingError.value = ''
+  try {
+    const answer = await getPendingChanges(cursor, controller.signal)
+    if (epoch !== waitingEpoch || current.value !== live) return
+    if (answer.live_version !== live || (more && (answer.head_commit !== before?.head_commit || answer.base_commit !== before.base_commit))) throw new Error('The live release or main branch changed. Refresh waiting changes.')
+    waiting.value = more && before ? appendPendingChanges(before, answer) : answer
+  } catch (error) {
+    if (epoch === waitingEpoch && !controller.signal.aborted) waitingError.value = error instanceof Error ? error.message : 'Waiting changes could not be loaded.'
+  } finally {
+    if (epoch === waitingEpoch) {
+      waitingLoading.value = false
+      await nextTick()
+      // The final page removes Show more; keep keyboard focus inside the panel.
+      if (epoch === waitingEpoch && showWaiting.value && focused && !focused.isConnected && document.activeElement === document.body) waitingClose.value?.focus({ preventScroll: true })
+    }
+  }
+}
+function resetWaiting(keepOpen = false) {
+  waitingRequest?.abort(); waitingEpoch++
+  waiting.value = null; waitingError.value = ''; waitingLoading.value = false
+  if (!keepOpen) showWaiting.value = false
+  if (current.value && session.identity) void loadWaiting()
+}
+watch(() => [current.value, session.identity?.tenant.id, session.identity?.principal.id], () => resetWaiting(), { immediate: true })
+const stopWaitingAccess = onAccessChange(change => {
+  resetWaiting(change === 'refresh')
+  if (change === 'reset') peekKey.value = null
+})
 
 // ---------- A ticket beside the history ----------
 const peekKey = ref<string | null>(null)
@@ -372,7 +418,7 @@ function closePeek() {
 }
 provide(TICKET_PEEK, { open: (key, from) => void openPeek(key, from), openKey: peekKey })
 // On phones the ticket is a full-screen sheet: the history under it is inert.
-const covered = computed(() => phone.value && !!peekKey.value)
+const covered = computed(() => phone.value && (!!peekKey.value || showWaiting.value))
 const inPeek = (target: EventTarget | null) => target instanceof Node && !!peekPane.value?.contains(target)
 // The side panel's own keys, as beside a project list.
 function peekKeys(event: KeyboardEvent) {
@@ -388,8 +434,10 @@ const typing = (target: EventTarget | null) => target instanceof HTMLElement && 
 function keydown(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     event.preventDefault()
+    if (typing(event.target)) { (event.target as HTMLElement).blur(); return }
     if (help.value) help.value = false
     else if (peekKey.value) void peekPanel.value?.requestClose()
+    else if (showWaiting.value) closeWaiting()
     else if (mode.value === 'compare') exitCompare()
     else if (showDetail.value && phone.value) { showDetail.value = false; void nextTick(() => listbox.value?.focus({ preventScroll: true })) }
     else emit('close')
@@ -441,6 +489,7 @@ onBeforeUnmount(() => {
   phoneQuery.removeEventListener('change', onPhone)
   scrollStatsQuery.removeEventListener('change', onScrollStats)
   clearInterval(clock)
+  waitingRequest?.abort(); waitingEpoch++; stopWaitingAccess()
   setOverlayTitle('')
   // Leave the top layer first: the page is inert while the modal is open.
   if (dialog.value?.open) dialog.value.close()
@@ -467,14 +516,14 @@ const KINDS = [
 </script>
 
 <template>
-  <dialog ref="dialog" class="releases" :aria-label="`${brand.wordmark} releases`" tabindex="-1" @cancel.prevent @keydown="keydown">
+  <dialog ref="dialog" class="releases" :aria-label="`${brand.wordmark} releases`" :aria-describedby="resultId" tabindex="-1" @cancel.prevent @keydown="keydown">
     <div class="shell" :class="{ 'show-detail': showDetail, compare: mode === 'compare', peeking: !!peekKey }">
       <header class="head" :inert="covered">
         <div class="title-row">
           <!-- The mark leaves the release history for the home page, like the app header's mark. -->
           <a class="mark-backing" href="/" :aria-label="`${brand.wordmark} home`" data-tip="Home" @click.prevent="emit('home')"><img :src="mark" width="26" height="26" alt="" /></a>
           <div class="titles">
-            <p class="eyebrow">{{ eyebrow }}</p>
+            <p id="release-header-line" class="eyebrow">{{ eyebrow }}</p>
             <h1 id="releases-title" class="hero" :class="{ named: !!hero }">
               <ReleaseCodename v-if="hero" :version="hero" :name="heroName" plain />
               <template v-else>{{ brand.wordmark }} releases</template>
@@ -504,7 +553,7 @@ const KINDS = [
           </div>
           <label class="search-field search">
             <AppIcon name="search" :size="14" />
-            <input ref="searchInput" v-model="filter.q" class="field" type="search" placeholder="Search names, changes, tickets" aria-label="Search releases" aria-keyshortcuts="/" @keydown="searchKeys" />
+            <input ref="searchInput" v-model="filter.q" class="field" type="search" maxlength="240" placeholder="Search names, changes, tickets" aria-label="Search releases" aria-keyshortcuts="/" @keydown="searchKeys" />
             <kbd v-if="!filter.q" class="keycap slash" aria-hidden="true">/</kbd>
           </label>
           <button type="button" class="btn compare-btn" aria-label="Compare" :aria-pressed="mode === 'compare'" aria-keyshortcuts="c" :disabled="mode !== 'compare' && !visible.length" @click="mode === 'compare' ? exitCompare() : startCompare()">
@@ -527,15 +576,13 @@ const KINDS = [
           <!-- Stacked cards scroll away with the list, inside its gutter. -->
           <ReleaseStats v-if="releases.length && scrollStats" compact class="stats" :releases="releases" :now="now" />
           <div class="filters">
+            <span class="filter-label">Show</span>
             <div class="toggles" role="group" aria-label="Show only releases with">
               <button type="button" class="toggle" :aria-pressed="filter.features" @click="filter.features = !filter.features"><AppIcon name="sparkle" :size="13" />Features</button>
               <button type="button" class="toggle" :aria-pressed="filter.fixes" @click="filter.fixes = !filter.fixes"><AppIcon name="bug" :size="13" />Fixes</button>
-              <button type="button" class="toggle" :aria-pressed="filter.tickets" @click="filter.tickets = !filter.tickets"><AppIcon name="ticket" :size="12" />Tickets</button>
+              <button type="button" class="toggle" :aria-pressed="filter.other" @click="filter.other = !filter.other"><AppIcon name="gear" :size="12" />Other</button>
             </div>
-            <p class="result-count" aria-live="polite">
-              <template v-if="filtering">{{ matching.length }} of {{ releases.length }}</template>
-              <template v-else-if="releases.length">{{ releases.length - reservedCount }} published<template v-if="reservedCount"> · {{ reservedCount }} reserved</template></template>
-            </p>
+            <p :id="resultId" class="sr result-count" aria-live="polite"><template v-if="filtering">{{ matching.length }} of {{ releases.length }}</template><template v-else>{{ historySummary }}</template></p>
           </div>
 
           <p v-if="mode === 'compare'" class="compare-hint" role="status">
@@ -580,30 +627,25 @@ const KINDS = [
                 <span class="time" role="gridcell">
                   <span class="mono clock">{{ timeOf(r) }}</span>
                   <span class="age">{{ ageOf(r) }}</span>
+                  <span v-if="r.version === current" class="time-badge current-tag">Live</span>
+                  <span v-if="r.version === rollbackTarget" class="time-badge rollback-tag">Rollback</span>
+                  <span v-if="store.highlight.has(r.version)" class="time-badge new-tag">New</span>
+                  <span v-if="mode === 'compare' && r.version === compareFrom" class="time-badge end-tag">From</span>
+                  <span v-if="r.version === compareTo" class="time-badge end-tag">To</span>
                 </span>
                 <span class="main" role="gridcell">
                   <span class="line1">
-                    <span v-fit-badges class="row-identity">
-                      <ReleaseName plain :version="r.version" :name="r.codename" class="row-name" :title="r.codename || codenameOf(r.version) || r.version"><template v-for="(p, i) in marked(r.codename || codenameOf(r.version) || r.version)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseName>
-                      <span v-if="r.version === current" class="tag current-tag" title="Current"><span class="live-dot" aria-hidden="true" /><span class="tag-label">Current</span></span>
-                      <span v-if="store.highlight.has(r.version)" class="tag new-tag" title="New"><span class="tag-label">New</span></span>
-                      <span v-if="r.version === rollbackTarget" class="tag" title="Rollback target"><span class="tag-label">Rollback target</span></span>
-                      <span v-if="mode === 'compare' && r.version === compareFrom" class="tag end-tag" title="From"><span class="tag-label">From</span></span>
-                      <span v-if="r.version === compareTo" class="tag end-tag" title="To"><span class="tag-label">To</span></span>
+                    <ReleaseName plain :version="r.version" :name="r.codename" class="row-name" :title="r.codename || codenameOf(r.version) || r.version" :data-tip="r.codename || codenameOf(r.version) || r.version"><template v-for="(p, i) in marked(r.codename || codenameOf(r.version) || r.version)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseName>
+                    <span class="counts">
+                      <span v-for="k in KINDS" :key="k.key" class="count" role="img" :aria-label="k.label(countsOf(r)[k.key])" :data-tip="k.label(countsOf(r)[k.key])"><AppIcon :name="k.icon" :size="11" />{{ countsOf(r)[k.key] }}</span>
                     </span>
-                    <ReleaseVersionCopy :value="r.version" class="row-version" @click.stop />
                   </span>
                   <span v-if="r.state === 'reserved'" class="headline">Reserved, never published</span>
                   <template v-else>
-                    <span v-if="rails.get(r.version)?.text" class="rail-name"><span class="headline" :class="{ theme: rails.get(r.version)!.themed }" :lang="rails.get(r.version)!.lang"><template v-for="(p, i) in marked(rails.get(r.version)!.text)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span><LangBadge v-if="rails.get(r.version)!.lang !== lang" :lang="rails.get(r.version)!.lang" /></span>
-                    <span v-if="view === 'details' && technicalLine(r)" class="subjects" :title="technicalLine(r)"><template v-for="(p, i) in marked(technicalLine(r))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
+                    <span v-if="rails.get(r.version)?.text" class="rail-name"><span class="summary-size" aria-hidden="true">{{ railLine(r, lang === 'en' ? 'de' : 'en').text }}</span><span class="headline" :class="{ theme: rails.get(r.version)!.themed }" :lang="rails.get(r.version)!.lang"><template v-for="(p, i) in marked(rails.get(r.version)!.text)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span><LangBadge v-if="rails.get(r.version)!.lang !== lang" :lang="rails.get(r.version)!.lang" /></span>
+
                   </template>
-                  <span v-if="r.state === 'published'" class="counts">
-                    <template v-for="k in KINDS" :key="k.key">
-                      <span v-if="countsOf(r)[k.key]" class="count" role="img" :aria-label="k.label(countsOf(r)[k.key])" :data-tip="k.label(countsOf(r)[k.key])"><AppIcon :name="k.icon" :size="13" />{{ countsOf(r)[k.key] }}</span>
-                    </template>
-                    <span v-if="countsOf(r).tickets.length" class="count keys mono">{{ countsOf(r).tickets.slice(0, 2).join(' ') }}<template v-if="countsOf(r).tickets.length > 2"> +{{ countsOf(r).tickets.length - 2 }}</template></span>
-                  </span>
+                  <span class="row-foot"><ReleaseVersionCopy :value="r.version" class="row-version" @click.stop /></span>
                 </span>
                 <span role="gridcell" class="row-chev"><AppIcon name="chevron-right" :size="14" /></span>
               </div>
@@ -611,25 +653,67 @@ const KINDS = [
           </div>
         </section>
 
-        <section ref="detailPane" class="detail-pane" :aria-label="mode === 'compare' ? 'Comparison' : 'Release'" :inert="covered">
-          <button v-if="phone" type="button" class="btn sm ghost back" @click="showDetail = false"><AppIcon name="arrow-left" :size="13" />All releases</button>
-          <ReleaseCompare
-            v-if="mode === 'compare' && compareFrom" key="compare" :releases="eligible" :from="compareFrom" :to="compareTo"
-            :repository="history?.repository ?? ''" :query="filter.q" :lang="lang" :view="view" @swap="swap" @exit="exitCompare"
-          />
-          <ReleaseDetail
-            v-else-if="selected" ref="detail" :key="selected.version" :release="selected" :repository="history?.repository ?? ''"
-            :current="selected.version === current" :rollback="selected.version === rollbackTarget" :fresh="store.highlight.has(selected.version)"
-            :hidden-in-history="hiddenReserved"
-            :live-since="history?.live_since ?? null" :now="now" :query="filter.q" :evidence="evidence" :lang="lang" :view="view" @evidence="value => evidence = value"
-          />
-          <div v-else-if="store.loading" class="detail-loading skeleton-body" role="status" aria-label="Loading release"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
+        <section class="detail-pane" :aria-label="mode === 'compare' ? 'Comparison' : 'Release'">
+          <div class="detail-actions" :inert="covered">
+            <div class="detail-left">
+              <button v-if="selected?.version === current" type="button" class="next-up" :data-tip="waitingLabel" :aria-label="waitingLabel" @click="openWaiting"><span>{{ waitingLabel }}</span></button>
+              <button v-if="selected && selected.version !== current && currentKnown" type="button" class="to-current" :data-tip="behindLine" @click="choose(current)"><AppIcon name="arrow-left" :size="11" /><span>{{ behindLine }}</span></button>
+            </div>
+            <div class="pager">
+              <button type="button" class="icon-btn flat" aria-label="Previous release" :disabled="selectedIndex <= 0" @click="step(-1)"><AppIcon name="chevron-left" :size="14" /></button>
+              <span class="detail-action-state">{{ selectedIndex < 0 ? '—' : selectedIndex + 1 }} of {{ order.length }}</span>
+              <button type="button" class="icon-btn flat" aria-label="Next release" :disabled="selectedIndex < 0 || selectedIndex >= order.length - 1" @click="step(1)"><AppIcon name="chevron-right" :size="14" /></button>
+            </div>
+            <button type="button" class="evidence-control" :aria-pressed="evidence || view === 'details'" :disabled="!selected || (!selected.tag && selected.state !== 'candidate')" @click="evidence = !evidence"><AppIcon name="shield" :size="13" />Evidence<kbd class="keycap">E</kbd></button>
+          </div>
+          <div ref="detailScroll" class="detail-scroll" :inert="covered">
+            <ReleaseCompare
+              v-if="mode === 'compare' && compareFrom" key="compare" :releases="eligible" :from="compareFrom" :to="compareTo"
+              :repository="history?.repository ?? ''" :query="filter.q" :lang="lang" :view="view" @swap="swap" @exit="exitCompare"
+            />
+            <ReleaseDetail
+              v-else-if="selected" ref="detail" :key="selected.version" :release="selected" :repository="history?.repository ?? ''"
+              :current="selected.version === current" :rollback="selected.version === rollbackTarget" :fresh="store.highlight.has(selected.version)"
+              :hidden-in-history="hiddenReserved" :published-count="releases.filter(r => r.state === 'published').length"
+              :live-since="history?.live_since ?? null" :now="now" :query="filter.q" :evidence="evidence" :lang="lang" :view="view"
+            />
+            <div v-else-if="store.loading" class="detail-loading skeleton-body" role="status" aria-label="Loading release"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
+          </div>
+          <section v-if="showWaiting" class="pending-pane" aria-label="Changes waiting for the next release" :inert="phone && !!peekKey" @keydown="waitingKeys">
+            <header class="pending-head"><h2>Next release</h2><button type="button" ref="waitingClose" class="icon-btn flat" aria-label="Close waiting changes" @click="closeWaiting"><AppIcon name="close" :size="14" /></button></header>
+            <div class="pending-controls">
+              <button type="button" class="btn sm" :aria-disabled="waitingLoading" @click="loadWaiting()"><AppIcon name="refresh" :size="12" />Refresh</button>
+              <button v-if="waiting?.next_cursor" type="button" class="btn sm" :aria-disabled="waitingLoading || waiting.changes.length >= 250" @click="loadWaiting(true)">Show more</button>
+            </div>
+            <div class="pending-scroll">
+              <p class="pending-status" role="status">{{ waitingLabel }}</p>
+              <p v-if="waitingError" role="alert">{{ waitingError }}</p>
+              <p v-for="reason in waiting?.unavailable ?? []" :key="reason">{{ reason }}</p>
+              <ul class="pending-list">
+                <li v-for="change in waiting?.changes ?? []" :key="change.commit"><p>{{ plainSubject(change.subject, change.tickets) }}</p><div class="pending-meta"><TicketLink v-for="key in change.tickets" :key="key" :ticket-key="key" variant="inline" /><span class="mono">{{ shortCommit(change.commit) }}</span></div></li>
+              </ul>
+            </div>
+          </section>
+          <div v-if="peekKey" ref="peekPane" class="peek-pane">
+            <ReleaseTicketPanel ref="peekPanel" :ticket-key="peekKey" :now="now" open-in-project @close="closePeek" @navigate="path => emit('navigate', path)" />
+          </div>
         </section>
-
-        <div v-if="peekKey" ref="peekPane" class="peek-pane">
-          <ReleaseTicketPanel ref="peekPanel" :ticket-key="peekKey" :now="now" open-in-project @close="closePeek" @navigate="path => emit('navigate', path)" />
-        </div>
       </div>
+
+      <footer class="sheet-foot" :inert="covered">
+        <p v-if="!releaseSummary" class="sheet-sum" aria-hidden="true"></p>
+        <p v-else-if="releaseSummary.loading" class="sheet-sum" role="status" aria-label="Loading"><span class="sum-dot" aria-hidden="true" /><span class="sum-skel skeleton" aria-hidden="true" /></p>
+        <button v-else-if="releaseSummary.action" type="button" class="sheet-sum" :data-tone="releaseSummary.tone" :aria-label="releaseSummary.aria" @click="openRisk">
+          <span class="sum-dot" aria-hidden="true" /><span><template v-for="(part, index) in releaseSummary.full" :key="index"><b v-if="part.as === 'count'">{{ part.text }}</b><span v-else-if="part.as === 'exception'" class="x">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></span>
+        </button>
+        <p v-else class="sheet-sum" role="status" :data-tone="releaseSummary.tone" :aria-label="releaseSummary.aria">
+          <span class="sum-dot" aria-hidden="true" /><span><template v-for="(part, index) in releaseSummary.full" :key="index"><b v-if="part.as === 'count'">{{ part.text }}</b><span v-else-if="part.as === 'exception'" class="x">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></span>
+        </p>
+        <div v-if="phone" class="mobile-footer">
+          <button type="button" :aria-pressed="!showDetail" @click="showDetail = false"><AppIcon name="chevron-left" :size="13" />All releases</button>
+          <button type="button" :aria-pressed="showDetail" :disabled="!selected" @click="showDetail = true">Release notes<AppIcon name="chevron-right" :size="13" /></button>
+        </div>
+      </footer>
 
       <div v-if="help" class="help-scrim" @click.self="help = false">
         <section class="help" role="dialog" aria-labelledby="release-keys-title">
@@ -650,259 +734,186 @@ const KINDS = [
 </template>
 
 <style scoped>
-.releases {
-  width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; color: var(--ink); outline: none; overflow: hidden;
-  background-color: var(--canvas);
-  background-image:
-    radial-gradient(1200px 600px at 10% -10%, var(--wash-1), transparent 60%),
-    radial-gradient(900px 520px at 100% 0%, var(--wash-2), transparent 55%),
-    radial-gradient(700px 500px at 90% 100%, var(--wash-3), transparent 60%);
-}
+.releases { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; color: var(--ink); outline: none; overflow: hidden; background-color: var(--canvas); --aurora-1: color-mix(in srgb, var(--primary-tint) 55%, transparent); --aurora-2: color-mix(in srgb, var(--primary-line) 22%, transparent); --aurora-3: color-mix(in srgb, var(--secondary-tint) 32%, transparent); background-image: radial-gradient(ellipse 520px 230px at 25% 0%,var(--aurora-1),transparent),radial-gradient(ellipse 420px 190px at 45% 0%,var(--aurora-2),transparent),radial-gradient(ellipse 350px 200px at 60% 0%,var(--aurora-3),transparent); }
 .releases[open] { display: block; }
 .releases::backdrop { background: var(--scrim); }
-.shell {
-  position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; max-width: 1640px; margin: 0 auto; padding: 0 var(--gutter);
-  /* A soft aurora behind the title (AEON-488): aqua, teal and gold lights. */
-  --aurora-1: rgba(127, 216, 207, .55); --aurora-2: rgba(14, 111, 108, .22); --aurora-3: rgba(232, 192, 122, .32);
-  background:
-    radial-gradient(220px 160px at 130px 30px, var(--aurora-1), transparent) no-repeat,
-    radial-gradient(190px 130px at 440px 30px, var(--aurora-2), transparent) no-repeat,
-    radial-gradient(160px 110px at 670px 40px, var(--aurora-3), transparent) no-repeat;
+:root[data-theme="dark"] .releases { --aurora-1: color-mix(in srgb, var(--primary-tint) 20%, transparent); --aurora-2: color-mix(in srgb, var(--primary-tint) 8%, transparent); --aurora-3: color-mix(in srgb, var(--secondary-tint) 12%, transparent); }
+@media(prefers-color-scheme:dark) { :root:not([data-theme="light"]) .releases { --aurora-1: color-mix(in srgb, var(--primary-tint) 20%, transparent); --aurora-2: color-mix(in srgb, var(--primary-tint) 8%, transparent); --aurora-3: color-mix(in srgb, var(--secondary-tint) 12%, transparent); } }
+/* Toolbar labels may wrap; their intrinsic width must never enlarge the sheet. */
+.shell { position:relative; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; height:100%; max-width:1640px; margin:0 auto; padding:0 var(--gutter); }
+.sheet-foot { background: var(--canvas); }
+.sheet-sum { display: flex; align-items: center; gap: 8px; box-sizing: border-box; width: 100%; min-height: 44px; margin: 0; padding: 0 2px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--ink-2); font: 400 13px/1.3 var(--font); font-variant-numeric: tabular-nums; text-align: left; --tone: var(--ok); }
+button.sheet-sum { cursor: pointer; }
+.sheet-sum b { color: var(--ink); font-weight: 650; }
+.sheet-sum .x { color: var(--tone-ink, var(--ink)); font-weight: 650; }
+.sheet-sum[data-tone="problem"] { --tone: var(--agent-problem); --tone-ink: var(--agent-problem); }
+.sheet-sum[data-tone="attention"] { --tone: var(--gold); --tone-ink: var(--warn-ink); }
+.sheet-sum[data-tone="deliberate"] { --tone: var(--teal); --tone-ink: var(--teal-ink); }
+.sheet-sum[data-tone="idle"] { --tone: var(--st-backlog); }
+.sheet-sum .sum-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--tone); }
+.sheet-sum .sum-skel { display: inline-block; width: 150px; height: 8px; border-radius: 4px; }
+.sheet-sum:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+@media (hover: hover) { button.sheet-sum:hover { color: var(--ink); } }
+.head { display:grid; min-width:0; gap:18px; padding:18px 0 20px; }
+.title-row { display:flex; flex-wrap:wrap; align-items:flex-start; gap:12px; min-width:0; }
+.mark-backing { display:grid; place-items:center; flex:none; width:52px; height:52px; border-radius:15px; background:var(--glass); box-shadow:0 0 0 1px var(--glass-rim),0 6px 16px -10px var(--line-2); }
+.titles { flex:0 0 auto; width:max-content; max-width:100%; display:flex; flex-direction:column; align-items:center; gap:12px; min-width:0; padding:4px 0; }
+.titles .eyebrow { display:flex; align-items:center; gap:12px; width:100%; margin:0; font:600 10.5px/1.4 var(--mono); letter-spacing:.18em; white-space:nowrap; text-align:center; }
+.titles .eyebrow::before,.titles .eyebrow::after { content:''; flex:1; min-width:0; height:1px; background:var(--line-2); }
+.hero { max-width:100%; margin:0; font:300 clamp(28px,3.4vw,48px)/1.1 var(--serif); text-align:center; overflow-wrap:anywhere; }
+.status-dock { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:4px 14px; min-width:0; max-width:100%; min-height:44px; padding:6px 16px; border-radius:24px; background:linear-gradient(135deg,var(--glass),var(--glass-2)); box-shadow:inset 0 1px 0 var(--glass-edge),0 0 0 1px var(--glass-rim); }
+.dock-version { padding-left:14px; border-left:1px solid var(--line-2); }
+.status-line { display:flex; align-items:center; gap:8px; min-width:0; font-size:12px; line-height:1.45; color:var(--ink-2); }
+.status-line > span:not(.status-dot) { min-width:0; overflow-wrap:anywhere; }
+@media(min-width:600px) { .status-dock:not(:has(.outdated)) { flex-wrap:nowrap; } .status-line:not(.outdated),.status-dock:not(:has(.outdated)) .dock-version { flex:none; white-space:nowrap; } }
+.status-dot { flex:none; width:7px; height:7px; border-radius:50%; background:var(--gold); }
+.status-dot.live { background:var(--ok); }
+.reload { display:inline-flex; align-items:center; gap:6px; min-height:30px; padding:0 12px; border-radius:999px; color:var(--teal-ink); background:var(--surface); }
+.spacer { display:none; }
+.switches { display:flex; flex-wrap:wrap; flex:none; align-items:center; gap:8px; min-width:0; }
+.switches .seg { padding:0; }
+.switches .seg button { height:36px; padding:0 12px; }
+.search { flex:1 1 220px; min-width:140px; }
+.search .field { height:36px; border-radius:999px; padding-right:34px; font-size:12px; }
+.search .field::-webkit-search-cancel-button { display:none; }
+.slash { position:absolute; right:10px; }
+.compare-btn { height:36px; }
+.icon-btn { flex:none; width:36px; height:36px; }
+.notice { display:flex; align-items:center; gap:10px; padding:8px 14px; background:var(--glass); border-radius:12px; color:var(--ink); font-size:13px; }
+.notice > span { flex:1; min-width:0; }
+.stats-placeholder { display:grid; grid-template-columns:minmax(0,360px) minmax(0,1fr); gap:14px; height:300px; }
+.stats-placeholder .skeleton { border-radius:20px; }
+.body { display:grid; grid-template-columns:minmax(300px,410px) minmax(0,1fr); gap:28px; min-height:0; padding-bottom:8px; }
+.list-pane { display:flex; flex-direction:column; gap:10px; min-width:0; min-height:0; overflow:auto; padding:2px 1px; scrollbar-gutter:stable; overscroll-behavior:contain; }
+.filters { flex:none; position:sticky; top:0; z-index:2; display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-width:0; min-height:36px; padding-bottom:2px; background:var(--canvas); }
+.filter-label { font:600 10px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); }
+.toggles { display:flex; flex-wrap:wrap; gap:6px; min-width:0; }
+.toggle { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 11px; border:1px solid var(--glass-edge); border-radius:999px; background:var(--btn-bg); box-shadow:var(--shadow-btn); color:var(--ink-2); font-size:12px; font-weight:600; }
+.toggle[aria-pressed="true"] { background:var(--seg-on); color:var(--teal-ink); box-shadow:0 0 0 1px var(--chip-teal-line); }
+.compare-hint { font-size:12px; padding:8px; }
+.listbox { display:grid; gap:0; padding:4px 6px; border-radius:16px; outline:none; background:var(--surface-raised); box-shadow:0 0 0 1px var(--line),0 10px 26px -20px var(--line-2); }
+.day { display:grid; }
+.day-h { display:flex; align-items:baseline; gap:8px; padding:12px 10px 4px; font:600 10px/1.5 var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--ink-3); }
+.day:first-child .day-h { padding-top:8px; }
+.day-count { letter-spacing:0; font-weight:500; }
+.row { position:relative; display:grid; grid-template-columns:60px minmax(0,1fr) 12px; align-items:start; gap:10px; padding:12px 10px 13px; border-top:1px solid var(--line); cursor:pointer; outline-offset:-1px; }
+.day-h + .row { border-top:0; }
+.row.fresh { background:var(--secondary-tint-3); }
+.row[aria-selected="true"],.row.from { background:var(--row-selected); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--teal) 55%,transparent); border-radius:10px; border-top-color:transparent; }
+.row[aria-selected="true"] + .row { border-top-color:transparent; }
+.row.reserved .clock,.row.reserved .row-name { color:var(--ink-2); }
+.time { display:grid; gap:2px; justify-items:start; }
+.clock { font-size:12px; font-weight:600; color:var(--ink); }
+.age { font-size:10px; color:var(--ink); white-space:nowrap; }
+.time-badge.rollback-tag { color:var(--ink); }
+.time-badge { display:block; margin-top:6px; padding:4px 0; width:100%; text-align:center; font:650 10px/1.2 var(--mono); letter-spacing:.07em; text-transform:uppercase; color:var(--ink-2); background:var(--surface-2); border-radius:7px; }
+.current-tag { color:var(--teal-ink); background:var(--row-selected); box-shadow:inset 0 0 0 1px var(--chip-teal-line); }
+.new-tag { color:color-mix(in oklab,var(--secondary-ink),var(--ink) 35%); background:var(--secondary-tint-3); }
+.main { display:grid; gap:3px; min-width:0; }
+.line1 { display:grid; grid-template-columns:minmax(0,1fr) max-content; align-items:start; gap:10px; min-width:0; }
+.row-name { font-size:14.5px; line-height:20px; font-weight:600; color:var(--ink); }
+.row-name :deep(.rn-name) { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; white-space:normal; overflow-wrap:anywhere; }
+.counts { display:flex; flex:none; align-items:center; gap:9px; margin-top:3px; font-size:10px; color:var(--ink-3); }
+.count { display:inline-flex; align-items:center; gap:4px; font-variant-numeric:tabular-nums; }
+.rail-name { display:grid; margin-top:3px; min-width:0; }
+.rail-name .headline,.rail-name .summary-size { grid-area:1/1; }
+.headline,.summary-size { color:var(--ink-2); font-size:12.5px; line-height:1.4; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow-wrap:anywhere; }
+.summary-size { visibility:hidden; pointer-events:none; }
+.rail-name > .lang-badge { justify-self:end; }
+.row-foot { display:flex; justify-content:flex-end; min-width:0; margin-top:4px; }
+.row-version { font-size:11.5px; color:var(--ink-3); }
+.row-version :deep(.version-copy) { gap:4px; padding:0; margin:0; }
+/* Compact mouse rows; touch keeps the shared 44px button inside its row. */
+@media (pointer:fine) { .row-version :deep(.version-copy) { min-height:24px; } }
+.row-version :deep(.version-pretty) { font-size:11.5px; }
+.row-chev { align-self:center; opacity:.55; color:var(--ink-3); }
+.row[aria-selected="true"] .row-chev { opacity:1; color:var(--teal-ink); }
+.detail-pane { position:relative; display:grid; grid-template-rows:36px minmax(0,1fr); gap:10px; min-width:0; min-height:0; }
+.detail-actions { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:10px; min-width:0; }
+.to-current,.next-up,.evidence-control,.mobile-footer button { border:0; background:transparent; font-family:var(--font); cursor:pointer; }
+.detail-left { justify-self:stretch; display:flex; align-items:center; min-width:0; max-width:100%; }
+.to-current,.next-up { display:inline-flex; align-items:center; gap:6px; min-height:30px; padding:0 10px; border-radius:999px; font-size:12px; font-weight:600; color:var(--teal-ink); max-width:100%; }
+.to-current > span,.next-up > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.to-current > svg { flex:none; }
+.next-up { background:var(--row-selected); box-shadow:inset 0 0 0 1px var(--chip-teal-line); }
+.pager { display:flex; align-items:center; gap:6px; justify-self:center; }
+.detail-action-state { min-width:8ch; text-align:center; font:600 12px/1 var(--mono); color:var(--ink-2); font-variant-numeric:tabular-nums; }
+.evidence-control { justify-self:end; display:inline-flex; align-items:center; gap:6px; min-height:32px; padding:0 6px; font-size:12px; color:var(--ink); }
+.evidence-control .keycap { display:none; }
+.detail-scroll { overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; padding:6px 8px 24px; min-height:0; }
+.detail-loading { display:grid; align-content:start; gap:14px; padding:16px; }
+.detail-loading .skeleton { height:22px; }
+.loading { display:grid; gap:10px; padding:8px; }
+.row-skeleton { display:grid; grid-template-columns:58px 1fr; gap:12px; height:54px; }
+.empty { padding:28px 12px; display:grid; gap:8px; justify-items:start; }
+.empty p,.hidden-history { font-size:13px; color:var(--ink-3); }
+.peek-pane,.pending-pane { position:absolute; top:46px; right:0; bottom:8px; width:min(400px,calc(100% - 16px)); z-index:4; display:flex; flex-direction:column; min-height:0; background:var(--surface-raised); border-radius:16px; box-shadow:0 0 0 1px var(--line-2),var(--shadow-pop); }
+.peek-pane > * { flex:1; }
+@media(min-width:1280px) { .peeking .detail-scroll { margin-right:416px; } }
+.peek-pane :deep(.peek.inline) { padding:0; }
+.pending-pane { padding:16px; gap:12px; }
+.pending-controls { display:flex; gap:8px; }
+.pending-controls button[aria-disabled="true"] { cursor:default; opacity:.55; }
+.pending-scroll { overflow:auto; min-height:0; }
+.pending-status { font-size:12px; margin-bottom:12px; color:var(--ink-2); }
+.pending-head { display:flex; align-items:center; gap:12px; }
+.pending-head h2 { flex:1; font-size:17px; }
+.pending-list { display:grid; gap:0; list-style:none; padding:0; margin:0; }
+.pending-list li { padding:10px 0; border-top:1px solid var(--line); font-size:13px; overflow-wrap:anywhere; }
+.pending-meta { display:flex; gap:8px; flex-wrap:wrap; color:var(--ink-3); font-size:11px; margin-top:4px; }
+.help-scrim { position:absolute; inset:0; z-index:5; display:grid; place-items:center; padding:24px; background:var(--palette-scrim); }
+.help { width:min(460px,100%); padding:18px 22px 16px; border-radius:var(--radius); background:var(--surface-raised); box-shadow:var(--shadow-pop),var(--shadow); }
+.help header { display:flex; align-items:center; justify-content:space-between; }
+.help dl > div { display:grid; grid-template-columns:96px 1fr; align-items:center; gap:12px; min-height:36px; border-bottom:1px solid var(--line); }
+.help dt { display:flex; gap:4px; }
+.help dd { font-size:13px; color:var(--ink-2); }
+.sr { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.toggle:focus-visible,.to-current:focus-visible,.next-up:focus-visible,.evidence-control:focus-visible { outline:none; box-shadow:var(--focus-ring); }
+@media(hover:hover) { .row:hover:not([aria-selected="true"]) { background:var(--row-hover); border-radius:10px; } .toggle:hover { background:var(--btn-bg-hover); } }
+@media(max-width:1180px) and (min-width:761px) { .title-row { flex-wrap:wrap; } .titles { flex-basis:calc(100% - 164px); } .switches { order:4; } .search { order:5; } .compare-btn { order:6; } .help-btn { margin-left:auto; } .close-btn { order:1; } .body { grid-template-columns:minmax(300px,380px) minmax(0,1fr); gap:20px; } }
+@media(max-width:760px) {
+ .shell { padding:0 16px; grid-template-rows:auto minmax(0,1fr) auto; }
+ .head { gap:10px; padding:12px 0 10px; }
+ .title-row { flex-wrap:wrap; gap:10px; }
+ .mark-backing { display:none; }
+ .titles { flex:1; max-width:calc(100% - 54px); padding:4px 0; gap:10px; }
+ .titles .eyebrow { font-size:9px; letter-spacing:.12em; gap:8px; }
+ .hero { font-size:clamp(26px,7.4vw,34px); }
+ .status-dock { gap:2px 10px; padding:4px 12px; }
+ .dock-version { padding-left:0; border-left:0; }
+ .close-btn { order:1; width:44px; height:44px; }
+ .search { order:2; flex:1 1 calc(100% - 54px); min-width:0; }
+ .search .field { height:44px; }
+ .compare-btn { order:3; width:44px; height:44px; padding:0; }
+ .compare-btn .btn-text,.compare-btn .keycap,.slash { display:none; }
+ .switches { order:4; flex:1 1 auto; gap:6px; }
+ .switches .seg button { height:44px; padding:0 12px; }
+ .help-btn { display:flex; order:5; width:44px; height:44px; }
+ .body { display:block; min-height:0; }
+ .list-pane { height:100%; padding:2px 1px; }
+ .filters { min-height:44px; padding-bottom:8px; }
+ .toggles { gap:4px; }
+ .toggle { height:44px; padding:0 11px; }
+ .row { grid-template-columns:56px minmax(0,1fr) 10px; gap:8px; padding:12px 8px; }
+ .line1 { gap:5px; }
+ .row-name { font-size:14px; }
+ .counts { gap:5px; font-size:9px; }
+ .count { gap:2px; }
+ .detail-pane { display:none; height:100%; grid-template-rows:44px minmax(0,1fr); gap:8px; }
+ .show-detail .detail-pane { display:grid; }
+ .show-detail .list-pane,.show-detail .head > .stats { display:none; }
+ .detail-actions { gap:2px; }
+ .pager { gap:0; }
+ .detail-action-state { min-width:7ch; font-size:10px; }
+ .detail-actions .icon-btn { width:32px; height:44px; }
+ .evidence-control { height:44px; gap:4px; padding:0 2px; font-size:11px; }
+ .to-current,.next-up { min-height:44px; padding:0 6px; font-size:11px; }
+ .detail-scroll { padding:6px 2px 24px; }
+ .peek-pane,.pending-pane { position:fixed; inset:0; z-index:10; width:auto; border-radius:0; }
+ .pending-pane { padding:16px; }
+ .mobile-footer { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:60px; border-top:1px solid var(--line); padding:8px 0 max(8px,env(safe-area-inset-bottom)); background:var(--canvas); }
+ .mobile-footer button { display:flex; align-items:center; gap:6px; min-height:44px; padding:0 12px; border-radius:999px; font-size:12px; font-weight:600; }
+ .mobile-footer button[aria-pressed="true"] { background:var(--seg-on); }
 }
-:root[data-theme="dark"] .shell { --aurora-1: rgba(127, 216, 207, .2); --aurora-2: rgba(164, 229, 223, .08); --aurora-3: rgba(232, 192, 122, .12); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .shell { --aurora-1: rgba(127, 216, 207, .2); --aurora-2: rgba(164, 229, 223, .08); --aurora-3: rgba(232, 192, 122, .12); } }
-
-/* ---------- Head ---------- */
-.head { display: grid; gap: 14px; padding: 18px 0 16px; }
-.title-row { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
-/* The two switches sit with search and Compare, at the header controls' 36 px. */
-.switches { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-.switches .seg button { height: 30px; padding: 0 12px; }
-.mark-backing { display: grid; place-items: center; text-decoration: none; transition: transform .12s ease, box-shadow .12s ease; flex-shrink: 0; width: 52px; height: 52px; border-radius: 15px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim), 0 6px 16px -10px rgba(32, 60, 61, .5); }
-.mark-backing:hover { box-shadow: 0 0 0 1px var(--glass-rim), 0 8px 20px -10px rgba(32, 60, 61, .6); transform: translateY(-1px); }
-.mark-backing:focus-visible { outline: 2px solid var(--focus, #0e6f6c); outline-offset: 2px; }
-/* The light display title sits above one frosted glass status dock. */
-.titles {
-  /* The codename keeps its line; the search field gives way first. */
-  flex: 0 0 auto; max-width: 46%;
-  display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; padding: 4px 0;
-}
-.titles .eyebrow { display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; font: 600 10.5px/1.4 var(--font); letter-spacing: .18em; overflow-wrap: anywhere; text-align: center; }
-.titles .eyebrow::before, .titles .eyebrow::after { content: ''; flex: 1; min-width: 16px; height: 1px; background: var(--line-2); }
-.hero { max-width: 100%; margin: 0; font: 300 clamp(28px, 3.4vw, 48px)/1.1 var(--serif); color: var(--ink); text-align: center; overflow-wrap: anywhere; }
-.hero:not(.named) { font: 300 clamp(22px, 2.2vw, 30px)/1.15 var(--serif); letter-spacing: -.02em; }
-.status-dock { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 14px; max-width: 100%; min-height: 48px; padding: 6px 16px; border-radius: 24px; background: linear-gradient(135deg, var(--glass), var(--glass-2)); -webkit-backdrop-filter: blur(22px) saturate(1.4); backdrop-filter: blur(22px) saturate(1.4); box-shadow: inset 0 1px 0 var(--glass-edge), 0 0 0 1px var(--glass-rim), 0 12px 28px -18px var(--line-2); }
-.dock-version { padding-left: 14px; border-left: 1px solid var(--line-2); }
-.status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-2); }
-.status-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 3px rgba(214, 155, 49, .18); }
-.status-dot.live { background: var(--ok); box-shadow: 0 0 0 3px rgba(47, 143, 91, .16); }
-.status-version { font-weight: 600; color: var(--ink); vertical-align: baseline; }
-.reload { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface); color: var(--teal-ink); font: 600 13px/1 var(--font); cursor: pointer; }
-@media (hover: hover) { .reload:hover { background: var(--row-hover); } }
-.reload:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-@media (prefers-reduced-motion: no-preference) { .status-dot.live { animation: breathe 2.4s ease-in-out infinite; } }
-@keyframes breathe { 0%, 100% { box-shadow: 0 0 0 3px rgba(47, 143, 91, .16); } 50% { box-shadow: 0 0 0 6px rgba(47, 143, 91, .06); } }
-.spacer { flex: 1 1 0; }
-.search { flex: 0 1 360px; min-width: 180px; }
-.search .field { height: 36px; border-radius: 999px; padding-right: 34px; }
-.search .field::-webkit-search-cancel-button { display: none; }
-.slash { position: absolute; right: 10px; }
-.compare-btn { height: 36px; }
-.compare-btn .keycap { margin-right: -5px; }
-.icon-btn { width: 36px; height: 36px; }
-.notice { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 14px; border-radius: 12px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 1px var(--line); color: var(--ink); font-size: 13px; }
-.notice > span { flex: 1; min-width: 0; line-height: 1.45; }
-.notice-version { font-size: inherit; font-weight: 600; vertical-align: baseline; }
-.notice .btn, .notice .icon-btn { flex: none; }
-.notice svg { color: var(--teal-ink); }
-.stats-placeholder { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 14px; height: 300px; }
-.stats-placeholder .skeleton { border-radius: 20px; }
-
-/* ---------- Body ---------- */
-.body { display: grid; grid-template-columns: minmax(360px, 460px) minmax(0, 1fr); gap: 28px; min-height: 0; }
-.list-pane, .detail-pane { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.list-pane { display: flex; flex-direction: column; gap: 10px; padding: 2px 6px 32px 2px; margin-left: -2px; }
-.detail-pane { padding: 6px 4px 48px 8px; }
-.detail-loading { display: grid; align-content: start; gap: 14px; min-height: 70vh; padding: 16px; }
-.detail-loading .skeleton { height: 22px; }
-.detail-loading .skeleton:nth-child(2) { width: 65%; }
-.detail-loading .skeleton:nth-child(3) { height: 180px; }
-.filters, .day-h { background: color-mix(in srgb, var(--canvas) 94%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
-.filters { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 0 8px; }
-.toggles { display: flex; gap: 6px; }
-.toggle { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 1px solid var(--glass-edge); border-radius: 999px; background: var(--btn-bg); box-shadow: var(--shadow-btn); color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
-@media (hover: hover) { .toggle:hover { color: var(--teal-ink); background: var(--btn-bg-hover); } }
-.toggle[aria-pressed="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--chip-teal-line); }
-.toggle:focus-visible { box-shadow: var(--focus-ring); }
-.result-count { font: 500 11px/1.4 var(--mono); color: var(--ink-3); white-space: nowrap; }
-.compare-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 12px; border-radius: 10px; background: var(--surface-2); color: var(--ink); font-size: 12.5px; }
-.hint-version { font-size: 12px; font-weight: 600; }
-
-.listbox { display: grid; gap: 14px; border-radius: 14px; outline: none; }
-.listbox:focus-visible { box-shadow: none; }
-.day { display: grid; gap: 2px; }
-.day-h { position: sticky; top: 38px; z-index: 1; display: flex; align-items: baseline; gap: 8px; padding: 4px 10px 6px; border-radius: 8px; font: 600 10.5px/1.5 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); }
-.day-count { letter-spacing: 0; color: var(--ink-3); font-weight: 500; }
-.row {
-  position: relative; display: grid; grid-template-columns: 58px minmax(0, 1fr) 16px; align-items: start; gap: 12px; padding: 10px 10px 11px; border-radius: 12px; cursor: pointer;
-  outline-offset: -1px;
-  transition: background .12s ease, box-shadow .12s ease;
-}
-/* One look per state. Hover only where a pointer hovers, so it never sticks on touch. */
-@media (hover: hover) { .row:hover { background: var(--row-hover); } }
-/* New since the last visit: a warm tint. */
-.row.fresh { background: var(--gold-wash); }
-/* Current: a raised card (it wins over the tint; its New tag still says so). */
-.row.current { background: var(--surface-raised); box-shadow: 0 0 0 1px var(--line), 0 8px 22px -14px rgba(32, 60, 61, .45); }
-/* Reserved, never published: a dashed hairline in the row's shape, not faded text. */
-.row.reserved { outline: 1px dashed var(--line-2); }
-.row.reserved .clock { color: var(--ink-2); font-weight: 500; }
-.row.reserved .row-name { color: var(--ink-2); }
-/* Selected (and both ends of a comparison): an outline ring in the row's shape; focus makes it the focus ring. */
-.row[aria-selected="true"], .row.from { outline: 2px solid var(--chip-teal-line); }
-.listbox:focus-visible .row[aria-selected="true"] { outline-color: var(--teal); }
-.time { display: grid; gap: 1px; padding-top: 1px; }
-.clock { font-size: 13px; font-weight: 600; color: var(--ink); }
-.age { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
-.main { display: grid; gap: 3px; min-width: 0; container: release-row / inline-size; }
-/* The version owns its slot, including the canonical reveal and copy icon.
-   Only the name gives way; the 44 px copy target keeps the same position. */
-.line1 { --row-text-size: 14px; --row-line-height: 20px; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: start; gap: 8px; min-width: 0; }
-.row-identity { --compact-badge-width: 8px; display: flex; align-items: baseline; gap: 8px; min-width: 0; min-height: 44px; }
-.row-name { flex: 1; min-height: 44px; font-size: var(--row-text-size); line-height: var(--row-line-height); font-weight: 600; letter-spacing: .005em; color: var(--ink); }
-.row-name :deep(.rn-name) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
-.row-identity .tag { flex: none; align-items: baseline; padding-block: 4.5px; }
-.row-identity .live-dot { align-self: center; }
-.row-version { min-width: max-content; justify-self: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.row-version :deep(.version-copy) { justify-content: flex-end; gap: 6px; padding: 0; margin: 0; line-height: var(--row-line-height); }
-/* The name and Pretty version use the same system-font line box. Align the
-   canonical reveal to that baseline instead of centering different metrics. */
-.row-version :deep(.version-pretty) { font-size: var(--row-text-size); }
-.row-version :deep(.version-layers) { justify-items: end; align-items: baseline; grid-template-rows: var(--row-line-height); }
-/* Only measured overflow compacts a badge; its text remains accessible. */
-.row-identity .tag.compact { position: relative; align-self: center; align-items: center; justify-content: center; width: var(--compact-badge-width); height: 12px; padding: 0; }
-.row-identity .tag.compact:not(.current-tag)::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.row-identity .tag.compact .tag-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-@container release-row (max-width: 310px) {
-  .row-identity { gap: 1.5px; }
-  .row-identity .tag:not(.compact) { padding-inline: 5px; }
-}
-.tag { display: inline-flex; align-items: center; gap: 5px; height: 19px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
-.current-tag { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
-.new-tag { background: var(--gold-2); color: #3a2804; }
-.end-tag { background: var(--teal); color: var(--surface); }
-.live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
-.headline { color: var(--ink); font-size: 13.5px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
-.subjects { color: var(--ink-3); font-size: 12.5px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
-/* The fallback badge sits beside the clamped name, never cut off with it. */
-.rail-name { display: flex; align-items: flex-start; min-width: 0; }
-.rail-name .headline { min-width: 0; }
-.rail-name > .lang-badge { flex: none; margin-top: 2px; color: var(--ink-2); }
-.headline:not(.theme) { color: var(--ink-2); }
-.headline.theme { font-weight: 600; }
-.reserved .headline { color: var(--ink-2); font-style: italic; }
-.counts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 11.5px; color: var(--ink-3); }
-.count { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
-.keys { font-size: 10.5px; letter-spacing: .02em; }
-.row-chev { align-self: center; color: var(--ink-3); opacity: 0; transition: opacity .12s ease; }
-.row[aria-selected="true"] .row-chev { opacity: 1; color: var(--teal-ink); }
-.back { justify-self: start; margin: 0 0 10px -6px; }
-
-.loading { display: grid; gap: 10px; padding: 8px 10px; }
-.row-skeleton { display: grid; grid-template-columns: 58px 1fr; gap: 12px; align-items: center; height: 54px; }
-.row-skeleton .wide { height: 12px; }
-.empty { display: grid; justify-items: start; gap: 8px; padding: 28px 12px; }
-.empty h2 { font-size: 17px; }
-.empty p { font-size: 13.5px; }
-.hidden-history { font-size: 13px; color: var(--ink-3); }
-.empty-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--surface-2); color: var(--ink-2); }
-
-/* ---------- A ticket beside the history ---------- */
-.peek-pane { display: flex; min-width: 0; min-height: 0; }
-.peek-pane > * { flex: 1; }
-@media (min-width: 1280px) { .peeking .body { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr) clamp(440px, 34vw, 580px); gap: 24px; } }
-
-/* ---------- Keys ---------- */
-.help-scrim { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; padding: 24px; background: var(--palette-scrim); }
-.help { width: min(460px, 100%); padding: 18px 22px 16px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: var(--surface-raised); box-shadow: var(--shadow-pop), var(--shadow); }
-.help header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.help dl { margin: 0; display: grid; }
-.help dl > div { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 12px; min-height: 36px; border-bottom: 1px solid var(--line); }
-.help dl > div:last-child { border-bottom: 0; }
-.help dt { display: flex; gap: 4px; }
-.help dd { margin: 0; font-size: 13px; color: var(--ink-2); }
-
-/* ---------- Motion: the sheet rises in, rows follow ---------- */
-@media (prefers-reduced-motion: no-preference) {
-  .releases[open] .shell { animation: sheet-rise .34s cubic-bezier(.2, .75, .25, 1) both; }
-  .releases[open]::backdrop { animation: scrim-in .24s ease both; }
-  .row { animation: row-rise .38s cubic-bezier(.2, .75, .25, 1) both; animation-delay: calc(var(--i) * 18ms + 80ms); }
-  /* A new release (or comparison) settles into the pane; keyed, so each one rises in. */
-  .detail-pane > .detail, .detail-pane > .compare { animation: swap-in .2s cubic-bezier(.2, .75, .25, 1) both; }
-}
-@keyframes swap-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .row, .row-chev { transition: none; } }
-@keyframes sheet-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
-@keyframes row-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-@keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
-
-/* ---------- Narrower screens ---------- */
-@media (max-width: 1100px) {
-  .body { grid-template-columns: minmax(320px, 380px) minmax(0, 1fr); gap: 20px; }
-  .search { flex-basis: 280px; }
-}
-/* Too narrow for the title, switches and search in one line: the switches take the next one. */
-@media (max-width: 1180px) and (min-width: 761px) {
-  .title-row { flex-wrap: wrap; row-gap: 10px; }
-  .switches { order: 10; flex-basis: 100%; padding-left: 64px; }
-}
-/* Too narrow for three columns: the release and its ticket side by side. */
-@media (max-width: 1279px) and (min-width: 761px) {
-  .peeking .body { grid-template-columns: minmax(0, 1fr) minmax(400px, 48%); gap: 20px; }
-  .peeking .list-pane, .peeking .stats { display: none; }
-}
-@media (max-width: 760px) {
-  .shell { padding: 0 16px; }
-  .head { gap: 10px; padding: 12px 0 10px; }
-  .switches { order: 4; flex: 1 1 100%; flex-wrap: wrap; }
-  .switches .seg button { height: 38px; padding: 0 14px; }
-  .title-row { flex-wrap: wrap; gap: 10px; }
-  /* The codename takes the row beside Close; the mark waits on wider screens. */
-  .mark-backing { display: none; }
-  .titles { flex: 1; max-width: none; padding: 4px 0; gap: 10px; }
-  .hero { font-size: clamp(26px, 7.4vw, 34px); }
-  .hero:not(.named) { font-size: 21px; }
-  .titles .eyebrow { letter-spacing: .12em; gap: 8px; font-size: 10px; }
-  .status-dock { gap: 2px 10px; padding: 4px 12px; border-radius: 18px; }
-  .dock-version { padding-left: 0; border-left: 0; }
-  .reload { height: 44px; padding: 0 16px; }
-  .spacer { display: none; }
-  .close-btn { order: 1; width: 44px; height: 44px; }
-  .notice .btn, .notice .icon-btn { height: 44px; }
-  .notice .icon-btn { width: 44px; }
-  .search { order: 2; flex: 1 1 calc(100% - 54px); width: auto; }
-  .search .field { height: 44px; }
-  .slash, .help-btn, .compare-btn .btn-text, .compare-btn .keycap { display: none; }
-  .compare-btn { order: 3; width: 44px; height: 44px; padding: 0; }
-  .toggle { height: 44px; padding: 0 13px; }
-  .back { height: 44px; }
-  .body { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .detail-pane { display: none; padding: 4px 0 40px; }
-  .show-detail .detail-pane { display: block; }
-  .show-detail .list-pane, .show-detail .stats, .show-detail .search { display: none; }
-  .list-pane { padding: 2px 0 32px; margin: 0; }
-  .row { grid-template-columns: 50px minmax(0, 1fr) 14px; gap: 10px; padding: 10px 8px; }
-  /* Nothing is clipped at phone width: the count takes its own line, headlines wrap in full. */
-  .filters { flex-wrap: wrap; row-gap: 4px; }
-  .toggles { flex: 1 1 100%; }
-  .result-count { flex: 1 1 100%; padding-left: 2px; }
-  .headline, .subjects { display: block; overflow: visible; -webkit-line-clamp: unset; }
-
-  .row-chev { opacity: 1; }
-  .day-h { top: 74px; padding: 4px 8px 6px; }
-}
-@media (max-width: 350px) {
-  .row { grid-template-columns: 40px minmax(0, 1fr) 14px; column-gap: 6px; }
-  .age { overflow: hidden; text-overflow: ellipsis; }
-}
+@media(pointer:coarse) { .toggle { min-height:44px; } .icon-btn { width:44px; height:44px; } }
 </style>

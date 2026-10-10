@@ -20,7 +20,7 @@ import (
 func TestGroupFenceHoldsAndExclusiveWaits(t *testing.T) {
 	reset(t)
 	admin, runner, profile, token, mod := groupFixture(t)
-	member := groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "mbp2607")
+	member := groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "build-7")
 	outside := groupAccount(t, mod, admin, runner, token, "outside", "daemon-a", "Outside", "studio")
 	project, run := insertProjectRun(t, admin, runner, profile, "Client")
 	var group AccountGroup
@@ -36,7 +36,7 @@ func TestGroupFenceHoldsAndExclusiveWaits(t *testing.T) {
 
 	reset(t)
 	admin, runner, profile, token, mod = groupFixture(t)
-	member = groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "mbp2607")
+	member = groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "build-7")
 	outside = groupAccount(t, mod, admin, runner, token, "outside", "daemon-a", "Outside", "studio")
 	project, run = insertProjectRun(t, admin, runner, profile, "Client")
 	callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/groups", encoded(t, map[string]any{
@@ -62,7 +62,7 @@ func TestGroupFenceHoldsAndExclusiveWaits(t *testing.T) {
 func TestSharedQuotaCountsOnce(t *testing.T) {
 	reset(t)
 	admin, runner, profile, token, mod := groupFixture(t)
-	first := groupAccount(t, mod, admin, runner, token, "door-a", "daemon-a", "Spare", "mbp2607")
+	first := groupAccount(t, mod, admin, runner, token, "door-a", "daemon-a", "Spare", "build-7")
 	second := groupAccount(t, mod, admin, runner, token, "door-b", "daemon-b", "Spare", "studio")
 	fp := strings.Repeat("ab", 32)
 	seed(t, admin, func(tx pgx.Tx) error {
@@ -121,7 +121,7 @@ func TestGroupScheduleSitsBetweenAccountAndPool(t *testing.T) {
 func TestUseAccountPayloadHasNoPath(t *testing.T) {
 	reset(t)
 	admin, runner, _, token, mod := groupFixture(t)
-	first := groupAccount(t, mod, admin, runner, token, "door-a", "daemon-a", "Spare", "mbp2607")
+	first := groupAccount(t, mod, admin, runner, token, "door-a", "daemon-a", "Spare", "build-7")
 	second := groupAccount(t, mod, admin, runner, token, "door-b", "daemon-b", "Spare", "studio")
 	fp := strings.Repeat("cd", 32)
 	seed(t, admin, func(tx pgx.Tx) error {
@@ -159,7 +159,7 @@ func TestUseAccountPayloadHasNoPath(t *testing.T) {
 func TestTicketPinDoesNotCrossAFence(t *testing.T) {
 	reset(t)
 	admin, runner, profile, token, mod := groupFixture(t)
-	member := groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "mbp2607")
+	member := groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "build-7")
 	outside := groupAccount(t, mod, admin, runner, token, "outside", "daemon-a", "Outside", "studio")
 	project, ticket, run := insertTicketRun(t, admin, runner, profile)
 	var group AccountGroup
@@ -184,6 +184,58 @@ func TestTicketPinDoesNotCrossAFence(t *testing.T) {
 	}
 }
 
+func TestMigratedWorkRetainsAndEditsAccountPins(t *testing.T) {
+	for _, target := range []string{"account", "group"} {
+		t.Run(target, func(t *testing.T) {
+			reset(t)
+			admin, runner, profile, token, mod := groupFixture(t)
+			pinned := groupAccount(t, mod, admin, runner, token, "pinned", "daemon-a", "Pinned", "studio")
+			other := groupAccount(t, mod, admin, runner, token, "other", "daemon-a", "Other", "studio")
+			_, ticket, run := insertTicketRun(t, admin, runner, profile)
+			var group AccountGroup
+			callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/groups", encoded(t, map[string]any{"harness": "codex", "name": "Pinned group", "account_ids": []string{pinned.ID}}), 201, &group)
+			pin := map[string]any{"ticket_id": ticket, "harness": "codex"}
+			if target == "account" {
+				pin["account_id"] = pinned.ID
+			} else {
+				pin["group_id"] = group.ID
+			}
+			// Seed a legacy pin through the real guard, then restore canonical work.
+			// The full pre-1215 upgrade is covered by the database migration test.
+			seed(t, admin, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE node_kinds SET slug='ticket' WHERE slug='work'`); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO account_ticket_pins(tenant_id,ticket_id,harness,account_id,group_id) VALUES($1,$2,'codex',$3,$4)`, admin.TenantID, ticket, pin["account_id"], pin["group_id"]); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET slug='work' WHERE slug='ticket'`)
+				return err
+			})
+			seedUsed(t, admin, pinned.ID, 80)
+			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, run, "daemon-a", []Account{other}, map[string]int64{"requests": 1}), 409, nil)
+			if scalar(t, admin, `SELECT count(*) FROM agent_runs WHERE id=$1 AND account_id IS NOT NULL`, run) != 0 {
+				t.Fatal("retained pin allowed an unpinned account")
+			}
+			got := mustRoute(t, mod, runner, token, run, "daemon-a", []Account{other, pinned}, map[string]int64{"requests": 1})
+			if got.AccountID != pinned.ID {
+				t.Fatal("retained work pin ignored", got.AccountID)
+			}
+			callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/pins", encoded(t, map[string]any{"ticket_id": ticket, "harness": "codex", "group_id": group.ID}), 204, nil)
+			callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/pins", encoded(t, map[string]any{"ticket_id": ticket, "harness": "codex", "account_id": other.ID}), 204, nil)
+			var pins []TicketPin
+			callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/pins?ticket_id="+ticket, "", 200, &pins)
+			if len(pins) != 1 || pins[0].AccountID != other.ID || pins[0].GroupID != "" {
+				t.Fatalf("edited work pin not saved: %+v", pins)
+			}
+			callStatus(t, mod, &admin, "", "DELETE", "/api/agent-accounts/pins?ticket_id="+ticket+"&harness=codex", "", 204, nil)
+			if scalar(t, admin, `SELECT count(*) FROM account_ticket_pins WHERE ticket_id=$1`, ticket) != 0 {
+				t.Fatal("work pin deletion failed")
+			}
+		})
+	}
+}
+
 func groupFixture(t *testing.T) (tenant.Principal, tenant.Principal, string, string, httpapi.Module) {
 	t.Helper()
 	admin := makePrincipal(t, "groups", "person", "Ada", []string{"admin"})
@@ -197,11 +249,25 @@ func groupAccount(t *testing.T, mod httpapi.Module, admin, runner tenant.Princip
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", encoded(t, map[string]any{
 		"account_key": key, "harness": "codex", "daemon_id": daemon, "label": label,
 	}), 201, &account)
+	ownFixtureAccount(t, admin, &account)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+account.ID+"/probe", encoded(t, map[string]any{
 		"daemon_id": daemon, "daemon_generation": "g1", "available": true, "host_label": host,
 	}), 200, &account)
 	callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/"+account.ID+"/windows", windowBody(time.Now().Add(-time.Minute), time.Now().Add(time.Hour), "requests", 100, "unrestricted"), 201, nil)
+	fixtureAlwaysOn(t, mod, admin, account.ID)
 	return account
+}
+
+// Routing-fence fixtures have real manual caps but no vendor measurements.
+// Give them explicit hours so the asserted fence never depends on wall time.
+func fixtureAlwaysOn(t *testing.T, mod httpapi.Module, person tenant.Principal, accountID string) {
+	t.Helper()
+	s := capacity.DefaultSchedule("UTC")
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	s.Reserve = capacity.ReserveOff
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: accountID, Schedule: &s}), 204, nil)
 }
 
 func insertProjectRun(t *testing.T, person, agent tenant.Principal, profileID, title string) (string, string) {
@@ -231,7 +297,7 @@ func insertTreeRun(t *testing.T, person, agent tenant.Principal, profileID, titl
 			if err := tx.QueryRow(t.Context(), `
 				INSERT INTO nodes (tenant_id, key, kind_id, title, parent_id)
 				SELECT $1::uuid, aeon_next_node_key($1::uuid, k.short_prefix), k.id, 'Ticket', $2::uuid
-				FROM node_kinds k WHERE k.slug = 'ticket'
+				FROM node_kinds k WHERE k.slug = 'work'
 				RETURNING id::text`, person.TenantID, project).Scan(&ticket); err != nil {
 				return err
 			}

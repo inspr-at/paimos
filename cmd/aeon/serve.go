@@ -22,6 +22,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	webpush "github.com/SherClockHolmes/webpush-go"
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
@@ -30,6 +32,7 @@ import (
 	"github.com/inspr-at/paimos/internal/aithema/journal"
 	"github.com/inspr-at/paimos/internal/aithema/tokens"
 	"github.com/inspr-at/paimos/internal/approvals"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachments"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -42,12 +45,17 @@ import (
 	"github.com/inspr-at/paimos/internal/business/quotes/collaboration"
 	"github.com/inspr-at/paimos/internal/business/quotes/confirmation"
 	publicquotes "github.com/inspr-at/paimos/internal/business/quotes/public"
+	"github.com/inspr-at/paimos/internal/chat"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/decisiondesk"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/embedding"
+	"github.com/inspr-at/paimos/internal/engineadmission"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/features"
 	"github.com/inspr-at/paimos/internal/fromclassic"
 	"github.com/inspr-at/paimos/internal/greetings"
 	"github.com/inspr-at/paimos/internal/harness"
@@ -62,6 +70,8 @@ import (
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/outcomes"
+	"github.com/inspr-at/paimos/internal/parentbenefits"
+	"github.com/inspr-at/paimos/internal/phoneapprovals"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
@@ -77,8 +87,10 @@ import (
 	"github.com/inspr-at/paimos/internal/search"
 	"github.com/inspr-at/paimos/internal/stagehandoff"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
+	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbrand"
+	"github.com/inspr-at/paimos/internal/themes"
 	"github.com/inspr-at/paimos/internal/ticketwork"
 	"github.com/inspr-at/paimos/internal/usagedashboard"
 	"github.com/inspr-at/paimos/internal/views"
@@ -127,6 +139,24 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return err
 	}
 	defer pool.Close()
+	return serveWithPool(ctx, cfg, ln, pool, pdfConcurrency)
+}
+
+// serveWithPool keeps the production worker set available to the pool-starvation
+// integration test, including its real startup and shutdown paths.
+func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool *pgxpool.Pool, pdfConcurrency int) error {
+	closeListener := func() {
+		if ln != nil {
+			_ = ln.Close()
+		}
+	}
+	ctx, cancelWorkers := context.WithCancel(ctx)
+	defer cancelWorkers()
+	workerCtx := db.Background(ctx)
+	startPoolStats := db.Stats(pool)
+	slog.Info("database pool configured", "max_conns", startPoolStats.Max, "min_conns", pool.Config().MinConns, "foreground_reserve", db.ForegroundReserve, "background_limit", startPoolStats.BackgroundLimit)
+	var workers []func()
+	startWorker := func(run func()) { workers = append(workers, run) }
 
 	if err := db.EnsureTenant(ctx, pool, cfg.BootstrapTenantSlug, cfg.BootstrapTenantName); err != nil {
 		closeListener()
@@ -167,6 +197,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	}
 	// In-app models are workspace opt-ins. There is no global vendor fallback.
 	workspaceModels := modelprovider.New(pool, authCfg.SessionKey)
+	parentBenefits := parentbenefits.New(pool, workspaceModels.ParentBenefits)
 	workspaceNotes := crm.WorkspaceNotes{Provider: workspaceModels}
 	extraPlugins := []func() (plugins.Plugin, error){costunits.Plugin, func() (plugins.Plugin, error) { return crm.PluginWithNoteGenerator(workspaceNotes) }, quotes.ManifestPlugin, hours.Plugin, greetings.ManifestPlugin, profile.Plugin, host.Plugin}
 	journalStore, err := journal.NewStore(pool)
@@ -184,12 +215,15 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	journalStore.HostAuthorization = aithemaHost.CheckJournal
 	journalStore.AuthorityProjection = aithemaHost.CheckAuthority
 	if tokenMod.Keys != nil {
-		go aithemaHost.Run(ctx)
+		startWorker(func() { aithemaHost.Run(workerCtx) })
 	}
 
+	attachedMessages := attachedmsg.New(attachedmsg.Options{Enabled: cfg.AttachedMessages, SingleInstance: cfg.AttachedMessagesSingleInstance, Origin: cfg.PublicURL})
+	startWorker(func() { attachedMessages.Run(workerCtx, pool) })
+	questionsMod := questions.New(pool)
 	var messagingMod httpapi.Module
 	if cfg.MessagingKey != nil {
-		m, err := inbox.NewMessaging(pool, cfg.MessagingKey)
+		m, err := inbox.NewMessaging(pool, cfg.MessagingKey, inbox.WithHeldReplyBridge(questionsMod.ReplyHeld), inbox.WithAttachedMessages(attachedMessages))
 		if err != nil {
 			closeListener()
 			return fmt.Errorf("messaging: %w", err)
@@ -202,7 +236,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			closeListener()
 			return fmt.Errorf("routine dispatcher: %w", err)
 		}
-		go runRoutineDispatchers(ctx, pool, dispatcher)
+		startWorker(func() { runRoutineDispatchers(workerCtx, pool, dispatcher) })
 	} else {
 		slog.Warn("messaging disabled: AEON_MESSAGING_KEY_FILE is not set")
 	}
@@ -248,8 +282,11 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		closeListener()
 		return fmt.Errorf("public quotes: %w", err)
 	}
-	go embedding.NewWorker(pool, nil, embedding.Options{Resolve: workspaceModels.Embeddings}).Run(ctx)
-	go runConfirmationJobs(ctx, pool, confirmationMod, pdfConcurrency)
+	startWorker(func() {
+		embedding.NewWorker(pool, nil, embedding.Options{Resolve: workspaceModels.Embeddings}).Run(workerCtx)
+	})
+	startWorker(func() { parentBenefits.Run(workerCtx) })
+	startWorker(func() { runConfirmationJobs(workerCtx, pool, confirmationMod, pdfConcurrency) })
 	// A bad AEON_BRAND_FILE must stop startup, never fall back silently.
 	productBrand, err := brand.Load()
 	if err != nil {
@@ -262,7 +299,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	historyMod.UseTickets(releasehistory.DBTickets(pool))
 	historyMod.WithBackfills(pool, "AEON")
 	portalMod := portal.New(pool, cfg.Env != "dev", authCfg.SessionKey)
-	go portalMod.RunLimitSweep(ctx)
+	startWorker(func() { portalMod.RunLimitSweep(workerCtx) })
 	// AEON-178: invites can create the sign-in account through a configured identity
 	// provisioner (none by default). A misconfigured provisioner stops startup.
 	provisioner, err := identity.FromEnv()
@@ -270,16 +307,19 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return fmt.Errorf("identity provisioner: %w", err)
 	}
 	// R2: webhook wake for inbox deliveries.
-	go inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(ctx)
+	startWorker(func() { inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(workerCtx) })
 	// AEON-291: silent unmanaged sessions become "Lost contact" (one runner per tenant).
-	go harness.RunLostContactSweeper(ctx, pool)
+	startWorker(func() { harness.RunLostContactSweeper(workerCtx, pool) })
+	startWorker(func() { nodes.RunWorkLifecycle(workerCtx, pool) })
+	modelMod := modelregistry.NewWithVault(pool, authCfg.SessionKey)
+	startWorker(func() { modelMod.Run(workerCtx) })
 	// AEON-280: delivery deadlines and the attempt cap; one runner across
 	// processes through an advisory lock.
-	go inbox.NewSweeper(pool).Run(ctx)
+	startWorker(func() { inbox.NewSweeper(pool).Run(workerCtx) })
 	// AEON-288: one daily pass nominates method learnings. It never accepts them.
-	go knowledge.NewTagger(pool).Run(ctx)
+	startWorker(func() { knowledge.NewTagger(pool).Run(workerCtx) })
 	statusAuto := statusautopilot.New(pool)
-	go statusAuto.Run(ctx)
+	startWorker(func() { statusAuto.Run(workerCtx) })
 	recurringWork := recurrences.New(pool)
 	publishedHistory, err := releasehistory.Embedded()
 	if err != nil {
@@ -304,13 +344,27 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		publications = append(publications, recurrences.Publication{ProjectKey: "AEON", Name: name, Version: release.Version, PublishedAt: *at})
 	}
 	recurringWork.WithHistory(publications)
-	go recurringWork.Run(ctx)
+	startWorker(func() { recurringWork.Run(workerCtx) })
 	pairingMod := agentpairing.New(pool, cfg.PublicURL, cfg.BootstrapTenantSlug, cfg.PairingNixGuide)
 	if err := pairingMod.ConfigureAccountLink(authCfg.SessionKey); err != nil {
 		return fmt.Errorf("account linking: %w", err)
 	}
+	var vapid *webpush.Options
+	if cfg.PhonePush != nil {
+		vapid = &webpush.Options{VAPIDPublicKey: cfg.PhonePush.PublicKey, VAPIDPrivateKey: cfg.PhonePush.PrivateKey, Subscriber: cfg.PhonePush.Subject}
+	}
+	phoneMod := phoneapprovals.New(pool, pairingMod, cfg.PublicURL, cfg.LinkKey, vapid)
+	stepupMod := stepup.New(pool, phoneMod, cfg.PublicURL)
+	stepupMod.RecordResultsTx = inbox.RecordResults
+	stepupMod.Reauthenticate = authMod.BeginStepUp
+	authMod.StepUp = stepupMod
+	startWorker(func() { phoneMod.Run(workerCtx) })
+	pairingMod.SetAttachedMessages(attachedMessages)
 	doctrineMod := doctrine.New(pool, doctrine.Options{
+		Repositories:      cfg.DoctrineRepositories,
 		CredentialsDir:    cfg.DoctrineCredentialsDir,
+		MirrorDir:         cfg.DoctrineMirrorDir,
+		DefaultSource:     cfg.DoctrineDefaultSource,
 		GuardKey:          cfg.DoctrineGuardKey,
 		BinaryAllowlist:   cfg.DoctrineBinaryAllowlist,
 		AnalysisLearnings: knowledge.AnalysisLearnings,
@@ -319,8 +373,15 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			TenantID: cfg.DoctrineAppTenantID, GateLogin: cfg.DoctrineGateLogin, DCOAcknowledged: cfg.DoctrineDCOAcknowledged,
 		},
 	})
-	go doctrineMod.EnsurePrivateGuards(ctx)
-	go doctrineMod.RunOutcomeAnalysis(ctx)
+	questionsMod.WithDoctrine(doctrineMod)
+	startWorker(func() { questionsMod.Run(workerCtx) })
+	startWorker(func() {
+		if err := doctrineMod.EnsureDefaultSource(workerCtx); err != nil {
+			slog.Error("doctrine default source", "err", err)
+		}
+		doctrineMod.EnsurePrivateGuards(workerCtx)
+	})
+	startWorker(func() { doctrineMod.RunOutcomeAnalysis(workerCtx) })
 	reviewApp := &crossreview.GitHubApp{Config: crossreview.AppConfig{
 		ID: cfg.ReviewAppID, InstallationID: cfg.ReviewInstallationID, KeyFile: cfg.ReviewAppKeyFile,
 		TenantID: cfg.ReviewAppTenantID, Repository: cfg.ReviewAppRepository,
@@ -330,7 +391,13 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		reviewPublisher = reviewApp
 	}
 	reviewMod := crossreview.New(pool, reviewPublisher)
-	go reviewMod.RunStatusReporter(ctx)
+	reviewMod.ConfigureWebhook(cfg.ReviewWebhookSecret)
+	startWorker(func() { reviewMod.RunStatusReporter(workerCtx) })
+	deliveryMod := delivery.New(pool, reviewApp.Config, cfg.ReviewWebhookSecret, delivery.AppReader{App: reviewApp}, reviewMod.HandlePullChange)
+	startWorker(func() { deliveryMod.Run(workerCtx) })
+	startWorker(func() { deliveryMod.RunAlerts(workerCtx) })
+	startWorker(func() { deliveryMod.RunFlow(workerCtx) })
+	startWorker(func() { deliveryMod.RunAudit(workerCtx) })
 	api := &httpapi.Server{
 		Pool:                    pool,
 		Brand:                   &productBrand,
@@ -350,9 +417,11 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			nodes.New(pool, nodes.SQLWriter{}),
 			fromclassic.New(pool),
 			tenantbrand.New(pool),
+			features.New(pool),
 			workspaceModels,
+			parentBenefits,
 			relations.New(pool),
-			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(statusautopilot.UndoHandlers()), events.WithUndoHandlers(releases.UndoHandlers()), events.WithUndoHandlers(harness.UndoHandlers())),
+			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), events.WithCausalUndoHandlers(nodes.CausalUndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(themes.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(statusautopilot.UndoHandlers()), events.WithUndoHandlers(releases.UndoHandlers()), events.WithUndoHandlers(harness.UndoHandlers())),
 			search.NewWithResolver(pool, workspaceModels.Embeddings),
 			views.New(pool),
 			activity.New(pool),
@@ -362,10 +431,12 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			projectgroups.New(pool),
 			historyMod,
 			profile.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
+			themes.New(pool),
 			imports.New(pool),
 			// R2: agents
-			inbox.New(pool),
-			harness.New(pool, nodes.CapturePlanningStart),
+			inbox.New(pool, attachedMessages),
+			chat.New(pool),
+			harness.NewWithSessionRecovery(pool, agentruns.PrepareSessionRecovery, nodes.CapturePlanningStart),
 			rules.New(pool),
 			doctrineMod,
 			ticketwork.New(pool),
@@ -374,13 +445,19 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			usagedashboard.New(pool),
 			workorders.New(pool),
 			reviewMod,
-			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
+			deliveryMod,
+			engineadmission.New(pool, engineadmission.AppReader{App: reviewApp}),
+			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun, reviewMod.PrepareForRun),
 			approvals.New(pool),
-			questions.New(pool),
-			modelregistry.New(pool),
+			phoneMod,
+			stepupMod,
+			questionsMod,
+			decisiondesk.New(pool),
+			modelMod,
 			agentaccounts.New(pool),
+			accountuse.New(pool),
 			pairingMod,
-			// R3: journey
+			// Retired Flow compatibility routes
 			journey.New(pool),
 			requirements.New(pool),
 			releases.New(pool),
@@ -390,7 +467,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			plugins.NewWithRegistry(pool, pluginRegistry),
 			// EvidenceLaunchChecks admits only from the recorded candidate artifact
 			// and a fresh launch_readiness row. A missing record stays refused.
-			stagehandoff.New(pool, pluginRegistry, stagehandoff.EvidenceLaunchChecks{Pool: pool}),
+			stagehandoff.New(pool, pluginRegistry),
 			// R4: business plugins
 			costunits.New(pool, pluginRegistry),
 			crm.NewWithNoteGenerator(pool, pluginRegistry, workspaceNotes),
@@ -402,7 +479,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			hours.New(pool, pluginRegistry),
 			directory.New(pool, pluginRegistry),
 		},
-		Middleware: []func(http.Handler) http.Handler{authMod.Middleware, (doctrine.Credentials{Dir: cfg.DoctrineCredentialsDir}).CatalogMiddleware, events.PositionMiddleware(pool)},
+		Middleware: []func(http.Handler) http.Handler{authMod.Middleware, doctrineMod.CatalogMiddleware, events.PositionMiddleware(pool)},
 	}
 	if tokenMod.Keys != nil {
 		api.AithemaOrigin = cfg.PublicURL
@@ -423,6 +500,11 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		IdleTimeout:       time.Minute,
 	}
 
+	// Start the complete worker set only after initialization succeeds.
+	go db.WatchPool(ctx, pool)
+	for _, run := range workers {
+		go run()
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		api.SetServing(true)
@@ -584,8 +666,8 @@ func resolveWeb(cfg config.Config) (fs.FS, error) {
 }
 
 // settleUsage lets finished runs settle their account allowance projections (R2).
-func settleUsage(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, _ agentruns.Telemetry) error {
-	return agentaccounts.Settle(ctx, tx, p, run.ID)
+func settleUsage(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, _ agentruns.Telemetry, pending *[]events.Change) error {
+	return agentaccounts.SettleDeferred(ctx, tx, p, run.ID, pending)
 }
 
 // runRoutineDispatchers starts one routine dispatcher per tenant that exists at

@@ -1,0 +1,391 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/statusautopilot
+paths:
+  /status-autopilot/attention:
+    get:
+      operationId: listAutopilotAttention
+      summary: Needs attention across visible projects, 50 rows per keyset page
+      description: 'Ordered by kind (proposed, triage, cancel, blocked, missed), then newest flag time and event identity. Existing opaque node/event cursors remain accepted.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: after, in: query, schema: {type: string, maxLength: 120}}
+        - {name: kind, in: query, schema: {type: string, enum: [proposed, triage, cancel, blocked, missed]}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: assignee, in: query, schema: {type: string, maxLength: 36, description: 'Principal UUID, or none for unassigned'}}
+        - {name: q, in: query, schema: {type: string, maxLength: 200}}
+      responses:
+        '200':
+          description: Visible items and counts, with bounded project and assignee facets
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AutopilotAttentionPage'}
+        '400': {description: Invalid filter or cursor}
+  /status-autopilot/attention/actions:
+    post:
+      operationId: resolveAutopilotAttention
+      summary: Apply, dismiss or undo up to 100 suggestions with individual results
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, items]
+              properties:
+                action: {type: string, enum: [apply, dismiss, undo]}
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: {$ref: '#/components/schemas/AutopilotAttentionAction'}
+      responses:
+        '200':
+          description: Each item commits independently; failures remain explicit
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [event_id, ok]
+                      properties:
+                        event_id: {type: integer, format: int64}
+                        ok: {type: boolean}
+                        resolution_event_id: {type: integer, format: int64}
+                        revision: {type: string, format: date-time}
+                        release_id: {type: string, format: uuid}
+                        release_revision: {type: integer, format: int64}
+                        release_project_revision: {type: integer, format: int64}
+                        previous_release_project_revision: {type: integer, format: int64}
+                        previous_release_revision:
+                          type: integer
+                          format: int64
+                          description: Release revision verified before this committed change; refresh only identities matching it
+                        error: {type: string}
+        '400': {description: Invalid action or batch}
+  /status-autopilot/attention/bulk:
+    post:
+      operationId: bulkAutopilotAttention
+      summary: Preview or run up to 1000 attention changes
+      description: 'Runs require an actor-bound preview token and Idempotency-Key. Preview freezes identities and revisions. Each item commits independently with current authorization; new flags are excluded. A run has a 20 second deadline and reports partial results.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: Idempotency-Key, in: header, schema: {type: string, minLength: 1, maxLength: 128}, description: 'Required for a run; exact replay returns the stored result'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AutopilotAttentionBulkRequest'}
+      responses:
+        '200':
+          description: 'Preview or durable result including failures and skipped items'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/AutopilotAttentionBulkPreview'}
+                  - {$ref: '#/components/schemas/AutopilotAttentionBulkResult'}
+        '400': {description: 'Invalid request or missing idempotency key'}
+        '403': {description: 'Current write authority denied'}
+        '404': {description: 'Preview not available to this actor and tenant'}
+        '409': {description: 'Another bulk change is running here, preview expired or request does not match its preview or idempotency key'}
+  /status-autopilot/attention/bulk/{batch_id}/undo:
+    parameters:
+      - {name: batch_id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: undoAutopilotAttentionBulk
+      summary: Undo a batch within 24 hours
+      description: 'The batch actor or a settings manager may request undo. Every item retains the existing nodes.write, events.undo and events.undo_other checks and latest-change guard. Each item commits independently; failures are explicit and successful undos are safely replayed.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200':
+          description: 'Committed undo counts and individual failures'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AutopilotAttentionBulkResult'}
+        '400': {description: 'Invalid batch identity'}
+        '403': {description: 'Batch actor or settings management authority required'}
+        '404': {description: 'Batch unavailable or older than 24 hours'}
+        '409': {description: 'Another bulk change is running here'}
+  /status-autopilot/attention/groups:
+    get:
+      operationId: listAutopilotAttentionGroups
+      summary: Counts and permissions for folded attention groups
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: by, in: query, required: true, schema: {type: string, enum: [project, kind]}}
+        - {name: kind, in: query, schema: {type: string, enum: [proposed, triage, cancel, blocked, missed]}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: assignee, in: query, schema: {type: string, maxLength: 36}}
+        - {name: q, in: query, schema: {type: string, maxLength: 200}}
+      responses:
+        '200':
+          description: 'RLS-filtered group totals; at most 500 groups with explicit truncation'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AutopilotAttentionGroups'}
+        '400': {description: 'Invalid filters or grouping'}
+  /status-autopilot/changes:
+    get:
+      operationId: listStatusAutopilotChanges
+      summary: Recent automatic changes with reasons and Undo state
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 50}, description: Bounds recent changes; legacy suggestions listing is unchanged}
+        - {name: node_id, in: query, schema: {type: string, format: uuid}}
+        - {name: suggestions, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200':
+          description: Latest 50 visible changes; suggestions=true lists every currently flagged visible ticket (triage, cancellation, blocked reminder and missed release), independent of the recent-change window
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/StatusAutopilotChange'}
+  /status-autopilot/projects:
+    get:
+      operationId: listAutopilotProjects
+      summary: Project overrides or inheriting projects, 50 per keyset page
+      description: Workspace settings.manage required. Only visible live projects are returned; inherited_count counts visible projects following the workspace. Search and cursor are bounded; reads have a ten-second deadline.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: mode, in: query, schema: {type: string, enum: [overrides, inherit], default: overrides}}
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: q, in: query, schema: {type: string, maxLength: 200}}
+      responses:
+        '200':
+          description: Bounded project page and exact visible inheritance count
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor, inherited_count]
+                properties:
+                  inherited_count: {type: integer, minimum: 0}
+                  next_cursor: {type: [string, 'null'], format: uuid}
+                  items:
+                    type: array
+                    maxItems: 50
+                    items:
+                      type: object
+                      required: [id, key, title, override]
+                      properties:
+                        id: {type: string, format: uuid}
+                        key: {type: string}
+                        title: {type: string}
+                        override: {$ref: '#/components/schemas/StatusAutopilotOverride'}
+        '400': {description: "Invalid mode, search or cursor"}
+        '403': {description: Workspace settings.manage required}
+  /status-autopilot/proposals:
+    get:
+      operationId: listStatusAutopilotProposals
+      summary: Pending status proposals without ticket mutations
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200':
+          description: All pending visible proposals, including stale proposals that can only be dismissed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/StatusAutopilotProposal'}}
+  /status-autopilot/proposals/{eventId}:
+    parameters:
+      - {name: eventId, in: path, required: true, schema: {type: integer, minimum: 1}}
+    put:
+      operationId: resolveStatusAutopilotProposal
+      summary: Apply or dismiss a proposal as a workspace admin
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: {type: string, enum: [apply, dismiss]}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Applied or dismissed; returns an empty object}
+        '400': {description: Invalid proposal or action}
+        '403': {description: Person with settings.manage and nodes.write required; server Off forbids Apply}
+        '404': {description: Proposal not visible}
+        '409': {description: 'Proposal resolved or its ticket, rule or eligibility changed; reload'}
+components:
+  schemas:
+    AutopilotAttentionAction:
+      type: object
+      additionalProperties: false
+      required: [event_id, node_id, revision]
+      properties:
+        event_id: {type: integer, format: int64, minimum: 1}
+        node_id: {type: string, format: uuid}
+        revision: {type: string, format: date-time}
+        resolution_event_id: {type: integer, format: int64}
+        release_id: {type: string, format: uuid}
+        release_revision: {type: integer, format: int64}
+        release_project_revision: {type: integer, format: int64}
+    AutopilotAttentionBulkPreview:
+      type: object
+      required: [total, moves, skipped, through_event_id, preview_token, limit, truncated]
+      properties:
+        total: {type: integer, minimum: 0}
+        through_event_id: {type: integer, format: int64}
+        preview_token: {type: string, format: uuid}
+        limit: {type: integer, enum: [1000]}
+        truncated: {type: boolean, description: 'True when the scope contains more than the first 1000 frozen items'}
+        skipped: {type: array, items: {$ref: '#/components/schemas/AutopilotAttentionBulkSkipped'}}
+        moves:
+          type: array
+          maxItems: 1000
+          items:
+            type: object
+            required: [id, kind, from, to, count, sample_keys]
+            properties:
+              id: {type: string}
+              kind: {type: string}
+              from: {type: string}
+              to: {type: string}
+              release_id: {type: string, format: uuid}
+              release_title: {type: string}
+              count: {type: integer}
+              sample_keys: {type: array, maxItems: 4, items: {type: string}}
+    AutopilotAttentionBulkRequest:
+      type: object
+      additionalProperties: false
+      required: [action, scope, dry_run]
+      properties:
+        action: {type: string, enum: [apply, dismiss]}
+        scope: {$ref: '#/components/schemas/AutopilotAttentionBulkScope'}
+        dry_run: {type: boolean}
+        through_event_id: {type: integer, format: int64, minimum: 0}
+        preview_token: {type: string, format: uuid}
+        exclude: {type: array, maxItems: 1000, uniqueItems: true, items: {type: string, maxLength: 100}}
+    AutopilotAttentionBulkResult:
+      type: object
+      required: [batch_id, changed, skipped, failed, completed]
+      properties:
+        batch_id: {type: string, format: uuid}
+        changed: {type: integer, minimum: 0}
+        completed: {type: boolean, description: 'False if the deadline or cancellation left items unprocessed; skipped reports them explicitly'}
+        skipped: {type: array, items: {$ref: '#/components/schemas/AutopilotAttentionBulkSkipped'}}
+        failed:
+          type: array
+          maxItems: 1000
+          items:
+            type: object
+            required: [event_id, key, error]
+            properties:
+              event_id: {type: integer, format: int64}
+              key: {type: string}
+              error: {type: string}
+    AutopilotAttentionBulkScope:
+      type: object
+      additionalProperties: false
+      properties:
+        project_id: {type: string, format: uuid}
+        kind: {type: string, enum: [proposed, triage, cancel, blocked, missed]}
+        assignee: {type: string, maxLength: 36}
+        q: {type: string, maxLength: 200}
+    AutopilotAttentionBulkSkipped:
+      type: object
+      required: [reason, count, sample_keys]
+      properties:
+        reason: {type: string}
+        count: {type: integer, minimum: 0}
+        sample_keys: {type: array, maxItems: 4, items: {type: string}}
+    AutopilotAttentionFacet:
+      type: object
+      required: [id, label]
+      properties:
+        id: {type: string}
+        label: {type: string}
+    AutopilotAttentionGroups:
+      type: object
+      required: [groups, total, truncated]
+      properties:
+        total: {type: integer, minimum: 0, description: 'Total visible attention rows before the group cap'}
+        truncated: {type: boolean}
+        groups:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [id, total, counts, applicable, editable, can_manage]
+            properties:
+              id: {type: string}
+              kind: {type: string}
+              project_id: {type: string, format: uuid}
+              key: {type: string}
+              title: {type: string}
+              total: {type: integer}
+              counts: {type: object, additionalProperties: {type: integer}}
+              applicable: {type: integer}
+              editable: {type: integer}
+              override_mode: {type: string, enum: [inherit, on, off]}
+              can_manage: {type: boolean}
+    AutopilotAttentionItem:
+      type: object
+      required: [event_id, node_id, revision, key, title, project_id, kind, from, to, reason, at, editable, applicable]
+      properties:
+        event_id: {type: integer, format: int64}
+        node_id: {type: string, format: uuid}
+        revision: {type: string, format: date-time}
+        key: {type: string}
+        title: {type: string}
+        project_id: {type: string, format: uuid}
+        kind: {type: string, enum: [proposed, triage, cancel, blocked, missed]}
+        from: {type: string}
+        to: {type: string}
+        reason: {type: string}
+        at: {type: string, format: date-time}
+        editable: {type: boolean}
+        applicable: {type: boolean}
+        unavailable_reason: {type: string}
+        release_id: {type: string, format: uuid}
+        release_revision: {type: integer, format: int64}
+        release_project_revision: {type: integer, format: int64}
+        release_title: {type: string}
+    AutopilotAttentionPage:
+      type: object
+      required: [items, total, counts, facets, facets_truncated, next_cursor]
+      properties:
+        items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/AutopilotAttentionItem'}}
+        total: {type: integer}
+        counts: {type: object, additionalProperties: {type: integer}}
+        next_cursor: {type: [string, 'null']}
+        facets_truncated: {type: boolean}
+        facets:
+          type: object
+          properties:
+            projects: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AutopilotAttentionFacet'}}
+            assignees: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AutopilotAttentionFacet'}}
+    StatusAutopilotProposal:
+      type: object
+      required: [event_id, node_id, key, title, rule, reason, from, to, at, changed_since, applicable]
+      properties:
+        event_id: {type: integer, minimum: 1}
+        node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        rule: {type: string, enum: [new, backlog, blocked, progress, done, publish, accept]}
+        reason: {type: string}
+        from: {type: string}
+        to: {type: string, description: Proposed status or attention flag}
+        at: {type: string, format: date-time}
+        changed_since: {type: boolean}
+        applicable: {type: boolean, description: 'Caller can apply, ticket revision matches and server is not Off; eligibility is rechecked on Apply.'}

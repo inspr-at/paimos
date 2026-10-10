@@ -407,7 +407,7 @@ defineExpose({ el: root, editTitle: () => title.value?.start(), focusAddContact:
 .c-meta a:hover { color: var(--teal-ink); text-decoration: underline; }
 .c-meta svg { color: var(--ink-3); }
 .c-bind { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 2px; font-size: 12px; }
-.bound { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 999px; background: rgba(47, 122, 90, .1); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .28); color: var(--ok); font-weight: 600; }
+.bound { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--ok-bg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 28%, transparent); color: var(--ok); font-weight: 600; }
 .unbound { color: var(--ink-3); }
 .link-btn { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12px; font-weight: 600; }
 .link-btn:hover { background: var(--row-hover); }

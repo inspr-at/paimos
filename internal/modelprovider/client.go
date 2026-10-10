@@ -127,6 +127,22 @@ func (s *Service) Chat(ctx context.Context, tenantID, providerID string, revisio
 	return s.chat(ctx, c, key, messages, 2048)
 }
 
+// ParentBenefits uses only the explicitly selected workspace chat provider.
+// The request remains bound to the provider revision approved at claim time.
+func (s *Service) ParentBenefits(ctx context.Context, tenantID, providerID string, revision int64, messages []Message) (Completion, error) {
+	c, key, err := s.resolve(ctx, tenantID)
+	if err != nil {
+		return Completion{}, err
+	}
+	if !c.Enabled || !c.Features.ParentBenefits {
+		return Completion{}, ErrDisabled
+	}
+	if c.ProviderID != providerID || c.Revision != revision {
+		return Completion{}, errors.New("provider configuration changed")
+	}
+	return s.chat(ctx, c, key, messages, 2048)
+}
+
 func (s *Service) chat(ctx context.Context, c Config, key Secret, messages []Message, maxTokens int) (Completion, error) {
 	endpointURL, err := endpoint(c.BaseURL, "chat/completions")
 	if err != nil || c.ChatModel == "" {

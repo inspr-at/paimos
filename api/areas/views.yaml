@@ -1,0 +1,254 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/views
+paths:
+  /views:
+    get:
+      operationId: listViews
+      description: Own and tenant-shared views, deleted ones left out. With project_id, that project's views in the order they were made (its view bar); without, every view, most recently changed first.
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          $ref: '#/components/responses/Views'
+    post:
+      operationId: createView
+      security: *auth
+      requestBody:
+        $ref: '#/components/requestBodies/ViewWrite'
+      responses:
+        '201':
+          $ref: '#/components/responses/View'
+        '400':
+          $ref: '#/components/responses/Error'
+  /views/deleted:
+    get:
+      operationId: listDeletedViews
+      description: "Only the caller's own deleted views from the last 30 days, newest deletion first with id descending as the tie-breaker. Shared views owned by someone else are excluded. Pagination keeps the first page's time window; cursors expire after one hour and are bound to the tenant and principal. Reasons use matching deletion audit evidence, never a timestamp heuristic. Restore uses the existing owner-only restore operation."
+      security: *auth
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: cursor
+          in: query
+          description: "Opaque next_cursor from the preceding page."
+          schema: {type: string, minLength: 1, maxLength: 1024}
+      responses:
+        '200':
+          $ref: '#/components/responses/DeletedViews'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+  /views/{viewId}:
+    parameters: [{$ref: '#/components/parameters/ViewId'}]
+    get:
+      operationId: getView
+      security: *auth
+      responses:
+        '200':
+          $ref: '#/components/responses/View'
+        '404':
+          $ref: '#/components/responses/Error'
+    patch:
+      operationId: updateView
+      description: Owner only.
+      security: *auth
+      requestBody:
+        $ref: '#/components/requestBodies/ViewPatch'
+      responses:
+        '200':
+          $ref: '#/components/responses/View'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: deleteView
+      description: Owner only. The delete is soft; restore brings the view back with its id.
+      security: *auth
+      responses:
+        '204':
+          description: Deleted
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /views/{viewId}/restore:
+    parameters: [{$ref: '#/components/parameters/ViewId'}]
+    post:
+      operationId: restoreView
+      description: Owner only. Brings a deleted view back (the Undo of a delete) and appends view.restored.
+      security: *auth
+      responses:
+        '200':
+          $ref: '#/components/responses/View'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: The view is not deleted
+components:
+  schemas:
+    DeletedView:
+      type: object
+      required: [id, project_id, name, mode, deleted_at, deletion_reason]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: [string, 'null'], format: uuid}
+        name: {type: string}
+        mode: {type: string, enum: [list, outline, graph]}
+        deleted_at: {type: string, format: date-time}
+        deletion_reason:
+          type: string
+          enum: [owner_deleted, retired_by_upgrade, unknown]
+          description: "owner_deleted requires a matching owner-authored deletion snapshot; retired_by_upgrade requires the System-authored empty-column retirement snapshots used by migration 1249. Missing, stale or ambiguous evidence returns unknown."
+    DeletedViewList:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: {$ref: '#/components/schemas/DeletedView'}
+        next_cursor:
+          type: [string, 'null']
+          description: "Continue with this cursor; null means the page is complete."
+    SavedView:
+      allOf:
+        - {$ref: '#/components/schemas/ViewWrite'}
+        - type: object
+          required: [id, owner_principal_id, project_id, sort, sort_keys, group_by, mode, shared, created_at, updated_at, deleted_at]
+          properties:
+            id: {type: string, format: uuid}
+            owner_principal_id: {type: string, format: uuid}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+            deleted_at: {type: [string, 'null'], format: date-time}
+    ViewList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SavedView'
+    ViewPatch:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        filters:
+          type: object
+        sort:
+          type: object
+        sort_keys:
+          type: array
+          maxItems: 8
+          items: {type: string}
+        group_by:
+          type: string
+        mode:
+          type: string
+          enum: [list, outline, graph]
+          default: list
+          description: "Ticket presentation mode; saved views always store it."
+        columns:
+          type: array
+          items:
+            type: string
+        shared:
+          type: boolean
+    ViewWrite:
+      type: object
+      required: [name, filters, columns]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        project_id:
+          type: [string, 'null']
+          format: uuid
+          description: The project whose lists show the view; null or absent is workspace-wide. Set on create only.
+        filters:
+          type: object
+          description: Node-list filter keys and values (at most 8 KiB); the web app owns their shape
+        sort_keys:
+          type: array
+          maxItems: 8
+          description: The list sort in the node list's spelling, for example [state, -updated_at]
+          items: {type: string, pattern: '^-?[a-z][a-z_]{0,23}$'}
+        group_by:
+          type: string
+          default: none
+          pattern: '^[a-z][a-z_]{0,23}$'
+        sort:
+          type: object
+          required: [field, direction]
+          properties:
+            field:
+              type: string
+              enum: [position, updated_at, created_at, key, title]
+            direction:
+              type: string
+              enum: [asc, desc]
+          description: The earlier single-key sort; defaults to position asc
+        mode:
+          type: string
+          enum: [list, outline, graph]
+          default: list
+          description: "Ticket presentation mode; saved views always store it."
+        columns:
+          type: array
+          maxItems: 32
+          description: "Visible column ids in order; empty is retained for legacy clients."
+          items:
+            type: string
+            pattern: '^[a-z][a-z_]{0,23}$'
+        shared:
+          type: boolean
+          default: false
+  parameters:
+    ViewId:
+      name: viewId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  requestBodies:
+    ViewPatch:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ViewPatch'
+    ViewWrite:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ViewWrite'
+  responses:
+    DeletedViews:
+      description: "Owner-only recently deleted views."
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/DeletedViewList'
+    View:
+      description: Saved view
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SavedView'
+    Views:
+      description: Saved views
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ViewList'

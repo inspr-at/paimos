@@ -3,12 +3,13 @@
 // archive, frozen versions, the customer link and the acceptance receipt. Each
 // call sends the precondition the server asks for, so a stale view fails loudly
 // instead of changing a quote someone else just changed.
+import { captureToastOwner } from '../toast'
 import { api, APIError } from '../api'
-import { undoLatest } from '../crm'
+import { mutationEventIds, undoEvents, type MutationReceipt } from '../crm'
 import type { QuoteDocumentData } from './types'
 import type { QuoteRow, QuoteState } from './list'
 
-export interface QuoteProjection {
+export interface QuoteProjection extends MutationReceipt {
   quote_node_id: string; project_node_id: string; customer_org_node_id: string; current_version: number
   state: QuoteState; revision: number; offer_no?: string; archived: boolean; project_ref: string
   classic_status: QuoteRow['classic_status']
@@ -34,10 +35,12 @@ export interface SettingsState { revision: number; sender: Record<string, unknow
 const seg = (value: string) => encodeURIComponent(value)
 const quote = (id: string) => `/quotes/${seg(id)}`
 async function send<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  const current = captureToastOwner()
   const response = await api(path, body === undefined ? { method } : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   const data = await response.json().catch(() => ({})) as Record<string, unknown>
   if (!response.ok) throw new APIError(response.status, typeof data.error === 'string' ? data.error : `Quote request failed (${response.status})`, data)
-  return data as T
+  const eventIds = mutationEventIds(response, current)
+  return (eventIds ? { ...data, event_ids: eventIds } : data) as T
 }
 // What a failed lifecycle call means for the person, in the app's words.
 export function lifecycleError(e: unknown, fallback: string): string {
@@ -56,7 +59,7 @@ export const finalizeQuote = (id: string, pre: { expected_quote_revision: number
 export const branchQuote = (id: string, pre: { expected_quote_revision: number; expected_version: number; expected_content_sha256: string }) =>
   send<unknown>(`${quote(id)}/draft/branch`, 'POST', pre)
 // Only a draft that was never issued can be deleted (hidden, number kept); undo restores it.
-export const deleteQuote = (id: string, expectedRevision: number) => send<unknown>(`${quote(id)}?expected_revision=${expectedRevision}`, 'DELETE')
+export const deleteQuote = (id: string, expectedRevision: number) => send<MutationReceipt>(`${quote(id)}?expected_revision=${expectedRevision}`, 'DELETE')
 export const duplicateQuote = (id: string, expectedRevision: number) => send<QuoteProjection>(`${quote(id)}/duplicate`, 'POST', { expected_revision: expectedRevision })
 export const setArchived = (id: string, expectedRevision: number, archived: boolean) =>
   send<QuoteProjection>(`${quote(id)}/visibility`, 'PATCH', { expected_revision: expectedRevision, archived })
@@ -115,5 +118,5 @@ export const reviseConfirm = (current: number, accepted: boolean) => ({
   title: `Revise as version ${current + 1}?`, confirmLabel: 'Revise',
   body: `Version ${current} stays exactly as issued, with its fingerprint${accepted ? ' and the customer’s acceptance' : ''}. You edit a new draft; issuing it makes version ${current + 1} of the same quote. Its customer link stops accepting.`,
 })
-// Undoes the newest of these events on a quote through the event log.
-export const undoQuote = (quoteId: string, types: string[]) => undoLatest([{ node: quoteId, types }])
+// Undo is bound to the accepted write, including after navigation.
+export const undoQuote = (receipt: MutationReceipt) => undoEvents(receipt.event_ids)

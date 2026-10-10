@@ -1,14 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSession } from '../../stores/session'
-import { CONNECTED_COMPUTER_REASON, agentDeactivatePoints, keyHint, revokeAgentKey, splitAgents, type Agent } from '../../lib/access'
+import { CONNECTED_COMPUTER_REASON, agentDeactivatePoints, keyExpiry, keyHint, adoptAgentKey, revokeAgentKey, splitAgents, type Agent } from '../../lib/access'
 import type { RowAction } from '../../lib/rowActions'
 import { can, myPermissions } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
-import { keyState, listAgentKeys, type AgentKey } from '../../lib/settings'
+import { keyState, type AgentKey } from '../../lib/settings'
 import { toast } from '../../lib/toast'
 import { relativeTime } from '../../lib/work'
 import { useAccess } from '../../stores/access'
@@ -46,7 +46,8 @@ async function agentCreated(agent: Agent, presetId: string) {
   void access.load(true)
 }
 const manage = computed(() => can('members.manage'))
-const keys = ref<AgentKey[] | null>(null)
+// The same cache the footer counts. A revoke, a new key or a settled change refreshes both.
+const keys = computed(() => access.keys)
 const keysError = ref('')
 const open = ref(new Set<string>())
 const groups = computed(() => splitAgents(access.agents))
@@ -60,7 +61,7 @@ const keysOf = (agent: Agent) => (keys.value ?? []).filter(k => k.principal_id =
 async function loadKeys() {
   if (!manageKeys.value) return
   keysError.value = ''
-  try { keys.value = await listAgentKeys() } catch { keysError.value = 'The agent keys could not be loaded.' }
+  try { await access.loadKeys() } catch { if (active) keysError.value = 'The agent keys could not be loaded.' }
 }
 function toggle(agent: Agent) { const next = new Set(open.value); if (next.has(agent.principal_id)) next.delete(agent.principal_id); else next.add(agent.principal_id); open.value = next }
 async function revoke(key: AgentKey) {
@@ -69,8 +70,42 @@ async function revoke(key: AgentKey) {
   try { await revokeAgentKey(key.id); await Promise.all([loadKeys(), access.load(true)]); toast(`The key ${keyHint(key.prefix)} is revoked`) }
   catch (e) { toast(problem(e, 'The key stays active'), { tone: 'error' }) }
 }
+
+let active = true
+onUnmounted(() => { active = false })
+const adoptionBusy = ref(false)
+const personIdentity = () => `${session.identity?.tenant.id}:${session.identity?.principal.id}`
+watch(personIdentity, () => { open.value = new Set(); editing.value = null; void loadKeys() })
+// The footer's "key expires soon" lands here: the agents holding such a key open, and the first scrolls into view (AEON-785).
+watch([() => route.query.expiring, keys], async ([flag, list]) => {
+  if (flag !== '1' || !list) return
+  const soon = working.value.filter(agent => list.some(key => key.principal_id === agent.principal_id && keyState(key) === 'active' && keyExpiry(key).soon))
+  const query = { ...route.query }
+  delete query.expiring
+  void router.replace({ query })
+  if (!soon.length) return
+  open.value = new Set([...open.value, ...soon.map(agent => agent.principal_id)])
+  await nextTick()
+  document.getElementById(`keys-${soon[0]!.principal_id}`)?.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+}, { immediate: true })
+async function adopt(key: AgentKey) {
+  if (adoptionBusy.value || !manageKeys.value) return
+  const targetID = key.id
+  const identity = personIdentity()
+  adoptionBusy.value = true
+  try {
+    const ok = await confirmAction({ title: 'Make me the owner?', points: [`Key: ${key.name}`, "This key will follow your current permissions and agent plan.", "The existing key keeps working; its secret is unchanged."], confirmLabel: 'Make me the owner' })
+    if (!ok || !active || identity !== personIdentity() || !manageKeys.value || !keys.value?.some(k => k.id === targetID && k.created_by_principal_id === null)) return
+    const adopted = await adoptAgentKey(targetID)
+    if (!active || identity !== personIdentity() || !keys.value?.some(k => k.id === targetID && k.created_by_principal_id === null)) return
+    access.noteKey(adopted)
+    toast('You are now the key owner')
+  } catch (e) { if (active && identity === personIdentity()) toast(problem(e, 'The key owner could not be changed'), { tone: 'error' }) }
+  finally { adoptionBusy.value = false }
+}
+
 const editing = ref<{ agent: Agent; key: AgentKey } | null>(null)
-async function scopesSaved() { await Promise.all([loadKeys(), access.settle()]); toast('Key scopes updated') }
+async function scopesSaved() { await Promise.all([loadKeys(), access.settle()]); toast('Key updated') }
 const newKey = ref<Agent | null>(null)
 const rotateKey = ref<AgentKey | undefined>()
 function showKeySheet(agent: Agent, key?: AgentKey) { firstKey.value = agent.key_count === 0; firstKeyPreset.value = ''; rotateKey.value = key; newKey.value = agent }
@@ -80,6 +115,11 @@ const busy = ref(false)
 // Why the server refused a role change, shown in the open picker.
 const roleError = ref('')
 watch(picker, () => { roleError.value = '' })
+function closeRolePicker(restoreFocus: boolean) {
+  const anchor = picker.value?.anchor
+  picker.value = null
+  if (restoreFocus) anchor?.focus({ preventScroll: true })
+}
 async function chooseRole(roleId: string | null) {
   const target = picker.value
   if (!target) return
@@ -186,7 +226,7 @@ onMounted(loadKeys)
         <div v-if="open.has(agent.principal_id)" :id="`keys-${agent.principal_id}`" class="keys">
           <p v-if="keysError" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ keysError }}<button type="button" class="btn sm" @click="loadKeys">Try again</button></p>
           <div v-else-if="!keys" class="set-skeleton" role="status" aria-label="Loading keys"><span class="skeleton" /></div>
-          <KeysTable v-else-if="keysOf(agent).length" :keys="keysOf(agent)" :revocable="manageKeys" :rotatable="manageKeys && !agent.paired_computer" :editable="manageKeys" @edit="editing = { agent, key: $event }" @revoke="revoke" @rotate="showKeySheet(agent, $event)" />
+          <KeysTable v-else-if="keysOf(agent).length" :keys="keysOf(agent)" :revocable="manageKeys" :rotatable="manageKeys && !agent.paired_computer" :editable="manageKeys" :adoptable="manageKeys" @adopt="adopt" @edit="editing = { agent, key: $event }" @revoke="revoke" @rotate="showKeySheet(agent, $event)" />
           <p v-else class="empty">{{ agent.paired_computer ? 'No key: a computer connects by pairing.' : 'No keys yet.' }}</p>
           <!-- A computer takes no key, even after its identity is reactivated: it is paired afresh. -->
           <RouterLink v-if="agent.paired_computer && !agent.connected_computer" class="btn sm" to="/agents/register-agent"><AppIcon name="plus" :size="13" />Connect a computer</RouterLink>
@@ -231,12 +271,12 @@ onMounted(loadKeys)
 
     <RowMenu v-if="menu" :anchor="menu.anchor" :items="actions" :label="`Actions for ${menu.agent.name}`" @select="act" @close="closeMenu" />
     <RolePicker
-      v-if="picker" :anchor="picker.anchor" :subject="picker.agent.name" :roles="access.roles" :current="picker.agent.workspace_role?.id ?? null" :registry="access.registry"
-      :mine="myPermissions()" scope="workspace" allow-none none-label="No role" :busy="busy" :can-apply="can('members.manage')" :error="roleError" @choose="chooseRole" @close="picker = null"
+      v-if="picker" :anchor="picker.anchor" :subject="picker.agent.name" :roles="access.roles" :role-details="access.runtimeRoleDetails" :current="picker.agent.workspace_role?.id ?? null" :registry="access.registry"
+      :mine="myPermissions()" scope="workspace" allow-none none-label="No role" :busy="busy" :can-apply="can('members.manage')" :error="roleError" @choose="chooseRole" @close="closeRolePicker"
     />
-    <EditKeyScopesSheet v-if="editing" :agent="editing.agent" :agent-key="editing.key" @close="editing = null" @saved="scopesSaved" />
+    <EditKeyScopesSheet v-if="editing" :key="editing.key.id" :agent="editing.agent" :agent-key="editing.key" @close="editing = null" @saved="scopesSaved" />
     <NewAgentSheet v-if="creatingAgent" @close="closeAgent" @created="agentCreated" />
-    <NewKeySheet v-if="newKey" :first-key="firstKey" :preferred-preset="firstKeyPreset" :agent="newKey" :rotate-key="rotateKey" @close="newKey = null" @created="created" />
+    <NewKeySheet v-if="newKey" :key="rotateKey?.id ?? newKey.principal_id" :first-key="firstKey" :preferred-preset="firstKeyPreset" :agent="newKey" :rotate-key="rotateKey" @close="newKey = null" @created="created" />
   </div>
 </template>
 

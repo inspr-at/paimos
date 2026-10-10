@@ -729,3 +729,90 @@ func TestCodeHealthIntroNamesLayoutCompanion(t *testing.T) {
 		}
 	}
 }
+
+// AEON-984: workers who follow AGENTS.md must edit the authored fragments.
+// The generated bundle is rebuilt; hand-editing it is discarded on the next generate.
+func TestAgentsOpenAPIContractNamesAuthoredFragments(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	_, layout, found := strings.Cut(text, "## Layout\n\n```\n")
+	if !found {
+		t.Fatal("missing layout block")
+	}
+	block, _, found := strings.Cut(layout, "\n```")
+	if !found {
+		t.Fatal("layout block is not closed")
+	}
+	var layoutLine string
+	for _, line := range strings.Split(block, "\n") {
+		if !strings.Contains(line, "openapi") {
+			continue
+		}
+		if layoutLine != "" {
+			t.Fatal("layout block has more than one openapi line")
+		}
+		layoutLine = line
+	}
+	if layoutLine == "" {
+		t.Fatal("layout block does not name the OpenAPI contract")
+	}
+	sites := []struct{ name, line string }{
+		{"stack", agentsLine(t, text, "one OpenAPI 3.1 contract")},
+		{"layout", layoutLine},
+		{"scope", agentsLine(t, text, "**Your ticket is your scope.**")},
+		{"contract", agentsLine(t, text, "**Contract first.**")},
+	}
+	const generated = "node api/generate.mjs --write"
+	for _, site := range sites {
+		for _, phrase := range []string{"api/areas/*.yaml", "api/openapi.base.yaml", "api/openapi.yaml", generated} {
+			if !strings.Contains(site.line, phrase) {
+				t.Errorf("%s must name %q on the same instruction line", site.name, phrase)
+			}
+		}
+		if !strings.Contains(site.line, "generated output rebuilt by") || !strings.Contains(site.line, generated) {
+			t.Errorf("%s must say api/openapi.yaml is generated output rebuilt by %s", site.name, generated)
+		}
+	}
+	for _, stale := range []string{
+		"the contract; change it first, then code",
+		"Endpoints are added to `api/openapi.yaml`",
+	} {
+		if strings.Contains(text, stale) {
+			t.Errorf("AGENTS.md still directs workers to hand-edit the generated bundle: %q", stale)
+		}
+	}
+	rolloutRaw, err := os.ReadFile("rollout.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rollout struct {
+		AgentsSHA string `json:"existing_agents_sha256"`
+	}
+	if err := json.Unmarshal(rolloutRaw, &rollout); err != nil {
+		t.Fatal(err)
+	}
+	if rollout.AgentsSHA != digest(raw) {
+		t.Errorf("existing_agents_sha256 = %s, AGENTS.md digest = %s", rollout.AgentsSHA, digest(raw))
+	}
+}
+
+func agentsLine(t *testing.T, text, anchor string) string {
+	t.Helper()
+	var found string
+	for _, line := range strings.Split(text, "\n") {
+		if !strings.Contains(line, anchor) {
+			continue
+		}
+		if found != "" {
+			t.Fatalf("anchor %q matches more than one line", anchor)
+		}
+		found = line
+	}
+	if found == "" {
+		t.Fatalf("missing anchor %q", anchor)
+	}
+	return found
+}

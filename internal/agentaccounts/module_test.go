@@ -143,8 +143,8 @@ func issueKey(t *testing.T, p tenant.Principal, scopes []string) string {
 	prefix = prefix[:48]
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `
-			INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes)
-			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)`,
+			INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes,created_by_principal_id)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`,
 			p.TenantID, p.ID, p.Name, prefix, hex.EncodeToString(sum[:]), scopes)
 		return err
 	})
@@ -156,6 +156,13 @@ func issueKey(t *testing.T, p tenant.Principal, scopes []string) string {
 
 func call(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, path, body string) (int, []byte) {
 	t.Helper()
+	return callAt(t, mod, p, token, method, path, body, time.Time{})
+}
+
+// callAt is call with the in-process clock pinned. A zero time leaves the
+// handler on transaction time. The clock cannot be set through HTTP.
+func callAt(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, path, body string, now time.Time) (int, []byte) {
+	t.Helper()
 	mux := http.NewServeMux()
 	mod.Mount(mux)
 	var r *http.Request
@@ -164,9 +171,14 @@ func call(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, 
 	} else {
 		r = httptest.NewRequest(method, path, nil)
 	}
+	ctx := r.Context()
 	if p != nil {
-		r = r.WithContext(tenant.WithPrincipal(r.Context(), *p))
+		ctx = tenant.WithPrincipal(ctx, *p)
 	}
+	if !now.IsZero() {
+		ctx = context.WithValue(ctx, clockKey{}, now)
+	}
+	r = r.WithContext(ctx)
 	if token != "" {
 		r.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -231,6 +243,16 @@ func scalar(t *testing.T, p tenant.Principal, query string, args ...any) int64 {
 	return n
 }
 
+// Quota-detail fixtures explicitly own their account; administrator status
+// alone no longer grants another person's usage after decision 8.
+func ownFixtureAccount(t *testing.T, owner tenant.Principal, a *Account) {
+	t.Helper()
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=now() WHERE id=$1`, a.ID, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.OwnerPersonID = &owner.ID
+}
+
 func accountsMod() httpapi.Module { return New(appPool) }
 
 func windowBody(start, end time.Time, unit string, allowance int64, pace string) string {
@@ -240,7 +262,12 @@ func windowBody(start, end time.Time, unit string, allowance int64, pace string)
 
 func callStatus(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, path, body string, want int, dst any) {
 	t.Helper()
-	status, raw := call(t, mod, p, token, method, path, body)
+	callStatusAt(t, mod, p, token, method, path, body, time.Time{}, want, dst)
+}
+
+func callStatusAt(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, path, body string, now time.Time, want int, dst any) {
+	t.Helper()
+	status, raw := callAt(t, mod, p, token, method, path, body, now)
 	if status != want {
 		t.Fatalf("%s %s status %d, want %d: %s", method, path, status, want, raw)
 	}
@@ -302,6 +329,7 @@ func TestAccountPoolRoutingAndLedger(t *testing.T) {
 	if account.LastProbeOK == nil || !*account.LastProbeOK {
 		t.Fatal("probe was not recorded")
 	}
+	fixtureAlwaysOn(t, mod, admin, account.ID)
 
 	var requests Window
 	callStatus(t, mod, &admin, "", http.MethodPost, "/api/agent-accounts/"+account.ID+"/windows", windowBody(start, end, "requests", 100, "unrestricted"), http.StatusCreated, &requests)
@@ -412,7 +440,9 @@ func TestAllowanceProvisionalWithoutMeasuredUnit(t *testing.T) {
 	mod := accountsMod()
 	var account Account
 	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts", `{"account_key":"local","harness":"codex","daemon_id":"daemon","label":"Codex"}`, http.StatusCreated, &account)
+	ownFixtureAccount(t, admin, &account)
 	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/"+account.ID+"/probe", `{"daemon_id":"daemon","daemon_generation":"g1","available":true}`, http.StatusOK, nil)
+	fixtureAlwaysOn(t, mod, admin, account.ID)
 	start, end := time.Now().Add(-time.Minute).UTC(), time.Now().Add(time.Hour).UTC()
 	for _, unit := range []string{"requests", "cost_micros"} {
 		var window Window
@@ -486,6 +516,7 @@ func TestRankDrainGrantAndStaleProbe(t *testing.T) {
 	for _, account := range []Account{low, high} {
 		callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/"+account.ID+"/probe", fmt.Sprintf(`{"daemon_id":%q,"daemon_generation":"g1","available":true}`, account.DaemonID), http.StatusOK, nil)
 		callStatus(t, mod, &admin, "", http.MethodPost, "/api/agent-accounts/"+account.ID+"/windows", windowBody(start, end, "requests", 100, "unrestricted"), http.StatusCreated, nil)
+		fixtureAlwaysOn(t, mod, admin, account.ID)
 	}
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows w SET used = 40 FROM agent_accounts a WHERE a.id = w.account_id AND a.account_key = 'high'`)
@@ -550,6 +581,7 @@ func TestRankDrainGrantAndStaleProbe(t *testing.T) {
 	callStatus(t, mod, &claimer, issueKey(t, claimer, []string{"account.manage"}), http.MethodPost, "/api/agent-accounts", `{"account_key":"claimer","harness":"codex","daemon_id":"claimer-daemon","label":"Claimer"}`, http.StatusCreated, &claimerAccount)
 	callStatus(t, mod, &claimer, issueKey(t, claimer, []string{"account.probe"}), http.MethodPost, "/api/agent-accounts/"+claimerAccount.ID+"/probe", `{"daemon_id":"claimer-daemon","daemon_generation":"g1","available":true}`, http.StatusOK, nil)
 	callStatus(t, mod, &admin, "", http.MethodPost, "/api/agent-accounts/"+claimerAccount.ID+"/windows", windowBody(start, end, "requests", 100, "unrestricted"), http.StatusCreated, nil)
+	fixtureAlwaysOn(t, mod, admin, claimerAccount.ID)
 	claimed := mustRoute(t, mod, claimer, issueKey(t, claimer, []string{"run.claim"}), fresh, "claimer-daemon", []Account{claimerAccount}, map[string]int64{"requests": 1})
 	if claimed.AccountID != claimerAccount.ID {
 		t.Fatalf("grant route picked %s", claimed.AccountID)
@@ -583,6 +615,7 @@ func TestRouteOnlyClaimsLocalDaemonEnrollment(t *testing.T) {
 			fmt.Sprintf(`{"daemon_id":%q,"daemon_generation":"g1","available":true}`, daemon), http.StatusOK, nil)
 		callStatus(t, mod, &admin, "", http.MethodPost, "/api/agent-accounts/"+account.ID+"/windows",
 			windowBody(start, end, "requests", 100, "unrestricted"), http.StatusCreated, nil)
+		fixtureAlwaysOn(t, mod, admin, account.ID)
 		return account
 	}
 	local := register(runner, "local", "daemon-a")

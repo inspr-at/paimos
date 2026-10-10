@@ -81,7 +81,7 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
   <nav class="view-bar" aria-label="Saved views">
     <div ref="strip" class="strip" :class="{ 'fade-start': edges.start, 'fade-end': edges.end }" @scroll.passive="measure">
       <a class="view-tab plain" :href="hrefFor(null)" :aria-current="activeId ? undefined : 'page'" @click="click($event, null)">
-        <AppIcon name="list" :size="13" class="lead" /><span class="name">All tickets</span>
+        <AppIcon name="list" :size="13" class="lead" /><span v-clip-tip class="name">All tickets</span>
       </a>
       <span v-for="view in views" :key="view.id" class="tab" :class="{ active: view.id === activeId }">
         <a
@@ -90,7 +90,7 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
           @click="click($event, view.id)" @contextmenu.prevent="openMenu(view, $event.currentTarget as HTMLElement)"
         >
           <AppIcon v-if="view.id === defaultId" name="star" :size="12" class="lead star" />
-          <span class="name">{{ view.name }}</span>
+          <span v-clip-tip class="name">{{ view.name }}</span>
           <AppIcon v-if="view.shared" name="users" :size="12" class="shared" />
           <span :style="{ visibility: view.id === activeId && dirty ? 'visible' : 'hidden' }" class="dirty" role="img" aria-label="changed since saved" />
         </a>
@@ -143,6 +143,8 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
 .tab { display: inline-flex; align-items: center; flex-shrink: 0; border-radius: 999px; }
 .view-tab { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; max-width: 260px; height: 28px; padding: 0 4px 0 12px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .view-tab .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Saved views end in their own options button; the plain list has none, so its pill keeps the same 12 px as on the left. */
+.view-tab.plain { padding-right: 12px; }
 .view-tab:hover { color: var(--ink); background: var(--row-hover); }
 .view-tab:focus-visible, .tab-menu:focus-visible { box-shadow: var(--focus-ring); }
 .view-tab[aria-current="page"] { color: var(--teal-ink); font-weight: 600; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
@@ -150,11 +152,11 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
 .tab.active { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .tab.active .view-tab { background: transparent; box-shadow: none; padding-right: 4px; }
 .tab-menu { display: grid; place-items: center; width: 24px; height: 24px; margin-right: 3px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--teal-ink); }
-.tab-menu:hover, .tab-menu[aria-expanded="true"] { background: rgba(14, 111, 108, .12); }
+.tab-menu:hover, .tab-menu[aria-expanded="true"] { background: color-mix(in srgb, var(--primary-line) 12%, transparent); }
 .lead { flex-shrink: 0; color: var(--ink-3); }
 .view-tab[aria-current="page"] .lead { color: var(--teal-ink); }
-.star { color: var(--gold); }
-.view-tab[aria-current="page"] .star { color: var(--gold); }
+.star { color: var(--secondary-line); }
+.view-tab[aria-current="page"] .star { color: var(--secondary-line); }
 .shared { flex-shrink: 0; color: var(--ink-3); }
 .dirty { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 2px var(--chip-teal-bg); }
 .changes { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
@@ -175,6 +177,7 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
   .view-bar { gap: 6px; padding: 0 0 8px; }
   .strip { gap: 6px; }
   .view-tab { position: relative; height: 40px; padding: 0 4px 0 14px; font-size: 14px; }
+  .view-tab.plain { padding-right: 14px; }
   .view-tab::after { content: ''; position: absolute; inset: -2px 0; border-radius: inherit; }
   .tab.active .view-tab { padding-right: 4px; }
   .tab-menu { position: relative; width: 40px; height: 40px; margin-right: 0; }

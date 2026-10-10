@@ -10,15 +10,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/stepup"
 )
 
 // Me is the GET /api/me response.
 type Me struct {
-	Principal Principal `json:"principal"`
-	Tenant    Tenant    `json:"tenant"`
-	Identity  *Identity `json:"identity"`
+	OwnerWorkstation      bool      `json:"owner_workstation,omitempty"`
+	WorkstationComputerID string    `json:"workstation_computer_id,omitempty"`
+	Principal             Principal `json:"principal"`
+	Tenant                Tenant    `json:"tenant"`
+	Identity              *Identity `json:"identity"`
 }
 
 // Principal is the acting person or agent.
@@ -51,6 +56,8 @@ type StatusError struct {
 	Status        int
 	Message       string
 	AttachRefusal string
+	ReasonCode    string
+	RetryAfter    time.Duration
 }
 
 func (e *StatusError) Error() string {
@@ -60,11 +67,14 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("api %d", e.Status)
 }
 
-// Client calls one Aeon instance with an agent API key.
+// Client calls one Aeon instance with an agent key or an explicit person session.
 type Client struct {
-	BaseURL string
-	Token   string
-	HTTP    *http.Client
+	BaseURL      string
+	Token        string
+	SessionToken string
+	HTTP         *http.Client
+	// ConfirmStepUp receives only a challenge ID. Nil fails closed on 428.
+	ConfirmStepUp func(context.Context, string) (string, error)
 }
 
 // New returns a client for baseURL. token is sent as a Bearer credential and is never logged.
@@ -74,6 +84,15 @@ func New(baseURL, token string) *Client {
 		Token:   token,
 		HTTP:    &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// NewSession authenticates as a signed-in person, never as a bearer agent.
+func NewSession(baseURL, sessionToken string) *Client {
+	c := New(baseURL, "")
+	c.SessionToken = sessionToken
+	// A person cookie must never follow a redirect to another destination.
+	c.HTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return c
 }
 
 // Me calls GET /api/me.
@@ -119,7 +138,9 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.Token != "" {
+	if c.SessionToken != "" {
+		req.AddCookie(&http.Cookie{Name: "aeon_session", Value: c.SessionToken})
+	} else if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	for name, value := range headers {
@@ -129,36 +150,121 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 	if hc == nil {
 		hc = http.DefaultClient
 	}
-	res, err := hc.Do(req)
-	if err != nil {
-		return err
+	if req.Header.Get(stepup.Header) != "" {
+		proofHTTP := *hc
+		proofHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		hc = &proofHTTP
 	}
-	defer res.Body.Close()
-	// A page of 200 imported tickets carries their full bodies and fields and
-	// passes 1 MiB on production data (AEON-140); a cut-off read then failed as
-	// "unexpected end of JSON input". Read up to MaxResponseBytes and say so
-	// plainly when a response is larger.
-	payload, err := io.ReadAll(io.LimitReader(res.Body, MaxResponseBytes+1))
-	if err != nil {
-		return err
-	}
-	if len(payload) > MaxResponseBytes {
-		return fmt.Errorf("%s %s: response is larger than %d MiB", method, path, MaxResponseBytes>>20)
-	}
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		var detail struct {
-			AttachRefusal string `json:"attach_refusal"`
+	for attempt := 0; attempt < 2; attempt++ {
+		request := req.Clone(ctx)
+		if req.GetBody != nil {
+			request.Body, err = req.GetBody()
+			if err != nil {
+				return err
+			}
 		}
-		_ = json.Unmarshal(payload, &detail)
-		return &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal}
-	}
-	if dest == nil || len(bytes.TrimSpace(payload)) == 0 {
+		res, err := hc.Do(request)
+		if err != nil {
+			return err
+		}
+
+		// A page of 200 imported tickets carries their full bodies and fields and
+		// passes 1 MiB on production data (AEON-140); a cut-off read then failed as
+		// "unexpected end of JSON input". Read up to MaxResponseBytes and say so
+		// plainly when a response is larger.
+		limit := int64(MaxResponseBytes)
+		if res.StatusCode == http.StatusPreconditionRequired {
+			limit = 4096
+		}
+		payload, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
+		_ = res.Body.Close()
+		if err != nil {
+			return err
+		}
+		if int64(len(payload)) > limit {
+			if limit == MaxResponseBytes {
+				return fmt.Errorf("%s %s: response is larger than %d MiB", method, path, MaxResponseBytes>>20)
+			}
+			return fmt.Errorf("%s %s: Touch ID challenge exceeds %d bytes", method, path, limit)
+		}
+		if res.StatusCode == http.StatusPreconditionRequired {
+			var required stepup.Required
+			if json.Unmarshal(payload, &required) == nil && required.Code == "step_up_required" {
+				if attempt != 0 || req.Header.Get(stepup.Header) != "" {
+					return fmt.Errorf("Touch ID proof refused; action was not retried again")
+				}
+				if !stepup.ValidID(required.ChallengeID) || !stepup.ValidExpiry(required.ExpiresAt, time.Now()) {
+					return fmt.Errorf("invalid or expired Touch ID challenge")
+				}
+				if res.Request == nil || res.Request.URL.String() != req.URL.String() || res.Request.Method != req.Method {
+					return fmt.Errorf("Touch ID challenge from a redirected request refused")
+				}
+				if c.ConfirmStepUp == nil {
+					return fmt.Errorf("Touch ID confirmation required; configure the local paired agentd")
+				}
+				deadline := required.ExpiresAt
+				if cap := time.Now().Add(stepup.ConfirmTimeout); cap.Before(deadline) {
+					deadline = cap
+				}
+				confirmCtx, cancel := context.WithDeadline(ctx, deadline)
+				signature, confirmErr := c.ConfirmStepUp(confirmCtx, required.ChallengeID)
+				if confirmErr == nil {
+					confirmErr = confirmCtx.Err()
+				}
+				cancel()
+				if confirmErr != nil {
+					return fmt.Errorf("Touch ID confirmation failed: %w", confirmErr)
+				}
+				if !time.Now().Before(required.ExpiresAt) || !stepup.ValidSignature(signature) {
+					return fmt.Errorf("invalid or expired Touch ID proof")
+				}
+				req.Header.Set(stepup.Header, required.ChallengeID+"."+signature)
+				// A proof must never follow redirects, including same-origin 307/308.
+				retryHTTP := *hc
+				retryHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+				hc = &retryHTTP
+				continue
+			}
+		}
+		if res.StatusCode < 200 || res.StatusCode >= 300 {
+			var detail struct {
+				AttachRefusal string `json:"attach_refusal"`
+				ReasonCode    string `json:"reason_code"`
+			}
+			_ = json.Unmarshal(payload, &detail)
+			return &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal, ReasonCode: detail.ReasonCode, RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
+		}
+		if dest == nil || len(bytes.TrimSpace(payload)) == 0 {
+			return nil
+		}
+		if err := json.Unmarshal(payload, dest); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
 		return nil
 	}
-	if err := json.Unmarshal(payload, dest); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+	return fmt.Errorf("Touch ID retry exhausted")
+}
+
+// Bound untrusted delay values to one day. Both HTTP forms are supported;
+// malformed, past or excessive values provide no retry instruction.
+func retryAfter(value string, now time.Time) time.Duration {
+	if len(value) > 128 {
+		return 0
 	}
-	return nil
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.ParseUint(value, 10, 32); err == nil {
+		if seconds <= 86400 {
+			return time.Duration(seconds) * time.Second
+		}
+		return 0
+	}
+	if until, err := http.ParseTime(value); err == nil {
+		delay := until.Sub(now)
+		if delay > 0 && delay <= 24*time.Hour {
+			return delay
+		}
+	}
+	return 0
 }
 
 func errorMessage(payload []byte) string {

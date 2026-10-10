@@ -5,6 +5,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { accessWorld, mockAccess, DEPLOYER } from './access-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 const agent = (page: Page) => page.getByRole('list', { name: 'Agents' }).getByRole('listitem').filter({ hasText: 'pharos-deployer' })
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'Edit scopes for pharos-deployer' })
@@ -149,8 +150,9 @@ test('people without keys.manage have no scope edit action', async ({ page }) =>
   await expect(page.getByRole('button', { name: /^Edit scopes/ })).toHaveCount(0)
 })
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
-  test(`scopes fit ${width}px in ${theme} with keyboard access`, async ({ page }, testInfo) => {
+const scopeLayouts = [{ width: 1600 }, { width: 1440 }, { width: 390 }, { width: 390, wideFont: true }]
+for (const theme of ['light', 'dark'] as const) for (const { width, wideFont } of scopeLayouts) {
+  test(`scopes fit ${width}px in ${theme} with keyboard access${wideFont ? ' (wide system font)' : ''}`, async ({ page }, testInfo) => {
     await page.emulateMedia({ colorScheme: theme })
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const errors = watchErrors(page)
@@ -160,8 +162,29 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await agent(page).getByRole('button', { name: /^Edit scopes/ }).scrollIntoViewIfNeeded()
     await page.screenshot({ path: join(dir, `keys-${width}-${theme}.png`), fullPage: true })
     await edit(page)
-    await sheet(page).getByRole('checkbox', { name: /nodes\.write/ }).check()
-    await expect(sheet(page).getByRole('region', { name: 'Confirm role changes' })).toBeVisible()
+    const dialog = sheet(page)
+    // OS font metrics differ; a wider font must not expand the action on role confirmation.
+    if (wideFont) await page.addStyleTag({ content: '.actions .btn { font-family: monospace; }' })
+    const scope = dialog.getByRole('checkbox', { name: /nodes\.write/ })
+    await expectStableControls({
+      controls: {
+        frame: dialog,
+        cancel: dialog.getByRole('button', { name: 'Cancel', exact: true }),
+        save: dialog.locator('.actions .primary'),
+        actions: dialog.locator('.actions'),
+        lifetime: dialog.getByRole('radiogroup'),
+        presets: dialog.locator('.preset-actions'),
+        scope,
+        row: dialog.locator('.scope-row').filter({ has: page.getByRole('checkbox', { name: /nodes\.write/ }) }),
+      },
+      scrollAreas: { sheet: dialog, body: dialog.locator('.sheet-body') },
+      interactions: [{ name: 'confirm role extension', run: async () => {
+        await scope.check()
+        await expect(dialog.getByRole('region', { name: 'Confirm role changes' })).toBeVisible()
+      } }],
+    })
+    // Actions stay at the top; the long role explanation is in the scrolling body.
+    await sheet(page).getByRole('region', { name: 'Confirm role changes' }).scrollIntoViewIfNeeded()
     const confirmation = await sheet(page).getByRole('region', { name: 'Confirm role changes' }).boundingBox()
     expect(confirmation!.y + confirmation!.height).toBeLessThanOrEqual(width === 390 ? 844 : 1000)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
@@ -177,3 +200,57 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     expect(errors).toEqual([])
   })
 }
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`adoption preserves the key and controls at ${width}px in ${theme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    const world = await open(page, 'owner', world => {
+      world.keys.find(k => k.id === 'k2')!.created_by_principal_id = null
+      world.keys.find(k => k.id === 'k2')!.name = 'Arbeitsplatz-Agentenschlüssel für die gemeinsame langfristige Projektkoordination'
+    })
+    const row = agent(page)
+    const adopt = row.getByRole('button', { name: 'Make me the owner' })
+    await expect(row.getByText('No owner', { exact: true })).toBeVisible()
+    const before = structuredClone(world.keys.find(k => k.id === 'k2')!)
+    const count = world.keys.length
+    const dir = process.env.KEY_SCOPES_SHOTS ?? testInfo.outputDir
+    mkdirSync(dir, { recursive: true })
+    await adopt.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: join(dir, `adoption-list-${width}-${theme}.png`), fullPage: true })
+    await expectStableControls({ controls: { edit: row.getByRole('button', { name: /^Edit scopes/ }), rotate: row.getByRole('button', { name: /^Rotate key/ }), revoke: row.getByRole('button', { name: /^Revoke key/ }) }, interactions: [{ name: 'cancel adoption', run: async () => {
+      await adopt.click()
+      const dialog = page.getByRole('dialog', { name: /^Make me the owner\?/ })
+      await expect(dialog).toBeVisible()
+      await expectStableControls({ controls: { confirm: dialog.getByRole('button', { name: 'Make me the owner' }), cancel: dialog.getByRole('button', { name: 'Cancel', exact: true }) }, scrollAreas: { body: dialog.locator('#confirm-body') }, interactions: [{ name: 'read ownership effect', run: async () => { await dialog.locator('#confirm-body').evaluate(el => { el.scrollTop = el.scrollHeight }) } }] })
+      await page.screenshot({ path: join(dir, `adoption-confirm-${width}-${theme}.png`), fullPage: true })
+      await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(dialog).not.toBeVisible()
+    } }, { name: 'adopt same key', run: async () => {
+      await adopt.click()
+      await page.getByRole('dialog', { name: /^Make me the owner\?/ }).getByRole('button', { name: 'Make me the owner' }).click()
+      await expect(row.getByText('No owner', { exact: true })).not.toBeVisible()
+    } }] })
+    expect(world.keys).toHaveLength(count)
+    expect(world.keys.find(k => k.id === 'k2')).toEqual({ ...before, created_by_principal_id: world.me })
+    expect(world.calls.filter(c => c.path.endsWith('/adopt'))).toHaveLength(1)
+    expect(world.calls.filter(c => c.method === 'POST' && c.path === '/api/agent-keys')).toHaveLength(0)
+    expect(world.events.at(-1)?.type).toBe('agent_key.adopted')
+  })
+}
+
+test('adoption refusal reports failure and owned keys have no takeover action', async ({ page }) => {
+  const world = await open(page, 'owner', world => { world.keys.find(k => k.id === 'k2')!.created_by_principal_id = null })
+  await page.route('**/api/agent-keys/k2/adopt', route => route.fulfill({ status: 409, json: { error: 'key already has a person owner' } }))
+  await agent(page).getByRole('button', { name: 'Make me the owner' }).click()
+  await page.getByRole('dialog', { name: /^Make me the owner\?/ }).getByRole('button', { name: 'Make me the owner' }).click()
+  await expect(page.getByText('The key owner could not be changed')).toBeVisible()
+  await expect(agent(page).getByText('No owner', { exact: true })).toBeVisible()
+  await expect(page.getByText('You are now the key owner')).toHaveCount(0)
+  await page.unroute('**/api/agent-keys/k2/adopt')
+  world.keys.find(k => k.id === 'k2')!.created_by_principal_id = world.me
+  await page.reload()
+  await agent(page).getByRole('button', { name: /active key/ }).click()
+  // A normally owned key has no adoption control (undefined old fixtures also hide it).
+  await expect(page.getByRole('button', { name: 'Make me the owner' })).not.toBeVisible()
+})

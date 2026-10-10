@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/business/costunits
+paths:
+  /cost-units/{costUnitId}/rates:
+    get:
+      operationId: listCostUnitRates
+      summary: List effective-dated rates for a cost-unit node
+      security: *auth
+      parameters: [{name: costUnitId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Rates, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/CostUnitRate'}}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createCostUnitRate
+      summary: Add a rate interval
+      description: Admin person only. Intervals for one cost unit, unit and currency may not overlap. Historical quote and hour snapshots retain their amounts.
+      security: [{session: []}]
+      parameters: [{name: costUnitId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CostUnitRateWrite'}}}}
+      responses:
+        '201': {description: Rate, content: {application/json: {schema: {$ref: '#/components/schemas/CostUnitRate'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    CostUnitRate:
+      allOf:
+        - {$ref: '#/components/schemas/CostUnitRateWrite'}
+        - {type: object, required: [id, cost_unit_node_id, created_by_principal_id, created_at], properties: {id: {type: string, format: uuid}, cost_unit_node_id: {type: string, format: uuid}, created_by_principal_id: {type: string, format: uuid}, created_at: {type: string, format: date-time}}}
+    CostUnitRateWrite:
+      type: object
+      additionalProperties: false
+      required: [unit, currency, internal_amount, bill_amount, effective_from]
+      properties:
+        unit: {type: string, enum: [hour, day, item]}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        internal_amount: {type: number, minimum: 0}
+        bill_amount: {type: number, minimum: 0}
+        effective_from: {type: string, format: date}
+        effective_until: {type: [string, 'null'], format: date}

@@ -24,7 +24,7 @@ func TestEveryASCIIConfusableMapping(t *testing.T) {
 		checked++
 		plain := strings.Join([]string{"keep" + target, "quiet" + target, "violet" + target, "notebooks" + target, "behind" + target, "eastern" + target, "staircase" + target}, " ")
 		attack := strings.ReplaceAll(plain, target, string(source))
-		if guardPublic(publicRepository, attack) == nil && guardPrivateQuotes(quoteCorpus(plain), nil, attack) == nil {
+		if New(nil, Options{}).guardPublic(publicRepository, attack) == nil && guardPrivateQuotes(quoteCorpus(plain), nil, attack) == nil {
 			missed++
 			if missed <= 20 {
 				t.Errorf("U+%04X mapping to %q evaded the guard", source, target)
@@ -55,9 +55,9 @@ func TestDefaultIgnorablesRemovedBeforeNormalization(t *testing.T) {
 					t.Fatalf("insertion at position %d escaped", i)
 				}
 			}
-			for _, identity := range []string{"hsb1", "barta.cm", "pm.barta", "inspr-doctrine-private"} {
+			for _, identity := range []string{"hsb" + "424242", "barta.cm", "pm.barta", "inspr-doctrine-private"} {
 				for i := 0; i <= len(identity); i++ {
-					if guardPublic(publicRepository, identity[:i]+string(r)+identity[i:]) == nil {
+					if New(nil, Options{}).guardPublic(publicRepository, identity[:i]+string(r)+identity[i:]) == nil {
 						t.Fatalf("identity insertion escaped at %d", i)
 					}
 				}

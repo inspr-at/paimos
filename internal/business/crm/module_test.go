@@ -25,6 +25,7 @@ import (
 
 func TestBindContactPrincipal(t *testing.T) {
 	f := setup(t)
+	foreignEvents := count(t, f, f.other.TenantID, `SELECT count(*) FROM events`)
 	body := fmt.Sprintf(`{"principal_id":%q}`, f.customer)
 	w := request(f.handler, f.admin, "POST", "/api/crm/contacts/"+strings.ToUpper(f.contact)+"/principals", body)
 	expect(t, w, 201)
@@ -91,7 +92,7 @@ func TestBindContactPrincipal(t *testing.T) {
 	if count(t, f, f.admin.TenantID, `SELECT count(*) FROM crm_contact_principals`) != 1 || count(t, f, f.other.TenantID, `SELECT count(*) FROM crm_contact_principals`) != 1 {
 		t.Fatal("binding crossed tenants")
 	}
-	if count(t, f, f.other.TenantID, `SELECT count(*) FROM events`) != 1 {
+	if count(t, f, f.other.TenantID, `SELECT count(*) FROM events`) != foreignEvents+1 {
 		t.Fatal("other tenant event missing or leaked")
 	}
 }
@@ -204,6 +205,7 @@ type fixture struct {
 	otherContactKind string
 	bareTenant       string
 	bareAdmin        string
+	eventStart       int64
 }
 
 func setup(t *testing.T) fixture {
@@ -264,7 +266,7 @@ func setup(t *testing.T) fixture {
 		if _, err = insertKind(t, tx, f.admin.TenantID, Organisation, "ORG"); err != nil {
 			return err
 		}
-		taskKind, err := kindID(t, tx, f.admin.TenantID, "task")
+		taskKind, err := kindID(t, tx, f.admin.TenantID, "work")
 		if err != nil {
 			return err
 		}
@@ -322,6 +324,9 @@ func setup(t *testing.T) fixture {
 		return err
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Admin.QueryRow(t.Context(), `SELECT coalesce(max(id),0) FROM events WHERE tenant_id=$1`, f.admin.TenantID).Scan(&f.eventStart); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -405,7 +410,7 @@ func expect(t *testing.T, w *httptest.ResponseRecorder, status int) {
 
 func logEvents(t *testing.T, f fixture) []events.Event {
 	t.Helper()
-	w := request(f.handler, f.admin, "GET", "/api/events", "")
+	w := request(f.handler, f.admin, "GET", fmt.Sprintf("/api/events?after=%d", f.eventStart), "")
 	expect(t, w, 200)
 	var result struct {
 		Items []events.Event `json:"items"`

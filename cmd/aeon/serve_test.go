@@ -14,14 +14,170 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/inspr-at/paimos/internal/config"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/web"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Risk: background work consumes every slot and takes the entire installation
+// out of service although Postgres itself is healthy (AEON-995).
+func TestServeBackgroundPoolHeadroom(t *testing.T) {
+	t.Run("default workers", func(t *testing.T) { testServeBackgroundPoolHeadroom(t, false) })
+	t.Run("configured optional workers", func(t *testing.T) { testServeBackgroundPoolHeadroom(t, true) })
+}
+
+func testServeBackgroundPoolHeadroom(t *testing.T, configured bool) {
+	t.Setenv("AEON_ENV", "dev")
+	fresh := dbtest.Open(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	poolCfg, err := pgxpool.ParseConfig(fresh.AppURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poolCfg.MaxConns = 4 // Old pgx default on the affected four-CPU host.
+	poolCfg.MinConns = 0
+	if _, err := db.ConfigurePool(poolCfg); err != nil {
+		t.Fatal(err)
+	}
+	held := make(chan struct{}, 4)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	openBarrier := func() { releaseOnce.Do(func() { close(release) }) }
+	defer openBarrier()
+	var attempts atomic.Int64
+	poolCfg.PrepareConn = func(ctx context.Context, _ *pgx.Conn) (bool, error) {
+		if db.IsBackground(ctx) && attempts.Add(1) <= 2 {
+			held <- struct{}{}
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+		}
+		return true, nil
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{DatabaseURL: fresh.AppURL, Env: "dev", PublicURL: "http://127.0.0.1", BootstrapTenantSlug: "pool-headroom", BootstrapTenantName: "Pool headroom"}
+	if configured {
+		// Start optional lanes too, without any provisioned credentials or vendor
+		// traffic. Empty queues and deliberately absent App files fail closed.
+		if err := db.EnsureTenant(ctx, pool, cfg.BootstrapTenantSlug, cfg.BootstrapTenantName); err != nil {
+			t.Fatal(err)
+		}
+		var tid string
+		if err := pool.QueryRow(ctx, `SELECT id::text FROM tenants WHERE slug=$1`, cfg.BootstrapTenantSlug).Scan(&tid); err != nil {
+			t.Fatal(err)
+		}
+		cfg.PublicURL = "https://127.0.0.1"
+		cfg.MessagingKey = bytes.Repeat([]byte{1}, 32)
+		cfg.LinkKey = bytes.Repeat([]byte{2}, 32)
+		cfg.AttachedMessages, cfg.AttachedMessagesSingleInstance = true, true
+		private, public, err := webpush.GenerateVAPIDKeys()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.PhonePush = &config.PhonePushConfig{PublicKey: public, PrivateKey: private, Subject: "mailto:fixture@example.test"}
+		cfg.DoctrineGuardKey = bytes.Repeat([]byte{3}, 32)
+		cfg.DoctrineAppID, cfg.DoctrineInstallationID, cfg.DoctrineAppTenantID = "1", "1", tid
+		cfg.DoctrineAppKeyRef, cfg.DoctrineGateLogin, cfg.DoctrineDCOAcknowledged = "fixture.pem", "fixture", true
+		cfg.ReviewAppID, cfg.ReviewInstallationID, cfg.ReviewAppTenantID = "1", "1", tid
+		cfg.ReviewAppKeyFile, cfg.ReviewAppRepository = filepath.Join(t.TempDir(), "unprovisioned-app.pem"), "fixture/fixture"
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- serveWithPool(ctx, cfg, ln, pool, 1)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-time.After(20 * time.Second):
+			t.Error("server did not stop")
+		}
+	}()
+	client := &http.Client{Timeout: 10 * time.Second}
+	base := "http://" + ln.Addr().String()
+	for range 2 {
+		select {
+		case <-held:
+		case err := <-done:
+			t.Fatalf("server stopped: %v", err)
+		case <-time.After(20 * time.Second):
+			t.Fatal("real workers did not reach acquisition barrier")
+		}
+	}
+	if got := pool.Stat().AcquiredConns(); got != 2 {
+		t.Fatalf("background held %d slots, want exactly 2 with the acquisition barrier", got)
+	}
+	resp, err := client.Get(base + "/api/ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("readiness with real background workers = %d %s (acquired=%d max=%d)", resp.StatusCode, body, pool.Stat().AcquiredConns(), pool.Stat().MaxConns())
+	}
+
+	var ready struct {
+		Pool db.PoolStats `json:"pool"`
+	}
+	if err := json.Unmarshal(body, &ready); err != nil {
+		t.Fatal(err)
+	}
+	if ready.Pool.Max != 4 || ready.Pool.BackgroundLimit != 2 || ready.Pool.Waiting < 2 || ready.Pool.AcquireSamples == 0 {
+		t.Fatalf("readiness detail: %+v", ready.Pool)
+	}
+	resp, err = client.Get(base + "/api/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !bytes.Contains(body, []byte(`"db":"ok"`)) {
+		t.Fatalf("health under background load: %d %s", resp.StatusCode, body)
+	}
+	// A foreground operation shares the same pool and still has capacity.
+	foreground, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreground.Release()
+	openBarrier()
+	work, stop := context.WithTimeout(db.Background(ctx), 10*time.Second)
+	defer stop()
+	if _, err := inbox.NewSweeper(pool).SweepLocked(work); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := knowledge.TagOnce(work, pool); err != nil {
+		t.Fatal(err)
+	}
+	if s := db.Stats(pool); s.NestedAcquires != 0 {
+		t.Fatalf("worker attempted nested pool acquire: %+v", s)
+	}
+}
 
 func TestLoggerJSONInProd(t *testing.T) {
 	record := slog.NewRecord(time.Now(), slog.LevelInfo, "listening", 0)

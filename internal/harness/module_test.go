@@ -18,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
@@ -48,6 +49,10 @@ func fixture(t *testing.T) *harnessFixture {
 }
 
 func fixtureWithOwnershipClock(t *testing.T, now func() time.Time) *harnessFixture {
+	return fixtureWithKind(t, now, "work")
+}
+
+func fixtureWithKind(t *testing.T, now func() time.Time, kind string) *harnessFixture {
 	t.Helper()
 	f := &harnessFixture{db: dbtest.Open(t), mux: http.NewServeMux()}
 	f.person = tenant.Principal{ID: uid(), TenantID: uid(), Kind: tenant.Person}
@@ -77,7 +82,7 @@ func fixtureWithOwnershipClock(t *testing.T, now func() time.Time) *harnessFixtu
 		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE slug='project'`).Scan(&projectKind); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE slug='ticket'`).Scan(&ticketKind); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE slug=$1`, kind).Scan(&ticketKind); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title) VALUES($1,$2,'HTS-1',$3,'Harness project')`, f.person.TenantID, f.project, projectKind); err != nil {
@@ -89,16 +94,17 @@ func fixtureWithOwnershipClock(t *testing.T, now func() time.Time) *harnessFixtu
 	secret := uid()
 	sum := sha256.Sum256([]byte(secret))
 	prefix := strings.ReplaceAll(uid(), "-", "")
+	// Production authentication carries the key row on the principal; lead
+	// claims bind it as the generation's dispatch credential.
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'harness-test',$3,$4,$5)`, f.agent.TenantID, f.agent.ID, prefix, hex.EncodeToString(sum[:]), []string{"harness.read", "harness.write", "harness.worker", "harness.control"})
-		return err
+		return tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'harness-test',$3,$4,$5,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1)) RETURNING id::text`, f.agent.TenantID, f.agent.ID, prefix, hex.EncodeToString(sum[:]), []string{"harness.read", "harness.write", "harness.worker", "harness.control"}).Scan(&f.agent.AuthKeyID)
 	})
 	f.key = "aeon_" + prefix + "_" + secret
 	// Registration needs worker authority; keep read authority absent so the
 	// live-list privacy fixtures still exercise a worker-only caller.
 	f.agent.Scopes = []string{"harness.worker"}
 	if now == nil {
-		harness.New(f.db.App, nodes.CapturePlanningStart).Mount(f.mux)
+		harness.NewWithSessionRecovery(f.db.App, agentruns.PrepareSessionRecovery, nodes.CapturePlanningStart).Mount(f.mux)
 	} else {
 		harness.NewWithOwnershipClock(f.db.App, now).Mount(f.mux)
 	}

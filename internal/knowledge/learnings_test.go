@@ -98,16 +98,16 @@ func splitSection(body, start, end string) (string, string, bool) {
 func TestMethodLearnings(t *testing.T) {
 	f := setup(t)
 	setFields(t, f, f.ticket, map[string]any{"tags": []any{"process-learning"}})
-	mention := addNode(t, f, "LEARN-1", "ticket", "Mention only", &f.project)
+	mention := addNode(t, f, "LEARN-1", "work", "Mention only", &f.project)
 	setBody(t, f, mention, "The notes mention process-learning without a tag.")
-	object := addNode(t, f, "LEARN-2", "ticket", "Ship the checklist", &f.project)
+	object := addNode(t, f, "LEARN-2", "work", "Ship the checklist", &f.project)
 	setFields(t, f, object, map[string]any{"tags": []any{map[string]any{"name": "Process-Learning", "color": "gray"}}})
 	task := addNode(t, f, "TASK-1", "task", "Rename the staging host", &f.project)
 	setFields(t, f, task, map[string]any{"tags": []any{"process-learning"}})
-	elsewhere := addNode(t, f, "OTH-9", "ticket", "Other project learning", &f.other)
+	elsewhere := addNode(t, f, "OTH-9", "work", "Other project learning", &f.other)
 	setFields(t, f, elsewhere, map[string]any{"tags": []any{"process-learning"}})
 	nested := addNode(t, f, "NEST-1", "project", "Nested", &f.project)
-	buried := addNode(t, f, "NEST-9", "ticket", "Buried learning", &nested)
+	buried := addNode(t, f, "NEST-9", "work", "Buried learning", &nested)
 	setFields(t, f, buried, map[string]any{"tags": []any{"process-learning"}})
 
 	renumber := addComment(t, f, f.ticket, "#process-learning Renumber at integration.")
@@ -377,6 +377,14 @@ func addNode(t *testing.T, f fixture, key, kind, title string, parent *string) s
 	t.Helper()
 	var id string
 	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		// These two cases assert legacy per-kind classification. Define that
+		// tenant kind explicitly; ordinary work fixtures use the canonical kind.
+		if kind == "task" {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon,field_schema)
+			 VALUES($1,'task','Task','TSK','task','{"type":"object","issue_family":true}') ON CONFLICT (tenant_id,slug) DO NOTHING`, f.a.TenantID); err != nil {
+				return err
+			}
+		}
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id)
 		  SELECT $1,$2,id,$3,$5::uuid FROM node_kinds WHERE tenant_id=$1 AND slug=$4 RETURNING id::text`, f.a.TenantID, key, title, kind, parent).Scan(&id)
 	})
@@ -476,7 +484,7 @@ func TestOpenLearningsSurviveDecidedWindow(t *testing.T) {
 			  SELECT $1, 'LD-'||g::text, k.id, 'Decided '||g::text, $2::uuid,
 			         '{"tags":["process-learning"]}'::jsonb, clock_timestamp()
 			  FROM generate_series(1, $3) AS g
-			  JOIN node_kinds k ON k.tenant_id=$1 AND k.slug='ticket'
+			  JOIN node_kinds k ON k.tenant_id=$1 AND k.slug='work'
 			  RETURNING id
 			), ev AS (
 			  INSERT INTO events (tenant_id, actor_principal_id, node_id, type, after)
@@ -494,7 +502,7 @@ func TestOpenLearningsSurviveDecidedWindow(t *testing.T) {
 			INSERT INTO nodes (tenant_id, key, kind_id, title, parent_id, fields, updated_at)
 			SELECT $1, 'OLD-1', k.id, 'The older ticket still open', $2::uuid,
 			       '{"tags":["process-learning"]}'::jsonb, clock_timestamp() - interval '40 days'
-			FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='ticket'`,
+			FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='work'`,
 			f.a.TenantID, f.project); err != nil {
 			return err
 		}
@@ -502,7 +510,7 @@ func TestOpenLearningsSurviveDecidedWindow(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `
 			INSERT INTO nodes (tenant_id, key, kind_id, title, parent_id)
 			SELECT $1, 'HOST-8', k.id, 'Comment host', $2::uuid
-			FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='ticket'
+			FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='work'
 			RETURNING id::text`, f.a.TenantID, f.project).Scan(&host); err != nil {
 			return err
 		}
@@ -570,7 +578,7 @@ func TestLearningsProjectGrant(t *testing.T) {
 	setFields(t, f, f.ticket, map[string]any{"tags": []any{"process-learning"}})
 	ticketComment := addComment(t, f, f.ticket, "#process-learning Quote the ticket in the changelog.")
 	onProject := addComment(t, f, f.project, "#process-learning The project speaks for itself.")
-	elsewhere := addNode(t, f, "OTH-3", "ticket", "Other learning", &f.other)
+	elsewhere := addNode(t, f, "OTH-3", "work", "Other learning", &f.other)
 	setFields(t, f, elsewhere, map[string]any{"tags": []any{"process-learning"}})
 	nested := addNode(t, f, "NEST-1", "project", "Nested", &f.project)
 	onNested := addComment(t, f, nested, "#process-learning Stay with the nested project.")
@@ -697,7 +705,7 @@ func TestLearningsProjectSessionThroughAuth(t *testing.T) {
 	f := setup(t)
 	setFields(t, f, f.ticket, map[string]any{"tags": []any{"process-learning"}})
 	ticketComment := addComment(t, f, f.ticket, "#process-learning Quote the ticket in the changelog.")
-	elsewhere := addNode(t, f, "OTH-9", "ticket", "Other project learning", &f.other)
+	elsewhere := addNode(t, f, "OTH-9", "work", "Other project learning", &f.other)
 	setFields(t, f, elsewhere, map[string]any{"tags": []any{"process-learning"}})
 	otherComment := addComment(t, f, elsewhere, "#process-learning Stay in the other project.")
 

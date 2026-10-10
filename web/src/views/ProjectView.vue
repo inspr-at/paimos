@@ -1,21 +1,26 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { setPageTitle } from '../lib/brand'
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
+import { isClipped, vClipTip } from '../directives/clipTip'
+import { computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
 import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type BulkChange, type BulkResult, type ListItem, type SavedView } from '../lib/api'
 import { askDoneGate } from '../lib/doneGateAsk'
 import { benefitGateError, benefitSkip, benefitStepSummary, completionFields, needsBenefitPrompt, skippedStatusLabel } from '../lib/doneGate'
-import { can } from '../lib/authz'
+import { can, ensurePermissions } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
 import { planningPresent } from '../lib/planning'
-import { useDensity, useHeaderGraph } from '../lib/prefs'
+import { useDensity } from '../lib/prefs'
+import { useDeveloperSettings } from '../lib/developerSettings'
+import { useProjectHeader } from '../lib/useProjectHeader'
+import { selectionHiddenByPolicy, type HideState } from '../lib/hideStates'
+import { groupStates, reconcileStatusHide, type HeaderStatusGroup } from '../lib/projectStatusCounts'
+import ProjectStatusCounts from '../components/work/ProjectStatusCounts.vue'
 import { orderOf, pickerColumns, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../lib/savedViews'
 import { usePreference } from '../lib/preferences'
-import { useDeveloperSettings } from '../lib/developerSettings'
 import { toast } from '../lib/toast'
 import { settledNavigation } from '../lib/navigation'
 import { command, consume, run } from '../lib/commands'
@@ -25,12 +30,19 @@ import type { TicketGraphState } from '../lib/ticketGraphRenderer'
 import { useTicketList } from '../lib/useTicketList'
 import { useLiveList } from '../lib/useLiveList'
 import { rowStore } from '../lib/rowStore'
+import { TICKET_PEEK } from '../lib/ticketPeek'
+import { ticketRef } from '../lib/ticketLinks'
+import { scopeOwner } from '../lib/identityScope'
 import { PROJECT_COLUMN_BY_ID, projectProgressTip } from '../lib/projectColumns'
-import { absoluteTime, cycleSort, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
+import { absoluteTime, cycleSort, normaliseState, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
 import { useProjects } from '../stores/projects'
 import { useLiveAgents } from '../stores/liveAgents'
+import { ticketsFooter, withAgentsIsPartial } from '../lib/footerProviders'
+import { useFooterSummary } from '../lib/footerSummary'
 import { useSession } from '../stores/session'
 import { useWorkQueue } from '../stores/workQueue'
+import { useWorkVocabulary } from '../stores/workVocabulary'
+import { workNoun } from '../lib/workVocabulary'
 import { useReleases } from '../stores/releases'
 import { usePoller } from '../lib/usePolledData'
 import { queueable, queueHours } from '../lib/workQueue'
@@ -49,44 +61,100 @@ import StatusMenu from '../components/work/StatusMenu.vue'
 import TicketTable from '../components/work/TicketTable.vue'
 import TicketWorkspace from '../components/work/TicketWorkspace.vue'
 import ViewBar from '../components/work/ViewBar.vue'
+import HeaderNavMenu from '../components/work/HeaderNavMenu.vue'
 import SaveViewPanel from '../components/work/SaveViewPanel.vue'
 import BulkBar from '../components/work/BulkBar.vue'
 import LiveUpdatesChip from '../components/work/LiveUpdatesChip.vue'
-import ListFreshness from '../components/work/ListFreshness.vue'
 import LabelMenu, { type LabelChoice } from '../components/work/LabelMenu.vue'
 import OptionMenu from '../components/work/OptionMenu.vue'
 import EpicPicker from '../components/work/EpicPicker.vue'
 import ReleasePicker from '../components/work/ReleasePicker.vue'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../lib/releaseAssign'
-import { listNativeMemberships, openedMembershipMessage, type NativeReleaseView } from '../lib/releaseMembership'
-import { useJourney } from '../stores/journey'
-import { flowPillContext } from '../lib/flowPillContext'
+import { listNativeMemberships, openedMembershipMessage, releaseViewIsParent, type NativeReleaseView } from '../lib/releaseMembership'
 import HeaderGlimpse from '../components/work/HeaderGlimpse.vue'
+import LeadBand from '../components/lead/LeadBand.vue'
 import type KnowledgeEntryPageType from '../components/knowledge/KnowledgeEntryPage.vue'
 import type KnowledgeTabType from '../components/knowledge/KnowledgeTab.vue'
 import { DOCK_LIST_RESERVE, DOCK_MEDIA, entryPath, isKnowledgeType, parseEntryParam, type KnowledgeEntry, type KnowledgeType } from '../lib/knowledge'
 import { filtersFromQuery as knowledgeFiltersFrom, filtersToQuery as knowledgeQuery, useKnowledge, type KnowledgeFilters } from '../lib/useKnowledge'
-import type { Stage } from '../lib/journey'
 import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
 
-const JourneyView = defineAsyncComponent(() => import('../components/journey/JourneyView.vue'))
+const RecurringWorkCard = defineAsyncComponent(() => import('../components/recurrences/RecurringWorkCard.vue'))
+const ProjectWorkContextCard = defineAsyncComponent(() => import('../components/settings/ProjectWorkContextCard.vue'))
 // Knowledge loads with its tab, not with every project page.
 const KnowledgeTab = defineAsyncComponent(() => import('../components/knowledge/KnowledgeTab.vue'))
 const KnowledgeEntryPage = defineAsyncComponent(() => import('../components/knowledge/KnowledgeEntryPage.vue'))
+// Delivery (AEON-994) loads with its tab.
+const DeliveryView = defineAsyncComponent(() => import('../components/delivery/DeliveryView.vue'))
 
 const route = useRoute()
 const router = useRouter()
 const projects = useProjects()
 const session = useSession()
-const { showFlowControls } = useDeveloperSettings()
-const projectSections = computed(() => PROJECT_SECTIONS.filter(item => item.id !== 'journey' || showFlowControls.value))
+// Delivery is absent, not disabled, for people who may not read it (AEON-994).
+const projectSections = computed(() => PROJECT_SECTIONS.filter(item => item.id !== 'delivery' || (!!project.value && can('delivery.read', project.value.id))))
 
 const projectKey = computed(() => String(route.params.projectKey ?? ''))
 const ticketKey = computed(() => typeof route.params.ticketKey === 'string' ? route.params.ticketKey : '')
+// Links followed from a routed ticket reuse its panel and route guards. Other
+// project views retain the app peek (graphs, Knowledge and the plain list).
+const appPeek = inject(TICKET_PEEK, null)
+provide(TICKET_PEEK, {
+  open: (key, from) => { if (ticketKey.value) void openRelated(key); else appPeek?.open(key, from) },
+  openKey: computed(() => ticketKey.value ? ticketKey.value.toUpperCase() : appPeek?.openKey.value ?? null),
+})
 const project = computed(() => projects.byRouteKey(projectKey.value))
 const projectId = computed(() => project.value?.id ?? null)
+const descriptionExpanded = ref(false)
+const descriptionClipped = ref(false)
+const descriptionBlock = ref<HTMLElement>()
+const descriptionMore = ref<HTMLButtonElement>()
+const descriptionText = ref<HTMLElement>()
+const descriptionProbe = ref<HTMLElement>()
+const descriptionNeedsPanel = ref(false)
+const descriptionFull = ref<HTMLElement>()
+const descriptionRoom = ref(0)
+// Description disclosure owns its measurement; full text may exceed the
+// viewport, so it belongs in a focusable scroll region rather than a tooltip.
+watch([descriptionText, descriptionProbe, () => project.value?.description], ([element, probe], _, onCleanup) => {
+  if (!element) return
+  const measure = () => {
+    descriptionClipped.value = isClipped(element)
+    const rect = element.getBoundingClientRect()
+    const room = Math.max(rect.top - 16, innerHeight - rect.bottom - 16)
+    descriptionNeedsPanel.value = innerWidth <= 720 || matchMedia('(pointer: coarse)').matches || (probe?.offsetHeight ?? 0) > room
+    if (!descriptionClipped.value) descriptionExpanded.value = false
+  }
+  const observer = new ResizeObserver(measure)
+  observer.observe(element)
+  if (probe) observer.observe(probe)
+  window.addEventListener('resize', measure)
+  measure()
+  onCleanup(() => { observer.disconnect(); window.removeEventListener('resize', measure) })
+}, { flush: 'post' })
+function closeDescription() {
+  descriptionExpanded.value = false
+  descriptionMore.value?.focus()
+}
+async function toggleDescription() {
+  descriptionRoom.value = Math.max(44, innerHeight - (descriptionBlock.value?.getBoundingClientRect().bottom ?? 0) - 12)
+  const openedFor = projectId.value
+  descriptionExpanded.value = !descriptionExpanded.value
+  if (descriptionExpanded.value) {
+    await nextTick()
+    if (descriptionExpanded.value && projectId.value === openedFor) descriptionFull.value?.focus({ preventScroll: true })
+  }
+}
+function dismissDescription(event: PointerEvent) {
+  if (event.target instanceof Node && !descriptionBlock.value?.contains(event.target)) descriptionExpanded.value = false
+}
+watch([projectId, () => project.value?.description], () => {
+  descriptionExpanded.value = false
+  descriptionClipped.value = false
+})
 const routeKey = computed(() => project.value?.routeKey ?? projectKey.value)
 const queue = useWorkQueue(), releases = useReleases()
+const vocabulary = useWorkVocabulary()
 const queueAnchor = ref<HTMLElement | null>(null)
 const assigneeMenu = ref<{ row: ListItem; anchor: HTMLElement } | null>(null)
 const queueSnapshot = computed(() => projectId.value ? queue.snapshots[projectId.value] : undefined)
@@ -97,7 +165,12 @@ watch(projectId, id => { queueAnchor.value = null; assigneeMenu.value = null; if
 onMounted(() => queuePoller.start())
 onBeforeUnmount(() => queuePoller.stop())
 function closeQueue(restore: boolean) { const anchor = queueAnchor.value; queueAnchor.value = null; if (restore) anchor?.focus() }
-function openAssignee(row: ListItem, anchor: HTMLElement) { assigneeMenu.value = { row, anchor } }
+async function openAssignee(row: ListItem, anchor: HTMLElement) {
+  const request = peopleGeneration, revision = row.updated_at
+  await loadProjectPeople()
+  if (request !== peopleGeneration || !anchor.isConnected || row.updated_at !== revision) return
+  assigneeMenu.value = { row, anchor }
+}
 function closeAssignee(restore: boolean) { const anchor = assigneeMenu.value?.anchor; assigneeMenu.value = null; if (restore) anchor?.focus() }
 async function assignPerson(value: string) {
   const row = assigneeMenu.value?.row
@@ -131,6 +204,8 @@ const listPref = computed(() => projectId.value ? usePreference<ListPrefs>(`list
 const listPrefs = computed(() => listPref.value?.value.value ?? null)
 // On the Knowledge tab the address's search and filters are the tab's own, not the ticket list's.
 const section = computed(() => projectSection(route))
+const { headerDensity } = useProjectHeader()
+const ticketsHeader = computed(() => section.value === 'tickets')
 const sectionPath = (value: ProjectSection = section.value) => `/p/${encodeURIComponent(routeKey.value)}/${value}`
 const ticketSectionQuery = (value: ProjectSection = section.value): Record<string, string> => value === 'tickets' ? {} : { section: value }
 const onKnowledge = () => section.value === 'knowledge'
@@ -154,7 +229,7 @@ const toolbarColumns = computed(() => {
 // In a saved view the columns belong to the view (they become part of the list's
 // state); on the plain list they are the person's own for this project.
 function saveColumns(order: ColumnId[], visible: ColumnId[]) {
-  if (filters.value.view) { update({ cols: order.filter(id => visible.includes(id) && !PINNED.includes(id)) }); return }
+  if (filters.value.view || filters.value.cols) { update({ cols: order.filter(id => visible.includes(id) && !PINNED.includes(id)) }); return }
   listPref.value?.save({ ...(listPrefs.value ?? {}), order, visible }, 0)
 }
 function resetColumns() {
@@ -164,8 +239,12 @@ function resetColumns() {
 }
 function saveWidths(widths: Partial<Record<ColumnId, number>>) { listPref.value?.save({ ...(listPrefs.value ?? {}), widths }) }
 const { density, set: setDensity } = useDensity()
-const { headerGraph, ready: headerGraphReady, set: setHeaderGraph } = useHeaderGraph()
-const glimpseActive = ref(false)
+// AEON-1042: the header graph is a developer opt-in, off by default. Off, the
+// glimpse is not mounted and the header keeps its plain geometry.
+const { showHeaderGraph, loading: developerLoading } = useDeveloperSettings()
+const headerGraph = computed(() => !developerLoading.value && showHeaderGraph.value)
+const glimpseShown = ref(false)
+const glimpseActive = computed(() => headerGraph.value && !graphActive.value && glimpseShown.value)
 // A status change that met someone else's newer version opens the ticket to review it.
 async function fetchWorkList(query: ListQuery) {
   if (!query.state?.some(state => state === 'queued' || state === '!queued') || !projectId.value) return listNodes(query)
@@ -178,7 +257,7 @@ async function fetchWorkList(query: ListQuery) {
 const list = useTicketList(projectId, filters, { review: row => openRow(row), fetchList: fetchWorkList })
 const now = ref(Date.now())
 // Sections own their views. The registry also supplies TG1's optional renderer.
-type ViewMode = TicketView | 'journey' | 'knowledge'
+type ViewMode = TicketView | 'knowledge' | 'settings' | 'delivery'
 const activeTicketView = computed(() => ticketView(route.query.view))
 // Knowledge has its own address: /p/KEY/knowledge, and /p/KEY/knowledge/<type>/<slug> for one entry.
 const knowledgeActive = computed(onKnowledge)
@@ -230,29 +309,8 @@ watch([dockEntry, knowledgeWide], ([entry]) => {
 }, { immediate: true })
 const fullViewQuery = computed(() => !!ticketKey.value && (route.query.panel === 'full' || route.query.view === 'full'))
 const viewMode = computed<ViewMode>(() => section.value === 'tickets' ? activeTicketView.value.id as TicketView : section.value)
-const journeyActive = computed(() => section.value === 'journey')
-// The journey's own place: the stage looked at, a chosen release and the walker's ticket.
-const JOURNEY_KEYS = ['stage', 'release', 'walk'] as const
-const queryText = (value: unknown) => typeof value === 'string' && value ? value : null
-const journeyStage = computed(() => queryText(route.query.stage))
-const journeyRelease = computed(() => queryText(route.query.release))
-const journeyWalk = computed(() => queryText(route.query.walk))
-function journeyQuery(patch: Partial<Record<typeof JOURNEY_KEYS[number], string | null>> = {}) {
-  const query: Record<string, string> = ticketKey.value ? { section: 'journey' } : {}
-  for (const key of JOURNEY_KEYS) {
-    const value = key in patch ? patch[key] : queryText(route.query[key])
-    if (value) query[key] = value
-  }
-  return query
-}
-function journeyStageTo(stage: Stage) { void router.push({ path: ticketKey.value ? route.path : sectionPath('journey'), query: journeyQuery({ stage, walk: null }) }) }
-function journeyReleaseTo(key: string | null) { void router.replace({ path: route.path, query: journeyQuery({ release: key }) }) }
-function journeyWalkTo(key: string | null, mode: 'open' | 'move' | 'close') {
-  if (mode === 'open') { void router.push({ path: route.path, query: journeyQuery({ walk: key }) }); return }
-  if (mode === 'move') { void router.replace({ path: route.path, query: journeyQuery({ walk: key }) }); return }
-  if (typeof window.history.state?.back === 'string' && /(?:\/journey|section=journey)/.test(window.history.state.back) && !window.history.state.back.includes('walk=')) router.back()
-  else void router.replace({ path: route.path, query: journeyQuery({ walk: null }) })
-}
+const settingsActive = computed(() => section.value === 'settings')
+const deliveryActive = computed(() => section.value === 'delivery')
 const graphActive = computed(() => viewMode.value === 'graph')
 const graphState = ref<TicketGraphState>({ data: { nodes: [], links: [], truncated: false }, visible: { nodes: [], links: [], truncated: false }, loading: true })
 const ticketGraphView = ref<{ focus: () => void }>()
@@ -312,6 +370,7 @@ watch(bulkBar, bar => {
   bulkHeight.value = 0
   const element = bar?.$el.querySelector('.bulk-bar') as HTMLElement | undefined
   if (!element) return
+  bulkHeight.value = element.offsetHeight
   bulkResize = new ResizeObserver(() => { bulkHeight.value = element.offsetHeight })
   bulkResize.observe(element)
 }, { flush: 'post' })
@@ -355,7 +414,7 @@ const displayRows = computed(() => {
 const rowsById = computed(() => new Map(list.rows.value.map(row => [row.id, row])))
 const groups = computed(() => {
   const facet = groupFacet(filters.value.group)
-  return groupRows(displayRows.value, filters.value.group, facet ? list.facetCounts(facet) : {}, { me: session.identity?.principal.id, layout: liveList.layout })
+  return groupRows(displayRows.value, filters.value.group, facet ? list.facetCounts(facet) : {}, { me: session.identity?.principal.id, layout: liveList.layout, workName: vocabulary.leaf.name })
 })
 // Keyboard order: every visible row once (a ticket under two labels is visited once).
 const sequence = computed(() => {
@@ -397,13 +456,13 @@ function options(dimension: Dimension) {
       const value = dimension === 'status' ? node.status : dimension === 'priority' ? node.priority ?? 'none' : node.type
       counts[value] = (counts[value] ?? 0) + 1
     }
-    return facetOptions(dimension, counts, filters.value[dimension], list.names).filter(option => dimension !== 'type' || option.value !== 'task')
+    return facetOptions(dimension, counts, filters.value[dimension], list.names, undefined, { workName: vocabulary.leaf.name }).filter(option => dimension !== 'type' || option.value !== 'task')
   }
-  const result = facetOptions(dimension, list.counts(dimension), filters.value[dimension].filter(value => value !== 'queued' && value !== '!queued'), list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value })
+  const result = facetOptions(dimension, list.counts(dimension), filters.value[dimension].filter(value => value !== 'queued' && value !== '!queued'), list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value, workName: vocabulary.leaf.name })
   return dimension === 'status' ? [{ value: 'queued', label: 'Queued', count: queueSnapshot.value?.items.length ?? 0, hint: 'Open + a place' }, ...result] : result
 }
 function chipLabel(dimension: Dimension, value: string) {
-  return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value })
+  return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value, workName: vocabulary.leaf.name })
 }
 // What a menu needs before it opens: names, label counts or the project's epics.
 const facetLoading = ref(false)
@@ -428,10 +487,42 @@ function modeQuery() {
     ...(ticketKey.value ? ticketSectionQuery() : {}), ...(route.query.panel === 'full' ? { panel: 'full' } : {}) }
 }
 function update(patch: Partial<ListFilters>) {
+  if (patch.status !== undefined || patch.hideStates !== undefined) {
+    const nextStatus = patch.status ?? filters.value.status
+    if (patch.status !== undefined && !('statusScope' in patch)) patch = { ...patch, statusScope: undefined }
+    const hidden = selectionHiddenByPolicy(nextStatus, patch.statusScope ?? (patch.status === undefined ? filters.value.statusScope : undefined), project.value?.status_counts, patch.hideStates ?? filters.value.hideStates, project.value?.status_counts_truncated)
+    const result = reconcileStatusHide(filters.value.showClosed, filters.value.hideRestore ?? false, hidden)
+    patch = { ...patch, showClosed: result.showClosed, hideRestore: result.automatic || undefined }
+    if (result.note) toast(result.note, { key: 'project-status-hide' })
+  }
   void router.replace({ path: route.path, query: { ...filtersToQuery({ ...filters.value, ...patch }), ...modeQuery() } })
 }
+function setHideStates(hideStates: HideState[]) { update({ hideStates }) }
+function manualShowClosed(showClosed: boolean) { update({ showClosed, hideRestore: undefined }) }
+function selectCountGroup(group: HeaderStatusGroup) {
+  if (!project.value) return
+  const selected = filters.value.statusScope === group.id && filters.value.status.length > 0
+  update({ status: selected ? [] : groupStates(project.value, group), statusScope: selected ? undefined : group.id })
+}
+function selectCountStatus(state: string) {
+  const selected = filters.value.statusScope === 'canonical' && filters.value.status.length === 1 && filters.value.status[0] === state
+  update({ status: selected ? [] : [state], statusScope: selected ? undefined : 'canonical' })
+}
+// The temporary override travels with the URL/view, so reload and navigation
+// preserve restoration. There is no per-person or per-project override cache.
+watch(() => [filters.value.status, filters.value.statusScope, filters.value.hideRestore, filters.value.hideStates, project.value], () => {
+  if (project.value && filters.value.hideRestore && !selectionHiddenByPolicy(filters.value.status, filters.value.statusScope, project.value.status_counts, filters.value.hideStates, project.value.status_counts_truncated)) {
+    if (filters.value.showClosed) { update({ showClosed: false, hideRestore: undefined }); toast('Hide is on again.', { key: 'project-status-hide' }) }
+  }
+})
 // Remember each section's filters and view while moving around this project.
 watch(section, () => { creating.value = false; openedFromList = false })
+// A Delivery address without delivery.read leads to the project's tickets once permissions are known.
+watch([deliveryActive, projectId], async ([active, id]) => {
+  if (!active || !id) return
+  if (await ensurePermissions(id) !== 'known' || !deliveryActive.value || projectId.value !== id || can('delivery.read', id)) return
+  void router.replace({ path: sectionPath('tickets'), hash: route.hash })
+}, { immediate: true })
 const sectionQueries: Partial<Record<ProjectSection, typeof route.query>> = {}
 watch(projectKey, () => { for (const key of Object.keys(sectionQueries)) delete sectionQueries[key as ProjectSection] })
 function setSection(id: string) {
@@ -443,20 +534,6 @@ function setSection(id: string) {
   void router.push({ path: ticketKey.value ? ticketPath(ticketKey.value) : sectionPath(target),
     query: { ...saved, ...(ticketKey.value ? ticketSectionQuery(target) : {}) } })
 }
-watch([project, journeyActive, journeyStage], () => {
-  const current = project.value
-  if (!current) { flowPillContext.value = null; return }
-  const active = journeyActive.value
-  const stage = journeyStage.value
-  flowPillContext.value = {
-    projectId: current.id,
-    active,
-    open() {
-      if (active) journeyStageTo((stage ?? 'inspire') as Stage)
-      else setSection('journey')
-    },
-  }
-}, { immediate: true })
 let viewIntent = 0
 async function setView(view: string) {
   const intent = ++viewIntent, within = projectKey.value, sectionAtClick = section.value
@@ -476,10 +553,7 @@ async function setView(view: string) {
 }
 function toggleValue(dimension: Dimension, value: string) {
   const next = toggleIn(filters.value[dimension], value)
-  const adding = next.includes(value)
   const patch: Partial<ListFilters> = { [dimension]: next }
-  // Choosing a closed status while closed tickets are hidden would show nothing.
-  if (dimension === 'status' && adding && statusMeta(value).closed && !filters.value.showClosed) patch.showClosed = true
   update(patch)
 }
 function excludeValue(dimension: Dimension, value: string) { update({ [dimension]: toggleOut(filters.value[dimension], value) }) }
@@ -487,6 +561,30 @@ function clearFilters() { update(clearedFilters()) }
 function setDate(date: DateFilter | null) { update({ date }) }
 function sortBy(field: SortField, additive: boolean) { update({ sort: cycleSort(filters.value.sort, field, additive) }) }
 function setSort(sort: SortKey[]) { update({ sort }) }
+
+// ---------- Footer summary (AEON-785): what this list shows ----------
+// The same total the toolbar counts; blocked from the state counts, workers from the live read.
+useFooterSummary(() => {
+  // A first read that failed shows its own error; the footer does not wait for it.
+  if (!session.identity || !project.value || !liveActive.value || (list.error.value && !list.loadedOnce.value)) return null
+  const states = list.facets.value.state ?? {}
+  const blocked = Object.entries(states).reduce((sum, [state, n]) => sum + (normaliseState(state) === 'blocked' ? n : 0), 0)
+  const loadedRows = outlineActive.value ? outline.rows.value : list.rows.value
+  const loaded = new Set(loadedRows.map(row => row.id))
+  const hasMore = outlineActive.value ? outline.hasMoreRoot.value || !!list.cursor.value : !!list.cursor.value
+  const worked = new Set(liveAgents.forProject(project.value.id).flatMap(agent => agent.ticket ? [agent.ticket.id] : []))
+  const partial = withAgentsIsPartial(filtered.value, loaded.size, total.value, hasMore)
+  return ticketsFooter({
+    loaded: list.loadedOnce.value, total: total.value, blocked, filtered: filtered.value,
+    withAgents: filtered.value ? [...worked].filter(id => loaded.has(id)).length : worked.size,
+    withAgentsPartial: partial,
+    act: {
+      blocked: () => { if (!filters.value.status.some(state => normaliseState(state) === 'blocked')) toggleValue('status', 'blocked') },
+      top: () => { if (scrollRoot.value) scrollRoot.value.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }) },
+      clear: clearFilters,
+    },
+  })
+}, () => liveActive.value && liveUpdatedAt.value !== null ? { updatedAt: liveUpdatedAt.value, paused: liveDataStale.value } : null)
 function setGroup(group: GroupBy) {
   collapsed.value = new Set()
   if (group === 'tag') void list.requestFacet('tag')
@@ -504,30 +602,38 @@ function toggleGroup(key: string) {
 const views = computed(() => viewsOf(projectId.value))
 const activeView = computed(() => filters.value.view ? views.value.items.find(view => view.id === filters.value.view) ?? null : null)
 const viewFilters = computed(() => activeView.value ? filtersFromView(activeView.value) : null)
-const customised = computed(() => hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed)
-const viewDirty = computed(() => !!viewFilters.value && !sameListState(filters.value, viewFilters.value))
-const canSaveView = computed(() => !journeyActive.value && !knowledgeActive.value && (activeView.value ? viewDirty.value : customised.value))
+const savedFilters = computed(() => ({ ...filters.value, mode: activeTicketView.value.id as ListFilters['mode'], cols: toolbarColumns.value.order.filter(id => toolbarColumns.value.visible.includes(id) && !PINNED.includes(id)) }))
+const customised = computed(() => !!listPrefs.value?.visible || filters.value.mode !== 'list' || hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed || !!filters.value.hideStates)
+const viewDirty = computed(() => !!viewFilters.value && !sameListState(savedFilters.value, viewFilters.value))
+const canSaveView = computed(() => !knowledgeActive.value && !settingsActive.value && !deliveryActive.value && (activeView.value ? viewDirty.value : customised.value))
 // The saved-view strip shows once there is a view to pick or a list worth keeping; the plain list alone needs no strip.
-const showViewBar = computed(() => !journeyActive.value && !knowledgeActive.value && !graphActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
+const showViewBar = computed(() => !knowledgeActive.value && !settingsActive.value && !deliveryActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
 const defaultViewId = computed(() => listPrefs.value?.defaultView ?? null)
 function viewQuery(view: SavedView | null): Record<string, string> {
   return view ? filtersToQuery(filtersFromView(view)) : {}
 }
 function hrefFor(id: string | null) {
   const view = id ? views.value.items.find(item => item.id === id) ?? null : null
-  const query = new URLSearchParams({ ...viewQuery(view), ...(outlineActive.value ? { view: 'outline' } : {}) }).toString()
+  const query = new URLSearchParams(view ? viewQuery(view) : { ...(activeTicketView.value.id !== 'list' ? { view: activeTicketView.value.id } : {}) }).toString()
   return `${sectionPath('tickets')}${query ? `?${query}` : ''}`
 }
 function openView(id: string | null, replace = false) {
   const view = id ? views.value.items.find(item => item.id === id) ?? null : null
   collapsed.value = new Set()
-  const query = { ...viewQuery(view), ...(outlineActive.value ? { view: 'outline' } : {}) }
+  const query = view ? viewQuery(view) : { ...(activeTicketView.value.id !== 'list' ? { view: activeTicketView.value.id } : {}) }
   const location = { path: sectionPath('tickets'), query }
   if (replace) void router.replace(location); else void router.push(location)
 }
 // A link to a view someone cannot see (private, or deleted) keeps its filters.
 watch([() => filters.value.view, () => views.value.loaded], ([id, loaded]) => {
-  if (id && loaded && !views.value.items.some(view => view.id === id)) update({ view: null })
+  if (!id || !loaded) return
+  const view = views.value.items.find(view => view.id === id)
+  if (!view) { update({ view: null }); return }
+  // Bare view links adopt the stored presentation; explicit URL edits stay dirty.
+  const query = { ...route.query }
+  if (query.view === undefined) query.view = view.mode
+  if (query.cols === undefined && view.columns.length) query.cols = view.columns.join(',')
+  if (query.view !== route.query.view || query.cols !== route.query.cols) void router.replace({ path: route.path, query })
 })
 // The project opens with the person's default view when nothing else was asked for.
 // The list waits for that answer, so it never shows the plain list first.
@@ -545,14 +651,14 @@ watch(projectId, async id => {
   if (projectId.value !== id) return
   const target = pref.value.value?.defaultView
   const view = target ? viewsOf(id).items.find(item => item.id === target) : null
-  if (view && plain()) await router.replace({ path: route.path, query: { ...viewQuery(view), ...modeQuery() } })
+  if (view && plain()) await router.replace({ path: route.path, query: viewQuery(view) })
   entryResolved.value = true
 }, { immediate: true })
 
 const queryKey = computed(() => projectId.value && entryResolved.value ? JSON.stringify(apiParams(projectId.value, filters.value)) : '')
 // The Outline without filters loads its own levels; the list query then only supplies
 // counts. With filters or Hide closed, the Outline needs the list's whole match set.
-const listLoadMode = computed(() => graphActive.value ? 'graph' : journeyActive.value || knowledgeActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
+const listLoadMode = computed(() => graphActive.value ? 'graph' : knowledgeActive.value || settingsActive.value || deliveryActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
 watch([queryKey, listLoadMode], async ([value, mode], old) => {
   if (!value || mode === 'graph') return
   // Switching views on the same query reuses the rows already loaded.
@@ -587,12 +693,14 @@ const panelPosition = computed(() => {
   return index === -1 ? null : { index, count }
 })
 async function resolvePanel() {
+  // Invalidate an older lookup even when the new route is empty or cached.
+  const request = ++panelGeneration
   const key = ticketKey.value
   const within = projectId.value
   panelError.value = ''
+  panelLoading.value = false
   if (!key || !within) return
   if (list.rows.value.some(row => row.key.toLowerCase() === key.toLowerCase()) || fetched.value?.key.toLowerCase() === key.toLowerCase()) return
-  const request = ++panelGeneration
   panelLoading.value = true
   try {
     const sent = rowStore.mark()
@@ -625,7 +733,7 @@ const membershipIds = computed(() => {
   const seen = new Set<string>()
   const project = projectId.value
   const push = (row: { id: string; kind_slug: string; project?: { id: string } | null } | null | undefined) => {
-    if (!row || row.kind_slug === 'epic' || seen.has(row.id)) return
+    if (!row || seen.has(row.id)) return
     // A project change can render before the previous list is replaced.
     if (project && row.project?.id && row.project.id !== project) return
     seen.add(row.id)
@@ -698,19 +806,44 @@ function showUpdates() {
   if (!fullView.value && !panel.value?.el?.contains(document.activeElement)) table.value?.focusGrid()
 }
 
-// People who can be assigned: everyone assigned somewhere in this project, and you.
+// Discover everyone assigned in the project only when an assignment menu needs
+// them. Cold ticket navigation must not scan assignees and fetch each name.
 const projectPeople = ref<string[]>([])
-watch(projectId, async id => {
+let peopleGeneration = 0
+let projectPeopleLoad: Promise<void> | null = null
+watch([projectId, () => scopeOwner(session.identity)], () => {
+  peopleGeneration++
   projectPeople.value = []
-  if (!id) return
-  try {
-    const page = await listNodes({ within: id, kind: WORK_KINDS, facets: ['assignee'], limit: 1 })
-    const ids = Object.keys(page.facets?.assignee ?? {}).filter(value => value !== 'none')
-    await list.resolveNames(ids)
-    if (projectId.value === id) projectPeople.value = ids
-  } catch { /* the menu still offers you and Unassigned */ }
-}, { immediate: true })
-const people = computed(() => projectPeople.value.map(id => ({ id, name: list.names.get(id) ?? 'Someone' })))
+  projectPeopleLoad = null
+}, { flush: 'sync' })
+onBeforeUnmount(() => { peopleGeneration++ })
+function loadProjectPeople(): Promise<void> {
+  const id = projectId.value
+  if (!id) return Promise.resolve()
+  if (projectPeopleLoad) return projectPeopleLoad
+  const request = peopleGeneration
+  projectPeopleLoad = (async () => {
+    try {
+      const page = await listNodes({ within: id, kind: WORK_KINDS, facets: ['assignee'], limit: 1 })
+      if (request !== peopleGeneration) return
+      const ids = Object.keys(page.facets?.assignee ?? {}).filter(value => value !== 'none')
+      await list.resolveNames(ids)
+      if (request === peopleGeneration) projectPeople.value = ids
+    } catch {
+      // A later opening retries; already loaded people remain available.
+      if (request === peopleGeneration) projectPeopleLoad = null
+    }
+  })()
+  return projectPeopleLoad
+}
+const people = computed(() => {
+  const known = new Map<string, string>()
+  for (const row of [...list.rows.value, panelItem.value]) {
+    if (row?.project?.id === projectId.value && row.assignee) known.set(row.assignee.id, row.assignee.name)
+  }
+  for (const id of projectPeople.value) known.set(id, list.names.get(id) ?? 'Someone')
+  return [...known].map(([id, name]) => ({ id, name }))
+})
 
 let openedFromList = false
 let openedQuery = ''
@@ -777,15 +910,28 @@ function trailBack(steps = 1) { if (trail.value.length) router.go(-Math.min(step
 // Related tickets can live in another project: open them where they belong.
 async function openRelated(key: string, newTabRequested = false) {
   if (newTabRequested) { newTab(key); return }
+  // Markdown displays the key that was written, but its resolved link may
+  // name a moved record. Use the same canonical key and owner as its href.
+  const resolved = ticketRef(key)
+  const target = resolved ? projects.byId(resolved.projectId) : undefined
+  if (resolved && target) {
+    follow(`/p/${encodeURIComponent(target.routeKey)}/${encodeURIComponent(resolved.key)}`)
+    return
+  }
+  const from = route.fullPath
+  const ownerScope = scopeOwner(session.identity)
+  const stale = () => route.fullPath !== from || scopeOwner(session.identity) !== ownerScope
   const here = key.split('-')[0] === routeKey.value || list.rows.value.some(row => row.key === key)
   if (!here) {
     try {
       const page = await listNodes({ q: key, limit: 25 })
+      if (stale()) return
       const owner = page.items.find(item => item.key === key)?.project
       const target = owner ? projects.byId(owner.id) : undefined
       if (target && target.id !== projectId.value) { follow(`/p/${encodeURIComponent(target.routeKey)}/${encodeURIComponent(key)}`); return }
     } catch { /* fall back to this project, where the panel explains */ }
   }
+  if (stale()) return
   if (ticketKey.value) follow(ticketPath(key)); else openKey(key)
 }
 watch(ticketKey, key => { if (!key) openedFromList = false })
@@ -820,6 +966,11 @@ function openEpic(epic: EpicRef) { openKey(epic.key) }
 
 // ---------- Create and remove ----------
 async function startCreate(under: ListItem | null = null) {
+  const project = projectId.value, person = session.identity?.principal.id, tenant = session.identity?.tenant.id
+  const revision = under?.updated_at
+  await vocabulary.load()
+  if (project !== projectId.value || person !== session.identity?.principal.id || tenant !== session.identity?.tenant.id || (under && outline.node(under.id)?.updated_at !== revision)) return
+  if (!vocabulary.loaded) { toast(vocabulary.error, { tone: 'error' }); return }
   if (fullView.value) collapse()
   if (under && outlineActive.value) {
     creating.value = false
@@ -836,11 +987,12 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
   const current = project.value
   if (!current) return false
   try {
-    const kind = (await kinds()).find(candidate => candidate.slug === draft.kind)
+    const catalog = await kinds()
+    const kind = catalog.find(candidate => candidate.slug === 'work') ?? catalog.find(candidate => candidate.slug === draft.kind || candidate.slug === 'ticket')
     if (!kind) throw new Error('this workspace has no such type')
     let fields: Record<string, unknown> = draft.priority ? { priority: draft.priority } : {}
-    if (needsBenefitPrompt({ kind_slug: draft.kind, state: 'new', fields }, draft.state)) {
-      const text = await askDoneGate({ key: 'New ticket', title: draft.title, state: draft.state, fields })
+    if (needsBenefitPrompt({ kind_id: kind.id, kind_slug: draft.kind, state: 'new', fields }, draft.state)) {
+      const text = await askDoneGate({ key: `New ${workNoun(vocabulary.leaf.name)}`, title: draft.title, state: draft.state, fields })
       if (!text) return false
       fields = completionFields(fields, text)
     }
@@ -848,7 +1000,7 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
       kind_id: kind.id, title: draft.title, state: draft.state, fields,
       parent_id: draft.epic?.id ?? current.id, key_prefix: keyPrefix(current.routeKey),
     })
-    const parent = draft.epic ? { ...draft.epic, kind_slug: 'epic' } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
+    const parent = draft.epic ? { ...draft.epic, kind_slug: kind.slug === 'work' ? 'work' : 'epic' } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
     const created = asListItem(node, kind, parent, { id: current.id, key: current.key, title: current.title })
     list.insertRow(created)
     outline.insert(created)
@@ -867,14 +1019,14 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
 }
 function childCreated(item: ListItem) { list.insertRow(item); outline.insert(item); void projects.load(true) }
 function childMoved(item: ListItem, fromParent: string | null) {
-  outline.relocate(item, fromParent, fromParent && outline.node(fromParent)?.kind_slug === 'epic' ? fromParent : null)
+  outline.relocate(item, fromParent, fromParent && (outline.node(fromParent)?.is_leaf === false || outline.node(fromParent)?.kind_slug === 'epic') ? fromParent : null)
 }
 function closeCreate() { creating.value = false; outline.startCreateUnder(null) }
 // Drag and drop in the Outline: the same guarded move as the workspace's "Move to another epic".
 async function moveRow(row: ListItem, epic: ListItem | null) {
   const current = project.value
   if (!current) return
-  const parent = epic ? { id: epic.id, key: epic.key, title: epic.title, kind_slug: 'epic' } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
+  const parent = epic ? { id: epic.id, key: epic.key, title: epic.title, kind_slug: epic.kind_slug } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
   if (await guardedMove(row, parent, childMoved) === 'ok') {
     if (epic) outline.setExpanded(epic.id, true)
     cursorId.value = row.id
@@ -1000,6 +1152,7 @@ const savePanel = ref<{ mode: 'create' | 'rename'; anchor: HTMLElement; view?: S
 const saveBusy = ref(false)
 const saveError = ref('')
 const viewBar = ref<InstanceType<typeof ViewBar>>()
+watch([projectId, () => me.value?.id], () => { savePanel.value = null; saveError.value = ''; saveBusy.value = false })
 function startSave(anchor: HTMLElement) {
   saveError.value = ''
   const base = activeView.value ? copyName(activeView.value.name, views.value.items.map(v => v.name)) : suggestName(filters.value, chipLabel)
@@ -1013,31 +1166,35 @@ function closeSave(restore: boolean) {
 }
 function problem(e: unknown) { return e instanceof Error ? e.message : 'Something went wrong' }
 async function submitSave(value: { name: string; shared: boolean; makeDefault: boolean }) {
-  const panel = savePanel.value, id = projectId.value
+  const panel = savePanel.value, id = projectId.value, person = me.value?.id, state = { ...savedFilters.value, view: null }
   if (!panel || !id) return
   saveBusy.value = true; saveError.value = ''
   try {
     if (panel.mode === 'rename' && panel.view) {
       const saved = await renameView(id, panel.view, value.name)
+      if (projectId.value !== id || me.value?.id !== person || savePanel.value !== panel) return
       toast(`Renamed the view to “${saved.name}”`)
     } else {
-      const saved = await saveNewView(id, value.name, { ...filters.value, view: null }, value.shared)
+      const saved = await saveNewView(id, value.name, state, value.shared)
+      if (projectId.value !== id || me.value?.id !== person || savePanel.value !== panel) return
       if (value.makeDefault) listPref.value?.save({ ...(listPrefs.value ?? {}), defaultView: saved.id }, 0)
-      update({ view: saved.id })
+      if (sameListState(savedFilters.value, state)) update({ view: saved.id, cols: filtersFromView(saved).cols })
       toast(`Saved the view “${saved.name}”${saved.shared ? ', shared with the project' : ''}`)
     }
     closeSave(false)
   } catch (e) {
-    saveError.value = problem(e)
+    if (projectId.value === id && savePanel.value === panel) saveError.value = problem(e)
   } finally {
     saveBusy.value = false
   }
 }
 async function saveActive(view: SavedView) {
-  const id = projectId.value
+  const id = projectId.value, person = me.value?.id, state = { ...savedFilters.value, view: null }
   if (!id) return
   try {
-    await saveViewState(id, view, { ...filters.value, view: null })
+    const saved = await saveViewState(id, view, state)
+    if (projectId.value !== id || me.value?.id !== person || filters.value.view !== view.id) return
+    if (sameListState(savedFilters.value, state)) update({ cols: filtersFromView(saved).cols })
     toast(`Saved the changes to “${view.name}”`)
   } catch (e) { toast(`The view was not saved: ${problem(e)}`, { tone: 'error' }) }
 }
@@ -1077,7 +1234,7 @@ async function remove(view: SavedView) {
 }
 
 // ---------- Selection and bulk changes ----------
-const selectable = computed(() => writable.value && !journeyActive.value && !knowledgeActive.value && !graphActive.value && !fullView.value)
+const selectable = computed(() => writable.value && !knowledgeActive.value && !settingsActive.value && !deliveryActive.value && !graphActive.value && !fullView.value)
 const selected = ref(new Set<string>())
 // Phone selection can be armed before the first card is chosen.
 const phoneQuery = window.matchMedia('(max-width: 720px)')
@@ -1147,16 +1304,26 @@ watch(() => selected.value.size > 0, on => {
 onBeforeUnmount(() => { frameObserver?.disconnect(); window.removeEventListener('resize', measureFrame) })
 const bulkBusy = ref(false)
 const bulkMenu = ref<{ kind: 'status' | 'assignee' | 'priority' | 'labels' | 'move' | 'release'; anchor: HTMLElement } | null>(null)
+let bulkMenuGeneration = 0
 const releaseIds = ref<string[]>([])
-function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTMLElement | null) {
+async function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTMLElement | null) {
+  const opening = ++bulkMenuGeneration
   const at = anchor ?? document.querySelector<HTMLElement>(`.bulk-bar [aria-keyshortcuts="${{ status: 's', assignee: 'a', priority: 'p', labels: 'l', move: 'm', release: 'g' }[kind]}"]`)
   if (!at) return
   if (kind === 'release') { openRelease(at, liveSelection()); return }
   if (kind === 'labels') void list.requestFacet('tag')
+  if (kind === 'assignee') {
+    const request = peopleGeneration
+    const selection = () => JSON.stringify(selectedRows.value.map(row => [row.id, row.updated_at]))
+    const shown = selection()
+    await loadProjectPeople()
+    if (opening !== bulkMenuGeneration || request !== peopleGeneration || !at.isConnected || selection() !== shown) return
+  }
   if (kind === 'move') void list.loadEpics()
   bulkMenu.value = { kind, anchor: at }
 }
 function closeBulk(restore: boolean) {
+  bulkMenuGeneration++
   const anchor = bulkMenu.value?.anchor
   bulkMenu.value = null
   if (restore) anchor?.focus()
@@ -1190,7 +1357,7 @@ async function runBulk(change: Omit<BulkChange, 'ids'>, done: (count: number) =>
   const gone = new Set(selectedDeleted.value)
   ids = ids.filter(id => !gone.has(id))
   if (!ids.length || bulkBusy.value) return
-  bulkMenu.value = null
+  closeBulk(false)
   bulkBusy.value = true
   try {
     const bulkRows = selectionRows.value
@@ -1277,7 +1444,7 @@ async function undoBulk(eventId: number) {
 const count = (n: number) => plural(n, 'ticket')
 async function bulkStatus(state: string) {
   if (bulkBusy.value) return
-  bulkMenu.value = null
+  closeBulk(false)
   const gated = selectedRows.value.filter(row => needsBenefitPrompt(row, state))
   const gatedIds = new Set(gated.map(row => row.id))
   const ready = [...selected.value].filter(id => !gatedIds.has(id))
@@ -1307,6 +1474,7 @@ function bulkMove(epic: { id: string; key: string; title: string } | null) {
   void runBulk({ parent_id: target }, n => epic ? `Moved ${count(n)} to ${epic.title}` : `Took ${count(n)} out of their epic`)
 }
 function openRelease(anchor: HTMLElement, ids: string[]) {
+  bulkMenuGeneration++
   if (!ids.length || !can('releases.write', project.value?.id)) return
   releaseIds.value = ids
   bulkMenu.value = { kind: 'release', anchor }
@@ -1319,15 +1487,14 @@ async function chooseRelease(target: ReleaseTarget) {
   const rows = list.rows.value.filter(row => ids.includes(row.id))
   const tickets = ids.map(id => {
     const row = rows.find(item => item.id === id)
-    return { id, key: row?.key ?? id, title: row?.title ?? '', state: row?.state, kind: row?.kind_slug }
+    return { id, key: row?.key ?? id, title: row?.title ?? '', state: row?.state, kind: row?.kind_slug, isParent: releaseViewIsParent(nativeReleases.value.get(id)) }
   })
-  bulkMenu.value = null
+  closeBulk(false)
   const attempt = ++releaseAttempt
   bulkBusy.value = true
   const here = () => attempt === releaseAttempt && project.value?.id === projectId
   try {
     const outcome = await assignToRelease(projectId, tickets, target)
-    if (outcome.journey) useJourney().set(projectId, outcome.journey)
     if (!here()) return
     const changed = outcome.opened ? openedMembershipMessage(outcome.opened) : null
     if (changed) {
@@ -1337,7 +1504,7 @@ async function chooseRelease(target: ReleaseTarget) {
     }
     const joined = outcome.opened?.status === 'added'
       ? outcome.opened.count
-      : outcome.result?.walker.tickets.filter(ticket => ids.includes(ticket.ticket_node_id) && ticket.included).length ?? 0
+      : outcome.result?.walker.tickets.filter(ticket => (outcome.result?.leaf_node_ids ?? ids).includes(ticket.ticket_node_id) && ticket.included).length ?? 0
     if (!joined) {
       toast('Nothing was added to the release.')
       void refreshMemberships()
@@ -1369,7 +1536,10 @@ async function chooseRelease(target: ReleaseTarget) {
 function dirty() { return !!panel.value?.isDirty() || !!knowledgeEntry.value?.isDirty() }
 async function confirmDiscard() {
   if (skipGuard || !dirty()) return true
-  return confirmAction({ title: 'Discard unsaved changes?', body: 'You have edits in this ticket that are not saved yet.', confirmLabel: 'Discard changes', danger: true })
+  const outgoing = panel.value, outgoingKnowledge = knowledgeEntry.value
+  const ok = await confirmAction({ title: 'Discard unsaved changes?', body: 'You have edits in this ticket that are not saved yet.', confirmLabel: 'Discard changes', danger: true })
+  if (ok) { outgoing?.discard(); outgoingKnowledge?.discard() }
+  return ok
 }
 // Which knowledge entry an address shows (its page or the docked pane), so leaving
 // an entry asks about unsaved edits, while Expand (same entry, now its page) does not.
@@ -1438,7 +1608,7 @@ function extendSelection(step: number) {
 function keydown(event: KeyboardEvent) {
   if (event.altKey && event.key === 'ArrowLeft' && ticketKey.value && trail.value.length && !typing(event.target as HTMLElement | null)) { event.preventDefault(); trailBack(); return }
   // The Knowledge tab and its entries have their own keys.
-  if (knowledgeActive.value && !ticketKey.value) return
+  if ((knowledgeActive.value || settingsActive.value || deliveryActive.value) && !ticketKey.value) return
   // Command or Control A in the list selects every loaded row.
   if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'a' && selectable.value && !event.defaultPrevented
     && !typing(event.target) && !document.querySelector('dialog[open], .floating') && !panel.value?.el?.contains(document.activeElement)) {
@@ -1452,10 +1622,8 @@ function keydown(event: KeyboardEvent) {
     if (!graphActive.value && event.key === 'ArrowDown' && target === toolbar.value?.input) { event.preventDefault(); target.blur(); void move(cursorId.value ? 0 : 1) }
     return
   }
-  // The journey has its own keys; with a ticket open, the panel's keys still work.
-  if (journeyActive.value && !ticketKey.value) return
   if (graphActive.value && ['j', 'k', 'ArrowDown', 'ArrowUp', 'Enter', 'o', 'n'].includes(event.key)) return
-  if ((journeyActive.value || knowledgeActive.value) && ['j', 'k', 'ArrowDown', 'ArrowUp', 'Enter', 'o', '/', 'n'].includes(event.key)) return
+  if ((knowledgeActive.value) && ['j', 'k', 'ArrowDown', 'ArrowUp', 'Enter', 'o', '/', 'n'].includes(event.key)) return
   const row = sequence.value.find(item => item.id === cursorId.value)
   if (event.key === 'F') { event.preventDefault(); toolbar.value?.openFilterMenu(); return }
   if (selectable.value && !panel.value?.el?.contains(document.activeElement)) {
@@ -1488,7 +1656,7 @@ function keydown(event: KeyboardEvent) {
       else if (ticketKey.value) { event.preventDefault(); closePanel() }
       break
     case '/': if (!fullView.value) { event.preventDefault(); toolbar.value?.focusSearch() } break
-    case 'n': event.preventDefault(); void startCreate(outlineActive.value && !ticketKey.value && row?.kind_slug === 'epic' ? row : null); break
+    case 'n': event.preventDefault(); void startCreate(outlineActive.value && !ticketKey.value && (row?.is_leaf === false || row?.kind_slug === 'epic') ? row : null); break
     case 'u': if (activeLive.value.pill.value && liveActive.value) { event.preventDefault(); showUpdates() } break
     case 'e': if (ticketKey.value) { event.preventDefault(); void panel.value?.startEdit() } break
     case 's':
@@ -1534,6 +1702,8 @@ let clock: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
   scrollRoot.value = document.getElementById('main')
   void projects.load()
+  document.addEventListener('pointerdown', dismissDescription)
+  void kinds().catch(() => { /* The server completion gate remains authoritative. */ })
   window.addEventListener('keydown', keydown)
   window.addEventListener('beforeunload', beforeUnload)
   phoneQuery.addEventListener('change', onPhone)
@@ -1553,6 +1723,7 @@ watch([stickMark, scrollRoot], ([element, root]) => {
   stick.observe(element)
 }, { flush: 'post' })
 onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', dismissDescription)
   window.removeEventListener('keydown', keydown)
   window.removeEventListener('beforeunload', beforeUnload)
   clearInterval(clock)
@@ -1563,7 +1734,6 @@ onBeforeUnmount(() => {
   knowledge.stop()
   dockQuery.removeEventListener('change', onDockWidth)
   phoneQuery.removeEventListener('change', onPhone)
-  flowPillContext.value = null
 })
 
 // ---------- Document title ----------
@@ -1576,60 +1746,86 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 </script>
 
 <template>
-  <section class="project-page" :class="{ 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
+  <section class="project-page" :class="[ticketsHeader ? `header-${headerDensity}` : '', { 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'ticket-dock': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }]" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
       <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size, 'has-live-updates': liveActive && activeLive.pill.value }" :style="{ '--live-obstacle-h': `${bulkHeight ? bulkHeight + 8 : 0}px` }">
-      <header class="project-head" :class="{ 'glimpse-room': glimpseActive && !showViewBar }">
-        <div class="head-flex" :class="{ 'with-glimpse': glimpseActive }">
+      <div id="project-header-fold" v-show="!ticketsHeader || headerDensity !== 'collapsed'" class="project-fold">
+      <header class="project-head" :class="{ 'glimpse-room': !ticketsHeader && glimpseActive && !showViewBar }">
+        <div class="head-flex" :class="{ 'with-glimpse': !ticketsHeader && glimpseActive }">
         <div class="head-main">
           <div class="title-line">
             <span class="key-badge big">{{ project.routeKey }}</span>
-            <h1 id="project-title">{{ project.title }}</h1>
+            <h1 id="project-title" v-clip-tip>{{ project.title }}</h1>
             <span v-if="project.frozen" class="chip state-chip">Frozen</span>
             <span v-else-if="project.archived" class="chip state-chip">Archived</span>
           </div>
-          <p v-if="project.description" class="description" :data-tip="project.description.length > 120 ? project.description : undefined">{{ project.description }}</p>
+          <div v-if="project.description" ref="descriptionBlock" class="description-block" @keydown.esc.stop.prevent="closeDescription">
+            <button v-if="descriptionClipped && descriptionNeedsPanel" ref="descriptionMore" type="button" class="description-more" :aria-expanded="descriptionExpanded" aria-controls="project-description-full" @click="toggleDescription">{{ descriptionExpanded ? 'Less' : 'More' }}</button>
+            <p id="project-description" ref="descriptionText" v-clip-tip="descriptionNeedsPanel ? '' : project.description" class="description">{{ project.description }}</p>
+            <div class="description-measure" aria-hidden="true"><p ref="descriptionProbe" class="description-probe">{{ project.description }}</p></div>
+            <div v-if="descriptionExpanded" id="project-description-full" ref="descriptionFull" class="description-full" :style="{ maxHeight: `min(40dvh, ${descriptionRoom}px)` }" role="region" aria-label="Full project description" tabindex="0" @keydown.stop @keydown.esc.prevent="closeDescription">{{ project.description }}</div>
+          </div>
         </div>
-        <HeaderGlimpse v-if="headerGraphReady && headerGraph && !graphActive" :project-id="project.id" :project-key="project.routeKey" :ticket-count="counts?.total ?? 0" :enabled="headerGraph" @active="glimpseActive = $event" />
+        <div v-if="ticketsHeader" class="activity header-activity"><span>Active <time :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time></span>
+          <button v-if="queueSnapshot?.items.length || queueError" type="button" class="stat q-stat" aria-haspopup="dialog" :aria-expanded="!!queueAnchor" :aria-label="queueError ? 'Queue read failed. Open the work queue to retry' : `${queueSnapshot?.items.length} queued. Open the work queue`" :data-tip="queueSnapshot ? queueHours(queueSnapshot) : 'Open the work queue to retry'" @click="queueAnchor = queueAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon :name="queueError ? 'alert' : 'queue'" :size="12" /><template v-if="queueError">Queue unavailable</template><template v-else><b>{{ queueSnapshot?.items.length }}</b> queued</template></button>
+        </div>
+        <HeaderGlimpse v-if="headerGraph && !graphActive" :project-id="project.id" :project-key="project.routeKey" :ticket-count="counts?.total ?? 0" :enabled="headerGraph" @active="glimpseShown = $event" />
         <div v-if="counts" class="head-stats" :aria-label="`${counts.open} open, ${counts.progress} in progress, ${counts.done} done of ${counts.total}`">
-          <div class="stat-line">
+          <ProjectStatusCounts v-if="ticketsHeader" :summary="project" :filters="filters" :density="headerDensity" @group="selectCountGroup" @status="selectCountStatus" />
+          <div v-if="!ticketsHeader" class="stat-line">
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('open')!.tip"><StatusIcon state="open" :size="11" /><b>{{ counts.open.toLocaleString('en-GB') }}</b> open</span>
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('doing')!.tip"><StatusIcon state="in_progress" :size="11" /><b>{{ counts.progress.toLocaleString('en-GB') }}</b> doing</span>
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('done')!.tip"><StatusIcon state="done" :size="11" /><b>{{ counts.done.toLocaleString('en-GB') }}</b> done</span>
             <button v-if="queueSnapshot?.items.length || queueError" type="button" class="stat q-stat" aria-haspopup="dialog" :aria-expanded="!!queueAnchor" :aria-label="queueError ? 'Queue read failed. Open the work queue to retry' : `${queueSnapshot?.items.length} queued. Open the work queue`" @click="queueAnchor = queueAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon :name="queueError ? 'alert' : 'queue'" :size="12" /><template v-if="queueError">Queue unavailable</template><template v-else><b>{{ queueSnapshot?.items.length }}</b> queued</template></button>
           </div>
-          <p v-if="queueSnapshot?.items.length" class="q-warn" :class="{ on: queueSnapshot.capacity.warning || (queueSnapshot.capacity.hours ?? 0) >= 4 }"><AppIcon name="clock" :size="12" />{{ queueHours(queueSnapshot) }}</p>
+          <p v-if="!ticketsHeader && queueSnapshot?.items.length" class="q-warn" :class="{ on: queueSnapshot.capacity.warning || (queueSnapshot.capacity.hours ?? 0) >= 4 }"><AppIcon name="clock" :size="12" />{{ queueHours(queueSnapshot) }}</p>
           <div class="progress-line" :data-tip="projectProgressTip(counts.open, counts.progress, counts.done, counts.cancelled)">
+            <span v-if="ticketsHeader && headerDensity === 'comfortable'" class="progress-label">Progress</span>
             <span class="bar"><i :style="{ width: `${counts.percent}%` }" /></span>
             <span class="mono pct">{{ counts.percent }}%</span>
           </div>
-          <p class="activity">Active <time :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time></p>
+          <p v-if="!ticketsHeader" class="activity">Active <time :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time></p>
         </div>
         <div v-else class="head-stats head-stats-skeleton" aria-hidden="true">
           <span class="skeleton stat-placeholder" /><span class="skeleton progress-placeholder" /><span class="skeleton activity-placeholder" />
         </div>
         </div>
-        <ProjectTabs :items="projectSections" :selected="section" label="Project sections" sections @select="setSection" />
       </header>
-
+      <LeadBand :project-id="project.id" :project-key="project.routeKey" :route-key="project.routeKey" />
+      <div class="project-navigation" :class="{ 'legacy-navigation': !ticketsHeader }">
+        <ProjectTabs :items="projectSections" :selected="section" label="Project sections" sections tips @select="setSection" />
+        <RouterLink v-if="ticketsHeader" class="attention-view-link" :to="{ path: '/tickets', query: { view: 'needs-attention', project_id: project.id } }"><AppIcon name="flag" :size="13" />Needs attention</RouterLink>
+        <span v-if="ticketsHeader" class="nav-divider" aria-hidden="true" />
       <ViewBar
-        v-if="showViewBar" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
+        v-if="ticketsHeader || showViewBar" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
         :me="me?.id ?? null" :href-for="hrefFor" @open="id => openView(id)" @save="saveActive" @save-as="startSave" @reset="openView(activeView?.id ?? null, true)"
         @rename="startRename" @duplicate="duplicate" @set-default="setDefaultView" @share="share" @copy-link="copyViewLink" @remove="remove"
       />
+        <div v-if="ticketsHeader" id="project-view-settings" class="project-view-settings" />
+      </div>
+      </div>
       <div ref="stickMark" class="stick-mark" aria-hidden="true" />
-      <div v-if="!journeyActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
+      <div v-if="!settingsActive && !deliveryActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
         <ListToolbar
-          ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
-          :facet-loading="facetLoading"
+          ref="toolbar" :summary="project" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
+          :facet-loading="facetLoading" :settings-target="ticketsHeader ? '#project-view-settings' : undefined" :project-header="ticketsHeader" :collapsed-header="ticketsHeader && headerDensity === 'collapsed'"
           @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
-          @show-closed="value => update({ showClosed: value })" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
+          @show-closed="manualShowClosed" @hide-states="setHideStates" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
           @open-sheet="filterSheet?.open()" @need-options="needOptions" @create="startCreate()"
-          :view="viewMode" :knowledge-view="knowledgeView" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
+          :view="viewMode === 'settings' || viewMode === 'delivery' ? 'list' : viewMode" :knowledge-view="knowledgeView" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
           @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
           :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
-          :header-graph="headerGraph" @header-graph="setHeaderGraph"
-        />
+        >
+          <!-- Collapsed header: the sections and saved views it hides, at the top of the Display menu. -->
+          <template #header-nav="{ anchor, close }">
+            <HeaderNavMenu
+              :sections="projectSections" :section="section" :attention="{ path: '/tickets', query: { view: 'needs-attention', project_id: project.id } }"
+              :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :me="me?.id ?? null" :href-for="hrefFor" :can-save-new="canSaveView && !activeView"
+              @section="id => { close(false); setSection(id) }" @attention="close(false)" @view="id => { close(true); openView(id) }"
+              @view-menu="close(false); viewBar?.openMenuFor(anchor)" @save-as="close(false); startSave(anchor)"
+            />
+          </template>
+        </ListToolbar>
         <div v-if="selectable && (sequence.length || picking)" class="phone-pick" :class="{ on: picking }">
           <p v-if="picking" class="phone-pick-status">
             <span aria-live="polite"><b class="mono">{{ selected.size.toLocaleString('en-GB') }}</b> selected</span>
@@ -1641,16 +1837,11 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         </div>
       </div>
 
-      <JourneyView
-        v-if="journeyActive && showFlowControls" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :stage="journeyStage" :release-key="journeyRelease" :walk-key="journeyWalk"
-        :can-write="writable" :person="session.identity?.principal.kind === 'person'" :me="me?.id ?? null"
-        @stage="journeyStageTo" @release="journeyReleaseTo" @walk="journeyWalkTo" @open="openKey"
-      />
-      <section v-else-if="journeyActive" class="glass-card flow-disabled" aria-labelledby="flow-disabled-title">
-        <h2 id="flow-disabled-title">Flow controls are a developer feature</h2>
-        <p>They are off by default and have not yet been tested end to end. In the Developer section of Settings, turn on “Show the flow controls (not yet tested end to end)” to open this journey.</p>
-        <RouterLink class="btn" to="/settings/developer#flow-controls">Developer settings</RouterLink>
-      </section>
+      <template v-if="settingsActive">
+        <RecurringWorkCard :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" />
+        <ProjectWorkContextCard :key="project.id" :project="{ id: project.id, title: project.title }" />
+      </template>
+      <DeliveryView v-else-if="deliveryActive" :key="`${project.id}/${me?.id ?? ''}`" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" />
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
         :filters="knowledgeFilters" :can-write="knowledgeWritable" :person="session.identity?.principal.kind === 'person'" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge" @accepted="learningAccepted" @reverted="learningReverted"
@@ -1658,7 +1849,6 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <component :is="activeTicketView.component" v-else-if="activeTicketView.component"
         :project="project" :filters="filters" ref="ticketGraphView" @open="openKey" @state="(value: TicketGraphState) => graphState = value" />
       <template v-else>
-      <ListFreshness v-if="liveActive" class="ticket-freshness" :updated-at="liveUpdatedAt" :untrusted="liveDataStale" />
       <LiveUpdatesChip v-if="liveActive && activeLive.pill.value" :text="activeLive.pill.value" :overflow="activeLive.pending.overflow" @show="showUpdates" />
       <p v-if="liveActive" class="sr-only live-said" role="status" aria-live="polite">{{ activeLive.message.value }}</p>
       <TicketTable
@@ -1676,7 +1866,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @more-children="id => id === project!.id ? outline.loadMoreRoot() : outline.loadChildren(id, true)" @move="moveRow"
         @open="openRow" @cursor="id => cursorId = id" @sort="sortBy" @status="(row, anchor) => openStatus(row, anchor, 'list')" @release="(row, anchor) => openRelease(anchor, [row.id])"
         @assignee="openAssignee" @copy="row => copyKey(row.key)" @new-tab="row => newTab(row.key)" @toggle-group="toggleGroup" @open-epic="openEpic"
-        @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
+        @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="manualShowClosed(true)"
         :live-labels="liveActive ? activeLive.labels.value : undefined" :live-flash="liveActive ? activeLive.flash.value : undefined"
         :live-stale="liveDataStale"
         :live-pill="liveActive && activeLive.pill.value ? { text: activeLive.pill.value, overflow: activeLive.pending.overflow } : null" @show-updates="showUpdates"
@@ -1688,33 +1878,36 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
         @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @release="anchor => openRelease(anchor, liveSelection())" @queue="bulkQueue" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
       />
-      <p v-if="!journeyActive && !knowledgeActive && !graphActive" class="hint">
+      <p v-if="!knowledgeActive && !settingsActive && !deliveryActive && !graphActive" class="hint">
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·
         <button type="button" class="hint-link" @click="run({ name: 'shortcuts' })"><kbd class="keycap">?</kbd> all shortcuts</button>
       </p>
       </div>
 
       <KnowledgeEntryPage
-        v-if="shownEntry" ref="knowledgeEntry" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :mode="shownEntry.mode"
+        v-if="shownEntry" :key="`${project.id}/${me?.id ?? ''}`" ref="knowledgeEntry" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :mode="shownEntry.mode"
         :type="shownEntry.type" :slug="shownEntry.slug" :state="knowledge" :can-write="knowledgeWritable" :can-delete="knowledgeDeletable" :now="now" :list-query="knowledgeListQuery"
         @close="shownEntry.mode === 'dock' ? closeKnowledgeDock() : closeKnowledgeEntry()"
       />
       <PanelSplitter v-if="knowledgeDocked" field="knowledgePanel" css-var="--knowledge-panel-user-w" target=".entry-page.dock" :reserve="DOCK_LIST_RESERVE" />
-      <PanelSplitter v-if="ticketKey && !fullView" />
+      <PanelSplitter v-if="ticketKey && !fullView" class="early" :reserve="500" />
       <TicketWorkspace
-        v-if="ticketKey" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
+        v-if="ticketKey" :key="`${project.id}/${me?.id ?? ''}/${ticketKey.toUpperCase()}`" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
         :names="list.names" :me="me" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable" :can-link="relationLinkable" :can-unlink="relationUnlinkable"
-        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :native-releases="nativeReleases"
+        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :ensure-people="loadProjectPeople" :native-releases="nativeReleases"
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
       />
-      <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
+      <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :derived="statusMenu.row.status_derived" :children-count="statusMenu.row.work_children_count" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
-        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
+        ref="filterSheet" :summary="project" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
+        :density="density" :columns="toolbarColumns" :project-header="ticketsHeader"
+        @sort="setSort" @density="setDensity" @columns="saveColumns" @columns-reset="resetColumns"
+        @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
-        @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup" @date="setDate"
-        @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el ?? anchor)"
+        @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="manualShowClosed" @hide-states="setHideStates" @group="setGroup" @date="setDate"
+        @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el?.offsetParent ? viewBar.$el : anchor)"
       />
       <SaveViewPanel
         v-if="savePanel" :key="`${savePanel.mode}-${savePanel.view?.id ?? 'new'}`" :anchor="savePanel.anchor" :mode="savePanel.mode" :name="savePanel.name" :project-title="project.title"
@@ -1756,18 +1949,31 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .project-page { width: 100%; margin: 0; padding: 22px var(--gutter) 12px; }
 /* The header follows its own width, not the window's: a docked ticket panel can
    leave the list as narrow as a phone on a wide screen (AEON-140). */
+.attention-view-link { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; font-size: 13px; color: var(--ink-2); text-decoration: none; }
+@media (pointer: coarse) {
+  .attention-view-link { position: relative; }
+  .attention-view-link::before { content: ''; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+}
 .project-head { padding: 4px 0 14px; container: projecthead / inline-size; }
-.head-flex { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
+.head-flex { display: flex; align-items: flex-start; justify-content: space-between; gap: 32px; }
 .head-flex.with-glimpse { display: grid; grid-template-columns: minmax(0, max-content) minmax(180px, 1fr) auto; align-items: stretch; column-gap: 28px; }
-.head-flex.with-glimpse .head-stats { align-self: end; }
-.head-flex.with-glimpse .head-main { align-self: center; }
+.head-flex.with-glimpse .head-stats, .head-flex.with-glimpse .head-main { align-self: start; }
 .head-main { min-width: 0; flex: 1; position: relative; z-index: 1; }
+.head-main:has(.description-full) { z-index: 6; }
 .head-stats { position: relative; z-index: 1; }
-.title-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.title-line { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
 .key-badge.big { height: 26px; padding: 0 10px; font-size: 12px; border-radius: 7px; }
-.title-line h1 { font-size: 30px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title-line h1 { min-width: 0; font-size: 30px; white-space: normal; overflow-wrap: anywhere; }
+.title-line .key-badge, .state-chip { flex: none; margin-top: 4px; }
 .state-chip { height: 20px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .description { margin-top: 6px; max-width: 820px; font-size: 13.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.description-measure { position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.description-probe { width: min(320px, calc(100vw - 16px)); padding: 5px 10px; font-size: 12.5px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
+.description-block { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.description-block:has(.description-full) { z-index: 6; }
+.description-more { display: block; align-self: flex-start; min-width: 5ch; height: 44px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.description-full { position: absolute; z-index: 6; top: 100%; inset-inline: 0; max-height: 40dvh; overflow: auto; overscroll-behavior: contain; padding: 12px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); font-size: 13.5px; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+@media (pointer: coarse) { .description { min-height: 44px; line-height: 22px; } }
 .head-stats { display: grid; justify-items: end; gap: 7px; flex-shrink: 0; }
 .head-stats-skeleton { width: 280px; }
 .stat-placeholder { width: 100%; height: 19px; }
@@ -1775,6 +1981,14 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .activity-placeholder { width: 42%; height: 18px; }
 .q-stat { height: 22px; margin: -2px -6px; padding: 0 6px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: inherit; }
 .q-stat:hover { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+@media (max-width: 600px) {
+  /* The configurable header folds its timestamp, not the queue action.
+     Keep these selectors more specific than its general phone folding rules. */
+  .project-page[class*="header-"] .header-activity > span { display: none; }
+  .project-page[class*="header-"] .header-activity { display: flex; grid-area: activity; justify-self: start; }
+  .project-page[class*="header-"] .header-activity .q-stat { margin: 0; min-width: 44px; min-height: 44px; }
+  .project-page[class*="header-"] .project-head .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "activity activity" "stats stats" "description description"; }
+}
 .q-warn { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); }
 .q-warn.on { color: var(--queue-wait-ink); }
 .stat-line { display: flex; gap: 16px; font-size: 12.5px; color: var(--ink-2); }
@@ -1787,9 +2001,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .activity time { color: var(--ink-2); }
 .stick-mark { height: 1px; margin-bottom: -1px; }
 /* While tickets are selected the bulk bar floats at the bottom: the list can scroll clear of it. */
-.list-view.selecting { padding-bottom: 76px; }
+.list-view.selecting { padding-bottom: calc(var(--live-obstacle-h, 0px) + 20px + env(safe-area-inset-bottom)); }
 @media (max-width: 720px) {
-  .list-view.selecting { padding-bottom: calc(168px + env(safe-area-inset-bottom)); }
   /* The fixed chip never moves rows when it arrives; the last row can scroll
      above both it and the measured selection sheet. Desktop stays in the header. */
   .list-view.has-live-updates { padding-bottom: calc(var(--live-obstacle-h, 0px) + 68px + env(safe-area-inset-bottom)); }
@@ -1808,12 +2021,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 }
 /* Without the saved-view strip the header glimpse keeps that room (14px + the 42px strip) to spread into; the graph was framed for it. */
 .project-head.glimpse-room { padding-bottom: 56px; }
-.flow-disabled { display: grid; justify-items: start; gap: 12px; padding: 24px; }
-.flow-disabled h2 { font-size: 18px; }
-.flow-disabled p { max-width: 65ch; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
 .toolbar-wrap { position: sticky; top: 0; z-index: 5; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); container: toolbar / inline-size; }
 .ticket-freshness { margin: 0 0 8px 4px; }
-.toolbar-wrap.stuck { background: var(--glass); box-shadow: 0 1px 0 var(--line), 0 12px 24px -20px rgba(16, 35, 39, .35); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); }
+.toolbar-wrap.stuck { background: var(--glass); box-shadow: 0 1px 0 var(--line), 0 12px 24px -20px color-mix(in srgb, var(--shadow-color) 35%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 16px 0 6px; font-size: 12px; color: var(--ink-3); }
 /* The hint waits for the rows, like the footer, so it never jumps while they load. */
 .project-page:has(.skeleton-body) .hint { visibility: hidden; }
@@ -1829,6 +2039,12 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   --panel-w: min(var(--knowledge-panel-user-w, var(--panel-default)), calc(100vw - 620px));
 }
 /* Wide screens dock the ticket panel: the list reflows beside it instead of under it. */
+.project-page.ticket-dock { --panel-w: min(var(--panel-user-w, var(--panel-default)), 72vw, calc(100vw - 500px)); }
+@media (min-width: 900px) {
+  .project-page.ticket-dock { padding-right: calc(var(--panel-w) + 22px); }
+  .project-page.ticket-dock :deep(.ticket-ws.panel) { width: var(--panel-w); }
+  .project-page.ticket-dock .toolbar-wrap { margin-right: 0; padding-right: 0; }
+}
 @media (min-width: 1100px) {
   .project-page.panel-open { width: 100%; margin: 0; padding-right: calc(var(--panel-w) + 22px); }
   .project-page.panel-open .toolbar-wrap { margin-right: 0; padding-right: 0; }
@@ -1858,9 +2074,93 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .toolbar-wrap { margin: 0 -12px; padding: 0 12px; }
   .title-line { gap: 10px; }
   .title-line h1 { font-size: 24px; }
-  .description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .description { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .stat-line { flex-wrap: wrap; gap: 4px 14px; }
   .activity { display: none; }
   .hint { display: none; }
 }
+
+/* AEON-639: header and view settings fold together; the independent toolbar
+   retains the same width and horizontal layout in every density. */
+.project-page[class*="header-"] { padding-top: 12px; }
+.project-navigation { display: flex; align-items: center; gap: 8px; min-width: 0; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.project-navigation :deep(.sections) { margin-top: 0; }
+.project-navigation .view-bar { flex: 1; min-width: 0; padding: 0; }
+.nav-divider { width: 1px; height: 20px; background: var(--line-2); flex: none; }
+.project-view-settings { display: flex; align-items: center; gap: 10px; margin-left: auto; flex: none; }
+.project-page[class*="header-"] .project-head { padding: 0 0 4px; }
+.project-page[class*="header-"] .head-flex { position: relative; display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto auto; align-items: center; gap: 8px 12px; }
+.project-page[class*="header-"] .head-main { display: contents; }
+.project-page[class*="header-"] .title-line { max-width: 34vw; }
+.project-page[class*="header-"] .title-line h1 { font-size: 22px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.project-page[class*="header-"] .description-block { min-width: 0; position: static; }
+.project-page[class*="header-"] .description { margin: 0; max-width: none; min-width: 0; }
+.project-page[class*="header-"] .description-block { min-width: 0; }
+.project-page[class*="header-"] .activity { white-space: nowrap; }
+.project-page[class*="header-"] .head-stats { display: flex; align-items: center; gap: 12px; }
+.project-page[class*="header-"] .stat-line { gap: 10px; }
+.project-page[class*="header-"] .progress-line { width: 130px; }
+.project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto minmax(0, max-content); grid-template-areas: "title title activity stats" "description description description stats"; grid-template-rows: min-content 1fr; align-items: start; row-gap: 6px; }
+.project-page.header-comfortable .title-line { grid-area: title; max-width: none; }
+.project-page.header-comfortable .title-line h1 { font-size: 34px; }
+.project-page.header-comfortable .description-block { grid-area: description; }
+.project-page.header-comfortable .description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.55; }
+.project-page.header-comfortable .activity { grid-area: activity; justify-self: end; align-self: center; }
+.project-page.header-comfortable .head-stats { grid-area: stats; display: grid; align-self: stretch; align-content: start; gap: 6px; }
+.header-activity { display: flex; align-items: center; gap: 12px; }
+.project-page[class*="header-"] .head-stats > .project-status-counts { grid-area: auto; }
+.project-page.header-comfortable .progress-line { width: 100%; }
+.progress-label { font: 500 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+.project-page.header-comfortable .project-navigation { margin-top: 12px; min-height: 48px; padding-bottom: 6px; }
+@media (min-width: 601px) and (max-width: 1100px) {
+  .project-navigation :deep(.sections button:not([aria-selected="true"]) .tab-label) { display: none; }
+  .project-page[class*="header-"] .progress-line { width: 88px; }
+  .project-page.header-comfortable .progress-line { width: 100%; }
+  .project-page[class*="header-"] .head-flex { column-gap: 8px; }
+  .project-page[class*="header-"] .stat-line { gap: 8px; }
+}
+@media (max-width: 900px) { .project-view-settings { display: none; } }
+@container projecthead (max-width: 760px) {
+  .project-page.header-compact .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "stats stats" "description description" "activity activity"; }
+  .project-page.header-compact .title-line { grid-area: title; max-width: none; }
+  .project-page.header-compact .head-stats { display: contents; }
+  .project-page.header-compact .head-stats > .project-status-counts { grid-area: stats; }
+  .project-page.header-compact .progress-line { grid-area: progress; }
+  .project-page.header-compact .description-block { grid-area: description; }
+  .project-page.header-compact .activity { grid-area: activity; }
+}
+@media (max-width: 600px) {
+  .header-activity { display: none; }
+  .header-activity:has(.q-stat) { display: flex; grid-area: activity; justify-self: start; }
+  .header-activity:has(.q-stat) > span { display: none; }
+  .header-activity .q-stat { min-height: 44px; margin: 0; }
+  .project-page[class*="header-"] .head-flex, .project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "stats stats" "description description" "activity activity"; gap: 4px 10px; }
+  .project-page[class*="header-"] .title-line { grid-area: title; max-width: none; }
+  .project-page[class*="header-"] .title-line h1 { font-size: 24px; }
+  .project-page.header-comfortable .title-line h1 { font-size: 28px; }
+  .project-page[class*="header-"] .description-block { grid-area: description; }
+  .project-page[class*="header-"] .description { white-space: nowrap; display: block; }
+  .project-page.header-comfortable .description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .project-page[class*="header-"] .head-stats { display: contents; }
+  .project-page[class*="header-"] .head-stats > .project-status-counts { grid-area: stats; }
+  .project-page[class*="header-"] .progress-line { grid-area: progress; width: 96px; }
+  .progress-label { display: none; }
+  .project-navigation { margin-top: 8px; min-height: 52px; gap: 6px; flex-wrap: wrap; }
+  .attention-view-link { flex: none; min-height: 44px; }
+  /* Saved views keep their own scrollable row below the project navigation. */
+  .project-navigation .view-bar { flex-basis: 100%; }
+  .project-navigation .nav-divider { display: none; }
+  .project-navigation :deep(.sections button:not([aria-selected="true"])) { flex: none; width: 44px; padding: 0; }
+  .project-navigation :deep(.sections button:not([aria-selected="true"]) .tab-label) { display: none; }
+  .project-navigation :deep(.view-bar) { padding: 0; }
+}
+
+.project-navigation.legacy-navigation { display: block; border: 0; padding: 0; }
+.project-navigation.legacy-navigation :deep(.sections) { margin-top: 18px; }
+.project-navigation.legacy-navigation .view-bar { padding: 2px 0 6px; }
+/* AEON-1027: the lead card, open or folded, keeps its own card gap (16px, as between the Agents page
+   cards) to the section bar, in every header density. One :deep() only: Vue leaves a second :deep()
+   literal and the browser drops the rule. */
+.project-page :deep(.lead) + .project-navigation { margin-top: 0; }
+.project-page :deep(.lead + .legacy-navigation .sections) { margin-top: 0; }
 </style>

@@ -3,8 +3,10 @@ package releasehistory_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -264,13 +266,16 @@ func TestPresentationRowsAreTenantIsolated(t *testing.T) {
 // first as if it were new. Guarded, it conflicts; unguarded, it edits.
 func TestPresentationConcurrentCreate(t *testing.T) {
 	f := newPresentationFixture(t)
-	ctx := tenant.WithPrincipal(dbtest.Seed(t.Context()), f.admin)
+	deadline, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	ctx := tenant.WithPrincipal(dbtest.Seed(deadline), f.admin)
 	zero := 0
 	first := releasehistory.PresentationInput{ThemeEN: "First", HeadlineEN: "First writer.", ExpectedRevision: &zero}
 	second := releasehistory.PresentationInput{ThemeEN: "Second", HeadlineEN: "Second writer.", ExpectedRevision: &zero}
 	race := func(version string, in releasehistory.PresentationInput) (releasehistory.PresentationChange, error) {
 		t.Helper()
 		saved := make(chan struct{})
+		secondPID := make(chan int, 1)
 		type result struct {
 			change releasehistory.PresentationChange
 			err    error
@@ -280,6 +285,7 @@ func TestPresentationConcurrentCreate(t *testing.T) {
 			<-saved
 			var r result
 			r.err = db.InTenant(ctx, f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+				secondPID <- int(tx.Conn().PgConn().PID())
 				var err error
 				r.change, err = releasehistory.SavePresentation(ctx, tx, f.admin, f.project, version, in)
 				return err
@@ -288,12 +294,20 @@ func TestPresentationConcurrentCreate(t *testing.T) {
 		}()
 		if err := db.InTenant(ctx, f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
 			if _, err := releasehistory.SavePresentation(ctx, tx, f.admin, f.project, version, first); err != nil {
+				close(saved)
 				return err
 			}
 			close(saved)
-			// Hold the uncommitted row while the second writer plans and inserts.
-			time.Sleep(400 * time.Millisecond)
-			return nil
+			// The second writer must actually reach the competing INSERT before
+			// the first commits. A serial execution cannot satisfy this barrier.
+			select {
+			case waiter := <-secondPID:
+				return dbtest.WaitForBlocked(ctx, f.db.Admin, waiter, int(tx.Conn().PgConn().PID()), "INSERT INTO release_presentations")
+			case r := <-done:
+				return fmt.Errorf("second writer exited before contention: %v", r.err)
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}); err != nil {
 			t.Fatal(err)
 		}

@@ -2,7 +2,7 @@
 import { api, APIError, getNode, type ListItem } from './api.ts'
 import { listModels, type ModelProfile } from './agents.ts'
 import { accountName, authorFamilyFor, displayText, fetchAccountCatalog, publicModelId, workRoleFor } from './accountCascade.ts'
-import { normaliseState } from './work.ts'
+import { normaliseState, statusMeta } from './work.ts'
 import type { AgentRunRow } from './agentRows.ts'
 
 // A projection of the existing agent run queue. Part A owns its HTTP contract.
@@ -25,8 +25,25 @@ export interface QueueTarget {
 }
 export type ReadyGap = 'estimate' | 'criteria' | 'blocker'
 export const QUEUE_STATES = ['new', 'open', 'backlog', 'blocked']
-export function queueable(row: Pick<ListItem, 'kind_slug' | 'state'>): boolean {
-  return (row.kind_slug === 'ticket' || row.kind_slug === 'task') && QUEUE_STATES.includes(normaliseState(row.state))
+type QueueRow = Pick<ListItem, 'kind_slug' | 'state'> & Partial<Pick<ListItem, 'assignee' | 'lead_worker' | 'fields' | 'queue_stale' | 'estimate' | 'is_leaf'>>
+export function staleProgress(row: QueueRow): boolean {
+  return row.is_leaf !== false && (row.kind_slug === 'ticket' || row.kind_slug === 'task' || row.kind_slug === 'work' && (row.is_leaf ?? row.estimate?.is_parent === false)) && statusMeta(row.state).key === 'progress' && !row.assignee && !row.lead_worker
+}
+export function staleWork(row: QueueRow): boolean {
+  return staleProgress(row) && row.queue_stale === true
+}
+export function queueable(row: QueueRow): boolean {
+  return row.is_leaf !== false && (row.kind_slug === 'ticket' || row.kind_slug === 'task' || row.kind_slug === 'work' && (row.is_leaf ?? row.estimate?.is_parent === false)) && (QUEUE_STATES.includes(normaliseState(row.state)) || staleWork(row))
+}
+export function queueIneligibleReason(row: QueueRow): string {
+  const status = statusMeta(row.state)
+  if (status.key === 'progress') {
+    const worker = row.assignee?.name ?? row.lead_worker?.name
+    return worker || row.queue_stale === false
+      ? `Already ${status.label.toLowerCase()} (${worker ?? 'assigned or active work'}), can't be queued.`
+      : `${status.label}: queue eligibility has not been confirmed.`
+  }
+  return `${status.label}: this work can't be queued.`
 }
 export function readyGaps(row: Pick<ListItem, 'fields' | 'state'>): ReadyGap[] {
   const out: ReadyGap[] = []
@@ -57,8 +74,10 @@ export async function queueRequest<T>(path: string, method = 'GET', body?: unkno
 }
 // Part A's published contract. The run property is deliberately discarded: run
 // rows belong to agentRows and its ledger, never this ticket projection.
+export interface QueueUndoToken { run_id: string; revision: string }
 export interface QueueWireEntry {
-  node_id: string; key: string; title: string; state: string; priority: string; estimate_hours: number
+  undo?: QueueUndoToken
+  node_id: string; project_id?: string | null; key: string; title: string; state: string; priority: string; estimate_hours: number
   queued: { run_id: string; position: number; by: QueuedTicket['by']; at: string; target_agent_id: string | null; expected_agent_id: string | null; model_profile_id: string | null; expected_start_at: string | null; waiting: boolean; wait_reason: string }
 }
 export interface QueueWireSnapshot {
@@ -86,7 +105,7 @@ export const addToQueue = (ticket: string, target?: QueueTarget) => queueRequest
 export const removeFromQueue = (ticket: string) => queueRequest<void>(`/queue/${encodeURIComponent(ticket)}`, 'DELETE')
 export const moveQueue = (ticket: string, position: number) => queueRequest<QueueWireSnapshot>(`/queue/${encodeURIComponent(ticket)}/move`, 'POST', { position })
 export const resetQueue = () => queueRequest<QueueWireSnapshot>('/queue/reset', 'POST')
-export interface QueueReadiness { queueable: boolean; ready: boolean; missing: ('status' | ReadyGap)[]; suggested_estimate_hours: number; security_review_required: boolean }
+export interface QueueReadiness { stale?: boolean; queueable: boolean; ready: boolean; missing: ('status' | ReadyGap)[]; suggested_estimate_hours: number; security_review_required: boolean }
 export const queueReadiness = (ticket: string) => queueRequest<QueueReadiness>(`/queue/${encodeURIComponent(ticket)}/readiness`)
 export const applyQueueEstimate = (ticket: string, estimate_hours: number) => queueRequest<QueueReadiness>(`/queue/${encodeURIComponent(ticket)}/estimate`, 'POST', { estimate_hours })
 export async function queueTargets(ticket: string): Promise<{ items: QueueTarget[] }> {
@@ -100,4 +119,28 @@ export async function queueTargets(ticket: string): Promise<{ items: QueueTarget
       account: accountName(account), model: modelName, effort: effort.effort, available: account.available,
       matches_preference: account.default_model_profile_id === effort.model_profile_id }] : []
   }))))) }
+}
+
+export const undoQueueAddition = (ticket: string, token: QueueUndoToken) => queueRequest<{ removed: boolean }>(`/queue/${encodeURIComponent(ticket)}/undo`, 'POST', token)
+
+// AEON-740: a parent queues a bounded, permission-checked snapshot of its open leaves.
+export type ParentLeafOutcome = 'pending' | 'queued' | 'already_queued' | 'changed' | 'not_ready' | 'active' | 'unavailable'
+export interface ParentQueueSnapshot {
+  id: string; parent_id: string; state: 'pending' | 'applied' | 'cancelled'; truncated: boolean; continuation_available?: boolean
+  partial: boolean; tree_changed: boolean; items: { node_id: string; outcome: ParentLeafOutcome; run_id?: string }[]
+}
+export const captureParentQueue = (parent: string, revision: string, continuationOf?: string) =>
+  queueRequest<ParentQueueSnapshot>(`/queue/${encodeURIComponent(parent)}/snapshots`, 'POST', { expected_revision: revision, ...(continuationOf ? { continuation_of: continuationOf } : {}) })
+export const applyParentQueue = (snapshot: string) => queueRequest<ParentQueueSnapshot>(`/queue-snapshots/${encodeURIComponent(snapshot)}/apply`, 'POST')
+/** One honest sentence for what a parent queue did, including skips and what is left. */
+export function parentQueueSummary(result: ParentQueueSnapshot): string {
+  const count = (outcome: ParentLeafOutcome) => result.items.filter(item => item.outcome === outcome).length
+  const queued = count('queued'), already = count('already_queued')
+  const skipped = result.items.length - queued - already
+  const parts = [`${queued} queued`]
+  if (already) parts.push(`${already} already queued`)
+  if (skipped) parts.push(`${skipped} skipped (changed, not ready, active or unavailable)`)
+  if (result.continuation_available) parts.push('more open work remains below; Queue again to continue')
+  else if (result.truncated) parts.push('the tree is deeper than 32 levels; deeper work was not included')
+  return parts.join(' · ')
 }

@@ -1,0 +1,121 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "approvals.decide",
+      "approvals.decide_high",
+      "approvals.propose",
+      "approvals.read",
+      "approvals.request",
+      "approvals.revoke"
+    ],
+    "member": [
+      "approvals.decide",
+      "approvals.propose",
+      "approvals.read",
+      "approvals.request",
+      "approvals.revoke"
+    ],
+    "owner": [
+      "approvals.decide",
+      "approvals.decide_high",
+      "approvals.propose",
+      "approvals.read",
+      "approvals.request",
+      "approvals.revoke"
+    ],
+    "viewer": [
+      "approvals.read"
+    ]
+  },
+  "project_filtered": {
+    "GET /api/approvals": true,
+    "GET /api/approvals/{approvalId}": true
+  },
+  "registry": [
+    {
+      "agent_grantable": false,
+      "description": "Decide approvals",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Approvals",
+      "key": "approvals.decide",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": false,
+      "description": "Decide High approvals",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Approvals",
+      "key": "approvals.decide_high",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Propose approvals",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Approvals",
+      "key": "approvals.propose",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read approvals",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Approvals",
+      "key": "approvals.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Request approvals",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Approvals",
+      "key": "approvals.request",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Revoke approvals",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Approvals",
+      "key": "approvals.revoke",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    }
+  ],
+  "routes": {
+    "GET /api/approvals": "approvals.read",
+    "GET /api/approvals/{approvalId}": "approvals.read",
+    "POST /api/approvals": "approvals.request",
+    "POST /api/approvals/{approvalId}/decision": "approvals.decide",
+    "POST /api/approvals/{approvalId}/revoke": "approvals.revoke"
+  },
+  "words": {
+    "resources": {
+      "approvals": "agent approvals"
+    }
+  }
+}

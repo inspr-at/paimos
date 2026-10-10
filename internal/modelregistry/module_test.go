@@ -4,6 +4,8 @@ package modelregistry
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -97,6 +100,9 @@ func addPrincipal(t *testing.T, tenantID, kind, name string, roles []string) ten
 		t.Fatalf("principal: %v", err)
 	}
 	dbtest.BindLegacy(t, testDB, tenantID, id)
+	if kind == "agent" && len(roles) > 0 {
+		dbtest.BindRole(t, testDB, tenantID, id, roles[0])
+	}
 	k := tenant.Person
 	if kind == "agent" {
 		k = tenant.Agent
@@ -107,7 +113,14 @@ func addPrincipal(t *testing.T, tenantID, kind, name string, roles []string) ten
 func call(t *testing.T, p *tenant.Principal, method, path, body string) (int, []byte) {
 	t.Helper()
 	mux := http.NewServeMux()
-	New(appPool).Mount(mux)
+	// Legacy invariants remain tested during the read-only transition. Real
+	// public retirement is covered separately with Module.Mount.
+	module := &Module{pool: appPool}
+	if strings.HasPrefix(path, "/api/model-preferences/levels/") {
+		module.mount(mux, module.writePreferences)
+	} else {
+		module.Mount(mux)
+	}
 	var r *http.Request
 	if body != "" {
 		r = httptest.NewRequest(method, path, strings.NewReader(body))
@@ -116,6 +129,30 @@ func call(t *testing.T, p *tenant.Principal, method, path, body string) (int, []
 	}
 	if p != nil {
 		r = r.WithContext(tenant.WithPrincipal(r.Context(), *p))
+		if p.Kind == tenant.Person && method != http.MethodGet && strings.HasPrefix(path, "/api/model-preferences/levels/person") {
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+				person, err := modelprefs.CanonicalPerson(t.Context(), tx, p.ID)
+				if err == nil && person != nil {
+					r.Header.Set("If-Prefs-Person", *person)
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if p.Kind == tenant.Agent {
+			// A real scoped fixture key; current scopes are read from storage.
+			prefix := strings.ReplaceAll(p.ID, "-", "")
+			secret := "model-read-fixture"
+			sum := sha256.Sum256([]byte(secret))
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'fixture',$3,$4,ARRAY['models.read']) ON CONFLICT(prefix) DO NOTHING`, p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:]))
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			r.Header.Set("Authorization", "Bearer aeon_"+prefix+"_"+secret)
+		}
 	}
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, r)
@@ -160,7 +197,7 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
 	member := addPrincipal(t, admin.TenantID, "person", "Mo", []string{"member"})
-	agent := addPrincipal(t, admin.TenantID, "agent", "runner", nil)
+	agent := addPrincipal(t, admin.TenantID, "agent", "runner", []string{"admin"})
 	other := makePrincipal(t, "beta", "person", "Bea", []string{"admin"})
 
 	status, body := call(t, nil, http.MethodGet, "/api/models", "")
@@ -197,8 +234,10 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 		t.Fatalf("unsafe model %d", status)
 	}
 
-	scout := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
 	luna := profileBySlug(profiles, "codex-luna-medium")
+	minimalAccount(t, admin, luna)
+	minimalAccount(t, admin, profileBySlug(profiles, "codex-astra-xhigh"))
+	scout := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
 	if scout.Source != "aeon" || scout.OwnerRequired || scout.Profile == nil || scout.Profile.ID != luna.ID ||
 		scout.CommandTemplate != "codex exec -m gpt-6-luna -c model_reasoning_effort=medium '{prompt}'" {
 		t.Fatalf("scout %+v", scout)
@@ -215,9 +254,11 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	astra := profileBySlug(profiles, "codex-astra-xhigh")
 	if gate.Profile == nil || gate.Profile.ID != astra.ID || gate.OwnerRequired ||
 		gate.CommandTemplate != "codex exec -m gpt-6-astra -c model_reasoning_effort=xhigh --sandbox read-only '{prompt}'" ||
-		len(gate.Ladder) != 6 || gate.Ladder[1].SkipReasons[0] != "author family" {
+		len(gate.Ladder) != 7 || gate.Ladder[1].SkipReasons[0] != "author family" {
 		t.Fatalf("gate %+v", gate)
 	}
+	otherProfiles := decode[[]Profile](t, &other, http.MethodGet, "/api/models", "", http.StatusOK)
+	minimalAccount(t, other, profileBySlug(otherProfiles, "claude-fable-xhigh"))
 	otherGate := decode[Resolution](t, &other, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=openai&harness=claude", "", http.StatusOK)
 	if otherGate.Profile == nil || otherGate.Profile.Slug != "claude-fable-xhigh" || !strings.Contains(otherGate.CommandTemplate, "--permission-mode plan") {
 		t.Fatalf("other tenant gate %+v", otherGate)
@@ -280,7 +321,7 @@ func TestAuthorFamilyAliasesResolveAndReview(t *testing.T) {
 func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
-	agent := addPrincipal(t, admin.TenantID, "agent", "runner", nil)
+	agent := addPrincipal(t, admin.TenantID, "agent", "runner", []string{"admin"})
 	profiles := decode[[]Profile](t, &admin, http.MethodGet, "/api/models", "", http.StatusOK)
 	luna := profileBySlug(profiles, "codex-luna-medium")
 	haiku := profileBySlug(profiles, "claude-haiku-medium")

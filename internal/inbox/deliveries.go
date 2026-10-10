@@ -16,12 +16,16 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/attachedmsg"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 type compatSend struct {
+	ResendOf           *string `json:"resend_of,omitempty"`
+	Generation         string  `json:"recipient_message_generation,omitempty"`
 	RecipientSessionID *string `json:"recipient_session_id,omitempty"`
 	SenderSessionID    *string `json:"sender_session_id,omitempty"`
 	To                 string  `json:"to"`
@@ -37,28 +41,37 @@ type compatSend struct {
 // CompatMessage holds recipient-visible content. Never put this object in a
 // tenant event: event readers need only the IDs and controlled status fields.
 type CompatMessage struct {
-	RecipientSessionID     *string `json:"recipient_session_id,omitempty"`
-	SenderSessionID        *string `json:"sender_session_id,omitempty"`
-	SenderLabel            string  `json:"sender_label,omitempty"`
-	frozenSenderLabel      string
-	CreatedAt              time.Time             `json:"created_at"`
-	HumanResolutionOutcome *string               `json:"human_resolution_outcome"`
-	ID                     string                `json:"id"`
-	SenderPrincipalID      string                `json:"sender_principal_id"`
-	RecipientPrincipalID   string                `json:"recipient_principal_id"`
-	From                   string                `json:"from"`
-	To                     string                `json:"to"`
-	Body                   string                `json:"body"`
-	ReplyTo                *string               `json:"reply_to,omitempty"`
-	ThreadID               string                `json:"thread_id"`
-	Hop                    int                   `json:"hop"`
-	SentEventID            int64                 `json:"sent_event_id"`
-	ActionRequest          bool                  `json:"is_action_request"`
-	ExpectsReply           bool                  `json:"expects_reply"`
-	Level                  string                `json:"delivery_level"`
-	Status                 string                `json:"status"`
-	ReplyObligation        string                `json:"reply_obligation"`
-	DeliveryTarget         *CompatTargetSnapshot `json:"delivery_target,omitempty"`
+	Cancelled                  bool       `json:"cancelled,omitempty"`
+	ResendOf                   *string    `json:"resend_of,omitempty"`
+	ContentMode                string     `json:"content_mode,omitempty"`
+	MessageGrantID             *string    `json:"message_grant_id,omitempty"`
+	RecipientMessageGeneration *string    `json:"recipient_message_generation,omitempty"`
+	MessageDeadline            *time.Time `json:"message_deadline,omitempty"`
+	QuestionID                 string     `json:"question_id,omitempty"`
+	AnswerRevision             int64      `json:"answer_revision,omitempty"`
+	DeliverAfter               *time.Time `json:"deliver_after,omitempty"`
+	RecipientSessionID         *string    `json:"recipient_session_id,omitempty"`
+	SenderSessionID            *string    `json:"sender_session_id,omitempty"`
+	SenderLabel                string     `json:"sender_label,omitempty"`
+	frozenSenderLabel          string
+	CreatedAt                  time.Time             `json:"created_at"`
+	HumanResolutionOutcome     *string               `json:"human_resolution_outcome"`
+	ID                         string                `json:"id"`
+	SenderPrincipalID          string                `json:"sender_principal_id"`
+	RecipientPrincipalID       string                `json:"recipient_principal_id"`
+	From                       string                `json:"from"`
+	To                         string                `json:"to"`
+	Body                       string                `json:"body"`
+	ReplyTo                    *string               `json:"reply_to,omitempty"`
+	ThreadID                   string                `json:"thread_id"`
+	Hop                        int                   `json:"hop"`
+	SentEventID                int64                 `json:"sent_event_id"`
+	ActionRequest              bool                  `json:"is_action_request"`
+	ExpectsReply               bool                  `json:"expects_reply"`
+	Level                      string                `json:"delivery_level"`
+	Status                     string                `json:"status"`
+	ReplyObligation            string                `json:"reply_obligation"`
+	DeliveryTarget             *CompatTargetSnapshot `json:"delivery_target,omitempty"`
 }
 
 type CompatTargetBinding struct {
@@ -71,13 +84,13 @@ type CompatTargetSnapshot struct {
 	SimpleFallback *CompatTargetBinding `json:"simple_fallback"`
 }
 
-const compatMessageCols = `c.recipient_session_id::text,c.sender_session_id::text,coalesce(c.sender_label,c.sender_address),c.id::text,c.sender_principal_id::text,c.recipient_principal_id::text,c.sender_address,c.recipient_address,c.body,c.reply_to_id::text,c.thread_id,c.hop,c.sent_event_id,c.is_action_request,c.expects_reply,c.delivery_level,CASE WHEN c.is_action_request THEN 'held' ELSE 'accepted' END,CASE WHEN o.message_id IS NULL THEN 'none' WHEN o.closed_at IS NULL THEN 'open' ELSE 'closed' END,c.created_at,(SELECT e.after->>'decision' FROM events e WHERE e.type='inbox.action_resolved' AND e.node_id=c.project_id AND e.after->>'message_id'=c.id::text ORDER BY e.id LIMIT 1),(SELECT d.target_id::text FROM inbox_message_deliveries d WHERE d.tenant_id=c.tenant_id AND d.message_id=c.id),(SELECT t.target_kind FROM inbox_message_deliveries d JOIN inbox_message_targets t ON t.tenant_id=d.tenant_id AND t.id=d.target_id WHERE d.tenant_id=c.tenant_id AND d.message_id=c.id),(SELECT d.fallback_target_id::text FROM inbox_message_deliveries d WHERE d.tenant_id=c.tenant_id AND d.message_id=c.id),(SELECT t.target_kind FROM inbox_message_deliveries d JOIN inbox_message_targets t ON t.tenant_id=d.tenant_id AND t.id=d.fallback_target_id WHERE d.tenant_id=c.tenant_id AND d.message_id=c.id)`
+const compatMessageCols = `EXISTS(SELECT 1 FROM inbox_messages cancelled WHERE cancelled.tenant_id=c.tenant_id AND cancelled.id=c.inbox_message_id AND cancelled.cancelled_at IS NOT NULL),c.resend_of_id::text,c.content_mode,c.message_grant_id::text,c.recipient_message_generation::text,c.message_deadline,c.recipient_session_id::text,c.sender_session_id::text,coalesce(c.sender_label,c.sender_address),c.id::text,c.sender_principal_id::text,c.recipient_principal_id::text,c.sender_address,c.recipient_address,c.body,c.reply_to_id::text,c.thread_id,c.hop,c.sent_event_id,c.is_action_request,c.expects_reply,c.delivery_level,CASE WHEN c.is_action_request THEN 'held' ELSE 'accepted' END,CASE WHEN o.message_id IS NULL THEN 'none' WHEN o.closed_at IS NULL THEN 'open' ELSE 'closed' END,c.created_at,(SELECT e.after->>'decision' FROM events e WHERE e.type='inbox.action_resolved' AND e.node_id=c.project_id AND e.after->>'message_id'=c.id::text ORDER BY e.id LIMIT 1),(SELECT d.target_id::text FROM inbox_message_deliveries d WHERE d.tenant_id=c.tenant_id AND d.message_id=c.id),(SELECT t.target_kind FROM inbox_message_deliveries d JOIN inbox_message_targets t ON t.tenant_id=d.tenant_id AND t.id=d.target_id WHERE d.tenant_id=c.tenant_id AND d.message_id=c.id),(SELECT d.fallback_target_id::text FROM inbox_message_deliveries d WHERE d.tenant_id=c.tenant_id AND d.message_id=c.id),(SELECT t.target_kind FROM inbox_message_deliveries d JOIN inbox_message_targets t ON t.tenant_id=d.tenant_id AND t.id=d.fallback_target_id WHERE d.tenant_id=c.tenant_id AND d.message_id=c.id)`
 const compatObligationJoin = ` LEFT JOIN inbox_reply_obligations o ON o.tenant_id=c.tenant_id AND o.message_id=c.id `
 
 func scanCompatMessage(row pgx.Row) (CompatMessage, error) {
 	var v CompatMessage
 	var primaryID, primaryKind, fallbackID, fallbackKind *string
-	err := row.Scan(&v.RecipientSessionID, &v.SenderSessionID, &v.frozenSenderLabel, &v.ID, &v.SenderPrincipalID, &v.RecipientPrincipalID, &v.From, &v.To, &v.Body, &v.ReplyTo, &v.ThreadID, &v.Hop, &v.SentEventID, &v.ActionRequest, &v.ExpectsReply, &v.Level, &v.Status, &v.ReplyObligation, &v.CreatedAt, &v.HumanResolutionOutcome, &primaryID, &primaryKind, &fallbackID, &fallbackKind)
+	err := row.Scan(&v.Cancelled, &v.ResendOf, &v.ContentMode, &v.MessageGrantID, &v.RecipientMessageGeneration, &v.MessageDeadline, &v.RecipientSessionID, &v.SenderSessionID, &v.frozenSenderLabel, &v.ID, &v.SenderPrincipalID, &v.RecipientPrincipalID, &v.From, &v.To, &v.Body, &v.ReplyTo, &v.ThreadID, &v.Hop, &v.SentEventID, &v.ActionRequest, &v.ExpectsReply, &v.Level, &v.Status, &v.ReplyObligation, &v.CreatedAt, &v.HumanResolutionOutcome, &primaryID, &primaryKind, &fallbackID, &fallbackKind)
 	if err == nil && (primaryID != nil || fallbackID != nil) {
 		v.DeliveryTarget = &CompatTargetSnapshot{}
 		if primaryID != nil && primaryKind != nil {
@@ -90,6 +103,9 @@ func scanCompatMessage(row pgx.Row) (CompatMessage, error) {
 	if v.RecipientSessionID != nil || v.SenderSessionID != nil {
 		v.SenderLabel = v.frozenSenderLabel
 	}
+	if v.ContentMode == "durable" {
+		v.ContentMode = ""
+	}
 	return v, err
 }
 func messageDigest(v any) string {
@@ -98,6 +114,13 @@ func messageDigest(v any) string {
 	return hex.EncodeToString(s[:])
 }
 func validateCompatSend(in *compatSend) error {
+	if in.ResendOf != nil {
+		id, ok := parseUUID(*in.ResendOf)
+		if !ok || in.RecipientSessionID == nil || in.ActionRequest {
+			return badRequest("invalid resend_of")
+		}
+		in.ResendOf = &id
+	}
 	if err := normalizeSession(in.RecipientSessionID); err != nil {
 		return err
 	}
@@ -148,7 +171,27 @@ func (m *messaging) sendMessage(w http.ResponseWriter, r *http.Request) {
 		messagingFailure(w, err)
 		return
 	}
-	out, err := m.commitMessage(r.Context(), p, project, in)
+	// A reply bridge must never intercept an explicitly attached note or an
+	// attached recipient before the shared volatile/unsupported-mode policy.
+	if m.heldReply != nil && in.ReplyTo != nil {
+		ctx, cancel := context.WithTimeout(attachedmsg.BrowserContext(r, m.base.attached.Origin(), p), 10*time.Second)
+		handled, _, _, err := m.base.tryAttached(ctx, p, project, attachedInput{Recipient: in.To, Body: in.Body, Key: in.Key, Generation: in.Generation, Session: in.RecipientSessionID, SenderSession: in.SenderSessionID, Reply: in.ReplyTo, Thread: in.ThreadID, Level: in.Level, Action: in.ActionRequest, Expects: in.ExpectsReply, Compat: true})
+		cancel()
+		if err != nil {
+			messagingFailure(w, err)
+			return
+		}
+		if handled {
+			messagingFailure(w, attachedmsg.Fail(400, "unsupported_attached_mode"))
+			return
+		}
+	}
+	if m.heldReply != nil && in.ReplyTo != nil && p.Kind == tenant.Person && len(r.Header.Values("Authorization")) == 0 && r.Header.Get("X-Paimos-Agent-Name") == "" && r.Header.Get("X-Aeon-Agent-Name") == "" {
+		if m.heldReply(w, r, p, project, HeldReplyInput{To: in.To, Body: in.Body, Key: in.Key, Thread: in.ThreadID, Parent: *in.ReplyTo, RecipientSession: in.RecipientSessionID, SenderSession: in.SenderSessionID, Action: in.ActionRequest, ExpectsReply: in.ExpectsReply, Level: in.Level}) {
+			return
+		}
+	}
+	out, err := m.commitMessage(attachedmsg.BrowserContext(r, m.base.attached.Origin(), p), p, project, in)
 	if err != nil {
 		messagingFailure(w, err)
 		return
@@ -156,11 +199,37 @@ func (m *messaging) sendMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, out)
 }
 func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, project string, in compatSend) (CompatMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if in.ResendOf == nil {
+		if handled, _, msg, err := m.base.tryAttached(ctx, p, project, attachedInput{Recipient: in.To, Body: in.Body, Key: in.Key, Generation: in.Generation, Session: in.RecipientSessionID, SenderSession: in.SenderSessionID, Reply: in.ReplyTo, Thread: in.ThreadID, Level: in.Level, Action: in.ActionRequest, Expects: in.ExpectsReply, Compat: true}); handled || err != nil {
+			return msg, err
+		}
+	}
 	var out CompatMessage
 	key, digest := messageDigest(in.Key), messageDigest(in)
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := attachedmsg.Lock(ctx, tx); err != nil {
+			return err
+		}
+		recipientCheck, err := resolveAddress(ctx, tx, project, in.To)
+		if err != nil {
+			return err
+		}
+		if m.base.attached.Enabled() {
+			if request, err := attachedmsg.AttachmentForSend(ctx, tx, recipientCheck, in.RecipientSessionID); err != nil {
+				return err
+			} else if request != "" {
+				return attachedmsg.Fail(409, "attached_consent_required")
+			}
+		}
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err
+		}
+		if in.ReplyTo != nil && in.SenderSessionID != nil {
+			if err := authz.RequireTx(ctx, tx, p, "inbox.send", authz.Scope{ProjectID: project}); err != nil {
+				return errForbidden
+			}
 		}
 		// Serialize this projection's writes before taking row locks. events.Append
 		// also takes a per-tenant counter lock; a consistent order avoids inverse
@@ -169,7 +238,7 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 			return err
 		}
 		var priorDigest string
-		err := tx.QueryRow(ctx, `SELECT request_digest FROM inbox_compat_messages WHERE project_id=$1::uuid AND sender_principal_id=$2::uuid AND key_digest=$3`, project, p.ID, key).Scan(&priorDigest)
+		err = tx.QueryRow(ctx, `SELECT request_digest FROM inbox_compat_messages WHERE project_id=$1::uuid AND sender_principal_id=$2::uuid AND key_digest=$3`, project, p.ID, key).Scan(&priorDigest)
 		if err == nil {
 			if priorDigest != digest {
 				return errConflict
@@ -189,6 +258,25 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 		}
 		if _, err := messageSession(ctx, tx, in.RecipientSessionID, recipient, project); err != nil {
 			return err
+		}
+		if in.ResendOf != nil {
+			for _, permission := range []string{"inbox.send", "harness.read"} {
+				if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: project}); err != nil {
+					return errNotFound
+				}
+			}
+			var terminal bool
+			err := tx.QueryRow(ctx, `SELECT i.cancelled_at IS NOT NULL OR r.state='failed'
+ FROM inbox_compat_messages c JOIN inbox_messages i ON i.tenant_id=c.tenant_id AND i.id=c.inbox_message_id
+ JOIN inbox_receipts r ON r.tenant_id=i.tenant_id AND r.message_id=i.id
+ WHERE c.id=$1 AND c.project_id=$2 AND c.sender_principal_id=$3 AND c.recipient_principal_id=$4
+ AND c.recipient_session_id=$5 AND c.content_mode='durable' AND i.chat_thread_id IS NULL`, *in.ResendOf, project, p.ID, recipient, in.RecipientSessionID).Scan(&terminal)
+			if err != nil {
+				return err
+			}
+			if !terminal {
+				return errNotFound
+			}
 		}
 		senderLabel := p.Name
 		if in.SenderSessionID != nil {
@@ -241,28 +329,30 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 			thread = id
 		}
 		meta := map[string]any{"id": id, "project_id": project, "sender_principal_id": p.ID, "recipient_principal_id": recipient, "is_action_request": in.ActionRequest, "expects_reply": in.ExpectsReply}
-		ev, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.compat_sent", After: meta})
-		if err != nil {
-			return err
+		// Both ordinary and desk replies reserve the obligation before message
+		// rows. No existing row lock may be acquired after the first event.
+		if !in.ActionRequest && in.ReplyTo != nil {
+			if err := reserveReplyObligation(ctx, tx, p.TenantID, *in.ReplyTo); err != nil {
+				return err
+			}
 		}
+		var pending []events.Change
+		collect := func(c events.Change) error { pending = append(pending, c); return nil }
 		var inboxID *string
 		if !in.ActionRequest {
 			inboxID = &id
-			if _, err := tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_session_id,sender_label) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7,$8::uuid,$9::uuid,$10)`, p.TenantID, id, p.ID, recipient, ev.ID, in.Body, "compat/"+id, in.RecipientSessionID, in.SenderSessionID, senderLabel); err != nil {
-				return err
-			}
-			if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.sent", After: messageMeta{ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: recipient, SentEventID: ev.ID}}); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_session_id,sender_label) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7,$8::uuid,$9::uuid,$10)`, p.TenantID, id, p.ID, recipient, nil, in.Body, "compat/"+id, in.RecipientSessionID, in.SenderSessionID, senderLabel); err != nil {
 				return err
 			}
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO inbox_compat_messages(tenant_id,id,project_id,sender_principal_id,recipient_principal_id,sender_address,recipient_address,body,key_digest,request_digest,reply_to_id,thread_id,hop,inbox_message_id,sent_event_id,is_action_request,expects_reply,delivery_level,recipient_session_id,sender_session_id,sender_label) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11::uuid,$12,$13,$14::uuid,$15,$16,$17,$18,$19::uuid,$20::uuid,$21)`, p.TenantID, id, project, p.ID, recipient, "paimos:"+p.Name, in.To, in.Body, key, digest, in.ReplyTo, thread, hop, inboxID, ev.ID, in.ActionRequest, in.ExpectsReply, in.Level, in.RecipientSessionID, in.SenderSessionID, senderLabel); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO inbox_compat_messages(tenant_id,id,project_id,sender_principal_id,recipient_principal_id,sender_address,recipient_address,body,key_digest,request_digest,reply_to_id,thread_id,hop,inbox_message_id,sent_event_id,is_action_request,expects_reply,delivery_level,recipient_session_id,sender_session_id,sender_label,resend_of_id) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11::uuid,$12,$13,$14::uuid,$15,$16,$17,$18,$19::uuid,$20::uuid,$21,$22::uuid)`, p.TenantID, id, project, p.ID, recipient, "paimos:"+p.Name, in.To, in.Body, key, digest, in.ReplyTo, thread, hop, inboxID, nil, in.ActionRequest, in.ExpectsReply, in.Level, in.RecipientSessionID, in.SenderSessionID, senderLabel, in.ResendOf); err != nil {
 			return err
 		}
 		if in.ExpectsReply {
 			if _, err := tx.Exec(ctx, `INSERT INTO inbox_reply_obligations(tenant_id,message_id) VALUES($1::uuid,$2::uuid)`, p.TenantID, id); err != nil {
 				return err
 			}
-			if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.reply_obligation_opened", After: map[string]string{"message_id": id}}); err != nil {
+			if err := collect(events.Change{Type: "inbox.reply_obligation_opened", After: map[string]string{"message_id": id}}); err != nil {
 				return err
 			}
 		}
@@ -272,21 +362,42 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 				return err
 			}
 			if tag.RowsAffected() > 0 {
-				if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.reply_obligation_closed", After: map[string]string{"message_id": *in.ReplyTo, "reply_message_id": id}}); err != nil {
+				if err := collect(events.Change{Type: "inbox.reply_obligation_closed", After: map[string]string{"message_id": *in.ReplyTo, "reply_message_id": id}}); err != nil {
 					return err
 				}
 			}
 		}
-		if err := queueCompatDelivery(ctx, tx, p, project, id, in); err != nil {
+		if err := queueCompatDeliveryWith(ctx, tx, p, project, id, in, collect); err != nil {
 			return err
 		}
 		if !in.ActionRequest {
-			if err := recordAcceptanceReceipt(ctx, tx, p, id); err != nil {
+			if err := recordAcceptanceReceiptWith(ctx, tx, p, id, collect); err != nil {
 				return err
 			}
 		}
 		if !in.ActionRequest && in.RecipientSessionID == nil {
-			if err := enqueueWakes(ctx, tx, p, Message{ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: recipient, SentEventID: ev.ID}); err != nil {
+			if err := enqueueWakesWith(ctx, tx, p.TenantID, Message{ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: recipient}, collect); err != nil {
+				return err
+			}
+		}
+		ev, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.compat_sent", After: meta})
+		if err != nil {
+			return err
+		}
+		if err := bindMessageEvent(ctx, tx, p.TenantID, id, ev.ID, !in.ActionRequest); err != nil {
+			return err
+		}
+		if !in.ActionRequest {
+			if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.sent", After: messageMeta{ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: recipient, SentEventID: ev.ID}}); err != nil {
+				return err
+			}
+		}
+		for _, change := range pending {
+			if wake, ok := change.After.(wakeMeta); ok {
+				wake.EventID = ev.ID
+				change.After = wake
+			}
+			if _, err := events.Append(ctx, tx, p, change); err != nil {
 				return err
 			}
 		}
@@ -309,7 +420,7 @@ type MessageDelivery struct {
 	FallbackReason   string  `json:"fallback_reason"`
 }
 
-func queueCompatDelivery(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, id string, in compatSend) error {
+func queueCompatDeliveryWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, id string, in compatSend, appendEvent func(events.Change) error) error {
 	var target, fallback *string
 	state, reason := "pending", ""
 	if in.ActionRequest {
@@ -329,8 +440,7 @@ func queueCompatDelivery(ctx context.Context, tx pgx.Tx, p tenant.Principal, pro
 	if err != nil {
 		return err
 	}
-	_, err = events.Append(ctx, tx, p, events.Change{Type: "inbox.delivery_queued", After: d})
-	return err
+	return appendEvent(events.Change{Type: "inbox.delivery_queued", After: d})
 }
 func (m *messaging) getDeliveries(w http.ResponseWriter, r *http.Request) {
 	p, project, ok := m.messagingPrincipal(w, r, true)
@@ -342,7 +452,7 @@ func (m *messaging) getDeliveries(w http.ResponseWriter, r *http.Request) {
 		if err := messagingProject(r.Context(), tx, project); err != nil {
 			return err
 		}
-		rows, err := tx.Query(r.Context(), `SELECT d.id::text,d.message_id::text,d.target_id::text,d.fallback_target_id::text,d.state,d.reason,d.attempts,COALESCE(d.effective_level,''),d.fallback_reason FROM inbox_message_deliveries d JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id WHERE c.project_id=$1::uuid ORDER BY c.sent_event_id DESC LIMIT 200`, project)
+		rows, err := tx.Query(r.Context(), `SELECT d.id::text,d.message_id::text,d.target_id::text,d.fallback_target_id::text,d.state,d.reason,d.attempts,COALESCE(d.effective_level,''),d.fallback_reason FROM inbox_message_deliveries d JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id WHERE c.content_mode='durable' AND c.project_id=$1::uuid ORDER BY c.sent_event_id DESC LIMIT 200`, project)
 		if err != nil {
 			return err
 		}
@@ -378,7 +488,7 @@ func (m *messaging) inspectMessages(w http.ResponseWriter, r *http.Request) {
 	m.readMessages(w, r, true)
 }
 func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect bool) {
-	p, project, ok := m.messagingPrincipal(w, r, inspect)
+	p, project, ok := m.messagingPrincipal(w, r, false)
 	if !ok {
 		return
 	}
@@ -452,6 +562,24 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 		if err := messagingProject(r.Context(), tx, project); err != nil {
 			return err
 		}
+		admin := false
+		if inspect {
+			admin = authz.RequireTx(r.Context(), tx, p, "inbox.manage", authz.Scope{ProjectID: project}) == nil
+			if !admin {
+				if sessionID == nil || pending || authz.RequireTx(r.Context(), tx, p, "harness.read", authz.Scope{ProjectID: project}) != nil {
+					return errForbidden
+				}
+			}
+			if sessionID != nil {
+				var exists bool
+				if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE id=$1::uuid AND project_id=$2::uuid)`, *sessionID, project).Scan(&exists); err != nil {
+					return err
+				}
+				if !exists {
+					return errNotFound
+				}
+			}
+		}
 		if sessionID != nil && !inspect {
 			if _, err := listeningSession(r.Context(), tx, sessionID, p.ID, project); err != nil {
 				return err
@@ -479,14 +607,16 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
  WHERE c.project_id=$1::uuid AND c.sender_session_id IS NULL AND c.recipient_session_id IS NULL AND NOT c.is_action_request
  ) SELECT `+compatMessageCols+` FROM inbox_compat_messages c `+compatObligationJoin+`
  LEFT JOIN inbox_messages i ON i.tenant_id=c.tenant_id AND i.id=c.inbox_message_id
- WHERE c.project_id=$1::uuid AND `+comparison+`
+ WHERE ($10 OR NOT c.is_action_request) AND (c.content_mode='durable' OR ($10 AND c.content_mode='attached_volatile' AND c.sender_principal_id=$4::uuid
+ AND EXISTS(SELECT 1 FROM harness_attach_requests ar JOIN agent_pairing_computers pc ON pc.tenant_id=ar.tenant_id AND pc.id=ar.computer_id JOIN agent_pairing_requests pr ON pr.tenant_id=pc.tenant_id AND pr.id=pc.request_id
+ WHERE ar.session_id=c.recipient_session_id AND ar.owner_id=$4::uuid AND pr.approved_by=$4::uuid))) AND c.project_id=$1::uuid AND `+comparison+`
  AND ($3 OR (c.recipient_principal_id=$4::uuid AND NOT c.is_action_request AND i.acked_at IS NULL AND (i.expires_at IS NULL OR i.expires_at>clock_timestamp())))
  AND (($3 AND ($9::uuid IS NULL OR c.id IN (SELECT id FROM session_thread)))
       OR (NOT $3 AND (c.recipient_session_id IS NULL OR c.recipient_session_id=$9::uuid)))
  AND ($5='' OR c.recipient_address=$5)
  AND ($7::uuid IS NULL OR c.id IN (SELECT id FROM thread))
  AND (NOT $8 OR (c.is_action_request AND NOT EXISTS(SELECT 1 FROM events e WHERE e.type='inbox.action_resolved' AND e.node_id=c.project_id AND e.after->>'message_id'=c.id::text)))
- ORDER BY c.sent_event_id `+order+` LIMIT $6`, project, after, inspect, p.ID, to, limit, thread, pending, sessionID)
+ ORDER BY c.sent_event_id `+order+` LIMIT $6`, project, after, inspect, p.ID, to, limit, thread, pending, sessionID, admin)
 		if err != nil {
 			return err
 		}

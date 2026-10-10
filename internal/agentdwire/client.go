@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -20,7 +21,45 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/stepup"
 )
+
+// Fixed attach refusal codes admitted over the owner-only socket. Keep the
+// English and German inventories in sync; callers receive a copy.
+var attachRefusalCodes = []string{
+	"attach_live_limit",
+	"attach_pairing_revoked",
+	"attach_version_mismatch",
+	"attach_ticket_not_visible",
+	"attach_code_expired",
+	"attach_draining",
+	"attach_enrollment_unavailable",
+	"attach_registration_lost",
+	"attach_poll_key_unknown",
+	"attach_pairing_unavailable",
+	"attach_scope_changed",
+	"attach_computer_limit",
+	"attach_attempt_limit",
+	"attach_registration_limit",
+	"attach_poll_limit",
+	"attach_rate_limit",
+	"attach_snapshot_changed",
+	"attach_consent_required",
+	"attach_ended",
+	"attach_invalid_request",
+	"attach_offline",
+	"attach_server_unavailable",
+	"attach_unknown",
+	"attach_local_unavailable",
+	"attach_pairing_mismatch",
+}
+
+// AttachRefusalCodes lists the socket's attach refusal allowlist for parity.
+func AttachRefusalCodes() []string {
+	codes := slices.Clone(attachRefusalCodes)
+	slices.Sort(codes)
+	return codes
+}
 
 type Client struct {
 	Socket    string
@@ -119,6 +158,9 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 	}}
 	defer transport.CloseIdleConnections()
 	hc := &http.Client{Transport: transport, Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if path == "/v1/step-up" && method == "POST" {
+		hc.Timeout = stepup.ConfirmTimeout + 5*time.Second
+	}
 	r, err := http.NewRequestWithContext(ctx, method, "http://agentd"+path, bytes.NewReader(raw))
 	if err != nil {
 		return errors.New("invalid local request")
@@ -127,18 +169,34 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 	r.Header.Set("Content-Type", "application/json")
 	res, err := hc.Do(r)
 	if err != nil {
+		if path == "/v1/step-up" {
+			return errors.New("local Touch ID confirmation unavailable, cancelled or timed out")
+		}
 		return errors.New("local agentd unavailable")
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
+		if path == "/v1/attached-hook" && res.StatusCode == 404 {
+			return ErrAttachedHookUnavailable
+		}
+		if path == "/v1/step-up" {
+			raw, readErr := io.ReadAll(io.LimitReader(res.Body, 769))
+			hint := strings.TrimSpace(string(raw))
+			if readErr == nil && len(raw) <= 768 && validAttachDiagnostic(hint) {
+				return errors.New("Touch ID: " + hint)
+			}
+			return errors.New("local Touch ID confirmation refused")
+		}
 		if path == "/v1/attach" && res.StatusCode == http.StatusConflict {
 			raw, readErr := io.ReadAll(io.LimitReader(res.Body, 1025))
 			if readErr == nil && len(raw) <= 1024 {
 				var detail agentd.AttachLocalError
 				if json.Unmarshal(raw, &detail) == nil && validAttachDiagnostic(detail.Hint) {
 					switch detail.Code {
-					case "harness_identity_mismatch", "harness_executable_unsafe", "harness_image_changed", "harness_identity_unavailable", "harness_identity_unsupported",
-						"attach_live_limit", "attach_pairing_revoked", "attach_version_mismatch", "attach_ticket_not_visible", "attach_code_expired":
+					case "harness_identity_mismatch", "harness_executable_unsafe", "harness_image_changed", "harness_identity_unavailable", "harness_identity_unsupported":
+						return &detail
+					}
+					if slices.Contains(attachRefusalCodes, detail.Code) {
 						return &detail
 					}
 				} else if hint := strings.TrimSpace(string(raw)); !strings.HasPrefix(hint, "{") && validAttachDiagnostic(hint) {
@@ -148,7 +206,17 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 		}
 		return errors.New("local lifecycle request rejected")
 	}
-	d := json.NewDecoder(io.LimitReader(res.Body, 64<<10))
+	limit := int64(64 << 10)
+	if in, ok := body.(agentd.AttachedHookRequest); ok && path == "/v1/attached-hook" && in.Operation == "pull" {
+		// Drain returns at most one message: 65,536 Unicode characters,
+		// up to six JSON bytes per character, plus delivery metadata.
+		limit = 512 << 10
+	}
+	payload, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
+	if err != nil || int64(len(payload)) > limit {
+		return errors.New("invalid local lifecycle response")
+	}
+	d := json.NewDecoder(bytes.NewReader(payload))
 	d.DisallowUnknownFields()
 	if d.Decode(dest) != nil || d.Decode(&struct{}{}) != io.EOF {
 		return errors.New("invalid local lifecycle response")
@@ -226,4 +294,45 @@ func validAttachDiagnostic(text string) bool {
 		}
 	}
 	return true
+}
+
+func (c Client) BindAttachedHook(ctx context.Context, in agentd.AttachedHookRequest) error {
+	return c.lifecycleRequest(ctx, "POST", "/v1/attached-hook", in, &struct{}{})
+}
+
+var ErrAttachedHookUnavailable = errors.New("no live paired hook binding")
+
+func (c Client) PullAttachedHook(ctx context.Context, session string) ([]agentd.HarnessDelivery, error) {
+	var out []agentd.HarnessDelivery
+	err := c.lifecycleRequest(ctx, "POST", "/v1/attached-hook", agentd.AttachedHookRequest{Operation: "pull", SessionID: session}, &out)
+	return out, err
+}
+func (c Client) CompleteAttachedHook(ctx context.Context, session string, delivery agentd.HarnessDelivery) error {
+	var out []agentd.HarnessDelivery
+	return c.lifecycleRequest(ctx, "POST", "/v1/attached-hook", agentd.AttachedHookRequest{Operation: "complete", SessionID: session, DeliveryID: delivery.ID, Cursor: delivery.Cursor}, &out)
+}
+
+func (c Client) ImportLedger(ctx context.Context, config agentd.LedgerConfig) error {
+	var out struct {
+		Imported bool `json:"imported"`
+	}
+	if err := c.lifecycleRequest(ctx, "POST", "/v1/ledger/import", config, &out); err != nil {
+		return err
+	}
+	if !out.Imported {
+		return errors.New("ledger import unconfirmed")
+	}
+	return nil
+}
+func (c Client) LeaveLedger(ctx context.Context) error {
+	var out struct {
+		Left bool `json:"left"`
+	}
+	if err := c.lifecycleRequest(ctx, "POST", "/v1/ledger/leave", nil, &out); err != nil {
+		return err
+	}
+	if !out.Left {
+		return errors.New("ledger leave unconfirmed")
+	}
+	return nil
 }

@@ -218,7 +218,7 @@ func TestCostUnitRates(t *testing.T) {
 		t.Fatal("deleted cost unit rated")
 	}
 	var ticketKind string
-	if err := database.Admin.QueryRow(ctx, `SELECT id::text FROM node_kinds WHERE tenant_id=$1::uuid AND slug='ticket'`, tenantA).Scan(&ticketKind); err != nil {
+	if err := database.Admin.QueryRow(ctx, `SELECT id::text FROM node_kinds WHERE tenant_id=$1::uuid AND slug='work'`, tenantA).Scan(&ticketKind); err != nil {
 		t.Fatal(err)
 	}
 	var ticket string

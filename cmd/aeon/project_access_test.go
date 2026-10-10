@@ -122,8 +122,8 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 	for _, path := range []string{
 		"/api/nodes/" + w.ids["TB"], "/api/node-keys/TB-1", "/api/nodes/" + w.ids["TB"] + "/activity",
 		"/api/nodes/" + w.ids["TB"] + "/attachments", "/api/attachments/" + w.ids["attB"] + "/content",
-		"/api/knowledge/" + w.ids["GB"], "/api/projects/" + w.ids["B"] + "/journey",
-		"/api/projects/" + w.ids["B"] + "/requirements", "/api/projects/" + w.ids["B"] + "/intake",
+		"/api/knowledge/" + w.ids["GB"], "/api/projects/" + w.ids["B"] + "/releases",
+		"/api/projects/" + w.ids["B"] + "/intake",
 		"/api/relations?node_id=" + w.ids["TB"], "/api/events?node_id=" + w.ids["TB"],
 		"/api/knowledge/resolve?project_id=" + w.ids["B"] + "&type=guideline&slug=gb",
 		"/api/projects/" + w.ids["B"] + "/members", "/api/knowledge/graph?project_id=" + w.ids["B"],
@@ -376,17 +376,17 @@ func (w *accessWorld) seed() {
 		}
 		node("A", "project", "PA-1", "")
 		node("B", "project", "PB-1", "")
-		node("TA", "ticket", "TA-1", "A")
-		node("TA2", "ticket", "TA-2", "A")
-		node("TB", "ticket", "TB-1", "B")
+		node("TA", "work", "TA-1", "A")
+		node("TA2", "work", "TA-2", "A")
+		node("TB", "work", "TB-1", "B")
 		// Work of B that is moved into A later (review findings 1 and 2).
-		node("TB2", "ticket", "TB-2", "B")
-		node("TB3", "ticket", "TB-3", "B")
-		node("TB4", "ticket", "TB-4", "B")
+		node("TB2", "work", "TB-2", "B")
+		node("TB3", "work", "TB-3", "B")
+		node("TB4", "work", "TB-4", "B")
 		node("GA", "guideline", "GA-1", "A")
 		node("GB", "guideline", "GB-1", "B")
 		var ticketKind string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='ticket'`, w.tid).Scan(&ticketKind); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='work'`, w.tid).Scan(&ticketKind); err != nil {
 			return err
 		}
 		w.ids["ticketKind"] = ticketKind

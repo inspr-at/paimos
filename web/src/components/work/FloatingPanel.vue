@@ -1,12 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { isSettingsField } from '../../lib/settingsOverlays'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 // A popover anchored to a trigger. It is teleported to <body> so table cells
 // and sticky toolbars never clip it; it flips above the trigger near the
 // bottom edge, closes on Escape, outside clicks and scroll that moves its trigger, and hands
 // focus back to the trigger when it closes by keyboard. A menu closes on Tab;
 // a small form (`cycle`) keeps Tab among its own controls instead.
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false })
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; fieldEscape?: boolean; settingsKeys?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false })
 const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const panel = ref<HTMLElement>()
 const x = ref(-9999)
@@ -23,6 +24,18 @@ function place(keepSide = false) {
   if (!props.anchor || !panel.value) return
   const rect = props.anchor.getBoundingClientRect()
   placedAnchor = rect
+  // A long picker uses a top-anchored frame with its own scrolling body and
+  // pinned actions. Its location never depends on the selected role's preview.
+  if (props.sheet) {
+    const phone = innerWidth <= 600
+    const width = phone ? innerWidth : Math.min(960, Math.max(480, innerWidth * .64), innerWidth - 32)
+    x.value = Math.round((innerWidth - width) / 2)
+    y.value = phone ? 0 : Math.min(64, Math.round(innerHeight * .08))
+    maxHeight.value = phone ? innerHeight : Math.min(props.tallest, innerHeight - y.value - 16)
+    placedHeight.value = phone ? innerHeight : undefined
+    above.value = false
+    return
+  }
   const height = panel.value.scrollHeight
   const room = innerHeight - rect.bottom - 12
   // Open above when the menu would not fit below and there is more room above.
@@ -63,7 +76,20 @@ const layer = (props.anchor instanceof Element ? props.anchor.closest<HTMLElemen
 // another dialog open above the popover's own layer handles its Escape itself.
 function escape(event: KeyboardEvent) {
   if (event.key !== 'Escape' || [...document.querySelectorAll('dialog[open]')].some(dialog => dialog !== layer)) return
+  // Names loaded after this panel mounts register their Escape listener later.
+  // Let the open disclosure consume Escape before dismissing its menu.
+  if (panel.value?.querySelector('.read-name-detail:popover-open')) return
+  // A form: Escape first leaves a text field or select, the next press closes (AEON-541 keyboard rule).
+  const field = event.target
+  if (props.fieldEscape && field instanceof HTMLElement && panel.value?.contains(field) && (field.tagName === 'SELECT' || (field.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((field as HTMLInputElement).type)))) {
+    event.preventDefault(); event.stopImmediatePropagation()
+    field.blur(); panel.value.tabIndex = -1; panel.value.focus({ preventScroll: true })
+    return
+  }
   event.preventDefault(); event.stopImmediatePropagation()
+  if (props.settingsKeys && isSettingsField(event.target)) {
+    (event.target as HTMLElement).blur(); panel.value?.focus({ preventScroll: true }); return
+  }
   emit('close', true)
 }
 let scrollFrame = 0
@@ -81,6 +107,9 @@ function keydown(event: KeyboardEvent) {
   }
 }
 const onResize = () => place()
+// The collapsed Display menu widens after it counts columns. Place again once that
+// width arrives: the resize that caused the recount already placed the narrower menu.
+watch(() => props.width, () => place(true))
 onMounted(async () => {
   await nextTick()
   place()
@@ -108,7 +137,7 @@ defineExpose({ place })
 
 <template>
   <Teleport :to="layer">
-    <div ref="panel" class="floating pop" :class="{ above }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
+    <div ref="panel" class="floating pop" :class="{ above, sheet }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: sheet ? undefined : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
       <slot />
     </div>
   </Teleport>
@@ -116,6 +145,9 @@ defineExpose({ place })
 
 <style scoped>
 .floating { position: fixed; z-index: 70; top: 0; left: 0; max-width: calc(100vw - 16px); overflow: auto; padding: 6px; overscroll-behavior: contain; }
+.floating:focus { outline: none; }
+.floating.sheet { width: min(960px, max(480px, 64vw)); max-width: calc(100vw - 32px); overflow: hidden; }
+@media (max-width: 600px) { .floating.sheet { width: 100%; max-width: none; border-radius: 0; } }
 @media (prefers-reduced-motion: no-preference) {
   .floating { animation: pop-in .14s cubic-bezier(.2, .7, .2, 1); }
   @keyframes pop-in { from { opacity: 0; margin-top: -4px; } to { opacity: 1; margin-top: 0; } }

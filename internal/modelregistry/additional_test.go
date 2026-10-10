@@ -23,7 +23,7 @@ func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) 
 			if err != nil {
 				return err
 			}
-			if profile.Slug == "codex-terra-high" {
+			if profile.Slug == "codex-6-1-sol-high" {
 				first = r.ID
 			}
 		}
@@ -33,7 +33,7 @@ func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) 
 		t.Fatal(err)
 	}
 	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
-	if len(profiles) != 44 {
+	if len(profiles) != 51 {
 		t.Fatal("upgrade profiles", len(profiles))
 	}
 	readRoutes := func() []Route {

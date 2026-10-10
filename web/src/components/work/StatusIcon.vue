@@ -24,5 +24,5 @@ const key = computed(() => statusMeta(props.state).key)
 </template>
 
 <style scoped>
-.st-qa { filter: drop-shadow(0 0 3px rgba(164, 229, 223, .7)); }
+.st-qa { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--st-qa-ring) 70%, transparent)); }
 </style>

@@ -78,7 +78,15 @@ func (m *Module) handleGetNodeByKey(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		node, err = loadNode(ctx, tx, id, false)
-		return err
+		if err != nil {
+			return err
+		}
+		recurrences, err := loadNodeRecurrences(ctx, tx, []string{id})
+		if err != nil {
+			return err
+		}
+		node.Recurrence = recurrences[id]
+		return nil
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -137,7 +145,7 @@ func (m *Module) projectMove(ctx context.Context, p tenant.Principal, id, projec
 		if err := tx.QueryRow(ctx, `SELECT slug FROM node_kinds WHERE id=$1::uuid`, current.KindID).Scan(&kind); err != nil {
 			return err
 		}
-		if kind != "epic" && kind != "ticket" && kind != "task" {
+		if kind != "work" && kind != "epic" && kind != "ticket" && kind != "task" {
 			return badRequest("only issues can move between projects")
 		}
 		var nested, feature bool

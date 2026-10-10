@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /chat/offline-wait-policy:
+    get:
+      operationId: getChatOfflineWaitPolicy
+      x-aeon-package: R3
+      description: "Reserved chat-v1 contract for R3; not mounted by R1. Read the current person's effective policy or workspace default. A person's override takes precedence over the workspace default, then the built-in one-hour default. Workspace reads require settings.read; person reads never expose another person's policy. Legacy delivery deadlines are unchanged."
+      parameters:
+        - {name: scope, in: query, required: false, schema: {type: string, enum: [person, workspace], default: person}}
+      responses:
+        '200': {description: Effective offline-wait policy, content: {application/json: {schema: {$ref: '#/components/schemas/ChatOfflineWaitPolicy'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putChatOfflineWaitPolicy
+      x-aeon-package: R3
+      description: "Reserved chat-v1 contract for R3; not mounted by R1. Update only the current person's override or the workspace default with revision CAS and final transaction authorization. Workspace writes require settings.manage. At most 4 KiB body, with a three-second body/work deadline. Changes apply only to messages accepted afterward; they never extend or reset an accepted delivery deadline, resend expired/uncertain messages, or change legacy settings."
+      parameters:
+        - {name: scope, in: query, required: false, schema: {type: string, enum: [person, workspace], default: person}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChatOfflineWaitPolicyWrite'}
+      responses:
+        '200': {description: Saved policy for future messages, content: {application/json: {schema: {$ref: '#/components/schemas/ChatOfflineWaitPolicy'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive before the deadline}
+        '409': {description: Policy revision conflict}
+  /chat/stream:
+    get:
+      operationId: "streamChatEvents"
+      x-aeon-package: "R3"
+      description: "Reserved chat-v1 contract for R3; not mounted by R1. Content-free participant changes only. At most 100 conversation subscriptions and 128 KiB per event. Opaque resumable cursor, bounded keepalives and current authorization on every query/keepalive; unreadable conversations emit no IDs, counts, snippets or existence hints."
+      parameters: [{"name": "conversation_id", "in": "query", "required": true, "schema": {"type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": true, "items": {"type": "string", "format": "uuid"}}}, {"name": "after", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}]
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            text/event-stream:
+              schema:
+                type: "string"
+                description: "Content-free SSE frames containing ChatEvent only."
+        '400':
+          description: "Invalid bounded input/cursor"
+        '404':
+          description: "Disabled, unknown, wrong tenant or unauthorized target"
+        '409':
+          description: "Stale identity or conflicting state"
+        '429':
+          description: "Rate limit reached; Retry-After supplies the retry interval"
+components:
+  schemas:
+    ChatOfflineWaitPolicy:
+      type: object
+      additionalProperties: false
+      required: [contract, scope, source, revision, offline_wait_seconds]
+      properties:
+        contract: {type: string, const: chat-v1}
+        scope: {type: string, enum: [person, workspace]}
+        source: {type: string, enum: [person, workspace, built_in]}
+        revision: {$ref: '#/components/schemas/ChatPosition'}
+        offline_wait_seconds: {type: integer, minimum: 600, maximum: 86400, default: 3600, description: "Wait for never-offered new chat input only. Person override, then workspace default, then one hour. Accepted deadlines and legacy delivery settings remain unchanged."}
+    ChatOfflineWaitPolicyWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, offline_wait_seconds]
+      properties:
+        expected_revision: {$ref: '#/components/schemas/ChatPosition'}
+        offline_wait_seconds: {type: integer, minimum: 600, maximum: 86400, default: 3600}

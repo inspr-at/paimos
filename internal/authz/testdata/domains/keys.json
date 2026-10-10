@@ -1,0 +1,42 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "keys.manage",
+      "keys.read"
+    ],
+    "owner": [
+      "keys.manage",
+      "keys.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": false,
+      "description": "Manage keys",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "API keys",
+      "key": "keys.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": false,
+      "description": "Read keys",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "API keys",
+      "key": "keys.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "words": {
+    "resources": {
+      "keys": "agent keys"
+    }
+  }
+}

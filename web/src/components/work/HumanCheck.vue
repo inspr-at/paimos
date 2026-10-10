@@ -41,7 +41,7 @@ async function set(text: string | null) {
 
 <style scoped>
 .human-check { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; margin-top: 12px; padding: 9px 10px 9px 12px; border-radius: 10px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 28%, transparent); }
-.hc-icon { color: var(--gold-ink); align-self: start; margin-top: 2px; }
+.hc-icon { color: var(--warn-ink); align-self: start; margin-top: 2px; }
 .hc-text { display: grid; min-width: 0; font-size: 13px; color: var(--ink); line-height: 1.45; overflow-wrap: anywhere; }
 .hc-text strong { font-weight: 600; }
 .hc-sub { font-size: 12px; color: var(--ink-2); }

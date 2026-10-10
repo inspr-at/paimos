@@ -1,0 +1,7 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "routes": {
+    "GET /api/nodes/{nodeId}/benefit-generation": "nodes.read",
+    "POST /api/nodes/{nodeId}/benefit-generation/retry": "nodes.write"
+  }
+}

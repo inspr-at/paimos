@@ -4,6 +4,8 @@
 // palette); grouping and multi-sort; view column sets; the persisted row height.
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
+import { controlStability } from './control-stability'
+import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
 import { fixtures, me, mockView, mockWork, watchErrors, type Call, type Fixtures } from './work-fixtures'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
@@ -14,6 +16,10 @@ const keys = (page: Page) => rows(page).locator('.key')
 const lastList = (calls: Call[]) => calls.filter(call => call.path === '/api/nodes' && call.query.get('within') && call.query.get('limit') === '200').at(-1)!
 const toolbar = (page: Page) => page.getByRole('toolbar', { name: 'Ticket list controls' })
 const bar = (page: Page) => page.getByRole('navigation', { name: 'Saved views' })
+// Active filter controls keep their accessible names when chips are folded
+// into the toolbar. Verify the selection rather than its former container.
+const selectedFilter = (page: Page, name: string) => toolbar(page).getByRole('button', { name: new RegExp(`^Edit ${name} filter:`) })
+const priorityFilter = (page: Page) => toolbar(page).locator('button[data-dim="priority"]')
 const MINE = '11111111-aaaa-4aaa-8aaa-000000000001'
 const SHARED = '11111111-aaaa-4aaa-8aaa-000000000002'
 const mira = '22222222-2222-4222-8222-222222222222'
@@ -27,7 +33,7 @@ function world(): Fixtures {
   return data
 }
 
-test('an excluded value filters with "not", shows in its chip and travels in the URL and the API', async ({ page }) => {
+test('an excluded value filters with "not", shows in its control and travels in the URL and the API', async ({ page }) => {
   const errors = watchErrors(page)
   const calls = await mockWork(page, world())
   await page.goto('/p/PHAROS?closed=1')
@@ -45,17 +51,18 @@ test('an excluded value filters with "not", shows in its chip and travels in the
   await menu.locator('.facet-option').filter({ hasText: 'Cancelled' }).getByRole('button', { name: 'Exclude Cancelled' }).click()
   await expect(rows(page)).toHaveCount(5)
   await page.keyboard.press('Escape')
-  const chips = page.getByLabel('Applied filters')
-  await expect(chips).toContainText('Statusnot Done, Cancelled')
-  // Backspace on a chip removes it and keeps focus in the chips.
-  await chips.getByRole('button', { name: /^Edit Status filter/ }).focus()
+  const status = selectedFilter(page, 'Status')
+  await expect(status).toHaveAccessibleName('Edit Status filter: not Done, Cancelled')
+  await expect(status).toContainText('not Done, Cancelled')
+  // Backspace on the active filter removes it.
+  await status.focus()
   await page.keyboard.press('Backspace')
   await expect(page).not.toHaveURL(/status=/)
   await expect(rows(page)).toHaveCount(7)
   expect(errors).toEqual([])
 })
 
-test('Shift F opens every filter: labels, epic, cost unit and release by name, and a relative date', async ({ page }) => {
+test('Shift F opens every filter: labels, parent, cost unit and release by name, and a relative date', async ({ page }) => {
   const calls = await mockWork(page, world())
   await page.goto('/p/PHAROS?closed=1')
   await expect(rows(page)).toHaveCount(7)
@@ -63,7 +70,7 @@ test('Shift F opens every filter: labels, epic, cost unit and release by name, a
   await page.keyboard.press('Shift+F')
   const more = page.getByRole('menu', { name: 'Filter by' })
   await expect(more).toBeVisible()
-  await expect(more.getByRole('menuitem')).toContainText(['Status', 'Priority', 'Assignee', 'Type', 'Labels', 'Epic', 'Cost unit', 'Imported release', 'Date'])
+  await expect(more.getByRole('menuitem')).toContainText(['Status', 'Priority', 'Assignee', 'Parents / Leaves', 'Depth', 'Legacy type', 'Labels', 'Human check', 'Parent', 'Cost unit', 'Imported release', 'Date'])
   await more.getByRole('menuitem', { name: 'Labels' }).click()
   const labels = page.getByRole('dialog', { name: 'Filter by Labels' })
   // Label counts are asked for when the menu opens.
@@ -75,16 +82,18 @@ test('Shift F opens every filter: labels, epic, cost unit and release by name, a
   await expect(keys(page)).toHaveText(['PHAROS-13'])
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: /Remove Labels filter/ }).click()
-  // Epic: the project's epics by title; the list asks for the epic's id.
+  // Parent by title retains the legacy epic query for saved-view compatibility.
+  // Match exactly: the menu also offers the separate Parents / Leaves filter.
   await page.getByRole('button', { name: 'Filter by more' }).click()
-  await page.getByRole('menuitem', { name: 'Epic' }).click()
-  const epics = page.getByRole('dialog', { name: 'Filter by Epic' })
+  await more.getByRole('menuitem', { name: 'Parent', exact: true }).click()
+  const epics = page.getByRole('dialog', { name: 'Filter by Parent' })
   await epics.getByText('Guarded multi-cloud provisioning').click()
   await expect.poll(() => lastList(calls).query.get('epic')).toBe('n-epic')
   await expect(keys(page)).toHaveText(['PHAROS-11', 'PHAROS-12', 'PHAROS-13'])
   await page.keyboard.press('Escape')
-  await expect(page.getByLabel('Applied filters')).toContainText('EpicGuarded multi-cloud provisioning')
-  await page.getByRole('button', { name: /Remove Epic filter/ }).click()
+  await expect(selectedFilter(page, 'Parent')).toHaveAccessibleName('Edit Parent filter: Guarded multi-cloud provisioning')
+  await expect(selectedFilter(page, 'Parent')).toContainText('Guarded multi-cloud provisioning')
+  await page.getByRole('button', { name: /Remove Parent filter/ }).click()
   // Cost unit: native and imported labels alike.
   await page.getByRole('button', { name: 'Filter by more' }).click()
   await page.getByRole('menuitem', { name: 'Cost unit' }).click()
@@ -105,7 +114,8 @@ test('Shift F opens every filter: labels, epic, cost unit and release by name, a
   await expect.poll(() => lastList(calls).query.get('date_field')).toBe('updated')
   const from = lastList(calls).query.get('date_from')!, to = lastList(calls).query.get('date_to')!
   expect(Date.parse(to) - Date.parse(from)).toBe(86_400_000)
-  await expect(page.getByLabel('Applied filters')).toContainText('Updatedtoday')
+  await expect(selectedFilter(page, 'date')).toHaveAccessibleName('Edit date filter: Updated today')
+  await expect(selectedFilter(page, 'date')).toContainText('today')
   // Clear all takes every filter and the date.
   await page.getByRole('button', { name: /Remove date filter/ }).click()
   await expect(page).toHaveURL('/p/PHAROS/tickets?closed=1&view=list')
@@ -127,7 +137,8 @@ test('a custom date range filters imported start dates by day', async ({ page })
   await expect(page).toHaveURL(/date=start:2026-09-01..2026-09-15/)
   await expect(keys(page)).toHaveText(['PHAROS-11'])
   expect(lastList(calls).query.get('date_field')).toBe('start')
-  await expect(page.getByLabel('Applied filters')).toContainText('Start1 Sep – 15 Sep')
+  await expect(selectedFilter(page, 'date')).toHaveAccessibleName('Edit date filter: Start 1 Sep – 15 Sep')
+  await expect(selectedFilter(page, 'date')).toContainText('1 Sep – 15 Sep')
 })
 
 test('saving a view: named from its filters, shared, then the bar shows it and changes mark it until saved', async ({ page }) => {
@@ -144,20 +155,21 @@ test('saving a view: named from its filters, shared, then the bar shows it and c
   await panel.getByRole('button', { name: 'Save view' }).click()
   await expect(page.getByText('Saved the view “Urgent”, shared with the project')).toBeVisible()
   const created = calls.find(call => call.path === '/api/views' && call.method === 'POST')!
-  expect(created.body).toMatchObject({ name: 'Urgent', project_id: 'p-pharos', shared: true, filters: { priority: 'high' }, group_by: 'status', sort_keys: [], columns: [] })
+  expect(created.body).toMatchObject({ name: 'Urgent', project_id: 'p-pharos', shared: true, filters: { priority: 'high' }, group_by: 'status', sort_keys: [], mode: 'list' })
+  expect((created.body as { columns: string[] }).columns.length).toBeGreaterThan(1)
   const id = data.views[0].id
   await expect(page).toHaveURL(new RegExp(`v=${id}`))
   const tab = bar(page).getByRole('link', { name: /Urgent/ })
   await expect(tab).toHaveAttribute('aria-current', 'page')
   // A change marks the view; Save writes it, Reset goes back.
-  await toolbar(page).getByRole('button', { name: /^Priority( \d+)?$/ }).click()
+  await priorityFilter(page).click()
   await page.getByRole('dialog', { name: 'Filter by Priority' }).getByText('Medium', { exact: true }).click()
   await page.keyboard.press('Escape')
   await expect(bar(page).locator('.dirty')).toBeVisible()
   await bar(page).getByRole('button', { name: 'Reset' }).click()
   await expect(bar(page).locator('.dirty')).toBeHidden()
   await expect(rows(page)).toHaveCount(2)
-  await toolbar(page).getByRole('button', { name: /^Priority( \d+)?$/ }).click()
+  await priorityFilter(page).click()
   await page.getByRole('dialog', { name: 'Filter by Priority' }).getByText('Medium', { exact: true }).click()
   await page.keyboard.press('Escape')
   await bar(page).getByRole('button', { name: 'Save changes to the view' }).click()
@@ -181,15 +193,18 @@ test('view menu: rename, duplicate, default on the next visit, share, copy link 
   const calls = await mockWork(page, data)
   await page.goto(`/p/PHAROS?priority=high&v=${MINE}`)
   await expect(rows(page)).toHaveCount(2)
-  const options = () => bar(page).getByRole('button', { name: /^Options for view/ })
-  await options().click()
+  // Normal saved views include their column snapshot, so opening one without
+  // edits must stay clean (empty columns describe a removed legacy view).
+  await expect(bar(page).getByRole('img', { name: 'changed since saved' })).toHaveCount(0)
+  const options = (name: string) => bar(page).getByRole('button', { name: `Options for view ${name}`, exact: true })
+  await options('Mine').click()
   let menu = page.getByRole('menu', { name: 'View Mine' })
   await menu.getByRole('menuitem', { name: 'Rename' }).click()
   await page.getByRole('dialog', { name: 'Rename view' }).getByLabel('View name').fill('High priority')
   await page.keyboard.press('Enter')
   await expect(bar(page).getByRole('link', { name: 'High priority' })).toBeVisible()
   // Default: the next visit to the project opens the view.
-  await options().click()
+  await options('High priority').click()
   await page.getByRole('menu', { name: 'View High priority' }).getByRole('menuitem', { name: 'Open the project with it' }).click()
   await expect.poll(() => (data.preferences['list:p-pharos'] as { defaultView?: string } | undefined)?.defaultView).toBe(MINE)
   await page.goto('/p/PHAROS')
@@ -198,24 +213,31 @@ test('view menu: rename, duplicate, default on the next visit, share, copy link 
   // Only the first list request is the view's: the plain list never loads first.
   expect(calls.filter(call => call.path === '/api/nodes' && call.query.get('limit') === '200' && !call.query.get('priority'))).toHaveLength(0)
   // Copy link and share.
-  await options().click()
+  await options('High priority').click()
   await page.getByRole('menu', { name: 'View High priority' }).getByRole('menuitem', { name: 'Copy link' }).click()
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(`v=${MINE}`)
-  await options().click()
+  await options('High priority').click()
   await page.getByRole('menu', { name: 'View High priority' }).getByRole('menuitem', { name: 'Share with the project' }).click()
   await expect(page.getByText('“High priority” is shared with everyone in Pharos')).toBeVisible()
   expect(data.views.find(v => v.id === MINE)!.shared).toBe(true)
   // A shared view of someone else: copy it to my views.
-  await bar(page).getByRole('link', { name: /Team/ }).click()
+  await bar(page).getByRole('link', { name: 'Team', exact: true }).click()
+  // Both views contain two rows; the count alone cannot prove navigation. Wait
+  // for Team to be current before resolving its options, rather than capturing
+  // the old view's button while the router is still changing the selection.
+  await expect(bar(page).getByRole('link', { name: 'Team', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(bar(page).getByRole('img', { name: 'changed since saved' })).toHaveCount(0)
   await expect(rows(page)).toHaveCount(2)
-  await options().click()
+  await options('Team').click()
   menu = page.getByRole('menu', { name: 'View Team' })
   await expect(menu.getByRole('menuitem', { name: 'Rename' })).toHaveCount(0)
   await expect(menu.getByRole('menuitem', { name: 'Delete view' })).toHaveCount(0)
   await menu.getByRole('menuitem', { name: 'Copy to my views' }).click()
   await expect(bar(page).getByRole('link', { name: 'Team copy' })).toHaveAttribute('aria-current', 'page')
+  await expect(bar(page).getByRole('img', { name: 'changed since saved' })).toHaveCount(0)
+  expect(data.views.find(view => view.name === 'Team copy')).toMatchObject({ columns: data.views.find(view => view.id === SHARED)!.columns, mode: 'list' })
   // Delete, then Undo brings the view back with its id.
-  await options().click()
+  await options('Team copy').click()
   await page.getByRole('menu', { name: 'View Team copy' }).getByRole('menuitem', { name: 'Delete view' }).click()
   await expect(bar(page).getByRole('link', { name: 'Team copy' })).toHaveCount(0)
   await expect(page).not.toHaveURL(/v=/)
@@ -309,11 +331,13 @@ test('in a view the column set belongs to the view; row height is the person’s
   await expect(bar(page).locator('.dirty')).toBeVisible()
   // The person's own columns are untouched.
   expect(data.preferences['list:p-pharos']?.visible).toBeUndefined()
-  await display.getByRole('radio', { name: 'Compact' }).click()
+  const compact = display.getByRole('radiogroup', { name: 'Row height', exact: true }).getByRole('radio', { name: 'Compact', exact: true })
+  await compact.click()
+  await expect(compact).toHaveAttribute('aria-checked', 'true')
   await expect.poll(() => (data.preferences['list:display'] as { density?: string } | undefined)?.density).toBe('compact')
   await page.keyboard.press('Escape')
   await bar(page).getByRole('button', { name: 'Save changes to the view' }).click()
-  await expect.poll(() => calls.filter(call => call.method === 'PATCH').at(-1)?.body).toMatchObject({ columns: ['status', 'updated', 'cost'] })
+  await expect.poll(() => calls.filter(call => call.method === 'PATCH').at(-1)?.body).toMatchObject({ columns: ['key', 'title', 'status', 'updated', 'cost'], mode: 'list' })
   await page.reload()
   await expect(rows(page).first()).toHaveCSS('height', '30px')
 })
@@ -326,25 +350,27 @@ test('a link to a view someone cannot see keeps its filters and drops the view',
   await expect(bar(page).getByRole('link', { name: 'All tickets' })).toHaveAttribute('aria-current', 'page')
 })
 
-test('filters and views have no axe violations in light and dark', async ({ page }) => {
-  const data = world()
-  data.views.push(mockView({ id: MINE, name: 'Mine', filters: { priority: 'high' } }), mockView({ id: SHARED, name: 'Team', owner_principal_id: mira, shared: true }))
-  data.preferences['list:p-pharos'] = { defaultView: MINE }
-  await mockWork(page, data)
-  const scan = async () => {
-    // Judge settled states only. A sort or filter change re-queries the list, and
-    // until the answer arrives the previous rows stay on screen dimmed as stale
-    // (tbody.dim, the grid aria-busy); scanning then measured the dimmed avatar
-    // initials, a loading transition rather than the page. Popovers mount off
-    // screen and are placed on the next frame.
-    await expect(grid(page)).toHaveAttribute('aria-busy', 'false')
-    await expect(grid(page).locator('tbody.dim')).toHaveCount(0)
-    for (const pop of await page.locator('.floating').all()) await expect(pop).toBeInViewport()
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
-    const summary = results.violations.map(v => `${v.id}: ${v.help} ${v.nodes.slice(0, 3).map(n => n.target.join(' ')).join(' | ')}`)
-    expect(summary, summary.join('\n')).toEqual([])
-  }
-  for (const colorScheme of ['light', 'dark'] as const) {
+// Seven full-page scans per scheme get independent test budgets; combining both
+// schemes timed out during the final scan on hosted CI, without an axe failure.
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`filters and views have no axe violations in ${colorScheme}`, async ({ page }) => {
+    const data = world()
+    data.views.push(mockView({ id: MINE, name: 'Mine', filters: { priority: 'high' } }), mockView({ id: SHARED, name: 'Team', owner_principal_id: mira, shared: true }))
+    data.preferences['list:p-pharos'] = { defaultView: MINE }
+    await mockWork(page, data)
+    const scan = async () => {
+      // Judge settled states only. A sort or filter change re-queries the list, and
+      // until the answer arrives the previous rows stay on screen dimmed as stale
+      // (tbody.dim, the grid aria-busy); scanning then measured the dimmed avatar
+      // initials, a loading transition rather than the page. Popovers mount off
+      // screen and are placed on the next frame.
+      await expect(grid(page)).toHaveAttribute('aria-busy', 'false')
+      await expect(grid(page).locator('tbody.dim')).toHaveCount(0)
+      for (const pop of await page.locator('.floating').all()) await expect(pop).toBeInViewport()
+      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
+      const summary = results.violations.map(v => `${v.id}: ${v.help} ${v.nodes.slice(0, 3).map(n => n.target.join(' ')).join(' | ')}`)
+      expect(summary, summary.join('\n')).toEqual([])
+    }
     await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
     await page.goto(`/p/PHAROS?priority=high,!low&tag=!docs&date=updated:30d&v=${MINE}&status=!done`)
     await expect(rows(page).first()).toBeVisible()
@@ -369,8 +395,8 @@ test('filters and views have no axe violations in light and dark', async ({ page
     await expect(page.getByRole('dialog', { name: 'Save view' })).toBeVisible()
     await scan()
     await page.keyboard.press('Escape')
-  }
-})
+  })
+}
 
 for (const width of [1920, 1440, 1280, 1024, 390]) {
   test(`at ${width}px the view bar and toolbar never overflow the page`, async ({ page }) => {
@@ -395,3 +421,186 @@ for (const width of [1920, 1440, 1280, 1024, 390]) {
     }
   })
 }
+
+// AEON-718 behavioural regressions: use the existing column picker and view bar.
+for (const mode of ['list', 'outline'] as const) {
+  test(`AEON-718 plain columns save and reopen in ${mode} despite personal changes`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const table = mode === 'outline' ? page.getByRole('treegrid', { name: 'Ticket outline' }) : grid(page)
+    const data = world()
+    data.preferences['list:p-pharos'] = { order: ['key', 'title', 'updated', 'status'], visible: ['status', 'updated'] }
+    const calls = await mockWork(page, data)
+    await page.goto(`/p/PHAROS/tickets?view=${mode}`)
+    await expect(table.locator('thead th')).toHaveText(['Key', 'Title', 'Updated', 'Status'])
+    await page.getByRole('button', { name: /^Display/ }).click()
+    const display = page.getByRole('dialog', { name: 'Display options' })
+    const column = display.getByRole('checkbox', { name: 'Cost unit' })
+    const guard = await controlStability(page, { column, display: page.getByRole('button', { name: /^Display/ }), modes: toolbar(page).getByRole('tablist', { name: 'Ticket views' }) })
+    await guard.check(() => column.check()); guard.done()
+    await page.keyboard.press('Escape')
+    await expect(bar(page).getByRole('button', { name: 'Save view', exact: true })).toBeVisible()
+    await bar(page).getByRole('button', { name: 'Save view', exact: true }).click()
+    const panel = page.getByRole('dialog', { name: 'Save view' })
+    await panel.getByLabel('View name').fill('Gespeicherte Spalten und Darstellungsart')
+    await panel.getByRole('button', { name: 'Save view', exact: true }).click()
+    const id = data.views[0].id
+    await expect(page).toHaveURL(new RegExp(`v=${id}`))
+    expect(calls.find(c => c.method === 'POST' && c.path === '/api/views')!.body).toMatchObject({ columns: ['key', 'title', 'updated', 'status', 'cost'], mode })
+    await expect(bar(page).locator('.dirty')).toBeHidden()
+    await bar(page).getByRole('link', { name: 'All tickets' }).click()
+    await expect(page).not.toHaveURL(/v=/)
+    await page.getByRole('button', { name: /^Display/ }).click()
+    await display.getByRole('checkbox', { name: 'Cost unit' }).uncheck()
+    await display.getByRole('checkbox', { name: 'Priority', exact: true }).check()
+    await page.keyboard.press('Escape')
+    await toolbar(page).getByRole('tab', { name: mode === 'list' ? 'Outline' : 'List', exact: true }).click()
+    await bar(page).getByRole('link', { name: 'Gespeicherte Spalten und Darstellungsart' }).click()
+    await expect(toolbar(page).getByRole('tab', { name: mode === 'list' ? 'List' : 'Outline', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(table.locator('thead th')).toHaveText(['Key', 'Title', 'Updated', 'Status', 'Cost unit'])
+    await expect(bar(page).locator('.dirty')).toBeHidden()
+    await page.getByRole('button', { name: /^Display/ }).click()
+    await display.getByRole('checkbox', { name: 'Priority', exact: true }).check()
+    await page.keyboard.press('Escape')
+    await expect(bar(page).locator('.dirty')).toBeVisible()
+    await bar(page).getByRole('button', { name: 'Save changes to the view' }).click()
+    await expect(bar(page).locator('.dirty')).toBeHidden()
+    expect(calls.filter(c => c.method === 'PATCH' && c.path === `/api/views/${id}`).at(-1)!.body).toMatchObject({ columns: ['key', 'title', 'updated', 'status', 'cost', 'priority'], mode })
+    await page.reload()
+    await expect(table.locator('thead th')).toHaveText(['Key', 'Title', 'Updated', 'Status', 'Cost unit', 'Priority'])
+    for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+      await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme })
+      await page.screenshot({ path: `test-results/aeon-718/${mode}-${width}-${colorScheme}.png`, fullPage: true })
+    }
+  })
+}
+
+test('AEON-718 Graph offers saved views, persists mode and applies their filters', async ({ page }) => {
+  const data = ticketGraphWorld()
+  data.work.preferences['list:p-pharos'] = { visible: ['status', 'updated'] }
+  await mockTicketGraph(page, data)
+  await page.goto('/p/PHAROS/tickets?view=graph&priority=high')
+  const canvas = page.locator('.ticket-graph-canvas')
+  await expect(canvas).toHaveAttribute('data-ready', 'true')
+  const before = await canvas.getAttribute('aria-label')
+  await expect(bar(page)).toBeVisible()
+  await bar(page).getByRole('button', { name: 'Save view', exact: true }).click()
+  const panel = page.getByRole('dialog', { name: 'Save view' })
+  await panel.getByLabel('View name').fill('Graph mit hoher Priorität')
+  await panel.getByRole('button', { name: 'Save view', exact: true }).click()
+  await expect(bar(page).getByRole('link', { name: 'Graph mit hoher Priorität' })).toHaveAttribute('aria-current', 'page')
+  expect(data.work.views[0]).toMatchObject({ mode: 'graph', columns: ['key', 'title', 'status', 'updated'], filters: { priority: 'high' } })
+  await expect(bar(page).locator('.dirty')).toBeHidden()
+  const guard = await controlStability(page, { modes: toolbar(page).getByRole('tablist', { name: 'Ticket views' }), graph: toolbar(page).getByRole('tab', { name: 'Graph', exact: true }) })
+  await guard.check(async () => {
+    await toolbar(page).getByRole('tab', { name: 'List', exact: true }).click()
+    await expect(toolbar(page).getByRole('tab', { name: 'List', exact: true })).toHaveAttribute('aria-selected', 'true')
+  }); guard.done()
+  await expect(bar(page).locator('.dirty')).toBeVisible()
+  await bar(page).getByRole('button', { name: 'Save changes to the view' }).click()
+  await expect(bar(page).locator('.dirty')).toBeHidden()
+  expect(data.work.views[0].mode).toBe('list')
+  await toolbar(page).getByRole('tab', { name: 'Graph', exact: true }).click()
+  await expect(bar(page).locator('.dirty')).toBeVisible()
+  await bar(page).getByRole('button', { name: 'Reset', exact: true }).click()
+  await expect(toolbar(page).getByRole('tab', { name: 'List', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await toolbar(page).getByRole('tab', { name: 'Graph', exact: true }).click()
+  await bar(page).getByRole('button', { name: 'Save changes to the view' }).click()
+  await expect(bar(page).locator('.dirty')).toBeHidden()
+  expect(data.work.views[0].mode).toBe('graph')
+  await bar(page).getByRole('link', { name: 'All tickets' }).click()
+  await toolbar(page).getByRole('tab', { name: 'Graph', exact: true }).click()
+  await expect(canvas).toHaveAttribute('data-ready', 'true')
+  const all = await canvas.getAttribute('aria-label')
+  expect(all).not.toBe(before)
+  await bar(page).getByRole('link', { name: 'Graph mit hoher Priorität' }).click()
+  await expect(canvas).toHaveAttribute('aria-label', before!)
+  await expect(toolbar(page).getByRole('tab', { name: 'Graph', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await page.reload()
+  await expect(canvas).toHaveAttribute('aria-label', before!)
+  for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme })
+    // Wait for the renderer's resize before fitting/capturing the projection.
+    await expect.poll(() => canvas.evaluate(el => Math.abs(el.clientWidth - el.querySelector('canvas')!.getBoundingClientRect().width))).toBeLessThan(2)
+    await page.getByRole('button', { name: 'Fit graph to view' }).click()
+    await page.evaluate(() => new Promise<void>(done => {
+      let frames = 8
+      const tick = () => --frames ? requestAnimationFrame(tick) : done()
+      requestAnimationFrame(tick)
+    }))
+    await page.screenshot({ path: `test-results/aeon-718/graph-${width}-${colorScheme}.png`, fullPage: true })
+  }
+})
+
+for (const width of [390, 1024, 1440]) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`project attention navigation fits and stays still at ${width}px in ${colorScheme}`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 844 })
+      await page.emulateMedia({ colorScheme })
+      const data = world()
+      data.views.push(
+        mockView({ id: MINE, name: 'Meine offenen Aufgaben vor der nächsten Veröffentlichung', filters: { assignee: me.id } }),
+        mockView({ id: SHARED, name: 'Gemeinsame Aufgaben für die nächste Veröffentlichung', owner_principal_id: mira, shared: true }),
+        mockView({ id: '11111111-aaaa-4aaa-8aaa-000000000003', name: 'Veröffentlichung v4.8.0', shared: true }),
+      )
+      await mockWork(page, data)
+      await page.goto(`/p/PHAROS?assignee=${me.id}&status=!done&v=${MINE}`)
+      await expect(rows(page).first()).toBeVisible()
+      await page.evaluate(() => document.fonts.ready)
+      expect(await page.locator('#main').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+      const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
+      await expect(attention).toHaveAttribute('href', '/tickets?view=needs-attention&project_id=p-pharos')
+      const bounds = await attention.boundingBox()
+      expect(bounds!.height).toBeGreaterThanOrEqual(width === 390 ? 44 : 20)
+      expect(bounds!.x).toBeGreaterThanOrEqual(0)
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width)
+      const options = bar(page).getByRole('button', { name: /^Options for view/ })
+      const guard = await controlStability(page, {
+        attention,
+        sections: page.getByRole('tablist', { name: 'Project sections' }),
+        tickets: page.getByRole('tab', { name: 'Tickets', exact: true }),
+        views: bar(page),
+        options,
+      })
+      await guard.check(async () => { await attention.focus(); await attention.hover() })
+      await guard.check(async () => { await options.click(); await expect(page.getByRole('menuitem', { name: 'Rename' })).toBeVisible() })
+      await guard.check(async () => { await page.keyboard.press('Escape'); await expect(options).toBeFocused() })
+      guard.done()
+      await page.screenshot({ path: testInfo.outputPath(`project-attention-${width}-${colorScheme}.png`), fullPage: true })
+    })
+  }
+}
+
+test.describe('coarse-pointer project attention link', () => {
+  test.use({ hasTouch: true })
+  for (const width of [390, 1024, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
+    test(`expanded project attention target activates without moving controls at ${width}px in ${colorScheme}`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 900 })
+      const data = world()
+      data.preferences.theme = { choice: colorScheme }
+      data.projects.find(project => project.id === 'p-pharos')!.title = 'Betriebsübersicht für sämtliche angeschlossenen Arbeitsbereiche'
+      await mockWork(page, data)
+      await page.goto('/p/PHAROS')
+      await expect(rows(page).first()).toBeVisible()
+      await page.evaluate(() => document.fonts.ready)
+      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+      const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
+      const bounds = await attention.evaluate(el => {
+        const rect = el.getBoundingClientRect(), hit = getComputedStyle(el, '::before')
+        const width = parseFloat(hit.width) || rect.width, height = parseFloat(hit.height) || rect.height
+        const x = rect.x + (rect.width - width) / 2, y = rect.y + (rect.height - height) / 2
+        return { x, y, width, height, visualHeight: rect.height,
+          edgesHit: [[x + 1, y + height / 2], [x + width - 1, y + height / 2], [x + width / 2, y + 1], [x + width / 2, y + height - 1]].every(([px, py]) => el.contains(document.elementFromPoint(px!, py!))) }
+      })
+      expect(bounds.height, 'attention hit height').toBeGreaterThanOrEqual(44)
+      expect(bounds.width, 'attention hit width').toBeGreaterThanOrEqual(44)
+      expect(bounds.visualHeight, 'visible link retains its size').toBe(width === 390 ? 44 : 36)
+      expect(bounds.edgesHit, 'all target edges activate the link').toBe(true)
+      const guard = await controlStability(page, { attention, sections: page.getByRole('tablist', { name: 'Project sections' }), tickets: page.getByRole('tab', { name: 'Tickets', exact: true }), views: bar(page) })
+      await guard.check(async () => { await attention.focus(); await attention.hover() })
+      guard.done()
+      await page.screenshot({ path: testInfo.outputPath(`project-attention-touch-${width}-${colorScheme}.png`), fullPage: true })
+      await page.touchscreen.tap(bounds.x + bounds.width / 2, bounds.y + 1)
+      await expect(page).toHaveURL('/tickets?view=needs-attention&project_id=p-pharos')
+    })
+  }
+})

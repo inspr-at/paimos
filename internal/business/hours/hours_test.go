@@ -441,7 +441,7 @@ func TestScopedAgentTerminalTimeAndLeastPrivilege(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, f.agent.TenantID, f.agent.ID, roleID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'test','fixture',$3,ARRAY['hours.read','hours.write'])`, f.agent.TenantID, f.agent.ID, hex.EncodeToString(sum[:]))
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'test','fixture',$3,ARRAY['hours.read','hours.write'],(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, f.agent.TenantID, f.agent.ID, hex.EncodeToString(sum[:]))
 		return err
 	})
 	requireStatus(t, f.call(f.agent, "GET", "/time-periods/"+p.ID, nil, bearer), 200)
