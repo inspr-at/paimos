@@ -91,6 +91,10 @@ type historyMessage struct {
 	Body         string  `json:"body"`
 	Payload      string  `json:"payload_mode"`
 	ReplyTo      *string `json:"reply_to,omitempty"`
+	// History pages name the author and time, so a viewer can tell the
+	// agent's saved reply from its own input (AEON-1071).
+	Sender  string `json:"sender_principal_id,omitempty"`
+	Created string `json:"created_at,omitempty"`
 }
 type historyItem struct {
 	Message   historyMessage `json:"message"`
@@ -161,7 +165,7 @@ func (m *Module) listMessages(r *http.Request, tx pgx.Tx, p tenant.Principal, _ 
 	if descending {
 		sign, order = "<", "DESC"
 	}
-	query := `SELECT id::text,sent_event_id,body,reply_to_id::text FROM inbox_messages WHERE chat_thread_id=$1 AND sent_event_id<=$2`
+	query := `SELECT id::text,sent_event_id,body,reply_to_id::text,sender_principal_id::text,to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') FROM inbox_messages WHERE chat_thread_id=$1 AND sent_event_id<=$2`
 	if c.Position > 0 {
 		query += ` AND sent_event_id` + sign + `$3`
 	} else {
@@ -178,7 +182,7 @@ func (m *Module) listMessages(r *http.Request, tx pgx.Tx, p tenant.Principal, _ 
 	for rows.Next() {
 		item := historyItem{Message: historyMessage{Conversation: c.Thread, Payload: "inline"}, ReadState: "known_unread"}
 		var event int64
-		if err = rows.Scan(&item.Message.ID, &event, &item.Message.Body, &item.Message.ReplyTo); err != nil {
+		if err = rows.Scan(&item.Message.ID, &event, &item.Message.Body, &item.Message.ReplyTo, &item.Message.Sender, &item.Message.Created); err != nil {
 			rows.Close()
 			return nil, err
 		}

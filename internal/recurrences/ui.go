@@ -33,8 +33,10 @@ func (m *Module) previewDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	times := []time.Time{}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := manage(r.Context(), tx, p, in.ProjectID); err != nil {
-			return err
+		if in.Definition == nil {
+			if err := manage(r.Context(), tx, p, in.ProjectID); err != nil {
+				return err
+			}
 		}
 		now, err := m.clock(r.Context(), tx)
 		if err != nil {
@@ -43,7 +45,11 @@ func (m *Module) previewDraft(w http.ResponseWriter, r *http.Request) {
 		if err = in.normalize(now); err != nil {
 			return workorders.Fail(400, err.Error())
 		}
-		if err = authorizeSources(r.Context(), tx, p, in); err != nil {
+		if in.Definition != nil {
+			if err = authorizeDefinition(r.Context(), tx, p, in); err != nil {
+				return err
+			}
+		} else if err = authorizeSources(r.Context(), tx, p, in); err != nil {
 			return err
 		}
 		if err = validateTarget(r.Context(), tx, in, false); err != nil {
@@ -135,7 +141,7 @@ func (m *Module) listHistory(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if err = read(r.Context(), tx, p, item.ProjectID); err != nil {
+		if err = readDefinition(r.Context(), tx, p, item.Input); err != nil {
 			return err
 		}
 		rows, err := tx.Query(r.Context(), `SELECT e.id,e.type,e.at,coalesce(p.name,'Recurring work'),e.before,e.after,n.key,n.title,n.state
@@ -281,7 +287,7 @@ func (m *Module) listReleases(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if err = read(r.Context(), tx, p, item.ProjectID); err != nil {
+		if err = readDefinition(r.Context(), tx, p, item.Input); err != nil {
 			return err
 		}
 		now, err := m.clock(r.Context(), tx)

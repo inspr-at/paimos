@@ -21,6 +21,7 @@
     ]
   },
   "project_decided": {
+    "POST /api/chat-deliveries/binding/current": true,
     "POST /api/chat-deliveries/binding/resolve": true,
     "POST /api/chat-deliveries/final": true,
     "POST /api/chat-deliveries/live": true,
@@ -30,6 +31,7 @@
     "POST /api/chat-threads/{id}/outbox": true
   },
   "project_filtered": {
+    "GET /api/chat-sessions/{sessionId}/thread": true,
     "GET /api/chat-threads/{id}": true,
     "GET /api/chat-threads/{id}/live": true,
     "GET /api/chat-threads/{id}/outbox": true
@@ -85,11 +87,13 @@
     }
   ],
   "routes": {
+    "GET /api/chat-sessions/{sessionId}/thread": "chat.read",
     "GET /api/chat-threads/{id}": "chat.read",
     "GET /api/chat-threads/{id}/live": "chat.read",
     "GET /api/chat-threads/{id}/messages": "chat.read",
     "GET /api/chat-threads/{id}/outbox": "chat.read",
     "GET /api/chat-threads/{id}/read-marker": "chat.read",
+    "POST /api/chat-deliveries/binding/current": "chat.receive",
     "POST /api/chat-deliveries/binding/resolve": "chat.receive",
     "POST /api/chat-deliveries/final": "chat.send",
     "POST /api/chat-deliveries/live": "chat.receive",

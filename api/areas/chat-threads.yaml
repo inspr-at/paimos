@@ -10,6 +10,15 @@ paths:
       responses:
         '200': {description: Participant conversation, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
         '404': {description: Disabled or unauthorized conversation}
+  /chat-sessions/{sessionId}/thread:
+    get:
+      operationId: getChatSessionThread
+      description: "chat-v1. The caller's own conversation whose current binding is this harness session, so the session panel can open the live stream. Person participant only, with current chat.read project authority. Past bindings, other people's threads and unbound sessions return 404."
+      parameters:
+        - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Participant conversation, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
+        '404': {description: "Disabled, unbound or unauthorized session"}
   /chat-threads/{id}/binding:
     post:
       operationId: bindChatThread
@@ -230,6 +239,8 @@ components:
         body: {type: string, maxLength: 65536}
         payload_mode: {type: string, enum: [inline, preview]}
         reply_to: {type: [string, 'null'], format: uuid}
+        sender_principal_id: {type: string, format: uuid, description: "Author of the message. Present on history pages (AEON-1071)."}
+        created_at: {type: string, format: date-time, description: "When the message was stored. Present on history pages (AEON-1071)."}
     ChatMessagePage:
       type: "object"
       additionalProperties: false

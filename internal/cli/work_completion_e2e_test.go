@@ -79,4 +79,26 @@ func TestMigratedWorkCLICompletionGate(t *testing.T) {
 			})
 		}
 	}
+	t.Run("no-release-needed", func(t *testing.T) {
+		code, out, stderr := invoke("create", "--project", "AEON", "--title", "Scene edit", "--estimate", "1h", "--no-release-needed", "true")
+		var created issueView
+		if code != 0 || json.Unmarshal([]byte(out), &created) != nil || !created.NoReleaseNeeded {
+			t.Fatalf("content create: %d %s %s", code, out, stderr)
+		}
+		if got := read(t, created.IssueKey); !got.NoReleaseNeeded || got.Hide {
+			t.Fatalf("content flag round trip: %+v", got)
+		}
+		code, _, stderr = invoke("update", created.IssueKey, "--no-release-needed", "invalid")
+		if code == 0 || !strings.Contains(stderr, "--no-release-needed must be true or false") {
+			t.Fatalf("invalid mark: %d %s", code, stderr)
+		}
+		code, _, stderr = invoke("update", created.IssueKey, "--no-release-needed", "false")
+		if code != 0 {
+			t.Fatalf("clear content mark: %d %s", code, stderr)
+		}
+		if got := read(t, created.IssueKey); got.NoReleaseNeeded || got.Hide || got.Title != created.Title {
+			t.Fatalf("clear lost fields: %+v", got)
+		}
+	})
+
 }

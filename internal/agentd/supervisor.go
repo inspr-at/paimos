@@ -113,6 +113,7 @@ type Record struct {
 
 type owned struct {
 	chat                                           *sessionChat // ephemeral; excluded from Record and checkpoints
+	relay                                          *ChatRelay   // ephemeral server relay of chat; never journaled
 	budgetMu                                       sync.Mutex
 	budgetProcess                                  Process
 	budgetTools                                    *managedToolServer
@@ -158,6 +159,7 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	chatGate               chatRelayGate
 	ledger                 *agentsetup.SharedLedger
 	ledgerBinding          ledgerBinding
 	ledgerRequired         bool
@@ -1272,12 +1274,27 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if (profile.Harness == Claude || profile.Harness == Codex) && !verification && !review {
 		caps = append(caps, servicetier.Capability)
 	}
+	relayAPI, relayable := s.api.(ChatRelayAPI)
+	// Advertise chat only for an S1-streaming harness the server's chat
+	// registration admits and whose turns name the input they consume; person
+	// input additionally needs inbox delivery.
+	if relayable && !verification && !review && relayChatHarness(profile.Harness) && sessionChatCapabilities(profile.Harness, caps).Deltas && s.chatGate.enabled() {
+		caps = append(caps, chatCapability)
+	}
 	registration := HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB, AccountLabel: route.AccountLabel, DisplayLabel: run.RecoveryLabel}
 	if profile.Harness != Codex {
 		registration.Model, registration.ReasoningEffort = profile.Model, profile.Effort
 	}
 	entry.harness, err = s.api.RegisterHarness(ctx, registration,
 		s.principalID, run.ID, run.WorkOrderID, profile.Harness, host, caps)
+	if err != nil && slices.Contains(caps, chatCapability) && chatCapabilityRefused(err) {
+		// An older server rejects the capability before writing anything. The
+		// run registers without live chat; only the relay is switched off.
+		s.chatGate.disable("capability_refused")
+		caps = slices.DeleteFunc(caps, func(c string) bool { return c == chatCapability })
+		entry.harness, err = s.api.RegisterHarness(ctx, registration,
+			s.principalID, run.ID, run.WorkOrderID, profile.Harness, host, caps)
+	}
 	if err != nil {
 		return err
 	}
@@ -1398,7 +1415,22 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if !verification && !review {
 		entry.mu.Lock()
 		entry.chat = newSessionChat(ChatBinding{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, Generation: s.generation, SessionID: entry.harness.ID}, sessionChatCapabilities(profile.Harness, caps))
+		if relayable && slices.Contains(caps, chatCapability) {
+			entry.relay = s.newChatRelay(relayAPI, entry, run.ID)
+			entry.chat.attachRelay(entry.relay)
+			go entry.relay.Run(s.lifetime)
+		}
 		entry.mu.Unlock()
+		defer func() {
+			// Every launch failure before an owned process exists ends the stream
+			// and its relay; after launch the monitor owns that.
+			entry.mu.Lock()
+			chat, launched := entry.chat, entry.process != nil
+			entry.mu.Unlock()
+			if !launched {
+				chat.close()
+			}
+		}()
 	}
 	// Commit the possible-fork boundary before handing control to an adapter.
 	// On a journal failure Start is never invoked; after success a crash is
@@ -1760,6 +1792,11 @@ func (s *Supervisor) monitor(entry *owned) {
 	defer entry.tools.Close()
 	err := proc.Wait()
 	entry.chat.close()
+	entry.mu.Lock()
+	relay := entry.relay
+	entry.mu.Unlock()
+	// Let the last explicit final reach the server before the session stops.
+	relay.Wait(chatRelayFlush + time.Second)
 	entry.mu.Lock()
 	entry.record.BudgetStopReason = entry.budgetStopReason()
 	entry.record.ExitObserved = err == nil
@@ -2237,7 +2274,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	if (isSetting(req.Operation) && !validSettingValue(req.Operation, req.Value)) || (!isSetting(req.Operation) && req.Value != "") {
 		return Receipt{}, ErrUnsupported
 	}
-	if len(req.Text) > 64<<10 || (req.Operation != "steer" && !inbox && req.Text != "") {
+	if len(req.Text) > 64<<10 && !(inbox && len(req.Text) <= inboxTextLimit) || (req.Operation != "steer" && !inbox && req.Text != "") {
 		return Receipt{}, errors.New("invalid control body")
 	}
 	s.mu.Lock()
@@ -2399,6 +2436,9 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	} else {
 		proc := entry.process
 		entry.mu.Unlock()
+		if req.writing != nil {
+			req.writing()
+		}
 		err = proc.Control(ctx, req.Operation, req.Text)
 		entry.mu.Lock()
 	}

@@ -132,6 +132,7 @@ type codexShutdown struct {
 
 type codexProcess struct {
 	chatPending      []pendingCodexChat // normalized, bounded and memory-only before turn acknowledgement
+	chatCandidate    pendingCodexChat   // the last completed agent message before acknowledgement
 	serviceTier      string
 	capacityParser   capacity.Parser
 	capacityModel    string

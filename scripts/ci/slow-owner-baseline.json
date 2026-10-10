@@ -1,7 +1,7 @@
 {
   "version": 1,
   "ticket": "AEON-1024",
-  "caseUpdates": [{"ticket":"AEON-569","reason":"Decision Desk cutover adds twelve no-shift cases; all existing split cases and tiers are retained."},{"ticket":"AEON-1079","reason":"Add one bounded aggregate-sort parity and concurrent-read guard; retain every existing case and tier."}],
+  "caseUpdates": [{"ticket":"AEON-569","reason":"Decision Desk cutover adds twelve no-shift cases; all existing split cases and tiers are retained."},{"ticket":"AEON-1079","reason":"Add one bounded aggregate-sort parity and concurrent-read guard; retain every existing case and tier."},{"ticket":"AEON-1091","reason":"Add the content-mark API round trip; retain every existing case and tier."}],
   "sourceCommit": "04739bc84",
   "timingRun": "37377299349",
   "timingSHA": "b2f9935a4264e932eae0fa2acd07c71e8d1fc417",
@@ -277,6 +277,7 @@
     {"kind":"go","package":"internal/nodes","name":"TestExactAPIExpiredListCursor","tier":"GATED-FULL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestExactAPIGraphUsesConfiguredBuckets","tier":"GATED-FULL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestExactAPISameKindHumanCheck","tier":"GATED-FULL","active":true},
+    {"kind":"go","package":"internal/nodes","name":"TestNoReleaseNeededAPIRoundTrip","tier":"GATED-FULL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestNodeWritesAllowConcurrentCommentTenantFK","tier":"GATED-FULL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestTicketGraphAgentKeyScope","tier":"GATED-FULL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestTicketGraphCap","tier":"GATED-FULL","active":true},

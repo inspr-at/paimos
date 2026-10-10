@@ -136,7 +136,9 @@ func (m *module) subscribe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", err.Error())
 		return
 	}
-	ctx := tenant.WithPrincipal(r.Context(), p)
+	listenCtx, stop := m.listenContext(r.Context())
+	defer stop()
+	ctx := tenant.WithPrincipal(listenCtx, p)
 	if err := m.subscriptionAuthorize(ctx); err != nil {
 		subscriptionFailure(w, err)
 		return

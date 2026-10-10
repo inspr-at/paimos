@@ -60,6 +60,7 @@ type module struct {
 	causalUndo       map[string]UndoFunc
 	subscriptions    subscriptionLimits
 	subscriptionWait func(context.Context, *pgx.Conn, time.Time) error
+	listenTimeout    func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 }
 
 // New returns a module for event history, SSE and registered resource undo.
