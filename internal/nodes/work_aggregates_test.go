@@ -474,6 +474,12 @@ func TestListEstimateSortBoundedConcurrentMatchesBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	aggregateETA(t, w, unknown.ID, 35, time.Date(2030, 1, 1, 12, 0, 0, 0, time.UTC), time.Date(2030, 1, 1, 13, 0, 0, 0, time.UTC))
+	// Bulk loading bypasses the gradual statistics updates of a representative
+	// live corpus. Analyze only this test's isolated database, as the existing
+	// aggregate benchmark does, before exercising the actual query plans.
+	if _, err := adminPool.Exec(t.Context(), `ANALYZE nodes; ANALYZE node_kinds; ANALYZE harness_sessions; ANALYZE harness_session_usage; ANALYZE ticket_live_eta`); err != nil {
+		t.Fatal(err)
+	}
 	ctx := tenant.WithPrincipal(t.Context(), w.admin)
 	q := listQuery{Within: &w.root.ID, Sort: []sortKey{{Name: "estimate", Desc: true}}, Limit: 20}
 	q.seen.harnessAll = true
