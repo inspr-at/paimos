@@ -15,99 +15,99 @@ digest="${2:?Expected the published release image digest}"
 [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected an immutable image digest' >&2; exit 1; }
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
-# The latest published image can already support account_use_v1. Its reads
-# must remain compatible; only a binary below the floor must fail at entry.
-# Keep that security counterexample pinned to the last pre-capability release,
-# using its published immutable image digest, in a separate disposable database.
-check_release() (
-  tag="$1"
-  digest="$2"
-  account_use="$3"
-  mkdir -p tmp
-  tmp="$(mktemp -d "$root/tmp/migration-compat.XXXXXXXX")"
-  suffix="${tmp##*.}"
-  db="aeon-compat-db-$suffix"
-  app="aeon-compat-app-$suffix"
-  network="aeon-compat-$suffix"
-  image="ghcr.io/inspr-at/aeon@$digest"
-  cleanup() {
-    docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
-    docker network rm "$network" >/dev/null 2>&1 || true
-    if command -v trash >/dev/null 2>&1; then trash "$tmp";
-    else echo "Disposable probe state left in $tmp (trash unavailable)" >&2; fi
-  }
-  trap cleanup EXIT
+mkdir -p tmp
+tmp="$(mktemp -d "$root/tmp/migration-compat.XXXXXXXX")"
+suffix="${tmp##*.}"
+db="aeon-compat-db-$suffix"
+app="aeon-compat-app-$suffix"
+network="aeon-compat-$suffix"
+image="ghcr.io/inspr-at/aeon@$digest"
+# AEON-1051's entry refusal applies to binaries below the account-use floor.
+# Release 129 and later advertise that capability, so keep the last published
+# below-floor image as a separate immutable counterexample. Its release body
+# records this digest and source commit 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
+# The latest release still runs every ordinary compatibility read below.
+rollback_tag="v261009095632.0.0"
+rollback_digest="sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c"
+cleanup() {
+  docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
+  docker network rm "$network" >/dev/null 2>&1 || true
+  if command -v trash >/dev/null 2>&1; then trash "$tmp";
+  else echo "Disposable probe state left in $tmp (trash unavailable)" >&2; fi
+}
+trap cleanup EXIT
 
+pull_previous() {
   echo "Previous published release: $tag"
   echo "Previous registry image: $image"
   docker pull --platform linux/amd64 "$image"
-  # Pull the release-note digest, then resolve its local config ID for both boots.
+  # Pull the release-note digest, then resolve its local config ID for boots.
   image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
   [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
   echo "Previous image: $image_id"
-  docker network create "$network" >/dev/null
-  docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
-    -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=aeon \
-    "$pgvector_image" >/dev/null
-  ready=0
-  for _ in {1..60}; do
-    if docker exec "$db" pg_isready -h 127.0.0.1 -U postgres -d postgres >/dev/null 2>&1; then ready=1; break; fi
-    sleep 1
-  done
-  [[ "$ready" = 1 ]] || { echo 'Disposable Postgres failed to start' >&2; exit 1; }
-  # Fixture credentials only. The application role cannot bypass tenant RLS.
-  docker exec -i "$db" psql -U postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+}
+pull_previous
+previous_tag="$tag"
+previous_image="$image"
+previous_image_id="$image_id"
+docker network create "$network" >/dev/null
+docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
+  -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=aeon \
+  "$pgvector_image" >/dev/null
+ready=0
+for _ in {1..60}; do
+  if docker exec "$db" pg_isready -h 127.0.0.1 -U postgres -d postgres >/dev/null 2>&1; then ready=1; break; fi
+  sleep 1
+done
+[[ "$ready" = 1 ]] || { echo 'Disposable Postgres failed to start' >&2; exit 1; }
+# Fixture credentials only. The application role cannot bypass tenant RLS.
+docker exec -i "$db" psql -U postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 CREATE ROLE aeon LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD 'aeon';
 CREATE DATABASE aeon OWNER aeon;
 \connect aeon
 CREATE EXTENSION vector;
 SQL
 
-  start_previous() {
-    docker run -d --name "$app" --network "$network" --platform linux/amd64 \
-      --memory 256m -p 127.0.0.1::8080 \
-      -e AEON_ENV=dev -e AEON_ADDR=:8080 -e AEON_FILES_DIR=/tmp/aeon-compat-files \
-      -e AEON_PUBLIC_URL=http://localhost:8080 -e AEON_BOOTSTRAP_ADMIN_EMAIL=compat@example.invalid \
-      -e "AEON_DATABASE_URL=postgres://aeon:aeon@$db:5432/aeon?sslmode=disable" \
-      "$image_id" >/dev/null
-    base="http://$(docker port "$app" 8080/tcp)"
-    python3 scripts/migration-compat-probe.py wait-ready --base "$base"
-  }
+start_previous() {
+  docker run -d --name "$app" --network "$network" --platform linux/amd64 \
+    --memory 256m -p 127.0.0.1::8080 \
+    -e AEON_ENV=dev -e AEON_ADDR=:8080 -e AEON_FILES_DIR=/tmp/aeon-compat-files \
+    -e AEON_PUBLIC_URL=http://localhost:8080 -e AEON_BOOTSTRAP_ADMIN_EMAIL=compat@example.invalid \
+    -e "AEON_DATABASE_URL=postgres://aeon:aeon@$db:5432/aeon?sslmode=disable" \
+    "$image_id" >/dev/null
+  base="http://$(docker port "$app" 8080/tcp)"
+  python3 scripts/migration-compat-probe.py wait-ready --base "$base"
+}
 
-  start_previous
-  python3 scripts/migration-compat-probe.py seed --base "$base" --state "$tmp/state.json" --version "${tag#v}"
+start_previous
+python3 scripts/migration-compat-probe.py seed --base "$base" --state "$tmp/state.json" --version "${tag#v}"
+docker stop --time 30 "$app" >/dev/null
+docker container rm "$app" >/dev/null
+
+# Run exactly the candidate's embedded migration path, including Go backfills
+# and nontransactional index recovery. No candidate server or image is built.
+db_address="$(docker port "$db" 5432/tcp)"
+AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=disable" \
+  GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
+start_previous
+python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
+echo "Previous release reads passed: $tag on the candidate schema"
+
+if [[ "$digest" != "$rollback_digest" ]]; then
   docker stop --time 30 "$app" >/dev/null
   docker container rm "$app" >/dev/null
-
-  # Run exactly the candidate's embedded migration path, including Go backfills
-  # and nontransactional index recovery. No candidate server or image is built.
-  db_address="$(docker port "$db" 5432/tcp)"
-  AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=disable" \
-    GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
+  echo "Account-use rollback boundary release: $rollback_tag"
+  tag="$rollback_tag"
+  image="ghcr.io/inspr-at/aeon@$rollback_digest"
+  pull_previous
   start_previous
+  # Prove the below-floor image and fixture work before activation too.
   python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
-  echo "Previous release reads passed: $tag on the candidate schema"
-  if [[ "$account_use" = below-floor ]]; then
-    python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
-    echo "Account-use rollback boundary passed: $tag on the candidate schema"
-  fi
-  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-    printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
-      "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
-    if [[ "$account_use" = below-floor ]]; then
-      printf 'Account-use refusal boundary %s; registry image %s; loaded image %s passed the activated legacy probes.\n' \
-        "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
-    fi
-  fi
-)
-
-# Published release v261009095632.0.0, source 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
-below_floor_tag=v261009095632.0.0
-below_floor_digest=sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
-if [[ "$tag" = "$below_floor_tag" && "$digest" = "$below_floor_digest" ]]; then
-  check_release "$tag" "$digest" below-floor
-else
-  check_release "$tag" "$digest" latest
-  check_release "$below_floor_tag" "$below_floor_digest" below-floor
 fi
-echo "Migration compatibility passed: $tag on the candidate schema; $below_floor_tag passed activated refusal checks"
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${rollback_tag#v}" --database-container "$db"
+echo "Account-use rollback boundary passed: $rollback_tag on the candidate schema"
+echo "Migration compatibility passed: latest-release reads and below-floor account-use boundary"
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations. Account-use refusal boundary %s; registry image ghcr.io/inspr-at/aeon@%s; loaded image %s passed the activated legacy probes.\n' \
+    "$previous_tag" "$previous_image" "$previous_image_id" "$rollback_tag" "$rollback_digest" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+fi
