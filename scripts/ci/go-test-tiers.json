@@ -7350,6 +7350,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestListEpicMembershipSetBasedAndScoped","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestListEstimateSortBoundedConcurrentMatchesBaseline","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestListFiltersExclusionsLabelsEpicsAndDates","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestListIDsNarrowsTheQueryToTheChangedRows","tier":"GATED-FULL"}

@@ -454,3 +454,44 @@ func TestWorkAggregateLimitsAreExplicitHTTPFailures(t *testing.T) {
 		}
 	}
 }
+
+// Risk: narrowing aggregate sorts to a page can silently change work ordering
+// and coverage. Keep the production-shaped baseline available for comparison.
+func TestListEstimateSortBoundedConcurrentMatchesBaseline(t *testing.T) {
+	w := planningSetup(t)
+	planningBulk(t, w, 1000, 2, "open", "LISTLOAD-", true)
+	group := aggregateNode(t, w, "LISTLOAD-1001", w.root.ID, "open", 99)
+	aggregateNode(t, w, "LISTLOAD-1002", group.ID, "done", 3)
+	aggregateNode(t, w, "LISTLOAD-1003", group.ID, "cancelled", 100)
+	aggregateNode(t, w, "LISTLOAD-1004", group.ID, "open", nil)
+	q := listQuery{Within: &w.root.ID, Sort: []sortKey{{Name: "estimate", Desc: true}}, Limit: 20}
+	ctx := tenant.WithPrincipal(t.Context(), w.admin)
+	q.seen.harnessAll = true
+	sql, args := listSQL(q, nil)
+	err := db.InTenant(ctx, appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		var raw []byte
+		if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+sql, args...).Scan(&raw); err != nil {
+			return err
+		}
+		var documents []map[string]any
+		if err := json.Unmarshal(raw, &documents); err != nil {
+			return err
+		}
+		functions := map[string]int{}
+		var visit func(map[string]any)
+		visit = func(plan map[string]any) {
+			if name, ok := plan["Function Name"].(string); ok {
+				functions[name] += int(plan["Actual Loops"].(float64))
+			}
+			for _, child := range planChildren(plan) {
+				visit(child)
+			}
+		}
+		visit(documents[0]["Plan"].(map[string]any))
+		t.Logf("baseline estimate sort: 1004 work rows, 2000 historical sessions; function loops: %v", functions)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
