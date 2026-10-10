@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -51,9 +52,18 @@ func TestQueuedRunNotificationsWakeAndRecheckExactKey(t *testing.T) {
 	if got := frame(); got != "event: queue.wake\ndata: {}" {
 		t.Fatalf("initial hint disclosed content: %s", got)
 	}
-	f.run(t, o)
+	run := f.run(t, o)
 	if got := frame(); got != "event: queue.wake\ndata: {}" {
 		t.Fatalf("creation did not wake: %s", got)
+	}
+	for _, typ := range []string{"queue.routed", "agent_pairing.verification_created"} {
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := events.Append(t.Context(), tx, f.person, events.Change{NodeID: &o.NodeID, Type: typ, Before: run, After: map[string]string{"run_id": run.ID}})
+			return err
+		})
+		if got := frame(); got != "event: queue.wake\ndata: {}" {
+			t.Fatalf("%s did not wake: %s", typ, got)
+		}
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE principal_id=$1`, f.agent.ID)

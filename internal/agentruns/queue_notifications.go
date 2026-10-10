@@ -33,9 +33,12 @@ func (m *module) queueNotificationHint(r *http.Request, p tenant.Principal, even
 		}
 		var project *string
 		err = tx.QueryRow(ctx, `SELECT n.project_id::text FROM events e
-		JOIN agent_runs a ON a.tenant_id=e.tenant_id AND a.id::text=e.after->>'id'
+		JOIN agent_runs a ON a.tenant_id=e.tenant_id AND a.id::text=CASE e.type
+		WHEN 'queue.routed' THEN e.before->>'id'
+		WHEN 'agent_pairing.verification_created' THEN e.after->>'run_id'
+		ELSE e.after->>'id' END
 		JOIN nodes n ON n.tenant_id=a.tenant_id AND n.id=a.work_order_id
-		WHERE e.tenant_id=$1 AND e.id=$2 AND e.type IN ('run.created','run.capacity_override')
+		WHERE e.tenant_id=$1 AND e.id=$2 AND e.type IN ('run.created','run.capacity_override','queue.routed','agent_pairing.verification_created')
 		AND a.agent_principal_id=$3 AND a.status='queued' AND n.deleted_at IS NULL`, p.TenantID, eventID, p.ID).Scan(&project)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
