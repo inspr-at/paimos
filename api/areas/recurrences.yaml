@@ -73,6 +73,41 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}/guardrails:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getRoutineGuardrails
+      description: 'Read the compiled hard floor, versioned installation recommendations and applicable tenant, project and owner-user revisions. Requires the same live scope visibility as the routine. Missing or stale override evidence fails closed.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Effective policy', content: {application/json: {schema: {$ref: '#/components/schemas/RoutineGuardPolicy'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putRoutineGuardrails
+      description: 'Person-only revisioned policy edit. Tenant and project policies require a current administrator in that scope; user policies require their canonical owner. Removing or weakening non-hard rules also requires a current administrator and a reason. The server binds identity, inherited digest, prior revision and rule digest; callers cannot supply approval or replace compiled script hashes. Changes save policy only and grant no execution.'
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [scope, expected_revision, rules]
+              properties:
+                scope: {type: string, enum: [tenant, project, user]}
+                expected_revision: {type: integer, minimum: 0}
+                reason: {type: string, maxLength: 2048}
+                rules: {type: array, maxItems: 64, items: {$ref: '#/components/schemas/RoutineGuardRule'}}
+      responses:
+        '200': {description: 'Saved scoped revision with server-bound evidence', content: {application/json: {schema: {$ref: '#/components/schemas/RoutineGuardSource'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /recurrences/{recurrenceId}/history:
     parameters:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -358,3 +393,62 @@ components:
         mode: {type: string, enum: [off, tokens, money, both], default: off}
         token_ceiling: {type: integer, minimum: 1, maximum: 1000000000000}
         money_ceiling_microusd: {type: integer, minimum: 1, maximum: 1000000000000}
+    RoutineGuardScope:
+      type: object
+      additionalProperties: false
+      required: [kind, id]
+      properties:
+        kind: {type: string, enum: [installation, tenant, project, user]}
+        id: {type: string}
+    RoutineGuardRule:
+      type: object
+      additionalProperties: false
+      required: [id, checkpoint, method, result]
+      properties:
+        id: {type: string, maxLength: 80}
+        checkpoint: {type: string, enum: [save, action, both]}
+        method: {type: string, enum: [words, paths, size, template]}
+        result: {type: string, enum: [allow, needs_person, block]}
+        values: {type: array, maxItems: 32, items: {type: string, maxLength: 1024}}
+        limit: {type: integer, minimum: 1, maximum: 131072}
+        template: {type: string, enum: [protected_paths_v1, catalogue_v1, harmful_intent_v1, different_family_v1]}
+        script_hash: {type: string, maxLength: 64}
+    RoutineGuardLoosening:
+      type: object
+      required: [rule_id, actor_id, reason, expected_revision, inherited_digest, previous_digest, replacement_digest]
+      properties:
+        rule_id: {type: string}
+        actor_id: {type: string, format: uuid}
+        reason: {type: string}
+        expected_revision: {type: integer}
+        inherited_digest: {type: string}
+        previous_digest: {type: string}
+        replacement_digest: {type: string}
+    RoutineGuardSource:
+      type: object
+      required: [scope, revision, rules, loosenings]
+      properties:
+        scope: {$ref: '#/components/schemas/RoutineGuardScope'}
+        revision: {type: integer}
+        rules: {type: array, maxItems: 64, items: {$ref: '#/components/schemas/RoutineGuardRule'}}
+        loosenings: {type: array, maxItems: 64, items: {$ref: '#/components/schemas/RoutineGuardLoosening'}}
+    RoutineGuardPolicy:
+      type: object
+      required: [hard_version, preset_version, digest, sources, rules]
+      properties:
+        hard_version: {type: string}
+        preset_version: {type: string}
+        digest: {type: string}
+        sources: {type: array, maxItems: 3, items: {$ref: '#/components/schemas/RoutineGuardSource'}}
+        rules:
+          type: array
+          maxItems: 198
+          items:
+            type: object
+            required: [rule, level, scope, version]
+            properties:
+              rule: {$ref: '#/components/schemas/RoutineGuardRule'}
+              level: {type: string, enum: [hard, recommended, custom]}
+              scope: {$ref: '#/components/schemas/RoutineGuardScope'}
+              version: {type: string}
+              superseded: {type: boolean}
