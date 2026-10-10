@@ -14,7 +14,9 @@ enough; `model` is recorded only when supplied. The official hook schema does no
 promise either optional field. The child advertises status only and cannot
 consume the parent's inbox or control a process. `SubagentStop` records a stop
 even when registration is still in flight. Stopped children use the ordinary
-Agents stale cleanup.
+Agents stale cleanup. When Claude resumes a completed child with the same agent
+ID, its next `SubagentStart` registers a fresh generation with a new reference
+and worker proof; the previous stop intent is cleared under the child lock.
 
 CLI-written child state lives in owned `0700` directories under the parent's
 state directory, with `0600` regular files. Agent IDs select hashed names rather
@@ -44,5 +46,7 @@ Payloads were verified on 2026-10-10 against the official
 [SubagentStop](https://code.claude.com/docs/en/hooks#subagentstop) references:
 both carry the common `session_id` and event name plus `agent_id` and
 `agent_type`; stop additionally carries `stop_hook_active`,
-`agent_transcript_path`, and `last_assistant_message`. Transcript paths and
-response text are not read by this feature.
+`agent_transcript_path`, and `last_assistant_message`.
+Lifecycle envelopes are bounded at 16 MiB, including a large final response;
+only lifecycle metadata is decoded, and response text and transcript paths are
+ignored and never persisted.

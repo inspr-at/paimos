@@ -278,7 +278,12 @@ func TestClaudeSubagentHookResume(t *testing.T) {
 // parent keeps heartbeating a child that has already finished.
 func TestClaudeSubagentHookLargeStopPayload(t *testing.T) {
 	f := newSubagentFixture(t, "scout")
-	f.invoke(t, "SubagentStart", "")
+	if stderr := f.invoke(t, "SubagentStart", ""); stderr != "" {
+		t.Fatal(stderr)
+	}
+	if len(f.registrations) != 1 || f.beats != 1 || f.childDisk(t).Closed {
+		t.Fatal("large-stop fixture did not start an active child")
+	}
 	response := strings.Repeat("final response content ", 8192)
 	if stderr := f.invoke(t, "SubagentStop", `,"last_assistant_message":"`+response+`","agent_transcript_path":"/unused/transcript.jsonl"`); stderr != "" {
 		t.Fatal(stderr)
@@ -333,7 +338,24 @@ func TestClaudeSubagentHookNoOp(t *testing.T) {
 }
 
 func TestClaudeSubagentHookStopDuringRegistration(t *testing.T) {
+	for _, resumed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("resumed=%t", resumed), func(t *testing.T) {
+			testClaudeSubagentHookStopDuringRegistration(t, resumed)
+		})
+	}
+}
+
+func testClaudeSubagentHookStopDuringRegistration(t *testing.T, resumed bool) {
 	f := newSubagentFixture(t, "scout")
+	wantStops, wantBeats := 1, 0
+	if resumed {
+		f.invoke(t, "SubagentStart", "")
+		f.invoke(t, "SubagentStop", "")
+		if f.stops != 1 || !f.childDisk(t).Closed {
+			t.Fatal("previous generation did not stop")
+		}
+		wantStops, wantBeats = 2, 1
+	}
 	f.entered, f.release = make(chan struct{}), make(chan struct{})
 	entered := f.entered
 	done := make(chan string, 1)
@@ -355,7 +377,7 @@ func TestClaudeSubagentHookStopDuringRegistration(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("start did not finish")
 	}
-	if f.stops != 1 || f.beats != 0 || !f.childDisk(t).Closed {
+	if f.stops != wantStops || f.beats != wantBeats || !f.childDisk(t).Closed {
 		t.Fatal("stop arriving during registration was lost")
 	}
 }

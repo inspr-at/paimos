@@ -48,9 +48,19 @@ func subagentName(id string) string {
 }
 
 func (rt *runtime) runSubagentHook(ctx context.Context, event string) error {
-	var input harnessHookInput
-	raw, err := io.ReadAll(io.LimitReader(rt.stdin, 64<<10+1))
-	if err != nil || len(raw) > 64<<10 || json.Unmarshal(raw, &input) != nil || input.Event != event || input.AgentID == nil || len(*input.AgentID) == 0 || len(*input.AgentID) > 128 || strings.ContainsAny(*input.AgentID, "\r\n\x00") {
+	// Stop envelopes include the final response. Match the inbox envelope's
+	// bounded size, but decode only lifecycle metadata; response text, tool
+	// content and transcript paths must never enter persisted child state.
+	var input struct {
+		Event       string  `json:"hook_event_name"`
+		Session     string  `json:"session_id"`
+		AgentID     *string `json:"agent_id"`
+		AgentType   string  `json:"agent_type"`
+		Description string  `json:"description"`
+		Model       string  `json:"model"`
+	}
+	raw, err := io.ReadAll(io.LimitReader(rt.stdin, 16<<20+1))
+	if err != nil || len(raw) > 16<<20 || json.Unmarshal(raw, &input) != nil || input.Event != event || input.AgentID == nil || len(*input.AgentID) == 0 || len(*input.AgentID) > 128 || strings.ContainsAny(*input.AgentID, "\r\n\x00") {
 		return errors.New("invalid subagent hook input")
 	}
 	if err := ctx.Err(); err != nil {
@@ -100,6 +110,25 @@ func (rt *runtime) runSubagentHook(ctx context.Context, event string) error {
 	}
 	defer hold.lock.Close()
 	req, err := readSubagentRequest(&hold)
+	if err == nil && req.Parent == id && req.Project == parent.ProjectID && event == "SubagentStart" {
+		session, exists, loadErr := loadHeartbeatSession(&hold)
+		if loadErr != nil {
+			return loadErr
+		}
+		if exists && session.disk.Closed && !session.disk.Terminal {
+			// Claude reuses agent_id when resuming. Only an explicit start may
+			// rotate a completed generation; the parent heartbeat never does.
+			// Clear the old stop before the identity, so a stop arriving during
+			// fresh registration is retained. Every change holds the child lock.
+			if err := hold.remove("subagent.stop"); err != nil {
+				return err
+			}
+			if err := clearHeartbeatIdentity(&hold); err != nil {
+				return err
+			}
+			err = os.ErrNotExist
+		}
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		if event == "SubagentStop" {
 			return nil
