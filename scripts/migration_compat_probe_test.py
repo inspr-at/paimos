@@ -92,13 +92,18 @@ elif tool not in ('go', 'trash'):
             calls = [json.loads(line) for line in (root / 'calls.jsonl').read_text().splitlines()]
             boots = [args[-1] for tool, args in calls
                      if tool == 'docker' and args[0] == 'run' and args[-1].startswith('sha256:')]
-            self.assertEqual(boots, ['sha256:' + '1' * 64] * 2 + ['sha256:' + '2' * 64])
+            self.assertEqual(boots, ['sha256:' + '1' * 64] * 2 + ['sha256:' + '2' * 64] * 2)
             probes = [(args[1], args[args.index('--version') + 1]) for tool, args in calls
                       if tool == 'python3' and '--version' in args]
             self.assertEqual(probes, [
                 ('seed', latest_tag[1:]), ('check', latest_tag[1:]),
                 ('account-use', latest_tag[1:]),
-                ('check', '261009095632.0.0'), ('account-use', '261009095632.0.0')])
+                ('seed', '261009095632.0.0'), ('check', '261009095632.0.0'),
+                ('account-use', '261009095632.0.0')])
+            databases = [args for tool, args in calls
+                         if tool == 'docker' and args[0] == 'run' and 'POSTGRES_USER=postgres' in args]
+            self.assertEqual(len(databases), 2, 'each image seeds its own fresh database')
+            self.assertEqual(len([args for tool, args in calls if tool == 'go']), 2)
             pulls = [args[-1] for tool, args in calls if tool == 'docker' and args[0] == 'pull']
             self.assertEqual(pulls, ['ghcr.io/inspr-at/aeon@' + latest_digest,
                                      'ghcr.io/inspr-at/aeon@' + floor_digest])
@@ -438,11 +443,16 @@ elif tool == 'git':
                                  'ghcr.io/inspr-at/aeon@' + self.legacy_digest])
         boots = [call[-1] for call in calls if call[:2] == ['docker', 'run'] and '--memory' in call]
         self.assertEqual(boots, ['sha256:' + 'a' * 64, 'sha256:' + 'a' * 64,
-                                 'sha256:' + 'b' * 64])
+                                 'sha256:' + 'b' * 64, 'sha256:' + 'b' * 64])
         probes = [call for call in calls if call[:2] == ['python3', 'scripts/migration-compat-probe.py']]
         modes = [call[2] for call in probes]
         self.assertEqual(modes, ['wait-ready', 'seed', 'wait-ready', 'check',
-                                 'account-use', 'wait-ready', 'check', 'account-use'])
+                                 'account-use', 'wait-ready', 'seed', 'wait-ready', 'check', 'account-use'])
+        seeds = [call[call.index('--version') + 1] for call in probes if call[2] == 'seed']
+        self.assertEqual(seeds, [self.latest_tag[1:], self.legacy_tag[1:]])
+        self.assertEqual(len([call for call in calls if call[:2] == ['go', 'run']]), 2)
+        self.assertEqual(len([call for call in calls if call[:2] == ['docker', 'run']
+                             and 'POSTGRES_USER=postgres' in call]), 2)
         checks = [call[call.index('--version') + 1] for call in probes if call[2] == 'check']
         self.assertEqual(checks, [self.latest_tag[1:], self.legacy_tag[1:]])
         activations = [call for call in probes if call[2] == 'account-use']
@@ -500,6 +510,8 @@ with open(os.environ['HARNESS_LOG'], 'a') as log:
 if name == 'docker':
     if args[:2] == ['image', 'ls']:
         print(args[-1].split('@')[1])
+    elif args[0] == 'run' and 'POSTGRES_USER=postgres' in args:
+        state = {'migrated': False}
     elif args[0] == 'run' and '--name' in args and args[args.index('--name') + 1].startswith('aeon-compat-app-'):
         state['image'] = args[-1]
     elif args[0] == 'port':
@@ -544,8 +556,15 @@ state_path.write_text(json.dumps(state))
                     self.assertEqual(result.returncode, 23 if fail_boundary else 0, result.stdout + result.stderr)
                     events = [json.loads(line) for line in log.read_text().splitlines()]
                     migrations = [event for event in events if event['command'] == 'go']
-                    self.assertEqual(len(migrations), 1)
+                    self.assertEqual([(event['image'], event['migrated']) for event in migrations],
+                        [(latest_digest, False), (legacy_digest, False)])
+                    databases = [event for event in events if event['command'] == 'docker' and
+                        event['args'][0] == 'run' and 'POSTGRES_USER=postgres' in event['args']]
+                    self.assertEqual(len(databases), 2)
                     probes = [event for event in events if event['command'] == 'python3']
+                    seeds = [event for event in probes if event['args'][1] == 'seed']
+                    self.assertEqual([(event['image'], event['migrated'], event['args'][-1]) for event in seeds],
+                        [(latest_digest, False, latest_tag[1:]), (legacy_digest, False, legacy_tag[1:])])
                     reads = [event for event in probes if event['args'][1] == 'check']
                     self.assertEqual([(event['image'], event['migrated'], event['args'][-1]) for event in reads],
                         [(latest_digest, True, latest_tag[1:]), (legacy_digest, True, legacy_tag[1:])])
@@ -584,6 +603,8 @@ root = Path(os.environ['AEON_COMPAT_TEST_ROOT'])
 tool, args = Path(sys.argv[0]).name, sys.argv[1:]
 floor = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
 latest_id, floor_id = 'sha256:' + 'b' * 64, 'sha256:' + 'c' * 64
+def fixture_path():
+    return root / ('fixture-' + (root / 'database').read_text())
 def record(event):
     with (root / 'events.jsonl').open('a') as out:
         out.write(json.dumps(event) + '\\n')
@@ -592,34 +613,38 @@ if tool == 'docker':
         record(['pull', args[-1]])
     elif args[:2] == ['image', 'ls']:
         print(floor_id if args[-1].endswith(floor) else latest_id)
+    elif args[0] == 'run' and 'POSTGRES_USER=postgres' in args:
+        if (root / 'database-live').exists() and (root / 'database-live').read_text() == 'true':
+            sys.exit('a fresh database requires the previous container to be removed')
+        cycle = int((root / 'database').read_text()) + 1 if (root / 'database').exists() else 1
+        (root / 'database').write_text(str(cycle))
+        (root / 'database-live').write_text('true')
+        fixture_path().write_text('fresh')
+        record(['database', cycle])
     elif args[0] == 'run' and args[-1] in (latest_id, floor_id):
         (root / 'image').write_text(args[-1])
         (root / 'running').write_text('true')
         record(['boot', args[-1]])
     elif args[0] == 'stop':
         (root / 'running').write_text('false')
+    elif args[:3] == ['container', 'rm', '-fv']:
+        (root / 'database-live').write_text('false')
     elif args[0] == 'port':
         print('127.0.0.1:18080')
     elif args[0] == 'exec' and '-i' in args:
         statement = sys.stdin.read()
-        if 'CREATE DATABASE aeon_compat_floor' in statement:
-            if (root / 'running').read_text() != 'false' or (root / 'fixture').read_text() != 'inactive':
-                sys.exit('snapshot requires an inactive fixture with no server connected')
-            (root / 'floor-fixture').write_text((root / 'fixture').read_text())
-            record(['snapshot'])
-        elif 'DROP DATABASE aeon;' in statement:
-            if (root / 'running').read_text() != 'false' or 'ALTER DATABASE aeon_compat_floor RENAME TO aeon;' not in statement:
-                sys.exit('restore requires no server connected and the saved database')
-            (root / 'fixture').write_text((root / 'floor-fixture').read_text())
-            record(['restore'])
+        if 'CREATE DATABASE aeon_compat_floor' in statement or 'DROP DATABASE aeon;' in statement:
+            sys.exit('each release must seed its own fresh database')
 elif tool == 'git':
     if args == ['show', 'v261009095632.0.0:internal/db/visibility.go']:
         print('func enterTenant() {}')
     else:
         sys.exit('unexpected git call')
 elif tool == 'go':
-    (root / 'fixture').write_text('inactive')
-    record(['migrate'])
+    if (root / 'running').read_text() != 'false' or fixture_path().read_text() != 'seeded':
+        sys.exit('migration requires its own seeded fixture with no server connected')
+    fixture_path().write_text('inactive')
+    record(['migrate', int((root / 'database').read_text())])
 elif tool == 'python3':
     mode = args[1]
     current = (root / 'image').read_text()
@@ -629,6 +654,12 @@ elif tool == 'python3':
         expected = '261009095632.0.0' if current == floor_id else '261010123154.0.0'
         if version != expected:
             sys.exit('wrong binary version')
+        if mode == 'seed':
+            if fixture_path().read_text() != 'fresh':
+                sys.exit('seeding requires a fresh database')
+            fixture_path().write_text('seeded')
+        elif fixture_path().read_text() != 'inactive':
+            sys.exit('reads require the non-activated migrated fixture')
     if mode == 'account-use':
         expected = '261009095632.0.0' if current == floor_id else '261010123154.0.0'
         if version != expected:
@@ -637,9 +668,9 @@ elif tool == 'python3':
             sys.exit('latest capability must use its pinned release')
         if current == floor_id and '--release-tag' in args:
             sys.exit('legacy refusal must remain unconditional')
-        if (root / 'fixture').read_text() != 'inactive':
+        if fixture_path().read_text() != 'inactive':
             sys.exit('account-use probes require an empty inactive fixture')
-        (root / 'fixture').write_text('activated with populated pool')
+        fixture_path().write_text('activated with populated pool')
         if current == latest_id and os.environ['AEON_COMPAT_TEST_LATEST_FAILS'] == 'true':
             sys.exit('latest policy gate failed')
         if current == floor_id and os.environ['AEON_COMPAT_TEST_LEGACY_FAILS'] == 'true':
@@ -666,7 +697,7 @@ elif tool == 'python3':
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn('latest policy gate failed', result.stderr)
                     self.assertNotIn('Migration compatibility passed:', result.stdout)
-                    self.assertNotIn(['restore'], events)
+                    self.assertEqual([event for event in events if event[0] == 'database'], [['database', 1]])
                     continue
                 self.assertEqual(checks, [['probe', 'check', latest_id, latest_version],
                     ['probe', 'check', floor_id, floor_version]])
@@ -676,10 +707,14 @@ elif tool == 'python3':
                 self.assertEqual([event for event in events if event[0] == 'pull'],
                     [['pull', 'ghcr.io/inspr-at/aeon@' + latest_digest],
                      ['pull', 'ghcr.io/inspr-at/aeon@' + floor_digest]])
-                self.assertLess(events.index(['migrate']), events.index(['snapshot']))
-                self.assertLess(events.index(['snapshot']), events.index(checks[0]))
-                self.assertLess(events.index(['probe', 'account-use', latest_id, latest_version]), events.index(['restore']))
-                self.assertLess(events.index(['restore']), events.index(checks[1]))
+                self.assertEqual([event for event in events if event[0] == 'database'], [['database', 1], ['database', 2]])
+                self.assertEqual([event for event in events if event[0] == 'migrate'], [['migrate', 1], ['migrate', 2]])
+                self.assertLess(events.index(['migrate', 1]), events.index(checks[0]))
+                self.assertLess(events.index(checks[0]), events.index(['probe', 'account-use', latest_id, latest_version]))
+                self.assertLess(events.index(['probe', 'account-use', latest_id, latest_version]), events.index(['database', 2]))
+                self.assertLess(events.index(['migrate', 2]), events.index(checks[1]))
+                self.assertEqual((root / 'fixture-1').read_text(), 'activated with populated pool')
+                self.assertEqual((root / 'fixture-2').read_text(), 'activated with populated pool')
                 if legacy_fails:
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn('legacy refusal gate failed', result.stderr)
