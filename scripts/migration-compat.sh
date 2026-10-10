@@ -79,12 +79,12 @@ AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=di
   GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
 start_previous "$image_id"
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
-echo "Migration compatibility passed: $tag on the candidate schema"
 
 # The latest published image may already support account_use_v1 (release 129
 # does). Keep its migration/read check above, then run every rollback-floor
 # refusal assertion with the last published image without that capability.
 # Release 128's tag and digest are immutable; never substitute latest here.
+# Published source: 2beba30ed75f68a6880ce0427fdc71c8d881fb76 (AEON-1051).
 legacy_tag="v261009095632.0.0"
 legacy_digest="sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c"
 legacy_entry="$(git show "$legacy_tag:internal/db/visibility.go")"
@@ -104,6 +104,7 @@ start_previous "$legacy_image_id"
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}"
 python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}" --database-container "$db"
 echo "Account-use rollback floor passed: $legacy_tag on the candidate schema"
+echo "Migration compatibility passed: $tag on the candidate schema"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
     "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"

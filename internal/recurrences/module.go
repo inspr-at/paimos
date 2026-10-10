@@ -45,6 +45,8 @@ func (m *Module) WithHistory(publications []Publication) *Module {
 	return m
 }
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/guardrails", m.getGuardrails)
+	mux.HandleFunc("PUT /api/recurrences/{recurrenceId}/guardrails", m.putGuardrails)
 	mux.HandleFunc("GET /api/recurrences", m.list)
 	mux.HandleFunc("POST /api/recurrences", m.create)
 	mux.HandleFunc("POST /api/recurrences/preview", m.previewDraft)
@@ -201,9 +203,12 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		out.Definition = in.Definition
+		if err = saveGuardrails(r.Context(), tx, p, out); err != nil {
+			return err
+		}
 		return record(r.Context(), tx, p, out.ProjectID, "recurrence.created", nil, out)
 	})
-	reply(w, 201, out, err)
+	reply(w, 201, out, m.recordGuardrailDenial(r.Context(), p, err))
 }
 func nextTime(t Trigger, now time.Time) (*time.Time, error) {
 	if t.Kind == "event" {
@@ -388,9 +393,12 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		out.Definition = in.Definition
+		if err = saveGuardrails(r.Context(), tx, p, out); err != nil {
+			return err
+		}
 		return record(r.Context(), tx, p, out.ProjectID, "recurrence.updated", before, out)
 	})
-	reply(w, 200, out, err)
+	reply(w, 200, out, m.recordGuardrailDenial(r.Context(), p, err))
 }
 func (m *Module) pause(w http.ResponseWriter, r *http.Request)  { m.setPaused(w, r, true, false) }
 func (m *Module) resume(w http.ResponseWriter, r *http.Request) { m.setPaused(w, r, false, false) }
