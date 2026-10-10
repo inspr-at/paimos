@@ -107,6 +107,7 @@
         "internal/agentplan/**",
         "internal/sessionusage/**",
         "internal/agentruns/**",
+        "internal/agentruns/routine_preparation.go",
         "internal/agentactivity/**",
         "internal/agentcompat/**",
         "internal/runkind/**",
@@ -148,7 +149,8 @@
         "internal/agentd/queue_cadence.go",
         "internal/agentd/queue_cadence_test.go",
         "internal/agentruns/queue_notifications.go",
-        "internal/agentruns/queue_notifications_test.go"
+        "internal/agentruns/queue_notifications_test.go",
+        "internal/runisolation/**"
       ]
     },
     {

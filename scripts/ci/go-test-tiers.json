@@ -1038,6 +1038,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestACPProbeOutcomesGateDispatchAndRecover","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestACPQueuedControlSettlesWhileBusy","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestACPVendorFixture","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestACPVersionOnlyProbeNeverEstablishesReadiness","tier":"GATED-FULL"}
@@ -1844,6 +1846,10 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRunCredentialIsFenced","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRunIdleSleepAssertionDaemonShutdown","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRunIdleSleepAssertionLifecycle","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestSIGTERMEndsIdleManagedCodex","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestScanAttachProcargs","tier":"GATED-FULL"}
@@ -2019,6 +2025,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestTierControlCannotUseLocalSocketAndFencesOwnership","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestUSDMicrosExactDecimal","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestUnattendedProbesReadOnlyAndUnknownOnFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestUnavailableCaptureNeverTakesDispatchSlot","tier":"GATED-FULL"}
     ,
@@ -2500,6 +2508,10 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestTouchIDDefaultIsMacOnlyUntilSaved","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestUnattendedMissingPlatformPreservesLegacyPairing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestUnattendedReportOnlyFreshnessOwnershipAndClaimSeam","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestUnqualifiedVerificationNeverAdvertisedAsDispatchTarget","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestVerificationAdvertisementMatchesLocalAdapters","tier":"GATED-FULL"}
@@ -2659,6 +2671,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestQueuedRunNotificationsWakeAndRecheckExactKey","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRequestedAccountIsValidatedAndAuditedWithoutReservation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRoutinePreparationPreservesAuthorityCriteriaAndPickup","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunAndQueueAccountContextChecks","tier":"ESSENTIAL"}
     ,
@@ -6570,6 +6584,8 @@
     ,
     {"kind":"go","package":"internal/hostcapacity","name":"TestHostCapacityLargestEncodingsStayBounded","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/hostcapacity","name":"TestUnattendedReadinessFreshnessAndRebootConstraints","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/httpapi","name":"TestAttachmentFramePolicyComposesWithAithema","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestCapabilityAndPanicDetailsNeverEnterRequestLogs","tier":"ESSENTIAL"}
@@ -8218,6 +8234,8 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceWriteLockOrderWithTreeWriters","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestReleaseSubscriptionOrderedReplayAndSourceAuthority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestRollbackUniqueKeyAndInvalidTarget","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineConsentBindsQualificationAndScopedIdentity","tier":"ESSENTIAL"}
@@ -9119,6 +9137,14 @@
     {"kind":"go","package":"internal/rulesimport","name":"TestUnrepresentableDraftKeepsPlan","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rulesimport","name":"TestUnsupportedDoctrineReadFailsClosed","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/runisolation","name":"TestIsolationAllocationAndOrphanReport","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/runisolation","name":"TestIsolationControllerCrashCleansOnlyOwnedFixtures","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/runisolation","name":"TestIsolationHelper","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/runisolation","name":"TestIsolationIncompleteAllocationsDoNotBlockRegistry","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/runkind","name":"TestExecutionLabels","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
