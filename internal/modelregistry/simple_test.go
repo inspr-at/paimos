@@ -92,6 +92,10 @@ func TestMinimalModelSourceAndNoteOwnership(t *testing.T) {
 	if status != 400 {
 		t.Fatal("source was writable", status)
 	}
+	status, _ = call(t, &admin, "POST", "/api/models", strings.TrimSuffix(payload, "}")+`,"origin":"shipped"}`)
+	if status != 400 {
+		t.Fatal("origin was writable", status)
+	}
 	status, _ = call(t, &admin, "POST", "/api/models", strings.Replace(payload, "Useful for building", strings.Repeat("x", 81), 1))
 	if status != 400 {
 		t.Fatal("oversized note", status)
@@ -100,6 +104,16 @@ func TestMinimalModelSourceAndNoteOwnership(t *testing.T) {
 	if profileBySlug(profiles, "codex-6-1-sol-high").Source != "auto" || profileBySlug(profiles, "codex-6-1-sol-high").Origin != "shipped" {
 		t.Fatal("seed source")
 	}
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		var incompatible int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_profiles WHERE source NOT IN ('auto','manual')`).Scan(&incompatible); err != nil {
+			return err
+		}
+		if incompatible != 0 {
+			t.Fatal("provenance broke the source vocabulary for older readers")
+		}
+		return nil
+	})
 }
 
 // Risk: a scheduled retirement blocks early, never becomes effective on the
