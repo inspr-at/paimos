@@ -890,10 +890,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	if err != nil {
 		return heartbeatSession{}, false, err
 	}
-	// A native coordinator session survives a helper process restart.
-	if o.Role == "coordinator" && o.SourceSession != "" {
-		ref = o.Harness + ":" + strings.ToLower(o.SourceSession)
-	}
+	ref = heartbeatRegistrationRef(o, ref)
 	label, haveLabel := resolveHeartbeatLabel(ctx, o, dep, true)
 	body := map[string]any{
 		"max_session_file_bytes": rules.SessionFileLimit(o.Harness), "rules_client_version": version.Version,
@@ -953,7 +950,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	}
 	// Capture the owner before registration: a long predecessor timeout must
 	// not attach the new generation to a process that reused the owner's PID.
-	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID, BoundTicket: boundTicket}
+	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID, BoundTicket: boundTicket, RegisteredRef: ref}
 	if proved.Start != "" {
 		disk.OwnerPID = proved.PID
 		disk.OwnerStart = proved.Start
@@ -1011,6 +1008,15 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		disk.SentLabel = label
 	}
 	return heartbeatSession{id: disk.SessionID, lease: lease, disk: disk, hold: session.hold}, true, nil
+}
+
+// A native coordinator session survives a helper process restart. Claim uses
+// the same rule for state written before the registered reference was saved.
+func heartbeatRegistrationRef(o heartbeatOptions, fallback string) string {
+	if o.Role == "coordinator" && o.SourceSession != "" {
+		return o.Harness + ":" + strings.ToLower(o.SourceSession)
+	}
+	return fallback
 }
 
 func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSession) error {

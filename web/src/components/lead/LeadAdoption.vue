@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { can } from '../../lib/authz'
-import { readLeadCandidates, type LeadCandidate } from '../../lib/lead'
+import { readLeadCandidates, type LeadCandidate, type LeadCandidates } from '../../lib/lead'
 import { vClipTip } from '../../directives/clipTip'
 import { useProjectLeads } from '../../stores/projectLeads'
 import { useSession } from '../../stores/session'
@@ -13,10 +13,14 @@ const props = defineProps<{ projectId: string; revision: number }>()
 const leads = useProjectLeads(), session = useSession()
 const open = ref(false), loading = ref(false), writing = ref(false)
 const items = ref<LeadCandidate[]>([]), selected = ref(''), cursor = ref<string | null>(null), feedback = ref('')
+const emptyReason = ref<LeadCandidates['empty_reason']>()
+const emptyText = computed(() => emptyReason.value?.code === 'person_owner_missing'
+  ? `${emptyReason.value.display_label || emptyReason.value.harness} on ${emptyReason.value.host} is registered without a person owner; register it with a key you created.`
+  : 'No eligible running coordinator is reporting for this person and project.')
 const owner = computed(() => `${session.identity?.tenant.id}:${session.identity?.principal.id}`)
 const allowed = computed(() => session.identity?.principal.kind === 'person' && can('harness.control', props.projectId) && can('run.create', props.projectId))
 let epoch = 0, confirmedRevision = props.revision
-watch(() => [props.projectId, owner.value, allowed.value], () => { epoch++; open.value = false; items.value = []; selected.value = ''; cursor.value = null; feedback.value = ''; loading.value = false; writing.value = false }, { flush: 'sync' })
+watch(() => [props.projectId, owner.value, allowed.value], () => { epoch++; open.value = false; items.value = []; selected.value = ''; cursor.value = null; emptyReason.value = undefined; feedback.value = ''; loading.value = false; writing.value = false }, { flush: 'sync' })
 onBeforeUnmount(() => { epoch++ })
 async function load(more = false) {
   if (loading.value || !allowed.value) return
@@ -28,13 +32,14 @@ async function load(more = false) {
     if (result.items.length > 50) throw new Error('The session list exceeded its limit.')
     items.value = more ? [...items.value, ...result.items] : result.items
     cursor.value = result.next_cursor
+    emptyReason.value = result.empty_reason
   } catch (e) { if (started === epoch) feedback.value = e instanceof Error ? e.message : 'Running sessions could not be read.' }
   finally { if (started === epoch) loading.value = false }
 }
 function toggle() {
   if (writing.value) return
   open.value = !open.value
-  if (open.value) { confirmedRevision = props.revision; selected.value = ''; items.value = []; void load() }
+  if (open.value) { confirmedRevision = props.revision; selected.value = ''; items.value = []; emptyReason.value = undefined; void load() }
   else { epoch++; loading.value = false }
 }
 async function confirm() {
@@ -69,7 +74,7 @@ async function confirm() {
         </button>
       </div>
       <p v-if="loading" class="adopt-help" role="status">Reading running sessions…</p>
-      <p v-else-if="!items.length && !feedback" class="adopt-help">No eligible running coordinator is reporting for this person and project.</p>
+      <p v-else-if="!items.length && !feedback" class="adopt-help">{{ emptyText }}</p>
       <p class="adopt-feedback" role="status">{{ feedback }}</p>
       <button v-if="cursor" type="button" class="btn sm" :aria-disabled="loading || items.length >= 200" @click="items.length < 200 && load(true)">More sessions</button>
       <p v-if="cursor" class="adopt-help">More sessions exist{{ items.length >= 200 ? '; reopen to refresh the first page' : '' }}.</p>

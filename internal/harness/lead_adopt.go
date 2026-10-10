@@ -37,6 +37,13 @@ type leadCandidate struct {
 	createdAt  time.Time
 }
 
+type leadCandidateEmptyReason struct {
+	Code    string  `json:"code"`
+	Label   *string `json:"display_label"`
+	Harness string  `json:"harness"`
+	Host    string  `json:"host"`
+}
+
 func adoptionOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (string, error) {
 	if p.Kind != tenant.Person {
 		return "", workorders.Fail(403, "person required to adopt lead")
@@ -82,8 +89,9 @@ func (m *Module) leadCandidates(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 		return nil, err
 	}
 	out := struct {
-		Items      []leadCandidate `json:"items"`
-		NextCursor *string         `json:"next_cursor"`
+		Items       []leadCandidate           `json:"items"`
+		NextCursor  *string                   `json:"next_cursor"`
+		EmptyReason *leadCandidateEmptyReason `json:"empty_reason,omitempty"`
 	}{Items: []leadCandidate{}}
 	for rows.Next() {
 		var s leadCandidate
@@ -103,6 +111,17 @@ func (m *Module) leadCandidates(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 		raw, _ := json.Marshal(sessionCursor{fingerprint, last.createdAt, last.ID})
 		next := base64.RawURLEncoding.EncodeToString(raw)
 		out.NextCursor = &next
+	}
+	if len(out.Items) == 0 && cursor.ID == "" {
+		// Explain one visible, otherwise eligible coordinator without turning it
+		// into a choice or exposing another person's owned sessions.
+		reason := leadCandidateEmptyReason{Code: "person_owner_missing"}
+		err = tx.QueryRow(ctx, `SELECT display_label,harness,host FROM harness_sessions WHERE project_id=$1 AND owner_principal_id IS NULL AND `+adoptEligibleSQL+` ORDER BY created_at DESC,id DESC LIMIT 1`, id).Scan(&reason.Label, &reason.Harness, &reason.Host)
+		if err == nil {
+			out.EmptyReason = &reason
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
 	}
 	return out, nil
 }

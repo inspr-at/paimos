@@ -37,6 +37,7 @@ type heartbeatDisk struct {
 	Schema                string                  `json:"schema"`
 	SessionID             string                  `json:"session_id"`
 	ProjectID             string                  `json:"project_id,omitempty"`
+	RegisteredRef         string                  `json:"registered_ref,omitempty"` // Private proof; never project or log.
 	Sequence              int64                   `json:"sequence"`
 	LabelSent             bool                    `json:"label_sent"`
 	SentLabel             string                  `json:"sent_label,omitempty"`
@@ -126,7 +127,7 @@ type heartbeatSession struct {
 
 func validStateName(name string) bool {
 	switch name {
-	case "session.id", "state.json", "lease.key", "session.ref", "stop.intent", "settle.intent", "heartbeat.lock", "activity.json", "activity-mode.json":
+	case "session.id", "state.json", "lease.key", "session.ref", "index.source", "stop.intent", "settle.intent", "heartbeat.lock", "activity.json", "activity-mode.json":
 		return true
 	default:
 		return false
