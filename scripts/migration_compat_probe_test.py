@@ -8,99 +8,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 import threading
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('migration_compat_probe', Path(__file__).with_name('migration-compat-probe.py'))
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-
-
-class HarnessTest(unittest.TestCase):
-    # Risk: after the capability ships, the latest stable image can no longer
-    # prove the refusal of a below-floor binary. Both image checks must run,
-    # and a failure of the historical refusal probe must remain fatal.
-    def test_capable_latest_keeps_below_floor_refusal_mandatory(self):
-        latest_tag = 'v261010123154.0.0'
-        latest_digest = 'sha256:' + 'a' * 64
-        legacy_tag = 'v261009095632.0.0'
-        legacy_digest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
-        versions = {'sha256:' + '1' * 64: latest_tag[1:],
-                    'sha256:' + '2' * 64: legacy_tag[1:]}
-        images = {'ghcr.io/inspr-at/aeon@' + latest_digest: next(iter(versions)),
-                  'ghcr.io/inspr-at/aeon@' + legacy_digest: list(versions)[1]}
-        for refusal_exit in (0, 17):
-            with self.subTest(refusal_exit=refusal_exit), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                scripts, binaries = root / 'scripts', root / 'bin'
-                scripts.mkdir()
-                binaries.mkdir()
-                script = scripts / 'migration-compat.sh'
-                script.write_bytes(Path(module.__file__).with_name('migration-compat.sh').read_bytes())
-                # Execute the real shell orchestration with disposable tool
-                # doubles; no Docker daemon, Go build or network is needed.
-                double = f'''#!{sys.executable}
-import json
-from pathlib import Path
-import sys
-
-root = Path(__file__).parent.parent
-tool, args = Path(sys.argv[0]).name, sys.argv[1:]
-active = root / 'active-image'
-image = active.read_text() if active.exists() else ''
-with (root / 'calls.jsonl').open('a') as log:
-    log.write(json.dumps({{'tool': tool, 'args': args, 'image': image}}) + '\\n')
-versions, images = {versions!r}, {images!r}
-if tool == 'docker':
-    if args[:2] == ['image', 'ls']:
-        print(images[args[-1]])
-    elif args[0] == 'run' and args[args.index('--name') + 1].startswith('aeon-compat-app-'):
-        active.write_text(args[-1])
-    elif args[0] == 'port':
-        print('127.0.0.1:12345')
-elif tool == 'python3':
-    mode = args[1]
-    if mode in ('seed', 'check', 'account-use'):
-        if args[args.index('--version') + 1] != versions[image]:
-            sys.exit('wrong image version')
-        state = Path(args[args.index('--state') + 1])
-        if mode == 'seed':
-            state.write_text('{{"project":"project","ticket":"ticket"}}')
-        elif json.loads(state.read_text()) != {{'project': 'project', 'ticket': 'ticket'}}:
-            sys.exit('seeded rows lost')
-    if mode == 'account-use':
-        if versions[image] == {latest_tag[1:]!r}:
-            sys.exit('activated capable binary returned HTTP 200')
-        sys.exit({refusal_exit})
-'''
-                for tool in ('docker', 'python3', 'go', 'trash'):
-                    executable = binaries / tool
-                    executable.write_text(double)
-                    executable.chmod(0o700)
-                completed = subprocess.run(
-                    ['bash', str(script), latest_tag, latest_digest], cwd=root,
-                    env={**os.environ, 'PATH': str(binaries) + os.pathsep + os.environ['PATH'],
-                         'GITHUB_STEP_SUMMARY': str(root / 'summary')},
-                    capture_output=True, text=True, timeout=15, check=False)
-                self.assertEqual(completed.returncode, refusal_exit, completed.stderr)
-                calls = [json.loads(line) for line in (root / 'calls.jsonl').read_text().splitlines()]
-                checks = [(call['args'][1], versions[call['image']])
-                          for call in calls if call['tool'] == 'python3' and call['args'][1] != 'wait-ready']
-                self.assertEqual(checks, [('seed', latest_tag[1:]), ('check', latest_tag[1:]),
-                                          ('check', legacy_tag[1:]), ('account-use', legacy_tag[1:])])
-                pulls = [call['args'][-1] for call in calls
-                         if call['tool'] == 'docker' and call['args'][0] == 'pull']
-                self.assertEqual(pulls, list(images))
-                if refusal_exit:
-                    self.assertNotIn('Migration compatibility passed:', completed.stdout)
-                    self.assertFalse((root / 'summary').exists())
-                else:
-                    summary = (root / 'summary').read_text()
-                    self.assertIn(latest_tag, summary)
-                    self.assertIn(legacy_tag, summary)
-                    self.assertIn(legacy_digest, summary)
 
 
 class ProbeTest(unittest.TestCase):
@@ -262,6 +177,97 @@ class ProbeTest(unittest.TestCase):
             self.assertEqual(boundary.errors(), (0, 0))
             result.stderr = 'ERROR: 0A000: '+module.CAPABILITY_ERROR+'\nCONTEXT: aeon_enter_principal(uuid,uuid,boolean)'
             self.assertEqual(boundary.errors(), (1, 1))
+
+
+class MigrationRuntimeTest(unittest.TestCase):
+    def test_latest_compatibility_and_legacy_refusal_use_their_own_images(self):
+        # Risk: after publishing a capable release, an activated 200 from that
+        # release must not replace the below-floor binary's strict refusal gate.
+        floor_digest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
+        floor_version = '261009095632.0.0'
+        latest_digest = 'sha256:' + 'a' * 64
+        latest_version = '261010123154.0.0'
+        for legacy_fails in (False, True):
+            with self.subTest(legacy_fails=legacy_fails), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                scripts, commands = root / 'scripts', root / 'commands'
+                scripts.mkdir()
+                commands.mkdir()
+                script = scripts / 'migration-compat.sh'
+                script.write_bytes(Path(module.__file__).with_name('migration-compat.sh').read_bytes())
+                driver = '#!' + sys.executable + '\n' + '''
+import json, os, sys
+from pathlib import Path
+root = Path(os.environ['AEON_COMPAT_TEST_ROOT'])
+tool, args = Path(sys.argv[0]).name, sys.argv[1:]
+floor = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
+latest_id, floor_id = 'sha256:' + 'b' * 64, 'sha256:' + 'c' * 64
+def record(event):
+    with (root / 'events.jsonl').open('a') as out:
+        out.write(json.dumps(event) + '\\n')
+if tool == 'docker':
+    if args[0] == 'pull':
+        record(['pull', args[-1]])
+    elif args[:2] == ['image', 'ls']:
+        print(floor_id if args[-1].endswith(floor) else latest_id)
+    elif args[0] == 'run' and args[-1] in (latest_id, floor_id):
+        (root / 'image').write_text(args[-1])
+        record(['boot', args[-1]])
+    elif args[0] == 'port':
+        print('127.0.0.1:18080')
+    elif args[0] == 'exec' and '-i' in args:
+        sys.stdin.read()
+elif tool == 'go':
+    record(['migrate'])
+elif tool == 'python3':
+    mode = args[1]
+    current = (root / 'image').read_text()
+    version = args[args.index('--version') + 1] if '--version' in args else None
+    record(['probe', mode, current, version])
+    if mode in ('seed', 'check'):
+        expected = '261009095632.0.0' if current == floor_id else '261010123154.0.0'
+        if version != expected:
+            sys.exit('wrong binary version')
+    if mode == 'account-use':
+        if current != floor_id or version != '261009095632.0.0':
+            sys.exit('activated capable release correctly returns HTTP 200')
+        if os.environ['AEON_COMPAT_TEST_LEGACY_FAILS'] == 'true':
+            sys.exit('legacy refusal gate failed')
+'''
+                for name in ('docker', 'go', 'python3', 'trash'):
+                    executable = commands / name
+                    executable.write_text(driver)
+                    executable.chmod(0o700)
+                result = subprocess.run(['bash', str(script), 'v' + latest_version, latest_digest],
+                    cwd=root, env={**os.environ, 'PATH': str(commands) + os.pathsep + os.environ['PATH'],
+                        'GITHUB_STEP_SUMMARY': str(root / 'summary'),
+                        'AEON_COMPAT_TEST_ROOT': str(root),
+                        'AEON_COMPAT_TEST_LEGACY_FAILS': str(legacy_fails).lower()},
+                    capture_output=True, text=True, timeout=30, check=False)
+                events = [json.loads(line) for line in (root / 'events.jsonl').read_text().splitlines()]
+                latest_id, floor_id = 'sha256:' + 'b' * 64, 'sha256:' + 'c' * 64
+                checks = [event for event in events if event[:2] == ['probe', 'check']]
+                self.assertEqual(checks, [['probe', 'check', latest_id, latest_version],
+                    ['probe', 'check', floor_id, floor_version]])
+                self.assertEqual([event for event in events if event[:2] == ['probe', 'account-use']],
+                    [['probe', 'account-use', floor_id, floor_version]])
+                self.assertEqual([event for event in events if event[0] == 'pull'],
+                    [['pull', 'ghcr.io/inspr-at/aeon@' + latest_digest],
+                     ['pull', 'ghcr.io/inspr-at/aeon@' + floor_digest]])
+                self.assertLess(events.index(['migrate']), events.index(checks[0]))
+                self.assertLess(events.index(checks[0]), events.index(checks[1]))
+                if legacy_fails:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('legacy refusal gate failed', result.stderr)
+                    self.assertNotIn('Migration compatibility passed:', result.stdout)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn('Migration compatibility passed:', result.stdout)
+                    summary = (root / 'summary').read_text()
+                    self.assertIn(latest_version, summary)
+                    self.assertIn(latest_id, summary)
+                    self.assertIn(floor_version, summary)
+                    self.assertIn(floor_id, summary)
 
 
 if __name__ == '__main__':

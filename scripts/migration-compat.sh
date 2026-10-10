@@ -13,12 +13,6 @@ tag="${1:?usage: bash scripts/migration-compat.sh vYYMMDDhhmmss.0.0 sha256:DIGES
 [[ "$tag" =~ ^v[0-9]{12}\.0\.0$ ]] || { echo 'Expected an immutable release tag' >&2; exit 1; }
 digest="${2:?Expected the published release image digest}"
 [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected an immutable image digest' >&2; exit 1; }
-# AEON-1051's refusal proof needs a binary without account_use_v1. Release
-# 129 and later declare that capability, so releases/latest is no longer a
-# below-floor target. Keep release 128's published tag/digest fixed while the
-# latest stable image continues to prove ordinary migration compatibility.
-below_floor_tag="v261009095632.0.0"
-below_floor_digest="sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 mkdir -p tmp
@@ -28,6 +22,12 @@ db="aeon-compat-db-$suffix"
 app="aeon-compat-app-$suffix"
 network="aeon-compat-$suffix"
 image="ghcr.io/inspr-at/aeon@$digest"
+# AEON-1051's activated refusal gate needs a binary below the capability floor.
+# The latest release may already advertise that capability. Keep testing its
+# read compatibility, and retain the last pre-capability release separately.
+# Published release v261009095632.0.0, source 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
+floor_tag='v261009095632.0.0'
+floor_image='ghcr.io/inspr-at/aeon@sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
 cleanup() {
   docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
@@ -42,6 +42,7 @@ docker pull --platform linux/amd64 "$image"
 # Pull the release-note digest, then resolve its local config ID for both boots.
 image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
 [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
+previous_image_id="$image_id"
 echo "Previous image: $image_id"
 docker network create "$network" >/dev/null
 docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
@@ -67,12 +68,12 @@ start_previous() {
     -e AEON_ENV=dev -e AEON_ADDR=:8080 -e AEON_FILES_DIR=/tmp/aeon-compat-files \
     -e AEON_PUBLIC_URL=http://localhost:8080 -e AEON_BOOTSTRAP_ADMIN_EMAIL=compat@example.invalid \
     -e "AEON_DATABASE_URL=postgres://aeon:aeon@$db:5432/aeon?sslmode=disable" \
-    "$1" >/dev/null
+    "$image_id" >/dev/null
   base="http://$(docker port "$app" 8080/tcp)"
   python3 scripts/migration-compat-probe.py wait-ready --base "$base"
 }
 
-start_previous "$image_id"
+start_previous
 python3 scripts/migration-compat-probe.py seed --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 docker stop --time 30 "$app" >/dev/null
 docker container rm "$app" >/dev/null
@@ -82,26 +83,24 @@ docker container rm "$app" >/dev/null
 db_address="$(docker port "$db" 5432/tcp)"
 AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=disable" \
   GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
-start_previous "$image_id"
+start_previous
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 
-# Run every exact capability-entry and background assertion against the real
-# below-floor binary, after proving its nonactivated reads and version too.
-# This is mandatory even when the latest stable binary has the capability.
-below_floor_image="ghcr.io/inspr-at/aeon@$below_floor_digest"
-echo "Below-floor published release: $below_floor_tag; image: $below_floor_image"
-docker pull --platform linux/amd64 "$below_floor_image"
-below_floor_image_id="$(docker image ls --quiet --no-trunc "$below_floor_image" | sort -u)"
-[[ "$below_floor_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable below-floor image ID' >&2; exit 1; }
+# Verify the immutable pre-capability binary and the seeded reads before
+# activation. The existing exact SQLSTATE/entry, empty/populated pool and
+# background-write refusal assertions remain mandatory for that binary.
 docker stop --time 30 "$app" >/dev/null
 docker container rm "$app" >/dev/null
-start_previous "$below_floor_image_id"
-python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${below_floor_tag#v}"
-python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${below_floor_tag#v}" --database-container "$db"
+echo "Account-use rollback boundary release: $floor_tag"
+docker pull --platform linux/amd64 "$floor_image"
+floor_image_id="$(docker image ls --quiet --no-trunc "$floor_image" | sort -u)"
+[[ "$floor_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable rollback boundary image ID' >&2; exit 1; }
+image_id="$floor_image_id"
+start_previous
+python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${floor_tag#v}"
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${floor_tag#v}" --database-container "$db"
 echo "Migration compatibility passed: $tag on the candidate schema"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
-    "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
-  printf 'Below-floor release %s; registry image %s; loaded image %s passed nonactivated reads and exact activated capability-entry refusals for empty/populated pools and background jobs.\n' \
-    "$below_floor_tag" "$below_floor_image" "$below_floor_image_id" >> "$GITHUB_STEP_SUMMARY"
+  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations. Account-use refusal boundary %s; registry image %s; loaded image %s passed the activated legacy probes.\n' \
+    "$tag" "$image" "$previous_image_id" "$floor_tag" "$floor_image" "$floor_image_id" >> "$GITHUB_STEP_SUMMARY"
 fi
