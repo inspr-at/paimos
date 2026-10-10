@@ -69,13 +69,15 @@ with an injected clock.
 `TestChatLiveFiftyHTTPViewersReleaseDatabaseBeforeWrite` holds 50 HTTP handlers
 at transport barriers while a tenant mutation and acquisition of all 16 pool
 connections complete. `TestChatLiveTenantCapacityAndIdleEviction` checks tenant
-quotas, idle eviction and body-free hints. The handover, stopped-session and
-expired-heartbeat cases in `TestChatLiveObsoleteBindingReplayRequestsResync`
+quotas, idle eviction and body-free hints, including an injected-clock proof
+that a hint does not recreate an expired buffer. The handover, stopped-session
+and expired-heartbeat cases in `TestChatLiveObsoleteBindingReplayRequestsResync`
 require explicit resync without obsolete content. These three regressions
 fail against the unchanged pre-fix production code at `7d8d1952`.
 
 The affected `internal/chat`, `internal/agentd`, `internal/authz` and
-`internal/reportercontract` packages passed on the approved remote test lane.
+`internal/reportercontract` packages passed on the approved remote test lane
+after the fix round.
 The locked `ci-static --merge-main` check passed all 42 checks without skips;
 ownership, test-tier and web-shard checks also passed. No migration was added,
 and existing pinned response schemas remain unchanged.
