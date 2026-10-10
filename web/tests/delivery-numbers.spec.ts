@@ -19,7 +19,7 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en
   let hold: Promise<void> | null = null
   const reads: number[] = []
   await mockDelivery(page, async () => { reads.push(Date.now()); if (hold) await hold; return answer }, options.grant === false ? [] : ['delivery.read'])
-  // No recorded run yet: Flow shows the labelled example (AEON-1006 reads the recorded runs).
+  // No recorded run yet: Flow shows its empty state, never sample data (AEON-1135).
   await mockFlow(page, { empty: true })
   return {
     work, reads,
@@ -85,7 +85,7 @@ test('window, level and view switches keep every control still and are the perso
   await flowGuard.check(() => views.getByRole('tab', { name: 'Flow' }).click())
   await expect(page).toHaveURL(/view=flow/)
   await expect(windows).toBeHidden()
-  await expect(page.getByText('No flow data recorded yet.')).toBeVisible()
+  await expect(page.getByTestId('flow-empty')).toHaveText('No recorded runs yet. Runs appear here once work goes through the PAIMOS work queue.')
   await flowGuard.check(() => views.getByRole('tab', { name: 'Numbers' }).click())
   await expect(windows).toBeVisible()
   flowGuard.done()
