@@ -536,15 +536,18 @@ func TestPairingStaleWorkReleaseRetainsCapacityAndDrain(t *testing.T) {
 	for _, tc := range []struct {
 		process, daemon string
 		status          int
+		reason          string
 	}{
-		{"unconfirmed", *v.DaemonID, 409}, {"exited", "other-daemon", 403}, {"exited", *v.DaemonID, 200},
+		{"unconfirmed", *v.DaemonID, 409, "run is not live"},
+		{"exited", "other-daemon", 409, "daemon generation conflict"},
+		{"exited", *v.DaemonID, 200, ""},
 	} {
 		r := f.request("POST", "/api/runs/"+*e.VerificationRunID+"/telemetry", map[string]any{"sequence": 1, "kind": "finished", "status": "completed", "process_state": tc.process, "turn_count_delta": 1}, false, key)
 		r.Header.Set(agentruns.DaemonHeader, tc.daemon)
 		r.Header.Set(agentruns.GenerationHeader, "test-generation")
 		w := httptest.NewRecorder()
 		f.h.ServeHTTP(w, r)
-		if w.Code != tc.status {
+		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.reason) {
 			t.Fatalf("exit report %s/%s: %d want %d: %s", tc.process, tc.daemon, w.Code, tc.status, w.Body.String())
 		}
 	}

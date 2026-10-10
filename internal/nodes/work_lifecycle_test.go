@@ -898,7 +898,7 @@ func testWorkLifecycleStaleHolds(t *testing.T) {
 			if c.reason != "" {
 				sid := lifecycleSession(t, p, project.ID, leaf.ID, true)
 				if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-					_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET stopped_at=now()-make_interval(hours=>$2),stop_reason=$3,heartbeat_at=NULL WHERE id=$1`, sid, c.closureAge, c.reason)
+					_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET created_at=now()-make_interval(hours=>$2)-interval '1 hour',stopped_at=now()-make_interval(hours=>$2),stop_reason=$3,heartbeat_at=NULL WHERE id=$1`, sid, c.closureAge, c.reason)
 					return err
 				}); err != nil {
 					t.Fatal(err)
