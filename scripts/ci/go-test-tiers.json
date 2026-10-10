@@ -7394,6 +7394,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestMovePreconditions","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestNoReleaseNeededAPIRoundTrip","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestNodeChangesNameProjectFieldsAndRevisionForVisibleNodesOnly","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestNodeKeysFieldsAndEvents","tier":"ESSENTIAL"}
@@ -9201,6 +9203,10 @@
     {"kind":"go","package":"internal/statusautopilot","name":"TestHumanChecksPermitNonDeliveryDailyRules","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestMissingReleaseDoesNotPoisonDailyCursor","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestNoReleaseNeededAcceptancePolicy","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestNoReleaseNeededDailyAcceptanceAndObjections","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestPausedSessionsOccupyTicketUntilResumedOrArchived","tier":"GATED-FULL"}
     ,

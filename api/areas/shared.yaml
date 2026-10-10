@@ -2144,6 +2144,7 @@ components:
         benefit_en: {type: string, description: "English benefit, one or two plain-language sentences"}
         benefit_de: {type: string, description: "German benefit, one or two plain-language sentences, neutral without direct address"}
         hide_from_release_notes: {type: boolean, default: false, description: Omit from public notes; does not waive completion requirements}
+        no_release_needed: {type: boolean, default: false, description: 'Content or tool work needing no software release. Done work uses rules.accept.days before automatic acceptance, unless there is an objection or pending human check. Omitted from release notes; completion requirements still apply.'}
         roadmap_public: {type: boolean, description: Person approval for the public roadmap. False and omitted are unpublished. Only a person can change that.}
         roadmap_public_source: {type: [string, 'null'], enum: [person, null], description: Acting principal kind. Must be person when supplied while publishing.}
         roadmap_public_by: {type: [string, 'null'], format: uuid, readOnly: true, description: Person principal id. The server overwrites this.}
