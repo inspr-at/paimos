@@ -372,7 +372,7 @@ func (p *codexProcess) sealUsage(clean bool) {
 		return
 	}
 	p.sealed = true
-	p.chatPending = nil
+	p.chatPending, p.chatCandidate = nil, pendingCodexChat{}
 	if p.idleTimer != nil {
 		p.idleTimer.Stop()
 	}

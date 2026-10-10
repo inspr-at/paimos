@@ -60,6 +60,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/chat-threads/{id}/read-marker", handle(m, m.unionSeen))
 	mux.HandleFunc("POST /api/chat-threads/{id}/binding", handle(m, m.bindThread))
 	mux.HandleFunc("POST /api/chat-deliveries/binding/resolve", handle(m, m.resolveWorker))
+	mux.HandleFunc("POST /api/chat-deliveries/binding/current", handle(m, m.currentWorker))
 	mux.HandleFunc("GET /api/chat-threads/{id}/live", m.streamLive)
 	mux.HandleFunc("POST /api/chat-deliveries/live", handle(m, m.publishLive))
 	mux.HandleFunc("GET /api/chat-threads/{id}/outbox", handle(m, m.listOutbox))
@@ -275,7 +276,7 @@ func loadThread(ctx context.Context, tx pgx.Tx, id string) (Thread, error) {
 	var live bool
 	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM chat_session_bindings b JOIN harness_sessions s ON s.tenant_id=b.tenant_id AND s.id=b.session_id
  WHERE b.role_id=$1 AND b.valid_to IS NULL AND s.stopped_at IS NULL AND s.archived_at IS NULL AND s.phase NOT IN ('stopping','stopped')
- AND s.management='unmanaged' AND s.owner_principal_id=b.owner_person_id AND s.agent_principal_id=b.agent_principal_id
+ AND (s.management='unmanaged' OR s.management='managed' AND s.capabilities @> ARRAY['chat']::text[]) AND s.owner_principal_id=b.owner_person_id AND s.agent_principal_id=b.agent_principal_id
  AND coalesce(s.heartbeat_at,s.created_at)>clock_timestamp()-interval '2 minutes')`, out.Role.ID).Scan(&live)
 	if live {
 		out.Readiness.State = "unavailable"
@@ -384,7 +385,7 @@ func (m *Module) bindThread(r *http.Request, tx pgx.Tx, p tenant.Principal, in B
 	if _, err = tx.Exec(r.Context(), `SELECT 1 FROM chat_threads WHERE id=$1 FOR NO KEY UPDATE`, id); err != nil {
 		return nil, err
 	}
-	s, err := harness.ExternalRegistrationTx(r.Context(), tx, in.SessionID, true)
+	s, err := harness.ChatRegistrationTx(r.Context(), tx, in.SessionID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -450,6 +451,48 @@ func (m *Module) resolveWorker(r *http.Request, tx pgx.Tx, p tenant.Principal, i
 	return loadThread(r.Context(), tx, in.ConversationID)
 }
 
+// currentWorker lets the owning worker discover only its own session's current
+// binding. Candidate rows are then re-verified through AuthorizeWorkerTx, so
+// the lookup has exactly the relay routes' lease, epoch and native checks.
+func (m *Module) currentWorker(r *http.Request, tx pgx.Tx, p tenant.Principal, in CurrentBindingRequest) (any, error) {
+	if !workorders.UUID(in.SessionID) {
+		return nil, unavailable()
+	}
+	if err := accessFence(r.Context(), tx, p); err != nil {
+		return nil, err
+	}
+	s, err := harness.VerifyChatLeaseTx(r.Context(), tx, r, p, in.SessionID, false)
+	if err != nil {
+		return nil, err
+	}
+	if err = require(r.Context(), tx, p, "chat.receive", s.ProjectID); err != nil {
+		return nil, err
+	}
+	if err = workerKeyTx(r.Context(), tx, r, p); err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(r.Context(), `SELECT set_config('aeon.chat_session_id',$1,true)`, s.ID); err != nil {
+		return nil, err
+	}
+	var role string
+	var epoch int64
+	if err = tx.QueryRow(r.Context(), `SELECT role_id::text,binding_epoch FROM chat_session_bindings WHERE session_id=$1 AND agent_principal_id=$2 AND owner_person_id=$3 AND valid_to IS NULL`, s.ID, p.ID, s.OwnerPersonID).Scan(&role, &epoch); err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(r.Context(), `SELECT set_config('aeon.chat_role_id',$1,true)`, role); err != nil {
+		return nil, err
+	}
+	var thread string
+	if err = tx.QueryRow(r.Context(), `SELECT id::text FROM chat_threads WHERE role_id=$1 AND person_id=$2 AND archived_at IS NULL`, role, s.OwnerPersonID).Scan(&thread); err != nil {
+		return nil, err
+	}
+	out := CurrentBinding{Contract: "chat-live-v1", ConversationID: thread, BindingEpoch: strconv.FormatInt(epoch, 10)}
+	if _, err = AuthorizeWorkerTx(r.Context(), tx, r, p, WorkerBindingRequest{out.ConversationID, s.ID, out.BindingEpoch}); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthorizeWorkerTx is the common boundary for subsequent history/claim
 // packages. The caller must first hold the tenant access fence. All context
 // derives from verified server rows, never headers naming a role/person.
@@ -461,7 +504,7 @@ func AuthorizeWorkerTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant
 	if err != nil {
 		return harness.ExternalRegistration{}, err
 	}
-	s, err := harness.VerifyExternalLeaseTx(ctx, tx, r, p, in.SessionID, false)
+	s, err := harness.VerifyChatLeaseTx(ctx, tx, r, p, in.SessionID, false)
 	if err != nil {
 		return s, err
 	}
@@ -495,7 +538,7 @@ func AuthorizeWorkerTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant
 		return s, err
 	}
 	// Recheck the exact lease and liveness after acquiring the ordered locks.
-	s, err = harness.VerifyExternalLeaseTx(ctx, tx, r, p, in.SessionID, true)
+	s, err = harness.VerifyChatLeaseTx(ctx, tx, r, p, in.SessionID, true)
 	if err != nil {
 		return s, err
 	}
