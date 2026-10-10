@@ -102,7 +102,10 @@ func TestIsolationIncompleteAllocationsDoNotBlockRegistry(t *testing.T) {
 		}
 	})
 	t.Run("crashed-incomplete-allocation", func(t *testing.T) {
-		root := t.TempDir()
+		root := filepath.Join(t.TempDir(), "registry")
+		if err := os.Mkdir(root, 0700); err != nil {
+			t.Fatal(err)
+		}
 		owner := Owner{"tenant", "account", "host", "crashed-attempt"}
 		id, err := owner.id()
 		if err != nil {
@@ -174,7 +177,10 @@ func TestIsolationIncompleteAllocationsDoNotBlockRegistry(t *testing.T) {
 		}
 	})
 	t.Run("incomplete-attempts-count-toward-cap", func(t *testing.T) {
-		root := t.TempDir()
+		root := filepath.Join(t.TempDir(), "registry")
+		if err := os.Mkdir(root, 0700); err != nil {
+			t.Fatal(err)
+		}
 		for n := range maxRuns {
 			if err := os.Mkdir(filepath.Join(root, fmt.Sprintf("%032x", n)), 0700); err != nil {
 				t.Fatal(err)
