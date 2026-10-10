@@ -715,6 +715,7 @@ func TestModelAllowanceUnknownAndMeasuredLimit(t *testing.T) {
 	sol := profileBySlug(profiles, "codex-6-1-sol-xhigh")
 	runner := addPrincipal(t, admin.TenantID, "agent", "Allowance runner", nil)
 	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"anthropic:opus", "openai:sol"}, "not": []string{}, "revision": 0}, ""), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first/thinking?for=default", map[string]any{"effort": "xhigh", "revision": 1}, ""), 200)
 	inRegistry(t, admin, func(tx pgx.Tx) error {
 		now, err := dbNow(t.Context(), tx)
 		if err != nil {
