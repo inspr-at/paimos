@@ -22,6 +22,10 @@ func (m *Module) EnsureDefaultSource(ctx context.Context) error {
 	if m == nil || m.pool == nil || !m.defaultSource || !workorders.UUID(m.app.TenantID) || strings.ToLower(m.app.TenantID) != m.app.TenantID {
 		return nil
 	}
+	// This host-owned service path has no request person's project visibility.
+	// The tenant and repository still come exclusively from validated host
+	// policy, rechecked under the tenant fence before every source write.
+	ctx = db.AllProjects(ctx, "host-configured doctrine default source")
 	tid, repository := m.app.TenantID, m.repositories.Private()
 	ref := "github-app"
 	if m.credentials.MirrorDir != "" {
