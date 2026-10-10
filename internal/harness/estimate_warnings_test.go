@@ -21,6 +21,43 @@ import (
 // R3/R4/R10: optional projection contention must not lose an owned heartbeat,
 // bypass a revoked grant, refresh old process evidence, or manufacture Done.
 func TestHeartbeatIsolationCommitAndAuthority(t *testing.T) {
+	t.Run("scheduled pause uses receipt clock", func(t *testing.T) {
+		// R10: crossing a scheduled start before the receipt must deliver the
+		// mandatory pause and its deadline wake, even with projections omitted.
+		f := fixture(t)
+		lease := "isolated-pause-worker-lease-00000001"
+		session := f.registerSession(t, f.agent.ID, "worker", f.ticket, "isolated-pause-worker-ref-00001", lease)
+		path := "/api/projects/" + f.project + "/harness-sessions/" + session
+		w := f.call(f.person, "POST", path+"/pause", map[string]any{"level": "pause", "reason": "Scheduled handover"}, "")
+		expect(t, w, 200)
+		control := decode(t, w)["pause"].(map[string]any)["control_id"]
+		var startsAt time.Time
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			if err := tx.QueryRow(t.Context(), `SELECT clock_timestamp()+interval '1 hour'`).Scan(&startsAt); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET pause_record=pause_record ||
+				jsonb_build_object('starts_at',$2::timestamptz,'deadline_at',$3::timestamptz,'deliver',false,'wake_in_ms',0)
+				WHERE id=$1`, session, startsAt, startsAt.Add(10*time.Minute))
+			return err
+		})
+		// The pause is still scheduled during the earlier database reads. The
+		// existing clock seam advances only the final receipt past its start;
+		// no wall-clock wait establishes this transition.
+		f.mux = http.NewServeMux()
+		harness.NewWithOwnershipClock(f.db.App, func() time.Time { return startsAt.Add(time.Minute) }).(*harness.Module).
+			WithHeartbeatIsolation(func(context.Context, pgx.Tx, string) (bool, error) { return true, nil }).Mount(f.mux)
+		w = f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1}, lease)
+		expect(t, w, 200)
+		body := decode(t, w)
+		pause, ok := body["pause"].(map[string]any)
+		if !ok || pause["control_id"] != control || pause["state"] != "requested" || pause["deliver"] != true || pause["wake_in_ms"] != float64((7*time.Minute).Milliseconds()) {
+			t.Fatalf("isolated receipt lost scheduled pause delivery or deadline wake: %s", w.Body)
+		}
+		if body["activity_sequence"] != float64(1) || body["heartbeat_at"] == nil || body["finished"] != false {
+			t.Fatalf("pause receipt lost the accepted heartbeat or claimed completion: %s", w.Body)
+		}
+	})
 	f := fixture(t)
 	lease := "isolated-heartbeat-lease-0000000001"
 	session := f.registerSession(t, f.agent.ID, "coordinator", f.ticket, "isolated-heartbeat-ref-0000001", lease)
