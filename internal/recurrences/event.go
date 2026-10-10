@@ -179,43 +179,89 @@ const sourceProjectSQL = `EXISTS(SELECT 1 FROM nodes source WHERE source.id=e.no
 
 const sourceTypeSQL = `(CASE r.trigger->>'event'
  WHEN 'release.published' THEN e.type='release.published' AND e.node_id=r.project_id
- WHEN 'node.done' THEN e.type IN ('node.updated','status_autopilot.changed','status_autopilot.undone','status_autopilot.derived','status_autopilot.causal_undo') AND ` + sourceProjectSQL + `
- WHEN 'knowledge.changed' THEN e.type IN ('knowledge.created','knowledge.updated','knowledge.deleted','knowledge.learning_accepted','node.updated') AND ` + sourceProjectSQL + `
+ WHEN 'node.done' THEN e.type IN ('node.updated','status_autopilot.changed','status_autopilot.undone','status_autopilot.derived','status_autopilot.causal_undo') AND e.before->>'state'<>e.after->>'state' AND ` + sourceProjectSQL + `
+ WHEN 'knowledge.changed' THEN e.type IN ('knowledge.created','knowledge.updated','knowledge.deleted','knowledge.learning_accepted','node.updated') AND ` + sourceProjectSQL + ` AND EXISTS(SELECT 1 FROM nodes source JOIN node_kinds k ON k.tenant_id=source.tenant_id AND k.id=source.kind_id WHERE source.id=e.node_id AND k.slug IN ('runbook','guideline','memory','external_system','related_project','decision'))
  WHEN 'external.tag' THEN e.type='recurrence.external_received' AND e.node_id=r.project_id AND e.metadata->>'recurrence_id'=r.id::text
  WHEN 'external.deploy' THEN e.type='recurrence.external_received' AND e.node_id=r.project_id AND e.metadata->>'recurrence_id'=r.id::text
  ELSE false END)`
 
+const sourceBatchSize = 100
+
+type sourceCandidate struct {
+	id int64
+	at time.Time
+}
+
 func (m *Module) consumeSource(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence, now time.Time, deferred *[]string) error {
-	var id int64
-	var at time.Time
-	err := tx.QueryRow(ctx, `SELECT e.id,e.at FROM events e JOIN recurrences r ON r.id=$1 WHERE e.id>$2 AND `+sourceTypeSQL+` ORDER BY e.id LIMIT 1`, r.ID, r.EventCursor).Scan(&id, &at)
+	rows, err := tx.Query(ctx, `SELECT e.id,e.at FROM events e JOIN recurrences r ON r.id=$1 WHERE e.id>$2 AND `+sourceTypeSQL+` ORDER BY e.id LIMIT $3`, r.ID, r.EventCursor, sourceBatchSize)
 	if err != nil {
 		return err
 	}
-	if eventTime(r.Trigger, at).After(now) {
-		*deferred = append(*deferred, r.ID)
-		return nil
+	candidates := make([]sourceCandidate, 0, sourceBatchSize)
+	for rows.Next() {
+		var candidate sourceCandidate
+		if err := rows.Scan(&candidate.id, &candidate.at); err != nil {
+			rows.Close()
+			return err
+		}
+		candidates = append(candidates, candidate)
 	}
-	if !at.Before(r.ActiveSince) {
-		source, key, err := sourceContext(ctx, tx, actor.TenantID, r, id)
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	// Skip filtered events in one bounded claim, with only one owner/access
+	// setup. Stop at the first match: occurSource appends events, so no later
+	// candidate may acquire target or recurrence locks in this transaction.
+	cursor := r.EventCursor
+	pending := make([]sourceCandidate, 0, len(candidates))
+	waiting := false
+	for _, candidate := range candidates {
+		if eventTime(r.Trigger, candidate.at).After(now) {
+			waiting = true
+			break
+		}
+		cursor = candidate.id
+		if !candidate.at.Before(r.ActiveSince) {
+			pending = append(pending, candidate)
+		}
+	}
+	if len(pending) > 0 {
+		source, key, err := sourceContext(ctx, tx, actor.TenantID, r, pending)
 		if err != nil {
 			return err
 		}
 		if source != nil {
-			if _, err := occurSource(ctx, tx, actor, r, key, eventTime(r.Trigger, at), &id, "", "", source); err != nil {
+			cursor = source.EventID
+			waiting = false
+			var at time.Time
+			for _, candidate := range pending {
+				if candidate.id == cursor {
+					at = candidate.at
+					break
+				}
+			}
+			if _, err := occurSource(ctx, tx, actor, r, key, eventTime(r.Trigger, at), &cursor, "", "", source); err != nil {
 				return err
 			}
 		}
 	}
-	_, err = tx.Exec(ctx, `UPDATE recurrences SET event_cursor=$2 WHERE id=$1`, r.ID, id)
+	if waiting {
+		*deferred = append(*deferred, r.ID)
+	}
+	if cursor == r.EventCursor {
+		return nil
+	}
+	_, err = tx.Exec(ctx, `UPDATE recurrences SET event_cursor=$2 WHERE id=$1`, r.ID, cursor)
 	return err
 }
 
-// The service discovers only an event ID. Payload inspection then uses the
+// The service discovers only event IDs and times. Payload inspection then uses the
 // definition owner's CURRENT RLS and permission bindings in this same locked
 // transaction, including event-reference visibility. Restore service visibility
 // before target writes; there are no event-counter locks in this read step.
-func sourceContext(ctx context.Context, tx pgx.Tx, tenantID string, r Recurrence, id int64) (*EventContext, string, error) {
+func sourceContext(ctx context.Context, tx pgx.Tx, tenantID string, r Recurrence, candidates []sourceCandidate) (*EventContext, string, error) {
 	owner := tenant.Principal{ID: r.CreatedBy, TenantID: tenantID, FullAccess: true}
 	if err := tx.QueryRow(ctx, `SELECT kind FROM principals WHERE id=$1 AND status='active'`, owner.ID).Scan(&owner.Kind); err != nil {
 		return nil, "", err
@@ -223,15 +269,22 @@ func sourceContext(ctx context.Context, tx pgx.Tx, tenantID string, r Recurrence
 	if _, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,NULL::uuid)`, tenantID, owner.ID); err != nil {
 		return nil, "", err
 	}
-	source, key, err := inspectSource(ctx, tx, owner, r, id)
+	var source *EventContext
+	var key string
+	err := authorizeDefinition(ctx, tx, owner, r.Input)
+	if err == nil {
+		for _, candidate := range candidates {
+			source, key, err = inspectSource(ctx, tx, owner, r, candidate.id)
+			if err != nil || source != nil {
+				break
+			}
+		}
+	}
 	_, restoreErr := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true),set_config('aeon.principal_ids','',true),set_config('aeon.system','on',true)`)
 	return source, key, errors.Join(err, restoreErr)
 }
 
 func inspectSource(ctx context.Context, tx pgx.Tx, owner tenant.Principal, r Recurrence, id int64) (*EventContext, string, error) {
-	if err := authorizeDefinition(ctx, tx, owner, r.Input); err != nil {
-		return nil, "", err
-	}
 	if r.Trigger.External != nil {
 		var raw []byte
 		var sender string

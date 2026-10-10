@@ -103,7 +103,7 @@ func TestEventCandidatesExcludeUnrelatedProjectEdits(t *testing.T) {
 // Risk: filtered transitions need one transaction each, or a claim scans without a bound.
 func TestSourceClaimSkipsFilteredEventsInBoundedBatches(t *testing.T) {
 	f := setup(t)
-	source := f.node("work", &f.project, "Feature without release copy")
+	source := f.node("work", &f.project, "Feature moving through states")
 	in := f.input()
 	in.Trigger = Trigger{Kind: "event", Event: "node.done"}
 	r := f.create(in)
@@ -116,13 +116,18 @@ func TestSourceClaimSkipsFilteredEventsInBoundedBatches(t *testing.T) {
 		}
 	}
 	wanted := f.sourceEvent(source, "node.updated", "open", "accepted", map[string]any{})
+	next := f.sourceEvent(source, "node.updated", "open", "accepted", map[string]any{})
+	f.now = f.now.Add(time.Hour)
+	future := f.sourceEvent(source, "node.updated", "open", "accepted", map[string]any{})
+	f.now = f.now.Add(-time.Hour)
 	actor, err := ensureActor(t.Context(), f.m, f.p.TenantID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	claim := func() {
+	claim := func() []string {
 		t.Helper()
 		current := f.get(r.ID)
+		deferred := []string{}
 		f.tx(func(tx pgx.Tx) error {
 			if err := db.SetLocalStatementTimeout(t.Context(), tx, 5*time.Second); err != nil {
 				return err
@@ -130,9 +135,9 @@ func TestSourceClaimSkipsFilteredEventsInBoundedBatches(t *testing.T) {
 			if _, err := lock(t.Context(), tx, f.p.TenantID, false); err != nil {
 				return err
 			}
-			deferred := []string{}
 			return f.m.consumeSource(t.Context(), tx, actor, current, f.now, &deferred)
 		})
+		return deferred
 	}
 	claim()
 	if cursor := f.get(r.ID).EventCursor; cursor <= first || cursor >= wanted {
@@ -144,8 +149,23 @@ func TestSourceClaimSkipsFilteredEventsInBoundedBatches(t *testing.T) {
 	if len(got) != 1 || got[0].SourceEventID == nil || *got[0].SourceEventID != wanted || f.get(r.ID).EventCursor != wanted {
 		t.Fatalf("second claim failed to reach the relevant event: %+v", got)
 	}
+	claim()
+	got = f.receipts(r.ID)
+	if len(got) != 2 || got[1].SourceEventID == nil || *got[1].SourceEventID != next || f.get(r.ID).EventCursor != next {
+		t.Fatalf("claim skipped the next matching event: %+v", got)
+	}
+	if deferred := claim(); len(deferred) != 1 || deferred[0] != r.ID || f.get(r.ID).EventCursor != next {
+		t.Fatalf("future event was consumed instead of deferred: %v", deferred)
+	}
+	f.assertContextAndNoRuns(r, 2, source)
+	f.now = f.now.Add(time.Hour)
 	f.run()
-	f.assertContextAndNoRuns(r, 1, source)
+	got = f.receipts(r.ID)
+	if len(got) != 3 || got[2].SourceEventID == nil || *got[2].SourceEventID != future {
+		t.Fatalf("deferred event was lost: %+v", got)
+	}
+	f.run()
+	f.assertContextAndNoRuns(r, 3, source)
 }
 
 // Risk: a lower-ID recurrence's matching backlog stalls legacy release triggers.
