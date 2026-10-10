@@ -81,26 +81,35 @@ func PrepareWorkHandover(ctx context.Context, tx pgx.Tx, p tenant.Principal, nod
 
 func workHandover(p *Pause) bool { return p != nil && strings.HasPrefix(p.Reason, "work_lifecycle:") }
 
-// RequireHandoverDelivery rejects runs with no live reporting generation rather
-// than guessing that silence or a lost heartbeat proves process exit.
+// RequireHandoverDelivery keeps young uncertain holds closed. A stale run can
+// be settled by the person's lifecycle write without claiming process exit.
+// A standalone order needs closure evidence at or after its current activity;
+// historical ticket sessions cannot shorten a newer order's grace period.
 func RequireHandoverDelivery(ctx context.Context, tx pgx.Tx, ids []string) error {
 	var missing bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions s
- WHERE NOT aeon_work_session_stopped(s.stopped_at,s.stop_reason) AND s.stopped_at IS NOT NULL
+ WHERE NOT aeon_work_session_released(s.stopped_at,s.stop_reason,s.heartbeat_at) AND s.stopped_at IS NOT NULL
  AND (s.ticket_node_id=ANY($1::uuid[]) OR s.ticket_node_id IN(SELECT id FROM nodes WHERE parent_id=ANY($1::uuid[]))
  OR s.work_order_id IN(SELECT id FROM nodes WHERE parent_id=ANY($1::uuid[]))
  OR s.run_id IN(SELECT r.id FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id WHERE r.queue_node_id=ANY($1::uuid[]) OR o.parent_id=ANY($1::uuid[]))))
  OR EXISTS(SELECT 1 FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id
- WHERE (r.queue_node_id=ANY($1::uuid[]) OR o.parent_id=ANY($1::uuid[])) AND r.status IN ('starting','running','waiting')
- AND NOT EXISTS(SELECT 1 FROM harness_sessions s WHERE s.run_id=r.id AND s.stopped_at IS NULL))
+ WHERE (r.queue_node_id=ANY($1::uuid[]) OR o.parent_id=ANY($1::uuid[])) AND r.status IN ('starting','running','waiting') AND NOT aeon_work_run_releasable(r.id)
+ AND NOT EXISTS(SELECT 1 FROM harness_sessions s WHERE (s.run_id=r.id OR s.work_order_id=r.work_order_id OR s.ticket_node_id IN(r.queue_node_id,o.parent_id,o.id)) AND s.stopped_at IS NULL))
  OR EXISTS(SELECT 1 FROM work_orders w JOIN nodes o ON o.id=w.node_id WHERE o.parent_id=ANY($1::uuid[]) AND o.deleted_at IS NULL AND w.status='running'
+ AND w.updated_at>now()-interval '2 hours'
+ AND NOT EXISTS(SELECT 1 FROM harness_sessions s WHERE (s.work_order_id=w.node_id OR s.ticket_node_id=o.parent_id OR s.ticket_node_id=o.id)
+  AND s.stopped_at>=w.updated_at AND aeon_work_session_released(s.stopped_at,s.stop_reason,s.heartbeat_at))
  AND NOT EXISTS(SELECT 1 FROM agent_runs r WHERE r.work_order_id=w.node_id)
  AND NOT EXISTS(SELECT 1 FROM harness_sessions s WHERE (s.work_order_id=w.node_id OR s.ticket_node_id=o.parent_id OR s.ticket_node_id=o.id) AND s.stopped_at IS NULL))`, ids).Scan(&missing)
 	if err != nil {
 		return err
 	}
 	if missing {
-		return workorders.Fail(409, "running work must publish a live session for graceful handover")
+		var holders string
+		if err := tx.QueryRow(ctx, `SELECT coalesce(string_agg(aeon_work_busy_holders(id),'; '),'holder outside visible scope') FROM (SELECT id FROM unnest($1::uuid[]) id WHERE aeon_work_busy(id) LIMIT 2) held`, ids).Scan(&holders); err != nil {
+			return err
+		}
+		return workorders.Fail(409, "running work must publish a live session for graceful handover (holder details for up to two targets): "+holders)
 	}
 	return nil
 }

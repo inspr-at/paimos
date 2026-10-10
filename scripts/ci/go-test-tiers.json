@@ -974,6 +974,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestSharedQuotaVendorDenial","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestStaleWorkReleaseRetainsAdmissionUntilExit","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestStoredResidencyClassification","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestThreeAccountQuotaPoolAdditionsAndExplicitRemovals","tier":"GATED-FULL"}
@@ -2450,6 +2452,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPairingRevokedCleanupPreservesUnconfirmedAccounting","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestPairingStaleWorkReleaseRetainsCapacityAndDrain","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPairingSupervisorHTTPVerificationRoutesUnboundQueue","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPairingTenantAndInputValidation","tier":"GATED-FULL"}
@@ -2705,6 +2709,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestStaleQueueSessionEligibility","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestStaleQueueUndoFences","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestStaleWorkHoldKeepsWriterFenceAndOwnedExitReconciles","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestStartedTelemetryAcceptsMissingPlacementTrace","tier":"ESSENTIAL"}
     ,

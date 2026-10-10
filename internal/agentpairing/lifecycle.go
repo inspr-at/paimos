@@ -244,8 +244,11 @@ func finalizeDrain(ctx context.Context, tx pgx.Tx, computer string, pending ...*
 	if err := cancelDisconnectedAccountLinks(ctx, tx, computer, pending...); err != nil {
 		return err
 	}
+	// Keep the daemon available to reconcile stale lifecycle releases until
+	// its authenticated exit report clears the retained process hold.
 	tag, err := tx.Exec(ctx, `UPDATE agent_pairing_enrollments e SET state='revoked' WHERE computer_id=$1 AND state='draining'
-  AND NOT EXISTS(SELECT 1 FROM agent_runs r WHERE r.account_id=e.account_id AND r.status IN ('starting','running','waiting'))`, computer)
+  AND NOT EXISTS(SELECT 1 FROM agent_runs r WHERE r.account_id=e.account_id AND (r.status IN ('starting','running','waiting')
+   OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))`, computer)
 	if err != nil {
 		return err
 	}

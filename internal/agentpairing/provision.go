@@ -489,7 +489,8 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 		actorID = actor.ID
 	}
 	rows, err := tx.Query(ctx, `SELECT e.account_id::text,a.account_key,a.harness,a.label,e.model_profile_id::text,e.state,e.local_cleanup,e.verification_run_id::text,
-  ARRAY(SELECT r.id::text FROM agent_runs r WHERE r.account_id=e.account_id AND r.status IN ('starting','running','waiting') ORDER BY r.id),
+  ARRAY(SELECT r.id::text FROM agent_runs r WHERE r.account_id=e.account_id AND (r.status IN ('starting','running','waiting')
+   OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true') ORDER BY r.id),
  CASE WHEN e.verification_run_id IS NULL THEN 'not_selected' WHEN e.verification_expired_at IS NOT NULL THEN 'expired' WHEN e.verification_expires_at<=clock_timestamp() AND (SELECT status FROM agent_runs WHERE id=e.verification_run_id)='queued' THEN 'expired' ELSE (SELECT status FROM agent_runs WHERE id=e.verification_run_id) END,
  coalesce((SELECT error_code FROM run_telemetry WHERE run_id=e.verification_run_id AND error_code IS NOT NULL ORDER BY sequence DESC LIMIT 1),''),
  coalesce((SELECT verification_unavailable_reason FROM agent_runs WHERE id=e.verification_run_id),''),
