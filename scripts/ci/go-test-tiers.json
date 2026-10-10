@@ -1844,6 +1844,10 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRunCredentialIsFenced","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRunIdleSleepAssertionDaemonShutdown","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRunIdleSleepAssertionLifecycle","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestSIGTERMEndsIdleManagedCodex","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestScanAttachProcargs","tier":"GATED-FULL"}
@@ -2019,6 +2023,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestTierControlCannotUseLocalSocketAndFencesOwnership","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestUSDMicrosExactDecimal","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestUnattendedProbesReadOnlyAndUnknownOnFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestUnavailableCaptureNeverTakesDispatchSlot","tier":"GATED-FULL"}
     ,
@@ -2499,6 +2505,10 @@
     {"kind":"go","package":"internal/agentpairing","name":"TestTenantTreePairingLockOrder","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestTouchIDDefaultIsMacOnlyUntilSaved","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestUnattendedMissingPlatformPreservesLegacyPairing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestUnattendedReportOnlyFreshnessOwnershipAndClaimSeam","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestUnqualifiedVerificationNeverAdvertisedAsDispatchTarget","tier":"GATED-FULL"}
     ,
@@ -6569,6 +6579,8 @@
     {"kind":"go","package":"internal/hostcapacity","name":"TestHostCapacityBounds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/hostcapacity","name":"TestHostCapacityLargestEncodingsStayBounded","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/hostcapacity","name":"TestUnattendedReadinessFreshnessAndRebootConstraints","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestAttachmentFramePolicyComposesWithAithema","tier":"GATED-FULL"}
     ,
