@@ -184,6 +184,9 @@ func ParseProviderCatalog(source string, raw []byte, at time.Time) (ProviderCata
 			}
 		}
 		provider, id = CatalogIdentity(provider, "", id, "")
+		if source == "litellm" && provider == "google" {
+			id = strings.TrimPrefix(strings.TrimPrefix(id, "gemini/"), "vertex_ai/")
+		}
 		harness := map[string]string{"openai": "codex", "anthropic": "claude", "xai": "grok", "google": "gemini"}[provider]
 		launch := id
 		route := ""

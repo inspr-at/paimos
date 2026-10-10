@@ -117,7 +117,7 @@ func RecordCatalogFacts(ctx context.Context, tx pgx.Tx, tenantID string, facts [
 			return err
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO model_catalog_facts(tenant_id,provider,model_id,route,fact,value,source,source_kind,field_path,fetched_at)
- SELECT $1::uuid,provider,model_id,route,fact,value,source,source_kind,field_path,fetched_at FROM jsonb_to_recordset($2::jsonb)
+ SELECT $1::uuid,provider,model_id,route,fact,coalesce(value,'null'::jsonb),source,source_kind,field_path,fetched_at FROM jsonb_to_recordset($2::jsonb)
  AS f(provider text,model_id text,route text,fact text,value jsonb,source text,source_kind text,field_path text,fetched_at timestamptz)
  ON CONFLICT(tenant_id,provider,model_id,route,fact,source) DO UPDATE SET value=EXCLUDED.value,source_kind=EXCLUDED.source_kind,field_path=EXCLUDED.field_path,fetched_at=EXCLUDED.fetched_at
  WHERE model_catalog_facts.fetched_at<=EXCLUDED.fetched_at`, tenantID, string(raw))

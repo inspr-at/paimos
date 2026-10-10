@@ -12,12 +12,6 @@ type legacySeedModel struct {
 	Efforts []string
 }
 
-type seedRoute struct {
-	Role     string
-	Priority int
-	Slug     string
-}
-
 // Pinned model authority. Slugs follow the paimos catalog ids. Dots are
 // rewritten to hyphens because an AEON slug cannot contain '.'; the vendor
 // model id is stored unchanged.
