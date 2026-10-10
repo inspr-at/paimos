@@ -21,6 +21,26 @@ paths:
           $ref: '#/components/responses/View'
         '400':
           $ref: '#/components/responses/Error'
+  /views/deleted:
+    get:
+      operationId: listDeletedViews
+      description: "Only the caller's own deleted views from the last 30 days, newest deletion first with id descending as the tie-breaker. Shared views owned by someone else are excluded. Pagination keeps the first page's time window; cursors expire after one hour and are bound to the tenant and principal. Reasons use matching deletion audit evidence, never a timestamp heuristic. Restore uses the existing owner-only restore operation."
+      security: *auth
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: cursor
+          in: query
+          description: "Opaque next_cursor from the preceding page."
+          schema: {type: string, minLength: 1, maxLength: 1024}
+      responses:
+        '200':
+          $ref: '#/components/responses/DeletedViews'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
   /views/{viewId}:
     parameters: [{$ref: '#/components/parameters/ViewId'}]
     get:
@@ -70,6 +90,30 @@ paths:
           description: The view is not deleted
 components:
   schemas:
+    DeletedView:
+      type: object
+      required: [id, project_id, name, mode, deleted_at, deletion_reason]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: [string, 'null'], format: uuid}
+        name: {type: string}
+        mode: {type: string, enum: [list, outline, graph]}
+        deleted_at: {type: string, format: date-time}
+        deletion_reason:
+          type: string
+          enum: [owner_deleted, retired_by_upgrade, unknown]
+          description: "owner_deleted requires a matching owner-authored deletion snapshot; retired_by_upgrade requires the System-authored empty-column retirement snapshots used by migration 1249. Missing, stale or ambiguous evidence returns unknown."
+    DeletedViewList:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: {$ref: '#/components/schemas/DeletedView'}
+        next_cursor:
+          type: [string, 'null']
+          description: "Continue with this cursor; null means the page is complete."
     SavedView:
       allOf:
         - {$ref: '#/components/schemas/ViewWrite'}
@@ -190,6 +234,12 @@ components:
           schema:
             $ref: '#/components/schemas/ViewWrite'
   responses:
+    DeletedViews:
+      description: "Owner-only recently deleted views."
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/DeletedViewList'
     View:
       description: Saved view
       content:
