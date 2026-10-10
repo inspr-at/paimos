@@ -184,11 +184,34 @@ function levelOptions(counts: Record<string, number>, selected: string[], vocabu
   }
   return [...byName.values()]
 }
-// Include, exclude or drop every member of a Type option together.
+// Include, exclude or drop every member of a Type option together. A partly
+// chosen option (mixed) becomes fully chosen, never less.
 export function toggleMembers(values: string[], members: string[], mode: 'in' | 'out'): string[] {
   const on = members.every(member => valueState(values, member) === mode)
   const rest = values.filter(value => !members.includes(bare(value)))
   return on ? rest : [...rest, ...members.map(member => mode === 'out' ? `!${member}` : member)]
+}
+// What an option shows: every member included or excluded, or "mixed" when its
+// members differ (a saved view or link that chose only some of them).
+export function optionState(values: string[], option: FacetOption): ValueState | 'mixed' {
+  const states = new Set((option.members ?? [option.value]).map(member => valueState(values, member)))
+  return states.size > 1 ? 'mixed' : [...states][0] ?? null
+}
+// A list already on screen keeps its rows while it is open: each row keeps its
+// place (one that is gone stays, uncounted) and a new option joins at the end.
+// A row is the option with its value, else one with its name (a status's other spelling).
+export function heldOptions(held: FacetOption[], live: FacetOption[]): FacetOption[] {
+  const now = new Map<FacetOption, FacetOption>(), taken = new Set<FacetOption>()
+  const pair = (same: (option: FacetOption, row: FacetOption) => boolean) => {
+    for (const row of held) {
+      const option = now.has(row) ? undefined : live.find(option => !taken.has(option) && same(option, row))
+      if (option) { now.set(row, option); taken.add(option) }
+    }
+  }
+  pair((a, b) => a.value === b.value || !!a.members?.includes(b.value) || !!b.members?.includes(a.value))
+  pair((a, b) => a.label === b.label)
+  const rows = held.map(row => now.get(row) ?? (row.count === undefined ? row : { ...row, count: 0 }))
+  return [...rows, ...live.filter(option => !taken.has(option))]
 }
 
 const VIEW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

@@ -200,6 +200,9 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 10'%3E%3Cpath d='M1.2 5.1 4.3 8.2 10.8 1.4' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain;
 }
+/* Mixed: only some of what the box stands for is chosen. A dash in the checked fill. */
+.check-box:indeterminate { background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary-line) 60%, transparent); }
+.check-box:indeterminate::after { content: ''; width: 8px; height: 2px; border-radius: 1px; background: var(--primary-on); }
 .check-box:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-tint) 60%, transparent); }
 
 /* Progress */

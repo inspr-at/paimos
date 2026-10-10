@@ -88,6 +88,10 @@ filters by the names set under Settings › Workspace: the leaf name (default
 Ticket) and each parent level (default Epic, Story, Level 3 …), with counts
 from the list API's `level` facet. A row is its leaf name when it has no work
 children, else the name of its depth; levels that share a name are one option.
+When a link or saved view holds only some of those levels, the option shows a
+mixed box, and a click includes all of them. A filter's options appear once
+their names and counts have arrived, in the menu and in the Filters sheet, and
+keep their places while it is open; a later answer only adds rows at the end.
 The list API takes `level=leaf,1,!2` alongside `kind`, `shape` and `depth`,
 which keep working for the CLI. Links and saved views that used the legacy
 type (`type=epic`, `ticket`, `task`) or Parents / Leaves open as Type; a Parents

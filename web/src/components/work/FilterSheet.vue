@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
-import { DATE_FIELDS, DATE_PRESETS, offeredDimensions, type DateField, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import { computed, nextTick, ref, watch } from 'vue'
+import { DATE_FIELDS, DATE_PRESETS, heldOptions, offeredDimensions, type DateField, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
 import type { ColumnId } from '../../lib/columns'
 import { TICKET_GRAPH_FILTERS } from '../../lib/ticketGraphRenderer'
 import { plural, type SortKey } from '../../lib/work'
@@ -17,7 +17,7 @@ import HeaderRoomyChoice from './HeaderRoomyChoice.vue'
 
 // Phones and small tablets share every filter and display preference with the toolbar.
 const props = withDefaults(defineProps<{
-  summary?: ProjectSummary | null; filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null
+  summary?: ProjectSummary | null; filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; loading?: boolean; total: number | null
   view?: 'list' | 'outline' | 'graph'; canSave?: boolean; density: 'comfortable' | 'compact'; projectHeader?: boolean
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
 }>(), { view: 'list' })
@@ -32,6 +32,16 @@ const hideNames = computed(() => hiddenStates(props.filters.hideStates).map(stat
 // Advanced filters shown when the sheet opened stay until it closes, also once cleared.
 const kept = ref<Dimension[]>([])
 const dimensions = computed(() => offeredDimensions(props.filters, props.view === 'graph' ? TICKET_GRAPH_FILTERS : undefined, kept.value))
+// The filters appear once their names and counts are in, then every row holds
+// its place until the sheet closes: a late answer never moves one (AEON-974).
+const shown = ref(false)
+const held = ref<Partial<Record<Dimension, FacetOption[]>> | null>(null)
+watch(() => shown.value && !props.loading ? dimensions.value.map(d => [d.key, props.options(d.key)] as const) : null, entries => {
+  if (!entries) return
+  const next = { ...held.value ?? {} }
+  for (const [key, live] of entries) next[key] = heldOptions(next[key] ?? [], live)
+  held.value = next
+})
 const dialog = ref<HTMLDialogElement>()
 const doneButton = ref<HTMLButtonElement>()
 const dateField = ref<DateField>('updated')
@@ -40,12 +50,15 @@ async function open() {
   opener = document.activeElement as HTMLElement
   dateField.value = props.filters.date?.field ?? 'updated'
   kept.value = offeredDimensions(props.filters).map(d => d.key)
+  held.value = null
+  shown.value = true
   dialog.value?.showModal()
   emit('opened')
   await nextTick()
   doneButton.value?.focus({ preventScroll: true })
 }
 function close() { dialog.value?.close(); opener?.focus({ preventScroll: true }) }
+function closed() { shown.value = false }
 function backdrop(event: MouseEvent) { if (event.target === dialog.value) close() }
 function datePreset(value: DateFilter['preset']) {
   const current = props.filters.date
@@ -60,7 +73,7 @@ defineExpose({ open, close })
 </script>
 
 <template>
-  <dialog ref="dialog" class="filter-sheet" aria-labelledby="filter-sheet-title" @cancel.prevent="close" @click="backdrop">
+  <dialog ref="dialog" class="filter-sheet" aria-labelledby="filter-sheet-title" @cancel.prevent="close" @click="backdrop" @close="closed">
     <div class="sheet-card">
       <span class="grabber" aria-hidden="true" />
       <header>
@@ -93,10 +106,12 @@ defineExpose({ open, close })
           <h3 id="graph-sheet-display-title" class="eyebrow">Display</h3>
           <HeaderRoomyChoice class="graph-header-choice" />
         </section>
+        <p v-if="!held" class="sheet-loading" role="status">Loading filters…</p>
+        <template v-else>
         <section v-for="dimension in dimensions" :key="dimension.key" class="sheet-section">
           <p class="eyebrow">{{ dimension.title }}</p>
           <FacetOptions
-            :dimension="dimension.key" :options="options(dimension.key)" :selected="filters[dimension.key]"
+            :dimension="dimension.key" :options="held[dimension.key] ?? []" :selected="filters[dimension.key]"
             @toggle="value => emit('toggle', dimension.key, value)" @exclude="value => emit('exclude', dimension.key, value)"
           />
         </section>
@@ -109,6 +124,7 @@ defineExpose({ open, close })
             <button v-for="option in DATE_PRESETS" :key="option.value" type="button" class="choice" :aria-pressed="filters.date?.preset === option.value && filters.date.field === dateField" @click="datePreset(option.value)">{{ option.label }}</button>
           </div>
         </section>
+        </template>
       </div>
       <footer>
         <button ref="doneButton" type="button" class="btn primary done" @click="close">
@@ -135,6 +151,7 @@ header .btn { height: 44px; }
 .sheet-section { padding: 14px 0 8px; border-bottom: 1px solid var(--line); }
 .sheet-section .eyebrow { padding: 0 8px 8px; }
 .graph-header-choice { padding: 6px 8px 8px; }
+.sheet-loading { padding: 14px 8px; font-size: 14px; color: var(--ink-3); }
 .sheet-section :deep(.facet-options) { grid-template-columns: minmax(0, 1fr); }
 .sheet-section :deep(.facet-option) { min-height: 44px; }
 .sheet-section :deep(.facet-main) { font-size: 15px; }

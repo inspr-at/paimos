@@ -14,6 +14,8 @@ const toolbar = (page: Page) => page.getByRole('toolbar', { name: 'Ticket list c
 const filterButton = (page: Page) => toolbar(page).getByRole('button', { name: 'Add a filter' })
 const rows = (page: Page) => page.getByRole('grid', { name: 'Tickets' }).locator('tr.ticket-row:not(.ghost)')
 const lastList = (calls: Call[]) => calls.filter(call => call.path === '/api/nodes' && call.query.get('within') && call.query.get('limit') === '200').at(-1)!
+// The newest list request's levels, undefined before the first one.
+const level = (calls: Call[]) => calls.filter(call => call.path === '/api/nodes' && call.query.get('within') && call.query.get('limit') === '200').at(-1)?.query.get('level')
 
 async function world(page: Page, theme = 'light', vocabulary = { revision: 3, leaf: { name: LEAF, icon: 'check' }, levels: [{ name: TOP, icon: 'tree' }, { name: 'Teilvorhaben', icon: 'layers' }] }) {
   const data = fixtures()
@@ -115,19 +117,142 @@ test('levels that share a name are one Type option, one pill and one request for
   await expect(toolbar(page).getByRole('button', { name: 'Edit Type filter: Schritt', exact: true })).toBeVisible()
 })
 
+test('a shared-name Type option shows a partial saved choice as mixed; a click completes it and never narrows it', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { calls } = await world(page, 'light', { revision: 1, leaf: { name: 'Schritt', icon: 'check' }, levels: [{ name: TOP, icon: 'tree' }, { name: 'Schritt', icon: '' }] })
+  const mixed = (box: ReturnType<Page['locator']>) => box.evaluate(el => (el as HTMLInputElement).indeterminate)
+  // A link that holds only level 2 of the two levels named "Schritt".
+  await page.goto('/p/PHAROS?type=2')
+  await expect.poll(() => level(calls)).toBe('2')
+  let type = await addFilter(page, 'Type')
+  const step = type.getByRole('checkbox', { name: /Schritt/ })
+  await expect(step).not.toBeChecked()
+  expect(await mixed(step)).toBe(true)
+  await step.click()
+  await expect.poll(() => level(calls)).toBe('2,leaf')
+  await expect(step).toBeChecked()
+  expect(await mixed(step)).toBe(false)
+  await step.click()
+  await expect.poll(() => level(calls)).toBeNull()
+  await expect(step).not.toBeChecked()
+  // Excluding only level 2 is mixed too; "not" then excludes both.
+  await page.goto('/p/PHAROS?type=!2')
+  await expect.poll(() => level(calls)).toBe('!2')
+  type = await addFilter(page, 'Type')
+  const not = type.getByRole('button', { name: 'Exclude Schritt' })
+  expect(await mixed(type.getByRole('checkbox', { name: /Schritt/ }))).toBe(true)
+  await expect(not).toHaveAttribute('aria-pressed', 'false')
+  await not.click()
+  await expect.poll(() => level(calls)).toBe('!2,!leaf')
+  await expect(not).toHaveAttribute('aria-pressed', 'true')
+})
+
+// The level counts answer only when the test releases them.
+async function heldLevelCounts(page: Page) {
+  const state = { asked: false, release: () => {} }
+  const gate = new Promise<void>(resolve => { state.release = resolve })
+  await page.route(url => url.pathname === '/api/nodes' && url.searchParams.get('facets') === 'level', async route => {
+    state.asked = true
+    await gate
+    await route.fallback()
+  })
+  return state
+}
+const DEFAULT_NAMES = { revision: 0, leaf: { name: '', icon: '' }, levels: [] }
+
+test('Type rows wait for their names and counts, then hold their places while the menu is open', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { calls } = await world(page, 'light', DEFAULT_NAMES)
+  const counts = await heldLevelCounts(page)
+  await page.goto('/p/PHAROS')
+  await expect(rows(page)).toHaveCount(5)
+  const type = await addFilter(page, 'Type')
+  await expect.poll(() => counts.asked).toBe(true)
+  // Nothing to click while the answer is out: Story would land between Epic and Ticket.
+  await expect(type.getByRole('status')).toHaveText('Loading…')
+  await expect(type.getByRole('checkbox')).toHaveCount(0)
+  counts.release()
+  await expect(type.locator('.facet-option .option-label')).toHaveText(['Epic', 'Story', 'Ticket'])
+  await expect(type.getByRole('checkbox', { name: /Epic/ })).toBeFocused()
+  const box = (name: string) => type.getByRole('checkbox', { name: new RegExp(`^${name}`) })
+  const guard = await controlStability(page, { epic: box('Epic'), story: box('Story'), ticket: box('Ticket'), title: type.locator('.facet-head') })
+  await guard.check(async () => {
+    await box('Story').check()
+    await expect.poll(() => level(calls)).toBe('2')
+    await expect(rows(page)).toHaveCount(1)
+  })
+  await guard.check(async () => {
+    await box('Epic').check()
+    await expect.poll(() => level(calls)).toBe('2,1')
+  })
+  guard.done()
+})
+
+test('the Filters sheet shows its filters once their counts are in and keeps every row in place', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const { calls } = await world(page, 'light', DEFAULT_NAMES)
+  const counts = await heldLevelCounts(page)
+  await page.goto('/p/PHAROS')
+  await expect(rows(page).first()).toBeVisible()
+  await page.getByRole('button', { name: 'Filters', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+  await expect.poll(() => counts.asked).toBe(true)
+  await expect(sheet.getByText('Loading filters…')).toBeVisible()
+  await expect(sheet.locator('.sheet-section .eyebrow', { hasText: /^Type$/ })).toHaveCount(0)
+  counts.release()
+  const type = sheet.locator('.sheet-section').filter({ has: page.locator('.eyebrow', { hasText: /^Type$/ }) })
+  await expect(type.locator('.facet-option .option-label')).toHaveText(['Epic', 'Story', 'Ticket'])
+  await type.scrollIntoViewIfNeeded()
+  const box = (name: string) => type.getByRole('checkbox', { name: new RegExp(`^${name}`) })
+  const guard = await controlStability(page, { epic: box('Epic'), story: box('Story'), ticket: box('Ticket'), today: sheet.getByRole('group', { name: 'Period' }).getByRole('button', { name: 'Today' }), done: sheet.locator('footer button') })
+  await guard.check(async () => {
+    await box('Story').check()
+    await expect.poll(() => level(calls)).toBe('2')
+    await expect(box('Story')).toBeChecked()
+  })
+  guard.done()
+})
+
+for (const width of [1024, 940]) {
+  test(`Filter and Search stay put while pills overflow, come and go at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await world(page)
+    await page.goto('/p/PHAROS?status=new&priority=high&assignee=none&type=leaf&tag=BUG&human_check=none&epic=none&cost=none&release=none&date=updated:7d')
+    await expect(toolbar(page).locator('.facet-control')).toHaveCount(10)
+    const pills = toolbar(page).locator('.pills')
+    // Only the pills scroll; Filter and Clear all keep their room.
+    expect(await pills.evaluate(el => el.scrollWidth - el.clientWidth)).toBeGreaterThan(20)
+    expect(await toolbar(page).locator('.facets').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+    const guard = await controlStability(page, { filter: filterButton(page), search: toolbar(page).getByRole('searchbox') })
+    for (const name of ['Status', 'Priority', 'Assignee', 'Labels', 'Human check', 'Parent', 'Cost unit', 'Imported release', 'Type']) {
+      await guard.check(async () => {
+        await toolbar(page).getByRole('button', { name: `Remove ${name} filter` }).click()
+        await expect(toolbar(page).getByRole('button', { name: `Remove ${name} filter` })).toHaveCount(0)
+      })
+    }
+    await guard.check(async () => {
+      const status = await addFilter(page, 'Status')
+      await status.getByRole('checkbox', { name: /New/ }).check()
+      await page.keyboard.press('Escape')
+      await expect(toolbar(page).locator('.facet-control')).toHaveCount(2)
+    })
+    guard.done()
+  })
+}
+
 test('links and saved views with the legacy type or Parents / Leaves open as Type', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const { data, calls } = await world(page)
   data.views.push(mockView({ id: '11111111-aaaa-4aaa-8aaa-000000000009', name: 'Old epics', filters: { type: 'epic' } }))
   await page.goto('/p/PHAROS?type=epic')
   await expect(toolbar(page).getByRole('button', { name: `Edit Type filter: ${TOP}`, exact: true })).toBeVisible()
-  await expect.poll(() => lastList(calls).query.get('level')).toBe('1')
+  await expect.poll(() => level(calls)).toBe('1')
   expect(lastList(calls).query.get('kind')).toBe('work,ticket,task,epic')
   await expect(rows(page)).toHaveCount(1)
   await page.goto('/p/PHAROS?shape=leaf')
   await expect(toolbar(page).getByRole('button', { name: `Edit Type filter: ${LEAF}`, exact: true })).toBeVisible()
   await expect(toolbar(page).locator('.facet-control')).toHaveCount(1)
-  await expect.poll(() => lastList(calls).query.get('level')).toBe('leaf')
+  await expect.poll(() => level(calls)).toBe('leaf')
   // The saved view reads as Type and is unchanged (no dot, no Save).
   await page.goto('/p/PHAROS')
   const views = page.getByRole('navigation', { name: 'Saved views' })

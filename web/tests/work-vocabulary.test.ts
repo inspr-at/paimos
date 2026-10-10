@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { workLevel, workLabel, workIcon, workNoun, vocabularyRows, vocabularyChain, vocabularyLabel, listKeyTarget, workIconChoice } from '../src/lib/workVocabulary.ts'
-import { apiParams, filtersFromQuery, filtersToQuery, filtersFromView, viewShape, facetOptions, valueLabel, groupRows, offeredDimensions, sameListState, toggleMembers, EMPTY_FILTERS } from '../src/lib/ticketList.ts'
+import { apiParams, filtersFromQuery, filtersToQuery, filtersFromView, viewShape, facetOptions, valueLabel, groupRows, offeredDimensions, sameListState, toggleMembers, optionState, heldOptions, EMPTY_FILTERS } from '../src/lib/ticketList.ts'
 import type { ListItem } from '../src/lib/api.ts'
 test('workspace names depend on leaf shape first, then project-relative depth', () => {
   const vocabulary = { revision: 0, leaf: { name: 'Step', icon: 'check' }, levels: [{ name: 'Feature', icon: 'tree' }] }
@@ -57,6 +57,39 @@ test('Type offers each level by its workspace name; levels sharing a name are on
   assert.equal(valueLabel('type', '1'), 'Epic')
   const params = apiParams('p', filtersFromQuery({ type: '2,!leaf' }))
   assert.deepEqual([params.level, params.kind], [['2', '!leaf'], ['work', 'ticket', 'task', 'epic']])
+})
+test('a shared-name Type option shows a partial choice as mixed and a click completes it', () => {
+  const option = { value: '2', label: 'Schritt', members: ['2', 'leaf'] }
+  // Saved views and links may hold only some of the levels behind one name.
+  assert.equal(optionState(['2'], option), 'mixed')
+  assert.equal(optionState(['leaf'], option), 'mixed')
+  assert.equal(optionState(['!2'], option), 'mixed')
+  assert.equal(optionState(['2', '!leaf'], option), 'mixed')
+  assert.equal(optionState(['2', 'leaf', '1'], option), 'in')
+  assert.equal(optionState(['!2', '!leaf'], option), 'out')
+  assert.equal(optionState(['1'], option), null)
+  assert.equal(optionState(['high'], { value: 'high', label: 'High' }), 'in')
+  // Mixed becomes fully chosen, the other values stay; only a full choice turns off.
+  assert.deepEqual(toggleMembers(['1', '2'], option.members, 'in'), ['1', '2', 'leaf'])
+  assert.deepEqual(toggleMembers(['2', '!leaf'], option.members, 'in'), ['2', 'leaf'])
+  assert.deepEqual(toggleMembers(['!2'], option.members, 'out'), ['!2', '!leaf'])
+  assert.deepEqual(toggleMembers(['2', 'leaf'], option.members, 'in'), [])
+})
+test('an open list holds its rows: a late answer appends, never inserts or drops', () => {
+  const first = facetOptions('type')
+  const later = facetOptions('type', { 1: 1, 2: 1, leaf: 4 })
+  assert.deepEqual(later.map(o => o.label), ['Epic', 'Story', 'Ticket'])
+  const held = heldOptions(heldOptions([], first), later)
+  assert.deepEqual(held.map(o => [o.label, o.count]), [['Epic', 1], ['Ticket', 4], ['Story', 1]])
+  // A row the newest answer no longer has keeps its place, uncounted.
+  assert.deepEqual(heldOptions(held, facetOptions('type', { leaf: 2 })).map(o => [o.label, o.count]), [['Epic', 0], ['Ticket', 2], ['Story', 0]])
+  // A status keeps its row when the data's spelling of it changes.
+  const states = heldOptions([], facetOptions('status', { 'in-progress': 1, backlog: 1 }))
+  assert.deepEqual(heldOptions(states, facetOptions('status', { backlog: 1 })).map(o => o.label), states.map(o => o.label))
+  // A shared name keeps its row when its representative level changes.
+  const vocabulary = { revision: 1, leaf: { name: 'Story', icon: '' }, levels: [{ name: 'Vorhaben', icon: '' }] }
+  const step = heldOptions(facetOptions('type', {}, [], new Map(), undefined, { vocabulary }), facetOptions('type', { 2: 1, leaf: 1 }, [], new Map(), undefined, { vocabulary }))
+  assert.deepEqual(step.map(o => [o.label, o.value, o.members]), [['Vorhaben', '1', ['1']], ['Story', '2', ['2', 'leaf']]])
 })
 test('links and saved views with Legacy type or Parents / Leaves read as Type', () => {
   const view = (filters: Record<string, string>) => filtersFromView({ id: '12345678-1234-4234-8234-123456789abc', filters, sort_keys: [], group_by: 'none', columns: [] })

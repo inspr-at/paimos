@@ -467,20 +467,34 @@ function chipLabel(dimension: Dimension, value: string) {
   return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value, workName: vocabulary.leaf.name, vocabulary: vocabulary.value })
 }
 // What a menu needs before it opens: names, label counts or the project's epics.
+// Type also needs the workspace's names. Only the newest menu's wait counts.
 const facetLoading = ref(false)
+let facetWait = 0
 function needOptions(dimension: Dimension) {
-  if (dimension === 'assignee') { void list.resolveNames(options('assignee').map(o => o.value)); return }
-  if (dimension === 'epic') { facetLoading.value = true; void list.loadEpics().finally(() => { facetLoading.value = false }); return }
-  if (graphActive.value) return
+  const work: Promise<unknown>[] = []
+  if (dimension === 'assignee') void list.resolveNames(options('assignee').map(o => o.value))
+  if (dimension === 'epic') work.push(list.loadEpics())
+  if (dimension === 'type') work.push(vocabulary.load())
   const facet = dimension === 'tag' ? 'tag' : dimension === 'cost' ? 'cost_unit' : dimension === 'release' ? 'release' : dimension === 'human_check' ? 'human_check'
     : dimension === 'type' ? 'level' : dimension === 'shape' ? 'shape' : dimension === 'depth' ? 'depth' : null
-  if (facet && !filters.value[dimension].length) { facetLoading.value = true; void list.requestFacet(facet).finally(() => { facetLoading.value = false }) }
+  if (!graphActive.value && facet && !filters.value[dimension].length) work.push(list.requestFacet(facet))
+  const request = ++facetWait
+  facetLoading.value = work.length > 0
+  if (work.length) void Promise.allSettled(work).then(() => { if (request === facetWait) facetLoading.value = false })
 }
+// The sheet shows its filters once their names and counts are in, so a late answer moves nothing.
+const sheetLoading = ref(false)
+let sheetWait = 0
 function sheetOpened() {
-  if (graphActive.value) return
-  void list.resolveNames(options('assignee').map(o => o.value))
-  void list.loadEpics()
-  for (const facet of ['tag', 'cost_unit', 'release', 'human_check', 'level']) void list.requestFacet(facet)
+  const request = ++sheetWait
+  const work: Promise<unknown>[] = [vocabulary.load()]
+  if (!graphActive.value) {
+    void list.resolveNames(options('assignee').map(o => o.value))
+    work.push(list.loadEpics())
+    for (const facet of ['tag', 'cost_unit', 'release', 'human_check', 'level']) work.push(list.requestFacet(facet))
+  }
+  sheetLoading.value = true
+  void Promise.allSettled(work).then(() => { if (request === sheetWait) sheetLoading.value = false })
 }
 // Chips name epics by title, so the epics load when an epic filter is on.
 watch(() => filters.value.epic.length > 0 && !!projectId.value, on => { if (on) void list.loadEpics() }, { immediate: true })
@@ -1913,7 +1927,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :derived="statusMenu.row.status_derived" :children-count="statusMenu.row.work_children_count" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
-        ref="filterSheet" :summary="project" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
+        ref="filterSheet" :summary="project" :filters="filters" :options="options" :loading="sheetLoading" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
         :density="density" :columns="toolbarColumns" :project-header="ticketsHeader"
         @sort="setSort" @density="setDensity" @columns="saveColumns" @columns-reset="resetColumns"
         @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"

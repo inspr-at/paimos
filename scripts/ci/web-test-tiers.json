@@ -5028,6 +5028,14 @@
     ,
     {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"Filter and Search stay put while pills overflow, come and go at 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"Filter and Search stay put while pills overflow, come and go at 940","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"Type rows wait for their names and counts, then hold their places while the menu is open","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"a shared-name Type option shows a partial saved choice as mixed; a click completes it and never narrows it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"applied Type filter at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"applied Type filter at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -5043,6 +5051,8 @@
     {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"levels that share a name are one Type option, one pill and one request for all of them","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"links and saved views with the legacy type or Parents / Leaves open as Type","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"the Filters sheet shows its filters once their counts are in and keeps every row in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"the toolbar shows Filter and only applied filters; Type uses the workspace names and never moves Filter or the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -14581,6 +14591,10 @@
     {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"Parents / Leaves and depth survive links, saved views and API translation","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"Type offers each level by its workspace name; levels sharing a name are one option","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"a shared-name Type option shows a partial choice as mixed and a click completes it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"an open list holds its rows: a late answer appends, never inserts or drops","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"an unknown stored icon draws the level default","tier":"ESSENTIAL"}
     ,

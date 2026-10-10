@@ -328,7 +328,7 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
       <p v-if="attention.truncated" class="attention-note">{{ attentionWord('Only the first 100 facet choices are shown. Search narrows the ticket list.', 'Nur die ersten 100 Filterwerte werden gezeigt. Die Suche grenzt die Ticket-Liste ein.') }}</p>
     </FloatingPanel>
     <FacetMenu
-      v-if="open" :anchor="open.anchor" :dimension="open.dimension" :title="title(open.dimension)" :options="options(open.dimension)" :selected="filters[open.dimension]" :loading="facetLoading"
+      v-if="open" :key="open.dimension" :anchor="open.anchor" :dimension="open.dimension" :title="title(open.dimension)" :options="options(open.dimension)" :selected="filters[open.dimension]" :loading="facetLoading"
       @toggle="value => emit('toggle', open!.dimension, value)" @exclude="value => emit('exclude', open!.dimension, value)" @clear="emit('clear', open!.dimension)" @close="closeMenu"
     />
     <FilterMenu v-if="menuAnchor" :anchor="menuAnchor" :filters="filters" :dimensions="graph ? TICKET_GRAPH_FILTERS : undefined" :show-date="!graph" @choose="chooseFilter" @close="restore => { const a = menuAnchor; menuAnchor = null; if (restore) a?.focus() }" />
@@ -444,7 +444,9 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
 .toolbar:not(.knowledge) { flex-wrap: nowrap; min-height: 44px; padding: 6px 0; }
 .view-switch { order: 0; }
 .list-search { order: 1; flex: 0 1 240px; min-width: 150px; }
-/* Filter never scrolls away: only the applied pills scroll when they overflow. */
+/* Filter never scrolls away: only the applied pills scroll when they overflow.
+   What precedes Filter keeps its width, so pills coming and going never move it. */
+@media (min-width: 901px) { .toolbar:not(.attention) :is(.view-switch, .list-search) { flex: none; } }
 .facets { order: 2; align-items: center; min-width: 0; flex: 0 1 auto; padding: 3px; }
 .pills { display: flex; gap: 6px; min-width: 0; flex: 0 1 auto; overflow-x: auto; scrollbar-width: thin; padding: 3px; margin: -3px 0; }
 .facet-control { display: inline-flex; align-items: center; flex: none; height: 28px; border-radius: 8px; }

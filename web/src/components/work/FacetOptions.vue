@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { vClipTip } from '../../directives/clipTip'
-import { valueState, type Dimension, type FacetOption } from '../../lib/ticketList'
+import { optionState, type Dimension, type FacetOption } from '../../lib/ticketList'
 import { workIconChoice } from '../../lib/workVocabulary'
 import AppIcon from '../AppIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
@@ -9,8 +9,10 @@ import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
 
 // Checkbox rows for one filter. A value is included (checked), excluded ("not",
-// the button at the end or the minus key) or neither; see ticketList.ts.
-withDefaults(defineProps<{ dimension: Dimension; options: FacetOption[]; selected: string[]; excludable?: boolean }>(), { excludable: true })
+// the button at the end or the minus key) or neither; see ticketList.ts. An
+// option that stands for several values is mixed while only some are chosen.
+const props = withDefaults(defineProps<{ dimension: Dimension; options: FacetOption[]; selected: string[]; excludable?: boolean }>(), { excludable: true })
+const state = (option: FacetOption) => optionState(props.selected, option)
 const emit = defineEmits<{ toggle: [value: string]; exclude: [value: string] }>()
 // Keep keyboard focus on the option just toggled, also when its label text was clicked.
 function changed(event: Event, value: string) {
@@ -38,12 +40,12 @@ function move(event: KeyboardEvent) {
   <div class="facet-options" role="group" @keydown="move">
     <div
       v-for="option in options" :key="option.value" class="facet-option"
-      :class="{ muted: option.count === 0 && !valueState(selected, option.value), out: valueState(selected, option.value) === 'out' }"
+      :class="{ muted: option.count === 0 && !state(option), out: state(option) === 'out' }"
     >
       <label class="facet-main">
         <input
-          class="check-box" type="checkbox" :checked="valueState(selected, option.value) === 'in'"
-          :aria-describedby="valueState(selected, option.value) === 'out' ? `not-${dimension}` : undefined"
+          class="check-box" type="checkbox" :checked="state(option) === 'in'" :indeterminate="state(option) === 'mixed'"
+          :aria-describedby="state(option) === 'out' ? `not-${dimension}` : state(option) === 'mixed' ? `some-${dimension}` : undefined"
           @change="changed($event, option.value)" @keydown="keydown($event, option.value, excludable)"
         />
         <AppIcon v-if="dimension === 'status' && option.value === 'queued'" name="queue" :size="14" class="queue-glyph" /><StatusIcon v-else-if="dimension === 'status'" :state="option.value" />
@@ -55,18 +57,19 @@ function move(event: KeyboardEvent) {
         <AppIcon v-else-if="dimension === 'cost'" name="coin" :size="14" class="faint" />
         <AppIcon v-else-if="dimension === 'human_check'" name="person-check" :size="14" class="faint" />
         <AppIcon v-else name="box" :size="14" class="faint" />
-        <span v-if="valueState(selected, option.value) === 'out'" class="not-tag">not</span>
+        <span v-if="state(option) === 'out'" class="not-tag">not</span>
         <span v-clip-tip class="option-label">{{ option.label }}</span>
         <span v-if="option.hint" class="hint mono">{{ option.hint }}</span>
         <span v-if="option.count !== undefined" class="count mono">{{ option.count }}</span>
       </label>
       <button
-        v-if="excludable" type="button" class="not-btn" tabindex="-1" :aria-pressed="valueState(selected, option.value) === 'out'"
-        :aria-label="`Exclude ${option.label}`" :data-tip="valueState(selected, option.value) === 'out' ? 'Excluded · click to stop' : 'Exclude · minus key'"
+        v-if="excludable" type="button" class="not-btn" tabindex="-1" :aria-pressed="state(option) === 'out'"
+        :aria-label="`Exclude ${option.label}`" :data-tip="state(option) === 'out' ? 'Excluded · click to stop' : 'Exclude · minus key'"
         @click="emit('exclude', option.value)"
       ><AppIcon name="not" :size="13" /></button>
     </div>
     <span :id="`not-${dimension}`" class="sr-only">Excluded</span>
+    <span :id="`some-${dimension}`" class="sr-only">Partly chosen</span>
   </div>
 </template>
 
