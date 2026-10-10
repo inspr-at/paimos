@@ -7318,6 +7318,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRouteSuppressionAccountSkipsAndExpiry","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestRoutineEvaluationHonorsLivePolicyInBothRegistryRoutes","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestSecurityRoutesReplaceExpireAndRemainTenantScoped","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestSelectorChecksReuseAndSeparateReviewFloor","tier":"GATED-FULL"}
