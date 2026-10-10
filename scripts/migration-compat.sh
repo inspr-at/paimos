@@ -22,6 +22,12 @@ db="aeon-compat-db-$suffix"
 app="aeon-compat-app-$suffix"
 network="aeon-compat-$suffix"
 image="ghcr.io/inspr-at/aeon@$digest"
+# AEON-1051's activated refusal gate needs a binary below the capability floor.
+# The latest release may already advertise that capability. Keep testing its
+# read compatibility, and retain the last pre-capability release separately.
+# Published release v261009095632.0.0, source 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
+legacy_tag=v261009095632.0.0
+legacy_image=ghcr.io/inspr-at/aeon@sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
 cleanup() {
   docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
@@ -36,6 +42,7 @@ docker pull --platform linux/amd64 "$image"
 # Pull the release-note digest, then resolve its local config ID for both boots.
 image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
 [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
+previous_image_id="$image_id"
 echo "Previous image: $image_id"
 docker network create "$network" >/dev/null
 docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
@@ -80,12 +87,9 @@ AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=di
 start_image "$image_id"
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 
-# Account-use refusal must use a binary below the capability floor. The latest
-# published release can already enforce account_use_v1, so keep its read
-# compatibility above and exercise the unchanged refusal gate with this fixed
-# pre-capability release. Pin its published digest, never a moving tag.
-legacy_tag=v261009095632.0.0
-legacy_image=ghcr.io/inspr-at/aeon@sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
+# Verify the immutable pre-capability binary and the seeded reads before
+# activation. The existing exact SQLSTATE/entry, empty/populated pool and
+# background-write refusal assertions remain mandatory for that binary.
 echo "Account-use rollback fixture: $legacy_tag; image: $legacy_image"
 docker pull --platform linux/amd64 "$legacy_image"
 legacy_image_id="$(docker image ls --quiet --no-trunc "$legacy_image" | sort -u)"
@@ -98,7 +102,7 @@ python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$t
 echo "Migration compatibility passed: $tag on the candidate schema"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
-    "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+    "$tag" "$image" "$previous_image_id" >> "$GITHUB_STEP_SUMMARY"
   printf 'Rollback fixture %s; registry image %s; loaded image %s verified activated empty/populated pools refuse below-floor binaries.\n' \
     "$legacy_tag" "$legacy_image" "$legacy_image_id" >> "$GITHUB_STEP_SUMMARY"
 fi
