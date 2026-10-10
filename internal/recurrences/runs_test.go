@@ -138,6 +138,13 @@ func TestRoutineIntentAtomicReplayAndAuthority(t *testing.T) {
 						t.Fatalf("hidden %s leaked", table)
 					}
 				}
+				var events int
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='recurrence.occurred' AND after#>>'{run,id}'=$1`, first.Run.ID).Scan(&events); err != nil {
+					return err
+				}
+				if events != 0 {
+					t.Fatal("private run receipt leaked through audit events")
+				}
 				return nil
 			}); err != nil {
 				t.Fatal(err)

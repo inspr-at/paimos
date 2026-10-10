@@ -61,6 +61,15 @@ CREATE INDEX routine_runs_history ON routine_runs(tenant_id,recurrence_id,create
 CREATE INDEX routine_runs_owner_history ON routine_runs(tenant_id,owner_principal_id,created_at DESC,id DESC);
 CREATE INDEX routine_runs_pending ON routine_runs(tenant_id,created_at,id) WHERE state='pending';
 
+-- Pending run identity/digests in occurrence audit snapshots share the run's
+-- personal/workspace/project boundary. Legacy snapshots without run stay valid.
+CREATE POLICY events_routine_run_scope ON events AS RESTRICTIVE FOR SELECT
+ USING (type NOT IN ('recurrence.occurred','recurrence.skipped')
+  OR ((after->'run' IS NULL OR after->'run'='null'::jsonb
+       OR EXISTS(SELECT 1 FROM routine_runs r WHERE r.tenant_id=events.tenant_id AND r.id=aeon_uuid_or_null(after#>>'{run,id}')))
+   AND (before->'run' IS NULL OR before->'run'='null'::jsonb
+       OR EXISTS(SELECT 1 FROM routine_runs r WHERE r.tenant_id=events.tenant_id AND r.id=aeon_uuid_or_null(before#>>'{run,id}')))));
+
 CREATE TABLE routine_attempts (
  tenant_id uuid NOT NULL REFERENCES tenants(id),
  id uuid NOT NULL DEFAULT gen_random_uuid(),
