@@ -24,6 +24,10 @@ func TestLeadCLIContractAndProofPrivacy(t *testing.T) {
 					_, _ = w.Write([]byte(`{"id":"` + project + `","key":"LEAD"}`))
 					return
 				}
+				if r.URL.Path == "/api/projects/lookup" {
+					_, _ = w.Write([]byte(`{"id":"` + project + `","key":"LEAD"}`))
+					return
+				}
 				if r.URL.Path == "/api/nodes" {
 					_, _ = w.Write([]byte(`{"items":[{"id":"` + project + `","key":"` + project + `","kind_id":"p"}]}`))
 					return
@@ -185,6 +189,8 @@ func TestHarnessLeadClaimUsesExistingFilesAndRedactsProof(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/api/nodes/" + project:
+					_, _ = w.Write([]byte(`{"id":"` + project + `","key":"LEAD"}`))
+				case "/api/projects/lookup":
 					_, _ = w.Write([]byte(`{"id":"` + project + `","key":"LEAD"}`))
 				case "/api/nodes":
 					_, _ = w.Write([]byte(`{"items":[{"id":"` + project + `","key":"` + project + `","kind_id":"p"}]}`))

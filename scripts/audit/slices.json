@@ -156,7 +156,8 @@
         "internal/client/**",
         "internal/plugins/**",
         "internal/events/**",
-        "internal/attachedmsg/**"
+        "internal/attachedmsg/**",
+        "internal/cli/project_identity_test.go"
       ]
     },
     {
@@ -195,7 +196,9 @@
         "internal/fromclassic/**",
         "internal/quotepdf/**",
         "internal/deliveryvote/**",
-        "internal/workorders/**"
+        "internal/workorders/**",
+        "internal/nodes/project_lookup.go",
+        "internal/nodes/project_lookup_test.go"
       ]
     },
     {

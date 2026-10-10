@@ -35,6 +35,8 @@ func TestRegisterRejectsEpicTicket(t *testing.T) {
 			}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
 			w.Write([]byte(`{"principal":{"id":"p","name":"worker"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects/lookup":
+			_ = json.NewEncoder(w).Encode(project)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
 			q := r.URL.Query()
 			switch {

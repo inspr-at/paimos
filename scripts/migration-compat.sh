@@ -86,8 +86,10 @@ SQL
     GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
   start_previous
   python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
+  echo "Previous release reads passed: $tag on the candidate schema"
   if [[ "$account_use" = below-floor ]]; then
     python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
+    echo "Account-use rollback boundary passed: $tag on the candidate schema"
   fi
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
