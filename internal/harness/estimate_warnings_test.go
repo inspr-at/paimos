@@ -27,8 +27,12 @@ func TestHeartbeatIsolationCommitAndAuthority(t *testing.T) {
 	path := "/api/projects/" + f.project + "/harness-sessions/" + session + "/heartbeat"
 	old := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET progress_pct=100,
-			eta_live_at=$2,eta_reported_at=$2,process_observed_at=$2 WHERE id=$1`, session, old)
+		if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET progress_pct=100,
+			eta_live_at=$2,eta_reported_at=$2,process_observed_at=$2 WHERE id=$1`, session, old); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO ticket_live_eta(tenant_id,node_id,eta_live_at,reported_at,reported_by)
+			VALUES($1,$2,$3,$3,$4)`, f.person.TenantID, f.ticket, old, f.agent.ID)
 		return err
 	})
 	enabled := false
@@ -50,14 +54,14 @@ func TestHeartbeatIsolationCommitAndAuthority(t *testing.T) {
 	if _, err := blocker.Exec(ctx, `LOCK TABLE eta_settings IN ACCESS EXCLUSIVE MODE`); err != nil {
 		t.Fatal(err)
 	}
-	waitBlocked := func() {
+	waitBlocked := func(query string) {
 		t.Helper()
 		for {
 			var waiting bool
 			if err := f.db.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
 				WHERE datname=current_database() AND wait_event_type='Lock'
-				AND query LIKE '%SELECT interval_minutes FROM eta_settings%'
-				AND $1::int=ANY(pg_blocking_pids(pid)))`, blockerPID).Scan(&waiting); err != nil {
+				AND query LIKE $2
+				AND $1::int=ANY(pg_blocking_pids(pid)))`, blockerPID, query).Scan(&waiting); err != nil {
 				t.Fatal(err)
 			}
 			if waiting {
@@ -79,7 +83,7 @@ func TestHeartbeatIsolationCommitAndAuthority(t *testing.T) {
 		f.mux.ServeHTTP(w, r)
 		legacy <- w
 	}()
-	waitBlocked()
+	waitBlocked("%SELECT interval_minutes FROM eta_settings%")
 	assertStored := func(want int64, accepted bool) {
 		t.Helper()
 		f.tx(t, f.person, func(tx pgx.Tx) error {
@@ -117,11 +121,11 @@ func TestHeartbeatIsolationCommitAndAuthority(t *testing.T) {
 	projection := make(chan error, 1)
 	go func() {
 		projection <- db.InTenant(tenant.WithPrincipal(projectionCtx, f.person), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
-			var minutes int
-			return tx.QueryRow(projectionCtx, `SELECT coalesce((SELECT interval_minutes FROM eta_settings),10)`).Scan(&minutes)
+			_, err := eta.LoadAggregates(projectionCtx, tx, []string{f.ticket})
+			return err
 		})
 	}()
-	waitBlocked()
+	waitBlocked("%aeon_work_aggregates%")
 	enabled = true
 	beat := make(chan *httptest.ResponseRecorder, 1)
 	go func() {

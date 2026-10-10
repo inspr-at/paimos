@@ -210,9 +210,12 @@ func heartbeatReceipt(s Session) heartbeatResponse {
 	if s.Role == "coordinator" && s.StoppedAt == nil && s.ArchivedAt == nil {
 		s.ProgressPct = nil
 	}
-	// Until a read computes staleness from the current reporting interval,
-	// retain the conservative attention hint for any outstanding estimate.
-	s.EtaStale = s.EtaReportedAt != nil && s.StoppedAt == nil
+	// The reporting interval is constrained to at most 240 minutes. Beyond
+	// two maximum intervals the estimate is certainly stale; anything newer
+	// has unknown freshness until a read loads the setting. Use the committed
+	// beat's database timestamp, never the API host's clock.
+	s.EtaStale = s.StoppedAt == nil && s.EtaReportedAt != nil && s.HeartbeatAt != nil &&
+		s.HeartbeatAt.Sub(*s.EtaReportedAt) > 480*time.Minute
 	return heartbeatResponse{reporterSession(s), []EstimateWarning{{
 		Code: "projection_unavailable",
 		Hint: "Heartbeat accepted; ETA freshness, coordinator progress and estimate guidance are unknown on this receipt. Read session status separately; a failed read is not a failed heartbeat.",
