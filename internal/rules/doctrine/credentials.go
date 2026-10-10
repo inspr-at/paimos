@@ -26,6 +26,11 @@ var (
 // ErrCredential does not disclose whether a reference exists or why it was denied.
 var ErrCredential = errors.New("credential unavailable")
 
+// A moved marker does not revoke access to an already indexed pin. Cached
+// delivery may tolerate this exact freshness failure; fetches, mutations and
+// the private quotation guard continue to require authorizeSource to succeed.
+var errMirrorCommitChanged = gitFail("the host mirror commit changed; the indexed pin is stale; reindex the source")
+
 // Credentials resolves a credential reference to a read-only token. Aeon
 // stores only the reference (a name such as doctrine-private-read). The token
 // is a host-provisioned file named after it in Dir, the server's
@@ -154,7 +159,7 @@ func (c Credentials) authorizeSource(s Source, tenantID string) error {
 			return err
 		}
 		if commit != s.Commit {
-			return gitFail("the host mirror commit changed; reindex the source")
+			return errMirrorCommitChanged
 		}
 	}
 	return nil

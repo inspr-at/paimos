@@ -298,12 +298,18 @@ func (m *Module) load(ctx context.Context, p tenant.Principal, permission string
 		for _, s := range sources {
 			if s.CredentialRef != "" {
 				if err := m.credentials.authorizeSource(s, p.TenantID); err != nil {
-					// A revoked grant also hides cached bytes without preventing
-					// the owner from managing the source or reading other sources.
-					s.IndexError, s.IndexedAt = safeMessage(err), nil
-					s.Skipped = nil
-					all = append(all, loaded{source: s})
-					continue
+					if errors.Is(err, errMirrorCommitChanged) && s.IndexedAt != nil {
+						// Keep the authorized indexed pin visible with a freshness
+						// warning. The private quotation guard stays strict.
+						s.IndexError = safeMessage(err)
+					} else {
+						// A revoked grant or invalid mirror hides cached bytes
+						// without preventing management or reads of other sources.
+						s.IndexError, s.IndexedAt = safeMessage(err), nil
+						s.Skipped = nil
+						all = append(all, loaded{source: s})
+						continue
+					}
 				}
 			}
 			files, err := cachedFiles(ctx, tx, s)
@@ -575,9 +581,9 @@ func (m *Module) reindex(r *http.Request, p tenant.Principal) (any, error) {
 	}); err != nil {
 		return nil, err
 	}
-	if source.Repository != m.repositories.Private() {
+	if p.TenantID == m.app.TenantID && source.Repository != m.repositories.Private() {
 		if err := m.EnsureDefaultSource(ctx); err != nil {
-			return nil, err
+			slog.Error("doctrine default source", "err", err)
 		}
 	}
 	m.index(context.WithoutCancel(ctx), p, id)

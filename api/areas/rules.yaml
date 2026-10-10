@@ -1191,7 +1191,7 @@ components:
         credential_ref: {type: string, description: "Host credential name, github-app, or host-mirror; never a token"}
         url: {type: string, format: uri}
         state: {type: string, enum: [ready, not_indexed, failed]}
-        error: {type: string, maxLength: 300}
+        error: {type: string, maxLength: 300, description: "Read or freshness warning. An authorized indexed host-mirror pin remains ready with its cached files when the host marker advances; error marks it stale until reindex. Revoked grants or invalid mirrors hide cached files. Public proposals still require a fresh private quotation guard."}
         indexed_at: {type: string, format: date-time}
         files: {type: array, items: {"$ref": "#/components/schemas/DoctrineFile"}}
         skipped: {type: array, maxItems: 50, items: {"$ref": "#/components/schemas/DoctrineSkip"}}

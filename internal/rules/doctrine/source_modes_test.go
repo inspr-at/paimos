@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -329,12 +330,13 @@ func TestDoctrineHostDefaultRegistration(t *testing.T) {
 					t.Fatal(err)
 				}
 				stale := find(f.layer(owner, "GET", "/api/rules/doctrine", nil), privateRepository)
-				if stale.State != "failed" || len(stale.Files) != 0 {
-					t.Fatal("changed marker exposed stale cached rules")
+				if stale == nil || stale.State != "ready" || stale.Commit != source.Commit || stale.IndexedAt == nil || !reflect.DeepEqual(stale.Files, source.Files) || !strings.Contains(stale.Error, "stale") {
+					t.Fatal("changed marker lost or mislabeled the authorized indexed pin")
 				}
 				if err := db.InTenant(t.Context(), d.App, tid, func(tx pgx.Tx) error {
-					_, err := m.privateGuard(t.Context(), tx, owner)
-					if err == nil {
+					guard, err := m.privateGuard(t.Context(), tx, owner)
+					var failure *failure
+					if guard != nil || !errors.As(err, &failure) || failure.Code != "private_index_unavailable" {
 						t.Fatal("changed marker retained a stale private guard")
 					}
 					return nil
@@ -342,7 +344,7 @@ func TestDoctrineHostDefaultRegistration(t *testing.T) {
 					t.Fatal(err)
 				}
 				refreshed := find(f.layer(owner, "POST", "/api/rules/doctrine/sources/"+source.ID+"/index", nil), privateRepository)
-				if refreshed.Commit != nextCommit || refreshed.State != "ready" {
+				if refreshed.Commit != nextCommit || refreshed.State != "ready" || refreshed.Error != "" {
 					t.Fatalf("reindexed mirror: %+v", refreshed)
 				}
 				allowCredential(t, m.credentials.MirrorDir, "host-mirror", credentialTenantB, privateRepository)

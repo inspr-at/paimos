@@ -79,7 +79,10 @@ grant the DCO and independent publication gate; proposals retain those checks.
 
 An explicitly set `AEON_DOCTRINE_PRIVATE_REPOSITORY`, together with
 `AEON_DOCTRINE_APP_TENANT_ID`, enables host-owned default registration at
-startup and when a person reindexes a source. The private repository is added
+startup and when a person in that host-configured workspace reindexes a source.
+Default-source maintenance is best-effort: its failure is logged and does not
+block reindexing a different source. Other workspaces never trigger it.
+The private repository is added
 with `main`, default `docs/AGENTS-*.md` paths and `github-app`, then indexed.
 Concurrent starts and restarts keep the same source and produce just one
 `doctrine.source_added` event, attributed to System. A tenant-registered source
@@ -125,9 +128,12 @@ markers, writable mounts and escaping paths fail closed.
 
 Mirror reads make no network calls. The visible index and the full private
 quotation guard use the same bounded snapshot at the marker commit. A changed
-marker hides stale cached rules and refuses the stale private guard until
-reindex; reindex advances the pin and both indexes atomically. Restarts also
-refresh a moved mirror. Removing a host grant hides cached content immediately.
+marker keeps the authorized indexed pin available for rule delivery, with a
+stale warning in the visible index and session-file release pointer. Delivery
+uses only cached bytes at that pin, never the new export. The private quotation
+guard refuses a moved marker until reindex; reindex advances the pin and both
+indexes atomically. Restarts also refresh a moved mirror. Removing a host grant
+or invalidating the mirror hides cached content immediately.
 Tenant source management remains person-only; host default registration is the
 sole registration path that does not require a person. Publication and release
 authorities remain governed by the existing gates.
