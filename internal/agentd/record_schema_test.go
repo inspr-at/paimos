@@ -76,9 +76,16 @@ func TestRecordSchemaGolden(t *testing.T) {
 func TestRecordSchemaForwardRecoveryAndDowngrade(t *testing.T) {
 	t.Run("routine-version-5", func(t *testing.T) {
 		grant := routineTestGrant("31")
-		want := Record{RoutineWorkspace: &RoutineWorkspace{Grant: grant, ID: strings.Repeat("a", 64), Path: filepath.Join(t.TempDir(), "checkout"), Branch: "routine/" + grant.LaunchID}, TenantID: grant.TenantID, PrincipalID: grant.PrincipalID, RunID: grant.AgentRunID, Generation: grant.DaemonGeneration, LaunchState: launchAttempted, State: "ownership_lost"}
+		root, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(root, 0700); err != nil {
+			t.Fatal(err)
+		}
+		want := Record{RoutineWorkspace: &RoutineWorkspace{Grant: grant, ID: strings.Repeat("a", 64), Path: filepath.Join(root, "checkout"), Branch: "routine/" + grant.LaunchID}, TenantID: grant.TenantID, PrincipalID: grant.PrincipalID, RunID: grant.AgentRunID, Generation: grant.DaemonGeneration, LaunchState: launchAttempted, State: "ownership_lost"}
 		want.Workspace = want.RoutineWorkspace.Path
-		config := localjournal.Config[Record]{Directory: t.TempDir(), Prefix: "routine", Version: 5, MaxBytes: 4 << 20, MaxRecords: 4096, Key: func(r Record) (string, error) { return r.RunID, nil }, Validate: validateLaunchRecord}
+		config := localjournal.Config[Record]{Directory: root, Prefix: "routine", Version: 5, MaxBytes: 4 << 20, MaxRecords: 4096, Key: func(r Record) (string, error) { return r.RunID, nil }, Validate: validateLaunchRecord}
 		old, err := localjournal.Open(config)
 		if err != nil {
 			t.Fatal(err)
