@@ -1540,6 +1540,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestHarnessHoldReleaseRestartsProbeClockOnlyOnce","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestHarnessSafetyPollingRecoveryAndOwnership","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestHeartbeatAndChildDeadline","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestHookNotePortRechecksRemoteAuthorityBeforeDisclosure","tier":"ESSENTIAL"}
@@ -2657,6 +2659,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestQueuedRunNotificationsWakeAndRecheckExactKey","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRequestedAccountIsValidatedAndAuditedWithoutReservation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRoutinePreparationPreservesAuthorityCriteriaAndPickup","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunAndQueueAccountContextChecks","tier":"ESSENTIAL"}
     ,
