@@ -28,15 +28,19 @@ func writeRenderedRelative(workspace, rel, body string) error {
 	return writeRenderedAt(dir, filepath.Base(rel), body)
 }
 
-// Open the workspace once, then create/open each child relative to the held
-// parent. Never re-resolve a descendant through a pathname: a symlink planted
-// before a component is opened is refused, and replacing an opened component
-// cannot redirect subsequent operations to the symlink's target.
+// Resolve the operator-chosen workspace root once, then open it and create/open
+// each child relative to the held parent. A symlink planted before a descendant
+// is opened is refused; replacing an opened component cannot redirect later
+// operations to the symlink's target.
 func openRenderedDir(workspace, rel string) (*os.File, error) {
 	if !filepath.IsLocal(rel) {
 		return nil, fmt.Errorf("render directory %s escapes the workspace", rel)
 	}
-	fd, err := unix.Open(workspace, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	root, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		return nil, fmt.Errorf("resolve render workspace %s: %w", workspace, err)
+	}
+	fd, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open render workspace %s: %w", workspace, err)
 	}
@@ -60,7 +64,7 @@ func openRenderedDir(workspace, rel string) (*os.File, error) {
 		}
 		fd = next
 	}
-	return os.NewFile(uintptr(fd), filepath.Join(workspace, rel)), nil
+	return os.NewFile(uintptr(fd), filepath.Join(root, rel)), nil
 }
 
 func writeRenderedAt(dir *os.File, name, body string) error {
