@@ -138,7 +138,7 @@ func TestStaleWorkReleaseRetainsAdmissionUntilExit(t *testing.T) {
 				return nil
 			})
 			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, blocked, daemon, []Account{target}, map[string]int64{"requests": 1}), 409, nil)
-			status, raw := call(t, mod, &admin, "", "DELETE", "/api/agent-accounts/"+first.ID, "")
+			status, raw := call(t, mod, &admin, "", "POST", "/api/agent-accounts/"+first.ID+"/archive", "")
 			if status != 409 || !strings.Contains(string(raw), "account_busy") {
 				t.Fatalf("unconfirmed writer lost account removal protection: %d %s", status, raw)
 			}

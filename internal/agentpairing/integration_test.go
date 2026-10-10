@@ -574,8 +574,8 @@ func TestPairingStaleWorkReleaseRetainsCapacityAndDrain(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "", 200)
-		retryErrorCode(t, f.call("DELETE", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 409), "runs_unsettled")
-		retryErrorCode(t, f.call("DELETE", "/api/agent-accounts/"+e.AccountID, nil, true, "", 409), "account_busy")
+		retryErrorCode(t, f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/remove", nil, true, "", 409), "runs_unsettled")
+		retryErrorCode(t, f.call("POST", "/api/agent-accounts/"+e.AccountID+"/archive", nil, true, "", 409), "account_busy")
 	})
 }
 
