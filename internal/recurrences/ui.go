@@ -195,12 +195,16 @@ func publicationKey(p Publication) string {
 	return ""
 }
 func (m *Module) releases(ctx context.Context, tx pgx.Tx, item Recurrence, now time.Time) ([]ReleaseChoice, bool, error) {
+	projects := []string{item.ProjectID}
+	if releaseSubscription(item.Input) {
+		projects = sourceProjects(item.Input)
+	}
 	pubs := map[string]ReleaseChoice{}
 	var rows pgx.Rows
 	var err error
 	truncated := false
 	if releaseSubscription(item.Input) {
-		rows, err = tx.Query(ctx, `SELECT e.id FROM events e WHERE e.type='release.published' AND e.node_id=ANY($1::uuid[]) ORDER BY e.id DESC LIMIT 101`, sourceProjects(item.Input))
+		rows, err = tx.Query(ctx, `SELECT e.id FROM events e WHERE e.type='release.published' AND e.node_id=ANY($1::uuid[]) ORDER BY e.id DESC LIMIT 101`, projects)
 		if err != nil {
 			return nil, false, err
 		}
@@ -260,7 +264,7 @@ func (m *Module) releases(ctx context.Context, tx pgx.Tx, item Recurrence, now t
 			return nil, false, err
 		}
 	}
-	rows, err = tx.Query(ctx, `SELECT id::text,coalesce(fields->>'project_key','') FROM nodes WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL`, sourceProjects(item.Input))
+	rows, err = tx.Query(ctx, `SELECT id::text,coalesce(fields->>'project_key','') FROM nodes WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL`, projects)
 	if err != nil {
 		return nil, false, err
 	}
@@ -280,7 +284,7 @@ func (m *Module) releases(ctx context.Context, tx pgx.Tx, item Recurrence, now t
 	if err != nil {
 		return nil, false, err
 	}
-	if projectCount != len(sourceProjects(item.Input)) {
+	if projectCount != len(projects) {
 		return nil, false, pgx.ErrNoRows
 	}
 	for _, p := range m.history {
@@ -364,8 +368,10 @@ func (m *Module) listReleases(w http.ResponseWriter, r *http.Request) {
 		if err = readDefinition(r.Context(), tx, p, item.Input); err != nil {
 			return err
 		}
-		if err = authorizeSources(r.Context(), tx, p, item.Input); err != nil {
-			return err
+		if item.Trigger.Event == "release.published" {
+			if err = authorizeSources(r.Context(), tx, p, item.Input); err != nil {
+				return err
+			}
 		}
 		now, err := m.clock(r.Context(), tx)
 		if err != nil {
