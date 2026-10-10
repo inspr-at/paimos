@@ -245,8 +245,7 @@ func (rt *runtime) harnessProjectCtx(ctx context.Context, ref string) (string, e
 	if strings.TrimSpace(ref) == "" {
 		return "", usagef("--project is required")
 	}
-	n, err := rt.projectNodeCtx(ctx, ref)
-	return n.ID, err
+	return rt.projectIdentityCtx(ctx, ref)
 }
 
 // A coordinator can supply its known project UUID to keep heartbeat reports

@@ -23,11 +23,13 @@ app="aeon-compat-app-$suffix"
 network="aeon-compat-$suffix"
 image="ghcr.io/inspr-at/aeon@$digest"
 # AEON-1051's activated refusal gate needs a binary below the capability floor.
-# The latest release may already advertise that capability. Keep testing its
-# read compatibility, and retain the last pre-capability release separately.
+# Release 129 and later advertise that capability. Keep testing the latest
+# release's read compatibility and retain the last pre-capability release
+# separately as an immutable counterexample.
 # Published release v261009095632.0.0, source 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
 legacy_tag=v261009095632.0.0
-legacy_image=ghcr.io/inspr-at/aeon@sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
+legacy_digest=sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
+legacy_image="ghcr.io/inspr-at/aeon@$legacy_digest"
 cleanup() {
   docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
@@ -36,14 +38,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Previous published release: $tag"
-echo "Previous registry image: $image"
-docker pull --platform linux/amd64 "$image"
-# Pull the release-note digest, then resolve its local config ID for both boots.
-image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
-[[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
+pull_previous() {
+  echo "Previous published release: $tag"
+  echo "Previous registry image: $image"
+  docker pull --platform linux/amd64 "$image"
+  # Pull the release-note digest, then resolve its local config ID for boots.
+  image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
+  [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
+  echo "Previous image: $image_id"
+}
+pull_previous
+previous_tag="$tag"
+previous_image="$image"
 previous_image_id="$image_id"
-echo "Previous image: $image_id"
 docker network create "$network" >/dev/null
 docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=aeon \
@@ -86,23 +93,28 @@ AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=di
   GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
 start_image "$image_id"
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
+echo "Previous release reads passed: $tag on the candidate schema"
 
 # Verify the immutable pre-capability binary and the seeded reads before
 # activation. The existing exact SQLSTATE/entry, empty/populated pool and
 # background-write refusal assertions remain mandatory for that binary.
-echo "Account-use rollback fixture: $legacy_tag; image: $legacy_image"
-docker pull --platform linux/amd64 "$legacy_image"
-legacy_image_id="$(docker image ls --quiet --no-trunc "$legacy_image" | sort -u)"
-[[ "$legacy_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable legacy image ID' >&2; exit 1; }
-docker stop --time 30 "$app" >/dev/null
-docker container rm "$app" >/dev/null
-start_image "$legacy_image_id"
-python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}"
+legacy_image_id="$previous_image_id"
+if [[ "$digest" != "$legacy_digest" ]]; then
+  echo "Account-use rollback fixture: $legacy_tag; image: $legacy_image"
+  docker pull --platform linux/amd64 "$legacy_image"
+  legacy_image_id="$(docker image ls --quiet --no-trunc "$legacy_image" | sort -u)"
+  [[ "$legacy_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable legacy image ID' >&2; exit 1; }
+  docker stop --time 30 "$app" >/dev/null
+  docker container rm "$app" >/dev/null
+  start_image "$legacy_image_id"
+  python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}"
+fi
 python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}" --database-container "$db"
-echo "Migration compatibility passed: $tag on the candidate schema"
+echo "Account-use rollback boundary passed: $legacy_tag on the candidate schema"
+echo "Migration compatibility passed: latest-release reads and below-floor account-use boundary"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
-    "$tag" "$image" "$previous_image_id" >> "$GITHUB_STEP_SUMMARY"
+    "$previous_tag" "$previous_image" "$previous_image_id" >> "$GITHUB_STEP_SUMMARY"
   printf 'Rollback fixture %s; registry image %s; loaded image %s verified activated empty/populated pools refuse below-floor binaries.\n' \
     "$legacy_tag" "$legacy_image" "$legacy_image_id" >> "$GITHUB_STEP_SUMMARY"
 fi
