@@ -17,6 +17,10 @@ backfilled notes. The existing hide setting remains independent. Marking work
 clears a previous missed-release flag; the autopilot never creates that flag for
 marked work. Benefit completion requirements remain in force.
 
+The database capture allowlist must include `no_release_needed` before this
+feature is deployed. Previously frozen captures retain their original contents;
+changing a current ticket does not rewrite historical release notes.
+
 The CLI supports the mark on creation and update:
 
 ```sh
