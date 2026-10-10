@@ -36,6 +36,11 @@ db="aeon-compat-db-$suffix"
 app="aeon-compat-app-$suffix"
 network="aeon-compat-$suffix"
 image="ghcr.io/inspr-at/aeon@$digest"
+# AEON-1051's activated refusal gate needs a binary below the capability floor.
+# The latest release may already advertise that capability. Keep testing its
+# read compatibility, and retain the last pre-capability release separately.
+# Published release v261009095632.0.0, source 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
+floor_image="ghcr.io/inspr-at/aeon@$floor_digest"
 cleanup() {
   docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
@@ -50,6 +55,7 @@ docker pull --platform linux/amd64 "$image"
 # Pull the release-note digest, then resolve its local config ID for both boots.
 image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
 [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
+previous_image_id="$image_id"
 echo "Previous image: $image_id"
 docker network create "$network" >/dev/null
 docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
@@ -92,6 +98,9 @@ AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=di
   GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
 start_previous
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
+# Verify the immutable pre-capability binary and its seeded reads before
+# activation. Exact SQLSTATE/entry, empty/populated pool and background-write
+# refusal assertions remain mandatory in the separate disposable database.
 if [[ "$probe_mode" = account-use-floor ]]; then
   python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
 else
@@ -99,10 +108,13 @@ else
   # release must never be made to look incapable, or counted as a refusal.
   cleanup
   trap - EXIT
+  echo "Account-use rollback boundary release: $floor_tag"
   bash scripts/migration-compat.sh "$floor_tag" "$floor_digest" account-use-floor
 fi
+floor_image_id="$(docker image ls --quiet --no-trunc "$floor_image" | sort -u)"
+[[ "$floor_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable rollback boundary image ID' >&2; exit 1; }
 echo "Migration compatibility passed: $tag on the candidate schema"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
-    "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations. Account-use refusal boundary %s; registry image %s; loaded image %s passed the activated legacy probes.\n' \
+    "$tag" "$image" "$previous_image_id" "$floor_tag" "$floor_image" "$floor_image_id" >> "$GITHUB_STEP_SUMMARY"
 fi
