@@ -347,6 +347,11 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		if in.ProjectID != before.ProjectID || in.ParentID != before.ParentID {
 			return workorders.Fail(400, "project and parent are immutable")
 		}
+		// Legacy routines and their audit events are shared with project readers.
+		// Conversion must preserve that visibility boundary.
+		if before.Definition == nil && in.Definition != nil && (in.Definition.Scope.Kind != "project" || in.Definition.Scope.ProjectID != before.ProjectID) {
+			return workorders.Fail(400, "legacy definitions must retain their project scope; create a new scoped definition")
+		}
 		if before.Definition != nil && (in.Definition.Scope != before.Definition.Scope || in.Definition.OwnerPrincipalID != before.Definition.OwnerPrincipalID) {
 			return workorders.Fail(400, "definition scope and owner are immutable")
 		}
