@@ -73,6 +73,7 @@ import { useSession } from './session'
 import { can } from '../lib/authz'
 import { registerAgentThemeRestoration } from '../lib/agentTheme'
 import { publishTheme } from '../lib/themeRuntime'
+import { toast } from '../lib/toast'
 import * as themes from '../lib/themes'
 import type { ActiveTheme, ThemeRecord, ThemesPage } from '../lib/themes'
 
@@ -599,10 +600,16 @@ export function useThemeEditor(): ThemeEditor {
 }
 
 /** Restore through the shared editor, reusing its first identity load. */
-export function restoreThemeEditor(identity: string): Promise<void> {
+export async function restoreThemeEditor(identity: string): Promise<void> {
   const existing = shared
   const editor = useThemeEditor()
-  if (!identity || editor.state.value.identity !== identity) return Promise.resolve()
-  return existing ? editor.restore(identity) : editor.idle()
+  if (!identity || editor.state.value.identity !== identity) return
+  const restoring = existing ? editor.restore(identity) : editor.idle()
+  const token = editor.state.value.token
+  await restoring
+  const state = editor.state.value
+  if (state.identity !== identity || state.token !== token || state.pending) return
+  if (!state.active && state.failure) toast('Your theme could not be loaded. Default colours are shown.', { tone: 'error' })
+  else if (state.active?.fallback_notice) toast('The theme you used was deleted. The workspace default is now in use.')
 }
 registerAgentThemeRestoration(restoreThemeEditor)

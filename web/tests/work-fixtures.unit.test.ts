@@ -2,6 +2,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import type { Page, Route } from '@playwright/test'
 import { fixtures, mockWork, type Fixtures } from './work-fixtures'
+import { PORCELAIN } from '../src/lib/themeEngine'
+import type { ThemeRecord } from '../src/lib/themes'
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
@@ -41,7 +43,7 @@ async function world(data: Fixtures) {
   let handle!: (route: Route) => Promise<unknown>
   await mockWork({ addInitScript: async () => {}, route: async (_pattern: string, handler: typeof handle) => { handle = handler } } as unknown as Page, data)
   return async (path: string, method = 'GET', body: unknown = null) => {
-    let answer!: { status?: number; json?: { items?: { id: string }[]; facets?: Record<string, Record<string, number>>; skipped?: { id: string; code?: string }[] } }
+    let answer!: { status?: number; json?: { theme?: ThemeRecord; items?: { id: string }[]; facets?: Record<string, Record<string, number>>; skipped?: { id: string; code?: string }[] } }
     await handle({
       request: () => ({ url: () => `https://fixture.test/api${path}`, method: () => method, postDataJSON: () => body, headers: () => ({}) }),
       fulfill: async (value: typeof answer) => { answer = value },
@@ -49,6 +51,13 @@ async function world(data: Fixtures) {
     return answer
   }
 }
+
+it('AEON-644: shared work fixtures supply matching active and listed themes at authenticated load', async () => {
+  const request = await world(fixtures())
+  const active = await request('/me/theme'), listed = await request('/themes')
+  expect(active.json).toEqual({ theme: expect.objectContaining({ tenant_id: 't1', scope: 'default', owner_principal_id: null, values: PORCELAIN }), default_theme_id: active.json?.theme?.id, selected_theme_id: null, revision: 0, fallback_notice: null })
+  expect(listed.json).toEqual({ items: [active.json?.theme], next_cursor: null })
+})
 
 it('leaf facets count terminal work across retired kinds without removing their parents', async () => {
   const data = fixtures(), original = data.nodes.map(node => node.id)

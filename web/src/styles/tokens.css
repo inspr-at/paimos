@@ -126,10 +126,15 @@
   --level-default: #8a9a9b;  --level-project: #d69b31;
   /* BEGIN GENERATED THEME light (scripts/theme-tokens.mjs) */
   --agent-working: #00870e;
+  --agent-working-ink: #ffffff;
   --agent-waiting: #c47a08;
+  --agent-waiting-ink: #102327;
   --agent-throttled: #7039c6;
+  --agent-throttled-ink: #ffffff;
   --agent-problem: #b92229;
+  --agent-problem-ink: #ffffff;
   --agent-idle: #6a7378;
+  --agent-idle-ink: #ffffff;
   --agent-idle-opacity: 0.55;
   --agent-art-scale: 1;
   --primary: #0e6f6c;
@@ -213,10 +218,15 @@
   --level-default: #8fa5a4;  --level-project: #e2b45a;
   /* BEGIN GENERATED THEME dark (scripts/theme-tokens.mjs) */
   --agent-working: #00d773;
+  --agent-working-ink: #102327;
   --agent-waiting: #ffd787;
+  --agent-waiting-ink: #102327;
   --agent-throttled: #ab71fa;
+  --agent-throttled-ink: #102327;
   --agent-problem: #f75653;
+  --agent-problem-ink: #102327;
   --agent-idle: #a3a3a3;
+  --agent-idle-ink: #102327;
   --agent-idle-opacity: 0.55;
   --agent-art-scale: 1;
   --primary: #a4e5df;
@@ -301,10 +311,15 @@
     --level-default: #8fa5a4;  --level-project: #e2b45a;
     /* BEGIN GENERATED THEME dark (scripts/theme-tokens.mjs) */
     --agent-working: #00d773;
+    --agent-working-ink: #102327;
     --agent-waiting: #ffd787;
+    --agent-waiting-ink: #102327;
     --agent-throttled: #ab71fa;
+    --agent-throttled-ink: #102327;
     --agent-problem: #f75653;
+    --agent-problem-ink: #102327;
     --agent-idle: #a3a3a3;
+    --agent-idle-ink: #102327;
     --agent-idle-opacity: 0.55;
     --agent-art-scale: 1;
     --primary: #a4e5df;
@@ -396,3 +411,8 @@
 :root { --project-l: .5; --project-c: .12; }
 :root[data-theme="dark"] { --project-l: .8; --project-c: .1; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --project-l: .8; --project-c: .1; } }
+
+/* AEON-644: ink for the remaining fixed semantic fills. */
+:root { --st-ok-on: #ffffff; --paused-mark-ink: #ffffff; }
+:root[data-theme="dark"] { --st-ok-on: #102327; --paused-mark-ink: #102327; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --st-ok-on: #102327; --paused-mark-ink: #102327; } }
