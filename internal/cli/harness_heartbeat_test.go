@@ -35,8 +35,8 @@ type hbCall struct {
 	body   map[string]any
 }
 
-// R10: an optional list/status 503 must not suppress an owned liveness POST
-// when the coordinator explicitly supplies its known project and harness.
+// R10/AEON-1107: an optional list/status 503 must not suppress an owned
+// liveness POST through either exact lookup or an explicit known project ID.
 func TestHeartbeatKnownProjectBypassesProjection(t *testing.T) {
 	var calls []hbCall
 	base := heartbeatFixture(t, &calls, "", "")
@@ -55,11 +55,14 @@ func TestHeartbeatKnownProjectBypassesProjection(t *testing.T) {
 	rt, _, _ := heartbeatRuntime(t, srv)
 	o := heartbeatTestOptions(t.TempDir())
 	session := heartbeatSession{id: transcriptSessionID, lease: "known-project-lease-00000000000001"}
-	if err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session); heartbeatStatus(err) != 503 {
+	if _, err := rt.projectNodeCtx(t.Context(), o.Project); heartbeatStatus(err) != 503 {
 		t.Fatalf("legacy lookup did not reproduce the list 503: %v", err)
 	}
 	if len(blockedQueries) != 1 || !strings.Contains(blockedQueries[0], "kind_id=project-kind") || !strings.Contains(blockedQueries[0], "limit=200") || len(hbWhere(calls, "POST", "/heartbeat")) != 0 {
 		t.Fatalf("unexpected failing reporter chain: queries=%v calls=%v", blockedQueries, calls)
+	}
+	if err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session); err != nil {
+		t.Fatalf("exact project lookup still depended on read projections: %v", err)
 	}
 	o.ProjectID = transcriptProjectID
 	if err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session); err != nil {
@@ -86,15 +89,24 @@ func TestHeartbeatKnownProjectBypassesProjection(t *testing.T) {
 	args := []string{"aeon", "harness", "heartbeat", "--project", "AEON", "--session", transcriptSessionID,
 		"--agent", "worker", "--worker-lease-file", leaseFile, "--activity-sequence", "1"}
 	if code, _, stderr := runCLI(args, ""); code == 0 || !strings.Contains(stderr, "api 503: Work aggregates exceeded") {
-		t.Fatalf("one-shot legacy lookup did not reproduce the list 503: code=%d %s", code, stderr)
+		t.Fatalf("one-shot without known harness did not reproduce the status 503: code=%d %s", code, stderr)
 	}
-	args = append(args, "--project-id", transcriptProjectID, "--harness", "codex")
+	args = append(args, "--harness", "codex")
+	if code, _, stderr := runCLI(args, ""); code != 0 {
+		t.Fatalf("one-shot exact lookup still depended on read projections: code=%d %s", code, stderr)
+	}
+	args = append(args, "--project-id", transcriptProjectID)
 	if code, _, stderr := runCLI(args, ""); code != 0 {
 		t.Fatalf("known one-shot project still depended on read projections: code=%d %s", code, stderr)
 	}
 	beats := hbWhere(calls, "POST", "/heartbeat")
-	if len(blockedQueries) != 2 || len(beats) != 2 || beats[1].path != harnessPath(transcriptProjectID, transcriptSessionID)+"/heartbeat" || beats[1].lease != session.lease || beats[1].body["max_session_file_bytes"] != float64(rules.SessionFileLimit("codex")) {
-		t.Fatalf("known reporter bypassed ownership or sent wrong client limit: queries=%v beats=%v", blockedQueries, beats)
+	if len(blockedQueries) != 2 || len(beats) != 4 || len(hbWhere(calls, "GET", "/projects/lookup")) != 3 {
+		t.Fatalf("reporter did extra projection work or lost a beat: queries=%v beats=%v", blockedQueries, beats)
+	}
+	for _, beat := range beats {
+		if beat.path != harnessPath(transcriptProjectID, transcriptSessionID)+"/heartbeat" || beat.lease != session.lease || beat.body["max_session_file_bytes"] != float64(rules.SessionFileLimit("codex")) {
+			t.Fatalf("known reporter bypassed ownership or sent wrong client limit: queries=%v beats=%v", blockedQueries, beats)
+		}
 	}
 }
 

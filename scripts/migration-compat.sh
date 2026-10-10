@@ -22,6 +22,13 @@ db="aeon-compat-db-$suffix"
 app="aeon-compat-app-$suffix"
 network="aeon-compat-$suffix"
 image="ghcr.io/inspr-at/aeon@$digest"
+# AEON-1051's entry refusal applies to binaries below the account-use floor.
+# Release 129 and later advertise that capability, so keep the last published
+# below-floor image as a separate immutable counterexample. Its release body
+# records this digest and source commit 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
+# The latest release still runs every ordinary compatibility read below.
+rollback_tag="v261009095632.0.0"
+rollback_digest="sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c"
 cleanup() {
   docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
@@ -30,13 +37,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Previous published release: $tag"
-echo "Previous registry image: $image"
-docker pull --platform linux/amd64 "$image"
-# Pull the release-note digest, then resolve its local config ID for both boots.
-image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
-[[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
-echo "Previous image: $image_id"
+pull_previous() {
+  echo "Previous published release: $tag"
+  echo "Previous registry image: $image"
+  docker pull --platform linux/amd64 "$image"
+  # Pull the release-note digest, then resolve its local config ID for boots.
+  image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
+  [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
+  echo "Previous image: $image_id"
+}
+pull_previous
 docker network create "$network" >/dev/null
 docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=aeon \
@@ -78,9 +88,26 @@ AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=di
   GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
 start_previous
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
-python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
-echo "Migration compatibility passed: $tag on the candidate schema"
+echo "Previous release reads passed: $tag on the candidate schema"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
     "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+fi
+
+if [[ "$digest" != "$rollback_digest" ]]; then
+  docker stop --time 30 "$app" >/dev/null
+  docker container rm "$app" >/dev/null
+  tag="$rollback_tag"
+  image="ghcr.io/inspr-at/aeon@$rollback_digest"
+  pull_previous
+  start_previous
+  # Prove the below-floor image and fixture work before activation too.
+  python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
+fi
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${rollback_tag#v}" --database-container "$db"
+echo "Account-use rollback boundary passed: $rollback_tag on the candidate schema"
+echo "Migration compatibility passed: latest-release reads and below-floor account-use boundary"
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  printf 'Below-floor release %s; registry image ghcr.io/inspr-at/aeon@%s; loaded image %s refused activated empty/populated pools at exact capability entry and created no reservation, claim or start.\n' \
+    "$rollback_tag" "$rollback_digest" "$image_id" >> "$GITHUB_STEP_SUMMARY"
 fi
