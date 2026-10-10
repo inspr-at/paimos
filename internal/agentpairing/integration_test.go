@@ -30,6 +30,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/modelregistry"
@@ -488,6 +489,75 @@ func TestPairingDrainSelectiveRevocationAndTombstone(t *testing.T) {
 		t.Fatal("stale setup revived revoked key")
 	}
 	f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "drain"}, true, "", 200)
+}
+
+// Risk: a stale ticket release drops host occupancy or revokes the paired
+// daemon during drain before that daemon can confirm its process has exited.
+func TestPairingStaleWorkReleaseRetainsCapacityAndDrain(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	e := v.Enrollments[0]
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	f.probe(v, e, key, 200)
+	f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_runs SET status='ownership_lost',ended_at=clock_timestamp(),trace='{"work_lifecycle_release":{"exit_unconfirmed":true}}' WHERE id=$1`, *e.VerificationRunID); err != nil {
+		t.Fatal(err)
+	}
+	policy := hostcapacity.Default()
+	policy.MaximumAgents = 1
+	f.call("PUT", "/api/agent-pairing/computers/"+*v.ComputerID+"/capacity", map[string]any{"expected_revision": v.Revision, "policy": policy}, true, "", 200)
+	var occupied agentpairing.View
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &occupied)
+	if occupied.HostCapacity == nil || occupied.HostCapacity.Running != 1 || occupied.HostCapacity.Reason != "maximum_agents" || !slices.Contains(occupied.Enrollments[0].ActiveRunIDs, *e.VerificationRunID) || occupied.AccountingState != "unconfirmed" {
+		t.Fatalf("unconfirmed process lost host or enrollment occupancy: %+v", occupied)
+	}
+	actor := tenant.Principal{ID: *v.PrincipalID, TenantID: f.tenantID, Kind: tenant.Agent}
+	err := db.InTenant(tenant.WithPrincipal(t.Context(), actor), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		if err := agentpairing.LockMutation(t.Context(), tx); err != nil {
+			return err
+		}
+		return agentpairing.RunFence(t.Context(), tx, e.AccountID, *e.VerificationRunID, true)
+	})
+	if denied, ok := err.(*agentpairing.Error); !ok || denied.Code != "host_capacity_wait" {
+		t.Fatalf("host admitted an unconfirmed process or rejected for another reason: %v", err)
+	}
+	var draining agentpairing.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "drain"}, true, "", 200), &draining)
+	if *draining.ComputerState != "draining" || draining.Enrollments[0].State != "draining" || draining.AccountingState != "unconfirmed" || !slices.Contains(draining.Enrollments[0].ActiveRunIDs, *e.VerificationRunID) {
+		t.Fatal("drain revoked the daemon needed to reconcile an unconfirmed process")
+	}
+	var holds int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, *e.VerificationRunID).Scan(&holds); err != nil || holds != 1 {
+		t.Fatalf("drain lost reservation: holds=%d err=%v", holds, err)
+	}
+	// Missing exit evidence and a different daemon cannot clear the hold.
+	for _, tc := range []struct {
+		process, daemon string
+		status          int
+	}{
+		{"unconfirmed", *v.DaemonID, 409}, {"exited", "other-daemon", 403}, {"exited", *v.DaemonID, 200},
+	} {
+		r := f.request("POST", "/api/runs/"+*e.VerificationRunID+"/telemetry", map[string]any{"sequence": 1, "kind": "finished", "status": "completed", "process_state": tc.process, "turn_count_delta": 1}, false, key)
+		r.Header.Set(agentruns.DaemonHeader, tc.daemon)
+		r.Header.Set(agentruns.GenerationHeader, "test-generation")
+		w := httptest.NewRecorder()
+		f.h.ServeHTTP(w, r)
+		if w.Code != tc.status {
+			t.Fatalf("exit report %s/%s: %d want %d: %s", tc.process, tc.daemon, w.Code, tc.status, w.Body.String())
+		}
+	}
+	var settled agentpairing.View
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &settled)
+	if *settled.ComputerState != "revoked" || settled.AccountingState != "settled" || len(settled.Enrollments[0].ActiveRunIDs) != 0 || settled.HostCapacity.Running != 0 {
+		t.Fatal("owned exit did not release occupancy and finish drain")
+	}
+	var retained bool
+	var reserved, used int64
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true',w.reserved,w.used FROM agent_runs r JOIN account_allowance_windows w ON w.account_id=r.account_id WHERE r.id=$1`, *e.VerificationRunID).Scan(&retained, &reserved, &used); err != nil || retained || reserved != 0 || used != 1 {
+		t.Fatalf("exit settlement: retained=%t reserved=%d used=%d err=%v", retained, reserved, used, err)
+	}
 }
 
 func TestPairingImmediateRevokeRetainsActiveAccounting(t *testing.T) {

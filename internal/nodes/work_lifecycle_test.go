@@ -880,19 +880,29 @@ func testWorkLifecycleStaleHolds(t *testing.T) {
 		})
 	}
 	for _, c := range []struct {
-		name      string
-		age       int
-		confirmed bool
-		want      int
+		name       string
+		age        int
+		closureAge int
+		reason     string
+		want       int
 	}{
-		{"young standalone order", 1, false, 409}, {"old standalone order", 3, false, 200}, {"confirmed standalone order", 1, true, 200},
+		{"young standalone order", 1, 0, "", 409}, {"old standalone order", 3, 0, "", 200}, {"confirmed standalone order", 1, 0, "completed", 200},
+		{"historical confirmed closure with new order", 1, 4, "completed", 409},
+		{"historical expired closure with new order", 1, 4, "heartbeat_lost", 409},
+		{"historical closure with old order", 3, 4, "completed", 200},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			p := newPrincipal(t, "stale-order")
 			project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
 			leaf := workNodeTest(t, p, project.ID, "open")
-			if c.confirmed {
-				lifecycleSession(t, p, project.ID, leaf.ID, true)
+			if c.reason != "" {
+				sid := lifecycleSession(t, p, project.ID, leaf.ID, true)
+				if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET stopped_at=now()-make_interval(hours=>$2),stop_reason=$3,heartbeat_at=NULL WHERE id=$1`, sid, c.closureAge, c.reason)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			var order string
 			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
@@ -912,6 +922,27 @@ func testWorkLifecycleStaleHolds(t *testing.T) {
 			}
 			if status == 409 && (!containsBytes(raw, order) || !containsBytes(raw, "age ")) {
 				t.Fatalf("missing order holder: %s", raw)
+			}
+			if status == 409 {
+				if !containsBytes(raw, "running work must publish a live session") {
+					t.Fatalf("standalone order rejected for the wrong reason: %s", raw)
+				}
+				if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+					var state string
+					var actions int
+					if err := tx.QueryRow(t.Context(), `SELECT status FROM work_orders WHERE node_id=$1`, order).Scan(&state); err != nil {
+						return err
+					}
+					if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM work_lifecycle_actions WHERE node_id=$1`, leaf.ID).Scan(&actions); err != nil {
+						return err
+					}
+					if state != "running" || actions != 0 || currentWorkTest(t, p, leaf.ID).State != "open" {
+						t.Fatal("held standalone order or ticket was mutated")
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if status == 200 {
 				if a := decode[workAction](t, status, raw, 200); a.State != "completed" {
