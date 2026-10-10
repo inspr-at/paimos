@@ -363,6 +363,8 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	doctrineMod := doctrine.New(pool, doctrine.Options{
 		Repositories:      cfg.DoctrineRepositories,
 		CredentialsDir:    cfg.DoctrineCredentialsDir,
+		MirrorDir:         cfg.DoctrineMirrorDir,
+		DefaultSource:     cfg.DoctrineDefaultSource,
 		GuardKey:          cfg.DoctrineGuardKey,
 		BinaryAllowlist:   cfg.DoctrineBinaryAllowlist,
 		AnalysisLearnings: knowledge.AnalysisLearnings,
@@ -373,7 +375,12 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	})
 	questionsMod.WithDoctrine(doctrineMod)
 	startWorker(func() { questionsMod.Run(workerCtx) })
-	startWorker(func() { doctrineMod.EnsurePrivateGuards(workerCtx) })
+	startWorker(func() {
+		if err := doctrineMod.EnsureDefaultSource(workerCtx); err != nil {
+			slog.Error("doctrine default source", "err", err)
+		}
+		doctrineMod.EnsurePrivateGuards(workerCtx)
+	})
 	startWorker(func() { doctrineMod.RunOutcomeAnalysis(workerCtx) })
 	reviewApp := &crossreview.GitHubApp{Config: crossreview.AppConfig{
 		ID: cfg.ReviewAppID, InstallationID: cfg.ReviewInstallationID, KeyFile: cfg.ReviewAppKeyFile,
@@ -472,7 +479,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			hours.New(pool, pluginRegistry),
 			directory.New(pool, pluginRegistry),
 		},
-		Middleware: []func(http.Handler) http.Handler{authMod.Middleware, (doctrine.Credentials{Dir: cfg.DoctrineCredentialsDir}).CatalogMiddleware, events.PositionMiddleware(pool)},
+		Middleware: []func(http.Handler) http.Handler{authMod.Middleware, doctrineMod.CatalogMiddleware, events.PositionMiddleware(pool)},
 	}
 	if tokenMod.Keys != nil {
 		api.AithemaOrigin = cfg.PublicURL

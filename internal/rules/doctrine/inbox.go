@@ -500,7 +500,7 @@ func (m *Module) inboxItems(ctx context.Context, actor tenant.Principal, full bo
 					loaded.denied = true
 				case err != nil:
 					return err
-				case s.CredentialRef != "" && m.credentials.authorize(s.CredentialRef, actor.TenantID, s.Repository) != nil:
+				case s.CredentialRef != "" && m.credentials.authorizeSource(s, actor.TenantID) != nil:
 					// A revoked grant hides the private text, as in the layer.
 					loaded.denied = true
 				case !full:
@@ -631,7 +631,7 @@ func (m *Module) submitInbox(r *http.Request, actor tenant.Principal) (any, erro
 			return fail(422, "unsupported_repository", "Only the deployment-configured doctrine repositories accept proposals; their visibility must match.")
 		}
 		if source.CredentialRef != "" {
-			if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
+			if err := m.credentials.authorizeSource(source, actor.TenantID); err != nil {
 				return err
 			}
 		}

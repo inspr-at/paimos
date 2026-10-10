@@ -106,7 +106,7 @@ func ResolveEscalation(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Wor
 		identities[harness+"/"+model+"/"+effort] = true
 	}
 	waiting := false
-	health, err := agentaccounts.HarnessHealthAt(ctx, tx, now)
+	health, err := agentaccounts.HarnessHealthAt(ctx, tx, now, q.ProjectID)
 	if err != nil {
 		return out, err
 	}

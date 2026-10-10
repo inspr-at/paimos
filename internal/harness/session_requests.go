@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/sessionrequest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -85,6 +86,9 @@ func (m *Module) requestSessionChange(r *http.Request, tx pgx.Tx, p tenant.Princ
 	} else {
 		if in.DisplayLabel != "" || !workorders.UUID(in.AccountID) || !workorders.UUID(in.ModelProfileID) {
 			return nil, workorders.Fail(400, "account and model profile from the catalog required")
+		}
+		if err := accountuse.RequireProject(ctx, tx, in.AccountID, s.ProjectID); err != nil {
+			return nil, err
 		}
 		// This requests a setting, not account switching or permission to launch.
 		// Keep the granted catalog profile immutable in the payload for the session.

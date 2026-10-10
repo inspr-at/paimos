@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -106,6 +107,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
 	return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		if err := agentpairing.LockMutation(ctx, tx); err != nil {
+			return err
+		}
+		if err := accountuse.LockShared(ctx, tx); err != nil {
 			return err
 		}
 		return fn(tx)

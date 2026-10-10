@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -146,6 +147,11 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 				}
 				if route.write {
 					if err := agentpairing.LockMutation(r.Context(), tx); err != nil {
+						return err
+					}
+				}
+				if route.write {
+					if err := accountuse.LockShared(r.Context(), tx); err != nil {
 						return err
 					}
 				}
@@ -361,6 +367,15 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	}
 	if err = requireWriterFree(ctx, tx, t.ID, ""); err != nil {
 		return queuePrepared{}, err
+	}
+	if in.Account != nil {
+		projectID := ""
+		if t.ProjectID != nil {
+			projectID = *t.ProjectID
+		}
+		if err := accountuse.RequireProject(ctx, tx, *in.Account, projectID); err != nil {
+			return queuePrepared{}, err
+		}
 	}
 	if in.Agent != "" {
 		if err = queueValidateTarget(ctx, tx, in); err != nil {

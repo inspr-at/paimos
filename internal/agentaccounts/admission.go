@@ -3,11 +3,13 @@ package agentaccounts
 
 import (
 	"context"
+	"errors"
 	"math"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/jackc/pgx/v5"
@@ -19,6 +21,7 @@ const vendorStopBackoff = time.Hour
 
 // CapacityWait is advisory. Reserve and claim always recheck the same policy.
 type CapacityWait struct {
+	Context       string     `json:"context,omitempty"`
 	HostReason    string     `json:"host_reason,omitempty"`
 	Code          string     `json:"code"`
 	Until         *time.Time `json:"until,omitempty"`
@@ -369,6 +372,39 @@ func waitForRun(ctx context.Context, tx pgx.Tx, run runRow) (*CapacityWait, erro
 		if (a.RegisteredBy == run.AgentID || bound[a.ID]) && a.Harness == harness && (run.AccountID == nil || a.ID == *run.AccountID) {
 			same = append(same, a)
 		}
+	}
+	contextCandidates := same
+	if run.RequestedAccountID != nil {
+		contextCandidates = keepAccount(contextCandidates, *run.RequestedAccountID)
+	} else {
+		ticket, err := runTicketID(ctx, tx, run.ID)
+		if err != nil {
+			return nil, err
+		}
+		if ticket != "" {
+			var pin *string
+			err := tx.QueryRow(ctx, `SELECT account_id::text FROM account_ticket_pins WHERE ticket_id=$1 AND harness=$2`, ticket, harness).Scan(&pin)
+			if err != nil && !isNoRows(err) {
+				return nil, err
+			}
+			if pin != nil {
+				contextCandidates = keepAccount(contextCandidates, *pin)
+			}
+		}
+	}
+	allowedCount := 0
+	for _, a := range contextCandidates {
+		if err := accountuse.RequireRun(ctx, tx, a.ID, run.ID); err != nil {
+			var denied *accountuse.Error
+			if errors.As(err, &denied) && denied.Message == accountuse.NotAllowed {
+				continue
+			}
+			return nil, err
+		}
+		allowedCount++
+	}
+	if len(contextCandidates) > 0 && allowedCount == 0 {
+		return waitFor("context"), nil
 	}
 	same, residencyEmptied, err := narrowCandidates(ctx, tx, run, harness, same)
 	if err != nil {
