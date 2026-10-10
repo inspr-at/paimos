@@ -15,6 +15,7 @@ test('Personal, Developer and Policies are for everyone; workspace sections foll
   assert.equal(sectionOf('agents'), 'agents')
   assert.equal(sectionOf('autopilot'), 'autopilot')
   assert.equal(sectionOf('theme'), 'theme')
+  assert.equal(settingsLink('theme', 'agents'), '/settings/theme#agents')
   assert.equal(sectionOf('business'), 'business')
   assert.equal(sectionOf('developer'), 'developer')
   assert.equal(sectionOf(undefined), 'personal')

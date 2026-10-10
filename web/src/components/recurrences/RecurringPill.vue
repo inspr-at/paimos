@@ -14,12 +14,12 @@ const manage = computed(() => !props.recurrence.retired && can('recurrences.mana
 const destination = computed(() => ({ path: `/p/${encodeURIComponent(props.recurrence.project_key)}/settings`, query: { recurrence: props.recurrence.id } }))
 </script>
 <template>
-  <RouterLink v-if="manage" class="recurring-pill" :to="destination" :aria-label="label" :title="label" :data-tip="label"><RecurrenceGlyph />{{ recurringWord(locale) }}</RouterLink>
-  <span v-else class="recurring-pill" role="img" tabindex="0" :aria-label="label" :title="label" :data-tip="label"><RecurrenceGlyph />{{ recurringWord(locale) }}</span>
+  <RouterLink v-if="manage" class="recurring-pill" :to="destination" :aria-label="label" :title="label" :data-tip="label"><span class="recurring-pill-mark" aria-hidden="true"><RecurrenceGlyph :size="8" /></span>{{ recurringWord(locale) }}</RouterLink>
+  <span v-else class="recurring-pill" role="img" tabindex="0" :aria-label="label" :title="label" :data-tip="label"><span class="recurring-pill-mark" aria-hidden="true"><RecurrenceGlyph :size="8" /></span>{{ recurringWord(locale) }}</span>
 </template>
 <style scoped>
 .recurring-pill { display: inline-flex; align-items: center; justify-content: center; flex: none; gap: 6px; min-height: 26px; max-width: 100%; padding: 3px 9px; border-radius: 999px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--marker) 35%, transparent); background: color-mix(in srgb, var(--marker) 10%, transparent); color: var(--ink); font-size: 12px; font-weight: 600; text-decoration: none; }
-.recurring-pill svg { flex: none; color: var(--marker-on); background: var(--marker); border-radius: 50%; }
+.recurring-pill-mark { display: grid; place-items: center; flex: none; width: 12px; height: 12px; color: var(--marker-on); background: var(--marker); border-radius: 50%; }
 a.recurring-pill:hover { background: color-mix(in srgb, var(--marker) 15%, transparent); }
 .recurring-pill:focus-visible { outline: 1px solid var(--marker); outline-offset: 3px; }
 @media (pointer: coarse) { .recurring-pill { min-height: 44px; } }
