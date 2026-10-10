@@ -6,6 +6,7 @@ package authz
 func init() {
 	registerRoutes("chat", map[string]string{
 		"GET /api/chat-threads/{id}":                          "chat.read",
+		"GET /api/chat-sessions/{sessionId}/thread":           "chat.read",
 		"GET /api/chat-threads/{id}/messages":                 "chat.read",
 		"GET /api/chat-threads/{id}/read-marker":              "chat.read",
 		"GET /api/chat-threads/{id}/live":                     "chat.read",
@@ -22,9 +23,10 @@ func init() {
 		"PUT /api/chat-threads/{id}/read-marker":              "chat.read",
 	})
 	registerDeclarations("chat", "project_filtered", ProjectFilteredRoutes, map[string]bool{
-		"GET /api/chat-threads/{id}":        true,
-		"GET /api/chat-threads/{id}/live":   true,
-		"GET /api/chat-threads/{id}/outbox": true,
+		"GET /api/chat-threads/{id}":                true,
+		"GET /api/chat-sessions/{sessionId}/thread": true,
+		"GET /api/chat-threads/{id}/live":           true,
+		"GET /api/chat-threads/{id}/outbox":         true,
 	})
 	registerDeclarations("chat", "project_decided", ProjectDecidedRoutes, map[string]bool{
 		"POST /api/chat-deliveries/binding/resolve": true,
