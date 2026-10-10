@@ -24,6 +24,8 @@ type Error struct {
 
 func (e *Error) Error() string              { return e.Message }
 func (e *Error) StatusCode() int            { return e.Status }
+func (e *Error) HTTPStatus() int            { return e.Status }
+func (e *Error) ErrorCode() string          { return e.Message }
 func fail(status int, message string) error { return &Error{status, message} }
 
 type RuleValues struct {

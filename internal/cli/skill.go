@@ -97,7 +97,7 @@ func (rt *runtime) cmdSkillRender() *Command {
 			if checkOnly {
 				return rt.checkRendered(target, rendered.Body)
 			}
-			if err := writeRendered(target, rendered.Body); err != nil {
+			if err := writeRenderedInWorkspace(root, target, rendered.Body); err != nil {
 				return err
 			}
 			rel := target
@@ -659,18 +659,59 @@ func resolveSkillPath(out, root, suggested string) (string, error) {
 	return filepath.Join(root, suggested), nil
 }
 
+func writeRenderedInWorkspace(workspace, path, body string) error {
+	rel, err := filepath.Rel(workspace, path)
+	if err != nil {
+		return fmt.Errorf("render path relative to workspace: %w", err)
+	}
+	if !filepath.IsLocal(rel) {
+		// An explicit --out may point outside the workspace.
+		return writeRendered(path, body)
+	}
+	return writeRenderedRelative(workspace, rel, body)
+}
+
 func writeRendered(path, body string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(body), 0o600); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("write %s: %w", tmp, err)
+	// Refuse symlink destinations, including dangling links, rather than silently
+	// replacing a link the caller may expect us to follow. Rename itself never
+	// follows the destination link, even if it is swapped after this check.
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("render %s: refusing symlink destination", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("lstat %s: %w", path, err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+	// CreateTemp exclusively creates a private (0600) file in the same
+	// directory, so concurrent renders do not share a name and rename is atomic.
+	f, err := os.CreateTemp(dir, ".paimos-render-*")
+	if err != nil {
+		return fmt.Errorf("create temporary file in %s: %w", dir, err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	if err := fillRenderedTemp(f, path, body); err != nil {
+		return err
+	}
+	if err := os.Rename(f.Name(), path); err != nil {
 		return fmt.Errorf("rename %s: %w", path, err)
+	}
+	return nil
+}
+
+func fillRenderedTemp(f *os.File, path, body string) error {
+	if _, err := f.WriteString(body); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("sync %s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", path, err)
 	}
 	return nil
 }

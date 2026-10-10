@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,6 +21,7 @@ import (
 // Writes == 0 and does not append events.
 func BackfillRelations(ctx context.Context, pool *pgxpool.Pool, tenantID string) (Report, error) {
 	report := Report{Counts: map[string]int{}}
+	ctx, batch := newImportEventBatch(ctx)
 	if pool == nil {
 		return report, errors.New("database pool is required")
 	}
@@ -27,6 +29,9 @@ func BackfillRelations(ctx context.Context, pool *pgxpool.Pool, tenantID string)
 		return report, errors.New("tenant id is required")
 	}
 	err := db.InTenant(db.AllProjects(ctx, "classic importer"), pool, tenantID, func(tx pgx.Tx) error {
+		if err := lockImportTree(ctx, tx, tenantID); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,42))`, tenantID+":relation-backfill"); err != nil {
 			return err
 		}
@@ -81,10 +86,15 @@ func BackfillRelations(ctx context.Context, pool *pgxpool.Pool, tenantID string)
 			}
 			report.Writes += wrote
 		}
-		return nil
+		return batch.flush()
 	})
 	report.Counts["writes"] = report.Writes
 	return report, err
+}
+
+type importedIdentity struct {
+	Source string
+	ID     int64
 }
 
 type importedIssue struct {
@@ -92,12 +102,13 @@ type importedIssue struct {
 	EventID int64
 }
 
-func loadImportedIssues(ctx context.Context, tx pgx.Tx, tenantID string) (map[int64]importedIssue, error) {
+func loadImportedIssues(ctx context.Context, tx pgx.Tx, tenantID string) (map[importedIdentity]importedIssue, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT DISTINCT ON (e.node_id)
 		       e.id,
 		       e.node_id::text,
-		       (e.after->'fields'->'classic'->>'id')::bigint
+		       (e.after->'fields'->'classic'->>'id')::bigint,
+ coalesce(e.after->'fields'->'classic'->>'source_id','')
 		FROM events e
 		JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id
 		JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
@@ -110,25 +121,27 @@ func loadImportedIssues(ctx context.Context, tx pgx.Tx, tenantID string) (map[in
 		return nil, err
 	}
 	defer rows.Close()
-	issues := map[int64]importedIssue{}
+	issues := map[importedIdentity]importedIssue{}
 	for rows.Next() {
 		var eventID, classicID int64
-		var nodeID string
-		if err := rows.Scan(&eventID, &nodeID, &classicID); err != nil {
+		var nodeID, source string
+		if err := rows.Scan(&eventID, &nodeID, &classicID, &source); err != nil {
 			return nil, err
 		}
-		if prev, ok := issues[classicID]; ok && prev.EventID > eventID {
-			continue
+		key := importedIdentity{source, classicID}
+		if prev, ok := issues[key]; ok && prev.NodeID != nodeID {
+			return nil, fmt.Errorf("ambiguous imported identity: source %q issue %d", source, classicID)
 		}
-		issues[classicID] = importedIssue{NodeID: nodeID, EventID: eventID}
+		issues[key] = importedIssue{NodeID: nodeID, EventID: eventID}
 	}
 	return issues, rows.Err()
 }
 
-func classicRelationFromEvent(raw []byte, issues map[int64]importedIssue) (classicRelation, bool, error) {
+func classicRelationFromEvent(raw []byte, issues map[importedIdentity]importedIssue) (classicRelation, bool, error) {
 	var payload struct {
 		ClassicRef  string `json:"classic_ref"`
 		ClassicType string `json:"classic_type"`
+		SourceID    string `json:"source_id"`
 		Record      Record `json:"record"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
@@ -146,10 +159,35 @@ func classicRelationFromEvent(raw []byte, issues map[int64]importedIssue) (class
 	if typ == "" || !sourceOK || !targetOK {
 		return classicRelation{}, false, nil
 	}
-	return classicRelation{
-		Type:         typ,
-		SourceNodeID: issues[sourceID].NodeID,
-		TargetNodeID: issues[targetID].NodeID,
-		ClassicRef:   payload.ClassicRef,
-	}, true, nil
+	namespace := payload.SourceID
+	if before, _, ok := strings.Cut(payload.ClassicRef, ":import.relation:"); ok {
+		if namespace != "" && namespace != before {
+			return classicRelation{}, false, errors.New("conflicting relation source namespaces")
+		}
+		namespace = before
+	}
+	resolve := func(id int64) (string, error) {
+		if namespace != "" {
+			return issues[importedIdentity{namespace, id}].NodeID, nil
+		}
+		node := ""
+		for key, item := range issues {
+			if key.ID == id {
+				if node != "" && node != item.NodeID {
+					return "", fmt.Errorf("ambiguous unqualified relation issue %d", id)
+				}
+				node = item.NodeID
+			}
+		}
+		return node, nil
+	}
+	source, err := resolve(sourceID)
+	if err != nil {
+		return classicRelation{}, false, err
+	}
+	target, err := resolve(targetID)
+	if err != nil {
+		return classicRelation{}, false, err
+	}
+	return classicRelation{Type: typ, SourceNodeID: source, TargetNodeID: target, ClassicRef: payload.ClassicRef}, source != "" && target != "", nil
 }

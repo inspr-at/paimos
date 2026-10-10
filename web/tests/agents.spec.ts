@@ -3,6 +3,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 const world: AgentWorld = {
   me: me.id,
@@ -40,7 +41,11 @@ async function grantAccounts(page: Page, manage = false) {
     return route.fulfill({ json: effective })
   })
 }
-const queue = (page: Page) => page.getByRole('region', { name: 'Needs you' })
+async function openDesk(page: Page, id?: string) {
+  await page.goto(id ? `/decision-desk?item=${encodeURIComponent(id)}` : '/decision-desk')
+  await expect(page.getByRole('heading', { name: 'Decision Desk', exact: true })).toBeVisible()
+  if (id) await expect(page.getByRole('dialog', { name: 'Decision Desk memo' })).toBeVisible()
+}
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Session details' })
 const row = (page: Page, id: string) => page.locator(`[data-row="s:${id}"]`)
 
@@ -65,17 +70,14 @@ test('pi sessions retain their SVG harness icon and provider account label', asy
 
 })
 
-test('the header links to Agents with a count of what needs you', async ({ page }) => {
-  await setup(page)
-  await page.goto('/')
+test('the header routes the canonical count to Decision Desk and keeps Agents separate', async ({ page }) => {
+  await setup(page); await page.goto('/')
   await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-  const link = page.getByRole('link', { name: 'Agents, 4 need you' })
-  await expect(link).toBeVisible()
-  await link.click()
-  await expect(page).toHaveURL('/agents')
-  // Agents is a place: highlighted in the header, so no breadcrumb repeats it.
-  await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Agents, 4 need you' })).toHaveAttribute('aria-current', 'page')
-  await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toHaveCount(0)
+  const places = page.getByRole('navigation', { name: 'Places' })
+  await expect(places.getByRole('link', { name: 'Agents', exact: true })).toBeVisible()
+  await places.getByRole('link', { name: 'Decision Desk, 4 open', exact: true }).click()
+  await expect(page).toHaveURL('/decision-desk')
+  await expect(places.getByRole('link', { name: 'Decision Desk, 4 open', exact: true })).toHaveAttribute('aria-current', 'page')
 })
 
 test('sessions are grouped by what they need, with ticket and heartbeat; details show account and model', async ({ page }) => {
@@ -158,21 +160,12 @@ test('an approval from an agent with no session and no address shows its name', 
     decided_by_principal_id: null,
     risk: 'high',
   })
-  await openAgents(page)
-  const card = queue(page).locator('.item', { hasText: 'Harbor Clerk' })
-  await expect(card).toBeVisible()
-  await expect(card).toContainText('Harbor Clerk')
-  await expect(card.locator('time.expiry')).toHaveAttribute('datetime', data.approvals[0].expires_at)
-  await expect(card.locator('time.expiry')).toContainText('Expires in')
-  await expect(card).not.toContainText(`Agent ${principal.slice(0, 8)}`)
-  // The asker pill carries an agent icon, centered on the name.
-  const pill = card.locator('.who')
-  const icon = pill.locator('.who-icon svg')
-  await expect(icon).toBeVisible()
-  const [p, i] = [await pill.boundingBox(), await icon.boundingBox()]
-  expect(Math.abs((p!.y + p!.height / 2) - (i!.y + i!.height / 2))).toBeLessThanOrEqual(1)
-  // A resource shows its label once, not label and title twice.
-  await expect(card.getByText('the whole workspace')).toHaveCount(1)
+  await openDesk(page, `a:${data.approvals[0].id}`)
+  const facts = page.getByRole('region', { name: 'Permission request', exact: true })
+  await expect(facts).toContainText('Asked by Harbor Clerk')
+  await expect(facts.locator('time')).toHaveAttribute('datetime', data.approvals[0].expires_at)
+  await expect(facts).not.toContainText(`Agent ${principal.slice(0, 8)}`)
+  await expect(facts.getByText('The whole workspace', { exact: true })).toHaveCount(1)
 })
 
 test('an approval without agent_name falls back to the short agent id', async ({ page }) => {
@@ -195,100 +188,77 @@ test('an approval without agent_name falls back to the short agent id', async ({
     risk: 'high',
   })
   delete (data.approvals[0] as { agent_name?: string | null }).agent_name
-  await openAgents(page)
-  const card = queue(page).locator('.item', { hasText: `Agent ${principal.slice(0, 8)}` })
-  await expect(card).toBeVisible()
-  await expect(card).not.toContainText('Harbor Clerk')
+  await openDesk(page, `a:${data.approvals[0].id}`)
+  const facts = page.getByRole('region', { name: 'Permission request', exact: true })
+  await expect(facts).toContainText(`Asked by Agent ${principal.slice(0, 8)}`)
+  await expect(facts).not.toContainText('Harbor Clerk')
 })
 
-test('approvals: j and k move, a opens a reason, Enter records the decision', async ({ page }) => {
+test('native approval choices and field shortcuts record the exact source and retain history', async ({ page }) => {
   const { calls, data } = await setup(page)
-  await openAgents(page)
-  await page.keyboard.press('j')
-  const first = queue(page).locator('.item:not(.signin)').first()
-  await expect(first).toHaveClass(/active/)
-  await expect(first).toContainText('Interrupt or stop agent sessions')
-  await expect(first).toContainText('High risk')
-  await expect(queue(page).locator('.item:not(.signin)').nth(2)).toContainText('Low risk')
-  await expect(first).toContainText(/Expires in \d+m/)
-  // Only the selected request's Approve is the filled primary; the emphasis moves with j and k.
-  await expect(first.getByRole('button', { name: 'Approve' })).toHaveClass(/primary/)
-  await expect(queue(page).locator('.item:not(.signin)').nth(1).getByRole('button', { name: 'Approve' })).toHaveClass(/approve-soft/)
-  await page.keyboard.press('j')
-  await expect(queue(page).locator('.item:not(.signin)').nth(1)).toHaveClass(/active/)
-  await expect(queue(page).locator('.item:not(.signin)').nth(1).getByRole('button', { name: 'Approve' })).toHaveClass(/primary/)
-  await expect(first.getByRole('button', { name: 'Approve' })).not.toHaveClass(/primary/)
-  await page.keyboard.press('a')
-  const reason = queue(page).getByLabel('Reason (optional)')
-  await expect(reason).toBeFocused()
-  await reason.fill('Fine for this run.')
-  await page.keyboard.press('Enter')
-  // The card itself confirms (AEON-505), then folds away.
-  await expect(queue(page).locator('.item.settled')).toContainText('Approved·nova may claim a run and start work')
-  expect(calls.find(c => c.path.endsWith('/decision'))?.body).toEqual({ decision: 'approved', reason: 'Fine for this run.' })
-  expect(data.approvals.find(a => a.scope === 'run.claim' && a.decision === 'approved' && a.agent_principal_id.endsWith('2'))).toBeTruthy()
-  await expect(queue(page).locator('.item:not(.signin)')).toHaveCount(3)
-  // d opens a denial; Escape backs out without a request.
-  await page.keyboard.press('d')
-  await expect(queue(page).getByLabel('Why not? The agent sees this.')).toBeFocused()
-  await page.keyboard.press('Escape')
-  await expect(queue(page).getByLabel('Why not? The agent sees this.')).toHaveCount(0)
-  expect(calls.filter(c => c.path.endsWith('/decision'))).toHaveLength(1)
-  await queue(page).getByRole('button', { name: /^Decided/ }).click()
-  await expect(queue(page).locator('.past')).toHaveCount(5)
+  const approval = data.approvals.find(a => a.scope === 'run.claim' && !a.decision)!
+  await openDesk(page, `a:${approval.id}`)
+  await page.getByTestId('choice-0').click()
+  const reason = page.getByRole('textbox', { name: 'Reason', exact: true })
+  await reason.fill('Fine for this run.'); await reason.press('Enter')
+  expect(calls.filter(c => c.path.endsWith('/decision'))).toHaveLength(0)
+  await page.getByTestId('desk-decide').click()
+  await expect(page.getByTestId('desk-announcement')).toContainText('Decision recorded')
+  expect(calls.find(c => c.path.endsWith('/decision'))).toMatchObject({ path: `/api/approvals/${approval.id}/decision`, body: { decision: 'approved', reason: 'Fine for this run.' } })
+  expect(approval.decision).toBe('approved')
+  await page.getByTestId('desk-close').click()
+  await page.getByRole('button', { name: /^Decided/ }).click()
+  await expect(page.getByTestId(`desk-row-a:${approval.id}`)).toBeVisible()
 })
 
 test('members can decide lower risk requests but not high risk requests', async ({ page }) => {
-  const { calls } = await setup(page, { member: true })
-  await openAgents(page)
-  const items = queue(page).locator('.item:not(.signin)')
-  await expect(items.first()).toContainText('High risk')
-  await expect(items.first().getByRole('button', { name: 'Approve' })).toHaveCount(0)
-  await items.first().focus()
-  await page.keyboard.press('a')
-  await expect(items.first().getByLabel('Reason (optional)')).toHaveCount(0)
-  await expect(items.nth(1).getByRole('button', { name: 'Approve' })).toBeVisible()
-  await items.nth(1).getByRole('button', { name: 'Approve' }).click()
-  await items.nth(1).getByRole('button', { name: 'Approve permission' }).click()
-  await expect.poll(() => calls.filter(c => c.path.endsWith('/decision')).length).toBe(1)
-  await expect(items.nth(1)).toContainText('Low risk')
-  await items.nth(1).getByRole('button', { name: 'Approve' }).click()
-  await items.nth(1).getByRole('button', { name: 'Approve permission' }).click()
-  await expect.poll(() => calls.filter(c => c.path.endsWith('/decision')).length).toBe(2)
+  const { calls, data } = await setup(page, { member: true })
+  const high = data.approvals.find(a => a.scope === 'harness.control' && !a.decision)!
+  await openDesk(page, `a:${high.id}`)
+  await expect(page.getByRole('region', { name: 'Permission request', exact: true })).toContainText('High risk')
+  await expect(page.getByTestId('desk-decide')).toBeDisabled()
+  for (const [index, scope] of ['run.claim', 'nodes.read'].entries()) {
+    const lower = data.approvals.find(a => a.scope === scope && !a.decision)!
+    await openDesk(page, `a:${lower.id}`)
+    await page.getByTestId('choice-0').click(); await page.getByTestId('desk-decide').click()
+    await expect(page.getByTestId('desk-announcement')).toContainText('Decision recorded')
+    expect(calls.filter(c => c.path.endsWith('/decision'))).toHaveLength(index + 1)
+    expect(calls.find(c => c.path === `/api/approvals/${lower.id}/decision`)?.body).toMatchObject({ decision: 'approved' })
+    expect(lower.decision).toBe('approved')
+  }
+  expect(high.decision).toBeNull()
 })
 
 test('approval controls require the action permission even with an admin legacy role', async ({ page }) => {
-  await setup(page)
+  const { calls, data } = await setup(page)
   await page.route('**/api/me/permissions*', route => {
     const effective = mockEffectivePermissions('admin')
     effective.workspace.permissions = effective.workspace.permissions.filter(permission => permission !== 'harness.control')
     return route.fulfill({ json: effective })
   })
-  await openAgents(page)
-  const high = queue(page).locator('.item:not(.signin)').first()
-  await expect(high).toContainText('High risk')
-  await expect(high.getByRole('button', { name: 'Approve' })).toHaveCount(0)
-  await high.focus()
-  await page.keyboard.press('a')
-  await expect(high.getByLabel('Reason (optional)')).toHaveCount(0)
+  const high = data.approvals.find(a => a.scope === 'harness.control' && !a.decision)!
+  await openDesk(page, `a:${high.id}`)
+  await expect(page.getByTestId('desk-decide')).toBeDisabled()
+  await page.getByTestId('desk-paper').press('Enter')
+  expect(calls.filter(c => c.method === 'POST')).toHaveLength(0)
 })
 
 test('a failed decision keeps the reason and says why', async ({ page }) => {
-  await setup(page, { failDecision: true })
-  await openAgents(page)
-  const item = queue(page).locator('.item:not(.signin)').first()
-  await item.getByRole('button', { name: 'Deny' }).click()
-  await queue(page).getByLabel('Why not? The agent sees this.').fill('Use the staging account instead.')
-  await item.getByRole('button', { name: 'Deny permission' }).click()
-  await expect(item.getByRole('alert')).toHaveText('The request expired while you were deciding')
-  await expect(queue(page).getByLabel('Why not? The agent sees this.')).toHaveValue('Use the staging account instead.')
+  const { data } = await setup(page, { failDecision: true })
+  const approval = data.approvals.find(a => !a.decision)!
+  await openDesk(page, `a:${approval.id}`)
+  await page.getByTestId('choice-1').click()
+  const reason = page.getByRole('textbox', { name: 'Reason', exact: true })
+  await reason.fill('Use the staging account instead.'); await reason.press('Enter')
+  await page.getByTestId('desk-decide').click()
+  await expect(page.getByTestId('desk-status')).toContainText('The request expired while you were deciding')
+  await expect(reason).toHaveValue('Use the staging account instead.')
+  expect(approval.decision).toBeNull()
 })
 
 test('read-only people see requests but cannot decide or control', async ({ page }) => {
-  await setup(page, { readOnly: true })
+  const { data, calls } = await setup(page, { readOnly: true })
   await openAgents(page)
-  await expect(queue(page).locator('.item:not(.signin)')).toHaveCount(4)
-  await expect(queue(page).getByRole('button', { name: 'Approve' })).toHaveCount(0)
   // Controls that cannot work are not offered at all: no row button, no disabled item, no excuse (AEON-291).
   await expect(row(page, camy).getByRole('button', { name: 'Interrupt camy' })).toHaveCount(0)
   await row(page, camy).hover()
@@ -296,6 +266,9 @@ test('read-only people see requests but cannot decide or control', async ({ page
   await expect(page.getByRole('menuitem', { name: /Interrupt|Stop now|Pause…|Resume/ })).toHaveCount(0)
   await expect(page.locator('[role="menuitem"][aria-disabled="true"]')).toHaveCount(0)
   await expect(page.getByRole('menu')).not.toContainText('Only people who may write')
+  await openDesk(page, `a:${data.approvals.find(a => !a.decision)!.id}`)
+  await expect(page.getByTestId('desk-decide')).toBeDisabled()
+  expect(calls.filter(c => c.method === 'POST')).toHaveLength(0)
 })
 
 test('the session panel shows the ticket, runs, telemetry and the thread, and sends messages', async ({ page }) => {
@@ -322,7 +295,7 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   await expect(details).toContainText('Claude Max')
   await expect(details.locator('.metric')).toHaveText([/Running/, /184k/, /22k/, /\$3\.84/])
   await expect(details.locator('.run-row .run-chip')).toHaveText(['Running', 'Completed', 'Failed'])
-  await expect(details.locator('.callout')).toHaveCount(0) // Principal-only approval stays in Needs you, not on this session.
+  await expect(details.locator('.callout')).toHaveCount(0) // Principal-only approval stays in Decision Desk.
   await details.getByRole('tab', { name: /Chat/ }).click()
   await expect(details.locator('.msg')).toHaveCount(4)
   await expect(details.locator('.msg.mine')).toHaveCount(2)
@@ -416,9 +389,9 @@ test('closing a session panel goes back instead of adding history, like the tick
   await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
   await page.getByRole('link', { name: /^Agents/ }).click()
   await expect(page.locator('.agents-page .row').first()).toBeVisible()
-  await row(page, camy).locator('.c-state').click()
+  await row(page, camy).locator('.agent-link').click()
   await expect(page).toHaveURL(`/agents/${camy}`)
-  await row(page, nova).locator('.c-state').click()
+  await row(page, nova).locator('.agent-link').click()
   await expect(page).toHaveURL(`/agents/${nova}`)
   await page.keyboard.press('Escape')
   await expect(page).toHaveURL('/agents')
@@ -427,40 +400,30 @@ test('closing a session panel goes back instead of adding history, like the tick
   await expect(page).toHaveURL('/')
 })
 
-test('a held action request opens the asking agent’s conversation', async ({ page }) => {
-  await setup(page)
-  await openAgents(page)
-  const held = queue(page).locator('.item.held')
-  await expect(held).toContainText('Held for you')
-  await expect(held).toContainText('Please merge the release fix once CI is green')
-  await expect(held).toContainText('9 min ago')
-  await held.getByRole('button', { name: 'Answer' }).click()
-  await expect(page).toHaveURL(`/agents/${kite}`)
+test('a held action request opens the exact native desk memo', async ({ page }) => {
+  const { data } = await setup(page)
+  const held = data.messages.find(m => m.is_action_request)!
+  await page.goto(`/agents?needs=m:${held.id}`)
+  await expect(page.getByRole('dialog', { name: 'Decision Desk memo' })).toBeVisible()
+  await expect(page.getByTestId('desk-body')).toContainText('Please merge the release fix once CI is green')
+  await expect(page.getByRole('link', { name: 'Open source record', exact: true })).toHaveAttribute('href', `/agents?needs=m:${held.id}`)
 })
 
-test('held action requests resolve or dismiss with an optional note, by button or keyboard', async ({ page }) => {
+test('held action requests resolve with an optional note through their original endpoint', async ({ page }) => {
   const { calls, data } = await setup(page)
-  await openAgents(page)
-  const held = queue(page).locator('.item.held')
-  // j reaches the held request after the three permission requests; a resolves, d dismisses.
-  for (let i = 0; i < 4; i++) await page.keyboard.press('j')
-  await expect(held).toHaveClass(/active/)
-  await expect(held.getByRole('button', { name: 'Resolve' })).toHaveClass(/primary/)
-  await page.keyboard.press('d')
-  const note = held.getByLabel('Note (optional)')
-  await expect(note).toBeFocused()
-  await expect(held).toContainText('The held message is not delivered.')
-  await page.keyboard.press('Escape')
-  await expect(note).toHaveCount(0)
-  await held.getByRole('button', { name: 'Resolve' }).click()
-  await held.getByLabel('Note (optional)').fill('Merged it myself after CI.')
-  await held.getByRole('button', { name: 'Mark resolved' }).click()
-  await expect(page.locator('.toast').filter({ hasText: 'Resolved: the request from kite is answered.' })).toBeVisible()
-  await expect(queue(page).locator('.item.held')).toHaveCount(0)
+  const held = data.messages.find(m => m.is_action_request)!
+  await openDesk(page, `m:${held.id}`)
+  await page.getByTestId('choice-2').click()
+  await expect(page.getByTestId('choice-2')).toHaveAttribute('aria-checked', 'true')
+  await page.getByTestId('choice-1').click()
+  const note = page.getByRole('textbox', { name: 'P.S. for the agent' })
+  await note.fill('Merged it myself after CI.'); await note.press('Enter')
+  await page.getByTestId('desk-decide').click()
+  await expect(page.getByTestId('desk-announcement')).toContainText('Decision recorded')
   const resolution = calls.find(c => c.path.endsWith('/resolution'))!
-  expect(resolution.path).toBe(`/api/projects/p-frozen/messages/${data.messages[4].id}/resolution`)
+  expect(resolution.path).toBe(`/api/projects/p-frozen/messages/${held.id}/resolution`)
   expect(resolution.body).toEqual({ decision: 'resolved', note: 'Merged it myself after CI.' })
-  await expect(page.getByRole('link', { name: 'Agents, 3 need you' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Decision Desk, 3 open' })).toBeVisible()
 })
 
 test('Settings lists limits set by hand as Set by you, never as a vendor percent; admins can drain and resume', async ({ page }) => {
@@ -505,7 +468,7 @@ test('an empty workspace explains how an agent connects', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'No agent has connected yet' })).toBeVisible()
   await expect(page.locator('.connect .lead')).toHaveText('Start an agent to queue a run; its daemon connects when an account is ready.')
   // No request waits (a failed check is not a sign-in prompt).
-  await expect(queue(page).locator('.item:not(.signin)')).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Sign-ins and connections' })).toHaveCount(0)
   // The empty state says it once; the head only shows faint zero counts.
   await expect(page.getByRole('group', { name: 'Show sessions by state' }).locator('.count:not(.zero)')).toHaveCount(0)
   await page.locator('.connect').getByRole('button', { name: 'Start agent' }).click()
@@ -519,7 +482,8 @@ test('a failing sessions read is a real error with a retry, and approvals keep w
   await expect(failure).toContainText('Sessions could not be loaded')
   await expect(failure).toContainText('(404)')
   await expect(failure.getByRole('button', { name: 'Try again' })).toBeVisible()
-  await expect(queue(page).locator('.item:not(.signin)')).toHaveCount(3)
+  await openDesk(page)
+  await expect(page.locator('[data-testid^=\"desk-row-a:\"]')).toHaveCount(3)
 })
 
 test('the ticket panel shows the bound agent’s attention state and links to its session', async ({ page }) => {
@@ -534,11 +498,11 @@ test('the ticket panel shows the bound agent’s attention state and links to it
   await expect(panel(page).getByRole('heading', { name: /camy/ })).toBeVisible()
 })
 
-test('old approvals, runs and pacing addresses land on Agents', async ({ page }) => {
+test('old approvals land on Decision Desk; runs and pacing land on Agents', async ({ page }) => {
   await setup(page)
   for (const path of ['/approvals', '/runs', '/pacing']) {
     await page.goto(path)
-    await expect(page).toHaveURL('/agents')
+    await expect(page).toHaveURL(path === '/approvals' ? '/decision-desk' : '/agents')
   }
 })
 
@@ -550,11 +514,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await setup(page)
     await openAgents(page)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.querySelector('main')!.scrollWidth <= innerWidth)).toBe(true)
-    for (const item of await queue(page).locator('.item:not(.signin)').all()) {
-      const box = (await item.boundingBox())!
-      expect(box.x + box.width).toBeLessThanOrEqual(390)
-    }
-    await expect(page.getByRole('link', { name: 'Agents, 4 need you' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Decision Desk, 4 open' })).toBeVisible()
     // Row controls live in an overflow menu on phones.
     const { calls } = { calls: [] as string[] }
     page.on('request', request => { if (request.method() === 'POST') calls.push(new URL(request.url()).pathname) })
@@ -562,9 +522,35 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.getByRole('button', { name: 'Actions for nova' }).click()
     await page.getByRole('menuitem', { name: /^Interrupt/ }).click()
     await expect.poll(() => calls.some(path => path.endsWith(`/harness-sessions/${nova}/controls/interrupt`))).toBe(true)
-    await row(page, camy).locator('.c-agent a').click()
-    expect(await panel(page).boundingBox()).toEqual({ x: 0, y: 0, width: 390, height: 844 })
+    await expectStableControls({ controls: {
+      desk: page.locator('.head-links').getByRole('link', { name: 'Decision Desk', exact: true }),
+      usage: page.locator('.head-links').getByRole('link', { name: 'Usage', exact: true }),
+      keys: page.locator('.head-links').getByRole('link', { name: 'Agent keys', exact: true }),
+    }, interactions: [
+      { name: 'open a full-height session', run: async () => { await row(page, camy).locator('.c-agent a').click(); await expect(panel(page)).toBeVisible(); expect(await panel(page).boundingBox()).toEqual({ x: 0, y: 0, width: 390, height: 844 }) } },
+      { name: 'return to the phone overview', run: async () => { await page.keyboard.press('Escape'); await expect(panel(page)).toHaveCount(0) } },
+    ] })
     expect(errors).toEqual([])
+  })
+}
+
+for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+  test(`cutover overview and session retain long German context at ${width} in ${colorScheme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 }); await page.emulateMedia({ colorScheme })
+    const { data } = await setup(page)
+    const brief = 'Die Berechtigungsanfrage mit nachvollziehbarer Begründung prüfen und den ursprünglichen Arbeitskontext für die nachfolgende Sitzung erhalten.'
+    data.sessions.find(session => session.id === camy)!.brief = brief
+    await openAgents(page)
+    await expect(row(page, camy)).toContainText(brief)
+    await expect(page.getByRole('region', { name: 'Needs you', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('link', { name: 'Decision Desk, 4 open', exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`agents-overview-${width}-${colorScheme}.png`), fullPage: true })
+    await row(page, camy).locator('.agent-link').click(); await expect(panel(page)).toBeVisible()
+    await expect(panel(page)).toContainText(brief)
+    await panel(page).getByText(brief, { exact: true }).scrollIntoViewIfNeeded()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`agents-session-${width}-${colorScheme}.png`), fullPage: true })
   })
 }
 

@@ -7,6 +7,7 @@ import { parse, compileScript } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { createScope } from '../src/lib/identityScope'
 import * as Recurrences from '../src/lib/recurrences'
+import { recurrenceSchedule } from '../src/lib/recurrenceMarker'
 import * as workVocabulary from '../src/lib/workVocabulary'
 import type { Recurrence } from '../src/lib/recurrences'
 import type { ListItem, NodeRecurrence } from '../src/lib/api'
@@ -227,5 +228,43 @@ it('Repeat creates children of a canonical parent and siblings of a canonical le
     expect(state.parent.value).toBe(is_leaf ? 'existing-parent' : 'work-source')
     expect(state.input.value.template.type).toBe('work')
     if (!is_leaf) expect(state.parentLabel.value).toBe('WORK-1 · Recurring work')
+  }
+})
+
+// Risk: editing an API-configured event silently turns it into a release trigger,
+// or manual Run now is blocked by an unrelated release picker.
+it('preserves non-release triggers through edits and manual runs', async () => {
+  vi.stubGlobal('navigator', { platform: 'Mac' })
+  for (const event of ['node.done', 'knowledge.changed', 'external.tag', 'external.deploy'] as const) {
+    const recurrence = definition()
+    recurrence.trigger = { kind: 'event', event, ...(event.startsWith('external.') ? { external: { principal_id: 'sender', public_key: 'public' } } : { filter: { project_ids: ['watched-project'], tag: event === 'knowledge.changed' ? 'website' : undefined } }) }
+    const draft = setup<{ schedule: { start: string }; input: Vue.ComputedRef<Recurrences.RecurrenceInput> }>(source('components/recurrences/RecurrenceEditor.vue'), { project, recurrence }, {
+      vue: { ...Vue, useId: () => 'event-editor', onMounted: () => {}, onBeforeUnmount: Vue.onScopeDispose },
+      '../../lib/api': { createRecurrence: vi.fn(), updateRecurrence: vi.fn(), getNode: vi.fn(), previewRecurrenceDraft: async () => ({ times: [] }) },
+      '../../lib/authz': { can: () => true }, '../../lib/useIdentityScope': { useIdentityScope: identityScope }, '../../lib/recurrences': Recurrences,
+      '../../stores/workVocabulary': { useWorkVocabulary: () => ({ leaf: { name: 'Work', icon: 'check' } }) }, '../../lib/workVocabulary': workVocabulary,
+    })
+    draft.schedule.start = 'hour'
+    expect(draft.input.value.trigger).toMatchObject({ ...recurrence.trigger, event_start: 'hour' })
+    const snapshot = Recurrences.copyRecurrenceInput(draft.input.value)
+    if (snapshot.trigger.filter) snapshot.trigger.filter.project_ids!.push('other-project')
+    if (snapshot.trigger.external) snapshot.trigger.external.public_key = 'changed'
+    if (recurrence.trigger.filter) expect(recurrence.trigger.filter.project_ids).toEqual(['watched-project'])
+    if (recurrence.trigger.external) expect(recurrence.trigger.external.public_key).toBe('public')
+    expect(Recurrences.triggerWords(recurrence.trigger)).not.toContain('release')
+    expect(recurrenceSchedule(recurrence.trigger, 'de')).not.toBe('nach jeder Veröffentlichung')
+    const releases = vi.fn(async () => ({ items: [], truncated: false })), run = vi.fn(async () => ({ outcome: 'created' }))
+    const mounted: (() => void)[] = []
+    const action = setup<{ run: () => void; loading: Vue.Ref<boolean> }>(source('components/recurrences/RecurrenceRun.vue'), { item: recurrence }, {
+      vue: { ...Vue, onMounted: (callback: () => void) => mounted.push(callback), onBeforeUnmount: Vue.onScopeDispose },
+      '../../lib/api': { recurrenceReleases: releases, runRecurrence: run },
+      '../../lib/authz': { can: () => true }, '../../lib/useIdentityScope': { useIdentityScope: identityScope }, '../../lib/recurrences': Recurrences,
+    })
+    mounted.forEach(callback => callback())
+    expect(action.loading.value).toBe(false)
+    action.run(); await settle()
+    expect(releases).not.toHaveBeenCalled()
+    expect(run).toHaveBeenCalledOnce()
+    expect(run.mock.calls[0]?.[1]).not.toHaveProperty('release_key')
   }
 })

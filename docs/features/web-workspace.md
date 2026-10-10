@@ -144,6 +144,26 @@ headers keep Display in the header bar with its menu as it was; the toolbar
 holds that place with an inert twin of the button, so folding or unfolding the
 header moves nothing in the toolbar.
 
+The filter strip shows **Filter** first and then only the filters that are
+applied, one pill each in the order they were applied, followed by **Clear
+all**; there are no empty Status, Priority or Assignee buttons. Filter never
+moves and keeps its size; when pills overflow, only the pills scroll. **Type**
+filters by the names set under Settings › Workspace: the leaf name (default
+Ticket) and each parent level (default Epic, Story, Level 3 …), with counts
+from the list API's `level` facet. A row is its leaf name when it has no work
+children, else the name of its depth; levels that share a name are one option.
+When a link or saved view holds only some of those levels, the option shows a
+mixed box, and a click includes all of them. A filter's options appear once
+their names and counts have arrived (for an applied filter, its counts without
+it), in the menu and in the Filters sheet, and keep their places while it is
+open. A later answer adds rows only at the end of the menu; the sheet only
+recounts, and new values appear the next time it opens.
+The list API takes `level=leaf,1,!2` alongside `kind`, `shape` and `depth`,
+which keep working for the CLI. Links and saved views that used the legacy
+type (`type=epic`, `ticket`, `task`) or Parents / Leaves open as Type; a Parents
+/ Leaves or Depth filter that Type cannot express stays as its own pill and is
+offered in Filter only while it is applied.
+
 At widths up to 900 px, Filters includes Display controls for sorting, row
 height, columns and model display. Saved column visibility and order also apply
 to phone cards: optional values appear below Key and Title; Automatic restores
@@ -236,7 +256,7 @@ cd web
 npm run test:unit
 npm run test:browser-safety # tiny Node process fixtures; no browser locally
 # Full UI suites: prefer CI; sharded UI jobs are tracked in AEON-410 (PR #29).
-# Prepared mbp2606 entry point (refuses until OPS-247 bootstrap is approved):
+# Prepared build-6 entry point (refuses until OPS-247 bootstrap is approved):
 AEON_REMOTE_CONTROL_DIR=/path/to/coordinator/aeon npm run test:remote
 # Locally, only one targeted file, one worker, when there is a technical reason:
 npm test -- tests/authz.spec.ts --workers=1
@@ -247,7 +267,7 @@ currently refuses with exit 3 before SSH or dependency installation: OPS-247
 owns the approved browser bootstrap and shared heavy-job launcher. Use hosted
 draft PR CI while that work is pending. No environment flag enables the lane;
 the coordinator must confirm the launcher contract and review a follow-up change
-to enable it. No browsers or Playwright were installed on mbp2606 for AEON-508.
+to enable it. No browsers or Playwright were installed on build-6 for AEON-508.
 
 The prepared runner accepts extra arguments to select files or reporters. Set
 `AEON_REMOTE_CONTROL_DIR` to the existing

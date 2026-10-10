@@ -234,8 +234,10 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 		t.Fatalf("unsafe model %d", status)
 	}
 
-	scout := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
 	luna := profileBySlug(profiles, "codex-luna-medium")
+	minimalAccount(t, admin, luna)
+	minimalAccount(t, admin, profileBySlug(profiles, "codex-astra-xhigh"))
+	scout := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
 	if scout.Source != "aeon" || scout.OwnerRequired || scout.Profile == nil || scout.Profile.ID != luna.ID ||
 		scout.CommandTemplate != "codex exec -m gpt-6-luna -c model_reasoning_effort=medium '{prompt}'" {
 		t.Fatalf("scout %+v", scout)
@@ -255,6 +257,8 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 		len(gate.Ladder) != 7 || gate.Ladder[1].SkipReasons[0] != "author family" {
 		t.Fatalf("gate %+v", gate)
 	}
+	otherProfiles := decode[[]Profile](t, &other, http.MethodGet, "/api/models", "", http.StatusOK)
+	minimalAccount(t, other, profileBySlug(otherProfiles, "claude-fable-xhigh"))
 	otherGate := decode[Resolution](t, &other, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=openai&harness=claude", "", http.StatusOK)
 	if otherGate.Profile == nil || otherGate.Profile.Slug != "claude-fable-xhigh" || !strings.Contains(otherGate.CommandTemplate, "--permission-mode plan") {
 		t.Fatalf("other tenant gate %+v", otherGate)

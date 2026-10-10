@@ -139,6 +139,23 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}/events:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: receiveRecurrenceExternalEvent
+      description: 'Receive a signed external tag or successful deploy event from the configured active agent principal. Requires its existing agent key, nodes.read and recurrences.manage on the target project inside the final write transaction. X-Aeon-Signature is base64 Ed25519 over UTF-8 aeon-recurrence-event-v1, tenant UUID, recurrence UUID and the exact request body, separated by LF. occurred_at must be within five minutes of the database clock. The sender and delivery_id own a durable tenant-local receipt, even after definition edits. Exact retries return that receipt; changed payloads return 409. Only a bounded event is recorded; the scheduler creates work and never launches an agent.'
+      security: [{agentKey: []}]
+      parameters:
+        - {name: X-Aeon-Signature, in: header, required: true, schema: {type: string, maxLength: 88}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RecurrenceExternalEvent'}}}}
+      responses:
+        '202': {description: 'Durable event receipt', content: {application/json: {schema: {type: object, required: [event_id, duplicate], properties: {event_id: {type: integer}, duplicate: {type: boolean}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /recurrences/{recurrenceId}/run-now:
     parameters:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -154,6 +171,35 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
 components:
   schemas:
+    RecurrenceEventFilter:
+      type: object
+      additionalProperties: false
+      description: 'Node and knowledge only. All supplied conditions must match. Source projects default to the recurrence project and must be visible and readable to the definition owner; permissions and event visibility are rechecked when firing.'
+      properties:
+        project_ids: {type: array, maxItems: 20, uniqueItems: true, items: {type: string, format: uuid}}
+        has_release_copy: {type: boolean, description: 'Done only; require nonblank bilingual pills and benefits in the event snapshot.'}
+        exclude_hidden: {type: boolean, description: 'Done only; reject snapshots hidden from release notes.'}
+        entry_id: {type: string, format: uuid, description: 'Knowledge only; one live source entry.'}
+        knowledge_type: {type: string, enum: [runbook, guideline, memory, external-system, related-project, decision]}
+        tag: {type: string, minLength: 1, maxLength: 128, description: 'Knowledge only; exact tag in the event snapshot fields.tags array.'}
+    RecurrenceExternalSender:
+      type: object
+      additionalProperties: false
+      required: [principal_id, public_key]
+      description: 'External only. Active tenant agent principal and base64 Ed25519 public key from an existing sender signing authority. No signing secret is generated or stored by PAIMOS.'
+      properties:
+        principal_id: {type: string, format: uuid}
+        public_key: {type: string, minLength: 44, maxLength: 44}
+    RecurrenceExternalEvent:
+      type: object
+      additionalProperties: false
+      required: [delivery_id, event, occurred_at, source, ref]
+      properties:
+        delivery_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.:-]+$'}
+        event: {type: string, enum: [external.tag, external.deploy]}
+        occurred_at: {type: string, format: date-time}
+        source: {type: string, minLength: 1, maxLength: 256, description: 'Product, repository or site identifier; no credentials or arbitrary payload.'}
+        ref: {type: string, minLength: 1, maxLength: 256, description: 'Published tag or successful deployment identifier.'}
     Recurrence:
       allOf:
         - {$ref: '#/components/schemas/RecurrenceInput'}
@@ -193,7 +239,7 @@ components:
         trigger: {$ref: '#/components/schemas/RecurrenceTrigger'}
         queue_each: {type: boolean, default: false}
         overlap_policy: {type: string, enum: [skip, create], default: skip, description: Skip if any preceding occurrence ticket is still nonterminal and live.}
-        catch_up_policy: {type: string, enum: [one], default: one, description: Consume only the latest missed time or publication per scheduler pass; no burst.}
+        catch_up_policy: {type: string, enum: [one], default: one, description: 'Consume only the latest missed time or publication per scheduler pass; new event kinds process source events in order in bounded passes.'}
     RecurrenceOccurrence:
       type: object
       required: [recurrence_id, occurrence_key, number, scheduled_at, outcome, reason]

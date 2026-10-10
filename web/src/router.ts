@@ -92,7 +92,7 @@ export const router = createRouter({
     // Earlier separate pages now live inside Agents.
     // eslint-disable-next-line no-restricted-syntax -- a route of the page, not a request
     { path: '/runs/:runId?', redirect: '/agents' },
-    { path: '/approvals', redirect: '/agents' },
+    { path: '/approvals', redirect: to => ({ path: '/decision-desk', query: to.query }) },
     { path: '/phone-approvals/:kind(approval|attach|stepup)/:requestId', component: () => import('./views/PhoneApprovalView.vue'), meta: { title: 'Review approval' } },
     { path: '/pacing', redirect: '/agents' },
     // The release history is a sheet over the page (App.vue); its own links open it over Projects.

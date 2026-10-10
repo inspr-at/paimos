@@ -18,6 +18,7 @@ func init() {
 		"POST /api/recurrences/{recurrenceId}/pause":   "recurrences.manage",
 		"POST /api/recurrences/{recurrenceId}/resume":  "recurrences.manage",
 		"POST /api/recurrences/{recurrenceId}/run-now": "recurrences.manage",
+		"POST /api/recurrences/{recurrenceId}/events":  "recurrences.manage",
 		"PUT /api/recurrences/{recurrenceId}":          "recurrences.manage",
 	})
 	registerDeclarations("recurrences", "project_filtered", ProjectFilteredRoutes, map[string]bool{

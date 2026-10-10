@@ -53,6 +53,8 @@ type Config struct {
 	// keys, one credential file and <ref>.allowlist.json per reference
 	// (AEON_DOCTRINE_CREDENTIALS_DIR, AEON-318). Aeon stores only the names.
 	DoctrineCredentialsDir string
+	DoctrineMirrorDir      string
+	DoctrineDefaultSource  bool
 	// DoctrineRepositories is validated deployment-owned proposal policy.
 	DoctrineRepositories *doctrinerepo.Pair
 	// PairingNixGuide is deployment-admin-owned public guidance. There is no
@@ -99,6 +101,7 @@ func FromEnv() (Config, error) {
 		HTMLSandboxOrigin:              os.Getenv("AEON_HTML_SANDBOX_ORIGIN"),
 		// Only the directory path is read here; a token is read at fetch time.
 		DoctrineCredentialsDir:  os.Getenv("AEON_DOCTRINE_CREDENTIALS_DIR"),
+		DoctrineMirrorDir:       os.Getenv("AEON_DOCTRINE_MIRROR_DIR"),
 		DoctrineAppID:           os.Getenv("AEON_DOCTRINE_APP_ID"),
 		DoctrineInstallationID:  os.Getenv("AEON_DOCTRINE_INSTALLATION_ID"),
 		DoctrineAppKeyRef:       os.Getenv("AEON_DOCTRINE_APP_KEY_REF"),
@@ -132,6 +135,10 @@ func FromEnv() (Config, error) {
 		return Config{}, repositoryErr
 	}
 	cfg.DoctrineRepositories = &repositories
+	cfg.DoctrineDefaultSource = privateSet && cfg.DoctrineAppTenantID != ""
+	if cfg.DoctrineMirrorDir != "" && !filepath.IsAbs(cfg.DoctrineMirrorDir) {
+		return Config{}, fmt.Errorf("AEON_DOCTRINE_MIRROR_DIR must be an absolute host directory")
+	}
 	if file := os.Getenv("AEON_REVIEW_WEBHOOK_SECRET_FILE"); file != "" {
 		secret, err := reviewWebhookSecret(file)
 		if err != nil {

@@ -18,21 +18,21 @@ import (
 
 // rawAPI is used only for byte-oriented resources. It keeps the configured
 // instance and credential while preserving response bytes for curl/downloads.
-func (rt *runtime) rawAPI(method, path string, body []byte, contentType string) ([]byte, error) {
+func (rt *runtime) rawResponse(method, path string, body []byte, contentType string) (*http.Response, string, error) {
 	inst, err := rt.resolve()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if !strings.HasPrefix(path, "/api/") && path != "/api" {
-		return nil, usagef("API path must start with /api")
+		return nil, "", usagef("API path must start with /api")
 	}
 	u, err := url.ParseRequestURI(path)
 	if err != nil || u.IsAbs() || u.Host != "" || strings.HasPrefix(path, "//") {
-		return nil, usagef("invalid API path")
+		return nil, "", usagef("invalid API path")
 	}
 	req, err := http.NewRequestWithContext(rt.context(), method, inst.URL+path, bytes.NewReader(body))
 	if err != nil {
-		return nil, rt.fail(err, inst.APIKey)
+		return nil, "", rt.fail(err, inst.APIKey)
 	}
 	req.Header.Set("Accept", "*/*")
 	if contentType != "" {
@@ -41,12 +41,21 @@ func (rt *runtime) rawAPI(method, path string, body []byte, contentType string) 
 	req.Header.Set("Authorization", "Bearer "+inst.APIKey)
 	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
-		return nil, rt.fail(err, inst.APIKey)
+		return nil, "", rt.fail(err, inst.APIKey)
 	}
+	return resp, inst.APIKey, nil
+}
+
+const maxRawResponseBytes = 64 << 20
+
+func readRawResponse(resp *http.Response, limit int64) ([]byte, error) {
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return nil, rt.fail(err, inst.APIKey)
+		return nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("response exceeds %d bytes", limit)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var apiErr struct {
@@ -59,7 +68,19 @@ func (rt *runtime) rawAPI(method, path string, body []byte, contentType string) 
 		if len(apiErr.Error) > 240 {
 			apiErr.Error = apiErr.Error[:240]
 		}
-		return nil, rt.fail(&client.StatusError{Status: resp.StatusCode, Message: apiErr.Error}, inst.APIKey)
+		return nil, &client.StatusError{Status: resp.StatusCode, Message: apiErr.Error}
+	}
+	return raw, nil
+}
+
+func (rt *runtime) rawAPI(method, path string, body []byte, contentType string) ([]byte, error) {
+	resp, key, err := rt.rawResponse(method, path, body, contentType)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := readRawResponse(resp, maxRawResponseBytes)
+	if err != nil {
+		return nil, rt.fail(err, key)
 	}
 	return raw, nil
 }

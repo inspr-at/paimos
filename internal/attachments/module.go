@@ -102,8 +102,11 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 	}
 	var a Attachment
 	err := db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := authz.RequireTx(r.Context(), tx, p, "attachments.read", authz.Scope{AnyProject: true}); err != nil {
+			return err
+		}
 		var err error
-		a, err = scan(tx.QueryRow(r.Context(), `SELECT `+columns+` FROM attachments WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL`, p.TenantID, id))
+		a, err = readAttachment(r.Context(), tx, p.TenantID, id)
 		return err
 	})
 	if err != nil {
@@ -147,6 +150,14 @@ func liveNode(ctx context.Context, tx pgx.Tx, tenantID, nodeID string) error {
 		return pgx.ErrNoRows
 	}
 	return nil
+}
+
+func readAttachment(ctx context.Context, tx pgx.Tx, tenantID, id string) (Attachment, error) {
+	a, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM attachments WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL`, tenantID, id))
+	if err == nil {
+		err = liveNode(ctx, tx, tenantID, a.NodeID)
+	}
+	return a, err
 }
 
 // requireNodeWrite runs after LockProjectWrite, in the transaction that

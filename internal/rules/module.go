@@ -107,11 +107,13 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 		// work instead: lock and statement timeouts for SQL, explicit checks in
 		// the budget's CPU loops, and InTenant rolls back when fn fails.
 		deadline := time.Now().Add(txTimeout)
+		bootstrap, cancel := context.WithDeadline(r.Context(), deadline)
+		defer cancel()
 		pending := &outcome{}
 		r = r.WithContext(context.WithValue(withDeadline(context.WithoutCancel(r.Context()), deadline), outcomeKey{}, pending))
 		var out any
 		committing := false
-		err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		err = db.InTenantWithBootstrap(r.Context(), bootstrap, m.pool, p.TenantID, func(tx pgx.Tx) error {
 			// Bounded waits and work: a lock that cannot be had in time fails the
 			// request (503) instead of queueing behind or ahead of access changes.
 			// The server enforces the deadline on the whole transaction too:
@@ -119,7 +121,7 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 			// timeout end the session, and with it every lock, at the deadline,
 			// however long the application spends between statements.
 			remaining := fmt.Sprintf("%dms", max(time.Until(deadline).Milliseconds(), 1))
-			if _, err := tx.Exec(r.Context(), `SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$2,true),set_config('transaction_timeout',$3,true),set_config('idle_in_transaction_session_timeout',$3,true)`, lockTimeout, statementTimeout, remaining); err != nil {
+			if _, err := tx.Exec(bootstrap, `SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$2,true),set_config('transaction_timeout',$3,true),set_config('idle_in_transaction_session_timeout',$3,true)`, lockTimeout, statementTimeout, remaining); err != nil {
 				return err
 			}
 			if err := authz.RequireTx(r.Context(), tx, p, permission, authz.Scope{AnyProject: true}); err != nil {
@@ -314,7 +316,7 @@ func writeFailure(w http.ResponseWriter, err error) {
 		e = &Error{Status: 404, Code: "not_found", Message: "rule resource unavailable"}
 	case errors.As(err, &we):
 		e = &Error{Status: we.Status, Code: "invalid_request", Message: we.Message}
-	case errors.As(err, &pe) && (pe.Code == "55P03" || pe.Code == "57014" || pe.Code == "25P03" || pe.Code == "25P04"), errors.Is(err, context.DeadlineExceeded):
+	case errors.As(err, &pe) && (pe.Code == "55P03" || pe.Code == "57014" || pe.Code == "25P03" || pe.Code == "25P04"), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		e = &Error{Status: 503, Code: "busy", Message: "the rules store is busy; nothing was changed, try again"}
 	case errors.As(err, &pe) && pe.Code == "23505":
 		e = &Error{Status: 409, Code: "revision_conflict", Message: "rule identity or version already exists"}

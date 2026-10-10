@@ -76,7 +76,9 @@ func TestWorkVocabularyRoundTripAndShape(t *testing.T) {
 	if !leaf.IsLeaf || leaf.Depth != 2 || leaf.LevelName != saved.Leaf.Name {
 		t.Fatalf("leaf %+v", leaf.WorkShape)
 	}
-	for _, tc := range []struct{ filter, id string }{{"shape=parent", root.ID}, {"shape=leaf&depth=2", child.ID}, {"kind=epic&shape=leaf", child.ID}, {"shape=!parent", child.ID}} {
+	for _, tc := range []struct{ filter, id string }{{"shape=parent", root.ID}, {"shape=leaf&depth=2", child.ID}, {"kind=epic&shape=leaf", child.ID}, {"shape=!parent", child.ID},
+		// AEON-974: the Type filter's level is the leaf, else the parent's depth.
+		{"level=1", root.ID}, {"level=leaf", child.ID}, {"level=!leaf", root.ID}, {"level=leaf,2", child.ID}, {"level=!1&depth=2", child.ID}} {
 		status, body = call(t, &p, "GET", "/api/nodes?"+tc.filter, "")
 		page := decode[nodePage](t, status, body, 200)
 		if len(page.Items) != 1 || page.Items[0].ID != tc.id || page.Items[0].WorkShape == nil {
@@ -84,10 +86,18 @@ func TestWorkVocabularyRoundTripAndShape(t *testing.T) {
 		}
 	}
 
-	status, body = call(t, &p, "GET", "/api/nodes?within="+projectRoot.ID+"&facets=shape,depth", "")
+	status, body = call(t, &p, "GET", "/api/nodes?within="+projectRoot.ID+"&facets=shape,depth,level", "")
 	facets := decode[nodePage](t, status, body, 200).Facets
 	if facets["shape"]["parent"] != 1 || facets["shape"]["leaf"] != 1 || facets["depth"]["2"] != 1 {
 		t.Fatalf("shape facets %+v", facets)
+	}
+	if len(facets["level"]) != 2 || facets["level"]["1"] != 1 || facets["level"]["leaf"] != 1 {
+		t.Fatalf("level facets %+v", facets["level"])
+	}
+	for _, bad := range []string{"level=parent", "level=0", "level=!", tooManyLevels()} {
+		if status, body = call(t, &p, "GET", "/api/nodes?"+bad, ""); status != 400 {
+			t.Fatalf("%s: %d %s", bad, status, body)
+		}
 	}
 	status, body = call(t, &p, "GET", "/api/tickets/graph?project_id="+projectRoot.ID, "")
 	graph := decode[TicketGraph](t, status, body, 200)
@@ -180,4 +190,13 @@ func TestWorkVocabularyLeadNamesSurviveLeadlessWrites(t *testing.T) {
 	if cleared := decode[workVocabulary](t, status, body, 200); cleared.Lead != nil || strings.Contains(string(body), `"lead"`) {
 		t.Fatalf("cleared %s", body)
 	}
+}
+
+// The leaf and 33 parent depths: one value more than a vocabulary can name.
+func tooManyLevels() string {
+	values := []string{"leaf"}
+	for depth := 1; depth <= 33; depth++ {
+		values = append(values, fmt.Sprint(depth))
+	}
+	return "level=" + strings.Join(values, ",")
 }

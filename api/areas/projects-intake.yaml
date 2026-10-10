@@ -5,16 +5,23 @@ paths:
     get:
       operationId: getProjectIntake
       summary: Read intake history
-      description: Aithema's source, transcript and draft history. Delegated calls require exact intake.read, session tid/pid/sid and current auth_epoch; reads do not check gen. Accepted and superseded proposals remain visible.
+      description: "Aithema's source, transcript and draft history. Delegated calls require exact intake.read, session tid/pid/sid and current auth_epoch; reads do not check gen. Accepted and superseded proposals remain visible. Each page returns at most limit sources, turns and drafts, with independent keyset positions in an opaque X-Next-Cursor header when more history exists. Continue with after and the same project and node_id filter. Completed collections are empty on later pages. node_id narrows draft history."
       security: [{session: []}, {agentKey: []}, {aithemaDelegated: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: node_id, in: query, schema: {type: string, format: uuid}, description: Return accepted drafts for this node or the requirement that generated this ticket; sources and turns are empty. Requires the same intake.read permission.}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 200}, description: "Maximum rows per collection in this page."}
+        - {name: after, in: query, schema: {type: string, maxLength: 2048}, description: "Opaque X-Next-Cursor from the preceding page; bound to the tenant, project and node_id filter."}
       responses:
+        '422': {$ref: '#/components/responses/IntakeError'}
         '400': {$ref: '#/components/responses/IntakeError'}
         '401': {$ref: '#/components/responses/IntakeError'}
         '503': {$ref: '#/components/responses/IntakeError'}
-        '200': {description: Intake snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSnapshot'}}}}
+        '200':
+          description: "Intake history page. Absence of X-Next-Cursor marks the end."
+          headers:
+            X-Next-Cursor: {schema: {type: string}, description: "Opaque continuation for after; absent when all collections are exhausted."}
+          content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSnapshot'}}}
         '404': {$ref: '#/components/responses/IntakeError'}
         '403': {$ref: '#/components/responses/IntakeError'}
         '409': {$ref: '#/components/responses/IntakeError'}

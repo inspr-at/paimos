@@ -23,7 +23,7 @@ test.describe('wide lists', () => {
     await expect(row('PHAROS-11').locator('.c-epic')).toHaveText('Guarded multi-cloud provisioning')
     await expect(row('PHAROS-11').locator('.c-release')).toHaveText('—')
     await expect(row('PHAROS-11').locator('.c-release')).not.toHaveText('v4.7.8')
-    await expect(row('PHAROS-11').locator('.c-tags .tag-chip')).toHaveText(['CUSTOMERPORTAL', 'hsb8'])
+    await expect(row('PHAROS-11').locator('.c-tags .tag-chip')).toHaveText(['CUSTOMERPORTAL', 'worker-8'])
     // A task shows its ticket's epic in the column and its ticket as the chip by the title.
     await expect(row('PHAROS-13').locator('.c-epic')).toHaveText('Guarded multi-cloud provisioning')
     await expect(row('PHAROS-13').locator('.parent-chip')).toHaveText('PHAROS-12')

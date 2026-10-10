@@ -85,7 +85,7 @@ const eta = (p50: string | null, p90: string | null, reason: string | null = nul
 const noRecord = { qualification_evidence: null, rollback_class: null }
 const items = (final: boolean, record = false) => [
   { id: R, kind: 'release', ref: '126', title: 'Release 126', prs: [405, 936, 937], started_at: iso('18:21'), ended_at: final ? iso('20:34:01') : null, pct_done: final ? 100 : 93, current_step_id: final ? null : id(10_028),
-    eta: final ? eta(null, null, 'run ended') : eta('20:35', '20:45'), target: { minutes: 24, from_step: 'a', source: 'Arion' }, next_human_gate: { principal_id: null, what: 'agm1 GO' },
+    eta: final ? eta(null, null, 'run ended') : eta('20:35', '20:45'), target: { minutes: 24, from_step: 'a', source: 'Arion' }, next_human_gate: { principal_id: null, what: 'release GO' },
     ...(record ? { qualification_evidence: 'AEON-487/comment/native-qualification', rollback_class: 'digest_safe' } : noRecord) },
   { id: C1, kind: 'change', ref: 'AEON-991', title: 'CI fix', prs: [414], started_at: iso('19:10'), ended_at: null, pct_done: 75, current_step_id: id(10_106),
     eta: eta('20:50', '21:08'), target: { minutes: 40, from_step: 'review', source: 'Arion' }, next_human_gate: null, ...noRecord },

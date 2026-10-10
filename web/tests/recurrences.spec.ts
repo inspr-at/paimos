@@ -267,3 +267,37 @@ for (const parent of [false, true]) {
     expect(errors).toEqual([])
   })
 }
+
+
+// Risk: API-configured triggers lose their selectors during edits, or a release
+// picker blocks manual work. Actions and start choices must remain under the pointer.
+test('non-release event edits preserve configuration and stable manual controls', async ({ page }) => {
+  const { calls, items, errors } = await setup(page)
+  for (const event of ['node.done', 'knowledge.changed', 'external.tag', 'external.deploy'] as const) {
+    const trigger: RecurrenceInput['trigger'] = { kind: 'event', event, event_start: 'now', event_timezone: 'UTC', ...(event.startsWith('external.') ? { external: { principal_id: 'sender', public_key: 'public' } } : { filter: { project_ids: ['p-pharos'], ...(event === 'knowledge.changed' ? { tag: 'website' } : { has_release_copy: true }) } }) }
+    items[0].trigger = trigger
+    await settings(page)
+    await expect(row(page)).not.toContainText('every release')
+    await row(page).getByRole('button', { name: /^More/ }).click()
+    await page.getByRole('menuitem', { name: 'Edit…', exact: true }).click()
+    const frame = editor(page), save = frame.getByRole('button', { name: /^Save/ })
+    const starts = ['Right away', '1 hour later', 'Next morning']
+    await expectStableControls({
+      controls: { save, cancel: frame.getByRole('button', { name: /^Cancel/ }), start: frame.getByRole('radiogroup', { name: 'Start', exact: true }), ...Object.fromEntries(starts.map(name => [name, frame.getByRole('radio', { name, exact: true })])) },
+      scrollAreas: { body: frame.locator('.editor-body') },
+      interactions: ['Next morning', 'Right away', '1 hour later'].map(name => ({ name, run: async () => { await frame.getByRole('radio', { name, exact: true }).click(); await expect(save).toBeEnabled() } })),
+    })
+    await save.click(); await expect(frame).toHaveCount(0)
+    const updated = calls.filter(call => call.method === 'PUT' && call.path.endsWith(id)).at(-1)!.body as unknown as RecurrenceInput
+    expect(updated.trigger).toEqual({ ...trigger, event_start: 'hour' })
+    await row(page).getByRole('button', { name: 'Run now', exact: true }).click()
+    const run = page.getByRole('dialog', { name: 'Run recurring work now' })
+    await expect(run.getByRole('radiogroup', { name: 'Published release' })).toHaveCount(0)
+    const create = run.getByRole('button', { name: /^Create/ })
+    await expectStableControls({ controls: { create, cancel: run.getByRole('button', { name: 'Cancel', exact: true }) }, interactions: [{ name: 'confirm manual occurrence', run: async () => { await expect(create).toBeEnabled(); await create.focus() } }] })
+    await create.click(); await expect(run).toHaveCount(0)
+    expect(calls.filter(call => call.path.endsWith('/run-now')).at(-1)!.body).not.toHaveProperty('release_key')
+    expect(calls.filter(call => call.path.endsWith('/releases'))).toHaveLength(0)
+  }
+  expect(errors).toEqual([])
+})

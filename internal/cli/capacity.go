@@ -19,11 +19,12 @@ import (
 
 func (rt *runtime) cmdCapacity() *Command {
 	var emitEnv bool
-	var daemon, profile, socket, root, shell string
+	var daemon, profile, socket, root, shell, project string
 	shell = "sh"
 	return &Command{Name: "capacity", Short: "Account capacity advice", Use: "capacity next <harness>", subs: []*Command{{
 		Name: "next", Short: "Next account in the server's routing order", Use: "capacity next <harness> [--env]", minArgs: 1, maxArgs: 1,
 		addFlags: func(fs *flagSet) {
+			fs.string(&project, "project-id", 0, "project context (otherwise infer from the linked working folder)")
 			fs.bool(&emitEnv, "env", 0, "print a config-home export from the owning local agentd")
 			fs.string(&daemon, "daemon-id", 0, "restrict advice to a computer")
 			fs.string(&profile, "model-profile-id", 0, "restrict advice to a model profile")
@@ -54,6 +55,13 @@ func (rt *runtime) cmdCapacity() *Command {
 			}
 			if profile != "" {
 				q.Set("model_profile_id", profile)
+			}
+			projectID, err := rt.accountProject(project)
+			if err != nil {
+				return err
+			}
+			if projectID != "" {
+				q.Set("project_id", projectID)
 			}
 			var advice agentaccounts.CapacityNext
 			if err := rt.do("GET", "/api/agent-accounts/capacity/next?"+q.Encode(), nil, &advice); err != nil {

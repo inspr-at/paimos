@@ -182,3 +182,79 @@ located by `(tenant_id,recurrence_id,occurrence_key)`; linked ticket contents an
 actor identity remain personal data in the existing nodes/principals/events
 inventory. The coordinator must add these entries when merging onto the DSAR
 inventory. No new secret storage is introduced.
+
+
+AEON-825 adds API/CLI JSON configuration for `node.done`, `knowledge.changed`,
+`external.tag` and `external.deploy`. The existing recurrence editor still
+creates time and release triggers; use JSON definitions for these new kinds.
+Existing definitions display the correct event type and retain selectors/sender
+configuration when editing templates or event delays. Manual Run now for the new
+kinds creates a normal manual occurrence without offering a release picker.
+New trigger configuration controls need Opus design.
+
+A Done trigger derives a transition from actual node/status events into the
+kind's configured Done category, including custom status names. Updates that
+stay in Done and transitions to Cancelled do not fire. For example:
+
+```json
+{"kind":"event","event":"node.done","filter":{"project_ids":["<source project UUID>"],"has_release_copy":true,"exclude_hidden":true}}
+```
+
+The project list accepts at most 20 distinct UUIDs and defaults to the target
+project. Release-copy filtering requires all four nonblank pills/benefits in
+the source event snapshot. A knowledge trigger accepts `entry_id`,
+`knowledge_type` and an exact `tag` from `fields.tags`; supplied conditions are
+combined. Supported types are runbook, guideline, memory, external-system,
+related-project and decision. Creation, content updates and archival changes
+can fire; unavailable/deleted source nodes are withheld.
+
+```json
+{"kind":"event","event":"knowledge.changed","filter":{"knowledge_type":"guideline","tag":"website"}}
+```
+
+The definition owner needs read permission in every source project (and
+`knowledge.read` for knowledge). The scheduler rechecks the owner's current
+permissions and event-reference visibility under the tenant/tree fence before
+writing a ticket. Invisible source events advance the cursor without copying
+content; revoked authority reports a failed attempt and retains its cursor for
+retry. New trigger kinds consume source events in order, within the existing
+50-claim tenant pass. A source event has one durable occurrence key, including
+an overlap skip. Replaying a cursor cannot create another occurrence. Pause
+and trigger replacement discard accumulated events, as for release triggers.
+Event delays apply to each source event's logged time. Created tickets append
+a bounded JSON context containing the event ID and source node key/ID, knowledge
+entry ID, release ID where available, or external delivery/source/ref. Source
+bodies and arbitrary external payloads are never copied. A description that
+would exceed the ordinary node limit produces a skipped receipt.
+
+External senders use an existing agent key and an existing Ed25519 signing
+authority; PAIMOS stores only the public key in `trigger.external`:
+
+```json
+{"kind":"event","event":"external.tag","external":{"principal_id":"<sender agent UUID>","public_key":"<base64 Ed25519 public key>"}}
+```
+
+Send normalized events to `POST /api/recurrences/{id}/events` with the existing
+agent authentication and `X-Aeon-Signature`. The sender needs an explicit
+`recurrences.manage` grant and `nodes.read` on the target project, with matching
+key scopes. Sign the exact UTF-8 bytes of
+`aeon-recurrence-event-v1\n<tenant UUID>\n<recurrence UUID>\n<request body>`
+using Ed25519, and base64-encode the signature. A trusted product/site relay
+maps its existing tag/deploy evidence to this envelope; native provider payloads
+are not accepted directly:
+
+```json
+{"delivery_id":"delivery-123","event":"external.tag","occurred_at":"2026-10-10T12:00:00Z","source":"product/repository","ref":"v1.2.3"}
+```
+
+Use `external.deploy` only for successful deployments. Requests are bounded to
+8192 bytes, delivery IDs to 128 bytes, and source/ref to 256 bytes each. The
+signed time must be within five minutes of the database clock. Tenant and
+recurrence IDs bind the signature, and the configured agent owns its delivery
+receipt. Exact retries within that window return the original `202` event
+receipt (`event_id`, `duplicate`); changing a delivery's payload returns `409`.
+Paused definitions reject new deliveries. Retired definitions and foreign
+UUIDs return `404`. Sender and owner permissions are checked again before
+scheduling. Intake records an event only; neither intake nor the scheduler
+launches an agent. Explicit `queue_each` retains the existing inert queue
+handoff to coordinator routing. No schema migration or new secret is required.

@@ -15,7 +15,7 @@ async function setup(page: Page, manage = true, longText = false, expired = long
   const world = capacityWorld(), data = agentData({ me: me.id, now: NOW, projects: {}, tickets: {}, nodes: {} })
   data.accounts = world.accounts as unknown as typeof data.accounts
   const c = world.computers[0]!
-  if (longText) { c.computer_name = 'mbp2607 · Arbeitscomputer mit einem ausführlichen deutschen Namen'; data.accounts[0]!.label = 'Arbeitskonto für gemeinsame Entwicklungsaufgaben mit einem ausführlichen deutschen Namen'; c.enrollments[0]!.label = data.accounts[0]!.label }
+  if (longText) { c.computer_name = 'build-7 · Arbeitscomputer mit einem ausführlichen deutschen Namen'; data.accounts[0]!.label = 'Arbeitskonto für gemeinsame Entwicklungsaufgaben mit einem ausführlichen deutschen Namen'; c.enrollments[0]!.label = data.accounts[0]!.label }
   c.revision = 4
   c.enrollments.forEach(e => Object.assign(e,{can_verify:true,verification_state:'completed'}))
   Object.assign(c,{harness_statuses:{codex:'ready',claude:'ready',grok:'ready',cursor:'ready'},verification_capabilities:{...c.verification_capabilities,claude:{supported:true,policy:'read_only',reason:''}}})
@@ -50,7 +50,7 @@ async function setup(page: Page, manage = true, longText = false, expired = long
 }
 async function computer(page: Page) {
   await page.locator('[data-computer]').first().click()
-  const pane = page.getByRole('dialog',{name:/^mbp2607/})
+  const pane = page.getByRole('dialog',{name:/^build-7/})
   await expect(pane).toBeVisible()
   await pane.getByRole('button',{name:/Capacity and load/}).click()
   return pane
@@ -143,9 +143,9 @@ test('Needs you verifies the expired sign-in once and reports a failed request h
   await action.click()
   await expect(page.getByText('Verification could not be requested.',{exact:true})).toBeVisible()
   expect(requests).toEqual([{expected_revision:4,expected_verification_run_id:null}])
-  await expect(page.getByText('Verification requested on mbp2607.',{exact:true})).toHaveCount(0)
+  await expect(page.getByText('Verification requested on build-7.',{exact:true})).toHaveCount(0)
   await page.locator(`[data-computer="${s.world.computers[0]!.computer_id}"]`).click()
-  await expect(page.getByRole('dialog',{name:'mbp2607'}).getByRole('button',{name:'Verify again',exact:true})).toBeVisible()
+  await expect(page.getByRole('dialog',{name:'build-7'}).getByRole('button',{name:'Verify again',exact:true})).toBeVisible()
 })
 
 test('sign-out confirmation names its scope and a failed write keeps the reviewed account open',async({page}) => {
@@ -191,7 +191,7 @@ test('a matching login joins the shared quota from the account panel and Sign ou
   await use.getByRole('button',{name:'Details for Main'}).click()
   await use.getByRole('button',{name:'Pool with Studio · studio',exact:true}).click()
   const confirm=page.getByRole('dialog',{name:'Same login — pool them?'})
-  await expect(confirm.locator('.points li')).toHaveText(['Main · mbp2607','Studio · studio'])
+  await expect(confirm.locator('.points li')).toHaveText(['Main · build-7','Studio · studio'])
   await confirm.getByRole('button',{name:'Pool accounts'}).click()
   await expect.poll(()=>pools).toEqual([{account_ids:[main.id,studio.id],quota_fingerprint:fingerprint,confirmed:true}])
   // The same panel now shows the canonical account with both logins.

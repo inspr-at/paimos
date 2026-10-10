@@ -8,6 +8,13 @@ edit returns a conflict instead of replacing newer fields; read the current
 node before retrying. If a tag was created but could not be attached, the error
 names that retained tag. A failed plan leaves earlier successful writes applied.
 
+Each tenant receives a default `tag` kind at creation; migration 1316 adds it to
+existing tenants that lack one, preserving custom tag definitions. `aeon tag
+create` uses that kind and creates a node with the existing `nodes.write`
+authority. Agents need no kind-creation request; direct kind creation remains
+person-only. Repeating tag-kind initialization leaves the existing definition
+unchanged.
+
 ```sh
 paimos auth login --url https://aeon.example --name default --key-file ./agent.key
 paimos whoami
@@ -182,6 +189,8 @@ Keyed-agent transactions acquire the authenticating-key usage fence before tenan
 Successful authorization records a tenant-isolated timestamp per authenticating key and scope, with at most one persisted write per minute and no request payload, route or address. A trim refuses to drop any scope used in the last 24 hours, with a conservative one-minute margin for debounce. Reads recheck that guard and expose a blocked memo if use or scopes changed after analysis. Missing timestamps mean unknown use; they do not establish that a scope was never used. Protected memo responses and their audit events contain no key secret, prefix or credential hash. Existing key creation, rotation and manual scope editing retain their contracts.
 
 The same change is available as `aeon keys scopes <key-id> --add harness.worker --remove nodes.write --session-file <private-cookie-file>` (repeatable/comma-separated scopes). The file contains an existing signed-in person's `aeon_session` cookie value; `-` reads it from stdin without echo. Use `--url` or the configured instance URL. This command neither stores nor prints the cookie; agent credentials cannot manage scopes. Permission denials can include `reason_code` (`missing_role_permission`, `missing_project_access`, or `missing_key_scope`); only a missing key scope after role authority passes includes `scope`. Agent session registration also requires `harness.worker`, preventing generations that cannot heartbeat or stop.
+
+Rendered skill files, onboarding output, and the rendered-skill index are written through exclusive `0600` temporary files in the output directory, synced and closed before atomic replacement. The operator-chosen workspace root may be reached through symlinks and is resolved once before in-workspace writes; descendant directories are opened without following symlinks. Symlink destinations (including dangling links) are refused; choose a regular output path.
 
 `whoami` and doctor's auth check use the same `GET /api/me` client call. A valid session or agent key can read its own identity without a workspace role or extra key scope, including project-only and empty-scope keys. Doctor probes public health and version information anonymously; schema and rules checks retain their own permissions. This grants no access to other workspace data or profile routes. Issue, knowledge, search and onboard commands use the current Aeon APIs. Commands whose API resource is unavailable exit 3. `aeon mcp` exposes `whoami`, `ask`, `ask_status`, issue list/get/create/update/comment, knowledge list/get/create/update, and search over stdio. Work tools reuse the CLI application operations and scoped HTTP APIs; updates preserve revision checks and kind changes remain person-only. JSON field writes preserve exact numeric tokens. Node walks fail explicitly if a cursor repeats or remains after fifty pages. Project-scoped issue search resolves ancestor membership and continues search pages up to the requested limit within the server’s ranked window of 200 matches. An ancestor returning not-found excludes that path from the visible descendant set; other lookup errors and traversal limits still fail the search. Onboarding `--check` compares the complete rendered bundle, options and managed header, normalizing only its generation timestamp.
 

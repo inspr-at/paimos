@@ -310,6 +310,8 @@ func TestMissingDoctrineGuardFileDoesNotPreventStartup(t *testing.T) {
 func TestDoctrineRepositoriesFromEnv(t *testing.T) {
 	t.Setenv("AEON_DATABASE_URL", "postgres://example")
 	t.Setenv("AEON_ENV", "prod")
+	t.Setenv("AEON_DOCTRINE_APP_TENANT_ID", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	t.Setenv("AEON_DOCTRINE_MIRROR_DIR", "/host/mirrors")
 	for _, name := range []string{"AEON_DOCTRINE_GUARD_KEY_FILE", "AEON_MESSAGING_KEY_FILE", "AEON_LINK_KEY_FILE", "AEON_REVIEW_WEBHOOK_SECRET_FILE", "AEON_PHONE_PUSH_VAPID_FILE", "AEON_DATABASE_PASSWORD_FILE"} {
 		t.Setenv(name, "")
 	}
@@ -319,7 +321,7 @@ func TestDoctrineRepositoriesFromEnv(t *testing.T) {
 	}{
 		{name: "unchanged defaults", unset: true, wantPublic: "inspr-at/inspr-modules", wantPrivate: "inspr-at/inspr-doctrine-private"},
 		{name: "custom pair", public: "team/shared-doctrine", private: "team/private-doctrine", wantPublic: "team/shared-doctrine", wantPrivate: "team/private-doctrine"},
-		{name: "private only", private: "augmentoring-team/agm-doctrine", wantPrivate: "augmentoring-team/agm-doctrine"},
+		{name: "private only", private: "example-business-team/agm-doctrine", wantPrivate: "example-business-team/agm-doctrine"},
 		{name: "canonical case preserved", public: "TEAM/Shared", private: "TEAM/Private", wantPublic: "TEAM/Shared", wantPrivate: "TEAM/Private"},
 		{name: "same repository", public: "team/doctrine", private: "TEAM/Doctrine", refusal: "must be different"},
 		{name: "no private guard", public: "team/shared", refusal: "PRIVATE_REPOSITORY"},
@@ -351,6 +353,9 @@ func TestDoctrineRepositoriesFromEnv(t *testing.T) {
 			}
 			if cfg.DoctrineRepositories == nil || cfg.DoctrineRepositories.Public() != tc.wantPublic || cfg.DoctrineRepositories.Private() != tc.wantPrivate {
 				t.Fatal("deployment proposal repositories not loaded")
+			}
+			if cfg.DoctrineDefaultSource != !tc.unset || cfg.DoctrineMirrorDir != "/host/mirrors" {
+				t.Fatal("host default requires an explicit private repository and preserves mirror policy")
 			}
 		})
 	}

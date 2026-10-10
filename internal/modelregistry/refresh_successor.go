@@ -3,6 +3,7 @@ package modelregistry
 
 import (
 	"context"
+	"github.com/inspr-at/paimos/internal/modelactivation"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -54,9 +55,12 @@ func acceptUsedSuccessor(ctx context.Context, tx pgx.Tx, p tenant.Principal, pin
 	if exists {
 		return false, nil
 	}
-	prof, err := insertProfile(ctx, tx, p.TenantID, pin)
+	prof, err := insertActivatedProfile(ctx, tx, p, pin, true, modelactivation.VendorSuccessor)
 	if err != nil {
 		return false, err
+	}
+	if !prof.Enabled {
+		return false, nil
 	}
 	var allowed bool
 	if err := tx.QueryRow(ctx, `SELECT aeon_account_allows_profile($1,ARRAY[$2::uuid],$3::uuid)`, pin.Harness, predecessor.ID, prof.ID).Scan(&allowed); err != nil {

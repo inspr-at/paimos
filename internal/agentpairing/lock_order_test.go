@@ -58,6 +58,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"recurrences/engine.go:RunTenant":                   "recurrence.lock",
 		"recurrences/engine.go:recordFailure":               "recurrence.lock",
 		"recurrences/engine.go:syncPublications":            "recurrence.lock",
+		"recurrences/external.go:receiveExternal":           "recurrence.lock",
 		"recurrences/occurrence.go:ensureActor":             "advisory:recurring-actor",
 		"recurrences/occurrence.go:runNow":                  "recurrence.lock",
 		"operatoractor/actor.go:Ensure":                     "operator.EnsureWithProduction",

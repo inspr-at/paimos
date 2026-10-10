@@ -35,7 +35,7 @@ export interface AccountLine {
   harness: string
   /** The vendor's name: Codex, Claude, Cursor. */
   vendor: string
-  /** The full sign-in identity, e.g. admin@augmentoring.com. */
+  /** The full sign-in identity, e.g. admin@example.com. */
   identity: string
   /** Its group when kept separate from the vendor's pool ("Client"). */
   group: string
@@ -275,7 +275,7 @@ function enrollmentRow(e: PairingEnrollment, computer: PairingView): AccountRow 
   }
 }
 
-/** The header pill: "2 of 2 ready", "0 of 2 ready · mbp2607 offline". */
+/** The header pill: "2 of 2 ready", "0 of 2 ready · build-7 offline". */
 export function readySummary(cards: ComputerCard[]): { text: string; tone: Tone } | null {
   const lines = cards.flatMap(c => c.accounts)
   if (!lines.length) return null
@@ -289,7 +289,7 @@ export function readySummary(cards: ComputerCard[]): { text: string; tone: Tone 
 
 /**
  * Middle ellipsis for an identity that does not fit: the start and the domain
- * stay readable ("admin@augmen…ring.com"). Short ones are returned whole.
+ * stay readable ("admin@exam…mple.com"). Short ones are returned whole.
  */
 export function middleEllipsis(text: string, max: number): string {
   if (text.length <= max || max < 5) return text

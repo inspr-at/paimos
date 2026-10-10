@@ -40,9 +40,9 @@ test('intended result prefers an explicit phrase, then the bound ticket title, t
   const keyOnly = view({ session: { brief: 'AEON-221' }, name: 'SC1 working' })
   assert.equal(intendedResult(keyOnly), 'AEON-221')
   assert.equal(sessionContext(keyOnly, 'AEON-221'), 'SC1 working')
-  const plain = view({ name: 'amy', session: { host: 'csb1', activity_note: 'Quiet · heartbeat only' } as SessionView['session'] })
+  const plain = view({ name: 'amy', session: { host: 'prod-1', activity_note: 'Quiet · heartbeat only' } as SessionView['session'] })
   assert.equal(intendedResult(plain), 'amy')
-  assert.equal(sessionContext(plain, 'amy'), 'csb1')
+  assert.equal(sessionContext(plain, 'amy'), 'prod-1')
   assert.equal(intendedResult(plain).includes('heartbeat'), false)
 })
 

@@ -166,6 +166,7 @@ func (e *Engine) SyncFences(ctx context.Context) (resultErr error) {
 			proof.Progress = observedProgress(s.View, local)
 		}
 	}
+	proof.Progress = e.reportInstall(s.View, proof.Progress)
 	cause = PairingServerUnavailable
 	v, err := e.API.Reconcile(ctx, proof)
 	if err != nil {
@@ -302,6 +303,11 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 				p.LocalProcesses = "drained"
 				if e.Services == nil && s.Service != nil {
 					return p, errors.New("service cleanup requires its owning manager")
+				}
+				if e.LeaveLedger != nil {
+					if err = e.LeaveLedger(ctx); err != nil {
+						return p, err
+					}
 				}
 				if s.Service != nil {
 					if err = e.Services.Remove(ctx, e.Store, s.Service, true); err != nil {
