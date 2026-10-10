@@ -57,8 +57,11 @@ func routinePolicyTx(ctx context.Context, tx pgx.Tx, tenantID string, item Recur
 	d := item.Definition
 	owner := tenant.Principal{ID: d.OwnerPrincipalID, TenantID: tenantID, Kind: tenant.Person}
 	if err := validateDefinition(ctx, tx, owner, item.Input); err != nil {
-		if errors.Is(err, authz.ErrForbidden) || errors.Is(err, pgx.ErrNoRows) {
-			out.WaitReason = "owner_unavailable"
+		var failure *workorders.Error
+		// Invalid saved definitions close execution, but must not roll back
+		// reads, pause or consent revocation. Unexpected failures still surface.
+		if errors.Is(err, authz.ErrForbidden) || errors.Is(err, pgx.ErrNoRows) || errors.As(err, &failure) && failure.Status >= 400 && failure.Status < 500 {
+			out.WaitReason = "definition_unavailable"
 			return out, nil
 		}
 		return out, err
