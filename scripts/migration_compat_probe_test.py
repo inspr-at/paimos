@@ -3,10 +3,12 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from unittest.mock import Mock, patch
@@ -175,6 +177,84 @@ class ProbeTest(unittest.TestCase):
             self.assertEqual(boundary.errors(), (0, 0))
             result.stderr = 'ERROR: 0A000: '+module.CAPABILITY_ERROR+'\nCONTEXT: aeon_enter_principal(uuid,uuid,boolean)'
             self.assertEqual(boundary.errors(), (1, 1))
+
+
+class MigrationHarnessTest(unittest.TestCase):
+    def test_latest_compatibility_and_legacy_capability_use_distinct_images(self):
+        # Risk: once the latest release understands account use, expecting it
+        # to fail the legacy capability guard rejects every subsequent PR.
+        # Execute the harness with disposable command doubles: keep latest
+        # read compatibility and exact legacy refusal as independent gates.
+        latest_tag = 'v261010123154.0.0'
+        latest_digest = 'sha256:c9952c1561c8d32c4a3efb17ed95934f81efd6bc2546de41a3b56bd138304deb'
+        legacy_tag = 'v261009095632.0.0'
+        legacy_digest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / 'scripts'
+            scripts.mkdir()
+            (scripts / 'migration-compat.sh').write_text(
+                Path(__file__).with_name('migration-compat.sh').read_text())
+            bin_dir = root / 'bin'
+            bin_dir.mkdir()
+            command = '''import json, os, sys
+from pathlib import Path
+name, args = Path(sys.argv[0]).name, sys.argv[1:]
+state_path = Path(os.environ['HARNESS_STATE'])
+state = json.loads(state_path.read_text()) if state_path.exists() else {}
+with open(os.environ['HARNESS_LOG'], 'a') as log:
+    log.write(json.dumps({'command': name, 'args': args, 'image': state.get('image'), 'migrated': state.get('migrated', False)}) + '\\n')
+if name == 'docker':
+    if args[:2] == ['image', 'ls']:
+        print(args[-1].split('@')[1])
+    elif args[0] == 'run' and '--name' in args and args[args.index('--name') + 1].startswith('aeon-compat-app-'):
+        state['image'] = args[-1]
+    elif args[0] == 'port':
+        print('127.0.0.1:8080' if args[-1] == '8080/tcp' else '127.0.0.1:5432')
+    elif args[0] == 'exec' and '-i' in args:
+        sys.stdin.read()
+elif name == 'go':
+    state['migrated'] = True
+elif name == 'python3':
+    mode = args[1]
+    if mode == 'seed':
+        Path(args[args.index('--state') + 1]).write_text('{}')
+    elif mode == 'account-use':
+        if state.get('image') != os.environ['HARNESS_LEGACY_DIGEST']:
+            sys.exit('capability refusal must exercise the immutable legacy image')
+        if os.environ['HARNESS_FAIL_BOUNDARY'] == '1':
+            sys.exit(23)
+state_path.write_text(json.dumps(state))
+'''
+            for name in ('docker', 'python3', 'go', 'trash'):
+                executable = bin_dir / name
+                executable.write_text('#!' + sys.executable + '\n' + command)
+                executable.chmod(0o755)
+            for fail_boundary in (False, True):
+                with self.subTest(fail_boundary=fail_boundary):
+                    log = root / f'commands-{fail_boundary}.jsonl'
+                    harness_env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ['PATH'],
+                        HARNESS_LOG=str(log), HARNESS_STATE=str(root / f'state-{fail_boundary}.json'),
+                        HARNESS_LEGACY_DIGEST=legacy_digest, HARNESS_FAIL_BOUNDARY=str(int(fail_boundary)))
+                    result = subprocess.run(['bash', str(scripts / 'migration-compat.sh'), latest_tag, latest_digest],
+                        env=harness_env, capture_output=True, text=True, timeout=15, check=False)
+                    self.assertEqual(result.returncode, 23 if fail_boundary else 0, result.stdout + result.stderr)
+                    events = [json.loads(line) for line in log.read_text().splitlines()]
+                    migrations = [event for event in events if event['command'] == 'go']
+                    self.assertEqual(len(migrations), 1)
+                    probes = [event for event in events if event['command'] == 'python3']
+                    reads = [event for event in probes if event['args'][1] == 'check']
+                    self.assertEqual([(event['image'], event['migrated'], event['args'][-1]) for event in reads],
+                        [(latest_digest, True, latest_tag[1:]), (legacy_digest, True, legacy_tag[1:])])
+                    boundary = [event for event in probes if event['args'][1] == 'account-use']
+                    self.assertEqual(len(boundary), 1)
+                    self.assertEqual(boundary[0]['image'], legacy_digest)
+                    self.assertTrue(boundary[0]['migrated'])
+                    self.assertEqual(boundary[0]['args'][boundary[0]['args'].index('--version') + 1], legacy_tag[1:])
+                    if fail_boundary:
+                        self.assertNotIn('Migration compatibility passed:', result.stdout)
+                    else:
+                        self.assertIn('Migration compatibility passed:', result.stdout)
 
 
 if __name__ == '__main__':

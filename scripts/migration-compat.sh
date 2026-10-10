@@ -55,18 +55,19 @@ CREATE DATABASE aeon OWNER aeon;
 CREATE EXTENSION vector;
 SQL
 
-start_previous() {
+start_image() {
+  local selected_image="$1"
   docker run -d --name "$app" --network "$network" --platform linux/amd64 \
     --memory 256m -p 127.0.0.1::8080 \
     -e AEON_ENV=dev -e AEON_ADDR=:8080 -e AEON_FILES_DIR=/tmp/aeon-compat-files \
     -e AEON_PUBLIC_URL=http://localhost:8080 -e AEON_BOOTSTRAP_ADMIN_EMAIL=compat@example.invalid \
     -e "AEON_DATABASE_URL=postgres://aeon:aeon@$db:5432/aeon?sslmode=disable" \
-    "$image_id" >/dev/null
+    "$selected_image" >/dev/null
   base="http://$(docker port "$app" 8080/tcp)"
   python3 scripts/migration-compat-probe.py wait-ready --base "$base"
 }
 
-start_previous
+start_image "$image_id"
 python3 scripts/migration-compat-probe.py seed --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 docker stop --time 30 "$app" >/dev/null
 docker container rm "$app" >/dev/null
@@ -76,11 +77,28 @@ docker container rm "$app" >/dev/null
 db_address="$(docker port "$db" 5432/tcp)"
 AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=disable" \
   GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
-start_previous
+start_image "$image_id"
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
-python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
+
+# Account-use refusal must use a binary below the capability floor. The latest
+# published release can already enforce account_use_v1, so keep its read
+# compatibility above and exercise the unchanged refusal gate with this fixed
+# pre-capability release. Pin its published digest, never a moving tag.
+legacy_tag=v261009095632.0.0
+legacy_image=ghcr.io/inspr-at/aeon@sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
+echo "Account-use rollback fixture: $legacy_tag; image: $legacy_image"
+docker pull --platform linux/amd64 "$legacy_image"
+legacy_image_id="$(docker image ls --quiet --no-trunc "$legacy_image" | sort -u)"
+[[ "$legacy_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable legacy image ID' >&2; exit 1; }
+docker stop --time 30 "$app" >/dev/null
+docker container rm "$app" >/dev/null
+start_image "$legacy_image_id"
+python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}"
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${legacy_tag#v}" --database-container "$db"
 echo "Migration compatibility passed: $tag on the candidate schema"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
     "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+  printf 'Rollback fixture %s; registry image %s; loaded image %s verified activated empty/populated pools refuse below-floor binaries.\n' \
+    "$legacy_tag" "$legacy_image" "$legacy_image_id" >> "$GITHUB_STEP_SUMMARY"
 fi
