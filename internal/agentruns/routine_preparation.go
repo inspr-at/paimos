@@ -221,7 +221,7 @@ func DraftRoutineCriteria(work RoutinePreparedWork, criteria []string) (RoutineC
 	bytes := 0
 	for _, criterion := range criteria {
 		bytes += len(criterion)
-		if strings.TrimSpace(criterion) == "" || len(criterion) > 4096 || bytes > 16384 {
+		if len(criterion) > 4096 || bytes > 16384 || strings.TrimSpace(criterion) == "" {
 			return out, workorders.Fail(400, "criteria_draft_limit")
 		}
 	}
