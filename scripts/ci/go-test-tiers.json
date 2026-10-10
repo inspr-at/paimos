@@ -5338,6 +5338,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestPairingReportAudienceMigrationBoundsLockWait","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestPoolRecycleDefaultsAndExplicitOverrides","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestPoolSizingAndRetainedSessionAdmission","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestPortalMigrationDoesNotResurrectDeletedStarterKinds","tier":"GATED-FULL"}
@@ -5835,6 +5837,8 @@
     {"kind":"go","package":"internal/events","name":"TestPositionWriterKeepsStreamingWorking","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestSSEHeartbeatAndInvalidResume","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestSSEListenerRecycleClosesBackendAndResumesWithoutLoss","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestSSELiveModeSkipsALongBacklog","tier":"GATED-FULL"}
     ,
