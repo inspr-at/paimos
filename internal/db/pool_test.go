@@ -14,6 +14,33 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Risk: backend caches grow throughout pgx's long defaults, while explicit
+// deployment tuning must keep working independently for each URL/keyword key.
+func TestPoolRecycleDefaultsAndExplicitOverrides(t *testing.T) {
+	for _, tc := range []struct {
+		name, url              string
+		lifetime, jitter, idle time.Duration
+	}{
+		{"defaults", "postgres://localhost/fixture", 15 * time.Minute, 3 * time.Minute, 3 * time.Minute},
+		{"keyword defaults", "host=localhost dbname=fixture", 15 * time.Minute, 3 * time.Minute, 3 * time.Minute},
+		{"url overrides", "postgres://localhost/fixture?pool_max_conn_lifetime=1h&pool_max_conn_lifetime_jitter=6m&pool_max_conn_idle_time=10m", time.Hour, 6 * time.Minute, 10 * time.Minute},
+		{"keyword overrides and zero", "host=localhost dbname=fixture pool_max_conn_lifetime=20m pool_max_conn_lifetime_jitter=0s pool_max_conn_idle_time=0s", 20 * time.Minute, 0, 0},
+		{"lifetime only", "postgres://localhost/fixture?pool_max_conn_lifetime=45m", 45 * time.Minute, 3 * time.Minute, 3 * time.Minute},
+		{"idle only", "postgres://localhost/fixture?pool_max_conn_idle_time=9m", 15 * time.Minute, 3 * time.Minute, 9 * time.Minute},
+		{"explicit zero jitter", "postgres://localhost/fixture?pool_max_conn_lifetime_jitter=0s", 15 * time.Minute, 0, 3 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := db.ParsePoolConfig(tc.url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.MaxConnLifetime != tc.lifetime || cfg.MaxConnLifetimeJitter != tc.jitter || cfg.MaxConnIdleTime != tc.idle || cfg.MaxConns != 16 {
+				t.Fatalf("recycle config: lifetime=%v jitter=%v idle=%v max=%d", cfg.MaxConnLifetime, cfg.MaxConnLifetimeJitter, cfg.MaxConnIdleTime, cfg.MaxConns)
+			}
+		})
+	}
+}
+
 // Risk: small machines lose all request capacity, or session-lock workers
 // deadlock while holding their only permitted slot. Cancellation must not leak
 // worker permits; tenant work must still execute in an isolated transaction.

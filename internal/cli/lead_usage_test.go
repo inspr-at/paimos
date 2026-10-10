@@ -20,6 +20,10 @@ func TestHarnessLeadUsageReadAndFailure(t *testing.T) {
 			json.NewEncoder(w).Encode(kindPage{Items: []apiKind{{ID: "project-kind", Slug: "project"}}})
 			return
 		}
+		if r.URL.Path == "/api/projects/lookup" {
+			json.NewEncoder(w).Encode(map[string]string{"id": project, "key": "LEAD"})
+			return
+		}
 		if r.URL.Path == "/api/nodes" {
 			json.NewEncoder(w).Encode(nodePage{Items: []apiNode{{ID: project, Key: "LEAD", KindID: "project-kind"}}})
 			return

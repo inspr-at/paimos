@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -28,6 +29,9 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	ctx, stop := m.listenContext(r.Context())
+	defer stop()
+	r = r.WithContext(ctx)
 	after := int64(0)
 	// ?after= opts into live mode (AEON-326): "latest" starts at the newest
 	// event instead of replaying the log, and every connection opens with a
@@ -180,4 +184,14 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 			return
 		} // Client resumes from the last successfully sent ID.
 	}
+}
+
+// Closing the stream recycles its dedicated backend. The existing reconnect
+// path LISTENs before replaying from Last-Event-ID, covering the recycle gap.
+func (m *module) listenContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := m.listenTimeout
+	if timeout == nil {
+		timeout = context.WithTimeout
+	}
+	return timeout(ctx, db.ListenerMaxLifetime)
 }

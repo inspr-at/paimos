@@ -18,6 +18,7 @@ func init() {
 		"GET /api/nodes/{nodeId}":                                     "nodes.read",
 		"GET /api/nodes/{nodeId}/work-lifecycle":                      "nodes.read",
 		"GET /api/projects":                                           "nodes.read",
+		"GET /api/projects/lookup":                                    "nodes.read",
 		"GET /api/settings/work-vocabulary":                           "nodes.read",
 		"GET /api/status/help":                                        "nodes.read", // Authenticated agents have a read-only exception in RequirePattern.
 		"GET /api/tickets/graph":                                      "nodes.read",
@@ -41,6 +42,7 @@ func init() {
 		"GET /api/nodes/lookup":             true,
 		"GET /api/nodes/tree":               true,
 		"GET /api/projects":                 true,
+		"GET /api/projects/lookup":          true,
 		"GET /api/settings/work-vocabulary": true,
 		"GET /api/status/help":              true,
 		"GET /api/tickets/graph":            true,

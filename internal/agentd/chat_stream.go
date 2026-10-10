@@ -78,6 +78,7 @@ type sessionChat struct {
 	sequence     uint64
 	closed       bool
 	subscribers  map[*chatSubscriber]bool
+	relay        *ChatRelay // optional server relay; its own bounded queue, never a lossy subscriber
 }
 
 func newSessionChat(binding ChatBinding, caps ChatCapabilities) *sessionChat {
@@ -104,6 +105,13 @@ func (s *Supervisor) SubscribeChat(binding ChatBinding) (<-chan ChatSessionEvent
 		return nil, nil, ErrNotOwned
 	}
 	return entry.chat.subscribe()
+}
+
+// attachRelay must precede the adapter start so the first turn is relayed.
+func (c *sessionChat) attachRelay(r *ChatRelay) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.relay = r
 }
 
 func (c *sessionChat) subscribe() (<-chan ChatSessionEvent, func(), error) {
@@ -157,6 +165,14 @@ func (c *sessionChat) publish(update ChatUpdate) {
 	if update.SessionUpdate == "state" {
 		c.state = update.State
 	}
+	if c.relay != nil {
+		relayed := update
+		if update.Content != nil {
+			content := *update.Content
+			relayed.Content = &content
+		}
+		c.relay.Observe(ChatSessionEvent{Binding: c.binding, Sequence: c.sequence, Update: &relayed})
+	}
 	for sub := range c.subscribers {
 		// Every subscriber owns its projection, including its text pointer.
 		copy := update
@@ -183,4 +199,5 @@ func (c *sessionChat) close() {
 	for sub := range c.subscribers {
 		c.remove(sub)
 	}
+	c.relay.Close()
 }

@@ -11,7 +11,98 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type listenerTracer struct{ listening chan *pgx.Conn }
+
+func (tr listenerTracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if data.SQL == "LISTEN aeon_events" {
+		tr.listening <- conn
+	}
+	return ctx
+}
+
+func (listenerTracer) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+// Risk: recycling closes a real dedicated backend but loses committed events
+// in the reconnect gap, duplicates old frames, or silently stops live delivery.
+// Injected expiry and handler/LISTEN barriers establish the exact ordering;
+// the request timeout only guards against hangs.
+func TestSSEListenerRecycleClosesBackendAndResumesWithoutLoss(t *testing.T) {
+	d, a, b := fixture(t)
+	listening := make(chan *pgx.Conn, 2)
+	cfg := d.App.Config()
+	cfg.ConnConfig.Tracer = listenerTracer{listening: listening}
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	m := New(pool).(*module)
+	expiry := make(chan context.CancelFunc, 2)
+	m.listenTimeout = func(ctx context.Context, lifetime time.Duration) (context.Context, context.CancelFunc) {
+		if lifetime != 30*time.Minute {
+			t.Errorf("listener lifetime = %v, want 30m", lifetime)
+		}
+		ctx, cancel := context.WithCancel(ctx)
+		t.Cleanup(cancel)
+		expiry <- cancel
+		return ctx, cancel
+	}
+	mux := http.NewServeMux()
+	m.Mount(mux)
+	finished := make(chan struct{}, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { finished <- struct{}{} }()
+		mux.ServeHTTP(w, r.WithContext(tenant.WithPrincipal(r.Context(), a)))
+	}))
+	t.Cleanup(srv.Close)
+
+	resp, sc, _ := liveStream(t, srv, "latest", "", false)
+	oldConn, recycle := <-listening, <-expiry
+	before := appendEvents(t, d, a, 1)[0]
+	if got := nextEvent(t, sc); got.ID != before.ID {
+		t.Fatalf("before recycle: got %d, want %d", got.ID, before.ID)
+	}
+	recycle() // Force the listener's expiry without cancelling the HTTP client.
+	if sc.Scan() || sc.Err() != nil {
+		t.Fatalf("expired stream did not close cleanly: %q, %v", sc.Text(), sc.Err())
+	}
+	<-finished
+	if !oldConn.IsClosed() {
+		t.Fatal("expired stream retained its dedicated backend")
+	}
+	resp.Body.Close()
+	gap := appendEvents(t, d, a, 2)
+	appendEvents(t, d, b, 1) // Another tenant's event cannot enter resumed replay.
+	resp, sc, ready := liveStream(t, srv, "latest", strconv.FormatInt(before.ID, 10), true)
+	newConn := <-listening
+	if ready != before.ID || newConn.PgConn().PID() == oldConn.PgConn().PID() {
+		t.Fatal("reconnect did not preserve the cursor with a fresh backend")
+	}
+	for _, want := range gap {
+		if got := nextEvent(t, sc); got.ID != want.ID || got.ActorPrincipalID != a.ID {
+			t.Fatalf("recycle gap: got %+v, want event %d", got, want.ID)
+		}
+	}
+	after := appendEvents(t, d, a, 1)[0]
+	if got := nextEvent(t, sc); got.ID != after.ID || got.ActorPrincipalID != a.ID {
+		t.Fatalf("after recycle: got %+v, want event %d", got, after.ID)
+	}
+	(<-expiry)()
+	if sc.Scan() || sc.Err() != nil {
+		t.Fatal("reconnected stream did not close cleanly")
+	}
+	<-finished
+	if !newConn.IsClosed() {
+		t.Fatal("reconnected stream retained its backend at expiry")
+	}
+	resp.Body.Close()
+}
 
 // liveStream opens /api/events/stream?after=... (live mode), checks that
 // stream.ready says resumed as expected and returns the ID it names.

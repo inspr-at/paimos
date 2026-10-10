@@ -409,7 +409,10 @@ type EnrolledAccount struct {
 
 type ControlRequest struct {
 	// Only the authenticated yield transport supplies a monotonic deadline.
-	deadline          time.Time
+	deadline time.Time
+	// Only the chat relay supplies writing: it runs when the inbox write
+	// begins, after this control waited behind any other.
+	writing           func()
 	Value             string                 `json:"value,omitempty"`
 	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`
 	ExpectedOwnership *ownedprocess.Identity `json:"expected_ownership,omitempty"`

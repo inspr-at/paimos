@@ -81,7 +81,9 @@
         "internal/agentpairing/ledger.go",
         "internal/agentpairing/ledger_test.go",
         "cmd/aeon-agentd/ledger.go",
-        "cmd/aeon-agentd/ledger_test.go"
+        "cmd/aeon-agentd/ledger_test.go",
+        "internal/agentaccounts/probe_batch.go",
+        "internal/agentaccounts/probe_batch_test.go"
       ]
     },
     {
@@ -136,8 +138,15 @@
         "internal/agentd/chat_normalize.go",
         "internal/agentd/chat_stream.go",
         "internal/agentd/chat_stream_test.go",
+        "internal/agentd/chat_relay.go",
+        "internal/agentd/chat_relay_test.go",
         "internal/agentd/chat_acp.go",
         "internal/agentd/chat_acp_test.go",
+        "internal/agentd/probe_batch.go",
+        "internal/agentd/queue_cadence.go",
+        "internal/agentd/queue_cadence_test.go",
+        "internal/agentruns/queue_notifications.go",
+        "internal/agentruns/queue_notifications_test.go",
         "internal/runisolation/**"
       ]
     },
@@ -153,7 +162,8 @@
         "internal/client/**",
         "internal/plugins/**",
         "internal/events/**",
-        "internal/attachedmsg/**"
+        "internal/attachedmsg/**",
+        "internal/cli/project_identity_test.go"
       ]
     },
     {
@@ -192,7 +202,9 @@
         "internal/fromclassic/**",
         "internal/quotepdf/**",
         "internal/deliveryvote/**",
-        "internal/workorders/**"
+        "internal/workorders/**",
+        "internal/nodes/project_lookup.go",
+        "internal/nodes/project_lookup_test.go"
       ]
     },
     {
@@ -220,10 +232,15 @@
         "internal/parentbenefits/**",
         "internal/statusautopilot/**",
         "internal/recurrences/**",
+        "internal/recurrences/definition.go",
+        "internal/recurrences/definition_test.go",
         "internal/usagedashboard/**",
         "internal/activity/**",
         "internal/decisiondesk/cutover_test.go",
-        "internal/questions/lock_order_test.go"
+        "internal/questions/lock_order_test.go",
+        "internal/routineguard/**",
+        "internal/recurrences/runs.go",
+        "internal/recurrences/runs_test.go"
       ]
     },
     {

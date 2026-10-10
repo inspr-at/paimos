@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -20,6 +21,10 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Reconnect resumes from Last-Event-ID after LISTEN is established again.
+	ctx, stop := context.WithTimeout(r.Context(), db.ListenerMaxLifetime)
+	defer stop()
+	r = r.WithContext(ctx)
 	after, err := streamCursor(r)
 	if err != nil {
 		failure(w, err)

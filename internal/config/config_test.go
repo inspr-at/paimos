@@ -81,6 +81,7 @@ func TestDoctrineBinaryAllowlist(t *testing.T) {
 }
 
 func TestFromEnvDefaults(t *testing.T) {
+	t.Setenv("AEON_CHAT_ENABLED", "")
 	t.Setenv("AEON_STATUS_AUTOPILOT", "")
 	t.Setenv("AEON_DATABASE_URL", "postgres://example")
 	t.Setenv("AEON_DOCTRINE_GUARD_KEY_FILE", "")
@@ -102,6 +103,9 @@ func TestFromEnvDefaults(t *testing.T) {
 	if cfg.StatusAutopilot != "on" {
 		t.Fatal("status autopilot must default on")
 	}
+	if cfg.ChatEnabled {
+		t.Fatal("chat must default off")
+	}
 	if len(cfg.AithemaOperatorLocalServices) != 0 {
 		t.Fatal("operator-local service exceptions must default off")
 	}
@@ -110,6 +114,47 @@ func TestFromEnvDefaults(t *testing.T) {
 	}
 	if cfg.DatabaseURL != "postgres://example" || cfg.PublicURL != "" || cfg.WebDir != "" {
 		t.Fatalf("unexpected cfg %+v", cfg)
+	}
+}
+
+// Risk: an absent or mistyped deployment switch silently enables private chat.
+func TestChatEnabledFromEnv(t *testing.T) {
+	t.Setenv("AEON_DATABASE_URL", "postgres://example")
+	t.Setenv("AEON_ENV", "prod")
+	for _, name := range []string{"AEON_MESSAGING_KEY_FILE", "AEON_LINK_KEY_FILE", "AEON_DOCTRINE_GUARD_KEY_FILE", "AEON_REVIEW_WEBHOOK_SECRET_FILE", "AEON_DATABASE_PASSWORD_FILE", "AEON_PHONE_PUSH_VAPID_FILE"} {
+		t.Setenv(name, "")
+	}
+	for _, tc := range []struct {
+		name, raw               string
+		unset, enabled, invalid bool
+	}{
+		{name: "unset", unset: true},
+		{name: "empty"},
+		{name: "true", raw: "true", enabled: true},
+		{name: "false", raw: "false"},
+		{name: "invalid", raw: "yes", invalid: true},
+		{name: "numeric", raw: "1", invalid: true},
+		{name: "uppercase", raw: "TRUE", invalid: true},
+		{name: "whitespace", raw: " true ", invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AEON_CHAT_ENABLED", tc.raw)
+			if tc.unset {
+				if err := os.Unsetenv("AEON_CHAT_ENABLED"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := FromEnv()
+			if tc.invalid {
+				if err == nil || err.Error() != "AEON_CHAT_ENABLED must be true or false" {
+					t.Fatalf("invalid chat switch: %v", err)
+				}
+				return
+			}
+			if err != nil || cfg.ChatEnabled != tc.enabled {
+				t.Fatalf("chat enabled = %v, want %v; error = %v", cfg.ChatEnabled, tc.enabled, err)
+			}
+		})
 	}
 }
 

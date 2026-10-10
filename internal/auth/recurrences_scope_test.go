@@ -12,7 +12,7 @@ func TestRecurrenceAgentScopeIsExplicitAndBounded(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
 		{"GET", base}, {"POST", base}, {"POST", base + "/preview"},
 		{"GET", id}, {"PUT", id}, {"DELETE", id}, {"HEAD", id + "/history"},
-		{"GET", id + "/preview"}, {"GET", id + "/history"}, {"GET", id + "/releases"},
+		{"GET", id + "/preview"}, {"GET", id + "/history"}, {"GET", id + "/releases"}, {"GET", id + "/guardrails"},
 		{"POST", id + "/pause"}, {"POST", id + "/resume"}, {"POST", id + "/run-now"},
 	} {
 		if got, ok := coreAgentScope(httptest.NewRequest(tc.method, tc.path, nil)); !ok || got != "recurrences.manage" {
@@ -20,7 +20,7 @@ func TestRecurrenceAgentScopeIsExplicitAndBounded(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct{ method, path string }{
-		{"DELETE", base}, {"PATCH", id}, {"POST", id + "/history"},
+		{"PUT", id + "/guardrails"}, {"DELETE", base}, {"PATCH", id}, {"POST", id + "/history"},
 		{"GET", id + "/secrets"}, {"POST", id + "/unknown"}, {"GET", id + "/history/private"},
 	} {
 		if got, ok := coreAgentScope(httptest.NewRequest(tc.method, tc.path, nil)); ok || got != "" {

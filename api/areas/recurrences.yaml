@@ -4,17 +4,18 @@ paths:
   /recurrences:
     get:
       operationId: listRecurrences
-      description: Project-visible recurring work. People need nodes.read; agents need an explicit recurrences.manage grant and key scope. Deleted definitions are omitted. Results are bounded to 100, with an optional after UUID cursor.
+      description: 'Visible recurring work and scoped routine definitions. People need nodes.read; agents need an explicit recurrences.manage grant and key scope. Personal definitions are private to the canonical owner; workspace definitions require workspace read authority; project definitions follow their scope project readers. Output project visibility is also required. Deleted definitions are omitted. Filtering occurs before the bounded 100-row UUID page.'
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: scope, in: query, schema: {type: string, enum: [project, personal, workspace]}, description: 'Definition scope; legacy definitions count as project scope. project_id continues to filter the output project.'}
       responses:
         '200': {description: Recurrences, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Recurrence'}}, next_cursor: {type: [string, 'null'], format: uuid}}}}}}
         '403': {$ref: '#/components/responses/Error'}
     post:
       operationId: createRecurrence
-      description: Create a ticket template in a live project and parent. Requires recurrences.manage and nodes.write in that project. queue_each also requires run.create and work_orders.write. The schedule lives in the server; no external timer is needed. Definitions persist across restarts. Creation appends recurrence.created.
+      description: 'Create a ticket template in a live project and parent. Requires recurrences.manage and nodes.write in that project. queue_each also requires run.create and work_orders.write. The schedule lives in the server; no external timer is needed. Definitions persist across restarts. Creation appends recurrence.created. Optional scoped definitions start paused and without execution consent; saving an assignment never starts agents. Output project_id/parent_id retain their legacy meaning, independently of definition scope. The canonical owner must have current target and source authority. Project/workspace owners must be administrators in their scope.'
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RecurrenceInput'}}}}
       responses:
@@ -25,7 +26,7 @@ paths:
   /recurrences/preview:
     post:
       operationId: previewRecurrenceDraft
-      description: Validate an unsaved definition and preview the next four dates on the database clock, using the scheduler calendar engine. No definition or event is written. Requires recurrences.manage and a visible valid target. Spring gaps and invalid month days are skipped; a fall-back fold uses its first instant.
+      description: 'Validate an unsaved definition and preview the next four dates on the database clock, using the scheduler calendar engine. No definition or event is written. Requires recurrences.manage and a visible valid target. Spring gaps and invalid month days are skipped; a fall-back fold uses its first instant.'
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RecurrenceInput'}}}}
       responses:
@@ -38,7 +39,7 @@ paths:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: getRecurrence
-      description: Read a visible recurrence. People need nodes.read; agents need recurrences.manage. Invisible or deleted IDs return 404.
+      description: 'Read a visible recurrence. People need nodes.read; agents need recurrences.manage. Invisible or deleted IDs return 404.'
       security: [{session: []}, {agentKey: []}]
       responses:
         '200': {description: Recurrence, content: {application/json: {schema: {$ref: '#/components/schemas/Recurrence'}}}}
@@ -46,7 +47,7 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
     put:
       operationId: updateRecurrence
-      description: Replace the template and options at expected_revision. Project and parent are immutable. A changed trigger starts after the database clock; an unchanged trigger retains overdue work. Paused state is preserved. Appends recurrence.updated.
+      description: 'Replace the template and options at expected_revision. Project and parent are immutable. A changed trigger starts after the database clock; an unchanged trigger retains overdue work. Paused state is preserved; adding a scoped definition to a legacy recurrence pauses it. Definition scope and canonical owner are immutable once supplied. Omitting definition (or supplying null) preserves a saved projection for legacy editors; an explicit complete definition with no assignment clears the assignment. Each edit clears execution consent. Appends recurrence.updated.'
       security: [{session: []}, {agentKey: []}]
       requestBody:
         required: true
@@ -64,11 +65,47 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
     delete:
       operationId: deleteRecurrence
-      description: Stop and retire a recurrence at expected_revision. Requires recurrences.manage inside the mutation transaction. Its definition, receipts, created tickets and audit history are retained. Appends recurrence.deleted. Deleted definitions cannot be run or edited.
+      description: 'Stop and retire a recurrence at expected_revision. Requires recurrences.manage inside the mutation transaction. Its definition, receipts, created tickets and audit history are retained. Appends recurrence.deleted. Deleted definitions cannot be run or edited.'
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
       responses:
         '204': {description: Retired}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}/guardrails:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getRoutineGuardrails
+      description: 'Read the compiled hard floor, versioned installation recommendations and applicable tenant, project and owner-user revisions. Requires the same live scope visibility as the routine. Missing or stale override evidence fails closed.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Effective policy', content: {application/json: {schema: {$ref: '#/components/schemas/RoutineGuardPolicy'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putRoutineGuardrails
+      description: 'Person-only revisioned policy edit. Tenant and project policies require a current administrator in that scope; user policies require their canonical owner. Removing or weakening non-hard rules also requires a current administrator and a reason. The server binds identity, inherited digest, prior revision and rule digest; callers cannot supply approval or replace compiled script hashes. Changes save policy only and grant no execution.'
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [scope, expected_revision, rules]
+              properties:
+                scope: {type: string, enum: [tenant, project, user]}
+                expected_revision: {type: integer, minimum: 0}
+                reason: {type: string, maxLength: 2048}
+                rules: {type: array, maxItems: 64, items: {$ref: '#/components/schemas/RoutineGuardRule'}}
+      responses:
+        '200': {description: 'Saved scoped revision with server-bound evidence', content: {application/json: {schema: {$ref: '#/components/schemas/RoutineGuardSource'}}}}
+        '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
@@ -77,7 +114,7 @@ paths:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: recurrenceHistory
-      description: Project-visible append-only recurrence events, newest first. Same read permissions as getRecurrence. Each page is bounded to 50; before is the previous next_cursor. Includes current node key, title and state only for visible live occurrence tickets.
+      description: 'Project-visible append-only recurrence events, newest first. Same read permissions as getRecurrence. Each page is bounded to 50; before is the previous next_cursor. Includes current node key, title and state only for visible live occurrence tickets.'
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: before, in: query, schema: {type: integer, minimum: 1}}
@@ -92,7 +129,7 @@ paths:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: pauseRecurrence
-      description: Requires recurrences.manage and expected_revision. Resume starts after the database clock and discards work accumulated while paused. Repeating the current state is a no-op. Appends recurrence.paused on a state change.
+      description: 'Requires recurrences.manage and expected_revision. Resume starts after the database clock and discards work accumulated while paused. Repeating the current state is a no-op. Appends recurrence.paused on a state change.'
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
       responses:
@@ -105,7 +142,7 @@ paths:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: previewRecurrence
-      description: Read-only next N scheduled times, strictly after the supplied after instant or the database clock, even while paused. The same calendar engine runs the scheduler. Event triggers have no predictable dates and return an empty list. Spring gaps and invalid month days are skipped; a fall-back fold uses its first instant. UTC timestamps are returned.
+      description: 'Read-only next N scheduled times, strictly after the supplied after instant or the database clock, even while paused. The same calendar engine runs the scheduler. Event triggers have no predictable dates and return an empty list. Spring gaps and invalid month days are skipped; a fall-back fold uses its first instant. UTC timestamps are returned.'
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: count, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 5}}
@@ -120,7 +157,7 @@ paths:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: recurrenceReleases
-      description: Published releases of this recurrence's project, from journey and immutable product history. Bounded to the newest 100, with truncated explicitly reported. Names are marketing codenames where supplied; version remains canonical. Receipts disable releases already attempted. Same read permissions as getRecurrence.
+      description: 'Published releases of this recurrence''s project, from journey and immutable product history. Bounded to the newest 100, with truncated explicitly reported. Names are marketing codenames where supplied; version remains canonical. Receipts disable releases already attempted. Same read permissions as getRecurrence.'
       security: [{session: []}, {agentKey: []}]
       responses:
         '200': {description: Release choices, content: {application/json: {schema: {type: object, required: [items, truncated], properties: {items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/RecurrenceRelease'}}, truncated: {type: boolean}}}}}}
@@ -131,7 +168,7 @@ paths:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: resumeRecurrence
-      description: Requires recurrences.manage and expected_revision. Resume starts after the database clock and discards work accumulated while paused. Repeating the current state is a no-op. Appends recurrence.resumed on a state change.
+      description: 'Requires recurrences.manage and expected_revision. Resume starts after the database clock and discards work accumulated while paused. Repeating the current state is a no-op. Appends recurrence.resumed on a state change.'
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
       responses:
@@ -161,7 +198,7 @@ paths:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: runRecurrenceNow
-      description: Manually attempt one occurrence, including while paused. An idempotency_key is required; retrying it returns the original receipt without creating another ticket, even after template edits. Manual runs do not move the schedule or event cursor. Uses the overlap policy and existing queue readiness. The occurrence number counts both created and skipped attempts. Creates ordinary tickets with Recurring work system-actor provenance; appends recurrence.occurred or recurrence.skipped with a reason.
+      description: 'Manually attempt one occurrence, including while paused. An idempotency_key is required; retrying it returns the original receipt without creating another ticket, even after template edits. Manual runs do not move the schedule or event cursor. Uses the overlap policy and existing queue readiness. The occurrence number counts both created and skipped attempts. Creates ordinary tickets with Recurring work system-actor provenance; appends recurrence.occurred or recurrence.skipped with a reason.'
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [idempotency_key], properties: {idempotency_key: {type: string, minLength: 1, maxLength: 128}, expected_revision: {type: integer, minimum: 1}, force_overlap: {type: boolean, default: false, description: Explicitly confirmed manual override of skip policy; does not change the definition.}, release_key: {type: string, maxLength: 256, description: A server-issued release choice key. Event only; renders the trusted release name and version and shares its durable receipt identity with the scheduler.}}}}}}
       responses:
@@ -235,6 +272,7 @@ components:
       properties:
         project_id: {type: string, format: uuid}
         parent_id: {type: string, format: uuid}
+        definition: {$ref: '#/components/schemas/RoutineDefinition'}
         template: {$ref: '#/components/schemas/RecurrenceTemplate'}
         trigger: {$ref: '#/components/schemas/RecurrenceTrigger'}
         queue_each: {type: boolean, default: false}
@@ -253,6 +291,19 @@ components:
         outcome: {type: string, enum: [created, skipped]}
         reason: {type: string}
         created_at: {type: string, format: date-time}
+        run: {$ref: '#/components/schemas/RoutineRunReceipt'}
+    RoutineRunReceipt:
+      type: object
+      additionalProperties: false
+      required: [id, state, assignment_digest, policy_digest]
+      description: 'Optional durable execution intent for an occurrence with a saved assignment. Replay returns the same run identity. Pending intent grants no launch authority; consent, project qualification and current permissions remain required. Ticket-only and skipped occurrences omit this field.'
+      properties:
+        id: {type: string, format: uuid}
+        state: {type: string}
+        work_order_id: {type: string, format: uuid}
+        agent_run_id: {type: string, format: uuid}
+        assignment_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        policy_digest: {type: string, pattern: '^[a-f0-9]{64}$', description: 'Digest of the frozen scope, owner, target, consent revision and assignment policy inputs; it is not an evaluated guardrail verdict.'}
     RecurrencePreview:
       type: object
       required: [times, trigger_kind]
@@ -295,3 +346,123 @@ components:
         benefit_de: {type: string, maxLength: 4096, description: 'Optional German benefit in impersonal form; nonblank text required before Done.'}
         hide_from_release_notes: {type: boolean, default: true, description: 'Recurring routines default to hidden; explicit false includes generated tickets in release notes. Hiding does not waive the Done copy requirements.'}
       description: 'Variables in title, description, criteria and release copy: {{occurrence}}, {{date}}, {{release_name}}, {{release_version}}. Unknown variables are rejected. Release variables are empty for time and manual runs. queue_each requires positive estimate_hours and non-empty acceptance_criteria. Release copy may be incomplete in a template; generated tickets still require all four valid texts before Done.'
+    RoutineDefinition:
+      type: object
+      additionalProperties: false
+      required: [scope, owner_principal_id]
+      description: 'Optional saved routine intent. Output remains RecurrenceInput.project_id/parent_id. Creation is paused, unconsented and never launches work. PUT uses the recurrence expected_revision. Scope and canonical person owner cannot be changed after creation. Consent, qualification, guardrails and budget enforcement are separate gates; these saved fields grant no execution authority.'
+      properties:
+        scope: {$ref: '#/components/schemas/RoutineDefinitionScope'}
+        owner_principal_id: {type: string, format: uuid, description: 'Active canonical person with current output/source authority; project/workspace owners must be scope administrators.'}
+        assignment: {$ref: '#/components/schemas/RoutineAssignment'}
+    RoutineDefinitionScope:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [project, personal, workspace]}
+        project_id: {type: string, format: uuid, description: 'Required only for project scope. This visibility project is independent of the output project.'}
+    RoutineAssignment:
+      type: object
+      additionalProperties: false
+      required: [goal, role, work_kind_id, runtime_requirements]
+      properties:
+        goal: {type: string, minLength: 1, maxLength: 16384}
+        sources:
+          type: array
+          maxItems: 32
+          uniqueItems: true
+          description: 'Distinct live tenant node IDs, readable by both the saving caller and canonical owner. Knowledge references must resolve to knowledge nodes. No URLs or remote fetches.'
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, id]
+            properties:
+              kind: {type: string, enum: [node, knowledge]}
+              id: {type: string, format: uuid}
+        role: {type: string, description: 'Existing model registry route role. No fixed model or account is granted by a definition.'}
+        work_kind_id: {type: string, format: uuid, description: 'Active registry work kind in the output project or workspace.'}
+        allowed_actions:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items: {type: string, enum: [work.create, work.update, knowledge.write, pr.open, pipeline.request]}
+          description: 'Closed outward action catalogue. Every eventual action still requires its ordinary authority, policy and person/pipeline gates.'
+        runtime_requirements: {$ref: '#/components/schemas/RoutineRuntimeRequirements'}
+        budget: {$ref: '#/components/schemas/RoutineDefinitionBudget'}
+    RoutineRuntimeRequirements:
+      type: object
+      additionalProperties: false
+      required: [needs_native_host, needs_browser, runtime_class]
+      description: 'Saved requirements only; no host selection or native capability qualification occurs during save. Native host is required; browser is required exactly for native_browser.'
+      properties:
+        needs_native_host: {type: boolean, const: true}
+        needs_browser: {type: boolean}
+        runtime_class: {type: string, enum: [native_coding, native_browser]}
+    RoutineDefinitionBudget:
+      type: object
+      additionalProperties: false
+      description: 'Per-run ceiling intent, default off. Tokens/money require only their respective positive ceiling; both requires both and stops at the first exhausted dimension. Off accepts no ceilings. Stored limits are not proof of adapter availability or enforcement. Money is actual paid micro-USD, separate from subscription list-price comparisons.'
+      properties:
+        mode: {type: string, enum: [off, tokens, money, both], default: off}
+        token_ceiling: {type: integer, minimum: 1, maximum: 1000000000000}
+        money_ceiling_microusd: {type: integer, minimum: 1, maximum: 1000000000000}
+    RoutineGuardScope:
+      type: object
+      additionalProperties: false
+      required: [kind, id]
+      properties:
+        kind: {type: string, enum: [installation, tenant, project, user]}
+        id: {type: string}
+    RoutineGuardRule:
+      type: object
+      additionalProperties: false
+      required: [id, checkpoint, method, result]
+      properties:
+        id: {type: string, maxLength: 80}
+        checkpoint: {type: string, enum: [save, action, both]}
+        method: {type: string, enum: [words, paths, size, template]}
+        result: {type: string, enum: [allow, needs_person, block]}
+        values: {type: array, maxItems: 32, items: {type: string, maxLength: 1024}}
+        limit: {type: integer, minimum: 1, maximum: 131072}
+        template: {type: string, enum: [protected_paths_v1, catalogue_v1, harmful_intent_v1, different_family_v1]}
+        script_hash: {type: string, maxLength: 64}
+    RoutineGuardLoosening:
+      type: object
+      required: [rule_id, actor_id, reason, expected_revision, inherited_digest, previous_digest, replacement_digest]
+      properties:
+        rule_id: {type: string}
+        actor_id: {type: string, format: uuid}
+        reason: {type: string}
+        expected_revision: {type: integer}
+        inherited_digest: {type: string}
+        previous_digest: {type: string}
+        replacement_digest: {type: string}
+    RoutineGuardSource:
+      type: object
+      required: [scope, revision, rules, loosenings]
+      properties:
+        scope: {$ref: '#/components/schemas/RoutineGuardScope'}
+        revision: {type: integer}
+        rules: {type: array, maxItems: 64, items: {$ref: '#/components/schemas/RoutineGuardRule'}}
+        loosenings: {type: array, maxItems: 64, items: {$ref: '#/components/schemas/RoutineGuardLoosening'}}
+    RoutineGuardPolicy:
+      type: object
+      required: [hard_version, preset_version, digest, sources, rules]
+      properties:
+        hard_version: {type: string}
+        preset_version: {type: string}
+        digest: {type: string}
+        sources: {type: array, maxItems: 3, items: {$ref: '#/components/schemas/RoutineGuardSource'}}
+        rules:
+          type: array
+          maxItems: 198
+          items:
+            type: object
+            required: [rule, level, scope, version]
+            properties:
+              rule: {$ref: '#/components/schemas/RoutineGuardRule'}
+              level: {type: string, enum: [hard, recommended, custom]}
+              scope: {$ref: '#/components/schemas/RoutineGuardScope'}
+              version: {type: string}
+              superseded: {type: boolean}

@@ -151,6 +151,7 @@ func (a *fakeAdapter) Start(_ context.Context, _ StartRequest, _ func(AdapterEve
 type fakeProcess struct {
 	mu      sync.Mutex
 	calls   int
+	texts   []string
 	stopped chan struct{}
 	once    sync.Once
 	onExit  func()
@@ -164,10 +165,11 @@ func (p *fakeProcess) Wait() error {
 	}
 	return nil
 }
-func (p *fakeProcess) Control(_ context.Context, _, _ string) error {
+func (p *fakeProcess) Control(_ context.Context, _, text string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
+	p.texts = append(p.texts, text)
 	return nil
 }
 func (p *fakeProcess) GracefulStop(ctx context.Context) error { return p.Stop(ctx) }

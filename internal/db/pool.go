@@ -18,11 +18,28 @@ import (
 
 // DefaultMaxConns is independent of host CPU count. Two slots are reserved for
 // foreground requests and probes; session-lock workers reuse their one slot.
-// LISTEN connections are already outside this pool and need additional server
-// max_connections headroom. AEON_DATABASE_URL pool_max_conns overrides 16.
+// Per-server connection budget (Postgres max_connections=50):
+//
+//	pooled:    16, including session-lock workers and 2 foreground/probe slots
+//	dedicated: 1 shared routine listener + 1 optional phone-push listener
+//	           + 1 per active event stream,
+//	           agent subscription, inbox stream/long poll, harness notification
+//	           stream, or delivery flow stream; chat live uses no DB listener
+//	total:     16 + dedicated (not a fixed 16; CLI/admin/replicas need headroom)
+//
+// With routine dispatch and phone push enabled, at most 32 client listeners fit
+// in the remaining 34 server slots BEFORE Postgres reserves and other clients.
+// Subscription and flow admission caps are each 64, not a global DB cap; lowering
+// the pool alone cannot bound client listeners. AEON_DATABASE_URL pool_max_conns
+// overrides 16.
 const DefaultMaxConns int32 = 16
 const ForegroundReserve int32 = 2
 const ProbeAcquireTimeout = 100 * time.Millisecond
+
+// ListenerMaxLifetime bounds dedicated backend caches. SSE listeners close at
+// expiry: clients reconnect with their durable cursor (or an initial wake).
+// Server-owned listeners reconnect and scan durable state before waiting again.
+const ListenerMaxLifetime = 30 * time.Minute
 
 type backgroundKey struct{}
 
@@ -49,6 +66,15 @@ func ParsePoolConfig(url string) (*pgxpool.Config, error) {
 	}
 	if _, explicit := raw.RuntimeParams["pool_max_conns"]; !explicit {
 		cfg.MaxConns = DefaultMaxConns
+	}
+	if _, explicit := raw.RuntimeParams["pool_max_conn_lifetime"]; !explicit {
+		cfg.MaxConnLifetime = 15 * time.Minute
+	}
+	if _, explicit := raw.RuntimeParams["pool_max_conn_lifetime_jitter"]; !explicit {
+		cfg.MaxConnLifetimeJitter = 3 * time.Minute
+	}
+	if _, explicit := raw.RuntimeParams["pool_max_conn_idle_time"]; !explicit {
+		cfg.MaxConnIdleTime = 3 * time.Minute
 	}
 	if _, err := ConfigurePool(cfg); err != nil {
 		return nil, err

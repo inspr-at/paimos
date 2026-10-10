@@ -646,22 +646,36 @@ func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (ma
 }
 
 func readAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string, lock bool) (map[string][]Window, error) {
+	return readAccountWindowsLimit(ctx, tx, accountIDs, lock, 0)
+}
+
+func readAccountWindowsLimit(ctx context.Context, tx pgx.Tx, accountIDs []string, lock bool, bound int) (map[string][]Window, error) {
 	query := `
 		SELECT id::text, account_id::text, starts_at, ends_at, unit, allowance, used, reserved,
 		       pace_model, burst_ratio::float8, pairing_verification, capacity_read_at, capacity_allowed, COALESCE(capacity_kind,''), capacity_bucket, capacity_retired, capacity_refresh_run::text, COALESCE(capacity_source,'')
 		FROM account_allowance_windows
 		WHERE account_id::text = ANY($1::text[]) AND (removed_at IS NULL OR EXISTS (SELECT 1 FROM account_limit_rules l WHERE l.from_window_id=account_allowance_windows.id AND l.removed_at IS NULL))
 		ORDER BY id`
+	args := []any{accountIDs}
+	if bound > 0 {
+		query += ` LIMIT $2`
+		args = append(args, bound+1)
+	}
 	if lock {
 		query += " FOR UPDATE"
 	}
-	rows, err := tx.Query(ctx, query, accountIDs)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := map[string][]Window{}
+	count := 0
 	for rows.Next() {
+		if bound > 0 && count == bound {
+			return nil, queueSnapshotOverflow("quota window")
+		}
+		count++
 		var w Window
 		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.pairingVerification, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun, &w.capacitySource); err != nil {
 			return nil, err

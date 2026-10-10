@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func aggregateNode(t *testing.T, w planningWorld, key, parent, state string, hours any) nodeJSON {
@@ -297,12 +301,12 @@ func BenchmarkWorkAggregatesRLS(b *testing.B) {
 					if err := db.InTenant(dbtest.Seed(ctx), appPool, tenantID, func(tx pgx.Tx) error {
 						var leaves int
 						if mode == "total" {
-							return tx.QueryRow(ctx, `SELECT leaf_count FROM aeon_work_aggregates(ARRAY[$1::uuid])`, root).Scan(&leaves)
+							return tx.QueryRow(ctx, `SELECT leaf_count FROM (`+eta.AggregateSQL("ARRAY[$1::uuid]")+`) aggregate`, root).Scan(&leaves)
 						}
 						column := map[string]string{"progress_sort": "progress_pct", "estimate_sort": "hours", "eta_sort": "eta_ready_at"}[mode]
 						// Scope discovery is performed once; all requested sort values are one batch.
 						return tx.QueryRow(ctx, `WITH targets AS MATERIALIZED(SELECT id FROM aeon_work_scope(ARRAY[$1::uuid])),
-      values AS MATERIALIZED(SELECT * FROM aeon_work_aggregates(ARRAY(SELECT id FROM targets))),
+      values AS MATERIALIZED(`+eta.AggregateSQL("ARRAY(SELECT id FROM targets)")+`),
       page AS(SELECT id FROM values ORDER BY `+column+` DESC NULLS LAST,id LIMIT 50)
       SELECT count(*)::int FROM page`, root).Scan(&leaves)
 					}); err != nil {
@@ -453,4 +457,258 @@ func TestWorkAggregateLimitsAreExplicitHTTPFailures(t *testing.T) {
 			t.Errorf("opaque failure: %s", r.Body.String())
 		}
 	}
+}
+
+// Risk: narrowing aggregate sorts to a page can silently change ordering and
+// coverage; concurrent read demand must not turn a scope limit into success.
+func TestListEstimateSortBoundedConcurrentMatchesBaseline(t *testing.T) {
+	w := planningSetup(t)
+	planningBulk(t, w, 1000, 2, "open", "LISTLOAD-", true)
+	group := aggregateNode(t, w, "LISTLOAD-1001", w.root.ID, "open", 99)
+	done := aggregateNode(t, w, "LISTLOAD-1002", group.ID, "done", 3)
+	cancelled := aggregateNode(t, w, "LISTLOAD-1003", group.ID, "cancelled", 100)
+	unknown := aggregateNode(t, w, "LISTLOAD-1004", group.ID, "open", nil)
+	archived := aggregateNode(t, w, "LISTLOAD-1005", group.ID, "archived", 4.5)
+	deleted := aggregateNode(t, w, "LISTLOAD-1006", group.ID, "open", 200)
+	if _, err := adminPool.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, deleted.ID); err != nil {
+		t.Fatal(err)
+	}
+	aggregateETA(t, w, unknown.ID, 35, time.Date(2030, 1, 1, 12, 0, 0, 0, time.UTC), time.Date(2030, 1, 1, 13, 0, 0, 0, time.UTC))
+	// Bulk loading bypasses the gradual statistics updates of a representative
+	// live corpus. Analyze only this test's isolated database, as the existing
+	// aggregate benchmark does, before exercising the actual query plans.
+	if _, err := adminPool.Exec(t.Context(), `ANALYZE nodes; ANALYZE node_kinds; ANALYZE harness_sessions; ANALYZE harness_session_usage; ANALYZE ticket_live_eta`); err != nil {
+		t.Fatal(err)
+	}
+	ctx := tenant.WithPrincipal(t.Context(), w.admin)
+	q := listQuery{Within: &w.root.ID, Sort: []sortKey{{Name: "estimate", Desc: true}}, Limit: 20}
+	q.seen.harnessAll = true
+	for _, enabled := range []bool{false, true} {
+		q.boundedAggregates = enabled
+		sql, args := listSQL(q, nil)
+		functions := listSortPlanFunctions(t, ctx, w.admin.TenantID, sql, args)
+		if enabled {
+			if functions["aeon_work_scope"] != 1 || functions["aeon_work_aggregates"] != 0 || functions["aeon_leaf_eta"] != 0 || functions["aeon_node_completion"] != 0 || functions["CTE sessions"] != 0 || functions["CTE leaf_facts"] != 0 {
+				t.Fatalf("estimate sort still reads session evidence: %v", functions)
+			}
+		} else if functions["aeon_work_scope"] != 1 || functions["aeon_work_aggregates"] != 0 || functions["aeon_leaf_eta"] != 0 || functions["aeon_node_completion"] != 0 || functions["CTE sessions"] != 1 || functions["CTE leaf_facts"] != 1 {
+			// The default path now batches full session facts in the shared
+			// projection; the estimate-only opt-in must still omit that work.
+			t.Fatalf("baseline aggregate facts are not shared once: %v", functions)
+		}
+		t.Logf("estimate sort opt-in=%v: 1005 visible work rows, 2000 historical sessions; function loops=%v", enabled, functions)
+	}
+	// Every root's value is compared to the published SQL function before
+	// paging, including out-of-page descendants, excluded closed leaves and
+	// null estimates. Page parity below also covers the shared default projection.
+	values := func(enabled bool) map[string]*string {
+		prefix, args := listFilterSQL(q, false)
+		cte := `, work_values AS MATERIALIZED (SELECT * FROM aeon_work_aggregates(ARRAY(SELECT id FROM filtered)))`
+		if enabled {
+			cte = listEstimateSortSQL()
+		}
+		out := map[string]*string{}
+		err := db.InTenant(ctx, appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx, prefix+cte+` SELECT id::text,hours::text FROM work_values`, args...)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var id string
+				var hours *string
+				if err := rows.Scan(&id, &hours); err != nil {
+					return err
+				}
+				out[id] = hours
+			}
+			return rows.Err()
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	baseline := values(false)
+	if !reflect.DeepEqual(baseline, values(true)) || len(baseline) != 1005 ||
+		baseline[group.ID] == nil || *baseline[group.ID] != "3" ||
+		baseline[done.ID] == nil || *baseline[done.ID] != "3" ||
+		baseline[cancelled.ID] == nil || *baseline[cancelled.ID] != "100" ||
+		baseline[archived.ID] == nil || *baseline[archived.ID] != "4.5" || baseline[unknown.ID] != nil {
+		t.Fatal("whole-scope estimate semantics changed")
+	}
+	plain := New(appPool, nil).(*Module)
+	baselinePage, err := plain.listNodes(ctx, w.admin.TenantID, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Stop all four optimized reads at the actual list statement before releasing
+	// them together. No sleep or elapsed-time assumption proves overlap.
+	ready, release := make(chan struct{}, 4), make(chan struct{})
+	cfg := appPool.Config()
+	cfg.MaxConns = 4
+	cfg.ConnConfig.Tracer = listReadBarrier{ready, release}
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	mod := New(pool, nil).(*Module)
+	pages, failures := make([]nodePage, 4), make([]error, 4)
+	var reads sync.WaitGroup
+	var unblock sync.Once
+	defer unblock.Do(func() { close(release) })
+	for i := range 4 {
+		reads.Add(1)
+		go func() {
+			defer reads.Done()
+			pages[i], failures[i] = mod.listNodes(WithBoundedListAggregates(ctx), w.admin.TenantID, q)
+		}()
+	}
+	guard, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for range 4 {
+		select {
+		case <-ready:
+		case <-guard.Done():
+			t.Fatal("concurrent list requests did not reach query barrier")
+		}
+	}
+	unblock.Do(func() { close(release) })
+	reads.Wait()
+	for i := range 4 {
+		if failures[i] != nil {
+			t.Fatal(failures[i])
+		}
+		if len(pages[i].Items) != 20 || pages[i].NextCursor == nil || !reflect.DeepEqual(baselinePage, pages[i]) {
+			t.Fatal("concurrent page/order/coverage/cursor differs from baseline")
+		}
+		if pages[i].Items[0].ID != cancelled.ID || pages[i].Items[1].ID != archived.ID {
+			t.Fatal("closed leaf ordering changed")
+		}
+	}
+	// A cursor minted with the default path also continues through the opt-in
+	// path, with matching filters, ties, page contents and next cursor.
+	q.Cursor = *pages[0].NextCursor
+	basePage, err := plain.listNodes(ctx, w.admin.TenantID, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextPage, err := plain.listNodes(WithBoundedListAggregates(ctx), w.admin.TenantID, q)
+	if err != nil || !reflect.DeepEqual(basePage, nextPage) {
+		t.Fatalf("cursor parity: %v", err)
+	}
+	q.Cursor = ""
+	// No new calculation is substituted for a compound ETA/progress sort.
+	for _, key := range []string{"progress", "eta_ready"} {
+		compound := q
+		compound.Sort = append([]sortKey{{Name: key}}, q.Sort...)
+		compound.boundedAggregates = false
+		baseSQL, _ := listSQL(compound, nil)
+		compound.boundedAggregates = true
+		optSQL, _ := listSQL(compound, nil)
+		if baseSQL != optSQL {
+			t.Fatal("whole-scope ETA/progress sort changed")
+		}
+	}
+	// RLS still applies to every filtered root and every scope descendant.
+	scopedViewer := insertPerson(t, w.admin.TenantID, "Scoped list viewer")
+	bindProjectRole(t, w.admin.TenantID, scopedViewer.ID, "viewer", w.root.ID)
+	viewerCtx := tenant.WithPrincipal(t.Context(), scopedViewer)
+	q.States = []string{"open"}
+	q.IDs = []string{group.ID, unknown.ID, archived.ID}
+	viewerBase, err := plain.listNodes(viewerCtx, w.admin.TenantID, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewerOpt, err := plain.listNodes(WithBoundedListAggregates(viewerCtx), w.admin.TenantID, q)
+	if err != nil || !reflect.DeepEqual(viewerBase, viewerOpt) || len(viewerOpt.Items) != 2 {
+		t.Fatalf("filtered viewer parity: %v", err)
+	}
+	other := addPrincipal(t, "list-other-tenant")
+	foreignPage, err := plain.listNodes(WithBoundedListAggregates(tenant.WithPrincipal(t.Context(), other)), other.TenantID, q)
+	if err != nil || len(foreignPage.Items) != 0 {
+		t.Fatalf("foreign tenant read: %v", err)
+	}
+	private := mustNode(t, w.admin, `{"kind_id":"`+kindBySlug(t, w.admin, "project").ID+`","title":"Private list"}`)
+	privateWorld := w
+	privateWorld.root = private
+	aggregateNode(t, privateWorld, "PRIVATE-1", private.ID, "open", 200)
+	q.Within, q.States, q.IDs = &private.ID, nil, nil
+	privatePage, err := plain.listNodes(WithBoundedListAggregates(viewerCtx), w.admin.TenantID, q)
+	if err != nil || len(privatePage.Items) != 0 {
+		t.Fatalf("ungranted project read: %v", err)
+	}
+	// The opt-in must retain both published budgets, even on a tiny page.
+	assertLimit := func(root, message string) {
+		q.Within, q.States, q.IDs = &root, nil, nil
+		page, err := plain.listNodes(WithBoundedListAggregates(ctx), w.admin.TenantID, q)
+		var pgerr *pgconn.PgError
+		if !errors.As(err, &pgerr) || pgerr.Code != "54000" || pgerr.Message != message || len(page.Items) != 0 {
+			t.Fatalf("limit reason/partial read: %v", err)
+		}
+		r := httptest.NewRecorder()
+		writeErr(r, err)
+		if r.Code != 503 || !strings.Contains(r.Body.String(), "Work aggregates exceeded a resource limit") {
+			t.Fatal("scope limit was hidden")
+		}
+	}
+	deep := seedAggregateTree(t, w, 317, 0)
+	assertLimit(deep, "work scope expansion budget exceeded")
+	planningBulk(t, w, 3100, 0, "open", "ROOTLIMIT-", false)
+	assertLimit(w.root.ID, "work scope root budget exceeded")
+}
+
+type listReadBarrier struct {
+	ready   chan<- struct{}
+	release <-chan struct{}
+}
+
+func (b listReadBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(data.SQL, "page_rows AS") {
+		select {
+		case b.ready <- struct{}{}:
+		case <-ctx.Done():
+			return ctx
+		}
+		select {
+		case <-b.release:
+		case <-ctx.Done():
+		}
+	}
+	return ctx
+}
+func (listReadBarrier) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func listSortPlanFunctions(t *testing.T, ctx context.Context, tenantID, sql string, args []any) map[string]int {
+	t.Helper()
+	functions := map[string]int{}
+	err := db.InTenant(ctx, appPool, tenantID, func(tx pgx.Tx) error {
+		var raw []byte
+		if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+sql, args...).Scan(&raw); err != nil {
+			return err
+		}
+		var documents []map[string]any
+		if err := json.Unmarshal(raw, &documents); err != nil {
+			return err
+		}
+		var visit func(map[string]any)
+		visit = func(plan map[string]any) {
+			if name, ok := plan["Function Name"].(string); ok {
+				functions[name] += int(plan["Actual Loops"].(float64))
+			}
+			if name, _ := plan["Subplan Name"].(string); name == "CTE sessions" || name == "CTE leaf_facts" {
+				functions[name] += int(plan["Actual Loops"].(float64))
+			}
+			for _, child := range planChildren(plan) {
+				visit(child)
+			}
+		}
+		visit(documents[0]["Plan"].(map[string]any))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return functions
 }
