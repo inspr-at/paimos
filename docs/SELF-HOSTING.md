@@ -59,6 +59,8 @@ operator's service configuration so future restart/upgrade commands use the
 same values and Compose project name (`aeon`). Do not put credentials into a
 database URL or a Compose environment variable.
 
+Set `AEON_CHAT_ENABLED=true` in the server container's environment to enable chat; unset or empty defaults to `false`, and only `true` or `false` are accepted.
+
 The GHCR image was checked anonymously on 2026-10-01: the pull-token request
 and manifest HEAD for `261001072608.0.0` both returned HTTP 200. No registry
 credentials were used and no visibility setting was changed. Registry access

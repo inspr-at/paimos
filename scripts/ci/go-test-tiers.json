@@ -366,6 +366,8 @@
     ,
     {"kind":"go","package":"cmd/aeon","name":"TestServeBackgroundPoolHeadroom","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"cmd/aeon","name":"TestServeChatEnabled","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon","name":"TestServeShutdownAndBootstrap","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon","name":"TestStopServingDrainsBeforeClose","tier":"GATED-FULL"}
@@ -5091,6 +5093,8 @@
     {"kind":"go","package":"internal/client","name":"TestStepUpSecondChallengeDoesNotPromptAgain","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/client","name":"TestSuppliedStepUpProofIsNeverRedirectedOrReconfirmed","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/config","name":"TestChatEnabledFromEnv","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/config","name":"TestDoctrineBinaryAllowlist","tier":"GATED-FULL"}
     ,
