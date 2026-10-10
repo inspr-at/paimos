@@ -1422,7 +1422,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	}
 	aggregateCTE := ""
 	if etaJoin != "" || estimateJoin != "" {
-		aggregateCTE = `, work_values AS MATERIALIZED (SELECT * FROM aeon_work_aggregates(ARRAY(SELECT id FROM filtered)))`
+		aggregateCTE = `, work_values AS MATERIALIZED (` + eta.AggregateSQL("ARRAY(SELECT id FROM filtered)") + `)`
 	}
 	sql := prefix + aggregateCTE + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
     cursor_guard AS (SELECT (` + anchorArg + `::uuid IS NULL OR EXISTS(SELECT 1 FROM ordered WHERE id=` + anchorArg + `::uuid)) AS valid),

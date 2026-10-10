@@ -7362,6 +7362,10 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestLeadMinutesFollowTheWebRules","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestLeafFactsBatchExecutionCounts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestLeafFactsBatchParityAndVisibility","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestLinkedAssigneesListFacetsPickerAndWrites","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestList6000FiltersPerformance","lane":"timing","tier":"GATED-FULL"}
