@@ -421,12 +421,24 @@ func (w *blockedLiveWriter) Flush() {
 // body-free durable-state hints. Idle eviction must explicitly expire cursors.
 func TestChatLiveTenantCapacityAndIdleEviction(t *testing.T) {
 	t.Run("notifications do not allocate", func(t *testing.T) {
-		b := liveRelay{}
+		now := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+		b := liveRelay{now: func() time.Time { return now }}
 		if _, err := b.publish(liveKey("busy", "absent"), "", "", 0, map[string]string{"type": "read_marker"}); err != nil {
 			t.Fatal(err)
 		}
 		if len(b.threads) != 0 {
 			t.Fatal("content-free notification allocated a replay buffer")
+		}
+		key := liveKey("busy", "expired")
+		if _, err := b.publish(key, "session", "1", 1, map[string]string{"text": "delta"}); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(liveRetention)
+		if _, err := b.publish(key, "", "", 0, map[string]string{"type": "read_marker"}); err != nil {
+			t.Fatal(err)
+		}
+		if len(b.threads) != 0 {
+			t.Fatal("content-free notification recreated an expired buffer")
 		}
 	})
 	t.Run("tenant buffer cap evicts oldest idle", func(t *testing.T) {

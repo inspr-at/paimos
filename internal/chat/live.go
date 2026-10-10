@@ -68,7 +68,7 @@ func (b *liveRelay) clock() time.Time {
 	}
 	return time.Now()
 }
-func (b *liveRelay) thread(key string) (*liveThread, error) {
+func (b *liveRelay) thread(key string, create bool) (*liveThread, error) {
 	now := b.clock()
 	for k, v := range b.threads {
 		if len(v.viewers) == 0 && now.Sub(v.touched) >= liveRetention {
@@ -79,6 +79,9 @@ func (b *liveRelay) thread(key string) (*liveThread, error) {
 		b.threads = map[string]*liveThread{}
 	}
 	v := b.threads[key]
+	if v == nil && !create {
+		return nil, nil
+	}
 	if v == nil {
 		tenant, _, _ := strings.Cut(key, "/")
 		count := 0
@@ -148,7 +151,7 @@ func parseLiveToken(token string, scope liveCursor) (liveCursor, error) {
 func (b *liveRelay) subscribe(c liveCursor, token string) (liveCursor, <-chan struct{}, func(), error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	v, err := b.thread(liveKey(c.Tenant, c.Thread))
+	v, err := b.thread(liveKey(c.Tenant, c.Thread), true)
 	if err != nil {
 		return c, nil, nil, err
 	}
@@ -214,12 +217,12 @@ func (b *liveRelay) publish(key, session, epoch string, source uint64, payload a
 	defer b.mu.Unlock()
 	// Durable-state notifications carry no interim content and only wake an
 	// existing replay buffer. They must not consume capacity without viewers.
-	if session == "" && source == 0 && b.threads[key] == nil {
-		return false, nil
-	}
-	v, err := b.thread(key)
+	v, err := b.thread(key, session != "" || source != 0)
 	if err != nil {
 		return false, err
+	}
+	if v == nil {
+		return false, nil
 	}
 	if source > 0 {
 		if v.sourceSession == session && v.sourceEpoch == epoch && source <= v.sourceSequence {
