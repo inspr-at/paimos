@@ -24,6 +24,8 @@ class MigrationCompatImagesTest(unittest.TestCase):
     # rollback-floor probe against that binary fails despite a sound DB fence.
     # Mock only process boundaries; execute the real shell orchestration and
     # retain strict refusals against an independently pinned incapable binary.
+    # Both images seed and migrate their own database: the floor image must
+    # boot before AND after migration, with its own retained seed state.
     def test_capable_previous_release_keeps_the_incapable_rollback_probe(self):
         latest_tag = 'v261010123154.0.0'
         latest_digest = 'sha256:' + 'a' * 64
@@ -53,13 +55,17 @@ if tool == 'docker':
         active.write_text(args[-1])
 elif tool == 'python3':
     mode = args[1]
-    if mode == 'seed':
-        Path(args[args.index('--state') + 1]).write_text('{}')
     if mode in ('seed', 'check', 'account-use'):
         version = args[args.index('--version') + 1]
         expected = '261009095632.0.0' if active.read_text() == floor_id else '261010123154.0.0'
         if version != expected:
             sys.exit('tested binary does not match the previous release')
+        state = Path(args[args.index('--state') + 1])
+        fixture = {'image': active.read_text(), 'version': version}
+        if mode == 'seed':
+            state.write_text(json.dumps(fixture))
+        elif json.loads(state.read_text()) != fixture:
+            sys.exit('probe did not retain its own image seed state')
     if mode == 'account-use' and active.read_text() != floor_id:
         sys.exit('activated previous binary returned HTTP 200')
 elif tool not in ('go', 'trash'):
@@ -82,14 +88,43 @@ elif tool not in ('go', 'trash'):
                 capture_output=True, text=True, timeout=15, check=False)
             self.assertEqual(completed.returncode, 0, completed.stderr)
             calls = [json.loads(line) for line in (root / 'calls.jsonl').read_text().splitlines()]
-            boots = [args[-1] for tool, args in calls
-                     if tool == 'docker' and args[0] == 'run' and args[-1].startswith('sha256:')]
-            self.assertEqual(boots, ['sha256:' + '1' * 64] * 2 + ['sha256:' + '2' * 64])
+            boot_indices = [index for index, (tool, args) in enumerate(calls)
+                            if tool == 'docker' and args[0] == 'run' and args[-1].startswith('sha256:')]
+            starts = [calls[index][1] for index in boot_indices]
+            self.assertEqual([args[-1] for args in starts],
+                             ['sha256:' + '1' * 64] * 2 + ['sha256:' + '2' * 64] * 2)
             probes = [(args[1], args[args.index('--version') + 1]) for tool, args in calls
                       if tool == 'python3' and '--version' in args]
             self.assertEqual(probes, [
                 ('seed', latest_tag[1:]), ('check', latest_tag[1:]),
+                ('seed', '261009095632.0.0'),
                 ('check', '261009095632.0.0'), ('account-use', '261009095632.0.0')])
+            databases = [args for tool, args in calls
+                         if tool == 'docker' and args[0] == 'run' and 'POSTGRES_USER=postgres' in args]
+            self.assertEqual(len(databases), 2)
+            database_names = [args[args.index('--name') + 1] for args in databases]
+            self.assertEqual(len(set(database_names)), 2)
+            for index, args in enumerate(starts):
+                self.assertIn('AEON_DATABASE_URL=postgres://aeon:aeon@' +
+                              database_names[index // 2] + ':5432/aeon?sslmode=disable', args)
+            seeds = [args for tool, args in calls if tool == 'python3' and args[1] == 'seed']
+            checks = [args for tool, args in calls if tool == 'python3' and args[1] == 'check']
+            state_paths = [args[args.index('--state') + 1] for args in seeds]
+            self.assertEqual(len(set(state_paths)), 2)
+            self.assertEqual([args[args.index('--state') + 1] for args in checks], state_paths)
+            migrations = [index for index, (tool, _) in enumerate(calls) if tool == 'go']
+            self.assertEqual(len(migrations), 2)
+            for index, migration in enumerate(migrations):
+                self.assertLess(boot_indices[2 * index], calls.index(['python3', seeds[index]]))
+                self.assertLess(calls.index(['python3', seeds[index]]), migration)
+                self.assertLess(migration, calls.index(['python3', checks[index]]))
+                self.assertLess(migration, boot_indices[2 * index + 1])
+                self.assertLess(boot_indices[2 * index + 1], calls.index(['python3', checks[index]]))
+            floor_probe = next(args for tool, args in calls
+                               if tool == 'python3' and args[1] == 'account-use')
+            self.assertEqual(floor_probe[floor_probe.index('--state') + 1], state_paths[1])
+            self.assertEqual(floor_probe[floor_probe.index('--database-container') + 1], database_names[1])
+            self.assertLess(calls.index(['python3', checks[1]]), calls.index(['python3', floor_probe]))
             pulls = [args[-1] for tool, args in calls if tool == 'docker' and args[0] == 'pull']
             self.assertEqual(pulls, ['ghcr.io/inspr-at/aeon@' + latest_digest,
                                      'ghcr.io/inspr-at/aeon@' + floor_digest])
