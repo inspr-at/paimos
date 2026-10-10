@@ -90,7 +90,7 @@ func setup(t *testing.T, mode string, paid bool) *fixture {
 	}))
 	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT id::text FROM work_kinds WHERE tenant_id=$1 AND slug='backend' AND project_id IS NULL`, f.owner.TenantID).Scan(&kind))
 	f.exec(`INSERT INTO project_lead_settings(tenant_id,project_id,owner_person_id,overrides,updated_by) VALUES($1,$2,$3,'{"recovery":{"max_attempts":5,"agent_hours":10}}',$3)`, f.owner.TenantID, f.project, f.owner.ID)
-	f.exec(`INSERT INTO project_lead_settings(tenant_id,project_id,owner_person_id,overrides,updated_by) VALUES($1,NULL,$2,'{"recovery":{"max_attempts":5,"agent_hours":10}}',$2)`, f.owner.TenantID, f.owner.ID)
+	f.exec(`INSERT INTO project_lead_settings(tenant_id,project_id,owner_person_id,overrides,updated_by) VALUES($1,NULL,NULL,'{"recovery":{"max_attempts":5,"agent_hours":10}}',$2)`, f.owner.TenantID, f.owner.ID)
 	q := modelregistry.Qualification{ID: "10000000-0000-4000-8000-000000000030", ProjectID: f.project, Runtime: modelregistry.ExecutionRuntime{ServerDigest: strings.Repeat("a", 64), DaemonDigest: strings.Repeat("b", 64), CapabilityDigest: strings.Repeat("c", 64), Capabilities: []string{"routine_native_coding_v1"}, HostMappingDigest: strings.Repeat("d", 64), BudgetModes: []string{"off", "tokens", "money", "both"}}, CoordinatorAcceptance: strings.Repeat("e", 64), OPSAttestation: strings.Repeat("f", 64)}
 	runtime := func(ctx context.Context, tx pgx.Tx, _ string) (modelregistry.ExecutionRuntime, error) {
 		r := q.Runtime
