@@ -25,14 +25,16 @@ export interface IntakeDraft {
   extensions?: IntakeExtensions; document_bytes?: string
 }
 export interface Intake { sources: IntakeSource[]; turns: IntakeTurn[]; drafts: IntakeDraft[] }
+export interface IntakePage extends Intake { nextCursor: string | null }
 
-async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+async function request<T>(path: string, method = 'GET', body?: unknown, onResponse?: (response: Response) => void): Promise<T> {
   const response = await api(path, { method, ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
     const text = typeof data?.error === 'string' ? data.error : typeof data?.message === 'string' ? data.message : `Request failed (${response.status})`
     throw new APIError(response.status, text, data && typeof data === 'object' ? data : {})
   }
+  onResponse?.(response)
   return response.status === 204 ? undefined as T : response.json()
 }
 const enc = encodeURIComponent
@@ -40,7 +42,14 @@ const root = (project: string) => `/projects/${enc(project)}`
 const releaseRoot = (project: string, release: string) => `${root(project)}/releases/${enc(release)}`
 
 export const getWalker = (project: string, release: string) => request<Walker>(`${releaseRoot(project, release)}/walker`)
-export const getIntake = (project: string, nodeId?: string) => request<Intake>(`${root(project)}/intake${nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : ''}`)
+export async function getIntake(project: string, nodeId?: string, after?: string): Promise<IntakePage> {
+  const query = new URLSearchParams()
+  if (nodeId) query.set('node_id', nodeId)
+  if (after) query.set('after', after)
+  let nextCursor: string | null = null
+  const data = await request<Intake>(`${root(project)}/intake${query.size ? `?${query}` : ''}`, 'GET', undefined, response => { nextCursor = response.headers.get('X-Next-Cursor') })
+  return { ...data, nextCursor }
+}
 export interface PlanningRelease { id: string; title: string; number: number; state: ReleaseState }
 export const listPlanningReleases = (project: string) => request<{ releases: PlanningRelease[]; truncated: boolean }>(`${root(project)}/releases`)
 

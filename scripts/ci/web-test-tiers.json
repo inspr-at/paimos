@@ -546,6 +546,20 @@
     ,
     "browser:tests/hours.spec.ts:open periods older than a year appear on a direct approvals load"
     ,
+    "browser:tests/intake-extensions.spec.ts:older extension response is discarded after selecting another ticket"
+    ,
+    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1024 dark"
+    ,
+    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1024 light"
+    ,
+    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1440 dark"
+    ,
+    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1440 light"
+    ,
+    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 390 dark"
+    ,
+    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 390 light"
+    ,
     "browser:tests/knowledge-learnings.spec.ts:a learning that changed after review is refused and shown again"
     ,
     "browser:tests/knowledge-learnings.spec.ts:leaving the knowledge view during a run sends no further step"
@@ -8206,6 +8220,20 @@
     ,
     {"kind":"browser","file":"tests/indicator-gallery.spec.ts","name":"robot family gallery light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"older extension response is discarded after selecting another ticket","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension reads respect intake permission","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket shows originating extension data at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -15621,6 +15649,10 @@
     {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"Aithema extension disclosures > adds no UI for legacy drafts and empty maps","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"Aithema extension disclosures > retains unknown namespaces and coexisting majors as plain text","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"intake history continuation > keeps older drafts accessible and preserves the node filter on the next page","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"intake history continuation > reports a continuation failure instead of returning an empty successful page","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/key-trim.unit.test.ts","name":"can approve proposals beyond the first page through the native CAS endpoint","tier":"GATED-FULL"}
     ,

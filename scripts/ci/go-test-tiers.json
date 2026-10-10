@@ -6636,7 +6636,11 @@
     ,
     {"kind":"go","package":"internal/intake","name":"TestIntakeErrorCatalogue","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/intake","name":"TestIntakeHistoryContinuesBeyond200","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/intake","name":"TestIntakePreservesPersonEdits","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/intake","name":"TestLongIntakeTranscriptContinuesBeyond200","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/intake","name":"TestNativeRequestHasRoomForAithemaLimits","tier":"GATED-FULL"}
     ,

@@ -11,7 +11,13 @@ import (
 func TestBusinessHistoryPagesBoundRowsAndReads(t *testing.T) {
 	f := setup(t)
 	period := f.period(f.member)
-	approvedPeriod := f.period(f.admin)
+	// The approved row must sort first regardless of randomly generated UUIDs.
+	// Equal starts_at values made the approval assertion depend on UUID order.
+	approved := f.call(f.admin, "POST", "/time-periods", map[string]any{
+		"principal_id": f.admin.ID, "starts_at": "2026-09-02T00:00:00Z", "ends_at": "2026-10-02T00:00:00Z",
+	})
+	requireStatus(t, approved, 201)
+	approvedPeriod := decode[Period](t, approved)
 	snapshot, digest := f.snapshot(approvedPeriod)
 	requireStatus(t, f.call(f.admin, "POST", "/time-periods/"+approvedPeriod.ID+"/approve", approvalBody(snapshot, digest)), 200)
 	f.sql(func(tx pgx.Tx) error {

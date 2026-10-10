@@ -876,7 +876,7 @@
         ,
         {"file":"tests/indicator-gallery.spec.ts","listedTests":5,"weightSeconds":11.097560833,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/intake-extensions.spec.ts","listedTests":17,"weightSeconds":37.731707,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/intake-extensions.spec.ts","listedTests":12,"weightSeconds":37.731707,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/kind-convert.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
         ,

@@ -50,94 +50,28 @@ func (m *Module) getIntake(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid node id")
 		return
 	}
+	page, err := historyBounds(r, p.TenantID, projectID, nodeID)
+	if err != nil {
+		writeResult(w, 0, nil, err)
+		return
+	}
 	var out snapshot
-	err := m.intakeTx(r, p, projectID, false, func(tx pgx.Tx, _ []string) error {
-		var err error
-		if nodeID == "" {
-			out, err = loadSnapshot(r.Context(), tx, projectID)
-		} else {
+	err = m.intakeTx(r, p, projectID, false, func(tx pgx.Tx, _ []string) error {
+		if nodeID != "" {
 			if _, err := nodeInProject(r.Context(), tx, nodeID, projectID); err != nil {
 				return err
 			}
-			out = snapshot{Sources: []sourceView{}, Turns: []turnView{}, Drafts: []draftView{}}
-			rows, loadErr := loadDrafts(r.Context(), tx, projectID, "", nodeID)
-			if loadErr != nil {
-				return loadErr
-			}
-			for _, row := range rows {
-				view, presentErr := presentDraft(r.Context(), tx, projectID, row)
-				if presentErr != nil {
-					return presentErr
-				}
-				out.Drafts = append(out.Drafts, view)
-			}
 		}
+		var err error
+		out, err = loadSnapshotPage(r.Context(), tx, projectID, nodeID, page)
 		return err
 	})
+	if err == nil {
+		if next := page.next(); next != "" {
+			w.Header().Set("X-Next-Cursor", next)
+		}
+	}
 	writeResult(w, http.StatusOK, out, err)
-}
-
-func loadSnapshot(ctx context.Context, tx pgx.Tx, projectID string) (snapshot, error) {
-	out := snapshot{Sources: []sourceView{}, Turns: []turnView{}, Drafts: []draftView{}}
-	sourceRows, err := tx.Query(ctx, `
-		SELECT id::text, project_node_id::text, kind, label, locator, file_id::text,
-		       content_sha256, idempotency_key, created_at
-		FROM intake_sources
-		WHERE project_node_id = $1::uuid
-		ORDER BY created_at, id LIMIT 201`, projectID)
-	if err != nil {
-		return snapshot{}, err
-	}
-	defer sourceRows.Close()
-	for sourceRows.Next() {
-		view, err := scanSource(sourceRows)
-		if err != nil {
-			return snapshot{}, err
-		}
-		if len(out.Sources) == maxSnapshotRows {
-			return snapshot{}, fail(422, "intake history exceeds 200 sources")
-		}
-		out.Sources = append(out.Sources, view)
-	}
-	if err := sourceRows.Err(); err != nil {
-		return snapshot{}, err
-	}
-
-	turnRows, err := tx.Query(ctx, `
-		SELECT id::text, source_id::text, ordinal, speaker, speaker_principal_id::text, body, idempotency_key, created_at
-		FROM intake_transcript_turns
-		WHERE project_node_id = $1::uuid
-		ORDER BY source_id, ordinal, id LIMIT 201`, projectID)
-	if err != nil {
-		return snapshot{}, err
-	}
-	defer turnRows.Close()
-	for turnRows.Next() {
-		view, err := scanTurn(turnRows)
-		if err != nil {
-			return snapshot{}, err
-		}
-		if len(out.Turns) == maxSnapshotRows {
-			return snapshot{}, fail(422, "intake history exceeds 200 turns")
-		}
-		out.Turns = append(out.Turns, view)
-	}
-	if err := turnRows.Err(); err != nil {
-		return snapshot{}, err
-	}
-
-	drafts, err := loadDrafts(ctx, tx, projectID, "")
-	if err != nil {
-		return snapshot{}, err
-	}
-	for _, row := range drafts {
-		view, err := presentDraft(ctx, tx, projectID, row)
-		if err != nil {
-			return snapshot{}, err
-		}
-		out.Drafts = append(out.Drafts, view)
-	}
-	return out, nil
 }
 
 func presentDraft(ctx context.Context, tx pgx.Tx, projectID string, row draftRow) (draftView, error) {
@@ -245,7 +179,7 @@ func acceptedTarget(ctx context.Context, tx pgx.Tx, draftID string) (string, tim
 }
 
 func findDraft(ctx context.Context, tx pgx.Tx, projectID, key string) (draftRow, bool, error) {
-	rows, err := loadDrafts(ctx, tx, projectID, key)
+	rows, err := loadDraftsFiltered(ctx, tx, projectID, key, "", nil, nil)
 	if err != nil {
 		return draftRow{}, false, err
 	}
@@ -256,7 +190,7 @@ func findDraft(ctx context.Context, tx pgx.Tx, projectID, key string) (draftRow,
 }
 
 func findDraftByID(ctx context.Context, tx pgx.Tx, projectID, id string) (draftRow, error) {
-	rows, err := loadDraftsFiltered(ctx, tx, projectID, "", id, nil)
+	rows, err := loadDraftsFiltered(ctx, tx, projectID, "", id, nil, nil)
 	if err != nil {
 		return draftRow{}, err
 	}
@@ -270,11 +204,7 @@ func findDraftByID(ctx context.Context, tx pgx.Tx, projectID, id string) (draftR
 
 const maxSnapshotRows = 200
 
-func loadDrafts(ctx context.Context, tx pgx.Tx, projectID, key string, nodeID ...string) ([]draftRow, error) {
-	return loadDraftsFiltered(ctx, tx, projectID, key, "", nodeID)
-}
-
-func loadDraftsFiltered(ctx context.Context, tx pgx.Tx, projectID, key, draftID string, nodeID []string) ([]draftRow, error) {
+func loadDraftsFiltered(ctx context.Context, tx pgx.Tx, projectID, key, draftID string, nodeID []string, page *historyPage) ([]draftRow, error) {
 	q := `
 		SELECT id::text, kind, requirement_kind, target_node_id::text, title, body,
 		       base_event_id, idempotency_key, proposed_at, extensions, document_bytes, requester_principal_id::text,
@@ -305,7 +235,18 @@ func loadDraftsFiltered(ctx context.Context, tx pgx.Tx, projectID, key, draftID 
 			  )))`
 		args = append(args, nodeID[0])
 	}
-	q += ` ORDER BY proposed_at DESC, id LIMIT 201`
+	limit := 1 // ID and idempotency-key lookups never materialize project history.
+	if page != nil {
+		limit = page.limit + 1
+		if pos := page.cursor.Draft; pos != nil {
+			args = append(args, pos.At, pos.ID)
+			at, id := strconv.Itoa(len(args)-1), strconv.Itoa(len(args))
+			q += " AND (proposed_at < $" + at + "::timestamptz OR (proposed_at = $" + at + "::timestamptz AND id > $" + id + "::uuid))"
+		}
+		page.cursor.DraftsDone = true
+	}
+	args = append(args, limit)
+	q += ` ORDER BY proposed_at DESC, id LIMIT $` + strconv.Itoa(len(args))
 	rows, err := tx.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -313,17 +254,22 @@ func loadDraftsFiltered(ctx context.Context, tx pgx.Tx, projectID, key, draftID 
 	defer rows.Close()
 	var drafts []draftRow
 	for rows.Next() {
+		if page != nil && len(drafts) == page.limit {
+			page.cursor.DraftsDone = false
+			break
+		}
 		var row draftRow
 		if err := rows.Scan(&row.ID, &row.Kind, &row.RequirementKind, &row.TargetNodeID, &row.Title, &row.Body, &row.BaseEventID, &row.IdempotencyKey, &row.ProposedAt, &row.Extensions, &row.DocumentBytes, &row.RequesterPrincipalID, &row.SupersedesDraftID, &row.Superseded); err != nil {
 			return nil, err
 		}
-		if len(drafts) == maxSnapshotRows {
-			return nil, fail(http.StatusUnprocessableEntity, "intake history exceeds 200 drafts; narrow the selection")
+		if page != nil {
+			page.cursor.Draft = &historyPosition{ID: row.ID, At: row.ProposedAt}
 		}
 		row.Citations = []citationWrite{}
 		row.Suggestions = []suggestionView{}
 		drafts = append(drafts, row)
 	}
+	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
