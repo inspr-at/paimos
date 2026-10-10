@@ -6,6 +6,7 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,8 @@ class MigrationCompatImagesTest(unittest.TestCase):
     # rollback-floor probe against that binary fails despite a sound DB fence.
     # Mock only process boundaries; execute the real shell orchestration and
     # retain strict refusals against an independently pinned incapable binary.
+    # Both images seed and migrate their own database: the floor image must
+    # boot before AND after migration, with its own retained seed state.
     def test_capable_previous_release_keeps_the_incapable_rollback_probe(self):
         latest_tag = 'v261010123154.0.0'
         latest_digest = 'sha256:' + 'a' * 64
@@ -53,13 +56,17 @@ if tool == 'docker':
         active.write_text(args[-1])
 elif tool == 'python3':
     mode = args[1]
-    if mode == 'seed':
-        Path(args[args.index('--state') + 1]).write_text('{}')
     if mode in ('seed', 'check', 'account-use'):
         version = args[args.index('--version') + 1]
         expected = '261009095632.0.0' if active.read_text() == floor_id else '261010123154.0.0'
         if version != expected:
             sys.exit('tested binary does not match the previous release')
+        state = Path(args[args.index('--state') + 1])
+        fixture = {'image': active.read_text(), 'version': version}
+        if mode == 'seed':
+            state.write_text(json.dumps(fixture))
+        elif json.loads(state.read_text()) != fixture:
+            sys.exit('probe did not retain its own image seed state')
     if mode == 'account-use':
         if '--release-tag' in args:
             if active.read_text() != latest_id or args[args.index('--release-tag') + 1] != 'v' + expected:
@@ -90,20 +97,49 @@ elif tool not in ('go', 'trash'):
                 capture_output=True, text=True, timeout=15, check=False)
             self.assertEqual(completed.returncode, 0, completed.stderr)
             calls = [json.loads(line) for line in (root / 'calls.jsonl').read_text().splitlines()]
-            boots = [args[-1] for tool, args in calls
-                     if tool == 'docker' and args[0] == 'run' and args[-1].startswith('sha256:')]
-            self.assertEqual(boots, ['sha256:' + '1' * 64] * 2 + ['sha256:' + '2' * 64] * 2)
+            boot_indices = [index for index, (tool, args) in enumerate(calls)
+                            if tool == 'docker' and args[0] == 'run' and args[-1].startswith('sha256:')]
+            starts = [calls[index][1] for index in boot_indices]
+            self.assertEqual([args[-1] for args in starts],
+                             ['sha256:' + '1' * 64] * 2 + ['sha256:' + '2' * 64] * 2)
             probes = [(args[1], args[args.index('--version') + 1]) for tool, args in calls
                       if tool == 'python3' and '--version' in args]
             self.assertEqual(probes, [
                 ('seed', latest_tag[1:]), ('check', latest_tag[1:]),
                 ('account-use', latest_tag[1:]),
-                ('seed', '261009095632.0.0'), ('check', '261009095632.0.0'),
-                ('account-use', '261009095632.0.0')])
+                ('seed', '261009095632.0.0'),
+                ('check', '261009095632.0.0'), ('account-use', '261009095632.0.0')])
             databases = [args for tool, args in calls
                          if tool == 'docker' and args[0] == 'run' and 'POSTGRES_USER=postgres' in args]
-            self.assertEqual(len(databases), 2, 'each image seeds its own fresh database')
-            self.assertEqual(len([args for tool, args in calls if tool == 'go']), 2)
+            self.assertEqual(len(databases), 2)
+            database_names = [args[args.index('--name') + 1] for args in databases]
+            self.assertEqual(len(set(database_names)), 2)
+            for index, args in enumerate(starts):
+                self.assertIn('AEON_DATABASE_URL=postgres://aeon:aeon@' +
+                              database_names[index // 2] + ':5432/aeon?sslmode=disable', args)
+            seeds = [args for tool, args in calls if tool == 'python3' and args[1] == 'seed']
+            checks = [args for tool, args in calls if tool == 'python3' and args[1] == 'check']
+            state_paths = [args[args.index('--state') + 1] for args in seeds]
+            self.assertEqual(len(set(state_paths)), 2)
+            self.assertEqual([args[args.index('--state') + 1] for args in checks], state_paths)
+            migrations = [index for index, (tool, _) in enumerate(calls) if tool == 'go']
+            self.assertEqual(len(migrations), 2)
+            for index, migration in enumerate(migrations):
+                self.assertLess(boot_indices[2 * index], calls.index(['python3', seeds[index]]))
+                self.assertLess(calls.index(['python3', seeds[index]]), migration)
+                self.assertLess(migration, calls.index(['python3', checks[index]]))
+                self.assertLess(migration, boot_indices[2 * index + 1])
+                self.assertLess(boot_indices[2 * index + 1], calls.index(['python3', checks[index]]))
+            latest_probe, floor_probe = [args for tool, args in calls
+                                        if tool == 'python3' and args[1] == 'account-use']
+            self.assertEqual(latest_probe[latest_probe.index('--release-tag') + 1], latest_tag)
+            self.assertEqual(latest_probe[latest_probe.index('--state') + 1], state_paths[0])
+            self.assertEqual(latest_probe[latest_probe.index('--database-container') + 1], database_names[0])
+            self.assertLess(calls.index(['python3', checks[0]]), calls.index(['python3', latest_probe]))
+            self.assertNotIn('--release-tag', floor_probe)
+            self.assertEqual(floor_probe[floor_probe.index('--state') + 1], state_paths[1])
+            self.assertEqual(floor_probe[floor_probe.index('--database-container') + 1], database_names[1])
+            self.assertLess(calls.index(['python3', checks[1]]), calls.index(['python3', floor_probe]))
             pulls = [args[-1] for tool, args in calls if tool == 'docker' and args[0] == 'pull']
             self.assertEqual(pulls, ['ghcr.io/inspr-at/aeon@' + latest_digest,
                                      'ghcr.io/inspr-at/aeon@' + floor_digest])
@@ -479,7 +515,100 @@ elif tool == 'git':
         completed, calls = self.run_harness(legacy_pull_rc=19)
         self.assertEqual(completed.returncode, 19)
         self.assertNotIn('Account-use rollback floor passed:', completed.stdout)
+        self.assertNotIn('Migration compatibility passed:', completed.stdout)
         self.assertFalse(any(call[:3] == ['python3', 'scripts/migration-compat-probe.py', 'account-use'] for call in calls))
+
+
+class MigrationCompatImageTest(unittest.TestCase):
+    def run_gate(self, refuse_floor=True):
+        # Risk: a moving latest release acquires the capability, so treating
+        # that binary as below-floor makes every unrelated PR fail CI.
+        # Execute the real shell orchestration with disposable command doubles;
+        # no images, containers, credentials or network calls are involved.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'scripts').mkdir()
+            script = root / 'scripts' / 'migration-compat.sh'
+            script.write_text(Path(module.__file__).with_name('migration-compat.sh').read_text())
+            tools = root / 'tools'
+            tools.mkdir()
+            log = root / 'commands.jsonl'
+            double = '''import json
+import os
+from pathlib import Path
+import shutil
+import sys
+tool = Path(sys.argv[0]).name
+args = sys.argv[1:]
+with open(os.environ['COMPAT_FIXTURE_LOG'], 'a') as log:
+    log.write(json.dumps([tool, *args]) + '\\n')
+if tool == 'docker':
+    if args[:2] == ['image', 'ls']:
+        print(args[-1].split('@')[1])
+    elif args[:1] == ['port']:
+        print('127.0.0.1:' + ('8080' if args[-1] == '8080/tcp' else '5432'))
+elif tool == 'trash':
+    shutil.rmtree(args[0])
+elif tool == 'git':
+    if args != ['show', 'v261009095632.0.0:internal/db/visibility.go']:
+        sys.exit('unexpected git call')
+    print('func enterTenant() {}')
+elif tool == 'python3' and args[1] == 'account-use':
+    version = args[args.index('--version') + 1]
+    if '--release-tag' in args:
+        if version != '261010123154.0.0' or args[args.index('--release-tag') + 1] != 'v' + version:
+            sys.exit('latest account-use policy must use its pinned release')
+        sys.exit(0)
+    # A capable latest binary accepts entry, so the unchanged refusal probe
+    # fails. Only the archived incapable fixture can provide that evidence.
+    if version != '261009095632.0.0' or os.environ['COMPAT_FIXTURE_REFUSES'] != 'yes':
+        sys.exit(23)
+'''
+            for name in ('docker', 'go', 'python3', 'git', 'trash'):
+                executable = tools / name
+                executable.write_text(f'#!{sys.executable}\n' + double)
+                executable.chmod(0o755)
+            result = subprocess.run(
+                [shutil.which('bash'), str(script), 'v261010123154.0.0', 'sha256:' + 'a' * 64],
+                env={'PATH': str(tools) + os.pathsep + os.defpath,
+                     'COMPAT_FIXTURE_LOG': str(log),
+                     'COMPAT_FIXTURE_REFUSES': 'yes' if refuse_floor else 'no'},
+                capture_output=True, text=True, timeout=15, check=False)
+            commands = [json.loads(line) for line in log.read_text().splitlines()]
+            return result, commands
+
+    def test_latest_compatibility_and_below_floor_refusal_use_separate_images(self):
+        result, commands = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        images = [args[-1] for tool, *args in commands if tool == 'docker' and args[0] == 'pull']
+        self.assertEqual(images, [
+            'ghcr.io/inspr-at/aeon@sha256:' + 'a' * 64,
+            'ghcr.io/inspr-at/aeon@sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c',
+        ])
+        phases = [(args[1], args[args.index('--version') + 1])
+                  for tool, *args in commands
+                  if tool == 'python3' and args[1] != 'wait-ready']
+        self.assertEqual(phases, [
+            ('seed', '261010123154.0.0'), ('check', '261010123154.0.0'),
+            ('account-use', '261010123154.0.0'),
+            ('seed', '261009095632.0.0'), ('check', '261009095632.0.0'),
+            ('account-use', '261009095632.0.0'),
+        ])
+        databases = [args[args.index('--name') + 1] for tool, *args in commands
+                     if tool == 'docker' and args[0] == 'run' and 'POSTGRES_USER=postgres' in args]
+        self.assertEqual(len(set(databases)), 2)
+        # Each lane cleans its own database/app and network after its checks.
+        cleanups = [args for tool, *args in commands
+                    if tool == 'docker' and args[:2] == ['network', 'rm']]
+        self.assertEqual(len(cleanups), 2)
+
+    def test_below_floor_acceptance_still_fails_the_whole_gate(self):
+        result, commands = self.run_gate(refuse_floor=False)
+        self.assertEqual(result.returncode, 23)
+        floor_probes = [args for tool, *args in commands
+                        if tool == 'python3' and args[1] == 'account-use' and '--release-tag' not in args]
+        self.assertEqual(len(floor_probes), 1)
+        self.assertEqual(floor_probes[0][floor_probes[0].index('--version') + 1], '261009095632.0.0')
 
 
 class MigrationHarnessTest(unittest.TestCase):
@@ -488,6 +617,7 @@ class MigrationHarnessTest(unittest.TestCase):
         # to fail the legacy capability guard rejects every subsequent PR.
         # Execute the harness with disposable command doubles: keep latest
         # reads, pinned policy checks and exact legacy refusal as gates.
+        # Each image seeds and migrates its own disposable database.
         latest_tag = 'v261010123154.0.0'
         latest_digest = 'sha256:c9952c1561c8d32c4a3efb17ed95934f81efd6bc2546de41a3b56bd138304deb'
         legacy_tag = 'v261009095632.0.0'
@@ -556,24 +686,37 @@ state_path.write_text(json.dumps(state))
                     self.assertEqual(result.returncode, 23 if fail_boundary else 0, result.stdout + result.stderr)
                     events = [json.loads(line) for line in log.read_text().splitlines()]
                     migrations = [event for event in events if event['command'] == 'go']
+                    self.assertEqual(len(migrations), 2)
+                    self.assertEqual([event['image'] for event in migrations], [latest_digest, legacy_digest])
                     self.assertEqual([(event['image'], event['migrated']) for event in migrations],
                         [(latest_digest, False), (legacy_digest, False)])
-                    databases = [event for event in events if event['command'] == 'docker' and
-                        event['args'][0] == 'run' and 'POSTGRES_USER=postgres' in event['args']]
-                    self.assertEqual(len(databases), 2)
                     probes = [event for event in events if event['command'] == 'python3']
                     seeds = [event for event in probes if event['args'][1] == 'seed']
+                    reads = [event for event in probes if event['args'][1] == 'check']
                     self.assertEqual([(event['image'], event['migrated'], event['args'][-1]) for event in seeds],
                         [(latest_digest, False, latest_tag[1:]), (legacy_digest, False, legacy_tag[1:])])
-                    reads = [event for event in probes if event['args'][1] == 'check']
                     self.assertEqual([(event['image'], event['migrated'], event['args'][-1]) for event in reads],
                         [(latest_digest, True, latest_tag[1:]), (legacy_digest, True, legacy_tag[1:])])
+                    database_names = [event['args'][event['args'].index('--name') + 1] for event in events
+                        if event['command'] == 'docker' and event['args'][0] == 'run' and 'POSTGRES_USER=postgres' in event['args']]
+                    self.assertEqual(len(database_names), 2)
+                    self.assertEqual(len(set(database_names)), 2)
+                    state_paths = [event['args'][event['args'].index('--state') + 1] for event in seeds]
+                    self.assertEqual(len(set(state_paths)), 2)
+                    self.assertEqual([event['args'][event['args'].index('--state') + 1] for event in reads], state_paths)
+                    for index, migration in enumerate(migrations):
+                        self.assertLess(events.index(seeds[index]), events.index(migration))
+                        self.assertLess(events.index(migration), events.index(reads[index]))
                     boundary = [event for event in probes if event['args'][1] == 'account-use']
                     self.assertEqual([(event['image'], event['migrated'],
                         event['args'][event['args'].index('--version') + 1]) for event in boundary],
                         [(latest_digest, True, latest_tag[1:]), (legacy_digest, True, legacy_tag[1:])])
                     self.assertEqual(boundary[0]['args'][boundary[0]['args'].index('--release-tag') + 1], latest_tag)
                     self.assertNotIn('--release-tag', boundary[1]['args'])
+                    for index, activation in enumerate(boundary):
+                        self.assertEqual(activation['args'][activation['args'].index('--state') + 1], state_paths[index])
+                        self.assertEqual(activation['args'][activation['args'].index('--database-container') + 1], database_names[index])
+                        self.assertLess(events.index(reads[index]), events.index(activation))
                     if fail_boundary:
                         self.assertNotIn('Migration compatibility passed:', result.stdout)
                     else:
@@ -621,6 +764,7 @@ if tool == 'docker':
         (root / 'database-live').write_text('true')
         fixture_path().write_text('fresh')
         record(['database', cycle])
+        record(['database-name', args[args.index('--name') + 1]])
     elif args[0] == 'run' and args[-1] in (latest_id, floor_id):
         (root / 'image').write_text(args[-1])
         (root / 'running').write_text('true')
@@ -645,6 +789,7 @@ elif tool == 'go':
         sys.exit('migration requires its own seeded fixture with no server connected')
     fixture_path().write_text('inactive')
     record(['migrate', int((root / 'database').read_text())])
+    record(['migrate-image', (root / 'image').read_text()])
 elif tool == 'python3':
     mode = args[1]
     current = (root / 'image').read_text()
@@ -654,10 +799,15 @@ elif tool == 'python3':
         expected = '261009095632.0.0' if current == floor_id else '261010123154.0.0'
         if version != expected:
             sys.exit('wrong binary version')
+        state = Path(args[args.index('--state') + 1])
+        fixture = {'image': current, 'version': version}
         if mode == 'seed':
             if fixture_path().read_text() != 'fresh':
                 sys.exit('seeding requires a fresh database')
             fixture_path().write_text('seeded')
+            state.write_text(json.dumps(fixture))
+        elif json.loads(state.read_text()) != fixture:
+            sys.exit('check requires the same image seed state')
         elif fixture_path().read_text() != 'inactive':
             sys.exit('reads require the non-activated migrated fixture')
     if mode == 'account-use':
@@ -708,6 +858,19 @@ elif tool == 'python3':
                     [['pull', 'ghcr.io/inspr-at/aeon@' + latest_digest],
                      ['pull', 'ghcr.io/inspr-at/aeon@' + floor_digest]])
                 self.assertEqual([event for event in events if event[0] == 'database'], [['database', 1], ['database', 2]])
+                database_names = [event[1] for event in events if event[0] == 'database-name']
+                self.assertEqual(len(database_names), 2)
+                self.assertEqual(len(set(database_names)), 2)
+                seeds = [event for event in events if event[:2] == ['probe', 'seed']]
+                self.assertEqual(seeds, [['probe', 'seed', latest_id, latest_version],
+                    ['probe', 'seed', floor_id, floor_version]])
+                self.assertEqual([event for event in events if event[0] == 'migrate-image'],
+                    [['migrate-image', latest_id], ['migrate-image', floor_id]])
+                for index in range(2):
+                    migration = ['migrate', index + 1]
+                    self.assertLess(events.index(['database', index + 1]), events.index(seeds[index]))
+                    self.assertLess(events.index(seeds[index]), events.index(migration))
+                    self.assertLess(events.index(migration), events.index(checks[index]))
                 self.assertEqual([event for event in events if event[0] == 'migrate'], [['migrate', 1], ['migrate', 2]])
                 self.assertLess(events.index(['migrate', 1]), events.index(checks[0]))
                 self.assertLess(events.index(checks[0]), events.index(['probe', 'account-use', latest_id, latest_version]))

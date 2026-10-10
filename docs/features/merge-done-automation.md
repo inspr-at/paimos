@@ -103,3 +103,25 @@ writes one non-applicable Needs You proposal and leaves the state unchanged.
 No role, key or scope is created. Local and remote `./internal/delivery` passed
 on build-6 (`TestMergeDone` included). The merge-main static gate returned 0
 (41 checks passed, no optional skips). No origin push and no live backfill.
+
+
+Recorded delivery merges also persist `fields.merged_at`. Already-Done leaves
+record this evidence without changing their state, other fields, marks or human
+checks; replay of the same merge does not write again. Status autopilot reads
+`delivery.merge_done` metadata for its merge clock, including historical events;
+editable fields and imported Done timestamps are not merge evidence. Classic
+history is skipped. Done without a recorded merge is never a missed release,
+and the reminder applies only to projects with releases.
+
+For AEON-1147's one-time cleanup, preview the existing attention bulk endpoint
+with `action: "dismiss"`, `dry_run: true`, and `scope: {kind: "invalid_missed"}`.
+This filter selects classic-history flags and flags without delivery merge
+evidence, preserving genuine merge reminders. Execute the frozen preview using
+its `preview_token` and `through_event_id`, `dry_run: false`, and a stable
+`Idempotency-Key` for retries of that preview. Use a new key for each new
+preview. Batches retain the existing 1,000-item cap; preview another
+batch until the remaining total is zero. The cleanup writes one audit event per
+ticket, preserves status and other fields/flags, rechecks authority and merge
+evidence in the final transaction, and supports the existing batch undo endpoint
+`POST /api/status-autopilot/attention/bulk/{batch_id}/undo` within 24 hours.
+No production cleanup is performed by the development worker.

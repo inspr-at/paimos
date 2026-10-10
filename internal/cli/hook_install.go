@@ -158,7 +158,7 @@ func (rt *runtime) mergeInboxHooks(path, command, harness string, uninstall, dry
 		}
 	}
 	var changes []string
-	for _, event := range inboxHookEvents() {
+	for _, event := range harnessHookEvents(harness) {
 		var groups []map[string]json.RawMessage
 		if raw, ok := hooks[event]; ok {
 			if json.Unmarshal(raw, &groups) != nil {

@@ -55,7 +55,11 @@ func (m *Module) mergeWebhook(w http.ResponseWriter, r *http.Request) {
 	defer controller.SetReadDeadline(time.Time{})
 	raw, err := io.ReadAll(io.LimitReader(r.Body, (2<<20)+1))
 	if err != nil || len(raw) > 2<<20 {
-		w.WriteHeader(413)
+		class := webhookClass("body_too_large")
+		if err != nil {
+			class = "body_read"
+		}
+		m.rejectWebhook(w, r, "unknown", "parse", 413, class)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Minute)
@@ -68,15 +72,24 @@ func (m *Module) mergeWebhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(response.status)
 		return
 	}
+	m.finishMergeWebhook(w, r, raw, reader)
+}
+
+// The authenticated audit phase has accepted before merge completion starts.
+func (m *Module) finishMergeWebhook(w http.ResponseWriter, r *http.Request, raw []byte, reader MergeReader) {
+	ctx := r.Context()
 	var e envelope
-	if json.Unmarshal(raw, &e) != nil {
-		w.WriteHeader(400)
+	if err := json.Unmarshal(raw, &e); err != nil {
+		m.rejectWebhook(w, r, webhookLogAction(raw, r.Header.Get("X-GitHub-Event")), "parse", 400, webhookClass("invalid_json"))
 		return
 	}
+	var err error
+	step := ""
 	facts := []MergeFact{}
 	switch r.Header.Get("X-GitHub-Event") {
 	case "pull_request":
 		if e.Action == "closed" {
+			step = "reader-MergedPull"
 			var f *MergeFact
 			f, err = reader.MergedPull(ctx, e.Pull.Number)
 			if f != nil {
@@ -85,18 +98,21 @@ func (m *Module) mergeWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	case "merge_group":
 		if e.Action == "destroyed" {
+			step = "reader-completedGroup"
 			facts, err = m.completedGroup(ctx, reader, e.Group.Head)
 		}
 	case "push":
 		if e.Ref == "refs/heads/main" {
+			step = "reader-MergedGroup"
 			facts, err = reader.MergedGroup(ctx, e.After)
 		}
 	}
 	if err == nil && len(facts) > 0 {
+		step = "completeMerges"
 		err = m.completeMerges(ctx, facts)
 	}
 	if err != nil {
-		w.WriteHeader(502)
+		m.rejectWebhook(w, r, e.Action, step, 502, err)
 		return
 	}
 	w.WriteHeader(204)
@@ -353,7 +369,8 @@ func mergeOwnerCandidate(ctx context.Context, tx pgx.Tx, tid string, project *st
 	return nil, nil
 }
 
-// prepareMergeTx mutates only leaf state, retaining all fields and human checks.
+// prepareMergeTx records merge evidence for leaf completion and already-Done
+// leaves, retaining other fields and human checks.
 // Receipt lookup and writes share the tenant/tree fence. Events are returned
 // for the caller to append after the whole batch's resource locks and writes.
 func prepareMergeTx(ctx context.Context, tx pgx.Tx, tid, repo string, e *mergeEntry) (*events.Change, error) {
@@ -369,18 +386,28 @@ func prepareMergeTx(ctx context.Context, tx pgx.Tx, tid, repo string, e *mergeEn
 	if e.Result == "refused" {
 		return nil, nil
 	}
-	if ticketbenefits.Completed(e.category) && !(e.category == "done" && e.To == "delivered") {
+	alreadyDone := e.category == "done" && e.To != "delivered"
+	if ticketbenefits.Completed(e.category) && e.category != "done" {
 		e.Result = "already_complete"
 		return nil, nil
 	}
 	var after json.RawMessage
-	if err := tx.QueryRow(ctx, `UPDATE nodes SET state=$2,status_autopilot='{}',updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING to_jsonb(nodes)`, e.Ticket, e.To).Scan(&after); err != nil {
-		return nil, err
+	if alreadyDone {
+		// This is an evidence write, not another completion. Keep the exact
+		// configured Done state and all existing marks under the same fence.
+		if err := tx.QueryRow(ctx, `UPDATE nodes SET fields=jsonb_set(fields,'{merged_at}',to_jsonb($2::text)),updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING to_jsonb(nodes)`, e.Ticket, e.MergedAt.UTC().Format(time.RFC3339Nano)).Scan(&after); err != nil {
+			return nil, err
+		}
+		e.Result = "already_complete"
+	} else {
+		if err := tx.QueryRow(ctx, `UPDATE nodes SET state=$2,fields=jsonb_set(fields,'{merged_at}',to_jsonb($3::text)),status_autopilot='{}',updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING to_jsonb(nodes)`, e.Ticket, e.To, e.MergedAt.UTC().Format(time.RFC3339Nano)).Scan(&after); err != nil {
+			return nil, err
+		}
+		e.Result = "applied"
 	}
 	if _, err := tx.Exec(ctx, `UPDATE status_autopilot_proposals SET status='applied' WHERE node_id=$1 AND rule='merge_refused' AND anchor LIKE $2`, e.Ticket, identity+"/%"); err != nil {
 		return nil, err
 	}
-	e.Result = "applied"
 	meta, _ := json.Marshal(map[string]any{"job": "merge-done", "repository": repo, "pull_request": e.PR, "merge_sha": e.SHA, "head_sha": e.Head, "merged_at": e.MergedAt, "merge_identity": identity})
 	return &events.Change{Type: "delivery.merge_done", NodeID: &e.Ticket, Before: e.before, After: after, Metadata: meta}, nil
 }

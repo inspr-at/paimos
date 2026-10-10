@@ -20,6 +20,15 @@ digest="${2:?Expected the published release image digest}"
 # Published release v261009095632.0.0, source 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
 account_use_floor_tag=v261009095632.0.0
 account_use_floor_digest=sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
+probe_mode="${3:-compatibility}"
+case "$probe_mode" in
+  compatibility) ;;
+  account-use-floor)
+    [[ "$tag" = "$account_use_floor_tag" && "$digest" = "$account_use_floor_digest" ]] || {
+      echo 'Account-use floor probe requires the pinned below-floor release' >&2; exit 1;
+    } ;;
+  *) echo 'Expected compatibility or account-use-floor probe mode' >&2; exit 1 ;;
+esac
 
 # Pull every required image before allocating disposable probe resources.
 # A failed pull must retain its own failure without network or container work.
@@ -36,9 +45,12 @@ suffix="${tmp##*.}"
 db="aeon-compat-db-$suffix"
 app="aeon-compat-app-$suffix"
 network="aeon-compat-$suffix"
+resources_active=0
 cleanup() {
-  docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
-  docker network rm "$network" >/dev/null 2>&1 || true
+  if [[ "$resources_active" = 1 ]]; then
+    docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
+    docker network rm "$network" >/dev/null 2>&1 || true
+  fi
   if command -v trash >/dev/null 2>&1; then trash "$tmp";
   else echo "Disposable probe state left in $tmp (trash unavailable)" >&2; fi
 }
@@ -47,6 +59,12 @@ trap cleanup EXIT
 probe_release() {
   local tag="$1" digest="$2" exercise_floor="$3"
   local image="ghcr.io/inspr-at/aeon@$digest" image_id base db_address ready
+  # Retain separate container identities and seed evidence for both lanes,
+  # including when they exercise the same immutable release image.
+  db="aeon-compat-db-$suffix-$exercise_floor"
+  app="aeon-compat-app-$suffix-$exercise_floor"
+  network="aeon-compat-$suffix-$exercise_floor"
+  local state="$tmp/state-$exercise_floor.json"
   if [[ "$exercise_floor" = 1 ]]; then
     echo "Account-use rollback boundary release: $tag"
     echo "Account-use rollback fixture: $tag; image: $image"
@@ -57,6 +75,8 @@ probe_release() {
   image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
   [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
   echo "Previous image: $image_id"
+  resources_active=1
+  docker network create "$network" >/dev/null
   docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
     -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=aeon \
     "$pgvector_image" >/dev/null
@@ -86,7 +106,7 @@ SQL
   }
 
   start_previous
-  python3 scripts/migration-compat-probe.py seed --base "$base" --state "$tmp/state.json" --version "${tag#v}"
+  python3 scripts/migration-compat-probe.py seed --base "$base" --state "$state" --version "${tag#v}"
   docker stop --time 30 "$app" >/dev/null
   docker container rm "$app" >/dev/null
 
@@ -96,17 +116,18 @@ SQL
   AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=disable" \
     GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
   start_previous
-  python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
+  python3 scripts/migration-compat-probe.py check --base "$base" --state "$state" --version "${tag#v}"
   echo "Previous release reads passed: $tag on the candidate schema"
   if [[ "$exercise_floor" = 1 ]]; then
     # Seeded reads precede activation. Exact SQLSTATE/entry, empty/populated
     # pool and background-write refusal assertions remain mandatory.
-    python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
+    python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$state" --version "${tag#v}" --database-container "$db"
+    echo "Account-use rollback floor passed: $tag on the candidate schema"
     echo "Account-use rollback boundary passed: $tag on the candidate schema"
   else
     # Capability comes from the pinned release's embedded entry migration;
     # supported releases must pass their policy probes, never legacy refusal.
-    python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db" --release-tag "$tag"
+    python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$state" --version "${tag#v}" --database-container "$db" --release-tag "$tag"
   fi
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations and passed account-use probes.\n' \
@@ -118,6 +139,8 @@ SQL
   fi
   docker stop --time 30 "$app" >/dev/null
   docker container rm -fv "$app" "$db" >/dev/null
+  docker network rm "$network" >/dev/null
+  resources_active=0
 }
 
 # Verify the pinned source remains below the capability floor before any
@@ -126,9 +149,12 @@ legacy_entry="$(git show "$account_use_floor_tag:internal/db/visibility.go")"
 [[ "$legacy_entry" == *"func enterTenant("* && "$legacy_entry" != *"aeon.account_use_capable"* ]] || {
   echo 'Pinned rollback image must predate the account-use capability' >&2; exit 1;
 }
-docker network create "$network" >/dev/null
 # Policy activation changes the fixture, so each probe seeds and migrates its
 # own fresh database even when both releases select the same immutable image.
-probe_release "$tag" "$digest" 0
-probe_release "$account_use_floor_tag" "$account_use_floor_digest" 1
+if [[ "$probe_mode" = account-use-floor ]]; then
+  probe_release "$tag" "$digest" 1
+else
+  probe_release "$tag" "$digest" 0
+  probe_release "$account_use_floor_tag" "$account_use_floor_digest" 1
+fi
 echo "Migration compatibility passed: $tag on the candidate schema; latest-release reads and account-use probes, and below-floor account-use boundary"

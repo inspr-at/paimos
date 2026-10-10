@@ -308,6 +308,20 @@ Use `aeon tell <address> --project KEY --recipient-session <id> -m TEXT` for one
 
 `aeon hook claude <event>` and `aeon hook codex <event>` read hook JSON from stdin for `PostToolUse`, `UserPromptSubmit`, and `Stop`. These are synchronous harness-executed commands: no model-started watcher is needed. Inputs/outputs were checked against installed Claude Code **2.1.284**, Codex CLI **0.158.0**, the [Claude hook reference](https://code.claude.com/docs/en/hooks), and [OpenAI hook reference](https://developers.openai.com/codex/hooks). Codex has lifecycle hooks; its older `notify` command is unnecessary here.
 
+`aeon hook install --harness claude` also installs `SubagentStart` and
+`SubagentStop` handlers (AEON-1141). Re-running installation adds them to existing
+settings without changing unrelated handlers; uninstall removes Aeon's entries.
+These lifecycle hooks use the private Claude session index to register children
+under the parent, inherit its project and ticket, and mark children stopped.
+They return no context or stop decision, never consume the parent's inbox, and
+retain the 2.5-second CLI budget and three-second installed timeout. A missing
+index or stopped parent is a quiet no-op. The parent's existing heartbeat helper
+maintains child liveness and retries persisted failed registrations and stops.
+This applies to the standard authenticated hooks; paired hooks keep their
+existing credential-free approval and capability path.
+See [Subagents on Agents](features/subagent-registration.md) for lifecycle and
+other-harness guidance.
+
 Bind each launched harness to its **Aeon generation**, using exactly one of:
 
 - `AEON_SESSION_ID`: the Aeon harness session UUID returned by registration.
