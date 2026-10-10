@@ -56,6 +56,52 @@ These routes preserve the disabled-by-default chat gate. They do not launch,
 resume, steer, stop or automatically resend an agent's work. No schema
 migration or release version change is required for this server slice.
 
+## Daemon integration prerequisites (AEON-1074)
+
+The daemon relay is not connected yet. The current S1 stream and server ingress
+have incompatible registration boundaries: `Supervisor.SubscribeChat` exposes
+supervisor-owned managed runs, while chat selection and every worker ingress
+require a live external **unmanaged** registration. `ExternalRegistrationTx`
+enforces this distinction, and `TestBindingRejectsForeignWrongRoleManagedAndStaleRegistration`
+checks that a managed registration cannot be selected. Reclassifying an owned
+run as external or removing this check would change the ownership policy.
+
+The current `POST /api/chat-deliveries/binding/resolve` verifies a supplied
+conversation ID, session ID and binding epoch; it does not discover a binding
+from an owned session. The daemon currently has no approved source for that
+conversation ID and epoch. Integration needs an explicit, authorized binding
+handoff and a decision about which registration boundary supplies the stream.
+Both must preserve exact-session ownership, the private worker lease, current
+permissions and binding-epoch checks.
+
+S1 supplies chunks, tool activity, capability snapshots and running/idle/action
+state only. It supplies no explicit final-response or recipient-receipt event.
+An idle state does not establish a final response, and fetching or queueing an
+input does not establish delivery or read. Integration also needs explicit
+final-response and recipient evidence sources. Interim chunks must never be
+assembled into a persisted final body or copied into the daemon journal.
+
+## Upgrade order and reverse proxies
+
+The required rollout supports either upgrade order. A new daemon talking to a
+release 128 server must detect missing relay routes, disable only the relay and
+emit one content-free diagnostic. Runs, verification and existing final-message
+delivery must continue. An older daemon talking to the new server supplies no
+live frames; the live view must show **live view unavailable** without treating
+the absent stream as an execution or final-delivery failure. These are pending
+daemon/UI integration acceptance requirements, not a tested compatibility claim
+for the server ingress alone. Until those prerequisites and both mixed-version
+tests are complete, this slice does not establish an end-to-end live-chat rollout.
+
+The live endpoint returns `text/event-stream` and flushes each frame. Keepalives
+arrive every 15 seconds; set proxy idle timeouts above 15 seconds. Each stream
+ends after five minutes, so the client reconnects using its last cursor through
+`Last-Event-ID` or `after`, following the resync rules above when replay expires.
+Disable response buffering for event streams; the server sends
+`X-Accel-Buffering: no`. Caddy automatically flushes event-stream responses and
+needs no `flush_interval` setting for this route. Preserve authentication and
+cursor headers, and do not cache the stream or log its response bodies.
+
 ## Acceptance and validation
 
 `TestChatLiveViewersReplayFinalOnlyAndReceipts` exercises two actual HTTP SSE
