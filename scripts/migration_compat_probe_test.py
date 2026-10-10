@@ -4,9 +4,12 @@ import importlib.util
 import io
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from unittest.mock import Mock, patch
@@ -175,6 +178,89 @@ class ProbeTest(unittest.TestCase):
             self.assertEqual(boundary.errors(), (0, 0))
             result.stderr = 'ERROR: 0A000: '+module.CAPABILITY_ERROR+'\nCONTEXT: aeon_enter_principal(uuid,uuid,boolean)'
             self.assertEqual(boundary.errors(), (1, 1))
+
+
+class MigrationCompatImageTest(unittest.TestCase):
+    def run_gate(self, refuse_floor=True):
+        # Risk: a moving latest release acquires the capability, so treating
+        # that binary as below-floor makes every unrelated PR fail CI.
+        # Execute the real shell orchestration with disposable command doubles;
+        # no images, containers, credentials or network calls are involved.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'scripts').mkdir()
+            script = root / 'scripts' / 'migration-compat.sh'
+            script.write_text(Path(module.__file__).with_name('migration-compat.sh').read_text())
+            tools = root / 'tools'
+            tools.mkdir()
+            log = root / 'commands.jsonl'
+            double = '''import json
+import os
+from pathlib import Path
+import shutil
+import sys
+tool = Path(sys.argv[0]).name
+args = sys.argv[1:]
+with open(os.environ['COMPAT_FIXTURE_LOG'], 'a') as log:
+    log.write(json.dumps([tool, *args]) + '\\n')
+if tool == 'docker':
+    if args[:2] == ['image', 'ls']:
+        print(args[-1].split('@')[1])
+    elif args[:1] == ['port']:
+        print('127.0.0.1:' + ('8080' if args[-1] == '8080/tcp' else '5432'))
+elif tool == 'trash':
+    shutil.rmtree(args[0])
+elif tool == 'python3' and args[1] == 'account-use':
+    version = args[args.index('--version') + 1]
+    # A capable latest binary accepts entry, so the unchanged refusal probe
+    # fails. Only the archived incapable fixture can provide that evidence.
+    if version != '261009095632.0.0' or os.environ['COMPAT_FIXTURE_REFUSES'] != 'yes':
+        sys.exit(23)
+'''
+            for name in ('docker', 'go', 'python3', 'trash'):
+                executable = tools / name
+                executable.write_text(f'#!{sys.executable}\n' + double)
+                executable.chmod(0o755)
+            result = subprocess.run(
+                [shutil.which('bash'), str(script), 'v261010123154.0.0', 'sha256:' + 'a' * 64],
+                env={'PATH': str(tools) + os.pathsep + os.defpath,
+                     'COMPAT_FIXTURE_LOG': str(log),
+                     'COMPAT_FIXTURE_REFUSES': 'yes' if refuse_floor else 'no'},
+                capture_output=True, text=True, timeout=15, check=False)
+            commands = [json.loads(line) for line in log.read_text().splitlines()]
+            return result, commands
+
+    def test_latest_compatibility_and_below_floor_refusal_use_separate_images(self):
+        result, commands = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        images = [args[-1] for tool, *args in commands if tool == 'docker' and args[0] == 'pull']
+        self.assertEqual(images, [
+            'ghcr.io/inspr-at/aeon@sha256:' + 'a' * 64,
+            'ghcr.io/inspr-at/aeon@sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c',
+        ])
+        phases = [(args[1], args[args.index('--version') + 1])
+                  for tool, *args in commands
+                  if tool == 'python3' and args[1] != 'wait-ready']
+        self.assertEqual(phases, [
+            ('seed', '261010123154.0.0'), ('check', '261010123154.0.0'),
+            ('seed', '261009095632.0.0'), ('check', '261009095632.0.0'),
+            ('account-use', '261009095632.0.0'),
+        ])
+        databases = [args[args.index('--name') + 1] for tool, *args in commands
+                     if tool == 'docker' and args[0] == 'run' and 'POSTGRES_USER=postgres' in args]
+        self.assertEqual(len(set(databases)), 2)
+        # Each lane cleans its own database/app and network after its checks.
+        cleanups = [args for tool, *args in commands
+                    if tool == 'docker' and args[:2] == ['network', 'rm']]
+        self.assertEqual(len(cleanups), 2)
+
+    def test_below_floor_acceptance_still_fails_the_whole_gate(self):
+        result, commands = self.run_gate(refuse_floor=False)
+        self.assertEqual(result.returncode, 23)
+        floor_probes = [args for tool, *args in commands
+                        if tool == 'python3' and args[1] == 'account-use']
+        self.assertEqual(len(floor_probes), 1)
+        self.assertEqual(floor_probes[0][floor_probes[0].index('--version') + 1], '261009095632.0.0')
 
 
 if __name__ == '__main__':

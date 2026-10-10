@@ -13,6 +13,20 @@ tag="${1:?usage: bash scripts/migration-compat.sh vYYMMDDhhmmss.0.0 sha256:DIGES
 [[ "$tag" =~ ^v[0-9]{12}\.0\.0$ ]] || { echo 'Expected an immutable release tag' >&2; exit 1; }
 digest="${2:?Expected the published release image digest}"
 [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected an immutable image digest' >&2; exit 1; }
+# Release 128 is the last published binary below the account_use_v1 floor.
+# Keep this negative probe independent of the moving latest-release check:
+# release 129 and newer correctly enter activated tenants with that capability.
+floor_tag=v261009095632.0.0
+floor_digest=sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c
+probe_mode="${3:-compatibility}"
+case "$probe_mode" in
+  compatibility) ;;
+  account-use-floor)
+    [[ "$tag" = "$floor_tag" && "$digest" = "$floor_digest" ]] || {
+      echo 'Account-use floor probe requires the pinned below-floor release' >&2; exit 1;
+    } ;;
+  *) echo 'Expected compatibility or account-use-floor probe mode' >&2; exit 1 ;;
+esac
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 mkdir -p tmp
@@ -78,7 +92,15 @@ AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=di
   GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
 start_previous
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
-python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
+if [[ "$probe_mode" = account-use-floor ]]; then
+  python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
+else
+  # Use a fresh disposable database for the negative fixture. A capable latest
+  # release must never be made to look incapable, or counted as a refusal.
+  cleanup
+  trap - EXIT
+  bash scripts/migration-compat.sh "$floor_tag" "$floor_digest" account-use-floor
+fi
 echo "Migration compatibility passed: $tag on the candidate schema"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
