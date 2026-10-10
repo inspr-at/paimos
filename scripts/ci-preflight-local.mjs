@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { fixedEnvironment } from './ci-static.mjs';
-import { localChecks, shaPattern } from './ci-preflight-result.mjs';
+import { localChecks, shaPattern, runnerLabelPattern } from './ci-preflight-result.mjs';
 
 function git(root, args) {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024 });
@@ -36,7 +36,7 @@ export function goPackages(paths) {
   const packages = [...new Set(paths.filter(path => path.endsWith('.go')).map(path => './' + dirname(path)))].sort();
   return packages.length > 64 ? ['./...'] : packages;
 }
-export async function preflight({ root = process.cwd(), sha, base, runner = hostname() }, {
+export async function preflight({ root = process.cwd(), sha, base, runner = hostname(), expectedRunner = process.env.AEON_PREFLIGHT_RUNNER }, {
   bind = boundCheckout, verifyBase = boundBase,
   diff = () => git(root, ['diff', '--name-only', '--no-renames', `${base}...${sha}`]).split('\n').filter(Boolean),
   execute = (bin, args, cwd) => {
@@ -48,7 +48,12 @@ export async function preflight({ root = process.cwd(), sha, base, runner = host
     return !result.error && !result.signal && result.status === 0;
   },
 } = {}) {
-  if (!/^mbp2606(?:\..*)?$/.test(runner) || !shaPattern.test(base ?? '')) throw new Error('preflight_requires_mbp2606_and_base_sha');
+  // Installation configuration names the approved lane; a candidate cannot
+  // grant itself permission by reporting an arbitrary hostname.
+  if (typeof expectedRunner !== 'string' || !runnerLabelPattern.test(expectedRunner) ||
+      !(runner === expectedRunner || runner.startsWith(expectedRunner + '.')) || !shaPattern.test(base ?? '')) {
+    throw new Error('preflight_requires_configured_runner_and_base_sha');
+  }
   bind(root, sha);
   verifyBase(root, base);
   const packages = goPackages(diff());
@@ -72,13 +77,13 @@ export async function preflight({ root = process.cwd(), sha, base, runner = host
     }
     checks.push({ id: localChecks[i], status });
   }
-  return { schema: 1, kind: 'local', sha, base_sha: base, runner_class: 'mbp2606', checks,
+  return { schema: 1, kind: 'local', sha, base_sha: base, runner_class: expectedRunner, checks,
     status: checks.every(row => row.status === 'passed') ? 'passed' : 'failed' };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const [sha, base, output] = process.argv.slice(2);
-    if (!output || process.argv.length !== 5) throw new Error('Usage: ci-preflight-local.mjs SHA BASE_SHA OUTPUT_JSON (on mbp2606)');
+    if (!output || process.argv.length !== 5) throw new Error('Usage: ci-preflight-local.mjs SHA BASE_SHA OUTPUT_JSON (AEON_PREFLIGHT_RUNNER required)');
     const result = await preflight({ sha, base });
     const destination = resolve(output);
     mkdirSync(dirname(destination), { recursive: true });

@@ -51,7 +51,7 @@ func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 	e1 := create(epic.ID, "PAI-1", "Provisioning", "backlog", root.ID, nil, "")
 	e2 := create(epic.ID, "PAI-2", "Billing", "backlog", root.ID, nil, "")
 	a := create(ticket.ID, "PAI-3", "Alpha", "new", e1.ID, map[string]any{"priority": "high", "assignee": p.ID,
-		"tags": []any{map[string]any{"id": 1, "name": "BUG", "color": "red"}, "hsb8"}, "cost_unit": map[string]any{"id": "x", "label": "Consulting"},
+		"tags": []any{map[string]any{"id": 1, "name": "BUG", "color": "red"}, "worker-8"}, "cost_unit": map[string]any{"id": "x", "label": "Consulting"},
 		"release": map[string]any{"id": 9, "label": "v4.7.8"}, "start_date": "2026-09-10"}, "")
 	b := create(ticket.ID, "PAI-4", "Beta", "in_progress", e2.ID, map[string]any{"priority": "low", "assignee": mira.ID,
 		"tags": []any{"bug"}, "classic": map[string]any{"cost_unit": map[string]any{"id": 4, "label": "Support"}}, "start_date": "2026-02-30"}, "The fleet agent restarts twice.")
@@ -95,9 +95,9 @@ func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 
 	// Tags by name, case-insensitive, string or object elements; none and not.
 	expect("tag=bug", "PAI-3", "PAI-4")
-	expect("tag=HSB8", "PAI-3")
+	expect("tag=WORKER-8", "PAI-3")
 	expect("tag=none", "PAI-5", "PAI-6")
-	expect("tag=bug,!hsb8", "PAI-4")
+	expect("tag=bug,!worker-8", "PAI-4")
 	expect("tag=!none", "PAI-3", "PAI-4")
 
 	// Cost units: native wins (also an explicit null), classic falls back.
@@ -149,7 +149,7 @@ func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 	// Facets for tags, cost units and releases; a cursor binds the new filters.
 	status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=work,task&facets=tag,cost_unit,release,state&limit=1&tag=!none", "")
 	page := decode[nodePage](t, status, body, http.StatusOK)
-	if page.Facets["tag"]["BUG"]+page.Facets["tag"]["bug"] != 2 || page.Facets["tag"]["hsb8"] != 1 || page.Facets["cost_unit"]["Consulting"] != 1 || page.Facets["cost_unit"]["Support"] != 1 || page.Facets["release"]["none"] != 1 {
+	if page.Facets["tag"]["BUG"]+page.Facets["tag"]["bug"] != 2 || page.Facets["tag"]["worker-8"] != 1 || page.Facets["cost_unit"]["Consulting"] != 1 || page.Facets["cost_unit"]["Support"] != 1 || page.Facets["release"]["none"] != 1 {
 		t.Fatalf("facets: %#v", page.Facets)
 	}
 	if page.NextCursor == nil {

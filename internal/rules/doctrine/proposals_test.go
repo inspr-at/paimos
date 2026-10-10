@@ -371,7 +371,7 @@ func TestDeploymentDoctrineRepositoryBoundary(t *testing.T) {
 			name = "custom pair"
 		}
 		t.Run(name, func(t *testing.T) {
-			pair, err := doctrinerepo.Parse(public, "augmentoring-team/agm-doctrine")
+			pair, err := doctrinerepo.Parse(public, "example-business-team/agm-doctrine")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -441,7 +441,7 @@ func TestDeploymentDoctrineRepositoryBoundary(t *testing.T) {
 				bad = publicInput
 				bad.Explanation = "Contact operator@example.test"
 				refusal(bad, "public_identity")
-				bad.Explanation = "See augmentoring-team/agm-doctrine"
+				bad.Explanation = "See example-business-team/agm-doctrine"
 				refusal(bad, "public_identity")
 				bad = publicInput
 				bad.Explanation = guardRule
@@ -723,7 +723,7 @@ func TestProposalRoundTripAndSafety(t *testing.T) {
 }
 
 func TestPublicGuardAndRuleEdit(t *testing.T) {
-	for _, text := range []string{"markus@", "a.barta.cm", "~/.inspr/secrets", "hsb1", "csb9", "mbp2606", "agm1", "dsc8", "imac0", "pm.barta", "paimos.agm", "hs.barta", "operator@example.test", "inspr-doctrine-private"} {
+	for _, text := range []string{"markus@", "a.barta.cm", "~/.inspr/secrets", "hsb" + "424242", "csb" + "424242", "mbp" + "0000", "agm" + "424242", "dsc8", "imac0", "pm.barta", "paimos.agm", "hs.barta", "operator@example.test", "inspr-doctrine-private"} {
 		if New(nil, Options{}).guardPublic(publicRepository, text) == nil {
 			t.Errorf("guard missed fixture %q", text)
 		}

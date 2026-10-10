@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,8 +10,57 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/version"
 	"gopkg.in/yaml.v3"
 )
+
+// Risk: the native release receipt rejects the real capability-bearing version
+// output. Execute the actual script with isolated build-tool stubs, including
+// negative checks that retain the exact version and capability requirements.
+func TestReleaseNativeRehearsalChecksVersionAndLedgerCapability(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"--version"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	script := readRepo(t, "scripts/release-rehearsal-native.sh")
+	for _, output := range []string{strings.TrimSpace(out.String()), "paimos-agentd wrong ledger-v1", "paimos-agentd " + version.Version} {
+		t.Run(output, func(t *testing.T) {
+			root := t.TempDir()
+			for _, dir := range []string{"scripts", "dist", "bin"} {
+				if err := os.Mkdir(filepath.Join(root, dir), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			files := map[string]string{
+				"scripts/release-rehearsal-native.sh": script,
+				"scripts/sign-notarize.sh":            "#!/bin/sh\n",
+				"bin/python3":                         "#!/bin/sh\nprintf '%s\\n' '" + version.Version + "'\n",
+				"bin/go":                              "#!/bin/sh\nprintf '%s\\n' \"$*\" >> go-calls\n",
+				"dist/paimos-agentd-darwin-arm64":     "#!/bin/sh\nprintf '%s\\n' '" + output + "'\n",
+			}
+			for name, body := range files {
+				if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd := exec.Command("bash", "scripts/release-rehearsal-native.sh")
+			cmd.Dir = root
+			cmd.Env = append(os.Environ(), "PATH="+filepath.Join(root, "bin")+":"+os.Getenv("PATH"), "AEON_DARWIN_ARCH=arm64", "GITHUB_STEP_SUMMARY="+filepath.Join(root, "summary"))
+			result, err := cmd.CombinedOutput()
+			if output == strings.TrimSpace(out.String()) {
+				if err != nil {
+					t.Fatalf("native rehearsal rejected current --version output: %v\n%s", err, result)
+				}
+				calls, err := os.ReadFile(filepath.Join(root, "go-calls"))
+				if err != nil || strings.Count(string(calls), "test -p 2") != 2 {
+					t.Fatal("native rehearsal skipped its Go guards", err)
+				}
+			} else if err == nil {
+				t.Fatal("native rehearsal accepted wrong version or missing capability")
+			}
+		})
+	}
+}
 
 func TestReleaseBuildsSplitDarwinCGO(t *testing.T) {
 	workflow := readRepo(t, ".github/workflows/release.yml")

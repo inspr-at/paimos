@@ -208,7 +208,7 @@ func TestConcurrentCriterionAppendAndTicketRevisionConflict(t *testing.T) {
 		}()
 	}
 	close(start)
-	waitTenantWaiters(t, f, 2)
+	waitFenceWaiters(t, f, tx.Conn().PgConn().PID(), 2)
 	if err := tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestOutcomeAvailabilityAndPermissionRevocationRetry(t *testing.T) {
 	f.advance(10 * time.Second)
 	finished := make(chan error, 1)
 	go func() { _, e := f.m.DispatchTenant(t.Context(), f.person.TenantID); finished <- e }()
-	waitTenantWaiters(t, f, 1)
+	waitFenceWaiters(t, f, tx.Conn().PgConn().PID(), 1)
 	if err = tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}

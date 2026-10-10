@@ -3,16 +3,18 @@
 import { computed } from 'vue'
 import AppIcon from '../../AppIcon.vue'
 import HarnessMark from '../../agents/HarnessMark.vue'
-import { lineFallback, pickText, showsEffort, type RowView } from '../../../lib/modelsSimple'
+import { lineFallback, lineFamily, pickText, showsEffort, type RowView } from '../../../lib/modelsSimple'
 
 // One row: label | picker | lock | remove, then a "can't run" line under it when the pick cannot run right now.
 const props = defineProps<{ row: RowView; harness?: string; expanded: boolean; lockTip: string; instead: string; reason: string }>()
 const emit = defineEmits<{ open: [button: HTMLElement]; reset: []; remove: [] }>()
 const name = computed(() => props.row.isDefault ? 'Default for all work' : props.row.label)
-const model = computed(() => props.row.entry?.name ?? lineFallback(props.row.line) ?? 'Not set')
+const model = computed(() => props.row.entry?.name ?? (lineFallback(props.row.line) || 'Not set'))
 const effort = computed(() => showsEffort(props.row.entry) ? props.row.effort : null)
-const summary = computed(() => pickText(props.row.entry, props.row.effort, lineFallback(props.row.line) || 'Not set'))
+// A pick whose profile left the registry keeps a readable name and its family's mark, and says why it has no details.
+const summary = computed(() => props.row.entry || !props.row.line ? pickText(props.row.entry, props.row.effort, 'Not set') : `${lineFallback(props.row.line)} (not in the model registry)`)
 const mark = computed(() => props.row.entry?.harness ?? props.harness ?? '')
+const family = computed(() => props.row.entry ? '' : lineFamily(props.row.line))
 </script>
 <template>
   <div class="row" :class="{ def: row.isDefault }" :data-row="row.key" :data-column="row.column">
@@ -24,12 +26,12 @@ const mark = computed(() => props.row.entry?.harness ?? props.harness ?? '')
       <span v-if="row.mine" class="mine">yours<template v-if="row.reset"> · <button type="button" class="link-btn" data-reset :aria-label="`Reset ${name} to the workspace default`" @click="emit('reset')">reset</button></template></span>
     </div>
     <button v-if="row.editable" :id="`pk-${row.key}`" type="button" class="pick" :data-pick="row.key" aria-haspopup="listbox" :aria-expanded="expanded" :aria-label="`${name}: ${summary.replace(' · ', ', ')}. Change`" @click="emit('open', $event.currentTarget as HTMLElement)">
-      <span class="hg" aria-hidden="true"><HarnessMark :harness="mark" :size="13" /></span>
+      <span class="hg" aria-hidden="true"><HarnessMark :harness="mark" :provider="family" :size="13" /></span>
       <span v-clip-tip="summary" class="pn">{{ model }}<span v-if="effort" class="pe"> · {{ effort }}</span></span>
       <AppIcon class="chev" name="chevron" :size="14" />
     </button>
     <span v-else :id="`pk-${row.key}`" class="pick ro" :data-pick="row.key">
-      <span class="hg" aria-hidden="true"><HarnessMark :harness="mark" :size="13" /></span>
+      <span class="hg" aria-hidden="true"><HarnessMark :harness="mark" :provider="family" :size="13" /></span>
       <span v-clip-tip="summary" class="pn">{{ model }}<span v-if="effort" class="pe"> · {{ effort }}</span></span>
     </span>
     <div class="c3"><span v-if="row.lock" class="lock" data-lock tabindex="0" role="img" :data-tip="lockTip" :aria-label="`Locked for everyone. ${lockTip}`"><AppIcon name="lock" :size="15" /></span></div>

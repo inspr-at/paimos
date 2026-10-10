@@ -319,7 +319,7 @@ func TestDoctrineRepositoriesFromEnv(t *testing.T) {
 	}{
 		{name: "unchanged defaults", unset: true, wantPublic: "inspr-at/inspr-modules", wantPrivate: "inspr-at/inspr-doctrine-private"},
 		{name: "custom pair", public: "team/shared-doctrine", private: "team/private-doctrine", wantPublic: "team/shared-doctrine", wantPrivate: "team/private-doctrine"},
-		{name: "private only", private: "augmentoring-team/agm-doctrine", wantPrivate: "augmentoring-team/agm-doctrine"},
+		{name: "private only", private: "example-business-team/agm-doctrine", wantPrivate: "example-business-team/agm-doctrine"},
 		{name: "canonical case preserved", public: "TEAM/Shared", private: "TEAM/Private", wantPublic: "TEAM/Shared", wantPrivate: "TEAM/Private"},
 		{name: "same repository", public: "team/doctrine", private: "TEAM/Doctrine", refusal: "must be different"},
 		{name: "no private guard", public: "team/shared", refusal: "PRIVATE_REPOSITORY"},

@@ -15,14 +15,17 @@ import { displayHeadline, hasUsableNotes, localizedNote } from '../../lib/releas
 import { absoluteTime, relativeTime } from '../../lib/work'
 import { useReleases } from '../../stores/releases'
 import { useSession } from '../../stores/session'
+import { useBusiness } from '../../stores/business'
 import { useVersion } from '../../stores/version'
 import { doctrineInbox } from '../../lib/doctrineInbox'
 import AppIcon from '../AppIcon.vue'
+import BizIcon from '../business/BizIcon.vue'
 import ReleaseName from '../ReleaseName.vue'
 import KeyCap from '../KeyCap.vue'
 import HeaderMenu from './HeaderMenu.vue'
 
 const session = useSession()
+const business = useBusiness()
 const releases = useReleases()
 const version = useVersion()
 const route = useRoute()
@@ -165,7 +168,7 @@ function edited() { sendKey = ''; sent.value = '' }
 
     <template v-if="pane === 'menu'">
       <template v-if="doctrineWaiting">
-        <button class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/settings/agent-rules#doctrine-inbox')">
+        <button class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/decision-desk')">
           <AppIcon name="book" /><span class="hm-text">Doctrine proposals</span><span class="hm-end waiting-count">{{ doctrineWaiting }}</span>
         </button>
         <hr class="hm-sep" role="separator" />
@@ -174,6 +177,7 @@ function edited() { sendKey = ''; sent.value = '' }
         <button class="hm-item" type="button" role="menuitem" tabindex="-1" @click="go('/settings/workspace')"><AppIcon name="gear" /><span class="hm-text">Workspace settings</span></button>
         <hr class="hm-sep" role="separator" />
       </template>
+      <button v-if="business.placeOpen" class="hm-item phone-business" type="button" role="menuitem" tabindex="-1" @click="go('/business')"><BizIcon name="briefcase" :size="16" /><span class="hm-text">Business</span><span class="hm-end" aria-hidden="true"><KeyCap k="g" /><KeyCap k="b" /></span></button>
       <template v-if="connect || keys">
         <div role="group" aria-labelledby="app-menu-agents">
           <p id="app-menu-agents" class="eyebrow hm-label">Agents</p>
@@ -273,6 +277,8 @@ function edited() { sendKey = ''; sent.value = '' }
 </template>
 
 <style scoped>
+.phone-business { display: none; }
+@media (max-width: 600px) { .phone-business { display: flex; } }
 .new-count { color: var(--secondary-ink); font-weight: 600; }
 .waiting-count { color: var(--ink-2); font-weight: 650; font-variant-numeric: tabular-nums; }
 /* A neutral dot on the gear while doctrine proposals wait (AEON-444). */

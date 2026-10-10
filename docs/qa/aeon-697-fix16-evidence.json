@@ -82,7 +82,7 @@
       ],
       "command": "remote-test.sh <worktree> -count=1 ./internal/releases/...",
       "log": "tmp/aeon-697-fix16-remote-go.log",
-      "runner": "mbp2606"
+      "runner": "build-6"
     },
     "remote_web": {
       "status": "not rerun",

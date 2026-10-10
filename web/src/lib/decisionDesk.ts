@@ -1,24 +1,35 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api, APIError } from './api.ts'
 import type { KeyTrimProposal } from './keyTrim'
+import type { Approval } from './agents'
+import type { DoctrineInboxItem } from './doctrine'
 import type { StepupRequest } from './stepup'
 // P6 presentation model. Wire contracts live in decisionDeskApi.ts.
 export type DeskOutcome = 'once' | 'always' | 'requirement' | 'doctrine'
-export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' | 'tier' | 'key_trim' | 'stepup'
+export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' | 'tier' | 'key_trim' | 'stepup' | 'account_matrix'
 // Outside the server option-ID alphabet, so an agent option cannot collide.
 export const CUSTOM_ANSWER = '@custom'
-export interface DeskChoice { id: string; title: string; description: string; answer: string; field?: boolean }
+export interface DeskChoice { id: string; title: string; description: string; answer: string; field?: boolean; unavailable?: string }
+export interface DeskDoctrineTarget { source_id: string; path: string; rule_key: string; rule_sha256: string; tldr_en?: string; tldr_de?: string }
+export interface DeskOutcomeAvailability { outcome: DeskOutcome; available: boolean; why: string; mapping_present?: boolean }
+export interface DeskEffectReview { kind: 'criterion' | 'doctrine'; ref: string; why: string }
+export interface DeskOutcomeEffect {
+  id: string; revision: number; kind: 'inbox' | 'comment' | 'outcome'; state: 'pending' | 'delivered' | 'failed' | 'replaced'; deliver_after: string
+  receipt_state?: 'queued' | 'handed_off' | 'failed'; receipt_failure?: string; error_code?: string; error_message?: string; effect_ref?: string; doctrine_state?: string
+  effect_data?: { retryable?: boolean; review_required?: DeskEffectReview[]; ticket_id?: string; criterion?: string; knowledge_id?: string; doctrine_id?: string; supersedes?: string; superseded_by?: string }
+}
 export interface DeskItem {
   id: string; kind: DeskKind; projectId: string; projectName: string; ticketId?: string; ticketKey?: string
   title: string; context: string; findings: string; meanwhile: string; destination: string
   choices: DeskChoice[]; recommended?: string; why: string; outcome: DeskOutcome; suggestion: string
   revision: number; createdAt: string; expiresAt?: string; held: boolean; decided: boolean
   answer?: string; optionId?: string; reason?: string; delivery?: string; fromRecord?: string
-  unavailable?: string; prUrl?: string; keyTrim?: KeyTrimProposal; stepup?: StepupRequest
+  outcomes?: DeskOutcomeAvailability[]; doctrine?: DeskDoctrineTarget; outcomeEffects?: DeskOutcomeEffect[]
+  unavailable?: string; prUrl?: string; source?: string; linkOut?: string; keyTrim?: KeyTrimProposal; approval?: Approval; rule?: DoctrineInboxItem; stepup?: StepupRequest
 }
 export interface DeskDraft { optionId: string; answer: string; reason: string; outcome: DeskOutcome; dirty: boolean }
 export const outcomeLabels: Record<DeskOutcome, string> = { once: 'Once', always: 'Always', requirement: 'Requirement', doctrine: 'Doctrine' }
-export const kindLabels: Record<DeskKind, string> = { question: 'Question', handover: 'Handover question', approval: 'Approval', action: 'Action request', rule: 'Rule change', tier: 'Tier request', key_trim: 'Key trim approval', stepup: 'Step-up approval' }
+export const kindLabels: Record<DeskKind, string> = { question: 'Question', handover: 'Handover question', approval: 'Approval', action: 'Action request', rule: 'Rule change', tier: 'Tier request', key_trim: 'Key trim approval', stepup: 'Step-up approval', account_matrix: 'Account matrix' }
 export function draftFor(item: DeskItem): DeskDraft {
   const protectedChoice = item.kind === 'approval' || item.kind === 'tier' || item.kind === 'key_trim' || item.kind === 'stepup'
   return { optionId: item.optionId ?? (protectedChoice ? '' : item.recommended ?? item.choices[0]?.id ?? ''), answer: item.answer ?? '', reason: item.reason ?? '', outcome: item.outcome, dirty: false }
@@ -29,8 +40,12 @@ export function answerFor(item: DeskItem, draft: DeskDraft): string {
 }
 export function outcomeUnavailable(item: DeskItem, outcome: DeskOutcome): string {
   if (item.kind !== 'question' && item.kind !== 'handover') return 'This action uses its own protected decision flow.'
-  // TODO AEON-565: enable only after the outcome contract offers this capability.
-  if (outcome !== 'once') return `${outcomeLabels[outcome]} publishing is not available yet.`
+  const capability = item.outcomes?.find(row => row.outcome === outcome)
+  // Older servers offered Once only. Publishing always needs a current server
+  // capability; the agent's suggested stamp is never authority.
+  if (!capability) return outcome === 'once' && !item.outcomes ? '' : `${outcomeLabels[outcome]} availability could not be confirmed.`
+  if (!capability.available) return capability.why || `${outcomeLabels[outcome]} is unavailable to this person.`
+  if (outcome === 'doctrine' && (!capability.mapping_present || !item.doctrine)) return 'Doctrine needs a confirmed source, rule and exact base mapping.'
   return ''
 }
 /** IDs freeze at an explicit round boundary. Refresh only updates arrivals. */
@@ -58,12 +73,26 @@ export function submitModifier(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' 
 }
 
 export interface DeskProjectionItem {
-  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'key_trim' | 'stepup'; project_id?: string
-  revision: number; title: string; created_at: string; expires_at?: string; held: boolean; href: string; source: string
+  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix'; project_id?: string
+  revision: number; title: string; created_at: string; expires_at?: string; held: boolean; can_decide?: boolean; href: string; source: string
 }
 export interface DeskProjection {
   items: DeskProjectionItem[]; counts: { open: number; held: number; chores: number }
   has_more: boolean; next_cursor?: string; as_of: string
+}
+
+export function deskItemID(item: Pick<DeskProjectionItem, 'kind' | 'id'>): string {
+  const prefix = { question: 'q', approval: 'a', action_request: 'm', doctrine: 'r', tier_request: 't', key_trim: 'k', stepup: 's', account_matrix: 'u' }[item.kind]
+  return `${prefix}:${item.id}`
+}
+// Link-out rows are decided on their own settings page, never in the memo.
+// Only a known in-app settings path is followed; anything else stays inert.
+export function deskLinkOut(item: Pick<DeskProjectionItem, 'kind' | 'href'>): string {
+  return item.kind === 'account_matrix' && typeof item.href === 'string' && /^\/settings\/[a-z0-9-]{1,40}(#[a-z0-9-]{1,40})?$/.test(item.href) ? item.href : ''
+}
+// Compatibility links are data, never a selector or a destination to execute.
+export function deskLinkItem(value: unknown): string {
+  return typeof value === 'string' && /^[qamrtks]:[a-zA-Z0-9][a-zA-Z0-9-]{0,79}$/.test(value) ? value : ''
 }
 
 export async function readDeskProjection(limit = 100, cursor?: string, signal?: AbortSignal): Promise<DeskProjection> {

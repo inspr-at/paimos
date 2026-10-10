@@ -46,13 +46,17 @@ async function submit() {
     </form>
     <template #footer>
       <button type="button" class="btn ghost" :disabled="busy" @click="emit('close')">Cancel</button>
-      <button type="submit" form="doctrine-proposal-form" class="btn primary" :disabled="busy || !en.trim() || !explanation.trim() || !sourceText.trim()">{{ busy ? 'Creating PR…' : frozen ? 'Retry proposal' : 'Create pull request' }}</button>
+      <button type="submit" form="doctrine-proposal-form" class="btn primary submit-action" :disabled="busy || !en.trim() || !explanation.trim() || !sourceText.trim()"><span class="submit-label" data-size-label="Create pull request"><span>{{ busy ? 'Creating PR…' : frozen ? 'Retry proposal' : 'Create pull request' }}</span></span></button>
     </template>
   </RulesDialog>
 </template>
 <style scoped>
 .form, label { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .form { gap: 15px; }
+.submit-label { display: grid; justify-items: center; }
+/* Reserve the longest state label without fixing a pixel width or moving Cancel. */
+.submit-label::before { content: attr(data-size-label); visibility: hidden; grid-area: 1 / 1; }
+.submit-label > span { grid-area: 1 / 1; }
 label { color: var(--ink-2); font-size: 13px; font-weight: 600; }
 .field { box-sizing: border-box; width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); color: var(--ink); font: inherit; font-weight: 400; line-height: 1.5; resize: vertical; }
 textarea.field { height: auto; min-height: 90px; }

@@ -67,7 +67,7 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
     await expectStableControls({ controls: { start: sheetStart, cancel, change, ...(width === 390 ? { frame: sheet } : {}) }, scrollAreas: { body: sheet.locator('.sheet-body') }, interactions: [
       { name: 'reveal host choices', run: async () => { await change.click(); await expect(sheet.getByRole('radiogroup', { name: 'Host' })).toBeVisible() } },
     ] })
-    const hosts = sheet.getByRole('radiogroup', { name: 'Host' }), fixed = hosts.getByRole('radio', { name: /mbp2607/ }), removed = hosts.getByRole('radio', { name: /mbp2606/ }), auto = hosts.getByRole('radio', { name: /Automatic/ })
+    const hosts = sheet.getByRole('radiogroup', { name: 'Host' }), fixed = hosts.getByRole('radio', { name: /build-7/ }), removed = hosts.getByRole('radio', { name: /build-6/ }), auto = hosts.getByRole('radio', { name: /Automatic/ })
     await expectStableControls({ controls: { start: sheetStart, cancel, change, hosts, fixed, removed, auto }, scrollAreas: { body: sheet.locator('.sheet-body') }, interactions: [
       { name: 'select a fixed host', run: async () => { await fixed.click(); await expect(fixed).toHaveAttribute('aria-checked', 'true') } },
       { name: 'removed host explains itself in place', run: async () => { await removed.dispatchEvent('click'); await expect(sheet.locator('.choice-note')).toContainText('being removed') } },

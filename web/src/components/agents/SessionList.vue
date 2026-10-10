@@ -422,6 +422,11 @@ function revealSession(id: string) {
   reveal()
 }
 defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
+function sessionLinkClick(event: MouseEvent, id: string) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  emit('open', id)
+}
 </script>
 
 <template>
@@ -517,7 +522,8 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
               :data-tip="row.open ? 'Fold · Left arrow' : 'Unfold · Right arrow'" @click="toggle(row.branch)"
             ><AppIcon name="chevron-right" :size="14" class="chev" :class="{ turned: row.open }" /></button>
             <span v-else class="tree-fold-space" aria-hidden="true" />
-            <RouterLink class="agent-link" :to="`/agents/${row.view.session.id}`" :aria-label="`${row.view.harness} ${row.view.name}, ${row.view.status.label}${row.lead ? ', lead' : ''}${row.under.problem ? `, ${rollLabel(row)}` : ''}. ${row.primary}. ${row.context}`">
+            <RouterLink v-slot="{ href }" :to="`/agents/${row.view.session.id}`" custom>
+            <a class="agent-link" :href="href" @click="sessionLinkClick($event, row.view.session.id)" :aria-label="`${row.view.harness} ${row.view.name}, ${row.view.status.label}${row.lead ? ', lead' : ''}${row.under.problem ? `, ${rollLabel(row)}` : ''}. ${row.primary}. ${row.context}`">
               <span class="bot">
                 <AgentGlyph :view="row.view" :size="30" />
                 <HarnessBadge :harness="row.view.session.harness" />
@@ -532,6 +538,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
                 </span>
                 <span v-if="activityLine(row.branch)" class="current-activity" :title="activityLine(row.branch)">{{ activityLine(row.branch) }}</span>
               </span>
+            </a>
             </RouterLink>
             <span v-if="row.view.session.stopped_at && row.view.session.handed_over_to_id" class="lineage">
               <RouterLink :to="`/agents/${row.view.session.handed_over_to_id}`" :title="`Handed over to ${lineageName(row.view.session.handed_over_to_id)}`">Handed over to {{ lineageName(row.view.session.handed_over_to_id) }}</RouterLink>
@@ -928,6 +935,8 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
   .exec-acct { display: none; }
   .exec-harness { order: -1; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-2); }
   .exec-model { flex: 0 1 auto; min-width: 0; font-size: 12px; }
+  /* Keep the terminal command whole; the named harness can use its tooltip. */
+  .c-exec:has([data-run-kind="terminal"]) .exec-model { flex-shrink: 0; max-width: 100%; }
   .exec-harness ~ .exec-model::before, .exec-copy:has(.exec-harness) .exec-model::before { content: '·'; margin: 0 .4em; color: var(--ink-3); }
   .c-state { grid-column: 2 / 4; grid-row: 3; min-width: 0; margin-top: 4px; min-height: 22px; }
   .c-state :deep(.agent-state-label) { min-width: 0; max-width: 100%; min-height: 22px; align-items: center; }

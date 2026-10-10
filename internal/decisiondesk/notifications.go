@@ -185,11 +185,11 @@ func FinishTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item, sta
 // Payload never includes title, question, rationale, context, findings or an
 // answer. Opening a pointer performs the source's normal authorization again.
 func Payload(item Item) ([]byte, error) {
-	if !validKind(item.Kind) || item.Kind == "doctrine" || !validID(item.ID) || item.Revision < 1 {
+	if (item.Kind != "question" && item.Kind != "approval" && item.Kind != "action_request") || !validID(item.ID) || item.Revision < 1 {
 		return nil, errors.New("invalid desk pointer")
 	}
 	prefix := map[string]string{"question": "q:", "action_request": "m:"}[item.Kind]
-	href := "/agents?needs=" + prefix + item.ID
+	href := "/decision-desk?item=" + prefix + item.ID
 	if item.Kind == "approval" {
 		href = "/phone-approvals/approval/" + item.ID
 	}

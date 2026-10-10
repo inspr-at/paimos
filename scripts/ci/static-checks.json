@@ -217,6 +217,21 @@
       "timeout_seconds": 120
     },
     {
+      "id": "public-names",
+      "command": "node --test scripts/check-public-names.test.mjs && node scripts/check-public-names.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "go-static",
+        "step": "Keep operator names out of public source",
+        "command": "node --test scripts/check-public-names.test.mjs && node scripts/check-public-names.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 60
+    },
+    {
       "id": "go-vet",
       "command": "go vet ./...",
       "cwd": ".",

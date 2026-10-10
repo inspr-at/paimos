@@ -46,7 +46,7 @@ async function desk(page: Page, theme: 'light' | 'dark', splitQuota = false) {
   })
   const spare = data.accounts.find(account => account.harness === 'codex')!
   const claude = data.accounts.find(account => account.harness === 'claude')!
-  Object.assign(spare, { label: 'Spare', host_label: 'mbp2607', quota_fingerprint: fingerprint, daemon_id: 'mbp2607' })
+  Object.assign(spare, { label: 'Spare', host_label: 'build-7', quota_fingerprint: fingerprint, daemon_id: 'build-7' })
   data.accounts.push({ ...spare, id: studioId, account_key: 'codex-studio', label: 'Studio', host_label: 'studio', daemon_id: 'studio', quota_fingerprint: fingerprint })
   if (splitQuota) Object.assign(spare, { group_id: 'bb000000-0000-4000-8000-000000000389', group_name: 'Client login' })
   Object.assign(claude, { group_id: clientGroup, group_name: 'Client', host_label: 'imac0' })
