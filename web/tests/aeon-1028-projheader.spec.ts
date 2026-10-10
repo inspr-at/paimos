@@ -162,7 +162,7 @@ test.describe('collapsed header: Display beside New', () => {
         // The List · Outline · Graph switch and the filter row stay as they were.
         await expect(toolbar(page).getByRole('tablist', { name: 'Ticket views' })).toBeVisible()
         for (const name of ['List', 'Outline', 'Graph']) await expect(toolbar(page).getByRole('tab', { name })).toBeVisible()
-        if (width > 600) for (const name of ['Status', 'Priority', 'Assignee']) await expect(toolbar(page).locator(`.facet-btn[data-dim="${name.toLowerCase()}"]`)).toBeVisible()
+        if (width > 600) await expect(toolbar(page).getByRole('button', { name: 'Add a filter' })).toBeVisible()
         else await expect(toolbar(page).getByRole('button', { name: 'Filters', exact: true })).toBeVisible()
         await capture(page, `${width}-${theme}-collapsed`)
         await openMenu(page)
@@ -563,7 +563,7 @@ test.describe('folding and unfolding the header', () => {
       const bar = toolbar(page)
       const controls: Record<string, Locator> = {
         views: bar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), new: create(page),
-        ...(width <= 600 ? { filters: bar.getByRole('button', { name: 'Filters', exact: true }) } : { status: bar.locator('.facet-control[data-dim="status"]'), facets: bar.locator('.facets') }),
+        ...(width <= 600 ? { filters: bar.getByRole('button', { name: 'Filters', exact: true }) } : { filter: bar.getByRole('button', { name: 'Add a filter' }), facets: bar.locator('.facets') }),
       }
       await fold(page, width)
       // The folded header is the baseline; every other view and the way back must match it.
@@ -589,7 +589,7 @@ test.describe('folding and unfolding the header', () => {
     await fold(page, 1440)
     const bar = toolbar(page)
     const trigger = display(page)
-    const controls = { views: bar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), status: bar.locator('.facet-control[data-dim="status"]'), trigger, new: create(page) }
+    const controls = { views: bar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), filter: bar.getByRole('button', { name: 'Add a filter' }), trigger, new: create(page) }
     await expectStableControls({
       controls,
       interactions: [{ name: 'open the menu', run: () => openMenu(page) }],

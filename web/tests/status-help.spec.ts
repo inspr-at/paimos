@@ -152,7 +152,7 @@ test('a stale check leaves the pending flag for review; help never chooses a sta
 test('human-check filter is linked and removes tickets that do not need a check', async ({ page }) => {
   const { calls } = await setup(page)
   await page.goto('/p/PHAROS')
-  await page.getByRole('button', { name: 'Filter by more', exact: true }).click()
+  await page.getByRole('button', { name: 'Add a filter', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Human check', exact: true }).click()
   const choices = page.getByRole('dialog', { name: 'Filter by Human check' })
   await expect(choices.locator('.facet-option').filter({ hasText: 'Needs a human check' }).locator('.count')).toHaveText('1')

@@ -168,7 +168,7 @@ for (const width of [1440, 1024]) {
     await page.setViewportSize({ width, height: 1000 })
     await mockWork(page, fixtures())
     await page.goto('/p/PHAROS')
-    await page.getByRole('button', { name: 'Filter by more' }).click()
+    await page.getByRole('button', { name: 'Add a filter' }).click()
     await page.getByRole('menuitem', { name: /Date/ }).click()
     const dialog = page.getByRole('dialog', { name: 'Filter by date' })
     const from = dialog.getByLabel('From', { exact: true }), to = dialog.getByLabel('To', { exact: true })

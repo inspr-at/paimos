@@ -112,18 +112,21 @@ test('filter triggers stay still until the popover closes and removals clear rea
   const data = fixtures(); data.preferences['list:display'] = { headerGraph: false }
   await mockWork(page, data); await page.goto('/p/PHAROS')
   const toolbar = page.getByRole('toolbar', { name: 'Ticket list controls' })
-  const status = toolbar.locator('.facet-btn[data-dim="status"]')
-  await status.click()
+  // Status opens from Filter, where its pill appears once the popover closes (AEON-974).
+  const filter = toolbar.getByRole('button', { name: 'Add a filter' })
+  await filter.click()
+  await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'Status', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Filter by Status', exact: true })
   await expect(dialog.getByRole('checkbox', { name: /New/ })).toBeVisible()
-  await expectStableControls({ controls: { trigger: status, newRow: dialog.locator('.facet-option').filter({ has: page.getByRole('checkbox', { name: /New/ }) }), new: dialog.getByRole('checkbox', { name: /New/ }), backlog: dialog.getByRole('checkbox', { name: /Backlog/ }) },
+  await expectStableControls({ controls: { trigger: filter, newRow: dialog.locator('.facet-option').filter({ has: page.getByRole('checkbox', { name: /New/ }) }), new: dialog.getByRole('checkbox', { name: /New/ }), backlog: dialog.getByRole('checkbox', { name: /Backlog/ }) },
     interactions: ['New', 'Backlog'].map(name => ({ name, run: async () => { await dialog.getByRole('checkbox', { name: new RegExp(name) }).check(); await expect(page).toHaveURL(/status=/) } })) })
   await page.keyboard.press('Escape'); await expect(dialog).toBeHidden()
+  const status = toolbar.locator('.facet-btn[data-dim="status"]')
   await expect(status).toHaveAccessibleName(/Edit Status filter: New, Backlog/)
   await toolbar.getByRole('button', { name: 'Remove Status filter' }).click()
   await expect(page).not.toHaveURL(/status=/)
   await expect(toolbar.getByRole('button', { name: 'Clear all', exact: true })).toBeHidden()
-  await toolbar.getByRole('button', { name: 'Filter by more' }).click()
+  await toolbar.getByRole('button', { name: 'Add a filter' }).click()
   await page.getByRole('menuitem', { name: /Labels/ }).click()
   const labels = page.getByRole('dialog', { name: 'Filter by Labels' })
   await labels.getByRole('checkbox', { name: /BUG/ }).check()
@@ -167,7 +170,7 @@ for (const dimension of ['assignee', 'epic'] as const) {
       await expect(dialog).toBeVisible()
       await request
       await expectStableControls({
-        controls: { trigger, search: search(page), priority: toolbar.locator('.facet-btn[data-dim="priority"]'), more: toolbar.getByRole('button', { name: 'Filter by more' }), clear: toolbar.getByRole('button', { name: 'Clear all', exact: true }), new: toolbar.getByRole('button', { name: 'New ticket', exact: true }) },
+        controls: { trigger, search: search(page), more: toolbar.getByRole('button', { name: 'Add a filter' }), clear: toolbar.getByRole('button', { name: 'Clear all', exact: true }), new: toolbar.getByRole('button', { name: 'New ticket', exact: true }) },
         interactions: [{ name: 'resolve the selected label while its menu is open', run: async () => {
           release()
           // The option proves the response reached Vue; no sleep or timing guess.

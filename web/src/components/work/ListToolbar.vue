@@ -144,9 +144,14 @@ watch([() => props.filters, resolvedLabels, open, dateAnchor, menuAnchor], () =>
     presentedLabels.value = resolvedLabels.value
   }
 }, { flush: 'sync' })
-// Only applied filters show, as pills to the right of Filter (AEON-974).
-const pills = computed(() => dimensions.value.filter(d => presented.value[d.key].length))
 const active = computed(() => activeDimensions(presented.value).filter(key => !graph.value || TICKET_GRAPH_FILTERS.includes(key)))
+// Only applied filters show, as pills to the right of Filter (AEON-974). A new
+// pill joins at the end, so the pills already there never move.
+const pillOrder = ref<(Dimension | 'date')[]>([])
+watch(() => [...active.value, ...(!graph.value && presented.value.date ? ['date' as const] : [])], applied => {
+  pillOrder.value = [...pillOrder.value.filter(key => applied.includes(key)), ...applied.filter(key => !pillOrder.value.includes(key))]
+}, { immediate: true, flush: 'sync' })
+const pills = computed(() => pillOrder.value.map(key => key === 'date' ? null : DIMENSION_BY_KEY.get(key)!))
 const filterCount = computed(() => active.value.reduce((sum, key) => sum + props.filters[key].length, 0) + (props.filters.q ? 1 : 0) + (!graph.value && presented.value.date ? 1 : 0))
 const activeFilterCount = computed(() => active.value.length + (!graph.value && presented.value.date ? 1 : 0))
 const groupWord = computed(() => props.filters.group === 'tag' ? 'label' : props.filters.group)
@@ -252,8 +257,9 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
         aria-label="Add a filter" aria-keyshortcuts="Shift+F" data-tip="Add a filter · Shift F" @click="menuAnchor = menuAnchor ? null : ($event.currentTarget as HTMLElement)">
         <AppIcon name="filter" :size="13" /><span class="more-label">Filter</span>
       </button>
-      <div v-if="pills.length || (!graph && presented.date)" class="pills" aria-label="Applied filters">
-        <span v-for="dimension in pills" :key="dimension.key" class="facet-control on" :data-dim="dimension.key">
+      <div v-if="pills.length" class="pills" aria-label="Applied filters">
+        <template v-for="dimension in pills" :key="dimension?.key ?? 'date'">
+        <span v-if="dimension" class="facet-control on" :data-dim="dimension.key">
           <button type="button" class="btn sm facet-btn on" :data-dim="dimension.key"
             :aria-label="`Edit ${dimension.title} filter: ${filterText(dimension.key, true)}`"
             :data-tip="`${dimension.title}: ${filterText(dimension.key, true)}`"
@@ -265,13 +271,14 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
           </button>
           <button type="button" class="facet-x" :aria-label="`Remove ${dimension.title} filter`" @click="emit('clear', dimension.key)"><AppIcon name="close" :size="11" /></button>
         </span>
-        <span v-if="!graph && presented.date" class="facet-control on date-filter">
+        <span v-else-if="presented.date" class="facet-control on date-filter">
           <button type="button" class="btn sm facet-btn on" :aria-label="`Edit date filter: ${fieldLabel(presented.date.field)} ${dateLabel(presented.date)}`"
             :data-tip="`${fieldLabel(presented.date.field)}: ${dateLabel(presented.date)}`" aria-haspopup="dialog" :aria-expanded="!!dateAnchor" @click="dateAnchor = $event.currentTarget as HTMLElement">
             <AppIcon name="calendar" :size="12" />{{ fieldLabel(presented.date.field) }}<span class="facet-value"> · {{ dateLabel(presented.date) }}</span><span class="facet-count date-count">1</span>
           </button>
           <button type="button" class="facet-x" aria-label="Remove date filter" @click="emit('date', null)"><AppIcon name="close" :size="11" /></button>
         </span>
+        </template>
       </div>
       <button v-if="activeFilterCount || presented.q" type="button" class="btn sm ghost clear-all" @click="emit('clearAll')">Clear all</button>
     </div>

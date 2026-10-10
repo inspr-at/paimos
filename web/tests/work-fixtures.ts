@@ -618,9 +618,12 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       // Shape is canonical even for old payloads that omit is_leaf. Count only
       // work children, and retain explicit shape for fixtures with hidden work.
       const workParents = new Set(data.nodes.filter(n => ['work', 'epic', 'ticket', 'task'].includes(n.kind_slug)).map(n => n.parent_id))
+      const levelOf = (n: MockNode) => (n.is_leaf ?? !workParents.has(n.id)) ? 'leaf' : String(n.depth ?? 1)
       let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
         .filter(n => passes(listParam(query, 'shape'), v => v === ((n.is_leaf ?? !workParents.has(n.id)) ? 'leaf' : 'parent')))
         .filter(n => passes(listParam(query, 'depth'), v => v === String(n.depth ?? 1)))
+        // AEON-974: Type levels are the leaf, else a parent's depth.
+        .filter(n => passes(listParam(query, 'level'), v => v === levelOf(n)))
         .filter(n => !onlyIds.length || onlyIds.includes(n.id))
         .filter(n => passes(states, v => v === n.state))
         .filter(n => passes(listParam(query, 'work_state'), v => v === canonicalWorkStatus(n.state)))
@@ -684,7 +687,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       for (const facet of listParam(query, 'facets')) {
         facets[facet] = {}
         for (const n of rows) {
-          const values = facet === 'human_check' ? [n.human_check?.trim() ? 'pending' : 'none'] : facet === 'tag' ? (tagNames(n).length ? tagNames(n).map(t => t.name) : ['none'])
+          const values = facet === 'level' ? [levelOf(n)] : facet === 'human_check' ? [n.human_check?.trim() ? 'pending' : 'none'] : facet === 'tag' ? (tagNames(n).length ? tagNames(n).map(t => t.name) : ['none'])
             : facet === 'cost_unit' ? [costUnit(n) || 'none'] : facet === 'release' ? [release(n) || 'none']
             : [facet === 'state' ? n.state : facet === 'kind' ? n.kind_slug : facet === 'priority' ? (typeof n.fields.priority === 'string' ? n.fields.priority : 'none') : (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')]
           for (const value of values) facets[facet][value] = (facets[facet][value] ?? 0) + 1

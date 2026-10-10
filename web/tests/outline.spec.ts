@@ -109,7 +109,8 @@ test('the List | Outline switch keeps the view in the URL and the same toolbar',
   await expect(row(page, 'PHAROS-30')).toHaveClass(/dimmed/)
   await expect(row(page, 'PHAROS-10')).not.toHaveClass(/dimmed/)
   // Filters keep the view; Group by does not apply.
-  await page.getByRole('toolbar').getByRole('button', { name: 'Priority', exact: true }).click()
+  await page.getByRole('toolbar').getByRole('button', { name: 'Add a filter' }).click()
+  await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'Priority', exact: true }).click()
   await page.getByRole('dialog', { name: 'Filter by Priority' }).getByText('High', { exact: true }).click()
   await page.keyboard.press('Escape')
   await expect(page).toHaveURL(/view=outline/)
