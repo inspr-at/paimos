@@ -2,6 +2,7 @@
 package recurrences
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -518,6 +519,10 @@ func TestNewEventTriggerValidationBounds(t *testing.T) {
 	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
 	base := Input{ProjectID: "10000000-0000-4000-8000-000000000001", ParentID: "10000000-0000-4000-8000-000000000002", Template: Template{Title: "Check"}}
 	for _, trigger := range []Trigger{
+		{Kind: "event", Event: "release.published", Filter: &EventFilter{ProjectIDs: make([]string, 21)}},
+		{Kind: "event", Event: "release.published", Filter: &EventFilter{ProjectIDs: []string{base.ProjectID, base.ProjectID}}},
+		{Kind: "event", Event: "release.published", Filter: &EventFilter{Tag: "unsupported"}},
+		{Kind: "event", Event: "release.published", Filter: &EventFilter{HasReleaseCopy: true}},
 		{Kind: "event", Event: "node.done", Filter: &EventFilter{ProjectIDs: make([]string, 21)}},
 		{Kind: "event", Event: "node.done", Filter: &EventFilter{ProjectIDs: []string{base.ProjectID, base.ProjectID}}},
 		{Kind: "event", Event: "node.done", Filter: &EventFilter{EntryID: base.ParentID}},
@@ -534,4 +539,186 @@ func TestNewEventTriggerValidationBounds(t *testing.T) {
 			t.Fatalf("accepted invalid trigger %+v", trigger)
 		}
 	}
+}
+
+// Risks: lost publications during downtime/overlap, duplicate automatic/manual
+// effects, source leakage and revocation bypass. Use the real fenced occurrence
+// and RLS paths; the injected S04 gate is qualification-fixture authority only.
+func TestReleaseSubscriptionOrderedReplayAndSourceAuthority(t *testing.T) {
+	t.Run("off by default and ordered publication retention", func(t *testing.T) {
+		f := setup(t)
+		source := f.node("project", nil, "Publication source")
+		f.tx(func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"project_key":"SRC"}'::jsonb WHERE id=$1`, source)
+			return err
+		})
+		in := intentInput(f)
+		in.OverlapPolicy = "skip"
+		in.Template.Title = "Review {{release_name}} {{release_version}}"
+		in.Trigger = Trigger{Kind: "event", Event: "release.published", Filter: &EventFilter{ProjectIDs: []string{source}}}
+		r := f.create(in)
+		if !r.Paused {
+			t.Fatal("saving a scoped subscription must not activate it")
+		}
+		f.tx(func(tx pgx.Tx) error {
+			// Synthetic active fixture, never production enablement or consent.
+			_, err := tx.Exec(t.Context(), `UPDATE recurrences SET paused=false WHERE id=$1`, r.ID)
+			return err
+		})
+		first := Publication{ProjectKey: "SRC", ProjectID: source, Name: "First publication", Version: "v1", PublishedAt: f.now.Add(time.Hour)}
+		second := Publication{ProjectKey: "SRC", ProjectID: source, Name: "Second publication", Version: "v2", PublishedAt: f.now.Add(2 * time.Hour)}
+		f.now = f.now.Add(3 * time.Hour) // Both arrived during downtime.
+		f.m.WithHistory([]Publication{second, first})
+		f.run()
+		if len(f.receipts(r.ID)) != 0 || f.get(r.ID).EventCursor != r.EventCursor {
+			t.Fatal("missing project gate consumed a publication")
+		}
+		f.m.WithReleaseSubscriptionGate(func(ctx context.Context, tx pgx.Tx, project string) (bool, error) {
+			var enabled bool
+			err := tx.QueryRow(ctx, `SELECT id=$1 FROM nodes WHERE id=$1`, f.project).Scan(&enabled)
+			if project != f.project {
+				t.Fatalf("gate checked source rather than output project: %s", project)
+			}
+			return enabled, err
+		})
+		f.run()
+		got := f.receipts(r.ID)
+		if len(got) != 1 || got[0].Outcome != "created" || got[0].Key != "release:"+publicationKey(first) || got[0].SourceEventID == nil {
+			t.Fatalf("first ordered publication: %+v", got)
+		}
+		cursor := f.get(r.ID).EventCursor
+		path := "/api/recurrences/" + r.ID + "/run-now"
+		f.call(f.p, "POST", path, map[string]string{"idempotency_key": "overlap", "release_key": publicationKey(second)}, 409)
+		f.run()
+		if len(f.receipts(r.ID)) != 1 || f.get(r.ID).EventCursor != cursor {
+			t.Fatal("open overlap consumed a publication or wrote a skip receipt")
+		}
+		f.tx(func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='accepted' WHERE id=$1`, got[0].NodeID)
+			return err
+		})
+		f.run()
+		if len(f.receipts(r.ID)) != 1 || f.get(r.ID).EventCursor != cursor {
+			t.Fatal("closed ticket bypassed an unfinished routine run")
+		}
+		f.tx(func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE routine_runs SET state='completed' WHERE recurrence_id=$1`, r.ID)
+			return err
+		})
+		// Manual-first recovery uses the same publication key as the scheduler.
+		var manual Occurrence
+		if err := json.Unmarshal(f.call(f.p, "POST", path, map[string]string{"idempotency_key": "recovered", "release_key": publicationKey(second)}, 200), &manual); err != nil {
+			t.Fatal(err)
+		}
+		if manual.Run == nil || manual.Key != "release:"+publicationKey(second) || manual.SourceEventID == nil {
+			t.Fatalf("manual publication lineage: %+v", manual)
+		}
+		// Restart and duplicate delivery cannot create a third ticket or intent.
+		gate := f.m.releaseSubscriptionGate
+		f.install(New(f.d.App).WithHistory([]Publication{first, second}).WithReleaseSubscriptionGate(gate))
+		f.run()
+		f.run()
+		got = f.receipts(r.ID)
+		if len(got) != 2 || got[1].Key != manual.Key || f.get(r.ID).EventCursor <= cursor {
+			t.Fatalf("recovery skipped or duplicated a publication: %+v", got)
+		}
+		var retry Occurrence
+		if err := json.Unmarshal(f.call(f.p, "POST", path, map[string]string{"idempotency_key": "retry", "release_key": publicationKey(first)}, 200), &retry); err != nil || retry.NodeID == nil || *retry.NodeID != *got[0].NodeID || retry.Run == nil {
+			t.Fatalf("automatic-first replay: %+v, %v", retry, err)
+		}
+		f.tx(func(tx pgx.Tx) error {
+			var correct bool
+			err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM routine_runs WHERE recurrence_id=$1)=2
+ AND (SELECT count(*) FROM routine_effect_outbox)=2 AND NOT EXISTS(SELECT 1 FROM routine_attempts)
+ AND NOT EXISTS(SELECT 1 FROM routine_runs WHERE execute_consent)
+ AND NOT EXISTS(SELECT 1 FROM nodes n JOIN recurrence_occurrences o ON o.node_id=n.id WHERE o.recurrence_id=$1
+ AND (n.project_id<>$2 OR n.body NOT LIKE '%'||$3||'%'))`, r.ID, f.project, source).Scan(&correct)
+			if err == nil && !correct {
+				t.Fatal("run/source lineage changed or automatic execution started")
+			}
+			return err
+		})
+	})
+	t.Run("source visibility revocation and bounded choices", func(t *testing.T) {
+		f := setup(t)
+		source := f.node("project", nil, "Private publication source")
+		manager := projectPrincipal(f, "member")
+		in := f.input()
+		in.Trigger = Trigger{Kind: "event", Event: "release.published", Filter: &EventFilter{ProjectIDs: []string{source}}}
+		f.call(manager, "POST", "/api/recurrences", in, 403)
+		f.tx(func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE key='viewer'`, f.p.TenantID, manager.ID, source)
+			return err
+		})
+		var r Recurrence
+		if err := json.Unmarshal(f.call(manager, "POST", "/api/recurrences", in, 201), &r); err != nil {
+			t.Fatal(err)
+		}
+		f.now = f.now.Add(time.Hour)
+		var first int64
+		f.tx(func(tx pgx.Tx) error {
+			for i := 0; i < 102; i++ {
+				e, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &source, Type: "release.published",
+					After: map[string]any{"project_id": source, "name": strings.Repeat("é", 300), "version": fmt.Sprintf("v%d", i), "published_at": f.now, "body": "private content must never be copied"}, At: &f.now})
+				if err != nil {
+					return err
+				}
+				if i == 0 {
+					first = e.ID
+				}
+			}
+			return nil
+		})
+		var page struct {
+			Items     []ReleaseChoice `json:"items"`
+			Truncated bool            `json:"truncated"`
+		}
+		path := "/api/recurrences/" + r.ID
+		raw := f.call(manager, "GET", path+"/releases", nil, 200)
+		if err := json.Unmarshal(raw, &page); err != nil || len(page.Items) != 100 || !page.Truncated || len(page.Items[0].Name) > 256 || strings.Contains(string(raw), "private content") {
+			t.Fatalf("bounded source choices: count=%d truncated=%v, %v", len(page.Items), page.Truncated, err)
+		}
+		f.call(projectPrincipal(f, "viewer"), "GET", path+"/releases", nil, 403)
+		f.m.WithReleaseSubscriptionGate(func(context.Context, pgx.Tx, string) (bool, error) { return true, nil })
+		f.run()
+		got := f.receipts(r.ID)
+		if len(got) != 1 || got[0].SourceEventID == nil || *got[0].SourceEventID != first {
+			t.Fatalf("oldest source publication: %+v", got)
+		}
+		cursor := f.get(r.ID).EventCursor
+		f.tx(func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1 AND scope_id=$2`, manager.ID, source)
+			return err
+		})
+		f.call(manager, "GET", path+"/releases", nil, 403)
+		f.call(manager, "POST", path+"/run-now", map[string]string{"idempotency_key": "revoked", "release_key": page.Items[0].Key}, 403)
+		if err := f.m.RunTenant(t.Context(), f.p.TenantID); err == nil || !strings.Contains(err.Error(), "permission") {
+			t.Fatalf("source revocation must refuse under the occurrence fence: %v", err)
+		}
+		if len(f.receipts(r.ID)) != 1 || f.get(r.ID).EventCursor != cursor {
+			t.Fatal("revoked source changed receipts or consumed pending publications")
+		}
+		f.tx(func(tx pgx.Tx) error {
+			var leaked bool
+			err := tx.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM nodes n JOIN recurrence_occurrences o ON o.node_id=n.id WHERE o.recurrence_id=$1 AND n.body LIKE '%private content%')`, r.ID).Scan(&leaked)
+			if leaked {
+				t.Fatal("source content copied to target")
+			}
+			return err
+		})
+		// A real foreign project is retained, so tenant denial cannot pass only
+		// because an arbitrary UUID does not exist anywhere.
+		foreign := "20000000-0000-4000-8000-000000000001"
+		var foreignProject string
+		if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, foreign, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO tenants(id,slug,name) VALUES($1,'foreign-release','Foreign release')`, foreign); err != nil {
+				return err
+			}
+			return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'PRJ-1',id,'Foreign publication source' FROM node_kinds WHERE slug='project' RETURNING id::text`, foreign).Scan(&foreignProject)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		in.Trigger.Filter.ProjectIDs = []string{foreignProject}
+		f.call(f.p, "POST", "/api/recurrences", in, 404)
+	})
 }

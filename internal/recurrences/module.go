@@ -26,6 +26,9 @@ type Module struct {
 	// now is an injected database-clock substitute for deterministic tests only.
 	now     func(context.Context, pgx.Tx) (time.Time, error)
 	history []Publication
+	// S04 supplies the current person-owned output-project enablement check.
+	// Missing integration leaves explicit release subscriptions disabled.
+	releaseSubscriptionGate func(context.Context, pgx.Tx, string) (bool, error)
 }
 
 func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
