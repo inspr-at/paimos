@@ -830,6 +830,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestPiAccountModelPermissionCatalogAndImmutablePins","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestPiModelUnderDenyRequiresAccountUseManage","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestPinWritesNeedTicketEditAndListsRespectVisibility","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestPoolConfirmationDoesNotSilentlyIncludeSpare","tier":"GATED-FULL"}
@@ -6786,6 +6788,12 @@
     ,
     {"kind":"go","package":"internal/markdownsource","name":"TestCodeRangesPreserveEmptyUnclosedAndNestedBlocks","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/modelactivation","name":"TestModelActivationCauseRuleMatrix","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelactivation","name":"TestModelActivationConsumesDisabledAndMultiRowCauses","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelactivation","name":"TestModelActivationFailedInsertRetryAndPersonAuthority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelprefs","name":"TestBucketUsesTicketRole","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelprefs","name":"TestCellPrecedenceAndLockBounds","tier":"ESSENTIAL"}
@@ -6881,6 +6889,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestDailyReviewKeepsReviewQualifiedAccounts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestDefaultRefreshNoNetworkAndOneAuditPerRun","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestDeniedEmptyCatalogSeedAdditionsAndUpgradeStayWithheld","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestDiscoveryVaultIsAccountBoundAndOutageKeepsPolicy","tier":"GATED-FULL"}
     ,
@@ -7006,6 +7016,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestNormalizeAuthorFamily","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestPersonModelWritersUnderDenyRecheckPermissions","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestPlacementSecurityReviewRejectsInvalidStructureBeforePreparation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestPlacementSecurityReviewRetainsOwnerRequiredExplanation","tier":"GATED-FULL"}
@@ -7123,6 +7135,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestVendorDiscoveryCapsPagesModelsAndUsesOneDeadline","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestVendorListBoundsPaginationRedirectionAndSanitizedErrors","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestVendorSuccessorWithheldDoesNotRewireLadder","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestWorkKindLifecyclePaginationAndTenantIsolation","tier":"GATED-FULL"}
     ,
@@ -9361,6 +9375,8 @@
     {"kind":"go","package":"internal/views","name":"TestAgentsPlanRevisionCheckedSaves","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/views","name":"TestAgentsPlanStays200WhenWeeklyPercentDeclines","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/views","name":"TestDeletedViewsOwnerPaginationReasonsAndRestore","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/views","name":"TestLegacyViewsMigrationScopeEventsAndRestore","tier":"ESSENTIAL"}
     ,

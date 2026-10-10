@@ -391,3 +391,8 @@
 }
 :root[data-theme="dark"] { --shadow-color: #000; --danger-on: #102327; --label-teal: #a4e5df; --kind-parent: #e2b45a; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --shadow-color: #000; --danger-on: #102327; --label-teal: #a4e5df; --kind-parent: #e2b45a; } }
+
+/* AEON-1057: project colour. Projects have no colour of their own; each gets a stable hue from its key (the project-group marker hues) at this lightness and chroma, legible as text in both themes. */
+:root { --project-l: .5; --project-c: .12; }
+:root[data-theme="dark"] { --project-l: .8; --project-c: .1; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --project-l: .8; --project-c: .1; } }

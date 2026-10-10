@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/modelactivation"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -26,7 +27,7 @@ func prepareAdditionalCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	if count == len(slugs) {
 		return nil, nil
 	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id', true), 0))`); err != nil {
+	if err := catalogLock(ctx, tx); err != nil {
 		return nil, err
 	}
 	added := []Profile{}
@@ -36,18 +37,20 @@ func prepareAdditionalCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 			continue
 		}
 		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE slug=$1 AND version IN ('2',$2) AND harness=$3 AND family=$4 AND model=$5 AND effort=$6 AND tier=$7 AND enabled)`, profile.Slug, profile.Version, profile.Harness, profile.Family, profile.Model, profile.Effort, profile.Tier).Scan(&exists); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE slug=$1 AND version IN ('2',$2) AND harness=$3 AND family=$4 AND model=$5 AND effort=$6 AND tier=$7)`, profile.Slug, profile.Version, profile.Harness, profile.Family, profile.Model, profile.Effort, profile.Tier).Scan(&exists); err != nil {
 			return nil, err
 		}
 		if exists {
 			continue
 		}
-		row, err := insertProfile(ctx, tx, p.TenantID, profileWrite{Slug: profile.Slug, Version: profile.Version, Harness: profile.Harness, Family: profile.Family, Model: profile.Model, Effort: profile.Effort, Tier: profile.Tier})
+		row, err := insertActivatedProfile(ctx, tx, p, profileWrite{Slug: profile.Slug, Version: profile.Version, Harness: profile.Harness, Family: profile.Family, Model: profile.Model, Effort: profile.Effort, Tier: profile.Tier}, true, modelactivation.ShippedCatalog)
 		if err != nil {
 			return nil, err
 		}
 		added = append(added, row)
-		ids[profile.Slug] = row.ID
+		if row.Enabled {
+			ids[profile.Slug] = row.ID
+		}
 	}
 	if len(added) == 0 {
 		return nil, nil
