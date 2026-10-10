@@ -246,6 +246,22 @@ test('without a recorded run every mode shows the empty state and no sample data
   await expect(page.getByTestId('flow-moment-head')).toContainText('Release 126 is live but not working properly')
 })
 
+for (const [width, theme] of [[390, 'light'], [390, 'dark'], [1024, 'light'], [1024, 'dark'], [1440, 'light'], [1440, 'dark']] as const) {
+  test(`the Flow empty state at ${width} ${theme} sits under the mode controls without sample data`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 })
+    await setup(page, { theme, empty: true })
+    await page.goto('/p/AEON/delivery?view=flow')
+    const empty = page.getByTestId('flow-empty')
+    await expect(empty).toHaveText('No recorded runs yet. Runs appear here once work goes through the PAIMOS work queue.')
+    // Below the mode controls, inside the page, with the whole sentence readable.
+    const [top, box] = [(await modes(page).boundingBox())!, (await empty.boundingBox())!]
+    expect(box.y).toBeGreaterThanOrEqual(top.y + top.height)
+    expect(box.x + box.width).toBeLessThanOrEqual(width + 0.5)
+    expect(await empty.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
+    await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-1135/flow-empty-${width}-${theme}.png`) })
+  })
+}
+
 // Risk (AEON-1003 round 7, kept with the reviewed AEON-1007 placement): a refused preference save covers or moves the
 // Flow mode buttons. The failure takes the headline's fixed slot: with recorded runs, with none (the empty state) and while
 // loading, the page head, the Updated line, the headline slot and the Flow mode controls keep their boxes (±0.5 px),

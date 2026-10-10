@@ -7120,6 +7120,18 @@
     ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"a release no record has reported on says \"not recorded\" in the same four rows","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 1024 dark sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 1024 light sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 1440 dark sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 1440 light sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 390 dark sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 390 light sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1024 dark en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1024 light en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
