@@ -9,24 +9,35 @@ import (
 	"sort"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountprivacy"
 	"github.com/inspr-at/paimos/internal/accountuse"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
 // HarnessHealthAt reports dispatch capacity for every enrolled harness.
 // A harness with no accounts is absent. Callers treat that as "no pool yet"
 // and do not skip a model for account reasons.
+// Explanations use the current reader's sharing policy before account identity
+// is folded into harness totals. Without a reader, private details stay hidden.
 func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time, projectIDs ...string) (map[string]HarnessHealth, error) {
 	accounts, err := listAccounts(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
+	ids := make([]string, len(accounts))
+	for i, a := range accounts {
+		ids[i] = a.ID
+	}
+	visible := accountprivacy.Policy{}
+	if reader, ok := tenant.PrincipalFrom(ctx); ok && reader.ID != "" {
+		visible, err = accountprivacy.Load(ctx, tx, reader, ids)
+		if err != nil {
+			return nil, err
+		}
+	}
 	var allowed map[string]bool
 	if len(projectIDs) > 0 {
-		ids := make([]string, len(accounts))
-		for i, a := range accounts {
-			ids[i] = a.ID
-		}
 		allowed, err = accountuse.AllowedIDs(ctx, tx, ids, projectIDs[0])
 		if err != nil {
 			return nil, err
@@ -67,7 +78,13 @@ func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time, projectIDs .
 		if route.Wait == nil && route.AvailableSlots > 0 && route.Rank > 0 {
 			health.Dispatchable++
 		} else if route.Wait != nil {
-			reason := ModelWaitReason(account.Harness, route.Wait)
+			wait := route.Wait
+			if !visible[account.ID] {
+				// Availability can be public without releasing the owner's
+				// quota, schedule, reserve or exact next attempt time.
+				wait = &CapacityWait{}
+			}
+			reason := ModelWaitReason(account.Harness, wait)
 			if !slices.Contains(health.Reasons, reason) {
 				health.Reasons = append(health.Reasons, reason)
 			}
