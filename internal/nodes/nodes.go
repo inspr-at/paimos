@@ -558,6 +558,9 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		}
 		if _, fieldsChanged := raw["fields"]; fieldsChanged || checkChanged {
 			sets = append(sets, "fields = "+add(string(nextFields))+"::jsonb")
+			if noReleaseNeeded(nextFields) {
+				sets = append(sets, "status_autopilot = status_autopilot - 'missed_release'")
+			}
 		}
 		issues, err := benefitTransition(ctx, tx, current.KindID, kind.Slug, current.State, nextState, nextFields)
 		if err != nil {

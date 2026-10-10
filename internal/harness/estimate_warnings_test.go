@@ -2,13 +2,240 @@
 package harness_test
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/eta"
+	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// R3/R4/R10: optional projection contention must not lose an owned heartbeat,
+// bypass a revoked grant, refresh old process evidence, or manufacture Done.
+func TestHeartbeatIsolationCommitAndAuthority(t *testing.T) {
+	t.Run("scheduled pause uses receipt clock", func(t *testing.T) {
+		// R10: crossing a scheduled start before the receipt must deliver the
+		// mandatory pause and its deadline wake, even with projections omitted.
+		f := fixture(t)
+		lease := "isolated-pause-worker-lease-00000001"
+		session := f.registerSession(t, f.agent.ID, "worker", f.ticket, "isolated-pause-worker-ref-00001", lease)
+		path := "/api/projects/" + f.project + "/harness-sessions/" + session
+		w := f.call(f.person, "POST", path+"/pause", map[string]any{"level": "pause", "reason": "Scheduled handover"}, "")
+		expect(t, w, 200)
+		control := decode(t, w)["pause"].(map[string]any)["control_id"]
+		var startsAt time.Time
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			if err := tx.QueryRow(t.Context(), `SELECT clock_timestamp()+interval '1 hour'`).Scan(&startsAt); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET pause_record=pause_record ||
+				jsonb_build_object('starts_at',$2::timestamptz,'deadline_at',$3::timestamptz,'deliver',false,'wake_in_ms',0)
+				WHERE id=$1`, session, startsAt, startsAt.Add(10*time.Minute))
+			return err
+		})
+		// The pause is still scheduled during the earlier database reads. The
+		// existing clock seam advances only the final receipt past its start;
+		// no wall-clock wait establishes this transition.
+		f.mux = http.NewServeMux()
+		harness.NewWithOwnershipClock(f.db.App, func() time.Time { return startsAt.Add(time.Minute) }).(*harness.Module).
+			WithHeartbeatIsolation(func(context.Context, pgx.Tx, string) (bool, error) { return true, nil }).Mount(f.mux)
+		w = f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1}, lease)
+		expect(t, w, 200)
+		body := decode(t, w)
+		pause, ok := body["pause"].(map[string]any)
+		if !ok || pause["control_id"] != control || pause["state"] != "requested" || pause["deliver"] != true || pause["wake_in_ms"] != float64((7*time.Minute).Milliseconds()) {
+			t.Fatalf("isolated receipt lost scheduled pause delivery or deadline wake: %s", w.Body)
+		}
+		if body["activity_sequence"] != float64(1) || body["heartbeat_at"] == nil || body["finished"] != false {
+			t.Fatalf("pause receipt lost the accepted heartbeat or claimed completion: %s", w.Body)
+		}
+	})
+	f := fixture(t)
+	lease := "isolated-heartbeat-lease-0000000001"
+	session := f.registerSession(t, f.agent.ID, "coordinator", f.ticket, "isolated-heartbeat-ref-0000001", lease)
+	path := "/api/projects/" + f.project + "/harness-sessions/" + session + "/heartbeat"
+	old := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET progress_pct=100,
+			eta_live_at=$2,eta_reported_at=$2,process_observed_at=$2 WHERE id=$1`, session, old); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO ticket_live_eta(tenant_id,node_id,eta_live_at,reported_at,reported_by)
+			VALUES($1,$2,$3,$3,$4)`, f.person.TenantID, f.ticket, old, f.agent.ID)
+		return err
+	})
+	enabled := false
+	f.mux = http.NewServeMux()
+	harness.New(f.db.App).(*harness.Module).WithHeartbeatIsolation(func(_ context.Context, _ pgx.Tx, project string) (bool, error) {
+		return enabled && project == f.project, nil
+	}).Mount(f.mux)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	blocker, err := f.db.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blocker.Rollback(context.Background()) }()
+	var blockerPID int
+	if err := blocker.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := blocker.Exec(ctx, `LOCK TABLE eta_settings IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	waitBlocked := func(query string, backendPID int) {
+		t.Helper()
+		for {
+			var waiting bool
+			if err := f.db.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+				WHERE datname=current_database() AND wait_event_type='Lock'
+				AND query LIKE $2
+				AND ($3::int=0 OR pid=$3)
+				AND $1::int=ANY(pg_blocking_pids(pid)))`, blockerPID, query, backendPID).Scan(&waiting); err != nil {
+				t.Fatal(err)
+			}
+			if waiting {
+				return
+			}
+			runtime.Gosched()
+		}
+	}
+	// With the gate off, the existing optional SELECT remains in the write.
+	legacyCtx, cancelLegacy := context.WithCancel(ctx)
+	defer cancelLegacy()
+	legacy := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		r := httptest.NewRequest("POST", path, strings.NewReader(`{"phase":"working","activity_sequence":1}`))
+		r = r.WithContext(tenant.WithPrincipal(legacyCtx, f.agent))
+		r.Header.Set("Authorization", "Bearer "+f.key)
+		r.Header.Set("X-Aeon-Worker-Lease", lease)
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		legacy <- w
+	}()
+	waitBlocked("%SELECT interval_minutes FROM eta_settings%", 0)
+	assertStored := func(want int64, accepted bool) {
+		t.Helper()
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			var seq int64
+			var beat *time.Time
+			var report, observed time.Time
+			var progress int
+			if err := tx.QueryRow(ctx, `SELECT activity_sequence,heartbeat_at,eta_reported_at,
+				process_observed_at,progress_pct FROM harness_sessions WHERE id=$1`, session).
+				Scan(&seq, &beat, &report, &observed, &progress); err != nil {
+				return err
+			}
+			if seq != want || (beat != nil) != accepted || !report.Equal(old) || !observed.Equal(old) || progress != 100 {
+				t.Fatalf("stored receipt seq=%d beat=%v report=%v process=%v progress=%d", seq, beat, report, observed, progress)
+			}
+			return nil
+		})
+	}
+	assertStored(0, false)
+	cancelLegacy()
+	select {
+	case w := <-legacy:
+		if w.Code == 200 {
+			t.Fatal("disabled mode unexpectedly accepted its blocked projection")
+		}
+	case <-ctx.Done():
+		t.Fatal("legacy request did not leave its query barrier")
+	}
+	assertStored(0, false)
+
+	// An unrelated read now reaches the same projection barrier without taking
+	// mutation fences. It stays blocked through commit and both authority checks.
+	projectionCtx, cancelProjection := context.WithCancel(ctx)
+	defer cancelProjection()
+	projection := make(chan error, 1)
+	projectionPID := make(chan int, 1)
+	go func() {
+		projection <- db.InTenant(tenant.WithPrincipal(projectionCtx, f.person), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
+			var pid int
+			if err := tx.QueryRow(projectionCtx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+				return err
+			}
+			projectionPID <- pid
+			_, err := eta.LoadAggregates(projectionCtx, tx, []string{f.ticket})
+			return err
+		})
+	}()
+	// Bind the barrier to this transaction, regardless of whether the aggregate
+	// uses the published SQL function or the shared inline leaf projection.
+	select {
+	case pid := <-projectionPID:
+		waitBlocked("%", pid)
+	case err := <-projection:
+		t.Fatalf("projection did not reach its lock barrier: %v", err)
+	case <-ctx.Done():
+		t.Fatal("projection transaction did not start")
+	}
+	enabled = true
+	beat := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		beat <- f.call(f.agent, "POST", path, map[string]any{"phase": "working", "activity_sequence": 1}, lease)
+	}()
+	var w *httptest.ResponseRecorder
+	select {
+	case w = <-beat:
+	case <-ctx.Done():
+		t.Fatal("owned heartbeat waited for the unrelated projection")
+	}
+	expect(t, w, 200)
+	body := decode(t, w)
+	warningCodes(t, body, "projection_unavailable")
+	observedText, observedOK := body["process_observed_at"].(string)
+	observed, observedErr := time.Parse(time.RFC3339Nano, observedText)
+	if body["finished"] != false || body["progress_pct"] != nil || body["eta_stale"] != true || !observedOK || observedErr != nil || !observed.Equal(old) {
+		t.Fatalf("unknown projection refreshed evidence or claimed completion: %s", w.Body)
+	}
+	assertStored(1, true)
+	select {
+	case err := <-projection:
+		t.Fatalf("projection barrier already left: %v", err)
+	default:
+	}
+	w = f.call(f.agent, "POST", path, map[string]any{"phase": "working", "activity_sequence": 2}, "wrong-isolated-worker-lease-0000001")
+	expect(t, w, 403)
+	if !strings.Contains(w.Body.String(), "harness worker proof rejected") {
+		t.Fatalf("wrong lease failed for the wrong reason: %s", w.Body)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, f.person.TenantID); err != nil {
+			return err
+		}
+		if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, f.agent.ID)
+		return err
+	})
+	w = f.call(f.agent, "POST", path, map[string]any{"phase": "working", "activity_sequence": 2}, lease)
+	expect(t, w, 403)
+	if !strings.Contains(w.Body.String(), "forbidden") {
+		t.Fatalf("revoked grant failed for the wrong reason: %s", w.Body)
+	}
+	assertStored(1, true)
+	cancelProjection()
+	select {
+	case err := <-projection:
+		if err == nil || !strings.Contains(err.Error(), "context canceled") {
+			t.Fatalf("projection failed for the wrong reason: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("projection did not cancel")
+	}
+	assertStored(1, true)
+}
 
 func warningCodes(t *testing.T, body map[string]any, want ...string) {
 	t.Helper()

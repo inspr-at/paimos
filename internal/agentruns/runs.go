@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/accountuse"
@@ -88,12 +89,14 @@ type UsageRecorder func(context.Context, pgx.Tx, tenant.Principal, Run, Telemetr
 type CompletionReviewer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange, *[]events.Change) error
 type CompletionPreparer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange) (bool, error)
 type module struct {
-	queueTimeout  func(context.Context, time.Duration) (context.Context, context.CancelFunc)
-	leadAdmission harness.LeadAdmission
-	reviews       CompletionReviewer
-	prepare       CompletionPreparer
-	pool          *pgxpool.Pool
-	usage         UsageRecorder
+	queueHintMu      sync.Mutex
+	queueHintReaders map[string]int
+	queueTimeout     func(context.Context, time.Duration) (context.Context, context.CancelFunc)
+	leadAdmission    harness.LeadAdmission
+	reviews          CompletionReviewer
+	prepare          CompletionPreparer
+	pool             *pgxpool.Pool
+	usage            UsageRecorder
 }
 
 // New returns the /api/runs and /api/work-orders/{id}/runs module. The optional
@@ -120,6 +123,7 @@ func NewWithReviews(pool *pgxpool.Pool, usage UsageRecorder, reviews CompletionR
 	return &module{pool: pool, usage: usage, reviews: reviews, prepare: prepare}
 }
 func (m *module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/runs/queued/notifications", m.queueNotifications)
 	m.mountQueue(mux)
 	for _, route := range []struct {
 		pattern, scope string

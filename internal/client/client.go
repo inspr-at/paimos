@@ -6,10 +6,12 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -75,6 +77,49 @@ type Client struct {
 	HTTP         *http.Client
 	// ConfirmStepUp receives only a challenge ID. Nil fails closed on 428.
 	ConfirmStepUp func(context.Context, string) (string, error)
+	// Tests inject the wait to prove cancellation without sleeping.
+	workReadWait func(context.Context, time.Duration) error
+}
+
+type workReadRetryKey struct{}
+
+// WithWorkReadRetry opts an authorized routine read into one aggregate-limit
+// retry. Callers must apply the project execution flag before opting in; normal
+// CLI, MCP and daemon requests keep their existing single-attempt behaviour.
+func WithWorkReadRetry(ctx context.Context) context.Context {
+	return context.WithValue(ctx, workReadRetryKey{}, true)
+}
+
+const workAggregateLimitMessage = "Work aggregates exceeded a resource limit; narrow the scope or retry."
+
+func workReadPath(path string) bool {
+	u, err := url.Parse(path)
+	if err != nil || u.IsAbs() || u.Host != "" {
+		return false
+	}
+	if u.Path == "/api/nodes" {
+		return true
+	}
+	if ref, ok := strings.CutPrefix(u.Path, "/api/node-keys/"); ok {
+		return ref != "" && !strings.Contains(ref, "/")
+	}
+	if ref, ok := strings.CutPrefix(u.Path, "/api/nodes/"); ok && len(ref) == 36 &&
+		ref[8] == '-' && ref[13] == '-' && ref[18] == '-' && ref[23] == '-' {
+		decoded, err := hex.DecodeString(strings.ReplaceAll(ref, "-", ""))
+		return err == nil && len(decoded) == 16
+	}
+	return false
+}
+
+func waitWorkRead(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return ctx.Err()
+	}
 }
 
 // New returns a client for baseURL. token is sent as a Bearer credential and is never logged.
@@ -228,11 +273,37 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 		}
 		if res.StatusCode < 200 || res.StatusCode >= 300 {
 			var detail struct {
+				Error         string `json:"error"`
 				AttachRefusal string `json:"attach_refusal"`
 				ReasonCode    string `json:"reason_code"`
 			}
 			_ = json.Unmarshal(payload, &detail)
-			return &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal, ReasonCode: detail.ReasonCode, RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
+			status := &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal, ReasonCode: detail.ReasonCode, RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
+			enabled, _ := ctx.Value(workReadRetryKey{}).(bool)
+			if attempt == 0 && enabled && method == http.MethodGet && body == nil &&
+				workReadPath(path) && req.Header.Get(stepup.Header) == "" &&
+				(res.Request == nil || (res.Request.Method == req.Method && res.Request.URL.String() == req.URL.String())) &&
+				res.StatusCode == http.StatusServiceUnavailable && detail.Error == workAggregateLimitMessage {
+				delay := 200 * time.Millisecond
+				if status.RetryAfter > delay {
+					delay = min(status.RetryAfter, time.Second)
+				}
+				wait := c.workReadWait
+				if wait == nil {
+					wait = waitWorkRead
+				}
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if err := wait(ctx, delay); err != nil {
+					return err
+				}
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				continue
+			}
+			return status
 		}
 		if dest == nil || len(bytes.TrimSpace(payload)) == 0 {
 			return nil

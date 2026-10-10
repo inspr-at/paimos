@@ -63,6 +63,8 @@ func transcriptFixture(t *testing.T, kind, slug string, calls *[]transcriptReque
 				items = append(items, map[string]string{"id": ids[name], "slug": name})
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+		case r.Method == "GET" && r.URL.Path == "/api/projects/lookup":
+			_ = json.NewEncoder(w).Encode(project)
 		case r.Method == "GET" && r.URL.Path == "/api/nodes" && r.URL.Query().Get("kind_id") == ids["project"]:
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{project}})
 		case r.Method == "GET" && r.URL.Path == "/api/nodes":

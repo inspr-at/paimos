@@ -435,7 +435,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			imports.New(pool),
 			// R2: agents
 			inbox.New(pool, attachedMessages),
-			chat.New(pool),
+			chat.New(pool, chat.Options{Enabled: cfg.ChatEnabled}),
 			harness.NewWithSessionRecovery(pool, agentruns.PrepareSessionRecovery, nodes.CapturePlanningStart),
 			rules.New(pool),
 			doctrineMod,

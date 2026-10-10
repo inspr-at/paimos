@@ -61,19 +61,32 @@ func listAccounts(ctx context.Context, tx pgx.Tx) ([]Account, error) {
 // queryAccounts with retired lists every account, for a daemon reconciling
 // its own registrations.
 func queryAccounts(ctx context.Context, tx pgx.Tx, retired bool) ([]Account, error) {
-	rows, err := tx.Query(ctx, `
+	return queryAccountsLimit(ctx, tx, retired, 0)
+}
+
+func queryAccountsLimit(ctx context.Context, tx pgx.Tx, retired bool, bound int) ([]Account, error) {
+	query := `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
 		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint, billing_mode
 		FROM agent_accounts
-		WHERE $1 OR NOT `+retiredSQL+`
-		ORDER BY created_at, id`, retired)
+		WHERE $1 OR NOT ` + retiredSQL + `
+		ORDER BY created_at, id`
+	args := []any{retired}
+	if bound > 0 {
+		query += ` LIMIT $2`
+		args = append(args, bound+1)
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []Account{}
 	for rows.Next() {
+		if bound > 0 && len(out) == bound {
+			return nil, queueSnapshotOverflow("account")
+		}
 		account, err := scanAccount(rows)
 		if err != nil {
 			return nil, err
@@ -93,6 +106,9 @@ func queryAccounts(ctx context.Context, tx pgx.Tx, retired bool) ([]Account, err
 	}
 	for i := range out {
 		out[i].Contexts = contexts[out[i].ID]
+	}
+	if bound > 0 {
+		return attachWindowsLimit(ctx, tx, out, maxWaitWindows)
 	}
 	return attachWindows(ctx, tx, out)
 }
@@ -126,6 +142,10 @@ func scanAccount(row scanner) (Account, error) {
 }
 
 func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Account, error) {
+	return attachWindowsLimit(ctx, tx, accounts, 0)
+}
+
+func attachWindowsLimit(ctx context.Context, tx pgx.Tx, accounts []Account, bound int) ([]Account, error) {
 	if len(accounts) == 0 {
 		return accounts, nil
 	}
@@ -133,7 +153,7 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 	for _, a := range accounts {
 		ids = append(ids, a.ID)
 	}
-	rows, err := tx.Query(ctx, `
+	query := `
 		SELECT w.id::text, w.account_id::text, w.starts_at, w.ends_at, w.unit,
 		       w.allowance, w.used, w.reserved, w.pace_model, w.burst_ratio::float8,
 		       NOT EXISTS (
@@ -146,13 +166,24 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		       ) AS provisional, w.capacity_read_at, w.capacity_allowed, COALESCE(w.capacity_kind,''), w.capacity_bucket, w.capacity_retired, w.capacity_refresh_run::text, COALESCE(w.capacity_source,'')
 		FROM account_allowance_windows w
 		WHERE w.account_id=ANY($1::uuid[]) AND NOT w.pairing_verification AND NOT w.capacity_retired AND w.removed_at IS NULL
-		ORDER BY w.account_id, w.starts_at, w.id`, ids)
+		ORDER BY w.account_id, w.starts_at, w.id`
+	args := []any{ids}
+	if bound > 0 {
+		query += ` LIMIT $2`
+		args = append(args, bound+1)
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	byAccount := map[string][]Window{}
+	count := 0
 	for rows.Next() {
+		if bound > 0 && count == bound {
+			return nil, queueSnapshotOverflow("window")
+		}
+		count++
 		var w Window
 		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun, &w.capacitySource); err != nil {
 			return nil, err
@@ -300,6 +331,7 @@ func isNoRows(err error) bool {
 }
 
 type probeWrite struct {
+	observedAt        *time.Time          // Batch-only health timestamp; never decode authority from HTTP.
 	MeasurementOnly   bool                `json:"measurement_only,omitempty"`
 	Readiness         *ReadinessReport    `json:"readiness,omitempty"`
 	OpenRouterCredits *openrouter.Credits `json:"openrouter_credits"`
@@ -360,6 +392,16 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	now, err := dbNow(ctx, tx)
 	if err != nil {
 		return Account{}, err
+	}
+	observedAt := now
+	if in.observedAt != nil {
+		observedAt = *in.observedAt
+		if observedAt.Before(now.Add(-ProbeFreshness)) || observedAt.After(now.Add(time.Minute)) || before.LastProbeAt != nil && observedAt.Before(*before.LastProbeAt) {
+			return Account{}, fail(http.StatusConflict, "stale account probe observation")
+		}
+		if observedAt.After(now) {
+			observedAt = now
+		}
 	}
 	if in.OpenRouterCredits != nil && (before.Provider != "openrouter" || !in.OpenRouterCredits.Valid() || in.OpenRouterCredits.ObservedAt.After(now.Add(time.Minute))) {
 		return Account{}, fail(400, "invalid OpenRouter credits")
@@ -460,7 +502,7 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 		UPDATE agent_accounts
 		SET last_probe_at = $7, last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END,
 		    last_probe_failure = $5, openrouter_credits=$6
-		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel, failure, in.OpenRouterCredits, now); err != nil {
+		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel, failure, in.OpenRouterCredits, observedAt); err != nil {
 		return Account{}, err
 	}
 	after, err := getAccount(ctx, tx, accountID)

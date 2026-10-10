@@ -89,6 +89,9 @@ func TestPairedServeFromRootWorkingDirectory(t *testing.T) {
 		case "/api/agent-pairing/attach":
 			w.WriteHeader(http.StatusForbidden)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "fixture attach disabled"})
+		case "/api/runs/queued/notifications", "/api/agent-accounts/probes":
+			// This previous-server fixture denies optional routes to agent keys.
+			w.WriteHeader(http.StatusForbidden)
 		case "/api/runs/queued":
 			_ = json.NewEncoder(w).Encode([]any{})
 			// The production loop polls only after the socket, control reference
