@@ -121,12 +121,14 @@ type heartbeatSession struct {
 	hold        heartbeatHold
 	// stopReason is how the wrapped job ended. A stop that did not land keeps it in
 	// stop.intent, so the replay names the same ending (AEON-437). Empty is a plain stop.
-	stopReason string
+	stopReason    string
+	subagentScan  *os.File
+	subagentNames []string
 }
 
 func validStateName(name string) bool {
 	switch name {
-	case "session.id", "state.json", "lease.key", "session.ref", "stop.intent", "settle.intent", "heartbeat.lock", "activity.json", "activity-mode.json":
+	case "session.id", "state.json", "lease.key", "session.ref", "stop.intent", "settle.intent", "heartbeat.lock", "activity.json", "activity-mode.json", "subagent.json", "subagent.stop":
 		return true
 	default:
 		return false

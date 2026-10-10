@@ -162,7 +162,11 @@
         "internal/plugins/**",
         "internal/events/**",
         "internal/attachedmsg/**",
-        "internal/cli/project_identity_test.go"
+        "internal/cli/project_identity_test.go",
+        "internal/cli/hook_subagent.go",
+        "internal/cli/hook_subagent_unix.go",
+        "internal/cli/hook_subagent_other.go",
+        "internal/cli/hook_subagent_unix_test.go"
       ]
     },
     {
