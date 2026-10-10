@@ -342,6 +342,7 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 						continue
 					}
 					pin, mapped := observedPin(o)
+					pin.Source = "provider"
 					if cfg.AutoAddProfiles && mapped {
 						accepted, err := acceptUsedSuccessor(ctx, tx, p, pin)
 						if err != nil {
@@ -366,6 +367,7 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 						continue
 					}
 					pin, mapped = observedPin(o)
+					pin.Source = "provider"
 					if cfg.AutoAddProfiles && mapped {
 						family, line, _ := ProfileLine(Profile{Family: pin.Family, Harness: pin.Harness, Model: pin.Model})
 						id := family + ":" + line
