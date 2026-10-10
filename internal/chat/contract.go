@@ -53,3 +53,15 @@ type WorkerBindingRequest struct {
 	SessionID      string `json:"session_id"`
 	BindingEpoch   string `json:"binding_epoch"`
 }
+
+type CurrentBindingRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+// CurrentBinding names only the caller's own exact binding; it carries no
+// message content, role, person or session metadata.
+type CurrentBinding struct {
+	Contract       string `json:"contract"`
+	ConversationID string `json:"conversation_id"`
+	BindingEpoch   string `json:"binding_epoch"`
+}

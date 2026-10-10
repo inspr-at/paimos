@@ -82,6 +82,10 @@ func (m *Module) listenPush(ctx context.Context, wakes chan<- string) {
 }
 
 func (m *Module) listenPushConnection(ctx context.Context, wakes chan<- string) error {
+	// Expiry follows the existing reconnect path, whose initial scan recovers
+	// durable requests committed while the dedicated backend was disconnected.
+	ctx, stop := context.WithTimeout(ctx, db.ListenerMaxLifetime)
+	defer stop()
 	connectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	conn, err := pgx.ConnectConfig(connectCtx, m.pool.Config().ConnConfig.Copy())
 	if err == nil {

@@ -949,6 +949,73 @@
       "table": "recurrences"
     },
     {
+      "classification": "personal",
+      "columns": {
+        "action_key": "metadata",
+        "approval_id": "metadata",
+        "attempt_id": "metadata",
+        "created_at": "personal",
+        "evaluation_id": "metadata",
+        "id": "metadata",
+        "kind": "metadata",
+        "policy_digest": "personal",
+        "request_digest": "personal",
+        "result": "personal",
+        "run_id": "metadata",
+        "state": "metadata",
+        "target_node_id": "metadata",
+        "target_revision": "metadata",
+        "tenant_id": "metadata",
+        "updated_at": "personal"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "routine_actions"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "agent_run_id": "metadata",
+        "assignment_digest": "personal",
+        "attempt_key": "metadata",
+        "created_at": "personal",
+        "id": "metadata",
+        "principal_id": "personal",
+        "process_receipt": "personal",
+        "role": "metadata",
+        "run_id": "metadata",
+        "state": "metadata",
+        "tenant_id": "metadata",
+        "updated_at": "personal"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "routine_attempts"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "action_id": "metadata",
+        "created_at": "personal",
+        "effect_key": "metadata",
+        "id": "metadata",
+        "kind": "metadata",
+        "payload": "personal",
+        "reconcile_after": "personal",
+        "result": "personal",
+        "run_id": "metadata",
+        "state": "metadata",
+        "tenant_id": "metadata",
+        "updated_at": "personal"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "routine_effect_outbox"
+    },
+    {
       "classification": "review",
       "columns": {
         "checkpoint": "metadata",
@@ -993,6 +1060,41 @@
         "person_column": "created_by"
       },
       "table": "routine_guard_policies"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "agent_run_id": "metadata",
+        "assignment": "personal",
+        "assignment_digest": "personal",
+        "consent_revision": "metadata",
+        "created_at": "personal",
+        "definition_revision": "metadata",
+        "execute_consent": "personal",
+        "execution_principal_id": "personal",
+        "id": "metadata",
+        "occurrence_key": "metadata",
+        "output_parent_id": "metadata",
+        "output_project_id": "metadata",
+        "owner_principal_id": "personal",
+        "policy_digest": "personal",
+        "policy_snapshot": "personal",
+        "recurrence_id": "metadata",
+        "scope_project_id": "metadata",
+        "scope_type": "metadata",
+        "source_event_id": "metadata",
+        "source_receipt": "personal",
+        "state": "metadata",
+        "tenant_id": "metadata",
+        "updated_at": "personal",
+        "work_node_id": "metadata",
+        "work_order_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "owner_principal_id"
+      },
+      "table": "routine_runs"
     },
     {
       "classification": "personal",

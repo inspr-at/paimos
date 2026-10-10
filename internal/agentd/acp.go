@@ -215,7 +215,7 @@ func (p *acpProcess) Control(ctx context.Context, op, text string) error {
 	if op != "inbox" && op != "steer" && op != "interrupt" {
 		return fmt.Errorf("%w: ACP has no %s action", ErrUnsupported, boundedACPAction(op))
 	}
-	if (op == "inbox" || op == "steer") && (len(text) == 0 || len(text) > 64<<10) || op == "interrupt" && text != "" {
+	if op == "steer" && (len(text) == 0 || len(text) > 64<<10) || op == "inbox" && (len(text) == 0 || len(text) > inboxTextLimit) || op == "interrupt" && text != "" {
 		return errors.New("invalid ACP control body")
 	}
 	// Grok's qualified native transport has no cancellation acknowledgement.

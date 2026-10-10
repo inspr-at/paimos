@@ -28,6 +28,7 @@ export function benefitIssues(fields: Record<string, unknown>): string[] {
     }
   }
   if ('hide_from_release_notes' in fields && typeof fields.hide_from_release_notes !== 'boolean') issues.push('hide_from_release_notes must be a boolean')
+  if ('no_release_needed' in fields && typeof fields.no_release_needed !== 'boolean') issues.push('no_release_needed must be a boolean')
   return issues
 }
 const benefitFieldNames: Record<(typeof benefitTextKeys)[number], string> = {
@@ -52,5 +53,6 @@ export function benefitDraft(fields: Record<string, unknown>) {
     benefit_en: typeof fields.benefit_en === 'string' ? fields.benefit_en : '',
     benefit_de: typeof fields.benefit_de === 'string' ? fields.benefit_de : '',
     hide_from_release_notes: fields.hide_from_release_notes === true,
+    no_release_needed: fields.no_release_needed === true,
   }
 }

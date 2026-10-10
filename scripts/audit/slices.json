@@ -136,6 +136,8 @@
         "internal/agentd/chat_normalize.go",
         "internal/agentd/chat_stream.go",
         "internal/agentd/chat_stream_test.go",
+        "internal/agentd/chat_relay.go",
+        "internal/agentd/chat_relay_test.go",
         "internal/agentd/chat_acp.go",
         "internal/agentd/chat_acp_test.go"
       ]
@@ -225,7 +227,9 @@
         "internal/activity/**",
         "internal/decisiondesk/cutover_test.go",
         "internal/questions/lock_order_test.go",
-        "internal/routineguard/**"
+        "internal/routineguard/**",
+        "internal/recurrences/runs.go",
+        "internal/recurrences/runs_test.go"
       ]
     },
     {
