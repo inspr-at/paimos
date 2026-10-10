@@ -79,7 +79,7 @@ type Binding struct {
 
 // AuthorizeTx resolves current definition/qualification/consent and the fixed
 // evaluator in the same final transaction. No network/model work is permitted.
-type AuthorizeTx func(context.Context, pgx.Tx, tenant.Principal, Binding, routineguard.Context) (tenant.Principal, routineguard.Decision, error)
+type AuthorizeTx func(context.Context, pgx.Tx, tenant.Principal, Binding, routineguard.Context) (tenant.Principal, routineguard.Decision, string, error)
 
 type Broker struct {
 	pool      *pgxpool.Pool
@@ -220,20 +220,27 @@ func (b *Broker) Execute(ctx context.Context, p tenant.Principal, run string, in
 		if b.authorize == nil {
 			return workorders.Fail(409, "routine_grant_unavailable")
 		}
-		actor, decision, err := b.authorize(ctx, tx, p, binding, in.GuardContext())
+		actor, decision, evaluationID, err := b.authorize(ctx, tx, p, binding, in.GuardContext())
 		if err != nil {
 			return err
 		}
 		if actor.TenantID != p.TenantID || actor.ID != binding.ExecutionPrincipalID {
 			return authz.ErrForbidden
 		}
-		if !decision.CanExecute() || decision.ContextDigest != routineguard.Digest(in.GuardContext()) {
+		if !decision.CanExecute() || decision.ContextDigest != routineguard.Digest(in.GuardContext()) || !workorders.UUID(evaluationID) {
 			return workorders.Fail(409, "guardrail_evaluation_required")
 		}
 		if err := authz.RequireTx(ctx, tx, actor, permission, authz.Scope{ProjectID: in.ProjectID}); err != nil {
 			return err
 		}
-		out, err = applyTx(ctx, tx, actor, binding, in, decision.PolicyDigest)
+		var evidence bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_guard_evaluations WHERE id=$1 AND recurrence_id=$2 AND definition_revision=$3 AND checkpoint='action' AND result='allow' AND policy_digest=$4 AND context_digest=$5 AND hard_version=$6 AND preset_version=$7)`, evaluationID, binding.RecurrenceID, binding.DefinitionRevision, decision.PolicyDigest, decision.ContextDigest, decision.HardVersion, decision.PresetVersion).Scan(&evidence); err != nil {
+			return err
+		}
+		if !evidence {
+			return workorders.Fail(409, "guardrail_evidence_changed")
+		}
+		out, err = applyTx(ctx, tx, actor, binding, in, decision.PolicyDigest, evaluationID)
 		return err
 	})
 	if err != nil {
@@ -271,7 +278,7 @@ func loadBinding(ctx context.Context, tx pgx.Tx, p tenant.Principal, run, attemp
 
 // applyTx is reached only after the live run grant and verified decision. Kept
 // separate so transaction tests can exercise receipts without forging S08 proof.
-func applyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Binding, in Request, policy string) (Receipt, error) {
+func applyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Binding, in Request, policy, evaluationID string) (Receipt, error) {
 	digest := routineguard.Digest(in)
 	var prior Receipt
 	var result []byte
@@ -320,7 +327,7 @@ func applyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Binding, in R
 		return Receipt{}, err
 	}
 	out := Receipt{RunID: b.RunID, ActionKey: in.ActionKey, Kind: in.Kind, RequestDigest: digest, State: "succeeded", NodeID: id, Revision: revision}
-	if err := tx.QueryRow(ctx, `INSERT INTO routine_actions(tenant_id,run_id,attempt_id,action_key,kind,request_digest,target_node_id,target_revision,policy_digest,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'succeeded') RETURNING id::text`, p.TenantID, b.RunID, in.AttemptID, in.ActionKey, in.Kind, digest, in.TargetID, in.ExpectedRevision, policy).Scan(&out.ID); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO routine_actions(tenant_id,run_id,attempt_id,action_key,kind,request_digest,target_node_id,target_revision,policy_digest,evaluation_id,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,nullif($10,'')::uuid,'succeeded') RETURNING id::text`, p.TenantID, b.RunID, in.AttemptID, in.ActionKey, in.Kind, digest, in.TargetID, in.ExpectedRevision, policy, evaluationID).Scan(&out.ID); err != nil {
 		return Receipt{}, err
 	}
 	raw, _ := json.Marshal(out)

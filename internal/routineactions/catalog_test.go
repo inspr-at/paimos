@@ -2,6 +2,7 @@
 package routineactions
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Risks: duplicate effects after response loss, false success after rollback,
@@ -73,14 +75,14 @@ func TestRoutineActionsAtomicReplayAndTargets(t *testing.T) {
 		})
 		return at.UnixMicro()
 	}
-	apply := func(in Request, rollback bool) (Receipt, error) {
+	applyOn := func(ctx context.Context, pool *pgxpool.Pool, in Request, rollback bool) (Receipt, error) {
 		var out Receipt
-		err := db.InTenant(tenant.WithPrincipal(t.Context(), p), d.App, p.TenantID, func(tx pgx.Tx) error {
-			if err := agentpairing.Lock(t.Context(), tx); err != nil {
+		err := db.InTenant(tenant.WithPrincipal(ctx, p), pool, p.TenantID, func(tx pgx.Tx) error {
+			if err := agentpairing.Lock(ctx, tx); err != nil {
 				return err
 			}
 			var err error
-			out, err = applyTx(t.Context(), tx, p, binding, in, strings.Repeat("a", 64))
+			out, err = applyTx(ctx, tx, p, binding, in, strings.Repeat("a", 64), "")
 			if err != nil {
 				return err
 			}
@@ -91,10 +93,26 @@ func TestRoutineActionsAtomicReplayAndTargets(t *testing.T) {
 		})
 		return out, err
 	}
+	apply := func(in Request, rollback bool) (Receipt, error) { return applyOn(t.Context(), d.App, in, rollback) }
 	create := Request{AttemptID: attempt, ActionKey: "create", Kind: "work.create", ProjectID: project, TargetID: parent, ExpectedRevision: revision(parent), WorkCreate: &WorkCreate{Title: "Created once", Body: "Bounded body"}}
-	first, err := apply(create, false)
-	if err != nil {
-		t.Fatal(err)
+	pool, barrier, ctx := dbtest.BarrierPool(t, d.App, func(sql string) bool { return strings.Contains(sql, "UPDATE routine_actions SET result") })
+	type answer struct {
+		receipt Receipt
+		err     error
+	}
+	firstResult, secondResult := make(chan answer, 1), make(chan answer, 1)
+	go func() { out, err := applyOn(ctx, pool, create, false); firstResult <- answer{out, err} }()
+	pid := barrier.Wait(t, ctx)
+	done := make(chan struct{})
+	go func() { out, err := applyOn(ctx, d.App, create, false); secondResult <- answer{out, err}; close(done) }()
+	if lock := dbtest.BlockedOrDone(t, ctx, d.Admin, pid, done); lock != "transactionid" {
+		t.Fatalf("replay did not overlap at tenant fence: %q", lock)
+	}
+	barrier.Release()
+	a, b := dbtest.Await(t, ctx, firstResult), dbtest.Await(t, ctx, secondResult)
+	first, err := a.receipt, a.err
+	if err != nil || b.err != nil || a.receipt != b.receipt {
+		t.Fatalf("concurrent replay: %+v %+v", a, b)
 	}
 	retry, err := apply(create, false)
 	if err != nil || first != retry {
@@ -149,6 +167,22 @@ func TestRoutineActionsAtomicReplayAndTargets(t *testing.T) {
 	if again, err := apply(knowledge, false); err != nil || again != ku {
 		t.Fatalf("knowledge update replay: %+v %v", again, err)
 	}
+	duplicate := knowledge
+	duplicate.ActionKey = "duplicate-slug"
+	duplicate.TargetID = project
+	duplicate.ExpectedRevision = revision(project)
+	_, err = apply(duplicate, false)
+	assertFailure(t, err, 409, "slug_taken")
+	outside := node("work", &project)
+	seed(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, first.NodeID, outside)
+		return err
+	})
+	escaped := update
+	escaped.ActionKey = "outside"
+	escaped.ExpectedRevision = revision(first.NodeID)
+	_, err = apply(escaped, false)
+	assertFailure(t, err, 403, "target_outside_run_scope")
 	other := node("project", nil)
 	seed(func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, first.NodeID, other)
