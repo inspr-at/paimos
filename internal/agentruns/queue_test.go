@@ -118,7 +118,7 @@ func TestRoutinePreparationPreservesAuthorityCriteriaAndPickup(t *testing.T) {
 	f.call(t, f.person, "POST", "/api/queue/"+*second.NodeID+"/move", map[string]int{"position": 1}, 200, nil)
 	assertCandidate(*second.NodeID)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_target_agent_id=$2 WHERE id=$1`, *first.Run.AgentRunID, f.agent.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_target_agent_id=$2,agent_principal_id=$2 WHERE id=$1`, *first.Run.AgentRunID, f.agent.ID)
 		return err
 	})
 	work := assertCandidate(*first.NodeID)
