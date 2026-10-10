@@ -1435,7 +1435,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	}
 	aggregateCTE := ""
 	if etaJoin != "" || estimateJoin != "" {
-		aggregateCTE = `, work_values AS MATERIALIZED (SELECT * FROM aeon_work_aggregates(ARRAY(SELECT id FROM filtered)))`
+		aggregateCTE = `, work_values AS MATERIALIZED (` + eta.AggregateSQL("ARRAY(SELECT id FROM filtered)") + `)`
 		if q.boundedAggregates && etaJoin == "" {
 			aggregateCTE = listEstimateSortSQL()
 		}
