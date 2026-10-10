@@ -8,12 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/client"
 )
 
 func routineTestGrant(n string) agentsetup.RoutineGrant {
@@ -227,3 +229,235 @@ func TestRoutineWorkspacesSeparateAndRetainWriters(t *testing.T) {
 type routineQualifiedFixture struct{ fakeAdapter }
 
 func (*routineQualifiedFixture) RoutineExecutionSupported(agentsetup.RoutineGrant) bool { return true }
+
+func routineGitFixture(t *testing.T) (string, string, func(...string) string) {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := filepath.Join(root, "repository")
+	if err := os.Mkdir(repository, 0700); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", repository}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("fixture git: %v %s", err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q")
+	git("config", "user.name", "Routine fixture")
+	git("config", "user.email", "routine@example.invalid")
+	for name, content := range map[string]string{"tracked.txt": "base\n", ".gitattributes": "tracked.txt filter=unadmitted\n"} {
+		if err := os.WriteFile(filepath.Join(repository, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("add", "--", "tracked.txt", ".gitattributes")
+	git("commit", "-qm", "fixture")
+	return root, repository, git
+}
+
+// Risk: included, conditional and worktree config can execute a helper before
+// admission. A real checkout must preserve the file without executing it.
+func TestRoutineCheckoutDisablesEffectiveFilterConfiguration(t *testing.T) {
+	for _, source := range []string{"include", "worktree", "destination-include"} {
+		t.Run(source, func(t *testing.T) {
+			root, repository, git := routineGitFixture(t)
+			marker := filepath.Join(root, "helper-ran")
+			config := filepath.Join(root, "filters.conf")
+			if err := os.WriteFile(config, []byte("[filter \"unadmitted\"]\n smudge = touch '"+marker+"'; cat\n required = true\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			destination := filepath.Join(root, "checkout")
+			switch source {
+			case "include":
+				git("config", "include.path", config)
+			case "worktree":
+				git("config", "extensions.worktreeConfig", "true")
+				git("config", "--worktree", "include.path", config)
+			case "destination-include":
+				git("config", "includeIf.gitdir:"+filepath.Join(repository, ".git", "worktrees", "checkout")+"/.path", config)
+			}
+			if _, err := routineGit(t.Context(), repository, "worktree", "add", "-b", "routine/fixture", destination, "HEAD"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("checkout executed an unadmitted helper", err)
+			}
+			if data, err := os.ReadFile(filepath.Join(destination, "tracked.txt")); err != nil || string(data) != "base\n" {
+				t.Fatal("checkout lost tracked content", err)
+			}
+		})
+	}
+}
+
+type routineReplayAPI struct {
+	*ledgerFixtureAPI
+	grant   agentsetup.RoutineGrant
+	pickups []agentsetup.RoutinePickup
+	claims  []agentsetup.RoutinePickup
+	lost    bool
+}
+
+func (a *routineReplayAPI) Identity(context.Context) (string, string, error) {
+	return a.grant.TenantID, a.grant.PrincipalID, nil
+}
+func (a *routineReplayAPI) Route(context.Context, string, string, []string, map[string]int64) (Route, error) {
+	return Route{}, &client.StatusError{Status: 409, Message: "routine pickup required"}
+}
+func (a *routineReplayAPI) RouteRoutine(_ context.Context, run, daemon string, ids []string, _ map[string]int64, pickup agentsetup.RoutinePickup) (Route, error) {
+	if run != a.grant.AgentRunID || daemon != a.grant.DaemonID || !reflect.DeepEqual(ids, []string{a.grant.AccountID}) || pickup.LaunchID != a.grant.LaunchID {
+		return Route{}, ErrScope
+	}
+	a.pickups = append(a.pickups, pickup)
+	a.run.AccountID = a.grant.AccountID // server commit precedes the lost response
+	if a.lost {
+		a.lost = false
+		return Route{}, errors.New("fixture lost routine route response")
+	}
+	return Route{AccountID: a.grant.AccountID, AccountKey: "local", DaemonID: daemon, Reservations: []Reservation{{ID: "reservation"}}}, nil
+}
+func (a *routineReplayAPI) ClaimRoutine(_ context.Context, run, daemon, generation string, _ []string, _ *WorkerPickup, pickup agentsetup.RoutinePickup) error {
+	if run != a.grant.AgentRunID || daemon != a.grant.DaemonID || generation != a.grant.DaemonGeneration {
+		return ErrScope
+	}
+	a.claims = append(a.claims, pickup)
+	return nil
+}
+
+func routineSupervisorFixture(t *testing.T) (*Supervisor, *routineReplayAPI, *fakeProcess, RoutineRepository, *int) {
+	t.Helper()
+	root, repository, git := routineGitFixture(t)
+	grant := routineTestGrant("21")
+	process := &fakeProcess{stopped: make(chan struct{})}
+	api := &routineReplayAPI{grant: grant, ledgerFixtureAPI: &ledgerFixtureAPI{fakeAPI: &fakeAPI{profile: Profile{ID: "profile", Harness: Codex, Model: "model"}}, view: agentsetup.View{ServerCapabilities: []string{agentsetup.LedgerCapability}}, maximum: 2}}
+	trees := filepath.Join(root, "trees")
+	if err := os.Mkdir(trees, 0700); err != nil {
+		t.Fatal(err)
+	}
+	base := RoutineRepository{TenantID: grant.TenantID, OwnerID: grant.OwnerID, ProjectID: grant.ProjectID, AccountID: grant.AccountID, ComputerID: grant.ComputerID, Repository: repository, Root: trees, BaseCommit: git("rev-parse", "HEAD"), DaemonDigest: grant.DaemonDigest, CapabilityDigest: grant.CapabilityDigest, HostMappingDigest: grant.HostMappingDigest}
+	allocations := new(int)
+	config := &RoutineWorkspaceConfig{Repositories: []RoutineRepository{base}, AcquireResources: func(_ context.Context, owner RoutineResourceOwner) (RoutineResourceLease, error) {
+		*allocations++
+		tmp := filepath.Join(root, "temp-"+owner.RunID)
+		if err := os.MkdirAll(tmp, 0700); err != nil {
+			return nil, err
+		}
+		return &routineLeaseFixture{environment: []string{"AEON_RUN_ID=" + owner.RunID, "AEON_RUN_DATABASE=aeon_run_" + strings.Repeat("a", 32), "AEON_RUN_APP_PORT=31001", "AEON_RUN_POSTGRES_PORT=31002", "AEON_RUN_TEMP_DIR=" + tmp, "TMPDIR=" + tmp, "TMP=" + tmp, "TEMP=" + tmp}}, nil
+	}}
+	s, err := NewSupervisor(t.Context(), Config{API: api, StateRoot: filepath.Join(root, "state"), DaemonID: grant.DaemonID, Workspace: repository, Adapters: []Adapter{&routineQualifiedFixture{fakeAdapter{proc: process}}}, Accounts: []EnrolledAccount{{ID: grant.AccountID, Key: "local", Harness: Codex, VerifiedIdentity: "routine-login"}}, RoutineWorkspaces: config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnableLedger(t.Context(), LedgerConfig{Path: filepath.Join(root, "ledger"), Label: "cm.aeon.agentd", Root: root, Origin: "https://routine.example.invalid"}); err != nil {
+		t.Fatal(err)
+	}
+	api.grant.DaemonGeneration, api.grant.LedgerGeneration = s.generation, s.ledgerBinding.Generation
+	raw, _ := json.Marshal(map[string]any{"routine_launch": api.grant, "routine_run_id": api.grant.RoutineRunID})
+	api.run = Run{ID: api.grant.AgentRunID, WorkOrderID: "order", AgentPrincipalID: api.grant.PrincipalID, ModelProfileID: "profile", Status: "queued", Purpose: "managed", RequestedAccountID: grant.AccountID, RoutineLaunchID: &api.grant.LaunchID, Trace: raw}
+	t.Cleanup(func() {
+		_ = process.Stop(context.Background())
+		for _, entry := range s.runs {
+			entry.mu.Lock()
+			done := entry.monitorDone
+			entry.mu.Unlock()
+			if done != nil {
+				<-done
+			}
+		}
+		_ = s.Close(context.Background())
+		for _, store := range s.routineCheckouts {
+			_ = store.Close()
+		}
+	})
+	return s, api, process, base, allocations
+}
+
+// Risk: a committed route with a lost response must keep its pickup, checkout,
+// resource lease and single ledger hold, rather than deleting the allocation.
+func TestRoutineSupervisorReplaysInterruptedRouting(t *testing.T) {
+	s, api, _, _, allocations := routineSupervisorFixture(t)
+	api.lost = true
+	if err := s.StartRun(t.Context(), api.run); err == nil || !strings.Contains(err.Error(), "lost routine route response") {
+		t.Fatal("missing interrupted route", err)
+	}
+	intent := s.journal.Snapshot()[0]
+	lease := s.routineResources[api.run.ID]
+	if err := s.StartRun(t.Context(), api.run); err != nil {
+		t.Fatal("routine route replay failed", err)
+	}
+	if len(api.pickups) != 2 || api.pickups[0] != api.pickups[1] || len(api.claims) != 2 || api.claims[0] != api.pickups[0] || api.claims[1] != api.pickups[0] {
+		t.Fatal("route/claim replay changed persisted pickup", api.pickups, api.claims)
+	}
+	entry := s.runs[api.run.ID]
+	entry.mu.Lock()
+	got := entry.record
+	entry.mu.Unlock()
+	data, _, err := s.ledger.Snapshot()
+	if err != nil || len(data.Groups) != 1 || got.LedgerGroup != intent.LedgerGroup || !reflect.DeepEqual(got.RoutineWorkspace, intent.RoutineWorkspace) || got.Workspace != intent.Workspace || *allocations != 1 || s.routineResources[api.run.ID] != lease {
+		t.Fatal("replay lost allocation provenance", got, data, err)
+	}
+}
+
+// Risk: capacity continuation must retain committed and uncommitted work and
+// refuse a changed lineage or unknown fixture/process exit before allocation.
+func TestRoutineContinuationRetainsOriginalCheckout(t *testing.T) {
+	s, api, _, repository, _ := routineSupervisorFixture(t)
+	oldRun, oldGrant := api.run, api.grant
+	w, err := s.prepareRoutineWorkspace(t.Context(), oldRun, oldGrant, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(w.Path, "retained.txt"), []byte("retained work\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	record := Record{RoutineWorkspace: w, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: oldRun.ID, WorkOrderID: oldRun.WorkOrderID, Generation: s.generation, Workspace: w.Path, LaunchBranch: w.Branch, AccountID: oldGrant.AccountID, LaunchState: launchAttempted, State: "failed", ExitObserved: true}
+	prior := &owned{record: record, process: &routineExitedFixture{fakeProcess: &fakeProcess{}, fixturesExited: true}}
+	s.runs[oldRun.ID] = prior
+	if err := s.journal.Put(record); err != nil {
+		t.Fatal(err)
+	}
+	nextGrant := oldGrant
+	nextGrant.LaunchID, nextGrant.AgentRunID = routineTestGrant("22").LaunchID, routineTestGrant("22").AgentRunID
+	next := oldRun
+	next.ID, next.RetryOfRunID, next.CapacityHandoff = nextGrant.AgentRunID, oldRun.ID, true
+	// Refusals must precede resource acquisition and ownership transfer.
+	for _, mutate := range []func(){func() { prior.record.ExitObserved = false }, func() { prior.process.(*routineExitedFixture).fixturesExited = false }, func() { prior.record.RoutineWorkspace = nil }} {
+		mutate()
+		if _, err := s.prepareRoutineWorkspace(t.Context(), next, nextGrant, repository); !errors.Is(err, ErrProcessesUnconfirmed) {
+			t.Fatal("unsafe continuation was not refused", err)
+		}
+		prior.record = record
+		prior.process.(*routineExitedFixture).fixturesExited = true
+	}
+	recovered, err := s.prepareRoutineWorkspace(t.Context(), next, nextGrant, repository)
+	if err != nil {
+		t.Fatal("continuation allocation failed", err)
+	}
+	if recovered.Path != w.Path || recovered.ID != w.ID || recovered.Branch != w.Branch || recovered.Grant.LaunchID != nextGrant.LaunchID {
+		t.Fatal("continuation replaced retained checkout", recovered)
+	}
+	if data, err := os.ReadFile(filepath.Join(recovered.Path, "retained.txt")); err != nil || string(data) != "retained work\n" {
+		t.Fatal("continuation lost work", err)
+	}
+	if err := s.validateCapacityHandoff(next, recovered.Branch); err != nil {
+		t.Fatal("retained handoff refused", err)
+	}
+	if err := validateLaunchRecord(Record{RoutineWorkspace: recovered, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: next.ID, Generation: s.generation, Workspace: recovered.Path, LaunchState: launchAttempted}); err != nil {
+		t.Fatal("retained workspace cannot be journaled", err)
+	}
+	if err := validateRoutineCheckout(t.Context(), repository, *recovered); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type routineExitedFixture struct {
+	*fakeProcess
+	fixturesExited bool
+}
+
+func (p *routineExitedFixture) RoutineFixturesExited() bool { return p.fixturesExited }
