@@ -29,11 +29,13 @@ func TestUnattendedMissingPlatformPreservesLegacyPairing(t *testing.T) {
 			key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 			// A later added harness retains its own qualified request metadata;
 			// only the computer's original legacy request lacks platform evidence.
-			q := f.propose("codex")
-			q.id = uuid(t, f.db)
+			q := &proposal{id: uuid(t, f.db), device: nonce(), runtime: p.runtime, lifecycle: p.lifecycle, request: map[string]any{}}
+			for k, value := range p.request {
+				q.request[k] = value
+			}
 			q.request["request_id"] = q.id
-			q.request["runtime_hash"] = hash(p.runtime)
-			q.request["lifecycle_hash"] = hash(p.lifecycle)
+			q.request["device_hash"] = hash(q.device)
+			q.request["accounts"] = []map[string]string{{"account_key": "codex-local", "harness": "codex", "label": "Added Codex", "model_profile_id": f.profiles["codex"]}}
 			q.request["existing_computer_id"] = *v.ComputerID
 			q.request["existing_lifecycle_secret"] = p.lifecycle
 			f.submit(q)
