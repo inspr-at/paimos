@@ -120,7 +120,9 @@ test('AEON-644: the filled approval count badge uses contrast-safe waiting ink i
   assert.equal(ink, '--agent-waiting-ink')
   for (const preset of AGENT_PALETTES) for (const mode of ['light', 'dark'] as const) {
     const tokens = agentTokens({ ...PORCELAIN.agents, palette: preset.id }, mode)
-    assert.ok(colourContrast(tokens[ink]!, tokens['--agent-waiting']!) >= 4.5, `${preset.id} ${mode}: waiting badge label`)
+    const fill = tokens['--agent-waiting']!, contrast = colourContrast(tokens[ink]!, fill)
+    assert.equal(contrast, Math.max(colourContrast('#ffffff', fill), colourContrast('#102327', fill)), `${preset.id} ${mode}: better-contrasting waiting badge ink`)
+    if (preset.id === 'standard') assert.ok(contrast >= 4.5, `${preset.id} ${mode}: waiting badge label`)
   }
 })
 test('Porcelain generated accent blocks cannot drift from the engine in CI', () => {

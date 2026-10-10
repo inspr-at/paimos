@@ -20378,6 +20378,8 @@
     ,
     {"kind":"vitest","file":"tests/work-creation-vocabulary.unit.test.ts","name":"workspace naming reads are shared and stale identities cannot restore old names","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/work-fixtures.unit.test.ts","name":"AEON-644: shared work fixtures supply matching active and listed themes at authenticated load","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/work-fixtures.unit.test.ts","name":"HTTP snapshot scenarios keep a healthy stream while explicit event transports remain in control","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/work-fixtures.unit.test.ts","name":"bulk nesting accepts a retired task kind and preserves a separately stale record","tier":"ESSENTIAL"}
