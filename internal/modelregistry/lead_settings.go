@@ -641,7 +641,7 @@ func FenceExecutionTx(ctx context.Context, tx pgx.Tx, tenantID, project string) 
 		return err
 	}
 	var active bool
-	if err := tx.QueryRow(ctx, `SELECT n.state='active' FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND n.deleted_at IS NULL AND k.slug='project' FOR NO KEY UPDATE OF n`, project).Scan(&active); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT n.state<>'archived' FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND n.deleted_at IS NULL AND k.slug='project' FOR NO KEY UPDATE OF n`, project).Scan(&active); err != nil {
 		return err
 	}
 	if !active {
@@ -731,7 +731,7 @@ func ProjectExecutionTx(ctx context.Context, tx pgx.Tx, tenantID, project string
 		return out, err
 	}
 	var active bool
-	if err = tx.QueryRow(ctx, `SELECT state='active' AND deleted_at IS NULL FROM nodes WHERE id=$1`, project).Scan(&active); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT state<>'archived' AND deleted_at IS NULL FROM nodes WHERE id=$1`, project).Scan(&active); err != nil {
 		return out, err
 	}
 	if !active {
