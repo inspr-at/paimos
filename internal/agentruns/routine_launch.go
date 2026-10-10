@@ -258,9 +258,28 @@ func acceptRoutinePickup(ctx context.Context, tx pgx.Tx, v Run, in *agentsetup.R
 	return err
 }
 
-func reportRoutineExit(ctx context.Context, tx pgx.Tx, v Run, t Telemetry) error {
-	if v.RoutineLaunchID == nil || t.Kind != "finished" || (t.ProcessState != "exited" && t.ProcessState != "not_attempted") {
+func reportRoutineExit(ctx context.Context, tx pgx.Tx, v Run, t Telemetry, status string) error {
+	if v.RoutineLaunchID == nil {
 		return nil
+	}
+	if terminal(status) && (t.Kind != "finished" || t.ProcessState == "" || t.ProcessState == "unconfirmed" && status != "ownership_lost") {
+		return workorders.Fail(409, "routine completion requires local process evidence")
+	}
+	if t.Kind == "started" {
+		_, err := tx.Exec(ctx, `INSERT INTO routine_launch_evidence(tenant_id,launch_id,kind,receipt) VALUES(current_setting('aeon.tenant_id')::uuid,$1,'launched','{}') ON CONFLICT DO NOTHING`, *v.RoutineLaunchID)
+		return err
+	}
+	if t.Kind != "finished" || t.ProcessState == "unconfirmed" {
+		return nil
+	}
+	if t.ProcessState == "not_attempted" {
+		var launched bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_launch_evidence WHERE launch_id=$1 AND kind='launched')`, *v.RoutineLaunchID).Scan(&launched); err != nil {
+			return err
+		}
+		if launched {
+			return workorders.Fail(409, "routine launch conflicts with no-launch evidence")
+		}
 	}
 	raw, _ := json.Marshal(map[string]any{"process_state": t.ProcessState, "sequence": t.Sequence, "daemon_id": v.DaemonID, "daemon_generation": v.Generation})
 	if _, err := tx.Exec(ctx, `INSERT INTO routine_launch_evidence(tenant_id,launch_id,kind,receipt) VALUES(current_setting('aeon.tenant_id')::uuid,$1,'exit_observed',$2) ON CONFLICT DO NOTHING`, *v.RoutineLaunchID, raw); err != nil {

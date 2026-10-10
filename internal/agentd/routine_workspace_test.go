@@ -67,6 +67,16 @@ func TestRoutineWorkspacesSeparateAndRetainWriters(t *testing.T) {
 	}
 	git("add", "tracked.txt")
 	git("commit", "-qm", "fixture")
+	// Repository helpers must never run during pre-launch allocation. The
+	// filter is installed after committing the fixture so setup cannot run it.
+	helperMarker := filepath.Join(root, "unadmitted-helper")
+	if err := os.WriteFile(filepath.Join(repository, ".gitattributes"), []byte("tracked.txt filter=unadmitted\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".gitattributes")
+	git("commit", "-qm", "attribute fixture")
+	git("config", "filter.unadmitted.smudge", "touch "+helperMarker)
+	git("config", "filter.unadmitted.required", "true")
 	g1, g2 := routineTestGrant("11"), routineTestGrant("12")
 	base := RoutineRepository{TenantID: g1.TenantID, OwnerID: g1.OwnerID, ProjectID: g1.ProjectID, AccountID: g1.AccountID, ComputerID: g1.ComputerID, Repository: repository, Root: trees, BaseCommit: git("rev-parse", "HEAD"), DaemonDigest: g1.DaemonDigest, CapabilityDigest: g1.CapabilityDigest, HostMappingDigest: g1.HostMappingDigest}
 	entered, release := make(chan RoutineResourceOwner, 2), make(chan struct{})
@@ -99,9 +109,12 @@ func TestRoutineWorkspacesSeparateAndRetainWriters(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = store.Close() })
-		return &Supervisor{tenantID: g1.TenantID, principalID: g1.PrincipalID, daemonID: g1.DaemonID, generation: g1.DaemonGeneration, state: store, routineConfig: config, routineCheckouts: map[string]*agentsetup.Store{}, routineResources: map[string]RoutineResourceLease{}, runs: map[string]*owned{}, capacityNow: time.Now}
+		return &Supervisor{tenantID: g1.TenantID, principalID: g1.PrincipalID, daemonID: g1.DaemonID, generation: g1.DaemonGeneration, ledgerBinding: ledgerBinding{Generation: g1.LedgerGeneration}, state: store, routineConfig: config, routineCheckouts: map[string]*agentsetup.Store{}, routineResources: map[string]RoutineResourceLease{}, runs: map[string]*owned{}, capacityNow: time.Now}
 	}
 	s1, s2 := newSupervisor("state1"), newSupervisor("state2")
+	if _, err := s1.routineRepository(Run{AccountID: g1.AccountID}, g1, &routineQualifiedFixture{}); err != nil {
+		t.Fatal("valid qualified map refused", err)
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	type result struct {
@@ -149,6 +162,9 @@ func TestRoutineWorkspacesSeparateAndRetainWriters(t *testing.T) {
 	w1, w2 := workspaces[g1.AgentRunID], workspaces[g2.AgentRunID]
 	if w1.ID == w2.ID || w1.Path == w2.Path || w1.Branch == w2.Branch {
 		t.Fatal("distinct jobs shared checkout")
+	}
+	if _, err := os.Stat(helperMarker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("allocation ran repository filter before admitted launch")
 	}
 	for _, item := range []struct {
 		s *Supervisor

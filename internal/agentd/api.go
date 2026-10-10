@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"net/http"
 	"net/url"
@@ -401,10 +402,22 @@ func (r *Remote) WorkOrder(ctx context.Context, id string) (WorkOrder, error) {
 }
 
 func (r *Remote) Route(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64) (Route, error) {
+	return r.route(ctx, runID, daemonID, accountIDs, estimates, nil)
+}
+
+func (r *Remote) RouteRoutine(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64, pickup agentsetup.RoutinePickup) (Route, error) {
+	raw, err := json.Marshal(pickup)
+	if err != nil {
+		return Route{}, err
+	}
+	return r.route(ctx, runID, daemonID, accountIDs, estimates, map[string]string{agentpairing.RoutinePickupHeader: string(raw)})
+}
+
+func (r *Remote) route(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64, headers map[string]string) (Route, error) {
 	var route Route
 	err := r.Client.DoWithHeaders(ctx, "POST", "/api/agent-accounts/route", map[string]any{
 		"run_id": runID, "daemon_id": daemonID, "account_ids": accountIDs, "estimated_units": estimates,
-	}, &route, r.ledgerHeaders(nil))
+	}, &route, r.ledgerHeaders(headers))
 	return route, err
 }
 

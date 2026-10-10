@@ -423,7 +423,14 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		return nil, err
 	}
 	s.capacityNow = c.Now
-	s.routineConfig = c.RoutineWorkspaces
+	if c.RoutineWorkspaces != nil {
+		if len(c.RoutineWorkspaces.Repositories) > 64 {
+			return nil, ErrRoutineUnavailable
+		}
+		config := *c.RoutineWorkspaces
+		config.Repositories = append([]RoutineRepository(nil), config.Repositories...)
+		s.routineConfig = &config
+	}
 	s.routineCheckouts = map[string]*agentsetup.Store{}
 	s.routineResources = map[string]RoutineResourceLease{}
 	s.capacityWake = make(chan struct{}, 1)
@@ -1039,12 +1046,17 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	var routineWorkspace *RoutineWorkspace
+	var resourceEnvironment []string
 	if grant != nil {
 		routineWorkspace, err = s.prepareRoutineWorkspace(ctx, run, *grant, approvedRepository)
 		if err != nil {
 			return err
 		}
 		runWorkspace = routineWorkspace.Path
+		resourceEnvironment, err = s.routineEnvironment(run.ID, *grant)
+		if err != nil {
+			return err
+		}
 		if pickup != nil {
 			pickup.WorktreeID = routineWorkspace.ID
 		}
@@ -1175,7 +1187,17 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		accountIDs = candidateIDs(attempt.RouteCandidates)
 	}
 	if route.AccountID == "" {
-		route, err = s.api.Route(ctx, run.ID, s.daemonID, accountIDs, s.estimates)
+		if routineWorkspace != nil {
+			api, ok := s.api.(interface {
+				RouteRoutine(context.Context, string, string, []string, map[string]int64, agentsetup.RoutinePickup) (Route, error)
+			})
+			if !ok {
+				return ErrRoutineUnavailable
+			}
+			route, err = api.RouteRoutine(ctx, run.ID, s.daemonID, accountIDs, s.estimates, routineWorkspace.pickup())
+		} else {
+			route, err = s.api.Route(ctx, run.ID, s.daemonID, accountIDs, s.estimates)
+		}
 		if err != nil {
 			return err
 		}
@@ -1430,7 +1452,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				return mode, true
 			}
 			entry.tools, err = startManagedTools(signer.runCredential(s.tenantID, s.principalID, run.ID, s.generation),
-				toolBinding{api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: runWorkspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
+				toolBinding{resourceEnvironment: resourceEnvironment, api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: runWorkspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
 			if err != nil {
 				closeHarness("process_failed")
 				return err
@@ -1472,8 +1494,10 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			}
 		}()
 	}
-	var resourceEnvironment []string
 	if routineWorkspace != nil {
+		if err := validateRoutineCheckout(ctx, approvedRepository, *routineWorkspace); err != nil {
+			return err
+		}
 		if err := claim(); err != nil {
 			return err
 		}

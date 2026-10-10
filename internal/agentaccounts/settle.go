@@ -55,6 +55,9 @@ func SettleDeferred(ctx context.Context, tx pgx.Tx, actor tenant.Principal, runI
 	if err := actorMayUseRun(ctx, tx, actor, run.AgentID, run.ID); err != nil {
 		return err
 	}
+	if observed, err := routineExitObservedTx(ctx, tx, run); err != nil || !observed {
+		return err // Unknown exit retains every routine reservation.
+	}
 	if run.AccountID != nil {
 		a, err := lockAccount(ctx, tx, *run.AccountID)
 		if err != nil {
@@ -143,6 +146,12 @@ func Release(ctx context.Context, tx pgx.Tx, actor tenant.Principal, runID, daem
 	}
 	if err := actorMayUseRun(ctx, tx, actor, run.AgentID, run.ID); err != nil {
 		return err
+	}
+	if observed, err := routineExitObservedTx(ctx, tx, run); err != nil || !observed {
+		if err != nil {
+			return err
+		}
+		return fail(http.StatusConflict, "routine exit is unconfirmed")
 	}
 	if run.DaemonID != nil && *run.DaemonID != "" {
 		gen := ""

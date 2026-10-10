@@ -318,6 +318,8 @@
   "tests": [
     {"kind":"go","package":"./internal/agentd","name":"TestRoutineWorkspacesSeparateAndRetainWriters","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"./internal/agentruns","name":"TestRoutineLaunchClaimReplayAndCurrentAuthority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon","name":"TestAgentProjectRoleFlags","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon","name":"TestDefaultServerHasNoOutboundNetwork","tier":"ESSENTIAL"}

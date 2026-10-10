@@ -19,6 +19,8 @@ import (
 )
 
 type runRow struct {
+	RoutineLaunchID       *string
+	Trace                 json.RawMessage
 	Residency             string
 	LimitEstimates        map[string]int64
 	CapacityOverride      string
@@ -35,6 +37,17 @@ type runRow struct {
 	Generation            *string
 }
 
+// Routine holds survive terminal labels and lost heartbeats. Only the exact
+// assigned daemon's accepted process evidence permits settlement or release.
+func routineExitObservedTx(ctx context.Context, tx pgx.Tx, run runRow) (bool, error) {
+	if run.RoutineLaunchID == nil {
+		return true, nil
+	}
+	var observed bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_launch_intents WHERE id=$1 AND agent_run_id=$2 AND state='exit_observed' AND exit_observed_at IS NOT NULL)`, *run.RoutineLaunchID, run.ID).Scan(&observed)
+	return observed, err
+}
+
 func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 	if !uuidRE.MatchString(id) {
 		return runRow{}, fail(http.StatusNotFound, "run not found")
@@ -43,11 +56,11 @@ func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 	err := tx.QueryRow(ctx, `
 		SELECT r.id::text, r.agent_principal_id::text, r.model_profile_id::text, r.account_id::text,
          r.status, r.daemon_id, r.daemon_generation, COALESCE(r.requested_account_id,r.retry_account_id)::text,
-         r.purpose, e.account_id::text, e.verification_expires_at, r.capacity_override, r.account_limit_estimates
+         r.purpose, e.account_id::text, e.verification_expires_at, r.capacity_override, r.account_limit_estimates,r.routine_launch_id::text,r.trace
   FROM agent_runs r LEFT JOIN agent_pairing_enrollments e
    ON e.tenant_id=r.tenant_id AND e.verification_run_id=r.id
   WHERE r.id = $1::uuid FOR UPDATE OF r`, id).
-		Scan(&run.ID, &run.AgentID, &run.ProfileID, &run.AccountID, &run.Status, &run.DaemonID, &run.Generation, &run.RequestedAccountID, &run.Purpose, &run.VerificationAccountID, &run.VerificationExpiresAt, &run.CapacityOverride, &run.LimitEstimates)
+		Scan(&run.ID, &run.AgentID, &run.ProfileID, &run.AccountID, &run.Status, &run.DaemonID, &run.Generation, &run.RequestedAccountID, &run.Purpose, &run.VerificationAccountID, &run.VerificationExpiresAt, &run.CapacityOverride, &run.LimitEstimates, &run.RoutineLaunchID, &run.Trace)
 	if isNoRows(err) {
 		return runRow{}, fail(http.StatusNotFound, "run not found")
 	}
@@ -85,6 +98,9 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		return RouteResult{}, err
 	}
 	if err := authorizeRoute(ctx, tx, r, p, run.AgentID, run.ID); err != nil {
+		return RouteResult{}, err
+	}
+	if err := agentpairing.RequireRoutineRouteTx(ctx, tx, p, run.ID, daemonID, run.RoutineLaunchID, run.Trace, r.Header.Get(agentpairing.RoutinePickupHeader), r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
 		return RouteResult{}, err
 	}
 	if err := agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {

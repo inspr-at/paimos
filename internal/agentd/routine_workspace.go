@@ -181,11 +181,11 @@ func (s *Supervisor) prepareRoutineWorkspace(ctx context.Context, run Run, g age
 	defer cancel()
 	// Git's shared repository metadata is independent of the checkout locks.
 	// Serialize worktree creation across accounts/daemons using this repository.
-	common, err := exec.CommandContext(gitCtx, "git", "-C", repository.Repository, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+	common, err := routineGit(gitCtx, repository.Repository, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil || len(common) > 4096 {
 		return nil, ErrRoutineUnavailable
 	}
-	commonPath, err := filepath.EvalSymlinks(strings.TrimSpace(string(common)))
+	commonPath, err := filepath.EvalSymlinks(strings.TrimSpace(common))
 	if err != nil || !filepath.IsAbs(commonPath) {
 		return nil, ErrRoutineUnavailable
 	}
@@ -210,10 +210,7 @@ func (s *Supervisor) prepareRoutineWorkspace(ctx context.Context, run Run, g age
 		case <-timer.C:
 		}
 	}
-	command := exec.CommandContext(gitCtx, "git", "-C", repository.Repository, "worktree", "add", "-b", w.Branch, w.Path, repository.BaseCommit)
-	// No fetch/clone or prompt-derived arguments; Git hooks cannot run here.
-	command.Env = append(os.Environ(), "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.hooksPath", "GIT_CONFIG_VALUE_0=/dev/null", "GIT_TERMINAL_PROMPT=0")
-	if err := command.Run(); err != nil {
+	if _, err := routineGit(gitCtx, repository.Repository, "worktree", "add", "-b", w.Branch, w.Path, repository.BaseCommit); err != nil {
 		return nil, errors.New("routine worktree allocation unconfirmed")
 	}
 	if err := validateRoutineCheckout(gitCtx, repository, w); err != nil {
@@ -237,19 +234,68 @@ func validateRoutineCheckout(ctx context.Context, r RoutineRepository, w Routine
 	}
 	gitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	branch, err := exec.CommandContext(gitCtx, "git", "-C", w.Path, "symbolic-ref", "--short", "HEAD").Output()
-	if err != nil || strings.TrimSpace(string(branch)) != w.Branch {
+	branch, err := routineGit(gitCtx, w.Path, "symbolic-ref", "--short", "HEAD")
+	if err != nil || strings.TrimSpace(branch) != w.Branch {
 		return ErrProcessesUnconfirmed
 	}
-	common, err := exec.CommandContext(gitCtx, "git", "-C", w.Path, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
-	approved, approvedErr := exec.CommandContext(gitCtx, "git", "-C", r.Repository, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
-	if err != nil || approvedErr != nil || string(common) != string(approved) {
+	common, err := routineGit(gitCtx, w.Path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	approved, approvedErr := routineGit(gitCtx, r.Repository, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil || approvedErr != nil || common != approved {
 		return ErrProcessesUnconfirmed
 	}
-	if exec.CommandContext(gitCtx, "git", "-C", w.Path, "merge-base", "--is-ancestor", r.BaseCommit, "HEAD").Run() != nil {
+	if _, err := routineGit(gitCtx, w.Path, "merge-base", "--is-ancestor", r.BaseCommit, "HEAD"); err != nil {
 		return ErrProcessesUnconfirmed
 	}
 	return nil
+}
+
+// Allocation must not execute repository hooks, filters, fsmonitor helpers or
+// lazy network fetches before the qualified native launch boundary. Reuse the
+// review helper's bounded output/environment discipline; do not read config
+// values (which could include credentials), only bounded filter key names.
+func routineGit(ctx context.Context, repository string, args ...string) (string, error) {
+	flags := []string{"--no-replace-objects", "--no-pager", "-C", repository, "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "core.attributesFile=" + os.DevNull}
+	environment := []string{}
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GIT_") && !strings.HasPrefix(entry, "LC_ALL=") {
+			environment = append(environment, entry)
+		}
+	}
+	environment = append(environment, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull, "GIT_ATTR_NOSYSTEM=1", "GIT_ALLOW_PROTOCOL=file", "GIT_NO_LAZY_FETCH=1", "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
+	run := func(arguments []string) (string, error) {
+		command := exec.CommandContext(ctx, "git", arguments...)
+		command.Env = environment
+		out := &boundedReviewBuffer{limit: 192 << 10}
+		command.Stdout = out
+		err := command.Run()
+		return out.String(), err
+	}
+	if len(args) > 0 && args[0] == "worktree" {
+		keys, err := run(append(append([]string(nil), flags...), "config", "--local", "--name-only", "--get-regexp", `^filter\..*\.(smudge|process|required)$`))
+		var exit *exec.ExitError
+		if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1 && keys == "") {
+			return "", ErrRoutineUnavailable
+		}
+		sections := map[string]bool{}
+		for _, key := range strings.Fields(keys) {
+			index := strings.LastIndex(key, ".")
+			if index < 7 || len(key) > 160 {
+				return "", ErrRoutineUnavailable
+			}
+			sections[key[:index]] = true
+		}
+		if len(sections) > 64 {
+			return "", ErrRoutineUnavailable
+		}
+		for section := range sections {
+			flags = append(flags, "-c", section+".smudge=", "-c", section+".process=", "-c", section+".required=false")
+		}
+	}
+	out, err := run(append(flags, args...))
+	if err != nil {
+		return "", ErrRoutineUnavailable
+	}
+	return out, nil
 }
 
 func (s *Supervisor) acquireRoutineCheckout(runID string, w RoutineWorkspace) error {
@@ -296,8 +342,12 @@ func (s *Supervisor) claimRoutine(ctx context.Context, run Run, ids []string, pi
 	if !ok {
 		return ErrRoutineUnavailable
 	}
+	return api.ClaimRoutine(ctx, run.ID, s.daemonID, s.generation, ids, pickup, w.pickup())
+}
+
+func (w RoutineWorkspace) pickup() agentsetup.RoutinePickup {
 	g := w.Grant
-	return api.ClaimRoutine(ctx, run.ID, s.daemonID, s.generation, ids, pickup, agentsetup.RoutinePickup{LaunchID: g.LaunchID, WorktreeID: w.ID, Capability: g.Capability, DaemonDigest: g.DaemonDigest, CapabilityDigest: g.CapabilityDigest, ComputerID: g.ComputerID})
+	return agentsetup.RoutinePickup{LaunchID: g.LaunchID, WorktreeID: w.ID, Capability: g.Capability, DaemonDigest: g.DaemonDigest, CapabilityDigest: g.CapabilityDigest, ComputerID: g.ComputerID}
 }
 
 func (s *Supervisor) releaseRoutineCheckouts() error {
@@ -364,4 +414,34 @@ func (s *Supervisor) routineEnvironment(runID string, g agentsetup.RoutineGrant)
 		return nil, ErrRoutineUnavailable
 	}
 	return append([]string(nil), environment...), nil
+}
+
+// These overrides originate only in a validated allocator lease, never in
+// terminal/tool input. Existing manual calls pass nil and retain their policy.
+func routineTempRoot(resources []string) string {
+	for _, entry := range resources {
+		if key, value, ok := strings.Cut(entry, "="); ok && key == "AEON_RUN_TEMP_DIR" {
+			return value
+		}
+	}
+	return ""
+}
+
+func routineResourceEnvironment(base, resources []string) []string {
+	if len(resources) == 0 {
+		return base
+	}
+	keys := map[string]bool{}
+	for _, entry := range resources {
+		key, _, _ := strings.Cut(entry, "=")
+		keys[key] = true
+	}
+	out := make([]string, 0, len(base)+len(resources))
+	for _, entry := range base {
+		key, _, _ := strings.Cut(entry, "=")
+		if !keys[key] {
+			out = append(out, entry)
+		}
+	}
+	return append(out, resources...)
 }

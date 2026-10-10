@@ -41,6 +41,7 @@ func (s *managedToolServer) Close() error {
 }
 
 type toolBinding struct {
+	resourceEnvironment                   []string
 	reportActivity                        func(string) (string, bool)
 	api                                   RunToolAPI
 	workOrderID, runID, workspace, branch string
@@ -216,7 +217,7 @@ func addManagedTools(s *mcp.Server, b toolBinding) {
 			if !b.active() {
 				return nil, "", ErrNotOwned
 			}
-			out, err := libraries.runTerminal(ctx, b.workspace, b.branch, in)
+			out, err := libraries.runTerminalWithResources(ctx, b.workspace, b.branch, in, b.resourceEnvironment)
 			return nil, out, err
 		})
 }
@@ -248,6 +249,10 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 }
 
 func (libraries *terminalLibraryCache) runTerminal(ctx context.Context, workspace, branch string, in terminalArgs) (string, error) {
+	return libraries.runTerminalWithResources(ctx, workspace, branch, in, nil)
+}
+
+func (libraries *terminalLibraryCache) runTerminalWithResources(ctx context.Context, workspace, branch string, in terminalArgs, resources []string) (string, error) {
 	if in.Directory != "" && in.Directory != "root" && in.Directory != "web" {
 		return "", errors.New("terminal directory denied")
 	}
@@ -301,7 +306,7 @@ func (libraries *terminalLibraryCache) runTerminal(ctx context.Context, workspac
 	if pathWithin(workspace, physicalHome) {
 		return "", errors.New("terminal workspace contains home")
 	}
-	tmp, err := os.MkdirTemp("", "aeon-terminal-")
+	tmp, err := os.MkdirTemp(routineTempRoot(resources), "aeon-terminal-")
 	if err != nil {
 		return "", err
 	}
@@ -401,8 +406,12 @@ func (libraries *terminalLibraryCache) runTerminal(ctx context.Context, workspac
 	if err != nil {
 		return "", err
 	}
-	profile := terminalSandboxProfile(physicalWorkspace, physicalTmp, readRoots, toolPaths, libraryPaths)
-	childEnv := terminalEnvironment(physicalTmp, moduleProxy, goRoot, toolPaths...)
+	sandboxTemporary := physicalTmp
+	if len(resources) > 0 {
+		sandboxTemporary = routineTempRoot(resources)
+	}
+	profile := terminalSandboxProfile(physicalWorkspace, sandboxTemporary, readRoots, toolPaths, libraryPaths)
+	childEnv := routineResourceEnvironment(terminalEnvironment(physicalTmp, moduleProxy, goRoot, toolPaths...), resources)
 	// Even read-only Git queries can trigger repository-configured helpers.
 	// Keep branch/staging checks inside exactly the same sandbox as the command.
 	gitProbe := func(args ...string) ([]byte, error) {
