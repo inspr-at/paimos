@@ -146,6 +146,14 @@ export const sendMessage = (projectId: string, body: MessageSend) => request<Pro
 export interface MessageStatus { cancelled?: boolean; message_id: string; status: 'sent' | 'delivered' | 'read' | 'not_delivered'; reason?: string; delivered_at: string | null; read_at: string | null; deliver_by: string | null }
 export interface ChatCancelResult { contract: 'chat-v1'; message_id: string; result: 'cancelled' | 'too_late' | 'uncertain'; receipt: { state: string } }
 export const cancelSessionMessage = (projectId: string, messageId: string) => request<ChatCancelResult>(`/projects/${enc(projectId)}/messages/${enc(messageId)}/cancel`, 'POST')
+// AEON-1071: the person's own chat thread whose current binding is this
+// session. 404 means no live stream for it (unbound, or chat is disabled).
+export async function chatThreadForSession(sessionId: string): Promise<{ status: number; thread?: string }> {
+  const response = await api(`/chat-sessions/${enc(sessionId)}/thread`)
+  if (!response.ok) return { status: response.status }
+  const body = await response.json().catch(() => null) as { conversation_id?: unknown } | null
+  return typeof body?.conversation_id === 'string' && body.conversation_id ? { status: 200, thread: body.conversation_id } : { status: 502 }
+}
 export const messageStatuses = (ids: string[]) => request<{ items: MessageStatus[] }>(`/inbox/message-status?ids=${ids.map(enc).join(',')}`)
 
 export const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed. Please retry.'

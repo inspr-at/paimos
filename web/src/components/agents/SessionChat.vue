@@ -3,7 +3,7 @@
 import { displayLanguage } from '../../lib/displayLanguage'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { APIError } from '../../lib/api'
-import { cancelSessionMessage, messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
+import { cancelSessionMessage, chatThreadForSession, messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
 import { readSessionMarker, writeSessionMarker } from '../../lib/agentRows'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
@@ -12,6 +12,8 @@ import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import SessionRequests from './SessionRequests.vue'
+import ChatLiveBlock from './ChatLiveBlock.vue'
+import { applyLiveFrame, followChatLive, liveWorking, settled, type LiveSource, type LiveTurn } from './chatLive'
 import { collapseMessages } from './sessionMessages'
 import { advanceReceipt, chatCapability, isQueuedMessage, chatSendLevel, chatWords, awaitsInboxHook, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
 
@@ -39,7 +41,9 @@ const messages = computed(() => {
 const address = computed(() => agents.addressOf(s.value.agent_principal_id))
 // A registered address is sent when one exists. Otherwise the recipient is the session's principal.
 const recipient = computed(() => address.value || s.value.agent_principal_id)
-const working = computed(() => s.value.activity === 'busy')
+// A live turn proves the agent is working before the session row catches up.
+const liveTurn = ref<LiveTurn | null>(null)
+const working = computed(() => s.value.activity === 'busy' || liveWorking(liveTurn.value))
 const capability = computed(() => chatCapability(s.value))
 const atPrompt = computed(() => capability.value === 'between' && awaitsInboxHook(s.value))
 const uncertain = ref<Set<string>>(new Set())
@@ -57,7 +61,10 @@ const threadMessages = computed(() => {
 })
 const current = computed(() => collapseMessages(threadMessages.value))
 const ended = computed(() => s.value.phase === 'stopped' || !!s.value.stopped_at || !!s.value.archived_at)
-const canSteer = computed(() => working.value && ['native', 'next'].includes(capability.value) && s.value.advertised_capabilities.includes('steer'))
+// The steer action stays in place for the whole session, enabled only while
+// the agent works, so a turn starting or ending never moves the composer.
+const steerOffered = computed(() => ['native', 'next'].includes(capability.value) && s.value.advertised_capabilities.includes('steer'))
+const canSteer = computed(() => working.value && steerOffered.value)
 const alternative = computed(() => capability.value === 'next' ? words.value.next : words.value.now)
 const primaryLabel = computed(() => editing.value ? words.value.save : working.value && capability.value !== 'between' ? words.value.after : words.value.send)
 // Unmanaged sessions take rename/model requests next to the composer (AEON-225).
@@ -85,8 +92,13 @@ const replyTo = ref<ProjectMessage | null>(null)
 const sendError = ref('')
 const historyLoading = ref(false)
 const historyError = ref('')
-const canStop = computed(() => !ended.value && s.value.activity === 'busy' && !props.interruptBlock)
-function stop() { if (props.active && canStop.value) emit('interrupt') }
+const canStop = computed(() => !ended.value && working.value && !props.interruptBlock)
+function stop() {
+  if (!props.active || !canStop.value) return
+  const before = agents.controls[s.value.id]?.id
+  emit('interrupt')
+  if (liveWorking(liveTurn.value)) markStopping(before)
+}
 function chatKeys(event: KeyboardEvent) {
   if (!props.active || event.key !== 'Escape' || event.repeat || event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
   if (document.querySelector('dialog[open], .floating, .ticket-peek-host')) return
@@ -574,6 +586,97 @@ watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
 watch([() => agents.threadPulse, () => agents.sessionsUpdatedAt], () => { if (loaded && props.active) void refresh().then(refreshReceipts) })
 watch(() => props.active, active => { if (active && loaded) void refresh().then(refreshReceipts) })
 
+// ---------- Live turn (AEON-1071, transcript policy A) ----------
+// Deltas and tool activity render in place, batched per animation frame. They
+// stay in this view's memory only; a reload shows final messages alone.
+const latestAgentMessage = computed(() => {
+  for (let i = messages.value.length - 1; i >= 0; i--) if (messages.value[i]!.sender_principal_id === s.value.agent_principal_id) return messages.value[i]!.id
+  return ''
+})
+const liveFrameLimit = 256
+let liveFrames: string[] = []
+let liveOverflow = false
+let liveDropped: number | undefined
+let liveFrameHandle: number | undefined
+let liveGeneration = 0
+let follower: ReturnType<typeof followChatLive> | undefined
+let stopTimer: ReturnType<typeof setTimeout> | undefined
+let stopBefore: string | undefined
+let stopIssued = false
+function applyLiveFrames() {
+  liveFrameHandle = undefined
+  const frames = liveFrames, overflow = liveOverflow
+  liveFrames = []; liveOverflow = false
+  let turn = liveTurn.value, hint = false
+  const at = Date.now()
+  for (const data of frames) {
+    const applied = applyLiveFrame(turn, data, at, latestAgentMessage.value, liveDropped)
+    turn = applied.turn
+    if (applied.dropped !== undefined) liveDropped = applied.dropped
+    if (applied.hint) hint = true
+  }
+  // Frames beyond the per-frame bound were skipped: say so instead of
+  // pretending the text is whole.
+  liveTurn.value = overflow && turn ? { ...turn, gap: true } : turn
+  if (hint && loaded) void refresh().then(refreshReceipts)
+}
+function liveFrame(data: string) {
+  if (liveFrames.length >= liveFrameLimit) { liveOverflow = true; return }
+  liveFrames.push(data)
+  if (liveFrameHandle === undefined) liveFrameHandle = requestAnimationFrame(applyLiveFrames)
+}
+function resetLive() {
+  if (liveFrameHandle !== undefined) { cancelAnimationFrame(liveFrameHandle); liveFrameHandle = undefined }
+  if (stopTimer !== undefined) { clearTimeout(stopTimer); stopTimer = undefined }
+  liveFrames = []; liveOverflow = false; liveDropped = undefined; liveTurn.value = null
+}
+function clearStopping() {
+  const turn = liveTurn.value
+  if (turn?.stopRequested && !turn.ended) liveTurn.value = { ...turn, stopRequested: false }
+}
+// "Stopping" holds only while an interrupt is on record. A refused one, or
+// none within five seconds, withdraws the claim.
+function markStopping(before: string | undefined) {
+  const turn = liveTurn.value
+  if (!turn) return
+  liveTurn.value = { ...turn, stopRequested: true }
+  stopBefore = before; stopIssued = false
+  if (stopTimer !== undefined) clearTimeout(stopTimer)
+  stopTimer = setTimeout(() => { stopTimer = undefined; if (!stopIssued) clearStopping() }, 5000)
+}
+watch(() => agents.controls[s.value.id], control => {
+  if (!control || control.kind !== 'interrupt' || control.id === stopBefore) return
+  stopIssued = true
+  if (control.state === 'completed' && control.outcome !== 'applied') clearStopping()
+})
+watch([liveTurn, latestAgentMessage], ([turn, latest]) => { if (settled(turn, latest)) liveTurn.value = null })
+const openLive = (url: string) => typeof EventSource === 'undefined' ? null : new EventSource(url, { withCredentials: true }) as unknown as LiveSource
+// One stream per open chat tab and person; it ends with the session.
+watch([() => me.value, () => s.value.id, () => props.active, ended], () => {
+  follower?.stop(); follower = undefined
+  resetLive()
+  if (!me.value || !person.value || !props.active || ended.value || !s.value.id) return
+  const generation = ++liveGeneration
+  follower = followChatLive(s.value.id, {
+    frame: data => { if (generation === liveGeneration) liveFrame(data) },
+    resync: () => {
+      if (generation !== liveGeneration) return
+      resetLive()
+      if (loaded) void refresh().then(refreshReceipts)
+    },
+    attached: () => {},
+  }, { lookup: chatThreadForSession, open: openLive })
+}, { immediate: true })
+// A session without a live thread so far may get one when a turn starts.
+watch(() => s.value.activity, activity => { if (activity === 'busy') follower?.retry() })
+// Streaming grows only at the bottom; keep a pinned reader on the latest line.
+watch(() => liveTurn.value && `${liveTurn.value.text.length}:${liveTurn.value.tools.length}:${liveTurn.value.state}:${liveTurn.value.ended}`, async () => {
+  await nextTick()
+  if (props.active && entered && stick && !paging) keepBottom()
+  else onScroll()
+})
+onBeforeUnmount(() => { liveGeneration++; follower?.stop(); resetLive() })
+
 // ---------- Composer ----------
 const composeBlock = computed(() => {
   if (ended.value || sendError.value === words.value.ended) return words.value.ended
@@ -725,9 +828,10 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
           <span v-if="historyError" class="history-error" role="alert">{{ historyError }}</span>
         </div>
         <div v-if="noPermission" class="empty-state"><AppIcon name="lock" :size="32" /><h3>{{ words.noPermissionTitle }}</h3><p>{{ words.noPermission }}</p></div>
-        <div v-else-if="agents.threadState(s) === 'ready' && !messages.length" class="empty-state"><AppIcon name="agent" :size="32" /><h3>{{ words.emptyTitle }} {{ view.name }}</h3><p>{{ words.emptyBody }}</p><div class="suggestions"><button v-for="text in [words.suggest1, words.suggest2, words.suggest3]" :key="text" type="button" :disabled="!canWrite || ended" @click="suggest(text)">{{ text }}</button></div></div>
+        <div v-else-if="agents.threadState(s) === 'ready' && !messages.length && !liveTurn" class="empty-state"><AppIcon name="agent" :size="32" /><h3>{{ words.emptyTitle }} {{ view.name }}</h3><p>{{ words.emptyBody }}</p><div class="suggestions"><button v-for="text in [words.suggest1, words.suggest2, words.suggest3]" :key="text" type="button" :disabled="!canWrite || ended" @click="suggest(text)">{{ text }}</button></div></div>
         <SessionMessages v-else :messages="threadMessages" :principal-id="s.agent_principal_id" :session-id="s.id" :now="now"
           :can-reply="canWrite && !composeBlock" :new-from="newFrom" :new-count="newCount" :statuses="statuses" :queued-ids="queuedIds" @reply="reply" @retry="retry" />
+        <ChatLiveBlock v-if="liveTurn && !noPermission" :turn="liveTurn" :name="view.name" :now="now" :can-stop="canStop" />
       </div>
         <p v-if="editing" class="replying" role="status"><AppIcon name="edit" :size="13" /><span>{{ words.editing }}</span><button type="button" class="icon-btn sm flat" :aria-label="words.cancel" @click="editing = null"><AppIcon name="close" :size="12" /></button></p>
         <p v-else-if="replyTo" class="replying"><span :title="replyTo.body">{{ words.replying }} “{{ replyTo.body }}”</span><button type="button" class="icon-btn sm flat" :aria-label="words.cancelReply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
@@ -761,12 +865,12 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
         <textarea :id="`compose-${s.id}`" ref="textarea" v-model="draft" class="field" rows="2" :placeholder="`${words.placeholder} ${view.name}`" :disabled="!canWrite" @keydown="composerKeys" @focus="toBottom(true)" />
         <p v-if="capability === 'abort'" class="gemini-note">{{ words.geminiNote }}</p>
         <p v-if="sendError" class="send-error" role="alert"><AppIcon name="alert" :size="12" />{{ sendError }}</p>
-        <div class="compose-row">
+        <div class="compose-row" :class="{ steering: steerOffered }">
           <span class="compose-hint"><KeyCap k="shift" /><KeyCap k="enter" />{{ words.newline }}</span>
-          <button v-if="canSteer" type="button" class="btn sm steer-send" :aria-label="alternative" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || offline" @click="send('steer')"><AppIcon name="bolt" :size="13" />{{ alternative }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
+          <button v-if="steerOffered" type="button" class="btn sm steer-send" :aria-label="alternative" :aria-busy="sending" :data-tip="canSteer ? undefined : words.steerIdle" :disabled="!canSteer || !draft.trim() || !canWrite || queueBusy || !!editing || offline" @click="send('steer')"><AppIcon name="bolt" :size="13" />{{ alternative }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
           <button v-if="capability === 'abort' && working" type="button" class="btn sm stop-send" :aria-label="words.stopSend" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || !canStop || offline" @click="stopAndSend"><AppIcon name="alert" :size="13" />{{ words.stopSend }}</button>
           <button type="submit" class="btn sm primary send" :aria-label="primaryLabel" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || offline"><AppIcon name="send" :size="13" /><span class="send-label"><span>{{ primaryLabel }}</span><span aria-hidden="true" class="label-size">{{ words.after }}</span></span><KeyCap k="enter" /></button>
-          <button v-if="s.management_mode === 'managed' && s.advertised_capabilities.includes('interrupt')" type="button" class="btn sm chat-stop" :aria-label="words.stop" :data-tip="canStop ? words.stopTip : interruptBlock || words.stopTip" :disabled="!canStop" @click="stop"><AppIcon name="stop" :size="13" /><span>{{ words.stop }}</span><KeyCap k="Esc" /></button>
+          <button type="button" class="btn sm chat-stop" :aria-label="words.stop" :data-tip="canStop ? words.stopTip : interruptBlock || words.stopTip" :disabled="!canStop" @click="stop"><AppIcon name="stop" :size="13" /><span>{{ words.stop }}</span><KeyCap k="Esc" /></button>
         </div>
       </form>
     </footer>
@@ -812,10 +916,16 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 .jump-enter-from, .jump-leave-to { opacity: 0; transform: translate(-50%, 6px); }
 @media (prefers-reduced-motion: reduce) { .jump-enter-active, .jump-leave-active { transition: none; } }
 .composer { flex-shrink: 0; padding: 10px 14px 12px; border-top: 1px solid var(--line); background: var(--surface-raised-2); border-radius: 0 0 var(--radius) var(--radius); }
-.compose { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+.compose { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; container-type: inline-size; }
 .compose textarea { width: 100%; min-width: 0; min-height: 56px; height: 64px; resize: none; padding: 9px 11px; font: inherit; font-size: 13.5px; line-height: 1.45; }
 .compose-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
 .compose-hint { margin-left: auto; display: inline-flex; gap: 2px; }
+/* With the steer action always present, a narrow panel drops the new-line hint
+   so Stop stays on the action row (AEON-1071). */
+@container (max-width: 640px) {
+  .compose-row.steering .compose-hint { display: none; }
+  .compose-row.steering .steer-send { margin-left: auto; }
+}
 .compose-block { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); padding: 6px 2px; overflow-wrap: anywhere; }
 .compose-block svg { flex: none; }
 .replying { position: absolute; bottom: 12px; left: 14px; right: 14px; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 10px; border-radius: 8px; background: var(--code-bg); font-size: 12px; color: var(--ink-2); }
