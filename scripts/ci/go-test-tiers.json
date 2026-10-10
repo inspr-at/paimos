@@ -7206,6 +7206,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelKeyMatchesAliasesAndAPIIDs","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelWaitReasonsRespectCurrentAccountSharing","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestNewHarnessProfileValidation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestNormalizeAuthorFamily","tags":["delete-candidate"],"tier":"GATED-FULL"}
