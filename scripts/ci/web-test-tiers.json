@@ -14200,6 +14200,20 @@
     ,
     {"kind":"node","file":"tests/releases.test.ts","name":"spans read in minutes, hours and days","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/review-tooling.test.ts","name":"audit facts require completed independent reports and retain the highest finding severity","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/review-tooling.test.ts","name":"builder self-check refuses missing, stale, failed and bypassed evidence before review","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/review-tooling.test.ts","name":"evidence input refuses oversized, malformed and symlinked files without echoing contents","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/review-tooling.test.ts","name":"offline audit CLI prepares API-compatible facts and rejects tampered selection and overwrites","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/review-tooling.test.ts","name":"self-check CLI binds real commits and refuses dirty, untracked or moved snapshots","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/review-tooling.test.ts","name":"weekly audit collection paginates, checks completeness and uses an exclusive UTC week end","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/review-tooling.test.ts","name":"weekly audit sampling is deterministic and refuses truncated or ambiguous inventories","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/rules.test.ts","name":"a 5xx after a committed write is uncertain and does not continue","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/rules.test.ts","name":"a layer cap refusal names the layer","tier":"GATED-FULL"}
