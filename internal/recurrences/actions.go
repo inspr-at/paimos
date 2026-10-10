@@ -34,7 +34,7 @@ func (m *Module) authorizeActionTx(ctx context.Context, tx pgx.Tx, p tenant.Prin
 		return empty, routineguard.Decision{}, err
 	}
 	d := current.Definition
-	if identity != b.ExecutionPrincipalID || d == nil || d.Assignment == nil || d.OwnerPrincipalID != b.OwnerID || current.ProjectID != b.ProjectID || current.ParentID != b.ParentID || routineguard.Digest(d.Assignment) != b.AssignmentDigest || b.ConsentRevision != current.Revision {
+	if identity != b.ExecutionPrincipalID || d == nil || d.Assignment == nil || d.OwnerPrincipalID != b.OwnerID || current.ProjectID != b.ProjectID || current.ParentID != b.ParentID || d.Scope.Kind != b.ScopeType || d.Scope.ProjectID != b.ScopeProjectID || routineguard.Digest(d.Assignment) != b.AssignmentDigest || b.ConsentRevision != current.Revision {
 		return empty, routineguard.Decision{}, workorders.Fail(409, "routine_grant_changed")
 	}
 	if !slices.Contains(d.Assignment.AllowedActions, c.Action) {

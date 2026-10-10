@@ -29,8 +29,9 @@ Without that verifier the route returns `guardrail_evaluation_required` and
 writes no effect or success receipt. Project execution remains default off.
 
 Each successful effect and its immutable request digest/receipt commit in one
-transaction. Audit events include the run, action and owner attribution, and
-are appended after the remaining writes. Identical authorized replay returns
+transaction. Audit events retain owner attribution and are appended after remaining writes.
+Run/action identifiers appear in public events only when definition and output
+share the same project visibility; private lineage stays in scoped receipts. Identical authorized replay returns
 the original receipt; different content with the same key conflicts. Failed
 writes roll back their receipts. A retry must still have current run authority.
 

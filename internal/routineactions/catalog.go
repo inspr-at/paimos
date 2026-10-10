@@ -71,6 +71,7 @@ type Receipt struct {
 // owner supplied in the request. Current consent is checked by the authorizer.
 type Binding struct {
 	RunID, RecurrenceID, OwnerID, ExecutionPrincipalID, ProjectID, ParentID string
+	ScopeType, ScopeProjectID                                               string
 	DefinitionRevision, ConsentRevision                                     int64
 	Assignment                                                              json.RawMessage
 	AssignmentDigest                                                        string
@@ -244,9 +245,9 @@ func loadBinding(ctx context.Context, tx pgx.Tx, p tenant.Principal, run, attemp
 	var b Binding
 	var state, attemptState, attemptPrincipal, attemptDigest string
 	var consent bool
-	err := tx.QueryRow(ctx, `SELECT r.id::text,r.recurrence_id::text,r.owner_principal_id::text,coalesce(r.execution_principal_id::text,''),r.output_project_id::text,r.output_parent_id::text,r.definition_revision,r.consent_revision,r.assignment,r.assignment_digest,r.state,r.execute_consent,a.state,coalesce(a.principal_id::text,''),a.assignment_digest
+	err := tx.QueryRow(ctx, `SELECT r.id::text,r.recurrence_id::text,r.owner_principal_id::text,coalesce(r.execution_principal_id::text,''),r.output_project_id::text,r.output_parent_id::text,r.definition_revision,r.consent_revision,r.assignment,r.assignment_digest,r.state,r.execute_consent,a.state,coalesce(a.principal_id::text,''),a.assignment_digest,r.scope_type,coalesce(r.scope_project_id::text,'')
  FROM routine_runs r JOIN routine_attempts a ON a.tenant_id=r.tenant_id AND a.run_id=r.id AND a.id=$2
- WHERE r.id=$1 FOR NO KEY UPDATE OF r,a`, run, attempt).Scan(&b.RunID, &b.RecurrenceID, &b.OwnerID, &b.ExecutionPrincipalID, &b.ProjectID, &b.ParentID, &b.DefinitionRevision, &b.ConsentRevision, &b.Assignment, &b.AssignmentDigest, &state, &consent, &attemptState, &attemptPrincipal, &attemptDigest)
+ WHERE r.id=$1 FOR NO KEY UPDATE OF r,a`, run, attempt).Scan(&b.RunID, &b.RecurrenceID, &b.OwnerID, &b.ExecutionPrincipalID, &b.ProjectID, &b.ParentID, &b.DefinitionRevision, &b.ConsentRevision, &b.Assignment, &b.AssignmentDigest, &state, &consent, &attemptState, &attemptPrincipal, &attemptDigest, &b.ScopeType, &b.ScopeProjectID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return b, workorders.Fail(404, "routine_grant_not_found")
 	}
@@ -326,7 +327,14 @@ func applyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Binding, in R
 	if _, err := tx.Exec(ctx, `UPDATE routine_actions SET result=$2 WHERE id=$1`, out.ID, raw); err != nil {
 		return Receipt{}, err
 	}
-	meta, _ := json.Marshal(map[string]string{"routine_run_id": b.RunID, "routine_action_id": out.ID, "on_behalf_of": b.OwnerID})
+	metadata := map[string]string{"on_behalf_of": b.OwnerID}
+	// Output-project readers may not see a personal/workspace/source-project
+	// definition. Keep private lineage in its RLS-scoped receipt, not public
+	// node events; the ordinary effect and owner attribution remain visible.
+	if b.ScopeType == "project" && b.ScopeProjectID == b.ProjectID {
+		metadata["routine_run_id"], metadata["routine_action_id"] = b.RunID, out.ID
+	}
+	meta, _ := json.Marshal(metadata)
 	// No further lock acquisition after the event counter.
 	for _, e := range nodeEvents {
 		e.Metadata = meta

@@ -64,7 +64,7 @@ func TestRoutineActionsAtomicReplayAndTargets(t *testing.T) {
 		}
 		return tx.QueryRow(t.Context(), `INSERT INTO routine_attempts(tenant_id,run_id,attempt_key,role,principal_id,assignment_digest,state) VALUES($1,$2,'build','build',$3,$4,'running') RETURNING id::text`, p.TenantID, run, p.ID, routineguard.Digest(assignment)).Scan(&attempt)
 	})
-	binding := Binding{RunID: run, OwnerID: p.ID, ProjectID: project, ParentID: parent, Assignment: assignment}
+	binding := Binding{RunID: run, OwnerID: p.ID, ProjectID: project, ParentID: parent, Assignment: assignment, ScopeType: "project", ScopeProjectID: project}
 	revision := func(id string) int64 {
 		t.Helper()
 		var at time.Time
