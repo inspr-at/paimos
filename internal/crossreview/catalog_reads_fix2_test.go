@@ -49,16 +49,11 @@ func TestReadSnapshotReauthorizesAfterCommittedPreparation(t *testing.T) {
 				if f.catalogReadState(t) != before {
 					t.Fatal("final refusal changed independently authorized setup")
 				}
-				f.tx(t, func(tx pgx.Tx) error {
-					var profiles, seeds int
-					if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM model_profiles),(SELECT count(*) FROM events WHERE type='model.registry_seeded')`).Scan(&profiles, &seeds); err != nil {
-						return err
-					}
-					if profiles <= 3 || seeds != 1 {
-						t.Fatalf("preparation was not independently committed: %d profiles, %d seeds", profiles, seeds)
-					}
-					return nil
-				})
+				wantProfiles := 3
+				if cold {
+					wantProfiles = 0
+				}
+				f.assertPreparedCatalog(t, wantProfiles)
 			})
 		}
 	}
@@ -274,7 +269,7 @@ func TestReadPreparationHoldsFenceAgainstRevocation(t *testing.T) {
 		for _, path := range []string{"/api/model-preferences", "/api/models/resolve?role=build&area=backend"} {
 			t.Run(path+map[bool]string{true: " cold", false: " additive"}[cold], func(t *testing.T) {
 				f := newCatalogFixture(t, false, cold)
-				pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "INSERT INTO model_profiles") })
+				pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "INSERT INTO model_catalog_facts") })
 				h := f.boundaryHandler(t, pool)
 				r := boundaryRequest(ctx, path, nil, "", f.boundaryCookie(t))
 				r.Method = "GET"
@@ -307,16 +302,11 @@ func TestReadPreparationHoldsFenceAgainstRevocation(t *testing.T) {
 				if out.Code != 200 && !(out.Code == 403 && strings.Contains(out.Body.String(), "missing_role_permission")) {
 					t.Fatalf("unexpected inverse read %d %s", out.Code, out.Body.String())
 				}
-				f.tx(t, func(tx pgx.Tx) error {
-					var profiles, seeds int
-					if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM model_profiles),(SELECT count(*) FROM events WHERE type='model.registry_seeded')`).Scan(&profiles, &seeds); err != nil {
-						return err
-					}
-					if profiles <= 3 || seeds != 1 {
-						t.Fatalf("authorized setup lost: %d profiles, %d seeds", profiles, seeds)
-					}
-					return nil
-				})
+				wantProfiles := 3
+				if cold {
+					wantProfiles = 0
+				}
+				f.assertPreparedCatalog(t, wantProfiles)
 				state := f.catalogReadState(t)
 				next := boundaryRequest(ctx, path, nil, "", f.boundaryCookie(t))
 				next.Method = "GET"
@@ -338,6 +328,8 @@ func (f *fixture) catalogReadState(t *testing.T) string {
 	f.tx(t, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT jsonb_build_object(
 		 'profiles',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM model_profiles p),
+		 'facts',(SELECT jsonb_agg(to_jsonb(f) ORDER BY provider,model_id,route,fact,source) FROM model_catalog_facts f),
+		 'settings',(SELECT to_jsonb(s) FROM model_refresh_settings s),
 		 'routes',(SELECT jsonb_agg(to_jsonb(r) ORDER BY role,priority) FROM model_role_routes r),
 		 'seeds',(SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM events e WHERE type='model.registry_seeded'),
 		 'counter',(SELECT to_jsonb(c) FROM event_counters c))::text`).Scan(&state)
@@ -377,16 +369,11 @@ func TestPreferenceAndPlacementReadInitializeThroughMiddleware(t *testing.T) {
 				} else if len(body["preference"]) == 0 {
 					t.Fatal("placement read returned the legacy resolver response")
 				}
-				f.tx(t, func(tx pgx.Tx) error {
-					var profiles, seeds int
-					if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM model_profiles),(SELECT count(*) FROM events WHERE type='model.registry_seeded')`).Scan(&profiles, &seeds); err != nil {
-						return err
-					}
-					if profiles <= 3 || seeds != 1 {
-						t.Fatalf("setup did not commit once: profiles=%d seeds=%d", profiles, seeds)
-					}
-					return nil
-				})
+				wantProfiles := 3
+				if cold {
+					wantProfiles = 0
+				}
+				f.assertPreparedCatalog(t, wantProfiles)
 			})
 		}
 	}

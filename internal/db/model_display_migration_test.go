@@ -24,6 +24,20 @@ func TestModelDisplayMigrationPreservesPinsAcrossTenants(t *testing.T) {
 	})
 	var tenants, profiles []string
 	err = db.MigrateWithHook(ctx, d.App, func(name string) error {
+		if name == "1331_model_catalog_facts.sql" {
+			// Arrange older-binary inserts before the catalog expansion stops
+			// assigning guessed levels. Their published metadata must survive it.
+			for _, tenantID := range tenants {
+				if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+					_, err := tx.Exec(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier)
+						VALUES($1,'post-upgrade-opus','2','claude','anthropic','opus','high','strong')`, tenantID)
+					return err
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 		if name != "1074_model_display_effort.sql" {
 			return nil
 		}
@@ -58,7 +72,7 @@ func TestModelDisplayMigrationPreservesPinsAcrossTenants(t *testing.T) {
 			var id, revision, name, short, version, provider string
 			var level, count int
 			if err := tx.QueryRow(ctx, `SELECT p.id::text,p.version,d.model_display->>'display_name',d.model_display->>'short_name',d.model_display->>'model_version',d.effort_level,d.provider
-    FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id`).Scan(&id, &revision, &name, &short, &version, &level, &provider); err != nil {
+    FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id WHERE p.id=$1`, profiles[i]).Scan(&id, &revision, &name, &short, &version, &level, &provider); err != nil {
 				return err
 			}
 			if id != profiles[i] || revision != "registry-revision-99" || name != "Codex Sol" || short != "Sol" || version != "6.1" || level != 4 || provider != "openai" {
@@ -67,7 +81,7 @@ func TestModelDisplayMigrationPreservesPinsAcrossTenants(t *testing.T) {
 			if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profile_display`).Scan(&count); err != nil {
 				return err
 			}
-			if count != 1 {
+			if count != 2 {
 				return fmt.Errorf("tenant isolation: %d profiles", count)
 			}
 			if err := tx.QueryRow(ctx, `SELECT aeon_backfill_model_profile_display()`).Scan(&count); err != nil {
@@ -76,17 +90,27 @@ func TestModelDisplayMigrationPreservesPinsAcrossTenants(t *testing.T) {
 			if count != 0 {
 				return fmt.Errorf("repeated backfill inserted %d", count)
 			}
-			// Previous-binary inserts omit the new column and still receive metadata.
-			if _, err := tx.Exec(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier)
-    VALUES($1,'post-upgrade-opus','2','claude','anthropic','opus','high','strong')`, tenantID); err != nil {
-				return err
-			}
 			var aliasVersion string
 			if err := tx.QueryRow(ctx, `SELECT d.model_display->>'model_version',d.effort_level FROM model_profile_display d JOIN model_profiles p ON p.tenant_id=d.tenant_id AND p.id=d.profile_id WHERE p.slug='post-upgrade-opus'`).Scan(&aliasVersion, &level); err != nil {
 				return err
 			}
 			if aliasVersion != "" || level != 3 {
 				return fmt.Errorf("alias guessed version or lost effort")
+			}
+			// Current inserts still get tenant-scoped display metadata, with
+			// unknown effort rather than the previous hand-typed scale.
+			if _, err := tx.Exec(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier)
+				VALUES($1,'post-catalog-opus','3','claude','anthropic','opus','high','strong')`, tenantID); err != nil {
+				return err
+			}
+			var currentLevel *int
+			if err := tx.QueryRow(ctx, `SELECT d.model_display->>'display_name',d.model_display->>'model_version',d.effort_level
+				FROM model_profile_display d JOIN model_profiles p ON p.tenant_id=d.tenant_id AND p.id=d.profile_id
+				WHERE p.slug='post-catalog-opus'`).Scan(&name, &aliasVersion, &currentLevel); err != nil {
+				return err
+			}
+			if name != "opus" || aliasVersion != "" || currentLevel != nil {
+				return fmt.Errorf("new pin inherited guessed metadata: %s %s %v", name, aliasVersion, currentLevel)
 			}
 			return nil
 		}); err != nil {

@@ -44,6 +44,31 @@ func (f *fixture) tx(t *testing.T, fn func(pgx.Tx) error) {
 		t.Fatal(err)
 	}
 }
+
+// Preparation commits identity evidence, preserving every fixture-owned pin
+// and route. Check provenance as well as the independently committed event.
+func (f *fixture) assertPreparedCatalog(t *testing.T, wantProfiles int) {
+	t.Helper()
+	f.tx(t, func(tx pgx.Tx) error {
+		var profiles, routes, facts, invalid, seeds int
+		var version string
+		if err := tx.QueryRow(t.Context(), `SELECT
+			(SELECT count(*) FROM model_profiles),
+			(SELECT count(*) FROM model_role_routes),
+			(SELECT count(*) FROM model_catalog_facts WHERE source='offline-bootstrap'),
+			(SELECT count(*) FROM model_catalog_facts WHERE source='offline-bootstrap' AND
+				(source_kind<>'bootstrap' OR fact<>'model_id' OR field_path<>'id' OR jsonb_typeof(value)<>'string' OR route='')),
+			(SELECT count(*) FROM events WHERE type='model.registry_seeded'),
+			(SELECT catalog_version FROM model_refresh_settings)`).Scan(&profiles, &routes, &facts, &invalid, &seeds, &version); err != nil {
+			return err
+		}
+		if profiles != wantProfiles || routes != wantProfiles || facts <= 3 || invalid != 0 || seeds != 1 || version != modelregistry.CatalogVersion {
+			t.Fatalf("catalog setup: profiles=%d routes=%d facts=%d invalid=%d seeds=%d version=%q", profiles, routes, facts, invalid, seeds, version)
+		}
+		return nil
+	})
+}
+
 func newFixture(t *testing.T) *fixture { return newCatalogFixture(t, true) }
 
 func newCatalogFixture(t *testing.T, complete bool, cold ...bool) *fixture {
