@@ -20,8 +20,15 @@ only the failing mode to a readable shade of the same hue. Discard and Save
 appear in an overlay bar, preserving the page layout. Saves retain the Agents
 configuration and use the existing revision checks; conflicted drafts must be
 discarded and refreshed before saving again.
-The Agents link still opens Personal → Agents until the separate Agents card
-package lands. Applying saved theme values throughout the app is a later package.
+The Agents card shares the theme editor's saved selection and revision. The app
+waits for saved mode and active theme before mounting its first authenticated
+view. The approved OKLCH engine supplies accent roles, derived dark values,
+contrast-safe text and marker colours; a single identity-bound runtime stylesheet
+applies confirmed edits and selections. Its bounded first-paint cache retains only
+the owner and derived CSS. Drafts remain isolated in previews. Filled agent marks
+use the higher-contrast white or dark ink for their actual palette colour, including
+Custom; recurring badges use the same ink rule and a 12 px heavier glyph.
+Personal heartbeat writes preserve the stored legacy appearance for rollback.
 
 AEON-641 provides theme data for the appearance consumers. `GET /api/themes`
 returns visible workspace themes and the person's own themes with UUID keyset

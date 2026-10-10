@@ -12,8 +12,10 @@ export const dark = ref(preference.matches)
 preference.addEventListener('change', (event) => {
   if (themeChoice.value === 'system') dark.value = event.matches
 })
+let modeGeneration = 0
 const choices: readonly ThemeChoice[] = ['light', 'dark', 'system']
 export function setTheme(choice: ThemeChoice, persist = true) {
+  modeGeneration++
   themeChoice.value = choice
   if (persist) void writePreference('theme', { choice })
   if (choice === 'system') {
@@ -25,9 +27,17 @@ export function setTheme(choice: ThemeChoice, persist = true) {
   }
 }
 export function toggleTheme(persist = true) { setTheme(dark.value ? 'light' : 'dark', persist) }
-// Applies the stored choice after sign-in; an unknown or missing value keeps System.
-export async function restoreTheme() {
+// Applies a valid stored choice after sign-in; failed or missing reads keep the current mode.
+export async function restoreTheme(current: () => boolean = () => true) {
+  const started = modeGeneration
   const stored = await readPreference('theme')
+  if (!current() || started !== modeGeneration) return
   const choice = stored?.choice
   if (typeof choice === 'string' && (choices as readonly string[]).includes(choice)) setTheme(choice as ThemeChoice, false)
+}
+export function resetTheme() {
+  modeGeneration++
+  themeChoice.value = 'system'
+  dark.value = preference.matches
+  delete document.documentElement.dataset.theme
 }
