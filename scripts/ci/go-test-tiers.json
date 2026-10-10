@@ -4118,6 +4118,8 @@
     ,
     {"kind":"go","package":"internal/chat","name":"TestRegistrationAliasUsesResumedOwner","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/chat","name":"TestSessionThreadLookupFollowsOnlyTheCallersCurrentBinding","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/chat","name":"TestStrictLegacyResponseSnapshotsUnchanged","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/ciexecutor","name":"TestArtifactReadCannotFollowCandidateLinks","tier":"GATED-FULL"}
