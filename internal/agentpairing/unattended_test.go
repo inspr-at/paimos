@@ -13,6 +13,76 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// Risk: optional platform evidence on a legacy pairing record makes capacity
+// reads fail, rolling back reconciliation/disconnect or blocking ordinary runs.
+// Missing metadata must remain an unattended wait even with fresh Mac signals.
+func TestUnattendedMissingPlatformPreservesLegacyPairing(t *testing.T) {
+	for _, tc := range []struct{ name, patch string }{
+		{"absent", `{}`},
+		{"null", `{"platform":null}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			p := f.proposePlatform("darwin", "arm64", "claude")
+			f.approve(p, "one_per_harness")
+			v := f.redeem(p)
+			key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+			signals := hostcapacity.Signals{Cores: 8, MemoryPressure: "unknown", Power: "unknown", Thermal: "unknown", Unattended: &hostcapacity.UnattendedSignals{LoginSession: "ready", IdleSleep: "disabled", FileVault: "off"}}
+			f.call("POST", "/api/agent-pairing/self/capacity", signals, false, key, 200)
+			if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_requests SET details=(details-'platform') || $2::jsonb WHERE id=$1`, p.id, tc.patch); err != nil {
+				t.Fatal(err)
+			}
+			check := func(capacity *hostcapacity.View) {
+				t.Helper()
+				if capacity == nil || capacity.Policy.Mode != "off" || capacity.Reason != "" || capacity.Unattended == nil {
+					t.Fatal("missing platform changed ordinary host capacity", capacity)
+				}
+				if capacity.Unattended.Status != "wait" || capacity.Unattended.Reason != "unattended_platform_unsupported" || capacity.Unattended.AfterRebootReason != "unattended_reboot_unknown" {
+					t.Fatal("missing platform fabricated unattended readiness", capacity.Unattended)
+				}
+			}
+			actor := tenant.Principal{ID: *v.PrincipalID, TenantID: f.tenantID, Kind: tenant.Agent}
+			err := db.InTenant(tenant.WithPrincipal(t.Context(), actor), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+				if err := agentpairing.LockMutation(t.Context(), tx); err != nil {
+					return err
+				}
+				capacity, err := agentpairing.HostCapacityForPrincipal(t.Context(), tx, actor.ID)
+				if err != nil {
+					return err
+				}
+				check(capacity)
+				unattended, err := agentpairing.UnattendedForPrincipal(t.Context(), tx, actor.ID)
+				if err != nil {
+					return err
+				}
+				if unattended != *capacity.Unattended {
+					t.Fatal("claim seam disagrees with legacy host advisory", unattended)
+				}
+				return agentpairing.RunFence(t.Context(), tx, v.Enrollments[0].AccountID, *v.Enrollments[0].VerificationRunID, true)
+			})
+			if err != nil {
+				t.Fatal("legacy capacity/claim failed", err)
+			}
+			path := "/api/agent-pairing/computers/" + *v.ComputerID
+			var listed agentpairing.View
+			decodeResult(t, f.call("GET", path, nil, true, "", 200), &listed)
+			check(listed.HostCapacity)
+			var reconciled agentpairing.View
+			decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": agentpairing.SetupProgress{State: "login_required"}}, false, "", 200), &reconciled)
+			check(reconciled.HostCapacity)
+			decodeResult(t, f.call("GET", path, nil, true, "", 200), &listed)
+			if listed.SetupState != "login_required" {
+				t.Fatal("legacy lifecycle progress did not persist", listed.SetupState)
+			}
+			f.call("POST", path+"/disconnect", map[string]any{"mode": "revoke_now", "expected_revision": listed.Revision}, true, "", 200)
+			decodeResult(t, f.call("GET", path, nil, true, "", 200), &listed)
+			if listed.ComputerState == nil || *listed.ComputerState != "revoked" || listed.HostCapacity.Unattended.Reason != "unattended_computer_disconnected" {
+				t.Fatal("legacy disconnect did not persist", listed.ComputerState, listed.HostCapacity)
+			}
+		})
+	}
+}
+
 // Risk: stale/foreign/revoked host evidence authorizes routines, or a report
 // quietly changes manual claims, leaks across computers, or bypasses revocation.
 func TestUnattendedReportOnlyFreshnessOwnershipAndClaimSeam(t *testing.T) {
