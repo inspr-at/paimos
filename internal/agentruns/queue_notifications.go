@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -104,7 +105,7 @@ func (m *module) queueNotifications(w http.ResponseWriter, r *http.Request) {
 	op, cancel := context.WithTimeout(ctx, 10*time.Second)
 	conn, err := pgx.ConnectConfig(op, m.pool.Config().ConnConfig.Copy())
 	if err == nil {
-		_, err = conn.Exec(op, "LISTEN aeon_events")
+		_, err = conn.Exec(op, "LISTEN "+events.QueueHintChannel)
 	}
 	cancel()
 	if conn != nil {
