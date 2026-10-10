@@ -23,7 +23,11 @@ func (b Broker) SubgrantTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, p
 	if err != nil {
 		return Grant{}, err
 	}
-	if _, _, err := b.authorize(ctx, tx, p, r); err != nil {
+	policy, _, err := b.authorize(ctx, tx, p, r)
+	if err != nil {
+		return Grant{}, err
+	}
+	if err := requireRecoveryPolicy(ctx, tx, r.id, policy); err != nil {
 		return Grant{}, err
 	}
 	root, err := scanGrant(tx.QueryRow(ctx, `SELECT `+grantColumns+` FROM routine_budget_grants WHERE id=$1 AND run_id=$2 FOR NO KEY UPDATE`, parentID, in.RunID))
@@ -36,9 +40,12 @@ func (b Broker) SubgrantTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, p
 	if prior, ok, err := replay(ctx, tx, in, &parentID); err != nil || ok {
 		return prior, err
 	}
-	used, pending, err := children(ctx, tx, root.ID)
+	used, pending, count, err := children(ctx, tx, root.ID)
 	if err != nil {
 		return Grant{}, err
+	}
+	if count >= 4096 {
+		return Grant{}, workorders.Fail(409, "subgrant_count_exhausted")
 	}
 	balance, err := loadBalance(ctx, tx, in.RunID)
 	if err != nil {
@@ -64,12 +71,17 @@ func (b Broker) SubgrantTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, p
 	return insertGrant(ctx, tx, p, r, in, &parentID, "", root.BillingMode)
 }
 
-func children(ctx context.Context, tx pgx.Tx, parent string) (Amount, Amount, error) {
+func children(ctx context.Context, tx pgx.Tx, parent string) (Amount, Amount, int, error) {
 	var used, pending Amount
+	var count int
 	// NUMERIC sum catches overflow before conversion to checked signed int64.
 	err := tx.QueryRow(ctx, `SELECT coalesce(sum(used_tokens) FILTER(WHERE state='settled'),0),coalesce(sum(used_microusd) FILTER(WHERE state='settled'),0),coalesce(sum(used_ms) FILTER(WHERE state='settled'),0),
- coalesce(sum(maximum_tokens) FILTER(WHERE state<>'settled'),0),coalesce(sum(maximum_microusd) FILTER(WHERE state<>'settled'),0),coalesce(sum(maximum_ms) FILTER(WHERE state<>'settled'),0) FROM routine_budget_grants WHERE parent_id=$1`, parent).Scan(&used.Tokens, &used.PaidMicroUSD, &used.RecoveryMS, &pending.Tokens, &pending.PaidMicroUSD, &pending.RecoveryMS)
-	return used, pending, err
+ coalesce(sum(maximum_tokens) FILTER(WHERE state<>'settled'),0),coalesce(sum(maximum_microusd) FILTER(WHERE state<>'settled'),0),coalesce(sum(maximum_ms) FILTER(WHERE state<>'settled'),0),count(*)
+ FROM (SELECT * FROM routine_budget_grants WHERE parent_id=$1 LIMIT 4097) bounded`, parent).Scan(&used.Tokens, &used.PaidMicroUSD, &used.RecoveryMS, &pending.Tokens, &pending.PaidMicroUSD, &pending.RecoveryMS, &count)
+	if err == nil && count > 4096 {
+		err = workorders.Fail(409, "subgrant_count_exhausted")
+	}
+	return used, pending, count, err
 }
 
 // SettleTx accepts only qualified, complete evidence. It can reconcile after
@@ -143,7 +155,7 @@ func (b Broker) SettleTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 		if pending {
 			return Grant{}, workorders.Fail(409, "child_settlement_unknown")
 		}
-		used, _, err := children(ctx, tx, g.ID)
+		used, _, _, err := children(ctx, tx, g.ID)
 		if err != nil {
 			return Grant{}, err
 		}

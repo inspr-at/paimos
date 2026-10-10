@@ -63,6 +63,9 @@ func (b Broker) startCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, a
 	if err != nil {
 		return err
 	}
+	if err := requireRecoveryPolicy(ctx, tx, r.id, policy); err != nil {
+		return err
+	}
 	var held bool
 	if err := tx.QueryRow(ctx, `SELECT state='held' FROM routine_budget_grants WHERE agent_run_id=$1 AND account_id=$2 AND parent_id IS NULL`, agentRunID, accountID).Scan(&held); err != nil {
 		return err

@@ -115,6 +115,34 @@ func writeBalance(ctx context.Context, tx pgx.Tx, b Balance) error {
 	_, err := tx.Exec(ctx, `UPDATE routine_budget_balances SET settled_tokens=$2,settled_microusd=$3,settled_ms=$4,held_tokens=$5,held_microusd=$6,held_ms=$7 WHERE run_id=$1`, b.RunID, b.Settled.Tokens, b.Settled.PaidMicroUSD, b.Settled.RecoveryMS, b.Held.Tokens, b.Held.PaidMicroUSD, b.Held.RecoveryMS)
 	return err
 }
+
+// Existing holds keep their accounting envelope, but renewed work and launch
+// must still fit any subsequently qualified tighter owner recovery policy.
+func requireRecoveryPolicy(ctx context.Context, tx pgx.Tx, runID string, policy modelregistry.LeadSettings) error {
+	recovery := policy.Effective.Recovery
+	if recovery == nil || recovery.MaxAttempts <= 0 || recovery.AgentHours <= 0 || recovery.AgentHours > 10000 || math.IsNaN(recovery.AgentHours) || math.IsInf(recovery.AgentHours, 0) {
+		return workorders.Fail(409, "recovery_budget_unavailable")
+	}
+	balance, err := loadBalance(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	total, err := balance.Settled.add(balance.Held)
+	if err != nil {
+		return err
+	}
+	if total.RecoveryMS > min(balance.RecoveryMS, int64(math.Floor(recovery.AgentHours*3600000))) {
+		return workorders.Fail(409, "recovery_budget_exhausted")
+	}
+	var count int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM routine_budget_grants WHERE run_id=$1 AND parent_id IS NULL`, runID).Scan(&count); err != nil {
+		return err
+	}
+	if count > recovery.MaxAttempts {
+		return workorders.Fail(409, "recovery_attempts_exhausted")
+	}
+	return nil
+}
 func ensureBalance(ctx context.Context, tx pgx.Tx, p tenant.Principal, r runBinding, policy modelregistry.LeadSettings) (Balance, error) {
 	if len(r.assignment) > 131072 {
 		return Balance{}, workorders.Fail(409, "assignment_unavailable")
