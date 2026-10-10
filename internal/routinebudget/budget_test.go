@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -510,6 +511,161 @@ func TestRoutineBudgetAdmissionAndOwnership(t *testing.T) {
 
 // Risk: integer wraparound turning a finite money/token/recovery ceiling into
 // extra room. Arithmetic is checked before any ledger mutation.
+// Risk: moving the routine root into an ordinary project must not erase its
+// frozen budget lineage or permit either unbound or wrongly projected orders.
+func TestRoutineBudgetMovedRootKeepsChildBinding(t *testing.T) {
+	f := setup(t, "off", false)
+	in := f.attempt("lead", Amount{RecoveryMS: 1000})
+	_, err := reserve(t, f, f.d.App, t.Context(), in)
+	must(t, err)
+	var project, parent string
+	must(t, f.tx(func(tx pgx.Tx) error {
+		if err := db.LockCurrentTree(t.Context(), tx); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,position) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Ordinary project',2048 FROM node_kinds k WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.owner.TenantID).Scan(&project); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,position) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Moved output',$2,1024 FROM node_kinds k WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, f.owner.TenantID, project).Scan(&parent); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, f.work, parent)
+		return err
+	}))
+	var moved, frozen string
+	var targetBalances int
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT n.project_id::text,r.output_project_id::text,(SELECT count(*) FROM routine_budget_balances b JOIN routine_runs rr ON rr.id=b.run_id WHERE rr.output_project_id=$2) FROM nodes n JOIN routine_runs r ON r.work_node_id=n.id WHERE n.id=$1`, f.work, project).Scan(&moved, &frozen, &targetBalances))
+	if moved != project || frozen != f.project || targetBalances != 0 {
+		t.Fatal("fixture did not move root into a project without budgets", moved, frozen, targetBalances)
+	}
+	for _, binding := range []string{"", f.run} {
+		t.Run("binding="+binding, func(t *testing.T) {
+			wantError(t, f.tx(func(tx pgx.Tx) error {
+				if err := db.LockCurrentTree(t.Context(), tx); err != nil {
+					return err
+				}
+				_, _, err := workorders.CreateDeferred(t.Context(), tx, f.owner, workorders.CreateInput{Parent: &f.work, Title: "Moved routine child", Criteria: []string{"Verify"}, RoutineRunID: binding})
+				return err
+			}), "routine_order_outside_lineage")
+		})
+	}
+}
+
+// Risk: caller RLS hides personal ledger rows from the assigned daemon. Its
+// authenticated receipts must reconcile once without opening ordinary reads
+// or accepting another agent, a missing scope, or a different tenant.
+func TestRoutineBudgetDaemonSettlementKeepsLedgerPrivate(t *testing.T) {
+	f := setup(t, "both", true)
+	in := f.attempt("build", Amount{Tokens: 10, PaidMicroUSD: 10, RecoveryMS: 1000})
+	root, err := reserve(t, f, f.d.App, t.Context(), in)
+	must(t, err)
+	call := in
+	call.GrantKey = "provider-call"
+	var child Grant
+	must(t, f.tx(func(tx pgx.Tx) error {
+		var err error
+		child, err = f.broker.SubgrantTx(t.Context(), tx, f.owner, root.ID, call)
+		return err
+	}))
+	checkPrivate := func(tx pgx.Tx) error {
+		for _, table := range []string{"routine_runs", "routine_budget_balances", "routine_budget_grants", "routine_budget_settlements", "routine_budget_orders"} {
+			var n int
+			if err := tx.QueryRow(t.Context(), "SELECT count(*) FROM "+table).Scan(&n); err != nil {
+				return err
+			}
+			if n != 0 {
+				t.Fatal("daemon ordinary reads exposed personal ledger", table, n)
+			}
+		}
+		return nil
+	}
+	report := func(p tenant.Principal, id string, receipt Settlement) error {
+		return db.InTenant(tenant.WithPrincipal(t.Context(), p), f.d.App, p.TenantID, func(tx pgx.Tx) error {
+			if err := checkPrivate(tx); err != nil {
+				return err
+			}
+			_, err := f.broker.SettleTx(t.Context(), tx, p, f.run, id, receipt)
+			if err != nil {
+				return err
+			}
+			return checkPrivate(tx)
+		})
+	}
+	missingScope := f.agent
+	missingScope.Scopes = []string{"run.claim"}
+	if err := report(missingScope, child.ID, settlement("missing-scope", Amount{})); !errors.Is(err, authz.ErrForbidden) {
+		t.Fatalf("missing run.report scope: %v", err)
+	}
+	other := f.agent
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Other reporter') RETURNING id::text`, f.owner.TenantID).Scan(&other.ID))
+	dbtest.BindRole(t, f.d, other.TenantID, other.ID, "admin")
+	if err := report(other, child.ID, settlement("wrong-agent", Amount{})); !errors.Is(err, authz.ErrForbidden) {
+		t.Fatalf("unassigned reporter: %v", err)
+	}
+	foreign := f.agent
+	foreign.TenantID = "20000000-0000-4000-8000-000000000001"
+	err = db.InTenant(tenant.WithPrincipal(t.Context(), f.agent), f.d.App, f.agent.TenantID, func(tx pgx.Tx) error {
+		_, err := f.broker.SettleTx(t.Context(), tx, foreign, f.run, child.ID, settlement("wrong-tenant", Amount{}))
+		return err
+	})
+	if !errors.Is(err, authz.ErrForbidden) {
+		t.Fatalf("cross-tenant reporter: %v", err)
+	}
+	unknown := settlement("unknown-exit", Amount{})
+	unknown.ExitConfirmed = false
+	must(t, report(f.agent, root.ID, unknown))
+	if f.balance().Held != in.Maximum {
+		t.Fatal("unknown daemon exit freed hold")
+	}
+	// Reconciliation remains allowed after launch consent is revoked.
+	f.exec(`UPDATE routine_runs SET execute_consent=false WHERE id=$1`, f.run)
+	usage := Amount{Tokens: 7, PaidMicroUSD: 4, RecoveryMS: 100}
+	must(t, report(f.agent, child.ID, settlement("call-used", usage)))
+	final := settlement("exit-confirmed", usage)
+	must(t, report(f.agent, root.ID, final))
+	must(t, report(f.agent, root.ID, final))
+	if got := f.balance(); got.Held != (Amount{}) || got.Settled != usage {
+		t.Fatal("daemon receipt failed to reconcile exactly once", got)
+	}
+	var count int
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM routine_budget_settlements WHERE run_id=$1`, f.run).Scan(&count))
+	if count != 2 {
+		t.Fatal("receipt replay duplicated settlement", count)
+	}
+}
+
+// Risk: retired history and removed windows retained by live limit rules are
+// still read/locked by shared admission; overflow must fail before that work.
+func TestRoutineBudgetAdmissionBoundsHistoricalWindows(t *testing.T) {
+	for _, removed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "retired", true: "removed-rule-source"}[removed], func(t *testing.T) {
+			f := setup(t, "off", false)
+			in := f.attempt("build", Amount{RecoveryMS: 1000})
+			check := func() error {
+				return f.tx(func(tx pgx.Tx) error {
+					if _, err := begin(t.Context(), tx, f.owner, f.run); err != nil {
+						return err
+					}
+					var now time.Time
+					if err := tx.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now); err != nil {
+						return err
+					}
+					_, _, _, err := agentaccounts.RequireRoutineCapacityTx(t.Context(), tx, f.owner.ID, in.AgentRunID, f.account, f.gate, now)
+					return err
+				})
+			}
+			f.exec(`INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source,capacity_retired) SELECT $1,$2,clock_timestamp()-interval '8 days'-n*interval '1 minute',clock_timestamp()-interval '1 day'-n*interval '1 minute','percent',100,20,'unrestricted',clock_timestamp(),true,'weekly','codex','harness',true FROM generate_series(1,4095) n`, f.owner.TenantID, f.account)
+			must(t, check()) // Exactly 4096 consumed rows remain admissible.
+			var last string
+			must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model,capacity_retired,removed_at) VALUES($1,$2,clock_timestamp()-interval '9 days',clock_timestamp()-interval '2 days','requests',1000000,'unrestricted',true,CASE WHEN $3 THEN clock_timestamp() END) RETURNING id::text`, f.owner.TenantID, f.account, removed).Scan(&last))
+			if removed {
+				f.exec(`INSERT INTO account_limit_rules(tenant_id,account_id,amount,unit,period,from_window_id,created_by) VALUES($1,$2,1000000,'requests','week',$3,$4)`, f.owner.TenantID, f.account, last, f.owner.ID)
+			}
+			wantError(t, check(), "account_inputs_unreadable")
+		})
+	}
+}
+
 func TestRoutineBudgetCheckedArithmeticAndModes(t *testing.T) {
 	max := int64(math.MaxInt64)
 	for _, a := range []Amount{{Tokens: max}, {PaidMicroUSD: max}, {RecoveryMS: max}} {
