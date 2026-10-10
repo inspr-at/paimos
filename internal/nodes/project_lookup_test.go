@@ -65,7 +65,7 @@ func TestProjectLookupAliasesVisibilityAndZeroAggregates(t *testing.T) {
 			t.Fatalf("lookup returned a rich projection: %s", body)
 		}
 	}
-	for _, ref := range []string{"exact", "first", "OldXKΣſ", "FOREIGN", foreign.Key, leaf.Key, "LEAFALIAS"} {
+	for _, ref := range []string{"exact", "first", "OldXKΣſ", "FOREIGN", foreign.Key, leaf.Key, "LEAFALIAS", strings.Repeat("x", 1024)} {
 		lookup(p, ref, http.StatusNotFound)
 	}
 	// Matches on different alias forms are still ambiguous; an exact key does
@@ -92,7 +92,7 @@ func TestProjectLookupAliasesVisibilityAndZeroAggregates(t *testing.T) {
 		t.Fatal(err)
 	}
 	lookup(p, "SECOND", http.StatusNotFound)
-	for _, query := range []string{"", "?ref=", "?ref=+", "?ref=EXACT&ref=FIRST", "?ref=%00", "?ref=%FF", "?ref=" + strings.Repeat("x", 1025)} {
+	for _, query := range []string{"", "?ref=", "?ref=+", "?ref=EXACT&ref=FIRST", "?ref=%00", "?ref=%FF", "?ref=" + strings.Repeat("x", 1025), "?ref=" + strings.Repeat("x", 3*1024+1)} {
 		status, body := callAs(t, mod, &p, http.MethodGet, "/api/projects/lookup"+query, "")
 		if status != http.StatusBadRequest {
 			t.Fatalf("invalid reference returned %d: %s", status, body)

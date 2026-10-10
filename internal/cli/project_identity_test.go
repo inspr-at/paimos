@@ -93,7 +93,8 @@ func TestListenSetupUsesOneExactProjectLookup(t *testing.T) {
 			t.Setenv("PAIMOS_URL", srv.URL)
 			t.Setenv("PAIMOS_API_KEY", testKey)
 			code, _, stderr := runCLIWithMessaging([]string{program, "listen", "--project", "Old & alias", "--as", "codex:worker"}, "")
-			if code != 0 || lookups.Load() != 1 || richReads.Load() != 0 || inboxReads.Load() != 1 {
+			// The existing empty-inbox result is exit 3 for both CLI roots.
+			if code != 3 || lookups.Load() != 1 || richReads.Load() != 0 || inboxReads.Load() != 1 {
 				t.Fatalf("listen code=%d lookup=%d rich=%d inbox=%d: %s", code, lookups.Load(), richReads.Load(), inboxReads.Load(), stderr)
 			}
 		})

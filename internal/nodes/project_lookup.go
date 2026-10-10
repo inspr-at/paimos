@@ -14,6 +14,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
 )
 
 // projectAliasPattern preserves the CLI's strings.EqualFold semantics, including
@@ -23,7 +25,11 @@ func projectAliasPattern(ref string) string {
 	var pattern strings.Builder
 	pattern.WriteByte('^')
 	for _, r := range ref {
-		pattern.WriteByte('(')
+		if unicode.SimpleFold(r) == r {
+			pattern.WriteString(regexp.QuoteMeta(string(r)))
+			continue
+		}
+		pattern.WriteString("(?:")
 		pattern.WriteString(regexp.QuoteMeta(string(r)))
 		for fold := unicode.SimpleFold(r); fold != r; fold = unicode.SimpleFold(fold) {
 			pattern.WriteByte('|')
@@ -43,6 +49,11 @@ func (m *Module) handleLookupProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// A UTF-8 byte may use three URL bytes; cap decoding before parsing values.
+	if len(r.URL.RawQuery) > len("ref=")+3*1024 {
+		writeErr(w, badRequest("project lookup query exceeds its byte limit"))
+		return
+	}
 	refs := r.URL.Query()["ref"]
 	if len(refs) != 1 || len(refs[0]) > 1024 || !utf8.ValidString(refs[0]) || strings.ContainsRune(refs[0], 0) {
 		writeErr(w, badRequest("one project ref of at most 1024 UTF-8 bytes is required"))
@@ -56,7 +67,7 @@ func (m *Module) handleLookupProject(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	items := make([]nodePreview, 0, 2)
-	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+	err := db.InTenantReadSnapshot(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT n.id::text,n.key,n.title,n.state
 		FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
 		WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
