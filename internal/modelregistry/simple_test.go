@@ -415,7 +415,7 @@ func TestMinimalAutoAcceptOnlyUsedSuccessors(t *testing.T) {
 		return nil
 	})
 	// Exercise the actual refresh path: API lists contain model IDs only,
-	// so the successor inherits the registered native efforts, never default.
+	// so unknown native levels cannot be copied from a predecessor.
 	mod := NewWithVault(appPool, []byte(strings.Repeat("x", 32)))
 	inRegistry(t, admin, func(tx pgx.Tx) error {
 		cipher, err := linkvault.Encrypt(mod.vaultKey, admin.TenantID, "models/"+account+"/openai", "synthetic-discovery-fixture")
@@ -430,7 +430,7 @@ func TestMinimalAutoAcceptOnlyUsedSuccessors(t *testing.T) {
 	})
 	mod.discovery = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != vendorURLs["openai"] {
-			t.Fatal("unexpected vendor")
+			return fixtureCatalogClient(t, nil).Transport.RoundTrip(r)
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"gpt-6.3-sol"},{"id":"gpt-7-newline"}]}`)), Header: http.Header{}}, nil
 	})}
@@ -438,10 +438,10 @@ func TestMinimalAutoAcceptOnlyUsedSuccessors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Added < 1 {
-		t.Fatal("refresh did not accept a used successor", result)
+	if len(result.Sources) != 4 || result.Sources[0].State != "fresh" {
+		t.Fatal("native ID list was not refreshed", result)
 	}
-	if len(result.AcceptedModels) != 1 || result.AcceptedModels[0] != "openai:sol" {
+	if len(result.AcceptedModels) != 0 {
 		t.Fatalf("one accepted successor counted as %d profiles, models %v", result.Added, result.AcceptedModels)
 	}
 	for _, id := range result.NewLines {
@@ -454,7 +454,7 @@ func TestMinimalAutoAcceptOnlyUsedSuccessors(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE model='gpt-6.3-sol' AND effort='high' AND enabled),count(*) FILTER(WHERE (model='gpt-7-newline' AND enabled) OR (model='gpt-6.3-sol' AND effort='default')) FROM model_profiles`).Scan(&accepted, &bad); err != nil {
 			return err
 		}
-		if accepted != 1 || bad != 0 {
+		if accepted != 0 || bad != 0 {
 			t.Fatal("incorrect successor admission", accepted, bad)
 		}
 		return nil
@@ -466,7 +466,7 @@ func TestMinimalAutoAcceptOnlyUsedSuccessors(t *testing.T) {
 func TestMinimalManualRefreshCooldownBypassesInterval(t *testing.T) {
 	admin, _ := boardFixture(t)
 	clock := time.Now().UTC().Truncate(time.Microsecond)
-	mod := &Module{pool: appPool, validationClock: func(context.Context, pgx.Tx) (time.Time, error) { return clock, nil }}
+	mod := &Module{pool: appPool, discovery: fixtureCatalogClient(t, nil), validationClock: func(context.Context, pgx.Tx) (time.Time, error) { return clock, nil }}
 	inRegistry(t, admin, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET interval_minutes=1440,last_run_at=$1`, clock.Add(-time.Minute))
 		return err

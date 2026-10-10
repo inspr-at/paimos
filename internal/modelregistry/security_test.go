@@ -357,6 +357,9 @@ func TestRefreshReleasesCatalogLockAndSharesIntervalWithAgents(t *testing.T) {
 	}
 	started, release, finished := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 	m.discovery = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != vendorURLs["openai"] {
+			return fixtureCatalogClient(t, nil).Transport.RoundTrip(r)
+		}
 		deadline, ok := r.Context().Deadline()
 		if !ok || time.Until(deadline) > discoveryDeadline {
 			return nil, errors.New("missing round trip deadline")
@@ -463,29 +466,32 @@ func TestRefreshBoundsProfileAdditionsAndRejectsDisabledDiscoveryResults(t *test
 	reset(t)
 	owner := makePrincipal(t, "bounded-refresh", "person", "Owner", []string{"admin"})
 	agent := addPrincipal(t, owner.TenantID, "agent", "Reporter", nil)
-	account := enrollEvidenceHarness(t, owner, agent, "codex")
+	account := enrollEvidenceHarness(t, owner, agent, "claude")
 	m := NewWithVault(appPool, []byte(strings.Repeat("x", 32)))
 	decode[[]Profile](t, &owner, "GET", "/api/models", "", 200)
 	before := registryRoutes(t, owner)
-	cipher, err := linkvault.Encrypt(m.vaultKey, owner.TenantID, "models/"+account+"/openai", "fixture-key")
+	cipher, err := linkvault.Encrypt(m.vaultKey, owner.TenantID, "models/"+account+"/anthropic", "fixture-key")
 	if err != nil {
 		t.Fatal(err)
 	}
 	inRegistry(t, owner, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_discovery_credentials(tenant_id,account_id,vendor,ciphertext) VALUES($1,$2,'openai',$3)`, owner.TenantID, account, cipher); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_discovery_credentials(tenant_id,account_id,vendor,ciphertext) VALUES($1,$2,'anthropic',$3)`, owner.TenantID, account, cipher); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET api_enabled=true`)
 		return err
 	})
-	models := []map[string]string{}
+	models := []map[string]any{}
 	for i := 0; i < maxRefreshObservations+50; i++ {
-		models = append(models, map[string]string{"id": fmt.Sprintf("gpt-future-%03d", i)})
+		models = append(models, map[string]any{"id": fmt.Sprintf("claude-future-%03d", i), "capabilities": map[string]any{"effort": map[string]any{"high": map[string]any{"supported": true}}}})
 	}
 	raw, _ := json.Marshal(map[string]any{"data": models})
 	calls := 0
 	disableDuringFetch := false
-	m.discovery = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+	m.discovery = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if !strings.HasPrefix(r.URL.String(), vendorURLs["anthropic"]) {
+			return fixtureCatalogClient(t, nil).Transport.RoundTrip(r)
+		}
 		calls++
 		if disableDuringFetch {
 			inRegistry(t, owner, func(tx pgx.Tx) error {
@@ -502,7 +508,7 @@ func TestRefreshBoundsProfileAdditionsAndRejectsDisabledDiscoveryResults(t *test
 	}
 	inRegistry(t, owner, func(tx pgx.Tx) error {
 		var granted, observed int
-		if err := tx.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE enabled) FROM model_profiles WHERE version='observed-1'`).Scan(&observed, &granted); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE enabled) FROM model_profiles WHERE version='observed-2'`).Scan(&observed, &granted); err != nil {
 			return err
 		}
 		if observed != maxRefreshObservations || granted != 0 {
@@ -553,6 +559,9 @@ func TestRefreshVendorsShareDeadlineAndStopWhenDiscoveryDisabled(t *testing.T) {
 	disable := false
 	var deadline time.Time
 	m.discovery = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != vendorURLs["openai"] && r.URL.String() != vendorURLs["xai"] {
+			return fixtureCatalogClient(t, nil).Transport.RoundTrip(r)
+		}
 		calls++
 		current, ok := r.Context().Deadline()
 		if !ok || (!deadline.IsZero() && !current.Equal(deadline)) {
