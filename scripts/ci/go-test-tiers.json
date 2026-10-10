@@ -5042,6 +5042,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestWorkAliasNeverRemapsNonWorkKinds","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestWorkListRetryRetainsPaginationAndExplicitFailure","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestWorkMCPCancelAndListBounds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestWorkTypeAliasesUseCanonicalIDAndExposeShape","tier":"NIGHTLY"}
@@ -5103,6 +5105,8 @@
     {"kind":"go","package":"internal/client","name":"TestStepUpSecondChallengeDoesNotPromptAgain","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/client","name":"TestSuppliedStepUpProofIsNeverRedirectedOrReconfirmed","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/client","name":"TestWorkAggregateReadRetryIsOptInOnceAndCancellable","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/config","name":"TestChatEnabledFromEnv","tier":"ESSENTIAL"}
     ,
@@ -6738,7 +6742,19 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestReplyToHeldParentStaysInvisible","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineDispatcherSharesListenerAcrossTenants","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestRoutineDispatcherUsesEncryptedTargetAndFencedCompletion","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineDurableWakeRetryLeaseAndRestart","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineEarliestDeadlineBehindLeasedHead","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineHintsFilterTenantAndChannel","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineIdleFallbackAndReconnectScheduling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineSharedListenerRoutesHintsAndReleasesConnection","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestSendDoesNotWaitForTargetWriterAfterEvent","tier":"ESSENTIAL"}
     ,
@@ -7415,6 +7431,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestListCursorFiltersAndTree","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestListEpicMembershipSetBasedAndScoped","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestListEstimateSortBoundedConcurrentMatchesBaseline","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestListFiltersExclusionsLabelsEpicsAndDates","tier":"GATED-FULL"}
     ,

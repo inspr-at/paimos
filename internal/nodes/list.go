@@ -160,7 +160,19 @@ type listQuery struct {
 	modelNames  json.RawMessage
 	planRates   json.RawMessage
 	planPlanner *planner
+	// Internal opt-in stays out of the cursor fingerprint: results are equal.
+	boundedAggregates bool
 }
+
+type boundedListAggregatesKey struct{}
+
+// WithBoundedListAggregates enables the estimate-only sort projection after
+// the caller has checked the routine project execution flag. Nothing in the
+// ordinary HTTP wiring opts in; ETA/progress and page coverage stay unchanged.
+func WithBoundedListAggregates(ctx context.Context) context.Context {
+	return context.WithValue(ctx, boundedListAggregatesKey{}, true)
+}
+
 type listCursor struct {
 	Hash string `json:"hash"`
 	ID   string `json:"id"`
@@ -541,6 +553,7 @@ func listFingerprint(q listQuery) string {
 	return hex.EncodeToString(sum[:])
 }
 func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (nodePage, error) {
+	q.boundedAggregates, _ = ctx.Value(boundedListAggregatesKey{}).(bool)
 	ctx, cancel := context.WithTimeout(ctx, eta.AggregateReadTimeout)
 	defer cancel()
 	var mark *listCursor
@@ -1423,6 +1436,9 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	aggregateCTE := ""
 	if etaJoin != "" || estimateJoin != "" {
 		aggregateCTE = `, work_values AS MATERIALIZED (` + eta.AggregateSQL("ARRAY(SELECT id FROM filtered)") + `)`
+		if q.boundedAggregates && etaJoin == "" {
+			aggregateCTE = listEstimateSortSQL()
+		}
 	}
 	sql := prefix + aggregateCTE + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
     cursor_guard AS (SELECT (` + anchorArg + `::uuid IS NULL OR EXISTS(SELECT 1 FROM ordered WHERE id=` + anchorArg + `::uuid)) AS valid),
@@ -1463,6 +1479,26 @@ func listSQL(q listQuery, anchor any) (string, []any) {
     ) epic ON true` + moneyJoin + `
     ) SELECT page_rows.*,cursor_guard.valid FROM cursor_guard LEFT JOIN page_rows ON true ORDER BY page_rows.rn`
 	return sql, args
+}
+
+// Estimate sorting needs every filtered root's complete leaf sum, but no
+// session ETA/completion evidence. Reuse the published scope function so RLS,
+// cycles, historical shapes and the 4096-root/50000-pair limits remain exact.
+// Closed leaves retain their own estimate, including cancelled/archived ones;
+// only the rolled-up leaf sums exclude those two buckets (as in 1230).
+func listEstimateSortSQL() string {
+	return `, estimate_scope AS MATERIALIZED (
+        SELECT * FROM aeon_work_scope(ARRAY(SELECT id FROM filtered))
+    ), estimate_totals AS (
+        SELECT root, sum(` + estimateHoursSQL("fields") + `) FILTER (
+            WHERE is_leaf AND bucket NOT IN ('archived','cancelled')) AS hours
+        FROM estimate_scope GROUP BY root
+    ), work_values AS MATERIALIZED (
+        SELECT own.root AS id, CASE WHEN own.is_leaf THEN ` + estimateHoursSQL("own.fields") + `
+            ELSE totals.hours END AS hours
+        FROM estimate_scope own JOIN estimate_totals totals ON totals.root=own.root
+        WHERE own.id=own.root
+    )`
 }
 func facetSQL(q listQuery) (string, []any) {
 	prefix, args := listFilterSQL(q, false)

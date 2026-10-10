@@ -73,6 +73,13 @@
 // GET /api/inbox/message-status gives the sender sent|delivered|read|
 // not_delivered per message.
 //
+// Routine dispatchers subscribe to aeon_routine_deliveries before scanning.
+// Queue/reroute/retry transactions emit tenant-only hints at commit; claims
+// still check durable delivery state and fence completion with the lease token.
+// Empty queues reconcile every five seconds (12 checks/minute/tenant), or
+// sooner at the earliest persisted retry/lease deadline. Startup, disconnect
+// and listener renewal scan durable rows, so missed hints cannot strand work.
+//
 // Every inbox read and write runs inside db.InTenant. The worker's tenant
 // list is the one exception, because tenants has no tenant_id and no RLS
 // (the same registry read as the embedding worker). Mutation events commit
