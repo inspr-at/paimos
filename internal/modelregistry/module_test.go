@@ -161,7 +161,7 @@ func call(t *testing.T, p *tenant.Principal, method, path, body string) (int, []
 
 func decode[T any](t *testing.T, p *tenant.Principal, method, path, body string, want int) T {
 	t.Helper()
-	if p != nil && want >= 200 && want < 300 && (strings.HasPrefix(path, "/api/models") || strings.HasPrefix(path, "/api/model-preferences")) && !strings.HasPrefix(path, "/api/models/catalog") {
+	if p != nil && want >= 200 && want < 300 && (strings.HasPrefix(path, "/api/models") || strings.HasPrefix(path, "/api/model-preferences")) && !strings.HasPrefix(path, "/api/models/catalog") && !strings.HasPrefix(path, "/api/models/routes?") {
 		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error { return legacyCatalogFixture(t.Context(), tx, *p) }); err != nil {
 			t.Fatal(err)
 		}

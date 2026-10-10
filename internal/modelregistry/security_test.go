@@ -457,8 +457,8 @@ func TestVendorDiscoveryCapsPagesModelsAndUsesOneDeadline(t *testing.T) {
 		t.Fatal("cancelled discovery made an outbound call")
 		return nil, io.EOF
 	})
-	if _, err := listVendorModels(ctx, client, "openai", "fixture-key"); err == nil {
-		t.Fatal("cancelled discovery succeeded")
+	if _, err := listVendorModels(ctx, client, "openai", "fixture-key"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled discovery returned %v, want context.Canceled", err)
 	}
 }
 
@@ -490,7 +490,15 @@ func TestRefreshBoundsProfileAdditionsAndRejectsDisabledDiscoveryResults(t *test
 	disableDuringFetch := false
 	m.discovery = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if !strings.HasPrefix(r.URL.String(), vendorURLs["anthropic"]) {
-			return fixtureCatalogClient(t, nil).Transport.RoundTrip(r)
+			// Isolate revocation of credentialed discovery from independent
+			// keyless sources: all public catalogs are valid but empty here.
+			body := "{}"
+			if r.URL.String() == vendorURLs["openrouter"] {
+				body = `{"data":[]}`
+			} else if r.URL.String() != vendorURLs["modelsdev"] && r.URL.String() != vendorURLs["litellm"] {
+				t.Fatal("unexpected public catalog destination")
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 		}
 		calls++
 		if disableDuringFetch {
