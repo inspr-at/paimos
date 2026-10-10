@@ -838,6 +838,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestPoolConfirmationDoesNotSilentlyIncludeSpare","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestProbeBatchIndependentObservationsAndRevocation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestProjectDailySnapshotCapsContract","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestProjectLookupPreservesQueryFailure","tier":"NIGHTLY"}
@@ -1774,7 +1776,11 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteManagedHarnessContract","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRemoteProbeBatchPreservesIndividualResults","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteProbeStatusSendsOnlyTheCause","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRemoteQueueHintsStayOpenAndBoundFrames","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteReplyRetainsProjectAndSession","tier":"GATED-FULL"}
     ,
@@ -1928,9 +1934,13 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSupervisorDeliversMaximumEscapedChatInput","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestSupervisorIdleQueueCadenceAndHints","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestSupervisorPersistsLaunchAndReportsRunCommits","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSupervisorPublishesAccountMetadataOnce","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSupervisorQueueHintsCannotBypassDispatchFences","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSupervisorRelaysOwnedChatThroughJournaledInput","tier":"ESSENTIAL"}
     ,
@@ -2637,6 +2647,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestQueuedMeasuredReservationRecoversThroughClaim","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestQueuedRecoveryClaimsKeepTheirExactReservation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestQueuedRunNotificationsWakeAndRecheckExactKey","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRequestedAccountIsValidatedAndAuditedWithoutReservation","tier":"GATED-FULL"}
     ,

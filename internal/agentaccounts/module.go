@@ -102,6 +102,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	handle("PATCH /api/agent-accounts/{accountId}", m.patch)
 	handle("POST /api/agent-accounts/{accountId}/archive", m.archive)
 	handle("POST /api/agent-accounts/{accountId}/probe", m.probe)
+	handle("POST /api/agent-accounts/probes", m.probes)
 }
 
 func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {

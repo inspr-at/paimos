@@ -300,6 +300,7 @@ func isNoRows(err error) bool {
 }
 
 type probeWrite struct {
+	observedAt        *time.Time          // Batch-only health timestamp; never decode authority from HTTP.
 	MeasurementOnly   bool                `json:"measurement_only,omitempty"`
 	Readiness         *ReadinessReport    `json:"readiness,omitempty"`
 	OpenRouterCredits *openrouter.Credits `json:"openrouter_credits"`
@@ -360,6 +361,16 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	now, err := dbNow(ctx, tx)
 	if err != nil {
 		return Account{}, err
+	}
+	observedAt := now
+	if in.observedAt != nil {
+		observedAt = *in.observedAt
+		if observedAt.Before(now.Add(-ProbeFreshness)) || observedAt.After(now.Add(time.Minute)) || before.LastProbeAt != nil && observedAt.Before(*before.LastProbeAt) {
+			return Account{}, fail(http.StatusConflict, "stale account probe observation")
+		}
+		if observedAt.After(now) {
+			observedAt = now
+		}
 	}
 	if in.OpenRouterCredits != nil && (before.Provider != "openrouter" || !in.OpenRouterCredits.Valid() || in.OpenRouterCredits.ObservedAt.After(now.Add(time.Minute))) {
 		return Account{}, fail(400, "invalid OpenRouter credits")
@@ -460,7 +471,7 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 		UPDATE agent_accounts
 		SET last_probe_at = $7, last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END,
 		    last_probe_failure = $5, openrouter_credits=$6
-		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel, failure, in.OpenRouterCredits, now); err != nil {
+		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel, failure, in.OpenRouterCredits, observedAt); err != nil {
 		return Account{}, err
 	}
 	after, err := getAccount(ctx, tx, accountID)
