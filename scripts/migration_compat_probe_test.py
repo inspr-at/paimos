@@ -235,7 +235,8 @@ state_path.write_text(json.dumps(state))
                     log = root / f'commands-{fail_boundary}.jsonl'
                     harness_env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ['PATH'],
                         HARNESS_LOG=str(log), HARNESS_STATE=str(root / f'state-{fail_boundary}.json'),
-                        HARNESS_LEGACY_DIGEST=legacy_digest, HARNESS_FAIL_BOUNDARY=str(int(fail_boundary)))
+                        HARNESS_LEGACY_DIGEST=legacy_digest, HARNESS_FAIL_BOUNDARY=str(int(fail_boundary)),
+                        GITHUB_STEP_SUMMARY=str(root / f'summary-{fail_boundary}.txt'))
                     result = subprocess.run(['bash', str(scripts / 'migration-compat.sh'), latest_tag, latest_digest],
                         env=harness_env, capture_output=True, text=True, timeout=15, check=False)
                     self.assertEqual(result.returncode, 23 if fail_boundary else 0, result.stdout + result.stderr)
