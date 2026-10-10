@@ -320,7 +320,11 @@ func TestRoutineBudgetUnknownRetainsSlotAndChildBinding(t *testing.T) {
 		if err := agentaccounts.ValidateReservedCapacity(t.Context(), tx, in.AgentRunID, in.AccountID, f.broker.StartCheck(f.agent)); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=(SELECT work_order_id FROM agent_runs WHERE id=$1)`, in.AgentRunID, f.parent); err != nil {
+		var leaf string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,position) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Ordinary leaf',$2,2048 FROM node_kinds k WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, f.owner.TenantID, f.project).Scan(&leaf); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=(SELECT work_order_id FROM agent_runs WHERE id=$1)`, in.AgentRunID, leaf); err != nil {
 			return err
 		}
 		return agentaccounts.ValidateReservedCapacity(t.Context(), tx, in.AgentRunID, in.AccountID, f.broker.StartCheck(f.agent))
