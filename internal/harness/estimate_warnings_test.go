@@ -140,7 +140,9 @@ func TestHeartbeatIsolationCommitAndAuthority(t *testing.T) {
 	expect(t, w, 200)
 	body := decode(t, w)
 	warningCodes(t, body, "projection_unavailable")
-	if body["finished"] != false || body["progress_pct"] != nil || body["eta_stale"] != true || body["process_observed_at"] != old.Format(time.RFC3339) {
+	observedText, observedOK := body["process_observed_at"].(string)
+	observed, observedErr := time.Parse(time.RFC3339Nano, observedText)
+	if body["finished"] != false || body["progress_pct"] != nil || body["eta_stale"] != true || !observedOK || observedErr != nil || !observed.Equal(old) {
 		t.Fatalf("unknown projection refreshed evidence or claimed completion: %s", w.Body)
 	}
 	assertStored(1, true)
