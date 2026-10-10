@@ -27,13 +27,13 @@ export function setTheme(choice: ThemeChoice, persist = true) {
   }
 }
 export function toggleTheme(persist = true) { setTheme(dark.value ? 'light' : 'dark', persist) }
-// Applies the stored choice after sign-in; an unknown or missing value keeps System.
+// Applies a valid stored choice after sign-in; failed or missing reads keep the current mode.
 export async function restoreTheme(current: () => boolean = () => true) {
   const started = modeGeneration
   const stored = await readPreference('theme')
   if (!current() || started !== modeGeneration) return
   const choice = stored?.choice
-  setTheme(typeof choice === 'string' && (choices as readonly string[]).includes(choice) ? choice as ThemeChoice : 'system', false)
+  if (typeof choice === 'string' && (choices as readonly string[]).includes(choice)) setTheme(choice as ThemeChoice, false)
 }
 export function resetTheme() {
   modeGeneration++

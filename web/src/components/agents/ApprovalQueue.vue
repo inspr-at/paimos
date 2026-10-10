@@ -380,7 +380,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .card-head { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 10px 18px 8px; }
 .queue.clear .card-head { padding-bottom: 10px; }
 .card-head h2 { font-size: 17px; font-weight: 600; }
-.count-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--agent-waiting); color: var(--surface-raised); font: 700 11px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.count-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--agent-waiting); color: var(--agent-waiting-ink); font: 700 11px/1 var(--mono); font-variant-numeric: tabular-nums; }
 .all-clear { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-3); }
 .skeleton-rows { display: grid; gap: 4px; padding: 0 8px 8px; }
 .sk-row { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 10px; }

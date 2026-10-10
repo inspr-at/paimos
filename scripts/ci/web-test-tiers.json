@@ -14544,6 +14544,8 @@
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"5000 deterministic colours satisfy ink, line and fill-label contrast in both modes","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"AEON-644: the filled approval count badge uses contrast-safe waiting ink in both modes","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"OKLCH round trips sRGB and maps excessive chroma without changing hue","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"Porcelain generated accent blocks cannot drift from the engine in CI","tier":"ESSENTIAL"}
@@ -20213,6 +20215,10 @@
     {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor state model > unfinishedMissing × session restoration","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor state model > unfinishedMissing × sign out","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"AEON-644: a HTTP failure keeps the current display mode","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"AEON-644: a missing preference keeps the current display mode","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"a newer restoration owns runtime and editor in both response orders: editor first","tier":"NIGHTLY"}
     ,
