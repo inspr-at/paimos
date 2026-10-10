@@ -33,13 +33,14 @@ type Template struct {
 	HideFromReleaseNotes *bool    `json:"hide_from_release_notes,omitempty"`
 }
 type Input struct {
-	ProjectID     string   `json:"project_id"`
-	ParentID      string   `json:"parent_id"`
-	Template      Template `json:"template"`
-	Trigger       Trigger  `json:"trigger"`
-	QueueEach     bool     `json:"queue_each"`
-	OverlapPolicy string   `json:"overlap_policy"`
-	CatchUpPolicy string   `json:"catch_up_policy"`
+	ProjectID     string      `json:"project_id"`
+	ParentID      string      `json:"parent_id"`
+	Template      Template    `json:"template"`
+	Trigger       Trigger     `json:"trigger"`
+	QueueEach     bool        `json:"queue_each"`
+	OverlapPolicy string      `json:"overlap_policy"`
+	CatchUpPolicy string      `json:"catch_up_policy"`
+	Definition    *Definition `json:"definition,omitempty"`
 }
 type Recurrence struct {
 	Input
@@ -96,6 +97,11 @@ func (in *Input) normalize(now time.Time) error {
 	}
 	in.ProjectID = strings.ToLower(in.ProjectID)
 	in.ParentID = strings.ToLower(in.ParentID)
+	if in.Definition != nil {
+		if err := in.Definition.normalize(); err != nil {
+			return err
+		}
+	}
 	t := &in.Template
 	if t.HideFromReleaseNotes == nil {
 		hidden := true
@@ -239,7 +245,11 @@ func load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Recurrence, err
 	if lock {
 		query += ` FOR UPDATE`
 	}
-	return scanRecurrence(tx.QueryRow(ctx, query, id))
+	r, err := scanRecurrence(tx.QueryRow(ctx, query, id))
+	if err == nil {
+		err = definitions(ctx, tx, []Recurrence{r}, func(items []Recurrence) { r = items[0] })
+	}
+	return r, err
 }
 
 const occurrenceColumns = `recurrence_id::text,occurrence_key,number,scheduled_at,node_id::text,source_event_id,outcome,reason,created_at`

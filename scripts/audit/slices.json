@@ -219,6 +219,8 @@
         "internal/parentbenefits/**",
         "internal/statusautopilot/**",
         "internal/recurrences/**",
+        "internal/recurrences/definition.go",
+        "internal/recurrences/definition_test.go",
         "internal/usagedashboard/**",
         "internal/activity/**",
         "internal/decisiondesk/cutover_test.go",
