@@ -46,11 +46,23 @@ Messages from the chat thread keep their thread. Reply on one sends through
 `POST /api/chat-threads/{id}/outbox` with the message as `reply_to`, because
 the project message route only accepts project messages as parents; the
 client message ID keeps a retry idempotent. Such a reply has no project
-receipt and shows none. Read state follows the same split: a chat-native
-message seen on screen goes to `PUT /api/chat-threads/{id}/read-marker` as an
-exact visible ID, and the session read marker receives the newest project
-message at or before it. Another device takes the furthest message the
-history page reports as `seen` as its read watermark.
+receipt and shows none. The daemon relay reads the chat outbox only at turn
+boundaries, so while a chat-native message is the reply target the composer
+offers After this turn and Stop only: Send now and At next step leave the
+action row, and a short note in their place says that chat replies arrive
+between turns; ⌘/Ctrl+Enter then sends after the turn as well. Once the reply
+is sent or cancelled, a managed send may steer again. Steering a chat-native
+reply mid-turn is a follow-up.
+
+Read state follows the same split. Every chat-native message on screen goes
+to `PUT /api/chat-threads/{id}/read-marker` as an exact visible ID, including
+each post folded into a collapsed group. The session read marker receives
+only a project message this view has loaded: the watermark's own message
+when it is one, otherwise the newest loaded project message at or before it.
+A watermark cached on this browser from an earlier visit, whose message is
+not loaded yet, therefore waits for the thread to load and never reaches the
+session marker as an unknown ID. Another device takes the furthest message
+the history page reports as `seen` as its read watermark.
 
 ## Sends and Stop
 
@@ -91,4 +103,8 @@ turn ended claims nothing. Against mocks that refuse chat-native IDs the way
 the project routes do, it checks that a reply to a chat-native final goes to
 its chat thread, that seeing one is recorded on the thread and not sent again
 on the next visit, and that a delayed history read keeps the ended turn until
-its own final arrives.
+its own final arrives. It also reopens with a watermark cached on a
+chat-native final and checks that only a project message reaches the session
+marker, that every visible chat-native post and every post of a collapsed
+group is recorded, and, at 390 and 1440 px, that a chat-native reply target
+removes the steer action without moving the field, Send or Stop.
