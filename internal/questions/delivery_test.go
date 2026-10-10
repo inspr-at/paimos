@@ -259,12 +259,27 @@ func TestDeliveryDeadlineWakeScheduling(t *testing.T) {
 		f.expectEffects(t, q, "delivered")
 		// Lose every notification for a later answer. The injected fallback still
 		// recovers it; notification payloads never carry delivery authority.
-		q = f.answer(t, f.ask(t, input()), "missed hint")
-		f.advance(30 * time.Second)
-		if _, err := m.DispatchTenant(ctx, f.person.TenantID); err != nil {
-			t.Fatal(err)
+		step := 0
+		m.runDelivery(ctx, nil, func() time.Time { return time.Unix(0, f.now.Load()) }, func(_ context.Context, _ <-chan struct{}, delay time.Duration) bool {
+			want := []time.Duration{30 * time.Second, 10 * time.Millisecond, 30 * time.Second}
+			if step >= len(want) || delay != want[step] {
+				t.Fatalf("missed-hint step %d delay=%v", step, delay)
+			}
+			switch step {
+			case 0:
+				q = f.answer(t, f.ask(t, input()), "missed hint")
+				f.advance(delay)
+			case 1:
+				f.expectEffects(t, q, "delivered")
+			case 2:
+				return false
+			}
+			step++
+			return true
+		})
+		if step != 2 {
+			t.Fatalf("fallback scheduler stopped at step %d", step)
 		}
-		f.expectEffects(t, q, "delivered")
 	})
 }
 
