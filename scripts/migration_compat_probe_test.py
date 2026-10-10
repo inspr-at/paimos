@@ -7,9 +7,80 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from unittest.mock import Mock, patch
+
+
+class MigrationCompatibilityRunnerTest(unittest.TestCase):
+    # Risk: a capable latest release must still pass read compatibility, while
+    # an actual pre-capability image must retain every activated refusal check.
+    def test_latest_and_below_floor_images_keep_separate_compatibility_checks(self):
+        latest = '261010123154.0.0'
+        latest_digest = 'sha256:c9952c1561c8d32c4a3efb17ed95934f81efd6bc2546de41a3b56bd138304deb'
+        below_floor = '261009095632.0.0'
+        below_floor_digest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
+        source = Path(__file__).with_name('migration-compat.sh').read_text()
+        for version, digest, refuses in [(latest, latest_digest, True),
+                                          (latest, latest_digest, False),
+                                          (below_floor, below_floor_digest, True)]:
+            with self.subTest(version=version, refuses=refuses), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                scripts, binaries = root / 'scripts', root / 'bin'
+                scripts.mkdir()
+                binaries.mkdir()
+                runner = scripts / 'migration-compat.sh'
+                runner.write_text(source)
+                calls = root / 'calls.jsonl'
+                # Exercise the real shell orchestration without Docker, a build,
+                # or a network. The latest capable binary succeeds at resolve;
+                # treating it as below-floor produces the exact CI failure.
+                stub = f'''#!{sys.executable}
+import json
+from pathlib import Path
+import sys
+name, args = Path(sys.argv[0]).name, sys.argv[1:]
+with Path({str(calls)!r}).open('a') as output:
+    output.write(json.dumps([name, args]) + '\\n')
+if name == 'docker' and args[:2] == ['image', 'ls']:
+    print('sha256:' + 'a' * 64)
+elif name == 'docker' and args[:1] == ['port']:
+    print('127.0.0.1:8080')
+elif name == 'python3' and args[1] == 'account-use':
+    version = args[args.index('--version') + 1]
+    if version != {below_floor!r} or not {refuses!r}:
+        print('Migration compatibility failed: /api/models/resolve?role=build&harness=codex: activated previous binary returned HTTP 200', file=sys.stderr)
+        sys.exit(1)
+'''
+                for name in ('docker', 'python3', 'go', 'trash'):
+                    executable = binaries / name
+                    executable.write_text(stub)
+                    executable.chmod(0o755)
+                # Supply a minimal environment; never inherit credentials or
+                # the real CI summary path into this disposable runner.
+                result = subprocess.run(['bash', str(runner), 'v' + version, digest],
+                                        env={'PATH': str(binaries) + ':/usr/bin:/bin'},
+                                        capture_output=True, text=True, timeout=15, check=False)
+                if not refuses:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('activated previous binary returned HTTP 200', result.stderr)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                recorded = [json.loads(line) for line in calls.read_text().splitlines()]
+                expected = [(latest, latest_digest), (below_floor, below_floor_digest)] if version == latest else [(below_floor, below_floor_digest)]
+                pulls = [args[-1] for name, args in recorded if name == 'docker' and args[:1] == ['pull']]
+                self.assertEqual(pulls, ['ghcr.io/inspr-at/aeon@' + digest for _, digest in expected])
+                for mode in ('seed', 'check'):
+                    versions = [args[args.index('--version') + 1] for name, args in recorded
+                                if name == 'python3' and args[1] == mode]
+                    self.assertEqual(versions, [version for version, _ in expected])
+                activated = [args[args.index('--version') + 1] for name, args in recorded
+                             if name == 'python3' and args[1] == 'account-use']
+                self.assertEqual(activated, [below_floor])
+                migrations = [args for name, args in recorded if name == 'go']
+                self.assertEqual(migrations, [['run', '-p', '2', './scripts/migrate-candidate.go']] * len(expected))
+
 
 spec = importlib.util.spec_from_file_location('migration_compat_probe', Path(__file__).with_name('migration-compat-probe.py'))
 module = importlib.util.module_from_spec(spec)
