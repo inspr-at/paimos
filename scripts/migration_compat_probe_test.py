@@ -71,6 +71,11 @@ elif tool == 'python3':
                 sys.exit('capability refusal must exercise the independent legacy fixture')
         elif active.read_text() != latest_id or database != 'aeon':
             sys.exit('capability-aware activation must exercise the latest binary')
+        if '--require-refusal' in args:
+            if '--release-tag' in args:
+                sys.exit('legacy refusal must remain unconditional')
+        elif args[args.index('--release-tag') + 1] != 'v261010123154.0.0':
+            sys.exit('latest account-use policy must use its pinned release')
 elif tool not in ('go', 'trash'):
     sys.exit('unexpected tool')
 '''
@@ -102,6 +107,8 @@ elif tool not in ('go', 'trash'):
                 ('check', '261009095632.0.0'), ('account-use', '261009095632.0.0')])
             activations = [args for tool, args in calls if tool == 'python3' and args[1] == 'account-use']
             self.assertEqual(['--require-refusal' in args for args in activations], [False, True])
+            self.assertEqual(activations[0][activations[0].index('--release-tag') + 1], latest_tag)
+            self.assertNotIn('--release-tag', activations[1])
             self.assertNotIn('--database', activations[0])
             self.assertEqual(activations[1][activations[1].index('--database') + 1], 'aeon_legacy')
             copies = [i for i, (_tool, args) in enumerate(calls)
@@ -411,6 +418,115 @@ class ProbeTest(unittest.TestCase):
         self.assertTrue(all(not call.kwargs for call in request.call_args_list))
         self.assertEqual(boundary.snapshot.call_count, 4)
 
+    def capable_fixture(self):
+        tenant, owner, agent, account, run, order, request = [str(uuid.UUID(int=i)) for i in range(1, 8)]
+        self.responses['/api/me'] = {'principal': {'id': owner, 'tenant_id': tenant}}
+        preview = {'preview': True, 'profile': {'id': 'catalog-only'}, 'ladder': []}
+        resolutions = iter([preview, preview, {'profile': None, 'ladder': [{'skip_reasons': [module.CONTEXT_SKIP_REASON]}]}])
+        self.responses['/api/models/resolve?role=build&harness=codex'] = lambda: next(resolutions)
+        capacity = iter([{'accounts': [], 'parallel_runs': 0, 'wait': {'code': reason}}
+                         for reason in ('offline', 'context')])
+        self.responses['/api/agent-accounts/capacity/next?harness=codex'] = lambda: next(capacity)
+        uses = iter([(404, 'application/json', b'{"error":"account not found"}'),
+                     (409, 'application/json', b'{"error":"account_not_allowed_for_context"}')])
+        self.responses[f'/api/agent-accounts/use?harness=codex&account_id={account}'] = lambda: next(uses)
+        self.responses['/api/agent-accounts/route'] = (403, 'application/json', b'{"error":"agent key required"}')
+        self.responses[f'/api/agent-pairing/requests/{request}/approve'] = (404, 'application/json', b'{"error":"pairing not found"}')
+        claims = iter([(409, 'application/json', json.dumps({'error': reason}).encode())
+                       for reason in ('account reservation required', 'account daemon generation changed')])
+        self.responses[f'/api/runs/{run}/claim'] = lambda: next(claims)
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
+
+        def sql(statement):
+            if 'enforced_at IS NULL' in statement:
+                return '0,1,true'
+            if "key='agents.working'" in statement:
+                return '0'
+            if 'jsonb_build_object' in statement:
+                return 'unchanged reservations, runs and claims'
+            return ''
+
+        boundary.sql = Mock(side_effect=sql)
+        boundary.errors = Mock(return_value=(0, 0))
+        ids = [uuid.UUID(value) for value in (agent, account, run, order, request)]
+        ids += [uuid.UUID(int=i) for i in (8, 9)]
+        return boundary, ids, {'ticket': str(uuid.UUID(int=10))}
+
+    # Risk: the latest published binary already supports account_use_v1. Its
+    # safe HTTP 200 preview must pass while runnable material still fails.
+    def test_supported_previous_release_checks_both_activated_pools(self):
+        boundary, ids, state = self.capable_fixture()
+        with patch.object(module.uuid, 'uuid4', side_effect=ids), patch.object(module.time, 'sleep'), contextlib.redirect_stdout(io.StringIO()):
+            boundary.check_policy(state, capable=True)
+        boundary.errors.assert_not_called()
+        self.assertEqual(sum('jsonb_build_object' in c.args[0] for c in boundary.sql.call_args_list), 4)
+        self.assertTrue(any('DELETE FROM account_use_cells' in c.args[0] for c in boundary.sql.call_args_list))
+        self.assertEqual(sum(path.startswith('/api/runs/') for path, _ in self.posts), 2)
+
+    def test_supported_previous_release_rejects_executable_preview(self):
+        boundary, ids, state = self.capable_fixture()
+        self.responses['/api/models/resolve?role=build&harness=codex'] = {
+            'preview': True, 'profile': {'id': 'unsafe'}, 'command_template': 'unsafe launch'}
+        with patch.object(module.uuid, 'uuid4', side_effect=ids), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(AssertionError, 'activated pool supplied executable material'):
+                boundary.check_policy(state, capable=True)
+
+    def test_supported_previous_release_requires_context_and_no_capacity(self):
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
+        path = '/api/models/resolve?role=build&harness=codex'
+        self.responses[path] = {'profile': None, 'ladder': [{'skip_reasons': ['offline']}]}
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(AssertionError, 'denied pool lacks its context refusal'):
+                boundary.selection(True, 'account')
+            self.responses[path] = {'profile': None, 'ladder': [{'skip_reasons': [module.CONTEXT_SKIP_REASON]}]}
+            self.responses['/api/agent-accounts/capacity/next?harness=codex'] = {
+                'accounts': [{'account_id': 'denied'}], 'parallel_runs': 1, 'wait': {'code': 'context'}}
+            with self.assertRaisesRegex(AssertionError, 'pool supplied capacity or lost its refusal'):
+                boundary.selection(True, 'account')
+
+    # Risk: the released ladder names the full context refusal, never a bare
+    # category. CI against the published binary failed on the bare token; a
+    # substring match would also accept unrelated reasons that mention context.
+    def test_supported_previous_release_matches_released_context_reason(self):
+        go = (Path(__file__).resolve().parent.parent / 'internal/agentaccounts/use_policy.go').read_text()
+        self.assertIn('const ContextSkipReason = ' + json.dumps(module.CONTEXT_SKIP_REASON), go)
+        path = '/api/models/resolve?role=build&harness=codex'
+        self.responses['/api/agent-accounts/capacity/next?harness=codex'] = {
+            'accounts': [], 'parallel_runs': 0, 'wait': {'code': 'context'}}
+        self.responses['/api/agent-accounts/use?harness=codex&account_id=account'] = (
+            409, 'application/json', b'{"error":"account_not_allowed_for_context"}')
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
+        released = {'profile': None, 'preview': False, 'ladder': [
+            {'profile_id': 'other', 'skip_reasons': ['harness filter']},
+            {'profile_id': 'codex', 'skip_reasons': ["no account allowed for this project's context"]}]}
+        self.responses[path] = released
+        with contextlib.redirect_stdout(io.StringIO()):
+            boundary.selection(True, 'account')
+            for reasons in (['context'], ['account availability: context pending']):
+                self.responses[path] = {'profile': None, 'ladder': [{'skip_reasons': reasons}]}
+                with self.subTest(reasons=reasons), self.assertRaisesRegex(AssertionError, 'denied pool lacks its context refusal'):
+                    boundary.selection(True, 'account')
+
+    def test_pinned_release_floor_selects_checks_without_http_fallback(self):
+        with patch.object(module.subprocess, 'run') as run:
+            run.return_value = Mock(returncode=0, stdout='internal/db/migrations/1310_account_use_entry_guard.sql\n')
+            self.assertTrue(module.previous_account_use_capable('pinned-release'))
+            self.assertEqual(run.call_args.args[0][3], 'pinned-release')
+            run.return_value = Mock(returncode=0, stdout='')
+            self.assertFalse(module.previous_account_use_capable('legacy-release'))
+            run.return_value = Mock(returncode=128, stdout='')
+            with self.assertRaisesRegex(AssertionError, 'cannot determine the pinned release'):
+                module.previous_account_use_capable('missing-release')
+
+    def test_supported_refusal_rejects_wrong_status_or_reason(self):
+        path = '/api/agent-accounts/use'
+        self.responses[path] = (500, 'application/json', b'{"error":"unrelated"}')
+        with self.assertRaisesRegex(AssertionError, 'expected HTTP 409, got 500'):
+            self.probe.refused(path, status=409, message='account_not_allowed_for_context')
+        self.responses[path] = (409, 'application/json', b'{"error":"unrelated"}')
+        with self.assertRaisesRegex(AssertionError, 'wrong policy refusal'):
+            self.probe.refused(path, status=409, message='account_not_allowed_for_context')
+
 
 class MigrationHarnessTest(unittest.TestCase):
     def test_latest_compatibility_and_legacy_capability_use_distinct_images(self):
@@ -463,6 +579,11 @@ elif name == 'python3':
                 sys.exit('capability refusal must exercise the independent immutable legacy image')
         elif state.get('image') != os.environ['HARNESS_LATEST_DIGEST'] or database != 'aeon':
             sys.exit('capability-aware activation must exercise the latest binary')
+        if boundary == 'legacy':
+            if '--release-tag' in args:
+                sys.exit('legacy refusal must remain unconditional')
+        elif args[args.index('--release-tag') + 1] != 'v261010123154.0.0':
+            sys.exit('latest account-use policy must use its pinned release')
         if os.environ['HARNESS_FAIL_BOUNDARY'] == boundary:
             sys.exit(23)
 state_path.write_text(json.dumps(state))
@@ -496,6 +617,9 @@ state_path.write_text(json.dumps(state))
                                        '--require-refusal' in event['args']) for event in boundary],
                         [(latest_digest, 'aeon', True, latest_tag[1:], False)] +
                         ([] if fail_boundary == 'latest' else [(legacy_digest, 'aeon_legacy', True, legacy_tag[1:], True)]))
+                    self.assertEqual(boundary[0]['args'][boundary[0]['args'].index('--release-tag') + 1], latest_tag)
+                    if fail_boundary != 'latest':
+                        self.assertNotIn('--release-tag', boundary[1]['args'])
                     if fail_boundary != 'none':
                         self.assertNotIn('Migration compatibility passed:', result.stdout)
                     else:
@@ -538,14 +662,21 @@ if tool == 'docker':
         (root / 'image').write_text(args[-1])
         database = next(value for value in args if value.startswith('AEON_DATABASE_URL=')).split('/')[-1].split('?')[0]
         (root / 'database').write_text(database)
+        (root / 'running').write_text('true')
         record(['boot', args[-1], database])
+    elif args[0] == 'stop':
+        (root / 'running').write_text('false')
     elif args[0] == 'port':
         print('127.0.0.1:18080')
     elif args[0] == 'exec' and '-i' in args:
         sys.stdin.read()
     elif args[0] == 'exec' and 'CREATE DATABASE aeon_legacy WITH TEMPLATE aeon OWNER aeon' in args:
+        if (root / 'running').read_text() != 'false' or (root / 'fixture-aeon').read_text() != 'inactive':
+            sys.exit('snapshot requires an inactive fixture with no server connected')
+        (root / 'fixture-aeon_legacy').write_text((root / 'fixture-aeon').read_text())
         record(['copy-fixture'])
 elif tool == 'go':
+    (root / 'fixture-aeon').write_text('inactive')
     record(['migrate'])
 elif tool == 'python3':
     mode = args[1]
@@ -560,13 +691,24 @@ elif tool == 'python3':
         database = args[args.index('--database') + 1] if '--database' in args else 'aeon'
         if database != (root / 'database').read_text():
             sys.exit('probe and binary used different fixtures')
+        expected = '261009095632.0.0' if current == floor_id else '261010123154.0.0'
+        if version != expected:
+            sys.exit('wrong account-use capability release')
+        fixture = root / ('fixture-' + database)
+        if fixture.read_text() != 'inactive':
+            sys.exit('account-use probes require an empty inactive fixture')
+        fixture.write_text('activated with populated pool')
         if current == latest_id:
+            if args[args.index('--release-tag') + 1] != 'v' + expected:
+                sys.exit('latest capability must use its pinned release')
             if '--require-refusal' in args:
                 sys.exit('latest binary forced to refuse regardless of capability')
             record(['activated-latest', os.environ['AEON_COMPAT_TEST_LATEST_CAPABLE']])
             if os.environ['AEON_COMPAT_TEST_LATEST_FAILS'] == 'true':
                 sys.exit('capable normal path failed')
         else:
+            if '--release-tag' in args:
+                sys.exit('legacy refusal must remain unconditional')
             if database != 'aeon_legacy' or '--require-refusal' not in args:
                 sys.exit('legacy refusal gate lost its independent strict fixture')
             if os.environ['AEON_COMPAT_TEST_LEGACY_FAILS'] == 'true':

@@ -62,9 +62,13 @@ The shared fixture template explicitly preserves the previous all-allowed
 policy and activates it; policy-specific and pre-expansion migration fixtures
 retain their production defaults so their before-activation assertions remain
 meaningful. No production predicate, permission or audit is disabled.
-The previous-image harness also checks activated empty and populated pools.
-Older handlers sanitize database errors, so each refused request must produce
-the exact `0A000` message from `aeon_enter_principal` in the disposable
+The previous-image harness also checks activated empty and denied pools.
+The pinned release's embedded principal-entry migration identifies whether it
+supports the capability. Supported releases must return only a catalog preview
+for an empty pool, refuse denied context selection and account hand-outs, and
+leave reservations, claims, starts and background state unchanged. For releases
+below the floor, handlers sanitize database errors, so each refused request must
+produce the exact `0A000` message from `aeon_enter_principal` in the disposable
 Postgres log. Generic HTTP errors alone cannot pass that gate.
 
 The selection layer uses the same database predicates for dispatch, claims,

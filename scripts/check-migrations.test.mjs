@@ -298,6 +298,8 @@ elif tool == 'python3':
     const activations = probes.filter(call => call[2] === 'account-use');
     assert.deepEqual(activations.map(version), [tag.slice(1), rollbackTag.slice(1)]);
     assert.deepEqual(activations.map(call => call.includes('--require-refusal')), [false, true]);
+    assert.equal(activations[0][activations[0].indexOf('--release-tag') + 1], tag);
+    assert.ok(!activations[1].includes('--release-tag'), 'legacy refusal stays unconditional');
     assert.equal(activations[0].includes('--database'), false);
     assert.equal(activations[1][activations[1].indexOf('--database') + 1], 'aeon_legacy');
     const pulls = calls.filter(call => call[0] === 'docker' && call[1] === 'pull');

@@ -6,7 +6,7 @@ set -euo pipefail
 # OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
 pgvector_image="${PGVECTOR_IMAGE:-ghcr.io/inspr-at/paimos-ci/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11}"
 
-for tool in docker python3 go; do
+for tool in docker python3 go git; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
 tag="${1:?usage: bash scripts/migration-compat.sh vYYMMDDhhmmss.0.0 sha256:DIGEST}"
@@ -104,7 +104,7 @@ docker container rm "$app" >/dev/null
 docker exec "$db" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 \
   -c 'CREATE DATABASE aeon_legacy WITH TEMPLATE aeon OWNER aeon' >/dev/null
 start_image "$previous_image_id"
-python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db" --release-tag "$tag"
 
 # Verify the immutable pre-capability binary and the seeded reads before
 # activation. The existing exact SQLSTATE/entry, empty/populated pool and
