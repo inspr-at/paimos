@@ -54,6 +54,8 @@ func TestHeartbeatKnownProjectBypassesProjection(t *testing.T) {
 	defer srv.Close()
 	rt, _, _ := heartbeatRuntime(t, srv)
 	o := heartbeatTestOptions(t.TempDir())
+	// Match the one-shot harness below; the shared fixture defaults to Claude.
+	o.Harness = "codex"
 	session := heartbeatSession{id: transcriptSessionID, lease: "known-project-lease-00000000000001"}
 	if _, err := rt.projectNodeCtx(t.Context(), o.Project); heartbeatStatus(err) != 503 {
 		t.Fatalf("legacy lookup did not reproduce the list 503: %v", err)
