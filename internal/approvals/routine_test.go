@@ -43,8 +43,11 @@ func TestRoutineHoldIsExactPersonOwnedAndRevocable(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if replayed.ID != hold.ID || len(pending) != 1 || hold.Target != nil || hold.TargetDigestSHA256 != "" || hold.Scope != RoutineScope("nodes.write", digest) {
+		if replayed.ID != hold.ID || len(pending) != 1 {
 			t.Fatal("hold replay duplicated request/event")
+		}
+		if hold.Target != nil || hold.TargetDigestSHA256 != "" || hold.Scope != RoutineScope("nodes.write", digest) {
+			t.Fatal("routine hold lost its exact scope or reused deployment metadata")
 		}
 		if err = CanDecide(t.Context(), tx, f.agentA, hold); err == nil {
 			t.Fatal("requesting agent could decide")
