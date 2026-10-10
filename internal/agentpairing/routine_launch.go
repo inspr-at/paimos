@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const RoutinePickupHeader = "X-Aeon-Routine-Pickup"
+const RoutinePickupHeader = agentsetup.RoutinePickupHeader
 
 // RequireRoutineRouteTx refuses old daemons before account reservation, using
 // the immutable server trace rather than caller-provided run/prompt metadata.

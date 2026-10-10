@@ -9,6 +9,7 @@ import (
 )
 
 const RoutineExecutionCapability = "routine_execution_v1"
+const RoutinePickupHeader = "X-Aeon-Routine-Pickup"
 
 // RoutineGrant is immutable server intent, not a credential. The final claim
 // independently checks current consent, qualification, admission and budget.

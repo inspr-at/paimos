@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
-	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
@@ -412,7 +411,7 @@ func (r *Remote) RouteRoutine(ctx context.Context, runID, daemonID string, accou
 	if err != nil {
 		return Route{}, err
 	}
-	return r.route(ctx, runID, daemonID, accountIDs, estimates, map[string]string{agentpairing.RoutinePickupHeader: string(raw)})
+	return r.route(ctx, runID, daemonID, accountIDs, estimates, map[string]string{agentsetup.RoutinePickupHeader: string(raw)})
 }
 
 func (r *Remote) route(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64, headers map[string]string) (Route, error) {
