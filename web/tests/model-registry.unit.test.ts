@@ -51,7 +51,7 @@ describe('registry lines', () => {
     expect(lines.map(line => line.model)).toEqual(['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna', 'claude-opus-5-5'])
   })
   it('describes a line as harness, route (when it adds something), id, source and what was taken on', () => {
-    const [codex, cursor] = [buildLines([sol('high', 3)])[0]!, buildLines([profile({ harness: 'cursor', model: 'composer-2.5', effort: 'default', family: 'cursor' })])[0]!]
+    const [codex, cursor] = [buildLines([sol('high', 3, { origin: 'harness' })])[0]!, buildLines([profile({ harness: 'cursor', model: 'composer-2.5', effort: 'default', family: 'cursor', origin: 'harness' })])[0]!]
     expect(metaParts(codex)).toEqual(['Codex', 'OpenAI', 'gpt-6.1-sol', 'From harness'])
     expect(metaParts(cursor)).toEqual(['Cursor', 'composer-2.5', 'From harness'])
     expect(metaParts({ ...codex, origin: 'shipped' }).at(-1)).toBe('Shipped')

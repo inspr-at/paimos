@@ -115,7 +115,7 @@ func TestCoordinatorKeysThroughRealHandlers(t *testing.T) {
 				}
 				call(t, key.Token, http.MethodGet, "/api/models/resolve?role=build-hard", http.StatusOK)
 				call(t, key.Token, http.MethodGet, "/api/models", http.StatusOK)
-				for _, path := range []string{"/api/model-preferences", "/api/model-preferences/board", "/api/model-preferences/simple"} {
+				for _, path := range []string{"/api/model-preferences", "/api/model-preferences/board", "/api/model-preferences/coverage", "/api/model-preferences/evidence", "/api/model-preferences/simple", "/api/model-preferences/situations"} {
 					call(t, key.Token, http.MethodGet, path, http.StatusOK)
 				}
 				paths := []string{
@@ -201,7 +201,7 @@ func TestModelPreferenceReadsRetainOrdinaryKeyCeiling(t *testing.T) {
 			for _, path := range []string{"/api/model-preferences", "/api/model-preferences/board", "/api/model-preferences/coverage", "/api/model-preferences/evidence", "/api/model-preferences/simple", "/api/model-preferences/situations"} {
 				out := call(path)
 				if out.Code != http.StatusForbidden || !strings.Contains(out.Body.String(), "agent key scope required") {
-					t.Fatalf("ordinary preference ceiling %s: %d %s", path, out.Code, out.Body.String())
+					t.Fatalf("ordinary preference ceiling %s: %d %.220s", path, out.Code, out.Body.String())
 				}
 			}
 		})
