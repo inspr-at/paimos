@@ -11,8 +11,9 @@ package eta
 func AggregateSQL(roots string) string {
 	return `WITH scope AS MATERIALIZED (SELECT * FROM aeon_work_scope(` + roots + `)),
  leaf_nodes AS MATERIALIZED (
-  SELECT DISTINCT id,fields,bucket,project_id FROM scope WHERE is_leaf
- ), interval AS MATERIALIZED (SELECT aeon_eta_interval() AS duration),
+  SELECT DISTINCT id,fields,bucket,project_id FROM scope
+  WHERE is_leaf AND (bucket NOT IN ('archived','cancelled') OR root=id)
+ ), eta_interval AS MATERIALIZED (SELECT aeon_eta_interval() AS duration),
  sessions AS MATERIALIZED (
   SELECT s.id,s.ticket_node_id,s.project_id,s.agent_principal_id,s.role,s.phase,
    s.stopped_at,s.stop_reason,s.progress_pct,s.eta_ready_at,s.eta_reported_at
@@ -53,7 +54,7 @@ func AggregateSQL(roots string) string {
    coalesce(o.working,false) AS working,
    coalesce(o.id IS NULL AND aeon_session_finished(d.stopped_at,d.stop_reason,d.progress_pct),false) AS finished,
    d.stopped_at AS finished_at,dp.name AS finished_by
-  FROM leaf_nodes f CROSS JOIN interval i
+  FROM leaf_nodes f CROSS JOIN eta_interval i
   LEFT JOIN open_sessions o ON o.id=f.id
   LEFT JOIN latest_worker w ON w.ticket_node_id=f.id
   LEFT JOIN latest_stop d ON d.ticket_node_id=f.id

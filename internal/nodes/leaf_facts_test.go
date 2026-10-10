@@ -210,6 +210,7 @@ func TestLeafFactsBatchExecutionCounts(t *testing.T) {
 			ids = append(ids, root, root) // Overlapping and duplicate roots share facts.
 		}
 		counts := map[string]int{}
+		sessionStarts := map[string]int{}
 		for _, mode := range []string{"before", "after"} {
 			if _, err := adminPool.Exec(t.Context(), `ALTER SEQUENCE leafbatch_interval_calls RESTART WITH 0`); err != nil {
 				t.Fatal(err)
@@ -234,15 +235,38 @@ func TestLeafFactsBatchExecutionCounts(t *testing.T) {
 				calls++
 			}
 			counts[mode] = calls
+			sessionStarts[mode] = leafBatchSessionStarts(t, plan)
 			if mode == "after" {
 				assertLeafBatchPlan(t, plan, width)
 			}
 		}
-		if counts["after"] != 1 || counts["before"] < width {
+		// S02 may already hoist the interval in the installed SQL function.
+		// Require one call here, without coupling this slice to its merge order.
+		if counts["after"] != 1 || counts["before"] < 1 {
 			t.Fatalf("width=%d interval calls before=%d after=%d", width, counts["before"], counts["after"])
 		}
-		t.Logf("%d distinct leaves: interval calls before=%d after=%d; correlated ETA/completion function calls after=0", width, counts["before"], counts["after"])
+		t.Logf("%d distinct leaves: interval calls before=%d after=%d; harness scan starts before=%d after=%d; correlated ETA/completion function calls after=0", width, counts["before"], counts["after"], sessionStarts["before"], sessionStarts["after"])
 	}
+}
+
+func leafBatchSessionStarts(t *testing.T, raw []byte) int {
+	t.Helper()
+	var documents []map[string]any
+	if err := json.Unmarshal(raw, &documents); err != nil || len(documents) != 1 {
+		t.Fatalf("invalid executed plan: %v", err)
+	}
+	starts := 0
+	var visit func(map[string]any)
+	visit = func(n map[string]any) {
+		if n["Relation Name"] == "harness_sessions" {
+			starts += int(n["Actual Loops"].(float64))
+		}
+		for _, child := range planChildren(n) {
+			visit(child)
+		}
+	}
+	visit(documents[0]["Plan"].(map[string]any))
+	return starts
 }
 
 func assertLeafBatchPlan(t *testing.T, raw []byte, leaves int) {
