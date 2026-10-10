@@ -3,10 +3,12 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from unittest.mock import Mock, patch
@@ -14,6 +16,91 @@ from unittest.mock import Mock, patch
 spec = importlib.util.spec_from_file_location('migration_compat_probe', Path(__file__).with_name('migration-compat-probe.py'))
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+
+
+class HarnessTest(unittest.TestCase):
+    # Risk: after the capability ships, the latest stable image can no longer
+    # prove the refusal of a below-floor binary. Both image checks must run,
+    # and a failure of the historical refusal probe must remain fatal.
+    def test_capable_latest_keeps_below_floor_refusal_mandatory(self):
+        latest_tag = 'v261010123154.0.0'
+        latest_digest = 'sha256:' + 'a' * 64
+        legacy_tag = 'v261009095632.0.0'
+        legacy_digest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
+        versions = {'sha256:' + '1' * 64: latest_tag[1:],
+                    'sha256:' + '2' * 64: legacy_tag[1:]}
+        images = {'ghcr.io/inspr-at/aeon@' + latest_digest: next(iter(versions)),
+                  'ghcr.io/inspr-at/aeon@' + legacy_digest: list(versions)[1]}
+        for refusal_exit in (0, 17):
+            with self.subTest(refusal_exit=refusal_exit), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                scripts, binaries = root / 'scripts', root / 'bin'
+                scripts.mkdir()
+                binaries.mkdir()
+                script = scripts / 'migration-compat.sh'
+                script.write_bytes(Path(module.__file__).with_name('migration-compat.sh').read_bytes())
+                # Execute the real shell orchestration with disposable tool
+                # doubles; no Docker daemon, Go build or network is needed.
+                double = f'''#!{sys.executable}
+import json
+from pathlib import Path
+import sys
+
+root = Path(__file__).parent.parent
+tool, args = Path(sys.argv[0]).name, sys.argv[1:]
+active = root / 'active-image'
+image = active.read_text() if active.exists() else ''
+with (root / 'calls.jsonl').open('a') as log:
+    log.write(json.dumps({{'tool': tool, 'args': args, 'image': image}}) + '\\n')
+versions, images = {versions!r}, {images!r}
+if tool == 'docker':
+    if args[:2] == ['image', 'ls']:
+        print(images[args[-1]])
+    elif args[0] == 'run' and args[args.index('--name') + 1].startswith('aeon-compat-app-'):
+        active.write_text(args[-1])
+    elif args[0] == 'port':
+        print('127.0.0.1:12345')
+elif tool == 'python3':
+    mode = args[1]
+    if mode in ('seed', 'check', 'account-use'):
+        if args[args.index('--version') + 1] != versions[image]:
+            sys.exit('wrong image version')
+        state = Path(args[args.index('--state') + 1])
+        if mode == 'seed':
+            state.write_text('{{"project":"project","ticket":"ticket"}}')
+        elif json.loads(state.read_text()) != {{'project': 'project', 'ticket': 'ticket'}}:
+            sys.exit('seeded rows lost')
+    if mode == 'account-use':
+        if versions[image] == {latest_tag[1:]!r}:
+            sys.exit('activated capable binary returned HTTP 200')
+        sys.exit({refusal_exit})
+'''
+                for tool in ('docker', 'python3', 'go', 'trash'):
+                    executable = binaries / tool
+                    executable.write_text(double)
+                    executable.chmod(0o700)
+                completed = subprocess.run(
+                    ['bash', str(script), latest_tag, latest_digest], cwd=root,
+                    env={**os.environ, 'PATH': str(binaries) + os.pathsep + os.environ['PATH'],
+                         'GITHUB_STEP_SUMMARY': str(root / 'summary')},
+                    capture_output=True, text=True, timeout=15, check=False)
+                self.assertEqual(completed.returncode, refusal_exit, completed.stderr)
+                calls = [json.loads(line) for line in (root / 'calls.jsonl').read_text().splitlines()]
+                checks = [(call['args'][1], versions[call['image']])
+                          for call in calls if call['tool'] == 'python3' and call['args'][1] != 'wait-ready']
+                self.assertEqual(checks, [('seed', latest_tag[1:]), ('check', latest_tag[1:]),
+                                          ('check', legacy_tag[1:]), ('account-use', legacy_tag[1:])])
+                pulls = [call['args'][-1] for call in calls
+                         if call['tool'] == 'docker' and call['args'][0] == 'pull']
+                self.assertEqual(pulls, list(images))
+                if refusal_exit:
+                    self.assertNotIn('Migration compatibility passed:', completed.stdout)
+                    self.assertFalse((root / 'summary').exists())
+                else:
+                    summary = (root / 'summary').read_text()
+                    self.assertIn(latest_tag, summary)
+                    self.assertIn(legacy_tag, summary)
+                    self.assertIn(legacy_digest, summary)
 
 
 class ProbeTest(unittest.TestCase):
