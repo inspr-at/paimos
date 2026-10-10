@@ -173,7 +173,7 @@ func TestQueueWaitBatchScansAndFreshClaimFences(t *testing.T) {
 	}
 	t.Run("retired pool door still occupies slots", func(t *testing.T) {
 		err := db.InTenant(ctx, appPool, f.admin.TenantID, func(tx pgx.Tx) error {
-			if _, err := tx.Exec(ctx, `UPDATE agent_runs SET account_id=$1,status='running' WHERE id=ANY($2::uuid[])`, sibling.ID, ids[1:4]); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE agent_runs SET requested_account_id=$1,account_id=$1,status='running' WHERE id=ANY($2::uuid[])`, sibling.ID, ids[1:4]); err != nil {
 				return err
 			}
 			// Retirement keeps existing runs but requires its actor and makes
