@@ -7620,6 +7620,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkAggregatesDeepWideAndRLS","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkAggregatesETAIntervalOnceAndParity","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkAggregatesUnweightedAndHistoricalSpend","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkBenefitsCausalUndoRejectsIncompleteCompletion","tier":"GATED-FULL"}
