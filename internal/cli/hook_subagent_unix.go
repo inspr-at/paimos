@@ -5,9 +5,11 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -64,4 +66,34 @@ func lockSubagentDir(dir *os.File) (heartbeatHold, error) {
 	}
 	hold.lock = lock
 	return hold, nil
+}
+
+// This short lock covers lifecycle publication and the local reset only.
+// Never hold it over a network request or while acquiring the child lock.
+func lockSubagentLifecycle(ctx context.Context, dir *os.File) (*os.File, error) {
+	hold := heartbeatHold{dir: dir}
+	lock, err := hold.openNamedLock("subagent.lifecycle.lock")
+	if err != nil {
+		return nil, err
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			lock.Close()
+			return nil, err
+		}
+		err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		if err == nil {
+			return lock, nil
+		}
+		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EAGAIN) {
+			lock.Close()
+			return nil, err
+		}
+		timer := time.NewTimer(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
+	}
 }

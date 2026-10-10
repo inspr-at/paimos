@@ -128,7 +128,7 @@ type heartbeatSession struct {
 
 func validStateName(name string) bool {
 	switch name {
-	case "session.id", "state.json", "lease.key", "session.ref", "stop.intent", "settle.intent", "heartbeat.lock", "activity.json", "activity-mode.json", "subagent.json", "subagent.stop":
+	case "session.id", "state.json", "lease.key", "session.ref", "stop.intent", "settle.intent", "heartbeat.lock", "activity.json", "activity-mode.json", "subagent.json", "subagent.stop", "subagent.start", "subagent.lifecycle.lock":
 		return true
 	default:
 		return false

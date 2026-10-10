@@ -30,6 +30,13 @@ type subagentRequest struct {
 	Registration map[string]any `json:"registration,omitempty"`
 }
 
+// Only an explicit start publishes this authority. Maintenance consumes it
+// under the child lock, including when the start hook found that lock busy.
+type subagentStart struct {
+	Request    subagentRequest `json:"request"`
+	ResumeFrom string          `json:"resume_from,omitempty"`
+}
+
 func subagentHookEvent(event string) bool {
 	return event == "SubagentStart" || event == "SubagentStop"
 }
@@ -93,13 +100,18 @@ func (rt *runtime) runSubagentHook(ctx context.Context, event string) error {
 		return err
 	}
 	defer childDir.Close()
-	if event == "SubagentStop" {
-		// Persist without waiting for the registration lock: a very short child
-		// can stop while its start hook is still in flight.
-		h := heartbeatHold{dir: childDir}
-		if err := h.writeFile("subagent.stop", []byte(id+"\n")); err != nil {
-			return err
+	label := heartbeatText(input.AgentType, 128)
+	if label == "" {
+		label = "Claude subagent"
+	}
+	if description := heartbeatText(input.Description, 128); description != "" {
+		if combined := heartbeatText(label+": "+description, 128); combined != "" {
+			label = combined
 		}
+	}
+	request := subagentRequest{Parent: id, Project: parent.ProjectID, Label: label, Model: heartbeatText(input.Model, 128)}
+	if err := publishSubagentHook(ctx, childDir, event, request); err != nil {
+		return err
 	}
 	hold, err := lockSubagentDir(childDir)
 	if errors.Is(err, errHeartbeatBusy) {
@@ -112,41 +124,9 @@ func (rt *runtime) runSubagentHook(ctx context.Context, event string) error {
 	if rt.subagentLocked != nil {
 		rt.subagentLocked()
 	}
-	req, err := readSubagentRequest(&hold)
-	if err == nil && req.Parent == id && req.Project == parent.ProjectID && event == "SubagentStart" {
-		session, exists, loadErr := loadHeartbeatSession(&hold)
-		if loadErr != nil {
-			return loadErr
-		}
-		if exists && session.disk.Closed && !session.disk.Terminal {
-			// Claude reuses agent_id when resuming. Only an explicit start may
-			// rotate a completed generation; the parent heartbeat never does.
-			// Clear the old stop before the identity, so a stop arriving during
-			// fresh registration is retained. Every change holds the child lock.
-			if err := hold.remove("subagent.stop"); err != nil {
-				return err
-			}
-			if err := clearHeartbeatIdentity(&hold); err != nil {
-				return err
-			}
-			err = os.ErrNotExist
-		}
-	}
-	if errors.Is(err, os.ErrNotExist) {
-		if event == "SubagentStop" {
-			return nil
-		}
-		label := heartbeatText(input.AgentType, 128)
-		if label == "" {
-			label = "Claude subagent"
-		}
-		if description := heartbeatText(input.Description, 128); description != "" {
-			if combined := heartbeatText(label+": "+description, 128); combined != "" {
-				label = combined
-			}
-		}
-		req = subagentRequest{Parent: id, Project: parent.ProjectID, Label: label, Model: heartbeatText(input.Model, 128)}
-		err = writeSubagentRequest(&hold, req)
+	req, err := readSubagentWork(&hold)
+	if errors.Is(err, os.ErrNotExist) && event == "SubagentStop" {
+		return nil
 	}
 	if err != nil {
 		return err
@@ -159,6 +139,122 @@ func (rt *runtime) runSubagentHook(ctx context.Context, event string) error {
 		return ctx.Err()
 	}
 	return err
+}
+
+func publishSubagentHook(ctx context.Context, dir *os.File, event string, req subagentRequest) error {
+	lock, err := lockSubagentLifecycle(ctx, dir)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	hold := heartbeatHold{dir: dir}
+	if event == "SubagentStop" {
+		// The short lifecycle lock never waits for registration or heartbeat
+		// I/O. Stops can still land while either holds the child lock.
+		return hold.writeFile("subagent.stop", []byte(req.Parent+"\n"))
+	}
+	pending, err := readSubagentStart(&hold)
+	if err == nil {
+		if pending.Request.Parent != req.Parent || pending.Request.Project != req.Project {
+			return errHeartbeatState
+		}
+		// A repeated start must not clear a stop for an already pending resume.
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	current, err := readSubagentRequest(&hold)
+	start := subagentStart{Request: req}
+	if err == nil {
+		if current.Parent != req.Parent || current.Project != req.Project {
+			return errHeartbeatState
+		}
+		// Read only public state here; the child lock owns its proof and I/O.
+		raw, err := hold.readFile("state.json", 1<<20)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // Existing registration is still in flight.
+		}
+		var disk heartbeatDisk
+		if err != nil {
+			return err
+		}
+		if json.Unmarshal(raw, &disk) != nil || disk.Schema != heartbeatSchema || !validUUID(disk.SessionID) || disk.ProjectID != req.Project {
+			return errHeartbeatState
+		}
+		if !disk.Closed || disk.Terminal {
+			return nil
+		}
+		start.ResumeFrom = disk.SessionID
+		// Clear only the completed generation's stop, serialized with every
+		// stop publication. Reset never unlinks a subsequently published stop.
+		if err := hold.remove("subagent.stop"); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	raw, err := json.Marshal(start)
+	if err != nil || len(raw) > 16<<10 {
+		return errHeartbeatState
+	}
+	return hold.writeFile("subagent.start", raw)
+}
+
+func readSubagentStart(hold *heartbeatHold) (subagentStart, error) {
+	raw, err := hold.readFile("subagent.start", 16<<10)
+	var start subagentStart
+	if err != nil {
+		return start, err
+	}
+	if json.Unmarshal(raw, &start) != nil || !validUUID(start.Request.Parent) || !validUUID(start.Request.Project) || heartbeatText(start.Request.Label, 128) == "" || start.Request.Registration != nil || (start.ResumeFrom != "" && !validUUID(start.ResumeFrom)) {
+		return start, errHeartbeatState
+	}
+	return start, nil
+}
+
+func readSubagentWork(hold *heartbeatHold) (subagentRequest, error) {
+	req, err := readSubagentRequest(hold)
+	if errors.Is(err, os.ErrNotExist) {
+		start, err := readSubagentStart(hold)
+		return start.Request, err
+	}
+	return req, err
+}
+
+func prepareSubagent(ctx context.Context, hold *heartbeatHold, req *subagentRequest, closing bool) (heartbeatSession, bool, error) {
+	lock, err := lockSubagentLifecycle(ctx, hold.dir)
+	if err != nil {
+		return heartbeatSession{}, false, err
+	}
+	defer lock.Close()
+	session, exists, err := loadHeartbeatSession(hold)
+	if err != nil || closing {
+		return session, exists, err
+	}
+	start, err := readSubagentStart(hold)
+	if errors.Is(err, os.ErrNotExist) {
+		return session, exists, nil
+	}
+	if err != nil {
+		return session, exists, err
+	}
+	if start.Request.Parent != req.Parent || start.Request.Project != req.Project {
+		return session, exists, errHeartbeatState
+	}
+	if exists && session.disk.Closed && !session.disk.Terminal && start.ResumeFrom == session.id {
+		if err := clearHeartbeatIdentity(hold); err != nil {
+			return session, exists, err
+		}
+		exists = false
+	}
+	if !exists {
+		*req = start.Request
+		if err := writeSubagentRequest(hold, *req); err != nil {
+			return session, exists, err
+		}
+	}
+	return session, exists, hold.remove("subagent.start")
 }
 
 func readSubagentRequest(hold *heartbeatHold) (subagentRequest, error) {
@@ -182,7 +278,7 @@ func writeSubagentRequest(hold *heartbeatHold, req subagentRequest) error {
 }
 
 func (rt *runtime) syncSubagent(ctx context.Context, hold *heartbeatHold, req *subagentRequest, closing bool) error {
-	session, exists, err := loadHeartbeatSession(hold)
+	session, exists, err := prepareSubagent(ctx, hold, req, closing)
 	if err != nil {
 		return err
 	}
@@ -321,7 +417,7 @@ func (rt *runtime) heartbeatSubagents(ctx context.Context, parent *heartbeatSess
 			if rt.subagentLocked != nil {
 				rt.subagentLocked()
 			}
-			req, readErr := readSubagentRequest(&hold)
+			req, readErr := readSubagentWork(&hold)
 			if readErr == nil && req.Parent == parent.id && req.Project == parent.disk.ProjectID {
 				childCtx, childCancel := context.WithTimeout(ctx, hookBudget)
 				if rt.syncSubagent(childCtx, &hold, &req, closing) != nil {

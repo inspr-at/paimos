@@ -350,7 +350,7 @@ func TestClaudeSubagentHookResumeDuringMaintenance(t *testing.T) {
 	// may be needed to recover the explicit resume or its public metadata.
 	f.rt().heartbeatSubagents(t.Context(), p, false)
 	resumed := f.childDisk(t)
-	if len(f.registrations) != 2 || resumed.SessionID == first.SessionID || resumed.Closed || resumed.Terminal || f.beats < 2 || f.stops != 1 {
+	if len(f.registrations) != 2 || resumed.SessionID == first.SessionID || resumed.Closed || resumed.Terminal || resumed.Sequence != 2 || f.beats != 3 || f.stops != 1 {
 		t.Fatal("resume intent was lost while maintenance held the child lock")
 	}
 	if f.registrations[1]["display_label"] != "Explore: deferred resume" || f.registrations[1]["model"] != "claude-opus-4-6" || f.registrations[1]["work_shape"] != "ship" {
@@ -389,6 +389,10 @@ func TestClaudeSubagentHookStopBeforeResumeReset(t *testing.T) {
 		t.Fatal("resume did not acquire the child lock before reset")
 	}
 	if stderr := f.invoke(t, "SubagentStop", ""); stderr != "" {
+		t.Fatal(stderr)
+	}
+	// A duplicate start while the same resume is pending must retain its stop.
+	if stderr := f.invoke(t, "SubagentStart", ""); stderr != "" {
 		t.Fatal(stderr)
 	}
 	once.Do(func() { close(release) })
