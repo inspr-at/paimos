@@ -205,7 +205,7 @@ func (m *Module) stampSessions(ctx context.Context, tx pgx.Tx, sessions []*Sessi
 // heartbeatReceipt preserves authoritative write fields, including finished
 // and process_observed_at. Missing optional projections are unknown, never a
 // fresh estimate or a cached coordinator percent (which may predate its workers).
-// A warning uses the existing open code/hint shape on the pinned reporter API.
+// The unknown-projection warning is declared in the pinned reporter contract.
 func heartbeatReceipt(s Session) heartbeatResponse {
 	if s.Role == "coordinator" && s.StoppedAt == nil && s.ArchivedAt == nil {
 		s.ProgressPct = nil

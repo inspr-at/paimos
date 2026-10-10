@@ -1511,6 +1511,14 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		return nil, err
 	}
 	if isolated {
+		// Pause delivery and wake timers are mandatory controls, even when
+		// optional projections are omitted. Stamp after the final writes so
+		// a scheduled start reached during this heartbeat is delivered.
+		now, err := m.ownershipNow(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		s = stampPause(s, now)
 		return heartbeatReceipt(s), nil
 	}
 	if err = m.stampSessions(ctx, tx, []*Session{&s}); err != nil {

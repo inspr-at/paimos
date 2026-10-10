@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/2.11",
-    "sha256": "7168e041b7c237c6fffa17d8552bb40a7a4c2496453338f9105fe3b19550a919",
+    "version": "harness-session/3.0",
+    "sha256": "35eb883983ff67171444690719cfb330db512124048a58954a06c8d02ddd835b",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1942,7 +1942,8 @@
                   "enum": [
                     "missing_progress",
                     "missing_eta",
-                    "ticket_without_estimate"
+                    "ticket_without_estimate",
+                    "projection_unavailable"
                   ],
                   "type": "string"
                 },
@@ -3276,7 +3277,8 @@
                   "enum": [
                     "missing_progress",
                     "missing_eta",
-                    "ticket_without_estimate"
+                    "ticket_without_estimate",
+                    "projection_unavailable"
                   ],
                   "type": "string"
                 },
