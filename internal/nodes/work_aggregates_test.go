@@ -629,7 +629,7 @@ func TestListEstimateSortBoundedConcurrentMatchesBaseline(t *testing.T) {
 	private := mustNode(t, w.admin, `{"kind_id":"`+kindBySlug(t, w.admin, "project").ID+`","title":"Private list"}`)
 	privateWorld := w
 	privateWorld.root = private
-	aggregateNode(t, privateWorld, "PRIVATELIST-1", private.ID, "open", 200)
+	aggregateNode(t, privateWorld, "PRIVATE-1", private.ID, "open", 200)
 	q.Within, q.States, q.IDs = &private.ID, nil, nil
 	privatePage, err := plain.listNodes(WithBoundedListAggregates(viewerCtx), w.admin.TenantID, q)
 	if err != nil || len(privatePage.Items) != 0 {
