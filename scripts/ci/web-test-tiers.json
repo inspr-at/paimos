@@ -5010,6 +5010,38 @@
     ,
     {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header light 620: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 a cached watermark on a chat-native final never reaches the session marker","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 a chat-native reply offers only what its transport consumes 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 a chat-native reply offers only what its transport consumes 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 a late history read never dismisses the live turn","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 a refused stop after the turn ended claims nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 a reply to a chat-native final goes to its chat thread","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 a seen chat-native final is recorded on its chat thread","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 composer offers sends per capability: native steer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 composer offers sends per capability: next-step steer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 composer offers sends per capability: no steer control","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 composer offers sends per capability: unmanaged","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 every visible chat-native post is recorded on its chat thread","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -13590,6 +13622,36 @@
     ,
     {"kind":"node","file":"tests/capacity.test.ts","name":"two Codex accounts: soonest reset first, one plan sentence, gauges from server pacing","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"a dropped-frame count above the baseline marks the hole","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"a full frame queue applies at once and never drops the end of a turn","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"a watermark reaches the session marker only through a loaded project message","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"an older reply from a late history read never dismisses the live turn","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"composer flags mirror the agentd capability snapshot","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"deltas build one turn, idle ends it, and the saved reply replaces it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"every visible row and every folded post is chat read evidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"live text and tools stay bounded and say when they were cut","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"only an applied interrupt may say the person stopped the turn","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"read state for chat-native posts goes to the chat thread, never to the session marker","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"requires_action holds through text until idle; hints never change its text or state","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"saved chat messages between agent and viewer join the thread and settle the live turn","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"the follower opens only a found thread and resyncs on refusal or handover","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"the offered sends match the transport of the next message","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/chatLive.test.ts","name":"the working timer is tabular m:ss","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/clip-link.test.ts","name":"a record changed away and back still invalidates the in-flight gesture","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/clip-link.test.ts","name":"document disclosure capture cannot bypass the project gesture identity guard","tier":"GATED-FULL"}
@@ -14534,7 +14596,7 @@
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"chat keys distinguish after-turn input, steer and composition","tier":"ESSENTIAL"}
     ,
-    {"kind":"node","file":"tests/sessionChat.test.ts","name":"chat queue placement respects evidence and the static harness capability","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/sessionChat.test.ts","name":"chat queue placement respects evidence and the per-session capability flags","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"delivery wording is short and specific (AEON-280)","tier":"GATED-FULL"}
     ,
