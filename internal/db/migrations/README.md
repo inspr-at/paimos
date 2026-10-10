@@ -245,7 +245,14 @@ its API. It then applies the candidate's real embedded migrations and backfills,
 restarts those same previous-image bytes, and checks health, readiness, embedded
 SPA, session/permissions, members, kinds, project summaries, node lists
 and seeded node details. An unhealthy startup, failed read or missing seeded row
-fails the `migration-compat` job. No image is built or pushed.
+fails the `migration-compat` job. The account-use rollback-floor counterexample
+then boots the digest-pinned pre-capability release `v261009095632.0.0`
+on the same migrated disposable database, repeats the reads and activates the
+legacy probes. That image must refuse activated empty and populated pools at
+capability entry; the latest published release may already support account use.
+All existing
+refusal and unchanged-state assertions remain in the below-floor probe.
+No image is built or pushed.
 
 Run the same checks locally (Go, Node, Python and Docker required):
 

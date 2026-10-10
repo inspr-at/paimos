@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -189,10 +190,16 @@ func projectLeadWait(l Lead, now time.Time) Lead {
 	return l
 }
 
-func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead) (Lead, error) {
-	// AEON-734: the production launch policy remains OFF until AEON-603 proof.
-	// Admission injection supplies checks only; it must never enable launch.
-	l.AutomaticLaunchEnabled = false
+func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead, readers ...modelregistry.ExecutionRuntimeReader) (Lead, error) {
+	var reader modelregistry.ExecutionRuntimeReader
+	if len(readers) > 0 {
+		reader = readers[0]
+	}
+	policy, err := modelregistry.ProjectExecutionTx(ctx, tx, p.TenantID, l.ProjectID, reader)
+	if err != nil {
+		return l, err
+	}
+	l.AutomaticLaunchEnabled = policy.AutomaticLaunchEnabled
 	active, err := leadProject(ctx, tx, l.ProjectID)
 	if err != nil {
 		return l, err
@@ -253,7 +260,7 @@ func (m *Module) readLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
-	return projectLead(r.Context(), tx, p, l)
+	return m.projectLead(r.Context(), tx, p, l)
 }
 func (m *Module) startLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
@@ -315,7 +322,7 @@ func (m *Module) startLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = workorders.Record(ctx, tx, p, id, "lead.start_requested", before, l); err != nil {
 		return nil, err
 	}
-	return projectLead(ctx, tx, p, l)
+	return m.projectLead(ctx, tx, p, l)
 }
 
 // Removing an intent never erases a generation's immutable history. The same
@@ -538,7 +545,7 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = workorders.Record(ctx, tx, p, id, "lead.claim_checked", before, l); err != nil {
 		return nil, err
 	}
-	return projectLead(ctx, tx, p, l)
+	return m.projectLead(ctx, tx, p, l)
 }
 
 func (m *Module) pauseLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (result any, err error) {
@@ -616,7 +623,7 @@ func (m *Module) pauseLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	if err = record(ctx, tx, p, Session{ProjectID: id}, "lead_paused", before, l); err != nil {
 		return nil, err
 	}
-	return projectLead(ctx, tx, p, l)
+	return m.projectLead(ctx, tx, p, l)
 }
 
 // RequireCurrentLeadTx is the shared fence for accepted assignments (AEON-735)

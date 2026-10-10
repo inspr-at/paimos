@@ -142,6 +142,8 @@
         "internal/agentd/chat_relay_test.go",
         "internal/agentd/chat_acp.go",
         "internal/agentd/chat_acp_test.go",
+        "internal/harness/routine_execution.go",
+        "internal/harness/routine_execution_test.go",
         "internal/agentd/probe_batch.go",
         "internal/agentd/queue_cadence.go",
         "internal/agentd/queue_cadence_test.go",
@@ -237,6 +239,8 @@
         "internal/activity/**",
         "internal/decisiondesk/cutover_test.go",
         "internal/questions/lock_order_test.go",
+        "internal/recurrences/consent.go",
+        "internal/recurrences/consent_test.go",
         "internal/routineguard/**",
         "internal/recurrences/runs.go",
         "internal/recurrences/runs_test.go"

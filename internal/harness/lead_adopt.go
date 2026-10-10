@@ -166,7 +166,7 @@ func (m *Module) adoptLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = workorders.Record(ctx, tx, p, id, "lead.adoption_requested", before, l); err != nil {
 		return nil, err
 	}
-	return projectLead(ctx, tx, p, l)
+	return m.projectLead(ctx, tx, p, l)
 }
 
 // cancelLeadAdoption clears only the unclaimed session selection. It does not
@@ -213,5 +213,5 @@ func (m *Module) cancelLeadAdoption(r *http.Request, tx pgx.Tx, p tenant.Princip
 	if err = workorders.Record(ctx, tx, p, id, "lead.adoption_cancelled", before, l); err != nil {
 		return nil, err
 	}
-	return projectLead(ctx, tx, p, l)
+	return m.projectLead(ctx, tx, p, l)
 }
