@@ -528,7 +528,12 @@ func TestListEstimateSortBoundedConcurrentMatchesBaseline(t *testing.T) {
 		baseline[archived.ID] == nil || *baseline[archived.ID] != "4.5" || baseline[unknown.ID] != nil {
 		t.Fatal("whole-scope estimate semantics changed")
 	}
-	// Stop all four requests at the actual list statement before releasing
+	plain := New(appPool, nil).(*Module)
+	baselinePage, err := plain.listNodes(ctx, w.admin.TenantID, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Stop all four optimized reads at the actual list statement before releasing
 	// them together. No sleep or elapsed-time assumption proves overlap.
 	ready, release := make(chan struct{}, 4), make(chan struct{})
 	cfg := appPool.Config()
@@ -548,11 +553,7 @@ func TestListEstimateSortBoundedConcurrentMatchesBaseline(t *testing.T) {
 		reads.Add(1)
 		go func() {
 			defer reads.Done()
-			readCtx := ctx
-			if i%2 == 1 {
-				readCtx = WithBoundedListAggregates(readCtx)
-			}
-			pages[i], failures[i] = mod.listNodes(readCtx, w.admin.TenantID, q)
+			pages[i], failures[i] = mod.listNodes(WithBoundedListAggregates(ctx), w.admin.TenantID, q)
 		}()
 	}
 	guard, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -570,7 +571,7 @@ func TestListEstimateSortBoundedConcurrentMatchesBaseline(t *testing.T) {
 		if failures[i] != nil {
 			t.Fatal(failures[i])
 		}
-		if len(pages[i].Items) != 20 || pages[i].NextCursor == nil || !reflect.DeepEqual(pages[0], pages[i]) {
+		if len(pages[i].Items) != 20 || pages[i].NextCursor == nil || !reflect.DeepEqual(baselinePage, pages[i]) {
 			t.Fatal("concurrent page/order/coverage/cursor differs from baseline")
 		}
 		if pages[i].Items[0].ID != cancelled.ID || pages[i].Items[1].ID != archived.ID {
@@ -579,7 +580,6 @@ func TestListEstimateSortBoundedConcurrentMatchesBaseline(t *testing.T) {
 	}
 	// A cursor minted with the default path also continues through the opt-in
 	// path, with matching filters, ties, page contents and next cursor.
-	plain := New(appPool, nil).(*Module)
 	q.Cursor = *pages[0].NextCursor
 	basePage, err := plain.listNodes(ctx, w.admin.TenantID, q)
 	if err != nil {
