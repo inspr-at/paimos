@@ -1,0 +1,483 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/chat
+paths:
+  /chat-deliveries/final:
+    post:
+      operationId: "persistChatWorkerFinal"
+      description: "Persist only an explicit final agent message. Existing private external lease, current binding/native ownership and current chat.receive plus chat.send permission/key scopes required inside the final transaction. 512 KiB wire, 64 KiB valid UTF-8 body without NUL, three-second body/work budget; stable idempotent client message ID. Interim events never use this route."
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ChatOutboxResult"
+        '400':
+          description: "Invalid bounded input or cursor"
+        '404':
+          description: "Disabled, unknown or unauthorized target"
+        '409':
+          description: "Conflicting message, stale binding or expired replay cursor"
+        '429':
+          description: "Bounded relay capacity exhausted"
+        '408':
+          description: "Three-second request body/work deadline exceeded"
+        '413':
+          description: "Final body exceeds 64 KiB; no writes"
+      parameters:
+        -
+          name: "X-Aeon-Worker-Lease"
+          in: "header"
+          required: true
+          schema:
+            type: "string"
+            minLength: 32
+            maxLength: 4096
+          description: "Existing private registration proof; never logged or returned."
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/ChatWorkerFinal"
+  /chat-deliveries/live:
+    post:
+      operationId: "publishChatThreadLive"
+      description: "Relay exactly one normalized S1 ChatSessionEvent with a nonzero source sequence and update. 128 KiB wire limit, three-second body/work budget. The existing private external worker lease, current binding epoch, native context and current scoped chat.receive key are verified under the tenant fence. Public event binding identifiers grant no authority. Repeated/older source sequences for the same session/epoch are acknowledged without rebroadcast while the RAM buffer lives. Capability snapshots are excluded. This path never persists content."
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ChatLiveAdmission"
+        '400':
+          description: "Invalid bounded input or cursor"
+        '404':
+          description: "Disabled, unknown or unauthorized target"
+        '409':
+          description: "Conflicting message, stale binding or expired replay cursor"
+        '429':
+          description: "Bounded relay capacity exhausted"
+        '408':
+          description: "Three-second request body/work deadline exceeded"
+      parameters:
+        -
+          name: "X-Aeon-Worker-Lease"
+          in: "header"
+          required: true
+          schema:
+            type: "string"
+            minLength: 32
+            maxLength: 4096
+          description: "Existing private registration proof; never logged or returned."
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/ChatLivePublish"
+  /chat-deliveries/outbox:
+    post:
+      operationId: "listChatWorkerOutbox"
+      description: "Existing external lease and current exact binding/key proof required. Retrieve only final inputs pinned to this session; default 25, maximum 50, at most 1 MiB, caller/session/epoch-scoped keyset cursor. Retrieval is neither an ACK nor execution authority."
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ChatOutboxPage"
+        '400':
+          description: "Invalid bounded input or cursor"
+        '404':
+          description: "Disabled, unknown or unauthorized target"
+        '409':
+          description: "Conflicting message, stale binding or expired replay cursor"
+        '429':
+          description: "Bounded relay capacity exhausted"
+        '408':
+          description: "Three-second request body/work deadline exceeded"
+      parameters:
+        -
+          name: "X-Aeon-Worker-Lease"
+          in: "header"
+          required: true
+          schema:
+            type: "string"
+            minLength: 32
+            maxLength: 4096
+          description: "Existing private registration proof; never logged or returned."
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/ChatWorkerOutboxRequest"
+  /chat-deliveries/outbox/receipt:
+    post:
+      operationId: "reportChatOutboxReceipt"
+      description: "Content-free recipient evidence for the exact current external registration, binding, message and private worker lease. Explicit delivered advances sent; explicit read requires delivered first. Repeated or older evidence never downgrades read. Fetching, queueing, reconnecting or a legacy ACK never advances these states. Maximum 8 KiB body and three-second body/work budget."
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ChatOutboxResult"
+        '400':
+          description: "Invalid bounded input or cursor"
+        '404':
+          description: "Disabled, unknown or unauthorized target"
+        '409':
+          description: "Conflicting message, stale binding or expired replay cursor"
+        '429':
+          description: "Bounded relay capacity exhausted"
+        '408':
+          description: "Three-second request body/work deadline exceeded"
+      parameters:
+        -
+          name: "X-Aeon-Worker-Lease"
+          in: "header"
+          required: true
+          schema:
+            type: "string"
+            minLength: 32
+            maxLength: 4096
+          description: "Existing private registration proof; never logged or returned."
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/ChatWorkerOutboxReceipt"
+  /chat-threads/{id}/live:
+    get:
+      operationId: "streamChatThreadLive"
+      description: "Opt-in per-thread live stream. Person participant plus current chat.read required before each frame and 15-second keepalive. Normalized S1 deltas/tool activity stay only in RAM; never enter database, audit, telemetry or logs. Replay holds at most 64 frames and 256 KiB per thread, 256 threads and 256 viewers globally, four viewers per thread. Idle buffers expire on subsequent relay activity after two minutes. Last-Event-ID or after resumes strictly after the cursor; expired, evicted or restarted replay returns 409 before streaming, or a resync frame then closes. Reload final history on resync. No execution authority is granted. Streams rotate after five minutes; socket writes have a three-second deadline."
+      responses:
+        '200':
+          description: "SSE ready, chat, keepalive or resync frames; id is an opaque caller/thread-scoped cursor"
+          content:
+            "text/event-stream":
+              schema:
+                type: "string"
+                description: "Chat frames carry an update, final-message ID, receipt evidence or read-marker hint. Ready/keepalive never replay text."
+        '400':
+          description: "Invalid bounded input or cursor"
+        '404':
+          description: "Disabled, unknown or unauthorized target"
+        '409':
+          description: "Conflicting message, stale binding or expired replay cursor"
+        '429':
+          description: "Bounded relay capacity exhausted"
+      parameters:
+        -
+          name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        -
+          name: "Last-Event-ID"
+          in: "header"
+          schema:
+            type: "string"
+            maxLength: 4096
+        -
+          name: "after"
+          in: "query"
+          schema:
+            type: "string"
+            maxLength: 4096
+  /chat-threads/{id}/outbox:
+    post:
+      operationId: "sendChatOutboxFinal"
+      description: "Accept a final person message under current participant and chat.send authorization. Maximum 512 KiB wire, 64 KiB UTF-8 body without NUL, 64-byte client ID, three-second body/work deadline. Same client ID and identical payload replays the stable message ID; changed payload conflicts. Final text persists in chat-isolated inbox rows. The input is pinned to the selected session; binding handover never resends it to a successor. Sent means persisted, without implying delivery, wake, launch or interruption. No legacy inbox transport is used."
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ChatOutboxResult"
+        '400':
+          description: "Invalid bounded input or cursor"
+        '404':
+          description: "Disabled, unknown or unauthorized target"
+        '409':
+          description: "Conflicting message, stale binding or expired replay cursor"
+        '429':
+          description: "Bounded relay capacity exhausted"
+        '408':
+          description: "Three-second request body/work deadline exceeded"
+        '413':
+          description: "Final body exceeds 64 KiB; no writes"
+      parameters:
+        -
+          name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/ChatOutboxSend"
+    get:
+      operationId: "listChatOutboxFinal"
+      description: "Person-only final messages and sent/delivered/read evidence. Current participant and chat.read authorization; ascending keyset pagination, default 25 and maximum 50, at most 1 MiB. Reads never mark delivery or read. Person read evidence requires an exact visible-message read-marker union."
+      responses:
+        '200':
+          description: "Authorized bounded result"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ChatOutboxPage"
+        '400':
+          description: "Invalid bounded input or cursor"
+        '404':
+          description: "Disabled, unknown or unauthorized target"
+        '409':
+          description: "Conflicting message, stale binding or expired replay cursor"
+        '429':
+          description: "Bounded relay capacity exhausted"
+      parameters:
+        -
+          name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        -
+          name: "after"
+          in: "query"
+          schema:
+            type: "string"
+            maxLength: 4096
+        -
+          name: "limit"
+          in: "query"
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+components:
+  schemas:
+    ChatLiveAdmission:
+      type: "object"
+      additionalProperties: false
+      required: ["contract", "accepted"]
+      properties:
+        contract:
+          type: "string"
+          const: "chat-live-v1"
+        accepted:
+          type: "boolean"
+    ChatLivePublish:
+      type: "object"
+      additionalProperties: false
+      required: ["conversation_id", "session_id", "binding_epoch", "event"]
+      properties:
+        conversation_id:
+          type: "string"
+          format: "uuid"
+        session_id:
+          type: "string"
+          format: "uuid"
+        binding_epoch:
+          "$ref": "#/components/schemas/ChatPosition"
+        event:
+          "$ref": "#/components/schemas/ChatLiveSourceEvent"
+    ChatLiveSourceEvent:
+      type: "object"
+      additionalProperties: false
+      required: ["binding", "sequence", "dropped_events", "update"]
+      properties:
+        binding:
+          type: "object"
+          additionalProperties: false
+          required: ["tenant_id", "principal_id", "run_id", "generation", "session_id"]
+          properties:
+            tenant_id:
+              type: "string"
+              format: "uuid"
+            principal_id:
+              type: "string"
+              format: "uuid"
+            run_id:
+              type: "string"
+            generation:
+              type: "string"
+            session_id:
+              type: "string"
+              format: "uuid"
+        sequence:
+          type: "integer"
+          minimum: 1
+        dropped_events:
+          type: "integer"
+          minimum: 0
+        update:
+          "$ref": "#/components/schemas/ChatLiveUpdate"
+    ChatLiveUpdate:
+      type: "object"
+      additionalProperties: false
+      required: ["sessionUpdate"]
+      properties:
+        sessionUpdate:
+          type: "string"
+          enum: ["agent_message_chunk", "tool_call", "state"]
+        content:
+          type: "object"
+          additionalProperties: false
+          required: ["type", "text"]
+          properties:
+            type:
+              type: "string"
+              const: "text"
+            text:
+              type: "string"
+              minLength: 1
+              maxLength: 65536
+              x-aeon-max-utf8-bytes: 65536
+        toolCallId:
+          type: "string"
+          maxLength: 256
+        title:
+          type: "string"
+          maxLength: 128
+        status:
+          type: "string"
+          enum: ["in_progress", "completed", "failed"]
+        state:
+          type: "string"
+          enum: ["running", "idle", "requires_action"]
+    ChatOutboxPage:
+      type: "object"
+      additionalProperties: false
+      required: ["contract", "items", "next_cursor"]
+      properties:
+        contract:
+          type: "string"
+          const: "chat-live-v1"
+        items:
+          type: "array"
+          maxItems: 50
+          items:
+            "$ref": "#/components/schemas/ChatOutboxResult"
+        next_cursor:
+          type: ["string", "null"]
+          maxLength: 4096
+    ChatOutboxReceipt:
+      type: "object"
+      additionalProperties: false
+      required: ["message_id", "state"]
+      properties:
+        message_id:
+          type: "string"
+          format: "uuid"
+        state:
+          type: "string"
+          enum: ["sent", "delivered", "read"]
+    ChatOutboxResult:
+      type: "object"
+      additionalProperties: false
+      required: ["contract", "message", "receipt"]
+      properties:
+        contract:
+          type: "string"
+          const: "chat-live-v1"
+        message:
+          "$ref": "#/components/schemas/ChatMessage"
+        receipt:
+          "$ref": "#/components/schemas/ChatOutboxReceipt"
+    ChatOutboxSend:
+      type: "object"
+      additionalProperties: false
+      required: ["client_message_id", "body"]
+      properties:
+        client_message_id:
+          type: "string"
+          minLength: 1
+          maxLength: 64
+          x-aeon-max-utf8-bytes: 64
+        body:
+          type: "string"
+          minLength: 1
+          maxLength: 65536
+          x-aeon-max-utf8-bytes: 65536
+        reply_to:
+          type: "string"
+          format: "uuid"
+    ChatWorkerFinal:
+      type: "object"
+      additionalProperties: false
+      required: ["conversation_id", "session_id", "binding_epoch", "client_message_id", "body"]
+      properties:
+        conversation_id:
+          type: "string"
+          format: "uuid"
+        session_id:
+          type: "string"
+          format: "uuid"
+        binding_epoch:
+          "$ref": "#/components/schemas/ChatPosition"
+        client_message_id:
+          type: "string"
+          minLength: 1
+          maxLength: 64
+          x-aeon-max-utf8-bytes: 64
+        body:
+          type: "string"
+          minLength: 1
+          maxLength: 65536
+          x-aeon-max-utf8-bytes: 65536
+        reply_to:
+          type: "string"
+          format: "uuid"
+    ChatWorkerOutboxReceipt:
+      type: "object"
+      additionalProperties: false
+      required: ["conversation_id", "session_id", "binding_epoch", "message_id", "state"]
+      properties:
+        conversation_id:
+          type: "string"
+          format: "uuid"
+        session_id:
+          type: "string"
+          format: "uuid"
+        binding_epoch:
+          "$ref": "#/components/schemas/ChatPosition"
+        message_id:
+          type: "string"
+          format: "uuid"
+        state:
+          type: "string"
+          enum: ["delivered", "read"]
+    ChatWorkerOutboxRequest:
+      type: "object"
+      additionalProperties: false
+      required: ["conversation_id", "session_id", "binding_epoch"]
+      properties:
+        conversation_id:
+          type: "string"
+          format: "uuid"
+        session_id:
+          type: "string"
+          format: "uuid"
+        binding_epoch:
+          "$ref": "#/components/schemas/ChatPosition"
+        after:
+          type: "string"
+          maxLength: 4096
+        limit:
+          type: "integer"
+          minimum: 0
+          maximum: 50

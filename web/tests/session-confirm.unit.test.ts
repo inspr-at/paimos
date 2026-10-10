@@ -10,7 +10,7 @@ import { deferred, setupSource } from './record-source'
 import * as WorkVocabulary from '../src/lib/workVocabulary'
 
 vi.mock('../src/lib/api', () => ({ api: vi.fn(), getSession: vi.fn(), sessionEnded: { blocked: false, handler: null } }))
-vi.mock('../src/lib/theme', () => ({ restoreTheme: async () => {} }))
+vi.mock('../src/lib/theme', () => ({ restoreTheme: async () => {}, resetTheme: () => {} }))
 const person = (id: string, tenant = 'tenant'): Identity => ({ principal: { id, name: id, kind: 'person' }, tenant: { id: tenant, name: 'Workspace' } })
 const stopped: (() => void)[] = []
 

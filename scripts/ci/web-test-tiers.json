@@ -12154,6 +12154,26 @@
     ,
     {"kind":"browser","file":"tests/theme-agents.spec.ts","name":"visible screenshots and Personal agent behaviour controls stay stable in all viewport modes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"a reload waits for the saved colours before rendering the app","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"extreme saved accents keep personal appearance links readable in both modes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"system mode follows the OS without losing the chosen colours","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"theme colours and filled ink stay stable at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"theme colours and filled ink stay stable at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"theme colours and filled ink stay stable at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"theme colours and filled ink stay stable at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"theme colours and filled ink stay stable at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"theme colours and filled ink stay stable at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"waiting glyph ink survives the robot clock styles in both modes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/theme-control-geometry.spec.ts","name":"the attachment stage keeps a radial wash in every theme even if canvas-lo is missing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/theme-control-geometry.spec.ts","name":"the shared switch centres its knob on any track and the agents label keeps a 44px hit target","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -13219,6 +13239,8 @@
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"verification stays on the server terms and is selected by default","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"web fixes and labels follow the shared daemon/server vocabulary","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/agent-palettes.test.ts","name":"CSS token rules match complete selectors in reordered and wrapped lists","leaf":"CSS token rules match complete selectors in reordered and wrapped lists","line":47,"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agent-palettes.test.ts","name":"every approved look defines five marks with 3:1 contrast on cards in both modes","tier":"GATED-FULL"}
     ,
@@ -14522,6 +14544,8 @@
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"5000 deterministic colours satisfy ink, line and fill-label contrast in both modes","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"AEON-644: the filled approval count badge uses contrast-safe waiting ink in both modes","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"OKLCH round trips sRGB and maps excessive chroma without changing hue","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"Porcelain generated accent blocks cannot drift from the engine in CI","tier":"ESSENTIAL"}
@@ -14547,6 +14571,18 @@
     {"kind":"node","file":"tests/theme-control-geometry.test.ts","name":"the shared checkbox tick is primary-on ink and not a left or top edge","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/theme-control-geometry.test.ts","name":"the shared switch sizes its knob from the track and the agents label keeps the 44px hit target","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-values.test.ts","name":"every recurring source resolves per mode with ink for its actual fill","leaf":"every recurring source resolves per mode with ink for its actual fill","line":42,"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/theme-values.test.ts","name":"extreme dark accents produce readable text without changing their chosen value","leaf":"extreme dark accents produce readable text without changing their chosen value","line":9,"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/theme-values.test.ts","name":"extreme light accents produce readable text without changing their chosen value","leaf":"extreme light accents produce readable text without changing their chosen value","line":9,"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/theme-values.test.ts","name":"filled ink chooses higher contrast consistently for actual accent fills","leaf":"filled ink chooses higher contrast consistently for actual accent fills","line":20,"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/theme-values.test.ts","name":"main approved dark derivation and explicit dark choices remain authoritative","leaf":"main approved dark derivation and explicit dark choices remain authoritative","line":34,"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/theme-values.test.ts","name":"saved presets and Custom previews each choose ink within their own mode","leaf":"saved presets and Custom previews each choose ink within their own mode","line":49,"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/ticket-agent-work.test.ts","name":"a numeric cost in the payload is unknown, not displayed","tier":"GATED-FULL"}
     ,
@@ -14749,6 +14785,8 @@
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > rejects an estimated quota, a reading older than ten minutes, and a window that already reset","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > says all ready with the computers online when nothing blocks agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-appearance.unit.test.ts","name":"personal behaviour writes preserve stored accessibility choices while a theme is active","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agent-appearance.unit.test.ts","name":"reports a failed state save and lets the same choice be retried","tier":"GATED-FULL"}
     ,
@@ -15091,6 +15129,20 @@
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > uses the approved wind-down, zero, full and room wording","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > walks the entire ladder with the same ends in both views","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"a deleted selection applies the returned default and explains the fallback","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"a late person/workspace response cannot publish or announce their theme","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"a newer load owns both editor and runtime when the old response resolves last","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"applies server values, palette and inks, then clears owned CSS on identity reset","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"confirmed edits publish through the same editor and stylesheet as restoration","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"invalid, failed and oversized initial answers expose an honest default-colour error","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"reset invalidates pending reads and the shared editor before another sign-in","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/approval-settle.unit.test.ts","name":"a failed call returns the card to pending, actionable, and passes the error on","tier":"GATED-FULL"}
     ,
@@ -20164,6 +20216,10 @@
     ,
     {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor state model > unfinishedMissing × sign out","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"AEON-644: a HTTP failure keeps the current display mode","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"AEON-644: a missing preference keeps the current display mode","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"a newer restoration owns runtime and editor in both response orders: editor first","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"a newer restoration owns runtime and editor in both response orders: restoration first","tier":"NIGHTLY"}
@@ -20321,6 +20377,8 @@
     {"kind":"vitest","file":"tests/work-creation-vocabulary.unit.test.ts","name":"unsaved naming drafts and late reads cannot overwrite the accepted names","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-creation-vocabulary.unit.test.ts","name":"workspace naming reads are shared and stale identities cannot restore old names","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-fixtures.unit.test.ts","name":"AEON-644: shared work fixtures supply matching active and listed themes at authenticated load","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-fixtures.unit.test.ts","name":"HTTP snapshot scenarios keep a healthy stream while explicit event transports remain in control","tier":"GATED-FULL"}
     ,

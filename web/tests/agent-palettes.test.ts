@@ -44,6 +44,31 @@ const simulate = (value: Rgb, matrix: number[][]) => matrix.map(row => Math.min(
 const distance = (a: Rgb, b: Rgb) => { const p = oklab(a), q = oklab(b); return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) * 100 }
 const stateColours = AGENT_STATES
 
+test('CSS token rules match complete selectors in reordered and wrapped lists', () => {
+  const source = `
+    /* :root { --canvas: #000000; } */
+    .agent-theme-preview.darkish { --canvas: #111111; }
+    :root[data-theme="light"] { --canvas: #222222; }
+    .agent-theme-preview,
+    :root,
+    .agent-theme-preview.light { --canvas: #fffefa; --ink: #203c3d; }
+    .agent-theme-preview.dark,
+    :root[data-theme="dark"]{ --canvas: #101e20; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) { --canvas: #101e20; }
+    }
+  `
+  const light = { canvas: '#fffefa', ink: '#203c3d' }
+  for (const selector of [':root', '.agent-theme-preview', '.agent-theme-preview.light']) {
+    assert.deepEqual(block(source, selector), light)
+  }
+  const dark = { canvas: '#101e20' }
+  for (const selector of [':root[data-theme="dark"]', '.agent-theme-preview.dark', ':root:not([data-theme="light"])']) {
+    assert.deepEqual(block(source, selector), dark)
+  }
+  assert.throws(() => block(source, '.missing'), { message: 'missing .missing' })
+})
+
 test('seven approved looks, with the saved colour-blind choice read as Deutan', () => {
   assert.deepEqual(AGENT_PALETTES.map(option => option.id), ['standard', 'focus', 'errors', 'monochrome', 'deutan', 'protan', 'tritan'])
   assert.deepEqual(AGENT_PALETTES.map(option => option.name), ['Standard', 'Focus', 'Errors only', 'One colour', 'Red–green, most common', 'Red–green, red looks dark', 'Blue–yellow'])

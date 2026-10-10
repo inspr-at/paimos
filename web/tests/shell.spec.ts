@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { controlStability } from './control-stability'
+import { PORCELAIN } from '../src/lib/themeEngine'
 
 const canonical = '260923120000.0.0'
 // The shared renderer's accessible name: canonical version and its UTC date-time (INSPR-CalVer3).
@@ -17,10 +18,13 @@ const projectNodes = projects.map(p => ({ id: p.id, key: p.key, title: p.title, 
 async function mockAPI(page: Page, options: { signedIn?: boolean; auth?: { signedIn: boolean }; devMode?: boolean; version?: string; codename?: string; sessionFailure?: boolean; logoutFailure?: boolean; loginFailure?: boolean; gate?: Promise<void> } = {}) {
   let signedIn = options.signedIn ?? true
   const calls: { path: string; method: string; body: string | null }[] = []
+  const theme = { id: 'shell-default-theme', tenant_id: identity.tenant.id, name: 'Porcelain', scope: 'default', owner_principal_id: null, revision: 1, created_at: '', updated_at: '', values: structuredClone(PORCELAIN) }
   await page.route('**/api/**', async route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
     calls.push({ path, method: request.method(), body: request.postData() })
+    if (path === '/api/me/theme') return route.fulfill({ json: { theme, default_theme_id: theme.id, selected_theme_id: null, revision: 0, fallback_notice: null } })
+    if (path === '/api/themes') return route.fulfill({ json: { items: [theme], next_cursor: null } })
     if (path === '/api/kinds' || path === '/api/views') return route.fulfill({ json: { items: [] } })
     if (path === '/api/projects') {
       await options.gate
