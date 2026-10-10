@@ -19,6 +19,7 @@ import (
 // DeliveryWork is returned only to the authenticated recipient. TargetRef is
 // never part of the redacted ledger, event stream, or a person inspection page.
 type DeliveryWork struct {
+	retryAfter     time.Duration
 	ProjectKey     string         `json:"-"`
 	ID             string         `json:"delivery_id"`
 	LeaseToken     string         `json:"lease_token,omitempty"`
@@ -163,6 +164,7 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		}
 		if leaseUntil != nil && leaseUntil.After(now) {
 			work.State = "leased"
+			work.retryAfter = leaseUntil.Sub(now)
 			return nil
 		}
 		if targetID == nil {
@@ -189,6 +191,9 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		}
 		if requested == "simple" && priorFallback == "" && fallbackID != nil && (adapter == "agentd_codex" || adapter == "agentd_claude" || adapter == "agentd_pi" || adapter == "agentd_cursor" || adapter == "agentd_gemini" || adapter == "agentd_opencode" || adapter == "claude_channel") {
 			if _, err := tx.Exec(ctx, `UPDATE inbox_message_deliveries SET effective_target_id=$2::uuid,fallback_reason='not_steerable' WHERE id=$1::uuid`, id, *fallbackID); err != nil {
+				return err
+			}
+			if err := notifyRoutineTarget(ctx, tx, p.TenantID, fallbackID); err != nil {
 				return err
 			}
 			if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.delivery_rerouted", After: map[string]any{"delivery_id": id, "target_id": *fallbackID, "reason": "not_steerable"}}); err != nil {
@@ -425,6 +430,9 @@ func (m *messaging) unavailableDelivery(w http.ResponseWriter, r *http.Request) 
 			return &httpError{409, "delivery_conflict", "delivery cannot reroute"}
 		}
 		if _, err := tx.Exec(r.Context(), `UPDATE inbox_message_deliveries SET effective_target_id=$2::uuid,lease_token=NULL,lease_until=NULL,fallback_reason=$3 WHERE id=$1::uuid`, in.ID, *fallback, in.FallbackReason); err != nil {
+			return err
+		}
+		if err := notifyRoutineTarget(r.Context(), tx, p.TenantID, fallback); err != nil {
 			return err
 		}
 		if _, err = events.Append(r.Context(), tx, p, events.Change{Type: "inbox.delivery_rerouted", After: map[string]any{"delivery_id": in.ID, "target_id": *fallback, "reason": in.FallbackReason}}); err != nil {
