@@ -12,14 +12,18 @@ person objections (including undoing automatic acceptance), stored delivery
 objections, disabled acceptance and project/workspace automation settings still
 apply. Grouping parents continue to derive their status from their leaves.
 
-Marked work is omitted from release notes, including frozen captures and
-backfilled notes. The existing hide setting remains independent. Marking work
+The release-note builders omit marked work when the capture retains the mark.
+The existing hide setting remains independent. Marking work
 clears a previous missed-release flag; the autopilot never creates that flag for
 marked work. Benefit completion requirements remain in force.
 
-The database capture allowlist must include `no_release_needed` before this
-feature is deployed. Previously frozen captures retain their original contents;
-changing a current ticket does not rewrite historical release notes.
+**Deployment is blocked:** live and newly frozen database captures currently
+discard `no_release_needed`, so marked content still appears in release notes.
+A coordinator-reserved expansion migration must add the mark to the capture
+allowlist and retain it alongside `hide_from_release_notes` for deleted or
+non-work members before this feature is deployed. Previously frozen captures
+retain their original contents; changing a current ticket does not rewrite
+historical release notes.
 
 The CLI supports the mark on creation and update:
 
