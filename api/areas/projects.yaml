@@ -1,6 +1,40 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # aeon:owner internal/nodes
 paths:
+  /projects/lookup:
+    get:
+      operationId: lookupProject
+      description: "Resolve one live, visible project by exact node key, project_key, node-key prefix or case-insensitive classic.key. No work totals are computed. Matching uses current tenant and project visibility on every request; invisible and deleted projects answer like missing projects. Multiple visible matches return 409, even when one is an exact node key. At most two matches are read, with a five-second lookup deadline."
+      security: *auth
+      parameters:
+        - name: ref
+          in: query
+          required: true
+          description: "One project reference, trimmed before matching; 1 to 1024 UTF-8 bytes. Only classic.key is case-insensitive (Unicode simple case folding)."
+          schema: {type: string, minLength: 1, maxLength: 1024}
+      responses:
+        '200':
+          description: "The unique matching project identity."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, key, title, state]
+                properties:
+                  id: {type: string, format: uuid}
+                  key: {type: string}
+                  title: {type: string}
+                  state: {type: string}
+        '400':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '408':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
   /projects:
     get:
       operationId: listProjects

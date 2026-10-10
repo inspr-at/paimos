@@ -98,6 +98,7 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 	// Nothing of project B, and nothing workspace-wide, through any read.
 	for _, path := range []string{
 		"/api/projects", "/api/nodes", "/api/nodes?limit=200", "/api/nodes/tree",
+		"/api/projects/lookup?ref=PA-1",
 		"/api/nodes/lookup?ids=" + w.ids["TA"] + "," + w.ids["TB"] + "," + w.ids["GB"],
 		"/api/search?q=zebra", "/api/events", "/api/events?limit=200", "/api/knowledge",
 		"/api/knowledge/graph?project_id=" + w.ids["A"],
@@ -121,6 +122,7 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 	// Project B's resources by id, key and path are closed.
 	for _, path := range []string{
 		"/api/nodes/" + w.ids["TB"], "/api/node-keys/TB-1", "/api/nodes/" + w.ids["TB"] + "/activity",
+		"/api/projects/lookup?ref=PB-1",
 		"/api/nodes/" + w.ids["TB"] + "/attachments", "/api/attachments/" + w.ids["attB"] + "/content",
 		"/api/knowledge/" + w.ids["GB"], "/api/projects/" + w.ids["B"] + "/releases",
 		"/api/projects/" + w.ids["B"] + "/intake",
@@ -329,6 +331,7 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 	// loses the workspace role and stays a guest of A. The batch event has no
 	// node; its items name B, so it is no longer theirs to read.
 	w.expect("member", "POST", "/api/nodes/bulk", `{"ids":["`+w.ids["TA2"]+`","`+w.ids["TB"]+`"],"state":"qa"}`, 200)
+	w.expect("member", "GET", "/api/projects/lookup?ref=PB-1", "", 200)
 	if _, err := w.d.Admin.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, w.people["member"]); err != nil {
 		t.Fatal(err)
 	}
@@ -336,6 +339,8 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.noLeak("member", "/api/events after demotion", w.expect("member", "GET", "/api/events?limit=200", "", 200))
+	w.expect("member", "GET", "/api/projects/lookup?ref=PB-1", "", 404)
+	w.expect("member", "GET", "/api/projects/lookup?ref=PA-1", "", 200)
 	w.noLeak("member", "/api/events/stream after demotion", w.stream("member"))
 }
 
