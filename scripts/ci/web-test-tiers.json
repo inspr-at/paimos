@@ -14952,6 +14952,8 @@
     ,
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > says all ready with the computers online when nothing blocks agents","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"uses the same readiness words and ready count for unknown quota and a measured cap","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/agent-appearance.unit.test.ts","name":"personal behaviour writes preserve stored accessibility choices while a theme is active","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agent-appearance.unit.test.ts","name":"reports a failed state save and lets the same choice be retried","tier":"GATED-FULL"}
@@ -16535,6 +16537,8 @@
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > describes a line as harness, route (when it adds something), id, source and what was taken on","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > groups profiles into one line per model, levels in the model's own order, retired profiles left out","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > keeps legacy auto provenance generic until the server names its origin","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > marks a discovered, disabled line New and shows a scheduled retirement, never both","tier":"GATED-FULL"}
     ,

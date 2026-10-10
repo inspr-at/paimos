@@ -153,7 +153,7 @@ const grid = computed(() => accounts.value.map(a => ({
   account: a,
   quota: a.windows[0] ? { percent: Math.max(0, Math.min(100, Math.round(a.windows[0].remaining_percent))), label: windowLabel(a.windows[0]).toLowerCase().replace(' window', '').replace(' allowance', '') } : null,
   cells: computers.value.map(c => a.signins.filter(s => s.computer.computer_id === c.computer_id).map<Cell>(s => {
-    const text = signinStatus(c, s.enrollment.account_id)
+    const text = signinStatus(c, s.enrollment.account_id, a.rows.find(row => row.id === s.enrollment.account_id), now.value)
     return { signinId: s.enrollment.account_id, text, tone: text === 'Ready' ? 'ok' : problems.value.has(`${c.computer_id}/${s.enrollment.account_id}`) ? 'warn' : 'wait' }
   })),
 })))
