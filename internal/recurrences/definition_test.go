@@ -12,9 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Risks: tenant/person leakage, owner authority substitution, stale edits and
-// accidental execution. Existing recurrence guards cover legacy receipt/queue
-// idempotency; this test exercises the new scope boundary through real RLS.
+// Risks: tenant/person leakage, shared audit history loss, owner authority
+// substitution, stale edits and accidental execution. Existing recurrence guards
+// cover legacy receipt/queue idempotency; this test exercises the new scope
+// boundary through real RLS.
 func TestRoutineDefinitionScopeAuthorityAndInertRoundTrip(t *testing.T) {
 	f := setup(t)
 	reader := projectPrincipal(f, "viewer")
@@ -159,6 +160,40 @@ func TestRoutineDefinitionScopeAuthorityAndInertRoundTrip(t *testing.T) {
 		t.Fatal("legacy definition behavior changed")
 	}
 	f.manual(legacy.ID, "legacy-still-inert")
+	legacy = f.get(legacy.ID)
+	// A manager cannot hide a shared routine or its existing project audit trail
+	// by converting it to a narrower definition scope.
+	legacyEdit := legacy.Input
+	for _, scope := range []DefinitionScope{{Kind: "personal"}, {Kind: "workspace"}, {Kind: "project", ProjectID: otherProject}} {
+		legacyEdit.Definition = &Definition{Scope: scope, OwnerPrincipalID: f.p.ID}
+		raw := f.call(f.p, "PUT", "/api/recurrences/"+legacy.ID, struct {
+			Input
+			ExpectedRevision int64 `json:"expected_revision"`
+		}{legacyEdit, legacy.Revision}, 400)
+		if !strings.Contains(string(raw), "legacy definitions must retain their project scope") {
+			t.Fatalf("conversion rejected for the wrong reason: %s", raw)
+		}
+		if got := f.get(legacy.ID); !reflect.DeepEqual(got, legacy) {
+			t.Fatalf("rejected conversion changed the shared recurrence: %+v", got)
+		}
+	}
+	// Adding a definition in the original project remains supported and retains
+	// the pre-conversion creation event for project and workspace readers.
+	legacyEdit.Definition = &Definition{Scope: DefinitionScope{Kind: "project", ProjectID: legacy.ProjectID}, OwnerPrincipalID: f.p.ID}
+	f.call(f.p, "PUT", "/api/recurrences/"+legacy.ID, struct {
+		Input
+		ExpectedRevision int64 `json:"expected_revision"`
+	}{legacyEdit, legacy.Revision}, 200)
+	if got := f.get(legacy.ID); got.Revision != legacy.Revision+1 || !got.Paused || !reflect.DeepEqual(got.Definition, legacyEdit.Definition) {
+		t.Fatalf("same-project conversion did not round-trip inertly: %+v", got)
+	}
+	for _, p := range []tenant.Principal{reader, workspaceReader} {
+		f.call(p, "GET", "/api/recurrences/"+legacy.ID, nil, 200)
+		raw := f.call(p, "GET", "/api/recurrences/"+legacy.ID+"/history", nil, 200)
+		if !strings.Contains(string(raw), `"type":"recurrence.created"`) {
+			t.Fatalf("same-project conversion hid the original shared audit event: %s", raw)
+		}
+	}
 	f.tx(func(tx pgx.Tx) error {
 		// Seed hidden names ahead of visible rows. Filtering after LIMIT would
 		// produce an empty/short page instead of the full visible 100-row page.
