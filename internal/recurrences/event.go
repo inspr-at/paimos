@@ -270,7 +270,7 @@ func inspectSource(ctx context.Context, tx pgx.Tx, owner tenant.Principal, r Rec
  e.before->>'state' IS NOT NULL AND e.after->>'state' IS NOT NULL AND ` + workstate.CountBucketSQL("e.before->>'state'", "cb") + `<>'done' AND ` + workstate.CountBucketSQL("e.after->>'state'", "ca") + `='done',
  btrim(coalesce(e.after#>>'{fields,pill_en}',''))<>'' AND btrim(coalesce(e.after#>>'{fields,pill_de}',''))<>'' AND btrim(coalesce(e.after#>>'{fields,benefit_en}',''))<>'' AND btrim(coalesce(e.after#>>'{fields,benefit_de}',''))<>'',
  coalesce(e.after#>>'{fields,hide_from_release_notes}','false')<>'false',
- coalesce((e.after#>'{fields,tags}') ? $3,false)
+ coalesce(jsonb_typeof(e.after#>'{fields,tags}')='array' AND (e.after#>'{fields,tags}') ? $3,false)
  FROM events e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
  LEFT JOIN configured cb ON cb.kind_id=n.kind_id AND cb.norm=` + workstate.NormSQL("e.before->>'state'") + `
  LEFT JOIN configured ca ON ca.kind_id=n.kind_id AND ca.norm=` + workstate.NormSQL("e.after->>'state'") + `

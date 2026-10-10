@@ -134,6 +134,7 @@ func TestKnowledgeEventSelectorsContextAndReplay(t *testing.T) {
 	f.sourceEvent(another, "knowledge.updated", "backlog", "backlog", fields)
 	f.sourceEvent(memory, "knowledge.updated", "backlog", "backlog", fields)
 	f.sourceEvent(entry, "knowledge.updated", "backlog", "backlog", map[string]any{"tags": []string{"other"}})
+	f.sourceEvent(entry, "knowledge.updated", "backlog", "backlog", map[string]any{"tags": map[string]bool{"website": true}})
 	first := f.sourceEvent(entry, "knowledge.created", "backlog", "backlog", fields)
 	f.sourceEvent(entry, "knowledge.updated", "backlog", "cancelled", fields)
 	f.run()
@@ -145,7 +146,7 @@ func TestKnowledgeEventSelectorsContextAndReplay(t *testing.T) {
 	f.run()
 	f.assertContextAndNoRuns(r, 2, entry, `"entry_id"`, `"event":"knowledge.changed"`)
 	f.assertContextAndNoRuns(typeAndTag, 3, another, entry)
-	f.assertContextAndNoRuns(entryOnly, 3, entry)
+	f.assertContextAndNoRuns(entryOnly, 4, entry)
 	f.tx(func(tx pgx.Tx) error {
 		var leaked bool
 		err := tx.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM nodes n JOIN recurrence_occurrences o ON o.node_id=n.id WHERE o.recurrence_id=$1 AND n.body LIKE '%do not copy source content%')`, r.ID).Scan(&leaked)
