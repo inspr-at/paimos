@@ -93,21 +93,40 @@ func BindRoutineOrderTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, runI
 
 // GuardRoutineRunTx is shared by account reservation and final claim. It
 // rejects legacy retry/review callers that omit the original shared binding.
-func GuardRoutineRunTx(ctx context.Context, tx pgx.Tx, agentRunID string) error {
+// The caller has authenticated the exact run first. The bounded internal read
+// must also detect personal routine lineage outside a daemon's node projection;
+// it returns only a binding decision and restores visibility before returning.
+func GuardRoutineRunTx(ctx context.Context, tx pgx.Tx, agentRunID string) (bool, error) {
+	var visibility, system string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.visible_projects',true),''),coalesce(current_setting('aeon.system',true),'')`).Scan(&visibility, &system); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`); err != nil {
+		return false, err
+	}
+	routine, err := guardRoutineRun(ctx, tx, agentRunID)
+	if err != nil {
+		return false, err // caller must roll back every error
+	}
+	_, err = tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.system',$2,true)`, visibility, system)
+	return routine, err
+}
+
+func guardRoutineRun(ctx context.Context, tx pgx.Tx, agentRunID string) (bool, error) {
 	var parent *string
 	var order string
 	err := tx.QueryRow(ctx, `SELECT n.parent_id,n.id::text FROM agent_runs ar JOIN nodes n ON n.tenant_id=ar.tenant_id AND n.id=ar.work_order_id WHERE ar.id=$1`, agentRunID).Scan(&parent, &order)
 	if err != nil {
-		return err
+		return false, err
 	}
 	run, err := routineParent(ctx, tx, parent)
 	if err != nil || run == "" {
-		return err
+		return false, err
 	}
 	var bound string
 	err = tx.QueryRow(ctx, `SELECT run_id::text FROM routine_budget_orders WHERE work_order_id=$1`, order).Scan(&bound)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && bound != run {
-		return Fail(409, "routine_child_binding_required")
+		return false, Fail(409, "routine_child_binding_required")
 	}
-	return err
+	return true, err
 }

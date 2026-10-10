@@ -85,10 +85,10 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if err != nil {
 		return RouteResult{}, err
 	}
-	if err := workorders.GuardRoutineRunTx(ctx, tx, runID); err != nil {
+	if err := authorizeRoute(ctx, tx, r, p, run.AgentID, run.ID); err != nil {
 		return RouteResult{}, err
 	}
-	if err := authorizeRoute(ctx, tx, r, p, run.AgentID, run.ID); err != nil {
+	if _, err := workorders.GuardRoutineRunTx(ctx, tx, runID); err != nil {
 		return RouteResult{}, err
 	}
 	if err := agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
@@ -214,11 +214,8 @@ func ValidateReservedCapacity(ctx context.Context, tx pgx.Tx, runID, accountID s
 	if err := agentpairing.Lock(ctx, tx); err != nil {
 		return err
 	}
-	if err := workorders.GuardRoutineRunTx(ctx, tx, runID); err != nil {
-		return err
-	}
-	var routine bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_budget_orders b JOIN agent_runs r ON r.work_order_id=b.work_order_id WHERE r.id=$1)`, runID).Scan(&routine); err != nil {
+	routine, err := workorders.GuardRoutineRunTx(ctx, tx, runID)
+	if err != nil {
 		return err
 	}
 	if routine {
