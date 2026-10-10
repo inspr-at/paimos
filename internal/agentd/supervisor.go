@@ -1416,7 +1416,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		entry.mu.Lock()
 		entry.chat = newSessionChat(ChatBinding{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, Generation: s.generation, SessionID: entry.harness.ID}, sessionChatCapabilities(profile.Harness, caps))
 		if relayable && slices.Contains(caps, chatCapability) {
-			entry.relay = s.newChatRelay(relayAPI, entry, run.ID)
+			entry.relay = s.newChatRelay(relayAPI, entry, run.ID, profile.Harness)
 			entry.chat.attachRelay(entry.relay)
 			go entry.relay.Run(s.lifetime)
 		}

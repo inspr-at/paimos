@@ -99,6 +99,12 @@ Fetching or queueing an input is no evidence, nor is a turn another input
 started while this write waited. If no turn starts within two
 minutes, the input stays `sent`. Person read evidence remains the read markers.
 
+Receipts come only from harnesses whose turn start names the input it
+consumes: Claude, Codex, and the ACP harnesses (Cursor, OpenCode, Gemini,
+Grok). Pi's turn markers do not say which queued input started a turn, so Pi
+inputs are written but stay `sent`; Aeon never guesses. The same holds for any
+harness added later until it gains such a marker.
+
 ## Upgrade order and reverse proxies
 
 Either upgrade order is safe; both mixed versions are tested.

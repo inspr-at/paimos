@@ -82,6 +82,10 @@ type ChatRelayOptions struct {
 	// It calls writing once the harness write begins, after any wait behind
 	// other input: turn markers before that belong to other work.
 	Deliver func(ctx context.Context, messageID, body string, writing func()) error
+	// Receipts enables delivered/read evidence. Set it only for harnesses whose
+	// turn markers identify the turn that consumes an input exactly; without
+	// it the message honestly stays "sent".
+	Receipts bool
 	// Settled runs after the server committed delivery evidence.
 	Settled func(messageID string)
 	// Unsupported runs when the server refuses the relay. The reason is an
@@ -204,6 +208,9 @@ func (r *ChatRelay) Observe(ev ChatSessionEvent) {
 
 // Called with mu held.
 func (r *ChatRelay) receipt(id, state string) {
+	if !r.opts.Receipts {
+		return // turn markers still pace input; they are no evidence here
+	}
 	if len(r.receipts) >= chatRelayReceiptLimit {
 		r.receipts = r.receipts[1:]
 	}
@@ -711,10 +718,11 @@ func (g *chatRelayGate) clock() time.Time {
 // newChatRelay delivers person inputs through the same journaled inbox
 // control as other harness input, so a crash never re-injects one.
 // Called with entry.mu held.
-func (s *Supervisor) newChatRelay(api ChatRelayAPI, entry *owned, runID string) *ChatRelay {
+func (s *Supervisor) newChatRelay(api ChatRelayAPI, entry *owned, runID, harness string) *ChatRelay {
 	opts := ChatRelayOptions{
 		Settled:     func(id string) { _ = s.forgetSettledControl(entry, "chat:"+id) },
 		Unsupported: s.chatGate.disable,
+		Receipts:    exactChatTurns(harness),
 	}
 	if entry.inboxCapable {
 		opts.Deliver = func(ctx context.Context, id, body string, writing func()) error {
@@ -727,6 +735,16 @@ func (s *Supervisor) newChatRelay(api ChatRelayAPI, entry *owned, runID string) 
 		}
 	}
 	return NewChatRelay(api, entry.harness, opts)
+}
+
+// exactChatTurns lists harnesses whose turn start identifies the input it
+// consumes: Claude's bridge reacts to the input's own message ID, Codex
+// acknowledges the turn it started, and the queued ACP harnesses start the
+// turn in the write itself. Pi's prompt queue can start a turn for earlier
+// input while a write waits, so it never reports receipts; nor does any
+// harness not listed here.
+func exactChatTurns(harness string) bool {
+	return harness == Claude || harness == Codex || queuedChatHarness(harness)
 }
 
 // inboxTextLimit bounds harness inbox text. A person message holds at most

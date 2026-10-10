@@ -1462,6 +1462,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestExactCapacityBinaryRejectsRestoredMtime","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestExactTurnHarnessStillReportsReceipts","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestExitFlushesOwnedMetadataBeforeStop","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestExitMetadataArchivedSessionIsNotStoppedAgain","tier":"GATED-FULL"}
@@ -1695,6 +1697,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestPauseWakeHintAnchorsBeforeHeartbeatRoundTrip","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPiAdapterPublishesUsageFromOwnedWire","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPiChatInputNeverReportsReceipts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPiHeldQueueRefusesOtherGeneration","tier":"GATED-FULL"}
     ,
