@@ -1,8 +1,8 @@
 # PAIMOS AEON
 
-PAIMOS AEON is an open-source, self-hosted work platform for people and AI agents in the INSPR family. It brings projects, tickets and knowledge into a fully dynamic work tree, with list and outline views, search and live updates.
+PAIMOS AEON is the [What of INSPR](docs/features/web-workspace.md#product-role-and-release-evidence): planning work for people and AI agents, plus the agent-platform engine. It is open-source and self-hosted.
 
-Agents-first and voice-first, Aeon gives people a web workspace and agents a CLI and API, with tenant isolation and scoped permissions. The stack is Go, Postgres 18 + pgvector and Vue 3, built around nodes, relations and an append-only event log.
+Aeon is agents-first. Voice and Aithema requirements intake are [planned (AEON-822)](docs/features/web-workspace.md#planned-work); [shipped capabilities and their release evidence](docs/features/web-workspace.md#shipped-capabilities) live in the feature docs.
 
 Find published builds in [GitHub Releases](https://github.com/inspr-at/paimos/releases). PAIMOS AEON is licensed under [AGPL-3.0-only](LICENSE); third-party notices are in [NOTICE](NOTICE). See [SECURITY.md](SECURITY.md) to report a vulnerability privately.
 
