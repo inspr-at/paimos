@@ -232,7 +232,8 @@ components:
       required: [code, run_now_allowed]
       description: Server routing advice; times use the account owner schedule. Does not grant dispatch authority.
       properties:
-        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state, residency, daily_limit, daily_limit_unknown]}
+        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state, residency, context, daily_limit, daily_limit_unknown]}
+        context: {type: string, description: "Project whose account context denies this choice; omitted for default context or when no project identity is exposed."}
         host_reason: {type: string, description: Content-free host admission reason; present only on a capacity wait.}
         until: {type: string, format: date-time}
         read_at: {type: string, format: date-time}
