@@ -718,7 +718,7 @@ func TestModelWaitReasonsRespectCurrentAccountSharing(t *testing.T) {
 			sol := profileBySlug(profiles, "codex-6-1-sol-xhigh")
 			opus := profileBySlug(profiles, "claude-opus-xhigh")
 			account := minimalAccount(t, owner, sol)
-			minimalAccount(t, owner, opus)
+			fallback := minimalAccount(t, owner, opus)
 			boardDecode[boardWriteResult](t, boardCall(t, owner, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"openai:sol", "anthropic:opus"}, "not": []string{}, "revision": 0}, ""), 200)
 			boardDecode[boardWriteResult](t, boardCall(t, owner, "PUT", "/api/model-preferences/orders/other/first/thinking?for=default", map[string]any{"effort": "xhigh", "revision": 1}, ""), 200)
 			var until time.Time
@@ -727,7 +727,7 @@ func TestModelWaitReasonsRespectCurrentAccountSharing(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=$3,share_usage=false WHERE id=$1`, account, owner.ID, now); err != nil {
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=$3,share_usage=false WHERE id=ANY($1::uuid[])`, []string{account, fallback}, owner.ID, now); err != nil {
 					return err
 				}
 				if cause == "allowance" {
@@ -753,7 +753,7 @@ func TestModelWaitReasonsRespectCurrentAccountSharing(t *testing.T) {
 				_, err = tx.Exec(t.Context(), `UPDATE account_capacity_schedules SET schedule=$2 WHERE account_id=$1`, account, raw)
 				return err
 			})
-			detail := "Codex account is at its allowance or floor until " + until.Format(time.RFC3339)
+			detail := "Codex account is at its allowance or floor until " + until.UTC().Format(time.RFC3339)
 			if cause == "schedule" {
 				detail = "Codex account is outside its scheduled hours until " + until.Format(time.RFC3339)
 			}
@@ -845,7 +845,8 @@ func TestModelAllowanceUnknownAndMeasuredLimit(t *testing.T) {
 			}
 		}
 		query := WorkQuery{Role: "build", Column: "other", Area: "other", Situation: "first", WorkspaceOnly: true, ExplicitBoard: true}
-		unknown, err := resolveBoardWork(t.Context(), tx, admin, query, now, nil)
+		ctx := tenant.WithPrincipal(t.Context(), admin)
+		unknown, err := resolveBoardWork(ctx, tx, admin, query, now, nil)
 		if err != nil {
 			return err
 		}
@@ -857,7 +858,7 @@ func TestModelAllowanceUnknownAndMeasuredLimit(t *testing.T) {
 			if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','',10080,$3,$4,$5,'harness') ON CONFLICT(tenant_id,account_id,window_kind,bucket,read_at,source,phase) DO UPDATE SET used_percent=EXCLUDED.used_percent`, admin.TenantID, ids["claude"], amount, reset, now); err != nil {
 				return err
 			}
-			out, err := resolveBoardWork(t.Context(), tx, admin, query, now, nil)
+			out, err := resolveBoardWork(ctx, tx, admin, query, now, nil)
 			if err != nil {
 				return err
 			}

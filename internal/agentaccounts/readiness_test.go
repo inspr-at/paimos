@@ -944,7 +944,7 @@ func TestReadinessAndHarnessHealthShareRoutingSignal(t *testing.T) {
 		}
 		page := f.capacity(t)
 		err := db.InTenant(tenant.WithPrincipal(t.Context(), f.admin), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
-			health, err := HarnessHealthAt(t.Context(), tx, now)
+			health, err := HarnessHealthAt(tenant.WithPrincipal(t.Context(), f.admin), tx, now)
 			if err != nil {
 				return err
 			}

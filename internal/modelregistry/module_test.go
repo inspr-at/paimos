@@ -354,9 +354,9 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `
 			INSERT INTO agent_accounts
 				(tenant_id, account_key, harness, daemon_id, registered_by_principal_id, label, state,
-				 last_probe_at, last_probe_ok, last_daemon_generation)
+				 last_probe_at, last_probe_ok, last_daemon_generation, share_usage)
 			VALUES ($1::uuid, 'local-codex', 'codex', 'daemon-a', $2::uuid, 'Codex', 'available',
-			        now() - interval '10 minutes', true, 'gen-1')`, admin.TenantID, agent.ID)
+			        now() - interval '10 minutes', true, 'gen-1', true)`, admin.TenantID, agent.ID)
 		return err
 	})
 	if err != nil {
