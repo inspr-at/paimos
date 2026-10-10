@@ -29,7 +29,9 @@ const emit = defineEmits<{
 }>()
 const hideName = computed(() => hideLabel(props.filters.hideStates))
 const hideNames = computed(() => hiddenStates(props.filters.hideStates).map(state => statusMeta(state).label).join(', '))
-const dimensions = computed(() => offeredDimensions(props.filters, props.view === 'graph' ? TICKET_GRAPH_FILTERS : undefined))
+// Advanced filters shown when the sheet opened stay until it closes, also once cleared.
+const kept = ref<Dimension[]>([])
+const dimensions = computed(() => offeredDimensions(props.filters, props.view === 'graph' ? TICKET_GRAPH_FILTERS : undefined, kept.value))
 const dialog = ref<HTMLDialogElement>()
 const doneButton = ref<HTMLButtonElement>()
 const dateField = ref<DateField>('updated')
@@ -37,6 +39,7 @@ let opener: HTMLElement | null = null
 async function open() {
   opener = document.activeElement as HTMLElement
   dateField.value = props.filters.date?.field ?? 'updated'
+  kept.value = offeredDimensions(props.filters).map(d => d.key)
   dialog.value?.showModal()
   emit('opened')
   await nextTick()

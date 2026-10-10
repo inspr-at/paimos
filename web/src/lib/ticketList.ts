@@ -61,18 +61,19 @@ export const DIMENSIONS: DimensionDef[] = [
   { key: 'priority', title: 'Priority', facet: 'priority', primary: true, none: 'No priority' },
   { key: 'assignee', title: 'Assignee', facet: 'assignee', primary: true, none: 'Unassigned' },
   { key: 'type', title: 'Type', facet: 'level', primary: true, none: '' },
+  { key: 'shape', title: 'Parents / Leaves', facet: 'shape', primary: false, none: '', advanced: true },
+  { key: 'depth', title: 'Depth', facet: 'depth', primary: false, none: '', advanced: true },
   { key: 'tag', title: 'Labels', facet: 'tag', primary: false, none: 'No labels' },
   { key: 'human_check', title: 'Human check', facet: 'human_check', primary: false, none: 'No human check' },
   { key: 'epic', title: 'Parent', facet: null, primary: false, none: 'No parent' },
   { key: 'cost', title: 'Cost unit', facet: 'cost_unit', primary: false, none: 'No cost unit' },
   // Imported fields.release only. The ticket Release column reads native release membership.
   { key: 'release', title: 'Imported release', facet: 'release', primary: false, none: 'No imported release' },
-  { key: 'shape', title: 'Parents / Leaves', facet: 'shape', primary: false, none: '', advanced: true },
-  { key: 'depth', title: 'Depth', facet: 'depth', primary: false, none: '', advanced: true },
 ]
-// The filters a person can add: advanced ones only while they are applied.
-export function offeredDimensions(filters: ListFilters, only?: Dimension[]): DimensionDef[] {
-  return DIMENSIONS.filter(d => (!only || only.includes(d.key)) && (!d.advanced || filters[d.key].length > 0))
+// The filters a person can add: advanced ones only while they are applied, or
+// while a surface that showed them is open (keep), so nothing vanishes under the pointer.
+export function offeredDimensions(filters: ListFilters, only?: Dimension[], keep: readonly Dimension[] = []): DimensionDef[] {
+  return DIMENSIONS.filter(d => (!only || only.includes(d.key)) && (!d.advanced || filters[d.key].length > 0 || keep.includes(d.key)))
 }
 export const DIMENSION_BY_KEY = new Map(DIMENSIONS.map(d => [d.key, d]))
 export const DIMENSION_KEYS = DIMENSIONS.map(d => d.key)

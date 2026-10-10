@@ -75,6 +75,8 @@ test('links and saved views with Legacy type or Parents / Leaves read as Type', 
   assert.deepEqual(filtersFromQuery({ shape: 'leaf', depth: '2' }).shape, ['leaf'])
   assert.deepEqual(filtersFromQuery({ type: '1', shape: 'leaf' }).shape, ['leaf'])
   assert.ok(offeredDimensions(kept).some(d => d.key === 'shape'))
+  // An open sheet keeps a section it showed, also once its last value is cleared.
+  assert.ok(offeredDimensions(EMPTY_FILTERS, undefined, ['shape']).some(d => d.key === 'shape'))
   assert.deepEqual(offeredDimensions(EMPTY_FILTERS).map(d => d.title), ['Status', 'Priority', 'Assignee', 'Type', 'Labels', 'Human check', 'Parent', 'Cost unit', 'Imported release'])
   // A mapped view is unchanged when it loads (no "modified" dot), and saves the new words.
   assert.equal(sameListState(view({ type: 'epic' }), filtersFromQuery({ type: '1' })), true)
