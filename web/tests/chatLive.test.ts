@@ -46,7 +46,7 @@ test('deltas build one turn, idle ends it, and the saved reply replaces it', () 
   assert.equal(next.ended, false)
 })
 
-test('requires_action holds through text until idle; hints never touch the turn', () => {
+test('requires_action holds through text until idle; hints never change its text or state', () => {
   const { turn, hints } = run([chunk('Need approval'), state('requires_action'), chunk(' for the deploy'), JSON.stringify({ type: 'message', message_id: 'm' }), JSON.stringify({ type: 'receipt' }), JSON.stringify({ type: 'read_marker' })])
   assert.equal(turn!.state, 'requires_action')
   assert.equal(turn!.text, 'Need approval for the deploy')
