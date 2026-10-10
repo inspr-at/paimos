@@ -69,6 +69,15 @@ func UpdateRoutineWorkTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id,
 	if kind != "work" {
 		return RoutineMutation{}, workorders.Fail(400, "work_target_required")
 	}
+	if state != nil {
+		var parent bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds k ON k.id=c.kind_id WHERE c.parent_id=$1 AND c.deleted_at IS NULL AND k.slug='work')`, id).Scan(&parent); err != nil {
+			return RoutineMutation{}, err
+		}
+		if parent {
+			return RoutineMutation{}, workorders.Fail(409, "parent status follows its children")
+		}
+	}
 	if state != nil && workqueue.Terminal(*state) {
 		var queued bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE queue_node_id=$1 AND status='queued')`, id).Scan(&queued); err != nil {

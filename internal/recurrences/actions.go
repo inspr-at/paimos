@@ -3,15 +3,24 @@ package recurrences
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 
 	"github.com/inspr-at/paimos/internal/authz"
-	"github.com/inspr-at/paimos/internal/routineactions"
 	"github.com/inspr-at/paimos/internal/routineguard"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
+
+// ActionBinding carries server-loaded frozen lineage to the consent seam.
+type ActionBinding struct {
+	RunID, RecurrenceID, OwnerID, ExecutionPrincipalID, ProjectID, ParentID string
+	ScopeType, ScopeProjectID                                               string
+	DefinitionRevision, ConsentRevision                                     int64
+	Assignment                                                              json.RawMessage
+	AssignmentDigest                                                        string
+}
 
 // ActionEvaluatorTx is S08's verified persisted-verdict seam. It reads already
 // recorded evidence only; evaluator/model/network calls happen before this
@@ -23,7 +32,7 @@ func (m *Module) WithActionEvaluator(evaluate ActionEvaluatorTx) *Module {
 	return m
 }
 
-func (m *Module) authorizeActionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b routineactions.Binding, c routineguard.Context) (tenant.Principal, routineguard.Decision, string, error) {
+func (m *Module) AuthorizeActionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b ActionBinding, c routineguard.Context) (tenant.Principal, routineguard.Decision, string, error) {
 	empty := tenant.Principal{}
 	identity, err := RequireExecutionConsentTx(ctx, tx, p.TenantID, b.RecurrenceID, b.DefinitionRevision, m.executionRuntime)
 	if err != nil {

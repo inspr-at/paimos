@@ -2,7 +2,9 @@
 package recurrences
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -11,6 +13,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/routineactions"
+	"github.com/inspr-at/paimos/internal/routineguard"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -21,6 +24,16 @@ import (
 func TestRoutineActionGrantRejectsUnverifiedAndRevokedOwner(t *testing.T) {
 	f, in, q, reader := consentFixture(t)
 	enableConsentProject(t, f, q, reader)
+	install := func(m *Module) {
+		f.install(m)
+		mux := http.NewServeMux()
+		m.Mount(mux)
+		routineactions.New(m.pool, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, b routineactions.Binding, c routineguard.Context) (tenant.Principal, routineguard.Decision, string, error) {
+			return m.AuthorizeActionTx(ctx, tx, p, ActionBinding(b), c)
+		}).Mount(mux)
+		f.handler = mux
+	}
+	install(f.m)
 	r := f.create(in)
 	path := "/api/recurrences/" + r.ID
 	f.call(f.p, "POST", path+"/resume", map[string]any{"expected_revision": r.Revision}, 200)
@@ -54,7 +67,7 @@ func TestRoutineActionGrantRejectsUnverifiedAndRevokedOwner(t *testing.T) {
 		t.Fatalf("missing evaluation was not held: %s", held)
 	}
 	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "SELECT set_config('aeon.account_use_capable'") })
-	f.install(New(pool).WithExecutionRuntime(reader))
+	install(New(pool).WithExecutionRuntime(reader))
 	raw, _ := json.Marshal(request)
 	response := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
