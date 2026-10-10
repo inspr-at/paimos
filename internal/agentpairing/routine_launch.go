@@ -65,7 +65,7 @@ func RequireRoutineAccountTx(ctx context.Context, tx pgx.Tx, g agentsetup.Routin
  JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id
  WHERE a.id=$1 AND c.id=$2 AND q.approved_by=$3 AND c.principal_id=$4
  AND a.registered_by_principal_id=$4 AND a.daemon_id=$5 AND a.last_daemon_generation=$6
- AND c.ledger_generation=$7::uuid AND c.state='connected' AND e.state='connected' AND q.state='redeemed'
+ AND c.ledger_generation=$7 AND c.state='connected' AND e.state='connected' AND q.state='redeemed'
  AND e.ongoing_approved_at IS NOT NULL AND q.details->>'platform'='darwin'
  AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes')`, g.AccountID, g.ComputerID, g.OwnerID, g.PrincipalID, g.DaemonID, g.DaemonGeneration, g.LedgerGeneration).Scan(&matches)
 	if err != nil {
