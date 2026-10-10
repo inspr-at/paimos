@@ -158,7 +158,20 @@ func (b *Broker) handle(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 401, "unauthorized")
 		return
 	}
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+	if r.Body == nil {
+		r.Body = http.NoBody
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
+	if err := workorders.BufferEndpointBody(w, r); err != nil {
+		workorders.WriteError(w, err)
+		return
+	}
+	// The existing body guard completed and bounded every transport read before
+	// entering the mutation transaction. This reads only its buffered memory.
+	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {

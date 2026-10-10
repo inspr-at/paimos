@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -221,7 +222,7 @@ func assertFailure(t *testing.T, err error, status int, message string) {
 	}
 }
 
-// Risk: a generic effect or unbounded payload escaping the fixed catalogue.
+// Risk: a generic effect or unbounded/stalled payload escaping the catalogue.
 func TestRoutineActionCatalogueClosedAndBounded(t *testing.T) {
 	in := Request{AttemptID: "10000000-0000-4000-8000-000000000001", ActionKey: "action", Kind: "work.create", ProjectID: "10000000-0000-4000-8000-000000000002", TargetID: "10000000-0000-4000-8000-000000000003", ExpectedRevision: 1, WorkCreate: &WorkCreate{Title: "Valid"}}
 	if err := in.Validate(); err != nil {
@@ -261,6 +262,18 @@ func TestRoutineActionCatalogueClosedAndBounded(t *testing.T) {
 		if out.Code != tc.status {
 			t.Fatalf("body boundary: %d %s want %d", out.Code, out.Body.String(), tc.status)
 		}
+	}
+	// Cancellation is injected while the body cannot complete. The reused
+	// endpoint guard must close that read before any database admission.
+	expired, cancel := context.WithCancel(tenant.WithPrincipal(t.Context(), tenant.Principal{ID: in.AttemptID, TenantID: in.ProjectID, Kind: tenant.Person}))
+	cancel()
+	reader, writer := io.Pipe()
+	defer writer.Close()
+	req := httptest.NewRequest("POST", "/api/routine-runs/10000000-0000-4000-8000-000000000004/actions", reader).WithContext(expired)
+	out := httptest.NewRecorder()
+	mux.ServeHTTP(out, req)
+	if out.Code != http.StatusRequestTimeout {
+		t.Fatalf("stalled body was not interrupted before admission: %d %s", out.Code, out.Body.String())
 	}
 	v = in
 	v.ActionKey = "occurrence"

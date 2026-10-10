@@ -15,6 +15,8 @@ and retain the ordinary leaf and benefit checks; queued terminal changes
 must pass through the existing pipeline.
 
 Requests are limited to 64 KiB, titles to 500 UTF-8 bytes and bodies to 32 KiB.
+The existing endpoint body guard bounds transport reads before database admission
+under a ten-second request deadline, and interrupts a cancelled or stalled body.
 Unknown fields, mixed payloads, arbitrary paths, recipients, commands, surveys,
 merge and deploy actions are rejected. Administrative pause notices belong to
 separate system evidence. PR and pipeline effects belong to their own persisted
