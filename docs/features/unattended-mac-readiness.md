@@ -31,6 +31,10 @@ it is awake without changing its owner's sleep settings. This remains an
 observation: manual sleep, lid closure, switching power profiles, restart and
 power loss can interrupt work.
 Unsupported platforms and missing evidence are `wait`, never assumed ready.
+Legacy computer pairing records with an absent or null `platform` remain readable
+and report `unattended_platform_unsupported`. Their capacity policy,
+reconciliation and disconnect operations continue to use the existing gates;
+missing computer metadata does not override an enrollment's verification rules.
 
 Agentd requests a temporary `PreventUserIdleSystemSleep` assertion immediately
 before starting an owned run. It releases the assertion on startup failure,
@@ -74,4 +78,6 @@ Validation covers read-only probe failures, login and system-sleep distinctions,
 fake-power assertion acquisition and release around run and daemon lifetimes,
 injected-clock freshness, reboot constraints, compatibility negotiation and
 rollback, server persistence, ordinary claim compatibility, and tenant/principal
-isolation and revocation.
+isolation and revocation. Legacy metadata coverage includes absent and null
+platforms, an independently qualified added-harness claim, and persisted
+reconciliation and disconnect results.
