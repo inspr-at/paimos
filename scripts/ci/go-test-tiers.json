@@ -316,10 +316,6 @@
   "source": "AEON-678 zb-go essential allowlist (332 including two dispatch helpers)"
   ,
   "tests": [
-    {"kind":"go","package":"./internal/agentd","name":"TestRoutineWorkspacesSeparateAndRetainWriters","tier":"ESSENTIAL"}
-    ,
-    {"kind":"go","package":"./internal/agentruns","name":"TestRoutineLaunchClaimReplayAndCurrentAuthority","tier":"ESSENTIAL"}
-    ,
     {"kind":"go","package":"cmd/aeon","name":"TestAgentProjectRoleFlags","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon","name":"TestDefaultServerHasNoOutboundNetwork","tier":"ESSENTIAL"}
@@ -1828,6 +1824,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRevokedProbeDoesNotStarveOtherAccount","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineWorkspacesSeparateAndRetainWriters","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRunCommitsEarlierReproductions","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRunCommitsFastForwardOntoUpstream","tier":"GATED-FULL"}
@@ -2645,6 +2643,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestQueuedRecoveryClaimsKeepTheirExactReservation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRequestedAccountIsValidatedAndAuditedWithoutReservation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRoutineLaunchClaimReplayAndCurrentAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunAndQueueAccountContextChecks","tier":"ESSENTIAL"}
     ,
