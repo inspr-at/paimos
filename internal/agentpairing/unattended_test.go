@@ -3,6 +3,7 @@ package agentpairing_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
@@ -43,8 +44,16 @@ func TestUnattendedReportOnlyFreshnessOwnershipAndClaimSeam(t *testing.T) {
 	signals := hostcapacity.Signals{Cores: 8, MemoryPressure: "unknown", Power: "unknown", Thermal: "unknown", Unattended: &hostcapacity.UnattendedSignals{LoginSession: "ready", IdleSleep: "enabled", FileVault: "on"}}
 	var report hostcapacity.View
 	decodeResult(t, f.call("POST", "/api/agent-pairing/self/capacity", signals, false, key, 200), &report)
-	if report.Reason != "" || report.Unattended.Reason != "unattended_sleep_enabled" || report.ReportedAt == nil || report.Unattended.AfterRebootReason != "unattended_filevault_after_reboot" {
+	if report.Reason != "" || report.Unattended.Status != "ready" || report.Unattended.Reason != "" || !strings.Contains(report.Unattended.Message, "idle sleep is enabled") || report.ReportedAt == nil || report.Unattended.AfterRebootReason != "unattended_filevault_after_reboot" {
 		t.Fatal("readiness changed ordinary admission or lost reason", report)
+	}
+	if got := read(f.tenantID, actor.ID); got != *report.Unattended {
+		t.Fatal("claim seam lost awake readiness with idle sleep enabled", got)
+	}
+	var awake agentpairing.View
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &awake)
+	if *awake.HostCapacity.Unattended != *report.Unattended {
+		t.Fatal("Agents page DTO lost awake readiness with idle sleep enabled")
 	}
 	// The ordinary verification claim remains governed by its existing gate.
 	err := db.InTenant(tenant.WithPrincipal(t.Context(), actor), f.db.App, f.tenantID, func(tx pgx.Tx) error {
@@ -70,7 +79,7 @@ func TestUnattendedReportOnlyFreshnessOwnershipAndClaimSeam(t *testing.T) {
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_computers SET capacity_reported_at=clock_timestamp()-interval '2 minutes' WHERE id=$1`, v.ComputerID); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(f.tenantID, actor.ID); got.Reason != "unattended_host_unreachable" || got.Status != "wait" {
+	if got := read(f.tenantID, actor.ID); got.Reason != "unattended_host_unreachable" || got.Status != "wait" || !strings.Contains(got.Message, "asleep, lid closed or waiting for login") {
 		t.Fatal("stale report remained available", got)
 	}
 	// An old daemon replaces the complete sample; it cannot keep prior ready

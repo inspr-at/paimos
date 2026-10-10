@@ -1804,6 +1804,10 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRunCredentialIsFenced","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRunIdleSleepAssertionDaemonShutdown","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRunIdleSleepAssertionLifecycle","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestSIGTERMEndsIdleManagedCodex","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestScanAttachProcargs","tier":"GATED-FULL"}

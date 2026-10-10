@@ -32,7 +32,7 @@ func TestUnattendedReadinessFreshnessAndRebootConstraints(t *testing.T) {
 	for _, tc := range []struct{ field, value, reason string }{
 		{"login", "required", "unattended_login_required"},
 		{"login", "unknown", "unattended_login_unknown"},
-		{"sleep", "enabled", "unattended_sleep_enabled"},
+		{"sleep", "enabled", ""},
 		{"sleep", "unknown", "unattended_sleep_unknown"},
 		{"login", "", "unattended_signals_unknown"},
 		{"sleep", strings.Repeat("x", 4096), "unattended_signals_unknown"},
@@ -62,6 +62,12 @@ func TestUnattendedReadinessFreshnessAndRebootConstraints(t *testing.T) {
 			}
 			if tc.platform == "darwin" && tc.signals != nil && tc.signals.FileVault == "on" && v.AfterRebootReason != "unattended_filevault_after_reboot" {
 				t.Fatal("lost reboot constraint", v)
+			}
+			if tc.reason == "" && tc.signals.IdleSleep == "enabled" && !strings.Contains(v.Message, "idle sleep is enabled") {
+				t.Fatal("enabled idle sleep lost its informational risk", v)
+			}
+			if tc.reason == "unattended_host_unreachable" && !strings.Contains(v.Message, "asleep, lid closed or waiting for login") {
+				t.Fatal("unreachable Mac lost plain sleep/login wording", v)
 			}
 			// Ordinary admission ignores unattended readiness, even when the
 			// new report tells future routine dispatch to wait.
