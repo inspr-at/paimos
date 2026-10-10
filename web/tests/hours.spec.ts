@@ -215,7 +215,7 @@ test('a changed period refuses the approval and says so', async ({ page }) => {
   const panel = page.getByRole('complementary', { name: 'Period review' })
   await panel.getByRole('button', { name: 'Approve period' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Approve period' }).click()
-  await expect(page.getByText('Entries changed since you opened this period. The latest entries are shown; review them again.')).toBeVisible()
+  await expect(page.getByText('Entries changed since you opened this period. Review the latest entries again.')).toBeVisible()
   await expect(panel.getByRole('button', { name: 'Approve period' })).toBeVisible()
 })
 
