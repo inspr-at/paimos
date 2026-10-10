@@ -1000,6 +1000,14 @@
     ,
     "browser:tests/theme-agents.spec.ts:visible screenshots and Personal agent behaviour controls stay stable in all viewport modes"
     ,
+    "browser:tests/theme-settings.spec.ts:Load more is disabled while the current theme is unavailable and works again after Reload (1024 dark)"
+    ,
+    "browser:tests/theme-settings.spec.ts:Load more is disabled while the current theme is unavailable and works again after Reload (1024 light)"
+    ,
+    "browser:tests/theme-settings.spec.ts:Load more is disabled while the current theme is unavailable and works again after Reload (390 dark)"
+    ,
+    "browser:tests/theme-settings.spec.ts:Load more is disabled while the current theme is unavailable and works again after Reload (390 light)"
+    ,
     "browser:tests/theme-settings.spec.ts:Theme settings 1024 dark: preview, derived colours, marker and overlay stay still"
     ,
     "browser:tests/theme-settings.spec.ts:Theme settings 1024 light: preview, derived colours, marker and overlay stay still"
@@ -1619,6 +1627,70 @@
     "vitest:tests/theme-editor.unit.test.ts:theme editor matrix is complete > every phase has a fixture"
     ,
     "vitest:tests/theme-editor.unit.test.ts:theme editor matrix is complete > pending tokens are unique and their predecessors belong to no state"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > activeConflict: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > choosing: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > clean: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > confirming: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > confirmingConflict: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > createConflict: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > defaultManager: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > defaultMember: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > deletingActive: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > deletingOther: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > dirty: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > dirtyConflict: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > duplicating: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > fallback: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > fallbackFailed: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > invalid: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > lastPage: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > loadFailed: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > loading: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > otherConflict: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > paging: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > reader: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > readingDefault: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > reloading: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > renaming: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > saving: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > selectingCopy: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > selectingCopyConflicted: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > selectionConflict: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > signedOut: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > unfinished: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > unfinishedMissing: Load more is enabled exactly when pagination starts"
     ,
     "vitest:tests/theme-editor.unit.test.ts:theme editor runner > an identity change drops a delayed save result"
     ,
@@ -12182,6 +12254,14 @@
     ,
     {"kind":"browser","file":"tests/theme-control-geometry.spec.ts","name":"the shared switch centres its knob on any track and the agents label keeps a 44px hit target","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Load more is disabled while the current theme is unavailable and works again after Reload (1024 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Load more is disabled while the current theme is unavailable and works again after Reload (1024 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Load more is disabled while the current theme is unavailable and works again after Reload (390 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Load more is disabled while the current theme is unavailable and works again after Reload (390 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"New theme duplicates the default even on a later list page; managers may edit it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1024 dark: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -17523,6 +17603,70 @@
     {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor matrix is complete > every phase has a fixture","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor matrix is complete > pending tokens are unique and their predecessors belong to no state","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > activeConflict: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > choosing: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > clean: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > confirming: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > confirmingConflict: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > createConflict: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > defaultManager: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > defaultMember: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > deletingActive: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > deletingOther: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > dirty: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > dirtyConflict: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > duplicating: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > fallback: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > fallbackFailed: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > invalid: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > lastPage: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > loadFailed: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > loading: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > otherConflict: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > paging: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > reader: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > readingDefault: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > reloading: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > renaming: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > saving: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > selectingCopy: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > selectingCopyConflicted: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > selectionConflict: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > signedOut: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > unfinished: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > unfinishedMissing: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor runner > an identity change drops a delayed save result","tier":"NIGHTLY"}
     ,

@@ -465,6 +465,40 @@ test('pagination keeps New theme and Colours still when the final page arrives',
     } },
   ] })
 })
+// AEON-870: without an active theme the list cannot page, so Load more is disabled, not a dead button.
+for (const width of [390, 1024]) for (const mode of ['light', 'dark'] as const) test(`Load more is disabled while the current theme is unavailable and works again after Reload (${width} ${mode})`, async ({ page }, testInfo) => {
+  await page.setViewportSize({ width, height: 950 })
+  const data = await setupPaged(page)
+  let activeDown = false
+  await page.route('**/api/me/theme', route => activeDown && route.request().method() === 'GET' ? route.fulfill({ status: 503, json: { error: 'Unavailable' } }) : route.fallback())
+  await page.goto('/settings/theme')
+  await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+  const status = page.locator('.theme-status')
+  const more = page.getByRole('button', { name: 'Load more themes', exact: true })
+  const newTheme = page.getByRole('button', { name: 'New theme', exact: true })
+  await expect(more).toBeEnabled()
+  await expectStableControls({ controls: { more, newTheme }, scrollAreas: { page: page.locator('.settings-page') }, interactions: [
+    { name: 'the fallback read fails after deleting the active theme', run: async () => {
+      activeDown = true
+      await page.getByRole('button', { name: 'Delete Copper', exact: true }).click()
+      await page.getByRole('button', { name: 'Delete theme', exact: true }).click()
+      await expect(status).toContainText('Deleted, but your current theme could not be loaded.')
+      await expect(more).toBeDisabled(); await expect(newTheme).toBeDisabled()
+      await page.screenshot({ path: testInfo.outputPath(`unavailable-${width}-${mode}.png`), fullPage: true })
+    } },
+    { name: 'Reload restores paging', run: async () => {
+      activeDown = false
+      await page.getByRole('button', { name: 'Reload themes', exact: true }).click()
+      await expect(status).not.toContainText('could not be loaded')
+      await expect(more).toBeEnabled()
+    } },
+  ] })
+  await more.click()
+  await expect(more).toHaveCount(0)
+  await expect(page.locator('[data-theme-id="default"]')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath(`paged-${width}-${mode}.png`), fullPage: true })
+  expect(data.writes).toEqual([{ method: 'DELETE', path: '/api/themes/copper', body: null }])
+})
 test('New theme duplicates the default even on a later list page; managers may edit it', async ({ page }) => {
   const data = await setup(page, { admin: true, defaultLater: true }); await page.goto('/settings/theme')
   await expect(page.getByRole('button', { name: 'Load more themes' })).toBeVisible()
