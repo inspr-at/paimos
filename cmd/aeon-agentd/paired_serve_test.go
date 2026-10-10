@@ -78,6 +78,9 @@ func TestPairedServeRestartsWithUnconfirmedLedgerIntent(t *testing.T) {
 		case "/api/agent-pairing/attach":
 			w.WriteHeader(409)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "fixture attach disabled"})
+		case "/api/runs/queued/notifications", "/api/agent-accounts/probes":
+			// Pre-batch/pre-hint servers deny undeclared /api/ routes to agent keys.
+			w.WriteHeader(http.StatusForbidden)
 		case "/api/runs/queued":
 			_ = json.NewEncoder(w).Encode([]any{})
 			select {
@@ -227,6 +230,7 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 			var registrations, negotiations atomic.Int32
 			var updated atomic.Bool
 			polled := make(chan struct{}, 4)
+			var queueScans atomic.Int32
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/api/agent-pairing/reconcile":
@@ -266,12 +270,12 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 					}
 					w.WriteHeader(tc.status)
 					_ = json.NewEncoder(w).Encode(map[string]string{"error": tc.message})
+				case "/api/runs/queued/notifications", "/api/agent-accounts/probes":
+					// Pre-batch/pre-hint servers deny undeclared /api/ routes to agent keys.
+					w.WriteHeader(http.StatusForbidden)
 				case "/api/runs/queued":
+					queueScans.Add(1)
 					_ = json.NewEncoder(w).Encode([]any{})
-					select {
-					case polled <- struct{}{}:
-					default:
-					}
 				case "/api/agent-accounts":
 					if r.Method != http.MethodGet || r.URL.RawQuery != "include_checks=true" {
 						t.Error("capacity check poll did not use the scoped contract")
@@ -290,6 +294,12 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 						t.Error("recovery claim poll did not carry the paired daemon identity")
 					}
 					_ = json.NewEncoder(w).Encode([]any{})
+					// Recovery polling follows lifecycle reconciliation on every
+					// iteration, including when the empty queue scan backs off.
+					select {
+					case polled <- struct{}{}:
+					default:
+					}
 				default:
 					t.Errorf("unexpected paired runtime route: %s", r.URL.Path)
 					w.WriteHeader(404)
@@ -332,6 +342,7 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 			for _, afterUpdate := range []bool{false, true} {
 				updated.Store(afterUpdate)
 				negotiated := negotiations.Load()
+				scanned := queueScans.Load()
 				ctx, cancel := context.WithCancel(t.Context())
 				done := make(chan error, 1)
 				go func() { done <- servePairedContext(ctx, root, time.Hour) }()
@@ -360,6 +371,9 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 					// Each poll negotiates host capacity before reading the queue.
 					if negotiations.Load() == negotiated {
 						t.Fatal("paired serve polled work without negotiating host capacity")
+					}
+					if queueScans.Load() == scanned {
+						t.Fatal("paired serve never scanned work after registration")
 					}
 					local, err := agentdwire.OpenClient(filepath.Join(root, "daemon"))
 					if err != nil {

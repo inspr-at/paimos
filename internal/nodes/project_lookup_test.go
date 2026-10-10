@@ -34,14 +34,15 @@ func TestProjectLookupAliasesVisibilityAndZeroAggregates(t *testing.T) {
 	foreign := mustNode(t, other, fmt.Sprintf(`{"kind_id":%q,"title":"Foreign","fields":{"project_key":"FOREIGN","classic":{"key":"EXACT"}}}`, kindBySlug(t, other, "project").ID))
 	trace := &ticketGraphTracer{}
 	mod := New(tracedPool(t, trace), nil)
-	// Positive control: the old resolution path really calls the aggregate.
+	// Positive control: the rich resolution path really runs the batched aggregate.
+	const aggregateMarker = "WITH scope AS MATERIALIZED (SELECT * FROM aeon_work_scope("
 	status, body := callAs(t, mod, &p, http.MethodGet, "/api/nodes?kind_id="+kind.ID, "")
 	page := decode[nodePage](t, status, body, http.StatusOK)
 	if len(page.Items) != 2 {
 		t.Fatalf("rich baseline lost its projects: %+v", page.Items)
 	}
 	before := trace.snapshot()
-	if n := countMarker(before, "aeon_work_aggregates("); n != 1 {
+	if n := countMarker(before, aggregateMarker); n != 1 {
 		t.Fatalf("rich baseline aggregate calls=%d, want 1", n)
 	}
 	lookupCalls := 0
@@ -99,8 +100,10 @@ func TestProjectLookupAliasesVisibilityAndZeroAggregates(t *testing.T) {
 		}
 	}
 	after := trace.snapshot()[len(before):]
-	if n := countMarker(after, "aeon_work_aggregates("); n != 0 {
-		t.Fatalf("exact lookup invoked %d work aggregates", n)
+	for _, marker := range []string{aggregateMarker, "aeon_work_aggregates("} {
+		if n := countMarker(after, marker); n != 0 {
+			t.Fatalf("exact lookup invoked %d work aggregates (%s)", n, marker)
+		}
 	}
 	// One candidate SELECT per valid reference; no descendant or rich-list work.
 	if n := countMarker(after, "LIMIT 2"); n != lookupCalls {

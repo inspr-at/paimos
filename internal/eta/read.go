@@ -87,7 +87,7 @@ func LoadAggregates(ctx context.Context, tx pgx.Tx, ids []string) (map[string]Ag
 		return out, nil
 	}
 	rows, err := tx.Query(ctx, `SELECT e.id::text, `+estimateColumns+`,e.hours::float8,e.planned_hours::float8,e.is_parent,author.id::text,author.name
- FROM aeon_work_aggregates($1::uuid[]) e
+ FROM (`+AggregateSQL("$1::uuid[]")+`) e
  JOIN nodes n ON n.id=e.id AND n.tenant_id=current_setting('aeon.tenant_id')::uuid
  LEFT JOIN principals author ON author.tenant_id=n.tenant_id AND author.id=CASE
  WHEN n.fields->>'estimate_by' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -127,7 +127,7 @@ func Load(ctx context.Context, tx pgx.Tx, ids []string) (map[string]View, error)
 func One(ctx context.Context, tx pgx.Tx, id string) (View, error) {
 	ctx, cancel := context.WithTimeout(ctx, AggregateReadTimeout)
 	defer cancel()
-	rows, err := tx.Query(ctx, `SELECT e.id::text, `+estimateColumns+` FROM aeon_work_aggregates(ARRAY[$1::uuid]) e`, id)
+	rows, err := tx.Query(ctx, `SELECT e.id::text, `+estimateColumns+` FROM (`+AggregateSQL("ARRAY[$1::uuid]")+`) e`, id)
 	if err != nil {
 		return View{}, err
 	}

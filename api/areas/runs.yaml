@@ -38,6 +38,16 @@ paths:
       responses:
         '200': {description: Queued runs, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentRun'}}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /runs/queued/notifications:
+    get:
+      operationId: watchQueuedRunHints
+      description: "Content-free queue.wake SSE hints for an agent daemon using its existing run.read key. Initial wake after subscribing covers startup and reconnect gaps. Only changes to its own queued runs wake it; no run or event content is returned. The exact key is rechecked before each hint and every 15 seconds. Connections last at most 30 minutes, with at most two per principal and 32 per server. Hints grant no dispatch authority; lifecycle reconciliation, account freshness, routing and final claims remain required."
+      security: [{agentKey: []}]
+      responses:
+        '200': {description: "Queue hints and stream.ping keepalives", content: {text/event-stream: {schema: {type: string}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /runs/{runId}:
     get:
       operationId: getAgentRun

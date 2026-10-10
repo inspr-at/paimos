@@ -257,7 +257,9 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	captureCtx, stopCapture := context.WithCancel(ctx)
 	captureDone := make(chan struct{})
 	go func() { defer close(captureDone); s.RunCapacityCaptures(captureCtx) }()
-	defer func() { stopCapture(); <-captureDone }()
+	hintDone := make(chan struct{})
+	go func() { defer close(hintDone); s.RunQueueHints(captureCtx) }()
+	defer func() { stopCapture(); <-captureDone; <-hintDone }()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	stopping := false
@@ -282,7 +284,7 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 		}
 		// Lifecycle reconciliation is required before every fresh dispatch;
 		// the independent tombstone proof still works after key revocation.
-		c, err = pairedPollIteration(op, s, root, c, &diagnostics)
+		c, err = pairedPollIteration(op, s, root, c, &diagnostics, s.PollScheduledOnce)
 		if errors.Is(err, errStopDaemon) {
 			stopping = true
 		}
@@ -291,6 +293,7 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 		case <-ctx.Done():
 			stopping = true
 		case <-ticker.C:
+		case <-s.QueueWake():
 		}
 	}
 }
@@ -314,7 +317,7 @@ func (d *pairedDiagnostics) report(s *agentd.Supervisor, detail string, err erro
 	slog.Warn("agentd pairing diagnostic", "reason", agentsetup.PairingSyncFailed, "cause", detail, "first_cause", cause, "retryable", agentsetup.PairingRetryable(err))
 }
 
-func pairedPollIteration(ctx context.Context, s *agentd.Supervisor, root string, c agentsetup.RuntimeConfig, diagnostics *pairedDiagnostics) (agentsetup.RuntimeConfig, error) {
+func pairedPollIteration(ctx context.Context, s *agentd.Supervisor, root string, c agentsetup.RuntimeConfig, diagnostics *pairedDiagnostics, poll ...func(context.Context) error) (agentsetup.RuntimeConfig, error) {
 	// Reserve time for account health checks even if lifecycle HTTP times out.
 	op, cancel := context.WithTimeout(ctx, 5*time.Second)
 	err := syncPairing(op, root, c.Origin, s)
@@ -338,7 +341,7 @@ func pairedPollIteration(ctx context.Context, s *agentd.Supervisor, root string,
 		diagnostics.report(s, agentsetup.PairingRuntimeUnavailable, err)
 		return c, err
 	}
-	current, err := pollPairedRuntime(ctx, s, root, c, next)
+	current, err := pollPairedRuntime(ctx, s, root, c, next, poll...)
 	if err != nil {
 		diagnostics.report(s, agentsetup.PairingRuntimeUnavailable, err)
 	}
@@ -463,11 +466,15 @@ var errStopDaemon = errors.New("paired daemon must stop")
 // pollPairedRuntime keeps recovery and other harnesses polling while Claude
 // waits for a repin or a dependency repair. Identity changes fail closed: no
 // poll, while fence sync continues; an approved binding change stops the daemon.
-func pollPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root string, c, next agentsetup.RuntimeConfig) (agentsetup.RuntimeConfig, error) {
+func pollPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root string, c, next agentsetup.RuntimeConfig, poll ...func(context.Context) error) (agentsetup.RuntimeConfig, error) {
 	current, err := refreshPairedRuntime(ctx, s, root, c, next)
 	if err == nil {
 		s.SetPairingFailure("")
-		_ = s.PollOnce(ctx)
+		if len(poll) > 0 {
+			_ = poll[0](ctx)
+		} else {
+			_ = s.PollOnce(ctx)
+		}
 	}
 	return current, err
 }
