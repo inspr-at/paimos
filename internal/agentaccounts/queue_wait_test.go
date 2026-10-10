@@ -70,7 +70,12 @@ func TestQueueWaitBatchScansAndFreshClaimFences(t *testing.T) {
 		ids[i] = insertRun(t, f.admin, f.runner, f.profile)
 	}
 	seed(t, f.admin, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET quota_pool_fingerprint=$1`, strings.Repeat("ab", 32)); err != nil {
+		// Confirmed pools must match the reported login fingerprint. Keep both
+		// fixture doors in the pool without bypassing the database constraint.
+		if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET quota_fingerprint=$1,quota_pool_fingerprint=$1 WHERE id=ANY($2::uuid[])`, strings.Repeat("ab", 32), []string{f.account.ID, sibling.ID}); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET used=20 WHERE account_id=$1`, f.account.ID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `UPDATE agent_runs SET requested_account_id=$1 WHERE id=ANY($2::uuid[])`, f.account.ID, ids)
@@ -117,7 +122,9 @@ func TestQueueWaitBatchScansAndFreshClaimFences(t *testing.T) {
 		name, query, wait, refusal string
 	}{
 		{"grant revoked", `DELETE FROM account_use_cells WHERE account_id=$1`, "context", accountuse.NotAllowed},
-		{"budget exhausted", `UPDATE account_allowance_windows SET used=allowance WHERE account_id=$1`, "allowance", "reserved capacity is not eligible: allowance"},
+		// A person can reduce the spendable budget below the existing hold.
+		// Overfilling a request ledger instead would violate its DB constraint.
+		{"budget reduced", `UPDATE agent_accounts SET usage_floor_percent=80 WHERE id=$1`, "allowance", "reserved capacity is not eligible: allowance"},
 		{"probe stale", `UPDATE agent_accounts SET last_probe_at=last_probe_at-interval '3 minutes' WHERE id=$1`, "offline", "reserved account is not eligible"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -129,7 +136,7 @@ func TestQueueWaitBatchScansAndFreshClaimFences(t *testing.T) {
 				if len(advice) != 1 || advice[ids[0]] != nil {
 					t.Fatalf("expected positive advice before change: %+v", advice)
 				}
-				return nil
+				return ValidateReservedCapacity(ctx, tx, ids[0], f.account.ID)
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -166,10 +173,12 @@ func TestQueueWaitBatchScansAndFreshClaimFences(t *testing.T) {
 	}
 	t.Run("retired pool door still occupies slots", func(t *testing.T) {
 		err := db.InTenant(ctx, appPool, f.admin.TenantID, func(tx pgx.Tx) error {
-			if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET archived_at=$2 WHERE id=$1`, sibling.ID, now); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE agent_runs SET account_id=$1,status='running' WHERE id=ANY($2::uuid[])`, sibling.ID, ids[1:4]); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `UPDATE agent_runs SET account_id=$1,status='running' WHERE id=ANY($2::uuid[])`, sibling.ID, ids[1:4]); err != nil {
+			// Retirement keeps existing runs but requires its actor and makes
+			// the door unavailable for new work.
+			if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET archived_at=$2,archived_by_principal_id=$3,state='unavailable' WHERE id=$1`, sibling.ID, now, f.admin.ID); err != nil {
 				return err
 			}
 			before, err := WaitForRun(ctx, tx, ids[0])
