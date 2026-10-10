@@ -178,8 +178,11 @@ func (in *Input) normalize(now time.Time) error {
 		_, err := parseSchedule(in.Trigger)
 		return err
 	case "event":
-		if in.Trigger.Event != "release.published" || in.Trigger.RRULE != "" || in.Trigger.TimeOfDay != "" || in.Trigger.Timezone != "" || in.Trigger.StartDate != "" {
-			return fmt.Errorf("event trigger supports only release.published and no time fields")
+		if err := in.Trigger.normalizeEvent(); err != nil {
+			return err
+		}
+		if in.Trigger.RRULE != "" || in.Trigger.TimeOfDay != "" || in.Trigger.Timezone != "" || in.Trigger.StartDate != "" {
+			return fmt.Errorf("event trigger must not contain time fields")
 		}
 		if in.Trigger.EventStart != "" && in.Trigger.EventStart != "now" && in.Trigger.EventStart != "hour" && in.Trigger.EventStart != "morning" {
 			return fmt.Errorf("event_start must be now, hour or morning")

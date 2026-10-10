@@ -7920,13 +7920,23 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestDefinitionEditsPreserveDueCursorAndPausedManualRun","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestDoneEventCategoryFiltersOrderedDeliveryAndReplay","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestEventMorningFollowsLocalDateAcrossDST","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestExternalEventSignatureOwnershipReplayAndNoAgentExecution","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestKnowledgeEventSelectorsContextAndReplay","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestManualReceiptsOverlapProvenanceAndQueue","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestMonthlyIntervalValidation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestMonthlyIntervalsAnchoredToStartDate","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestNewEventTriggerValidationBounds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestNewEventTriggersRejectForeignTenantSourcesAndSenders","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestPauseDiscardsUnsyncedPublicationAndHistoricalDiscovery","tier":"GATED-FULL"}
     ,
@@ -7955,6 +7965,8 @@
     {"kind":"go","package":"internal/recurrences","name":"TestRollbackUniqueKeyAndInvalidTarget","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestSixMonthSpringGapWalksPastOneYear","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestSourceEventVisibilityAndLiveOwnerAuthorization","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestStoredLegacyTemplateCreatesQueuedWorkLeafAfterLockedReload","tier":"GATED-FULL"}
     ,

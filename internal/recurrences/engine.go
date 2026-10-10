@@ -110,7 +110,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 			// single-row unit never takes a later resource lock after events.Append.
 			r, err := scanRecurrence(tx.QueryRow(ctx, `SELECT `+recurrenceColumns+` FROM recurrences r WHERE NOT paused AND NOT (id=ANY($2::uuid[])) AND NOT (id=ANY($3::uuid[])) AND
     retired_at IS NULL AND
-    ((trigger->>'kind'='time' AND next_at<=$1) OR (trigger->>'kind'='event' AND EXISTS(SELECT 1 FROM events e WHERE e.type='release.published' AND e.node_id=r.project_id AND e.id>r.event_cursor))) ORDER BY next_at NULLS LAST,id LIMIT 1`, now, failedIDs, deferredIDs))
+    ((trigger->>'kind'='time' AND next_at<=$1) OR (trigger->>'kind'='event' AND EXISTS(SELECT 1 FROM events e WHERE (`+sourceTypeSQL+`) AND e.id>r.event_cursor))) ORDER BY next_at NULLS LAST,id LIMIT 1`, now, failedIDs, deferredIDs))
 			claimed = r
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
@@ -142,6 +142,9 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 				// no later resource lock, and rolls back atomically with the receipt.
 				_, err = tx.Exec(ctx, `UPDATE recurrences SET next_at=$2 WHERE id=$1`, r.ID, next)
 				return err
+			}
+			if r.Trigger.Event != "release.published" {
+				return m.consumeSource(ctx, tx, actor, r, now, &deferredIDs)
 			}
 			var id int64
 			var raw []byte
@@ -178,7 +181,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 					return err
 				}
 				if !prior {
-					_, err = occur(ctx, tx, actor, r, key, eventTime(r.Trigger, pub.PublishedAt), &id, pub.Name, pub.Version)
+					_, err = occurSource(ctx, tx, actor, r, key, eventTime(r.Trigger, pub.PublishedAt), &id, pub.Name, pub.Version, &EventContext{Event: "release.published", EventID: id, ReleaseID: pub.ReleaseID, ProjectID: r.ProjectID, Name: boundedText(pub.Name, 256), Version: boundedText(pub.Version, 256)})
 				}
 				if err != nil {
 					return err

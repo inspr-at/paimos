@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -55,6 +56,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/recurrences/{recurrenceId}/pause", m.pause)
 	mux.HandleFunc("POST /api/recurrences/{recurrenceId}/resume", m.resume)
 	mux.HandleFunc("POST /api/recurrences/{recurrenceId}/run-now", m.runNow)
+	mux.HandleFunc("POST /api/recurrences/{recurrenceId}/events", m.receiveExternal)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/preview", m.preview)
 }
 func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
@@ -119,7 +121,7 @@ func authorizeDefinition(ctx context.Context, tx pgx.Tx, p tenant.Principal, in 
 			}
 		}
 	}
-	return nil
+	return authorizeSources(ctx, tx, p, in)
 }
 
 // Tenant access fence precedes tree and resource rows. Try mode yields rather
@@ -180,7 +182,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		template, _ := json.Marshal(in.Template)
 		trigger, _ := json.Marshal(in.Trigger)
 		out, err = scanRecurrence(tx.QueryRow(r.Context(), `INSERT INTO recurrences(tenant_id,project_id,parent_id,template,trigger,queue_each,overlap_policy,catch_up_policy,next_at,event_cursor,created_by_principal_id,created_at,updated_at,active_since)
-   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,(SELECT coalesce(max(id),0) FROM events WHERE type='release.published'),$10,$11,$11,$11) RETURNING `+recurrenceColumns, p.TenantID, in.ProjectID, in.ParentID, template, trigger, in.QueueEach, in.OverlapPolicy, in.CatchUpPolicy, next, p.ID, now))
+   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,(SELECT coalesce(max(id),0) FROM events),$10,$11,$11,$11) RETURNING `+recurrenceColumns, p.TenantID, in.ProjectID, in.ParentID, template, trigger, in.QueueEach, in.OverlapPolicy, in.CatchUpPolicy, next, p.ID, now))
 		if err != nil {
 			return err
 		}
@@ -307,7 +309,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		if comparable.StartDate == "" {
 			comparable.StartDate = before.Trigger.StartDate
 		}
-		if comparable == before.Trigger {
+		if reflect.DeepEqual(comparable, before.Trigger) {
 			in.Trigger = before.Trigger
 		}
 		if err = in.Input.normalize(now); err != nil {
@@ -325,13 +327,13 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		next := before.NextAt
 		cursor := before.EventCursor
 		active := before.ActiveSince
-		if in.Trigger != before.Trigger {
+		if !reflect.DeepEqual(in.Trigger, before.Trigger) {
 			active = now
 			next, err = nextTime(in.Trigger, now)
 			if err != nil {
 				return err
 			}
-			if err = tx.QueryRow(r.Context(), `SELECT coalesce(max(id),0) FROM events WHERE type='release.published'`).Scan(&cursor); err != nil {
+			if err = tx.QueryRow(r.Context(), `SELECT coalesce(max(id),0) FROM events`).Scan(&cursor); err != nil {
 				return err
 			}
 		}
@@ -400,7 +402,7 @@ func (m *Module) setPaused(w http.ResponseWriter, r *http.Request, paused, retir
 			if err != nil {
 				return err
 			}
-			if err = tx.QueryRow(r.Context(), `SELECT coalesce(max(id),0) FROM events WHERE type='release.published'`).Scan(&cursor); err != nil {
+			if err = tx.QueryRow(r.Context(), `SELECT coalesce(max(id),0) FROM events`).Scan(&cursor); err != nil {
 				return err
 			}
 		}
