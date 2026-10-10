@@ -19,6 +19,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 type routineRoundTrip func(*http.Request) (*http.Response, error)
@@ -331,4 +332,54 @@ func TestRoutineDurableWakeRetryLeaseAndRestart(t *testing.T) {
 		t.Fatalf("stale lease did not fail for the lease fence: %v", err)
 	}
 	stop()
+}
+
+// Risk: ready work behind one address's live head must not hide another
+// address's earlier lease deadline. Database-clock injection makes boundaries
+// exact even when the host clock or test runner is slow.
+func TestRoutineEarliestDeadlineBehindLeasedHead(t *testing.T) {
+	w, m, project, _ := messagingWorld(t)
+	insertPrincipal(t, w.db, w.agent.TenantID, tenant.Agent, "other", nil)
+	for _, address := range []string{"grok_bot:worker", "grok_bot:other"} {
+		_, err := m.storeTarget(t.Context(), w.admin, project, targetInput{Address: address, Adapter: "grok_bot_routine", Kind: "https_webhook", Ref: "https://8.8.8.8/fixture-hook", Secret: "fixture-routine-sender-key", Role: "primary", MaximumLevel: "simple"})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	head := mustCompatSend(t, m, w.sender, project, compatInput("grok_bot:worker", "leased-head"))
+	work, err := m.claim(t.Context(), w.agent, project, claimInput{To: "grok_bot:worker", Adapter: "grok_bot_routine"})
+	if err != nil || work == nil || work.Message == nil || work.Message.ID != head.ID {
+		t.Fatalf("head fixture claim failed: %v", err)
+	}
+	blocked := mustCompatSend(t, m, w.sender, project, compatInput("grok_bot:worker", "behind-head"))
+	earlier := mustCompatSend(t, m, w.sender, project, compatInput("grok_bot:other", "earlier-deadline"))
+	now := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
+	setDeliveryLease(t, w, work.ID, now.Add(4*time.Second))
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_message_deliveries SET lease_until=$2 WHERE message_id=$1::uuid`, earlier.ID, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	m.databaseClock = func(context.Context, pgx.Tx) (time.Time, error) { return now, nil }
+	d := &RoutineDispatcher{m: m}
+	worked, delay, err := d.dispatchOne(t.Context(), w.agent.TenantID)
+	if worked || err != nil || delay != 2*time.Second {
+		t.Fatalf("blocked head hid earlier deadline: worked=%t delay=%s err=%v", worked, delay, err)
+	}
+	var attempts int
+	if err := w.db.Admin.QueryRow(t.Context(), `SELECT attempts FROM inbox_message_deliveries WHERE message_id=$1::uuid`, blocked.ID).Scan(&attempts); err != nil || attempts != 0 {
+		t.Fatalf("blocked message was claimed: attempts=%d err=%v", attempts, err)
+	}
+	now = now.Add(2 * time.Second)
+	candidate, delay, err := d.nextRoutine(dbtest.Seed(t.Context()), w.agent.TenantID)
+	// The ready worker row still sorts first; its fenced claim cannot skip the
+	// live head. Verify the newly due address directly after holding that row.
+	if err != nil || candidate.address != "grok_bot:worker" || delay != 2*time.Second {
+		t.Fatalf("deadline boundary changed queue ordering: address=%s delay=%s err=%v", candidate.address, delay, err)
+	}
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_message_deliveries SET lease_until=$2 WHERE message_id=$1::uuid`, blocked.ID, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	candidate, delay, err = d.nextRoutine(dbtest.Seed(t.Context()), w.agent.TenantID)
+	if err != nil || candidate.address != "grok_bot:other" || delay != 2*time.Second {
+		t.Fatalf("expired lease did not become due at the database boundary: address=%s delay=%s err=%v", candidate.address, delay, err)
+	}
 }

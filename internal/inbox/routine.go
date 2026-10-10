@@ -174,11 +174,20 @@ func (d *RoutineDispatcher) nextRoutine(ctx context.Context, tenantID string) (r
 	ready := false
 	err := db.InTenant(ctx, d.m.base.pool, tenantID, func(tx pgx.Tx) error {
 		candidate.actor.TenantID = tenantID
+		var now *time.Time
+		if d.m.databaseClock != nil {
+			value, err := d.m.databaseNow(ctx, tx)
+			if err != nil {
+				return err
+			}
+			now = &value
+		}
 		var kind string
-		var retrySeconds float64
-		err := tx.QueryRow(ctx, `WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS now)
+		var retrySeconds, nextRetrySeconds float64
+		err := tx.QueryRow(ctx, `WITH clock AS MATERIALIZED (SELECT COALESCE($2::timestamptz,clock_timestamp()) AS now)
 		 SELECT c.project_id::text,COALESCE(n.fields->>'project_key',n.key),c.recipient_address,p.id::text,p.kind,p.name,
-		 GREATEST(EXTRACT(EPOCH FROM (COALESCE(d.lease_until,clock.now)-clock.now)),0)::double precision
+		 GREATEST(EXTRACT(EPOCH FROM (COALESCE(d.lease_until,clock.now)-clock.now)),0)::double precision,
+		 GREATEST(EXTRACT(EPOCH FROM ((MIN(d.lease_until) FILTER (WHERE d.lease_until>clock.now) OVER ())-clock.now)),0)::double precision
 		 FROM inbox_message_deliveries d
 		 JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id
 		 JOIN inbox_message_targets t ON t.tenant_id=d.tenant_id AND t.id=COALESCE(d.effective_target_id,d.target_id)
@@ -188,15 +197,17 @@ func (d *RoutineDispatcher) nextRoutine(ctx context.Context, tenantID string) (r
 		 CROSS JOIN clock
 		 WHERE d.tenant_id=$1::uuid AND d.state='pending' AND t.adapter='grok_bot_routine'
 		 AND d.attempts<8 AND i.acked_at IS NULL
-		 ORDER BY CASE WHEN d.lease_until>clock.now THEN d.lease_until ELSE '-infinity'::timestamptz END,c.sent_event_id LIMIT 1`, tenantID).Scan(&candidate.project, &candidate.key, &candidate.address, &candidate.actor.ID, &kind, &candidate.actor.Name, &retrySeconds)
+		 ORDER BY CASE WHEN d.lease_until>clock.now THEN d.lease_until ELSE '-infinity'::timestamptz END,c.sent_event_id LIMIT 1`, tenantID, now).Scan(&candidate.project, &candidate.key, &candidate.address, &candidate.actor.ID, &kind, &candidate.actor.Name, &retrySeconds, &nextRetrySeconds)
 		candidate.actor.Kind = tenant.PrincipalKind(kind)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err == nil {
 			ready = retrySeconds <= 0
-			if !ready {
-				delay = min(routineFallback, time.Duration(retrySeconds*float64(time.Second)))
+			if nextRetrySeconds > 0 {
+				// A ready row may still be behind another address's live head.
+				// Keep the earliest tenant-wide deadline even in that case.
+				delay = max(time.Nanosecond, time.Duration(min(nextRetrySeconds, routineFallback.Seconds())*float64(time.Second)))
 			}
 		}
 		return err
@@ -276,7 +287,7 @@ func (d *RoutineDispatcher) dispatchOne(ctx context.Context, tenantID string) (b
 	}
 	if work == nil || work.ID == "" || work.State != "pending" || work.Message == nil {
 		if work != nil && work.retryAfter > 0 {
-			delay = min(routineFallback, work.retryAfter)
+			delay = min(delay, work.retryAfter)
 		}
 		return false, delay, nil
 	}

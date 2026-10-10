@@ -6726,6 +6726,8 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestRoutineDurableWakeRetryLeaseAndRestart","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestRoutineEarliestDeadlineBehindLeasedHead","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestRoutineHintsFilterTenantAndChannel","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestRoutineIdleFallbackAndReconnectScheduling","tier":"ESSENTIAL"}
