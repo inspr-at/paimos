@@ -159,6 +159,27 @@ func (f *fixture) input() CreateInput {
 
 func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 	f := newFixture(t)
+	// Risk: absent bootstrap pins must not silently erase the unavailable
+	// fallback entries, or let an author-family skip satisfy that assertion.
+	unavailableProfiles := map[string]bool{}
+	f.tx(t, func(tx pgx.Tx) error {
+		rows, err := tx.Query(t.Context(), `SELECT id::text FROM model_profiles WHERE slug IN ('gemini-gemini-2-5-pro-32768','opencode-google-gemini-2-5-pro-default')`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			unavailableProfiles[id] = false
+		}
+		return rows.Err()
+	})
+	if len(unavailableProfiles) != 2 {
+		t.Fatalf("fixture must retain both unavailable fallback profiles, got %d", len(unavailableProfiles))
+	}
 	path := "/api/nodes/" + f.ticket + "/reviews"
 	in := f.input()
 	var v Review
@@ -166,8 +187,7 @@ func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 	if v.Status != "queued" || v.ReviewerFamily == nil || *v.ReviewerFamily != "anthropic" || v.GateOpen || v.RunID == nil {
 		t.Fatalf("invalid queued review: %+v", v)
 	}
-	// A deliberately incomplete catalog receives all required missing profiles.
-	// Find the original custom policy entries by identity, not fixed indices.
+	// Find the fixture's policy entries by identity, not fixed indices.
 	selected, authorSkipped, unavailableSkipped := false, false, false
 	for _, candidate := range v.Ladder {
 		if candidate.ProfileID == f.profile {
@@ -182,9 +202,21 @@ func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 		if !candidate.Selected && len(candidate.SkipReasons) > 0 {
 			unavailableSkipped = true
 		}
+		if _, exists := unavailableProfiles[candidate.ProfileID]; exists {
+			for _, reason := range candidate.SkipReasons {
+				if strings.HasPrefix(reason, "unavailable until ") && strings.HasSuffix(reason, ": fixture fallback unavailable") && !candidate.Selected {
+					unavailableProfiles[candidate.ProfileID] = true
+				}
+			}
+		}
 	}
 	if !selected || !authorSkipped || !unavailableSkipped {
 		t.Fatal("fallback reasons were lost")
+	}
+	for id, skipped := range unavailableProfiles {
+		if !skipped {
+			t.Fatalf("fallback %s missing its explicit unavailability reason: %+v", id, v.Ladder)
+		}
 	}
 	var replay Review
 	f.call(t, f.person, "POST", path, in, 201, &replay)
