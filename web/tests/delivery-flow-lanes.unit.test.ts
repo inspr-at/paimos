@@ -7,7 +7,7 @@ import {
   CHAR_W, createTimeline, fitAll, fitLabel, following, followTick, keyInput, laneFrame, laneModel, MAX_ROWS, panBy, placeIncidentCaption, placeOverviewTargets, resetTimeline, rowPieces, setTime, timeLabel, wheelInput, zoomPreset, zoomTo,
   type FlowData, type FlowRun, type FlowStep, type Lane, type OverviewHit,
 } from '../src/lib/deliveryFlow'
-import { exampleLive, EXAMPLE_NOW } from '../src/lib/deliveryFlowExample'
+import { exampleLive, EXAMPLE_NOW } from './delivery-flow-example-fixtures'
 import { hintParts, flowText } from '../src/lib/deliveryFlowText'
 
 const words = (en: string) => ({ en, de: en })

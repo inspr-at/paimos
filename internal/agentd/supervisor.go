@@ -123,34 +123,35 @@ type owned struct {
 	budgetReason                                   string
 	budgetStopStarted, budgetStopUnconfirmed       bool
 
-	deadlineExpired atomic.Bool
-	mu              sync.Mutex
-	harnessMu       sync.Mutex
-	record          Record
-	harness         HarnessSession
-	heartbeatSeq    int64
-	pauseWakeAt     time.Time
-	metadataSeq     uint64
-	metadataPending []harnessMetadata
-	usage           *sessionUsageReporter
-	modelReports    map[string]bool // successful content-free evidence IDs, bounded per run
-	capacityPending map[string]capacity.Reading
-	vendorLimit     *capacity.LimitHit
-	inboxCapable    bool
-	queueInput      bool // Owned ACP transport; input is applied only after turn end.
-	pending         []HarnessControl
-	process         Process
-	tools           *managedToolServer
-	replies         map[string]InboxReplyTarget // delivered message ID -> authenticated reply target
-	replyOrder      []string
-	doneRequested   bool
-	monitorDone     chan struct{}
-	harnessWake     chan struct{}
-	stopRequested   bool
-	forceRequested  bool
-	harnessArchived bool
-	protocolFailed  bool
-	protocolStopped bool
+	deadlineExpired  atomic.Bool
+	mu               sync.Mutex
+	harnessMu        sync.Mutex
+	record           Record
+	harness          HarnessSession
+	heartbeatSeq     int64
+	pauseWakeAt      time.Time
+	metadataSeq      uint64
+	metadataPending  []harnessMetadata
+	usage            *sessionUsageReporter
+	modelReports     map[string]bool // successful content-free evidence IDs, bounded per run
+	capacityPending  map[string]capacity.Reading
+	vendorLimit      *capacity.LimitHit
+	inboxCapable     bool
+	queueInput       bool // Owned ACP transport; input is applied only after turn end.
+	pending          []HarnessControl
+	process          Process
+	tools            *managedToolServer
+	replies          map[string]InboxReplyTarget // delivered message ID -> authenticated reply target
+	replyOrder       []string
+	doneRequested    bool
+	monitorDone      chan struct{}
+	harnessWake      chan struct{}
+	harnessConnected bool // Advisory only; claims still check current generation/lease.
+	stopRequested    bool
+	forceRequested   bool
+	harnessArchived  bool
+	protocolFailed   bool
+	protocolStopped  bool
 }
 
 type harnessMetadata struct {
@@ -1597,49 +1598,85 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 }
 
 func (s *Supervisor) heartbeat(entry *owned) {
-	entry.mu.Lock()
-	inbox := entry.inboxCapable
-	entry.mu.Unlock()
 	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
-	var inboxTicks <-chan time.Time
-	if inbox {
-		inboxTicker := time.NewTicker(2 * time.Second)
-		defer inboxTicker.Stop()
-		inboxTicks = inboxTicker.C
-	}
-	s.heartbeatLoop(entry, ticker.C, inboxTicks)
+	s.heartbeatLoopScheduled(entry, ticker.C, nil, time.Now, newHarnessTimer)
 }
+
+type harnessTimer interface {
+	Ticks() <-chan time.Time
+	Reset(time.Duration)
+	Stop()
+}
+
+type realHarnessTimer struct{ timer *time.Timer }
+
+func newHarnessTimer() harnessTimer {
+	timer := time.NewTimer(time.Hour)
+	timer.Stop()
+	return &realHarnessTimer{timer: timer}
+}
+func (t *realHarnessTimer) Ticks() <-chan time.Time { return t.timer.C }
+func (t *realHarnessTimer) Stop() {
+	if !t.timer.Stop() {
+		select {
+		case <-t.timer.C:
+		default:
+		}
+	}
+}
+func (t *realHarnessTimer) Reset(delay time.Duration) { t.Stop(); t.timer.Reset(delay) }
 
 // Tick channels are injected so tests prove hint processing without elapsed
 // time assertions or accidentally passing via the fallback poll.
 func (s *Supervisor) heartbeatLoop(entry *owned, heartbeatTicks, inboxTicks <-chan time.Time) {
+	s.heartbeatLoopScheduled(entry, heartbeatTicks, inboxTicks, time.Now, nil)
+}
+
+func (s *Supervisor) heartbeatLoopScheduled(entry *owned, heartbeatTicks, inboxTicks <-chan time.Time, now func() time.Time, newTimer func() harnessTimer) {
 	entry.mu.Lock()
-	done, hints := entry.monitorDone, entry.harnessWake
+	done, hints, inbox := entry.monitorDone, entry.harnessWake, entry.inboxCapable
 	entry.mu.Unlock()
-	wakeTimer := time.NewTimer(time.Hour)
-	if !wakeTimer.Stop() {
-		<-wakeTimer.C
+	var pollTimer harnessTimer
+	if inbox && newTimer != nil {
+		pollTimer = newTimer()
+		defer pollTimer.Stop()
 	}
+	if newTimer == nil {
+		newTimer = newHarnessTimer
+	}
+	wakeTimer := newTimer()
 	defer wakeTimer.Stop()
+	var pollAt time.Time
+	var pollInterval time.Duration
+	retry := false
 	for {
 		entry.mu.Lock()
-		wake := entry.pauseWakeAt
+		wake, connected := entry.pauseWakeAt, entry.harnessConnected
 		entry.mu.Unlock()
-		var wakeTicks <-chan time.Time
-		if !wakeTimer.Stop() {
-			select {
-			case <-wakeTimer.C:
-			default:
+		entry.harnessMu.Lock()
+		pending := len(entry.pending) != 0
+		entry.harnessMu.Unlock()
+		if pollTimer != nil {
+			interval := harnessFallbackPoll
+			if connected && !retry && !pending {
+				interval = harnessSafetyPoll
 			}
+			if interval != pollInterval || pollAt.IsZero() {
+				pollInterval, pollAt = interval, now().Add(interval)
+			}
+			pollTimer.Reset(max(time.Millisecond, pollAt.Sub(now())))
+			inboxTicks = pollTimer.Ticks()
 		}
+		var wakeTicks <-chan time.Time
+		wakeTimer.Stop()
 		if !wake.IsZero() {
-			delay := time.Until(wake)
+			delay := wake.Sub(now())
 			if delay < time.Millisecond {
 				delay = time.Millisecond
 			}
 			wakeTimer.Reset(delay)
-			wakeTicks = wakeTimer.C
+			wakeTicks = wakeTimer.Ticks()
 		}
 		beat := false
 		claimControls := false
@@ -1648,8 +1685,12 @@ func (s *Supervisor) heartbeatLoop(entry *owned, heartbeatTicks, inboxTicks <-ch
 			return
 		case <-heartbeatTicks:
 			beat = true
+			entry.mu.Lock()
+			claimControls = !inbox || !entry.harnessConnected || retry || pending
+			entry.mu.Unlock()
 		case <-inboxTicks:
-			claimControls = true // bounded fallback when the hint stream is unavailable
+			pollAt = time.Time{}
+			claimControls = true // slow safety poll while connected; fast after failure
 		case <-hints:
 			claimControls = true
 		case <-wakeTicks:
@@ -1657,6 +1698,7 @@ func (s *Supervisor) heartbeatLoop(entry *owned, heartbeatTicks, inboxTicks <-ch
 			entry.pauseWakeAt = time.Time{}
 			entry.mu.Unlock()
 			beat = true
+			claimControls = true // durable deadlines never wait for the safety poll
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		var err error
@@ -1664,8 +1706,11 @@ func (s *Supervisor) heartbeatLoop(entry *owned, heartbeatTicks, inboxTicks <-ch
 			s.flushCapacity(ctx, entry)
 			err = s.update(ctx, entry, Telemetry{Kind: "heartbeat"})
 		}
-		serviceErr := s.serviceHarnessWake(ctx, entry, beat, beat || claimControls)
+		serviceErr := s.serviceHarnessWake(ctx, entry, beat, claimControls)
 		cancel()
+		if claimControls {
+			retry = serviceErr != nil
+		}
 		if !errors.Is(serviceErr, ErrControlUnconfirmed) {
 			err = errors.Join(err, serviceErr)
 		}
@@ -2138,7 +2183,7 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 			entry.pending = append(entry.pending[:index], entry.pending[index+1:]...)
 		}
 	}
-	if entry.inboxCapable {
+	if entry.inboxCapable && (claimControls || !heartbeat) {
 		// A drain returns at most one leased message and replays it until completed.
 		entry.mu.Lock()
 		busy := entry.harness.Activity == "busy"

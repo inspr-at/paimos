@@ -37,7 +37,7 @@ export interface RunFacts {
   pct: number | null; currentStepId: string | null
   eta: { p50: number | null; p90: number | null; basis: 'history' | 'ops' | 'none'; reason: string | null }
   gate: string | null
-  /** The release record a rollout reported (AEON-1022); absent on example data and the Arion target. */
+  /** The release record a rollout reported (AEON-1022); absent on the Arion target and on runs no rollout reported on. */
   record?: ReleaseFacts
 }
 /** The latest attempt of the rehearsal or the catalogue, read from every step the answer holds (never from a lane slice). */

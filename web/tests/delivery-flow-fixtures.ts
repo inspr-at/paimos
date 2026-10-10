@@ -65,6 +65,10 @@ const recordSteps = (): StepSpec[] => [
   { n: 33, item: R, key: 'rehearsal', kind: 'work', actor: 'ci', label: 'Checks', from: '19:25', to: '19:36', outcome: 'green', side: true },
   { n: 34, item: R, key: 'catalogue', kind: 'work', actor: 'ci', label: 'Checks', from: '19:26', to: '19:48', outcome: 'green', side: true, p50: 21, p90: 24 },
 ]
+// The one-minute merge of #935 at 20:09 (OPS timeline): beside the 24 s snapshot j it makes a "+2" sliver cluster at Fit all.
+const mergeStep = (): StepSpec[] => [
+  { n: 35, item: R, key: 'g', kind: 'work', actor: 'agent', label: 'OPS', from: '20:09', to: '20:10', round: 2, outcome: 'ok' },
+]
 const C1 = RUN.c991, C3 = RUN.c983, C9 = RUN.c993
 const changeSteps = (): StepSpec[] => [
   { n: 101, item: C1, key: 'build', kind: 'work', actor: 'agent', label: 'Builder', from: '19:10', to: '19:46', model: 'Opus 5.5', p50: 35, arion: 30 },
@@ -97,10 +101,10 @@ const items = (final: boolean, record = false) => [
 const incident = (final: boolean) => ({ id: id(900), item_id: R, started_at: iso('20:14:31'), ended_at: final ? iso('20:34:01') : null, severity: 'degraded', summary: 'ready 503, DB pool starved', recovery_step_ids: [26, 27, 28, ...(final ? [29, 30] : [])].map(n => id(10_000 + n)) })
 
 /** GET /delivery/flow at `now` (20:25 by default): the runs in flight. */
-export function flowAnswer(now = '20:25', record = false) {
+export function flowAnswer(now = '20:25', record = false, merge = false) {
   return {
     project_id: id(1), now: iso(now), at: iso(now), from: iso('16:25'), to: iso(now),
-    items: items(false, record), steps: [...releaseSteps(false), ...(record ? recordSteps() : []), ...changeSteps()].map(step), incidents: [incident(false)], truncated: false,
+    items: items(false, record), steps: [...releaseSteps(false), ...(record ? recordSteps() : []), ...(merge ? mergeStep() : []), ...changeSteps()].map(step), incidents: [incident(false)], truncated: false,
   }
 }
 /** GET /delivery/flow/runs/{itemId}: release 126 is final; the changes are as at 20:25. */
@@ -118,16 +122,18 @@ export interface FlowMock {
   /** Sends one server-sent hint on the open stream (the stream answers once, with a long retry). */
   hint(type: 'delivery.step' | 'delivery.item' | 'delivery.incident', itemId: string): void
   setNow(now: string): void
+  /** Switches between no recorded run and the recorded runs for the next read. */
+  setEmpty(empty: boolean): void
 }
 /** Mocks the flow reads and the hint stream. The stream waits until a test sends a hint. */
-export async function mockFlow(page: Page, options: { empty?: boolean; record?: boolean } = {}): Promise<FlowMock> {
+export async function mockFlow(page: Page, options: { empty?: boolean; record?: boolean; merge?: boolean } = {}): Promise<FlowMock> {
   const reads: string[] = []
-  let now = '20:25'
+  let now = '20:25', empty = !!options.empty
   let release: (frame: string) => void = () => {}
   let waiting = new Promise<string>(resolve => { release = resolve })
   await page.route(/\/api\/projects\/[^/]+\/delivery\/flow(\?|$)/, route => {
     reads.push(new URL(route.request().url()).pathname + new URL(route.request().url()).search)
-    return route.fulfill({ json: options.empty ? emptyFlow() : flowAnswer(now, options.record) })
+    return route.fulfill({ json: empty ? emptyFlow() : flowAnswer(now, options.record, options.merge) })
   })
   await page.route(/\/api\/projects\/[^/]+\/delivery\/flow\/runs\/[^/?]+/, route => {
     const itemId = new URL(route.request().url()).pathname.split('/').pop()!
@@ -144,5 +150,6 @@ export async function mockFlow(page: Page, options: { empty?: boolean; record?: 
     reads,
     hint(type, itemId) { seq++; release(`id: ${seq}\nevent: ${type}\ndata: ${JSON.stringify({ id: seq, type, at: iso(now), item_id: itemId, step_id: id(10_028) })}\n\n`) },
     setNow(value) { now = value },
+    setEmpty(value) { empty = value },
   }
 }
