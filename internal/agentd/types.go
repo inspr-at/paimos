@@ -283,6 +283,8 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
+	// Chat is transient output. It must never enter run telemetry or journals.
+	Chat         *ChatUpdate
 	ModelReports []modelreport.Observation
 	HarnessTier  string
 	Doing        string

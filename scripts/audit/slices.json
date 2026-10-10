@@ -132,7 +132,10 @@
         "internal/agentd/shared_ledger_test.go",
         "internal/agentd/ledger_exit_unix.go",
         "internal/agentd/ledger_exit_other.go",
-        "internal/agentdwire/ledger_test.go"
+        "internal/agentdwire/ledger_test.go",
+        "internal/agentd/chat_normalize.go",
+        "internal/agentd/chat_stream.go",
+        "internal/agentd/chat_stream_test.go"
       ]
     },
     {

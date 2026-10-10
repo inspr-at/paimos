@@ -1254,6 +1254,16 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCaptureDoesNotHoldDispatchBudget","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestChatCapabilitiesHonorOwnedSessionControls","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestChatHarnessFixtureParity","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestChatLiveOnlyBindingOverflowAndJournalIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestChatRejectsForeignAndOversizedFrames","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestChatSubscriberBoundAndCancellation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestClaimLookupOutageRecoversOutsideQueuedFeed","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaimRejectedQueuedRetriesSameReservation","tier":"GATED-FULL"}
@@ -1279,6 +1289,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestClaudeBridgeMapsSDKResultUsage","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeBridgeOnlyAllowsDaemonFileTools","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestClaudeBridgeProjectsNativeChatWithoutPayloads","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeBridgeRequiresAdvertisedInterruptSupport","tier":"GATED-FULL"}
     ,
@@ -1327,6 +1339,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestCodexCapacityNotification","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexCaptureCapacityBlockedNotificationUsesCaptureDeadline","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestCodexChatPreAcknowledgementKeepsExactTurn","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexDrainRequiresEOFAndOwnedExit","tier":"GATED-FULL"}
     ,
