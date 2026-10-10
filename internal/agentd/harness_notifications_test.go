@@ -258,10 +258,12 @@ func newSafetyHarnessFixture(t *testing.T, connected bool) *safetyHarnessFixture
 		})
 	}()
 	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		close(f.e.monitorDone)
 		select {
 		case <-ended:
-		case <-f.guard.Done():
+		case <-cleanup.Done():
 			t.Error("heartbeat loop did not stop")
 		}
 	})
@@ -465,10 +467,12 @@ func TestHarnessSafetyPollingRecoveryAndOwnership(t *testing.T) {
 			}, func(d time.Duration) time.Duration { return d })
 		}()
 		t.Cleanup(func() {
+			cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+			defer stop()
 			cancel()
 			select {
 			case <-ended:
-			case <-f.guard.Done():
+			case <-cleanup.Done():
 				t.Error("watcher ignored cancellation")
 			}
 		})
