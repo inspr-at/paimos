@@ -17,8 +17,9 @@ export function signinStatus(computer: PairingView, accountId: string, row?: Acc
   if (!enrollment) return ''
   if (computer.computer_state === 'revoked' || enrollment.state === 'revoked') return 'Blocked'
   if (computer.computer_state === 'draining' || enrollment.state === 'draining') return 'Draining'
-  if (row) return readiness(row, computer, now).text
-  return describeEnrollmentStatus(computer, enrollment) || 'Not reported'
+  const label = describeEnrollmentStatus(computer, enrollment)
+  if (!label) return 'Not reported'
+  return row ? readiness(row, computer, now).text : label
 }
 
 export const verificationExpired = (s: SignInReference) => s.enrollment.verification_state === 'expired' && !s.enrollment.verification_expired_ready
@@ -152,7 +153,7 @@ function accountReady(account: OverviewAccount, now: number): boolean {
   return account.signins.some(signin => {
     if (signin.computer.computer_state !== 'connected' || signin.enrollment.state !== 'connected') return false
     const row = rows.get(signin.enrollment.account_id)
-    return readiness(row ? { ...bareRow(signin), ...row } : bareRow(signin), signin.computer, now).kind === 'ready'
+    return signinStatus(signin.computer, signin.enrollment.account_id, row ? { ...bareRow(signin), ...row } : bareRow(signin), now) === 'Ready'
   })
 }
 

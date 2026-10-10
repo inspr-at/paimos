@@ -46,7 +46,7 @@ func acceptUsedSuccessor(ctx context.Context, tx pgx.Tx, p tenant.Principal, pin
 			}
 		}
 	}
-	pin.Tier, pin.Note, pin.Source = predecessor.Tier, predecessor.Note, "auto"
+	pin.Tier, pin.Note = predecessor.Tier, predecessor.Note
 	pin.Version += "-accepted"
 	var exists bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE slug=$1 AND version=$2)`, pin.Slug, pin.Version).Scan(&exists); err != nil {

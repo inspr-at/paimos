@@ -36,7 +36,16 @@ func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time, projectIDs .
 	if err != nil {
 		return nil, err
 	}
-	advice, err := routingAdvice(ctx, tx, accounts, "", runRow{Purpose: "managed"}, now)
+	eligible := accounts
+	if allowed != nil {
+		eligible = []Account{}
+		for _, account := range accounts {
+			if allowed[account.ID] {
+				eligible = append(eligible, account)
+			}
+		}
+	}
+	advice, err := routingAdvice(ctx, tx, eligible, "", runRow{Purpose: "managed"}, now)
 	if err != nil {
 		return nil, err
 	}
