@@ -109,6 +109,9 @@ func (rt *runtime) runSubagentHook(ctx context.Context, event string) error {
 		return err
 	}
 	defer hold.lock.Close()
+	if rt.subagentLocked != nil {
+		rt.subagentLocked()
+	}
 	req, err := readSubagentRequest(&hold)
 	if err == nil && req.Parent == id && req.Project == parent.ProjectID && event == "SubagentStart" {
 		session, exists, loadErr := loadHeartbeatSession(&hold)
@@ -315,6 +318,9 @@ func (rt *runtime) heartbeatSubagents(ctx context.Context, parent *heartbeatSess
 		}
 		hold, err := lockSubagentDir(dir)
 		if err == nil {
+			if rt.subagentLocked != nil {
+				rt.subagentLocked()
+			}
 			req, readErr := readSubagentRequest(&hold)
 			if readErr == nil && req.Parent == parent.id && req.Project == parent.disk.ProjectID {
 				childCtx, childCancel := context.WithTimeout(ctx, hookBudget)

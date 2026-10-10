@@ -4324,7 +4324,11 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookResume","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookResumeDuringMaintenance","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookRetries","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookStopBeforeResumeReset","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestClaudeSubagentHookStopDuringRegistration","tier":"ESSENTIAL"}
     ,

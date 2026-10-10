@@ -308,6 +308,111 @@ func TestClaudeSubagentHookLargeStopPayload(t *testing.T) {
 	}
 }
 
+// Risk: maintenance owns a closed child's lock when Claude resumes it, and
+// the busy start hook loses the only authority to create the next generation.
+func TestClaudeSubagentHookResumeDuringMaintenance(t *testing.T) {
+	f := newSubagentFixture(t, "ship")
+	f.invoke(t, "SubagentStart", "")
+	f.invoke(t, "SubagentStop", "")
+	first := f.childDisk(t)
+	if !first.Closed || f.stops != 1 {
+		t.Fatal("maintenance fixture did not close its first generation")
+	}
+	p := f.parent(t)
+	locked, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+	maintenance := f.rt()
+	maintenance.subagentLocked = func() {
+		close(locked)
+		<-release
+	}
+	done := make(chan struct{})
+	go func() {
+		maintenance.heartbeatSubagents(t.Context(), p, false)
+		close(done)
+	}()
+	select {
+	case <-locked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("maintenance did not acquire the closed child lock")
+	}
+	if stderr := f.invoke(t, "SubagentStart", `,"description":"deferred resume","model":"claude-opus-4-6"`); stderr != "" {
+		t.Fatal(stderr)
+	}
+	once.Do(func() { close(release) })
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("maintenance did not finish")
+	}
+	// A separate runtime models the next helper turn: no in-memory hook state
+	// may be needed to recover the explicit resume or its public metadata.
+	f.rt().heartbeatSubagents(t.Context(), p, false)
+	resumed := f.childDisk(t)
+	if len(f.registrations) != 2 || resumed.SessionID == first.SessionID || resumed.Closed || resumed.Terminal || f.beats < 2 || f.stops != 1 {
+		t.Fatal("resume intent was lost while maintenance held the child lock")
+	}
+	if f.registrations[1]["display_label"] != "Explore: deferred resume" || f.registrations[1]["model"] != "claude-opus-4-6" || f.registrations[1]["work_shape"] != "ship" {
+		t.Fatal("deferred resume lost its metadata")
+	}
+	f.invoke(t, "SubagentStop", "")
+	if f.stops != 2 || !f.childDisk(t).Closed {
+		t.Fatal("deferred generation was not stopped")
+	}
+}
+
+// Risk: a stop is published after resume acquires the child lock but before
+// reset clears the previous stop, so the resumed child stays falsely active.
+func TestClaudeSubagentHookStopBeforeResumeReset(t *testing.T) {
+	f := newSubagentFixture(t, "scout")
+	f.invoke(t, "SubagentStart", "")
+	f.invoke(t, "SubagentStop", "")
+	first := f.childDisk(t)
+	if !first.Closed || f.stops != 1 || f.beats != 1 {
+		t.Fatal("reset fixture did not close its first generation")
+	}
+	locked, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+	start := f.rt()
+	start.stdin = strings.NewReader(`{"hook_event_name":"SubagentStart","session_id":"` + indexSourceID + `","agent_id":"agent-fixture","agent_type":"Explore","description":"resumed run"}`)
+	start.subagentLocked = func() {
+		close(locked)
+		<-release
+	}
+	done := make(chan error, 1)
+	go func() { done <- start.runSubagentHook(t.Context(), "SubagentStart") }()
+	select {
+	case <-locked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("resume did not acquire the child lock before reset")
+	}
+	if stderr := f.invoke(t, "SubagentStop", ""); stderr != "" {
+		t.Fatal(stderr)
+	}
+	once.Do(func() { close(release) })
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("resume did not finish")
+	}
+	resumed := f.childDisk(t)
+	if len(f.registrations) != 2 || resumed.SessionID == first.SessionID {
+		t.Fatal("reset race did not create a fresh resumed generation")
+	}
+	if f.stops != 2 || f.beats != 1 || !resumed.Closed || resumed.Sequence != 0 {
+		t.Fatal("stop published before resume reset was discarded")
+	}
+	f.rt().heartbeatSubagents(t.Context(), f.parent(t), false)
+	if f.stops != 2 || f.beats != 1 {
+		t.Fatal("maintenance continued a stopped resumed generation")
+	}
+}
+
 func TestClaudeSubagentHookNoOp(t *testing.T) {
 	for _, kind := range []string{"no-index", "local-stopped", "server-stopped", "unsafe-directory"} {
 		t.Run(kind, func(t *testing.T) {
