@@ -61,7 +61,7 @@ func (m *Module) CheckDeskTargetTx(ctx context.Context, tx pgx.Tx, actor tenant.
 		return fail(422, "unsupported_repository", "This source does not accept doctrine proposals.")
 	}
 	if source.CredentialRef != "" {
-		if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
+		if err := m.credentials.authorizeSource(source, actor.TenantID); err != nil {
 			return err
 		}
 	}
@@ -336,7 +336,7 @@ func (m *Module) prepareInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Pri
 		return nil, fail(422, "unsupported_repository", "Only the deployment-configured doctrine repositories accept proposals; their visibility must match.")
 	}
 	if source.CredentialRef != "" {
-		if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
+		if err := m.credentials.authorizeSource(source, actor.TenantID); err != nil {
 			return nil, err
 		}
 	}
@@ -434,7 +434,7 @@ func (m *Module) verifyPreparedTx(ctx context.Context, tx pgx.Tx, actor tenant.P
 		}
 	}
 	if current.CredentialRef != "" {
-		if err := m.credentials.authorize(current.CredentialRef, actor.TenantID, current.Repository); err != nil {
+		if err := m.credentials.authorizeSource(current, actor.TenantID); err != nil {
 			return err
 		}
 	}
@@ -445,7 +445,7 @@ func (m *Module) verifyPreparedTx(ctx context.Context, tx pgx.Tx, actor tenant.P
 		}
 		for _, source := range sources {
 			if m.repositories.IsPrivate(source.Repository) {
-				if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
+				if err := m.credentials.authorizeSource(source, actor.TenantID); err != nil {
 					return err
 				}
 			}
