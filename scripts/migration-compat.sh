@@ -49,6 +49,7 @@ probe_release() {
   local image="ghcr.io/inspr-at/aeon@$digest" image_id base db_address ready
   if [[ "$exercise_floor" = 1 ]]; then
     echo "Account-use rollback boundary release: $tag"
+    echo "Account-use rollback fixture: $tag; image: $image"
   fi
   echo "Previous published release: $tag"
   echo "Previous registry image: $image"
@@ -107,7 +108,7 @@ SQL
     printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
       "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
     if [[ "$exercise_floor" = 1 ]]; then
-      printf 'Account-use refusal boundary %s; registry image %s; loaded image %s passed the activated legacy probes.\n' \
+      printf 'Account-use refusal boundary %s; registry image %s; loaded image %s passed the activated legacy probes; verified activated empty/populated pools refuse below-floor binaries.\n' \
         "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
     fi
   fi
@@ -123,4 +124,4 @@ else
   probe_release "$tag" "$digest" 0
   probe_release "$account_use_floor_tag" "$account_use_floor_digest" 1
 fi
-echo "Migration compatibility passed: $tag on the candidate schema"
+echo "Migration compatibility passed: $tag on the candidate schema; latest-release reads and below-floor account-use boundary"
