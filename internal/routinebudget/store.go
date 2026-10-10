@@ -219,14 +219,14 @@ func (b Broker) ReserveTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in
 	if err != nil {
 		return Grant{}, err
 	}
-	// Each recovery retry consumes the same run-wide allowance. The initial
-	// actor attempt is not a retry; subsequent same-role attempts are bounded.
+	// Every actor and retry consumes the same finite run-wide attempt count.
+	// Switching from build to review/fix cannot reset the recovery allowance.
 	var attempts int
-	err = tx.QueryRow(ctx, `SELECT count(*) FROM routine_budget_grants g JOIN routine_attempts a ON a.tenant_id=g.tenant_id AND a.id=g.attempt_id WHERE g.run_id=$1 AND g.parent_id IS NULL AND a.role=$2`, r.id, role).Scan(&attempts)
+	err = tx.QueryRow(ctx, `SELECT count(*) FROM routine_budget_grants WHERE run_id=$1 AND parent_id IS NULL`, r.id).Scan(&attempts)
 	if err != nil {
 		return Grant{}, err
 	}
-	if policy.Effective.Recovery == nil || attempts > policy.Effective.Recovery.MaxAttempts {
+	if policy.Effective.Recovery == nil || attempts >= policy.Effective.Recovery.MaxAttempts {
 		return Grant{}, workorders.Fail(409, "recovery_attempts_exhausted")
 	}
 	balance, err = balance.reserve(in.Maximum)

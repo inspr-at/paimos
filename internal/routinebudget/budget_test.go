@@ -375,6 +375,36 @@ func TestRoutineBudgetAdmissionAndOwnership(t *testing.T) {
 	var administrator string
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Remaining administrator') RETURNING id::text`, f.owner.TenantID).Scan(&administrator))
 	dbtest.BindRole(t, f.d, f.owner.TenantID, administrator, "owner")
+	// Even another workspace owner cannot read this personal routine's ledger.
+	privateCall := in
+	privateCall.GrantKey = "private-unused-call"
+	privateCall.Maximum = Amount{RecoveryMS: 1}
+	must(t, f.tx(func(tx pgx.Tx) error {
+		child, err := f.broker.SubgrantTx(t.Context(), tx, f.owner, g.ID, privateCall)
+		if err != nil {
+			return err
+		}
+		unused := settlement("private-unused", Amount{})
+		unused.ProvenUnused = true
+		_, err = f.broker.SettleTx(t.Context(), tx, f.owner, f.run, child.ID, unused)
+		return err
+	}))
+	other := tenant.Principal{ID: administrator, TenantID: f.owner.TenantID, Kind: tenant.Person}
+	for _, table := range []string{"routine_budget_balances", "routine_budget_grants", "routine_budget_settlements", "routine_budget_orders"} {
+		var retained int
+		must(t, f.d.Admin.QueryRow(t.Context(), "SELECT count(*) FROM "+table).Scan(&retained))
+		if retained == 0 {
+			t.Fatal("privacy fixture lost asserted data", table)
+		}
+		must(t, db.InTenant(tenant.WithPrincipal(t.Context(), other), f.d.App, other.TenantID, func(tx pgx.Tx) error {
+			var n int
+			err := tx.QueryRow(t.Context(), "SELECT count(*) FROM "+table).Scan(&n)
+			if err == nil && n != 0 {
+				t.Fatal("personal ledger leaked", table)
+			}
+			return err
+		}))
+	}
 	// Revoke on a real tenant fence before a competing provider-call transaction.
 	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(q string) bool { return strings.HasPrefix(q, "UPDATE principals SET status=") })
 	revoked := make(chan error, 1)
