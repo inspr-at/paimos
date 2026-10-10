@@ -271,6 +271,10 @@ func TestExternalEventSignatureOwnershipReplayAndNoAgentExecution(t *testing.T) 
 			large := e
 			large.Source = strings.Repeat("x", 9000)
 			f.signedCall(sender, key, r.ID, large, nil, 400)
+			hiddenSource := f.node("project", nil, "Hidden external source")
+			hiddenPayload := e
+			hiddenPayload.Source = hiddenSource
+			f.signedCall(sender, key, r.ID, hiddenPayload, nil, 404)
 			var first, retry externalReceipt
 			if err := json.Unmarshal(f.signedCall(sender, key, r.ID, e, nil, 202), &first); err != nil {
 				t.Fatal(err)

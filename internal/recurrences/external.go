@@ -131,6 +131,17 @@ func (m *Module) receiveExternal(w http.ResponseWriter, r *http.Request) {
 		if item.Paused {
 			return workorders.Fail(409, "recurrence is paused")
 		}
+		// Reference visibility also applies to our own events. Reject a payload
+		// naming a hidden node before recording it, so later receipt reads cannot
+		// miss the delivery and accidentally accept a replay as a new event.
+		payload, _ := json.Marshal(in)
+		var visible bool
+		if err = tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM unnest(aeon_event_node_refs($1::uuid,'recurrence.external_received',NULL,$2::jsonb)) ref(id) WHERE NOT EXISTS(SELECT 1 FROM nodes n WHERE n.id=ref.id))`, p.TenantID, payload).Scan(&visible); err != nil {
+			return err
+		}
+		if !visible {
+			return workorders.Fail(404, "external source reference unavailable")
+		}
 		// Lock the target rows and recurrence before the event counter. Intake
 		// creates neither occurrence tickets nor agent runs.
 		if err = validateTarget(ctx, tx, item.Input, true); err != nil {

@@ -175,10 +175,12 @@ func authorizeSources(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Inp
 	return nil
 }
 
+const sourceProjectSQL = `EXISTS(SELECT 1 FROM nodes source WHERE source.id=e.node_id AND ((coalesce(r.trigger#>'{filter,project_ids}','[]'::jsonb)='[]'::jsonb AND source.project_id=r.project_id) OR (r.trigger#>'{filter,project_ids}') ? source.project_id::text))`
+
 const sourceTypeSQL = `(CASE r.trigger->>'event'
  WHEN 'release.published' THEN e.type='release.published' AND e.node_id=r.project_id
- WHEN 'node.done' THEN e.type IN ('node.updated','status_autopilot.changed','status_autopilot.undone','status_autopilot.derived','status_autopilot.causal_undo')
- WHEN 'knowledge.changed' THEN e.type IN ('knowledge.created','knowledge.updated','knowledge.deleted','knowledge.learning_accepted','node.updated')
+ WHEN 'node.done' THEN e.type IN ('node.updated','status_autopilot.changed','status_autopilot.undone','status_autopilot.derived','status_autopilot.causal_undo') AND ` + sourceProjectSQL + `
+ WHEN 'knowledge.changed' THEN e.type IN ('knowledge.created','knowledge.updated','knowledge.deleted','knowledge.learning_accepted','node.updated') AND ` + sourceProjectSQL + `
  WHEN 'external.tag' THEN e.type='recurrence.external_received' AND e.node_id=r.project_id AND e.metadata->>'recurrence_id'=r.id::text
  WHEN 'external.deploy' THEN e.type='recurrence.external_received' AND e.node_id=r.project_id AND e.metadata->>'recurrence_id'=r.id::text
  ELSE false END)`
