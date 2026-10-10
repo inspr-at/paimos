@@ -45,13 +45,14 @@ const attentionCTE = `WITH pending AS (SELECT DISTINCT ON (node_id) * FROM statu
  ORDER BY e.id DESC LIMIT 1) e ON true
  WHERE n.deleted_at IS NULL AND mark.value='true'::jsonb AND NOT EXISTS(SELECT 1 FROM pending q WHERE q.node_id=n.id)
  AND mark.key IN ('triage_list','cancel_suggested','blocked_reminder','missed_release')
-), filtered AS (SELECT * FROM attention WHERE ($1='' OR kind=$1)
+), filtered AS (SELECT * FROM attention WHERE ($1='' OR kind=$1 OR ($1='invalid_missed' AND target='missed_release' AND EXISTS(SELECT 1 FROM nodes invalid WHERE invalid.tenant_id=current_setting('aeon.tenant_id')::uuid AND invalid.id=attention.node_id AND (invalid.fields ? 'classic' OR NOT EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=invalid.tenant_id AND e.node_id=invalid.id AND ` + mergeEvidenceSQL + `)))))
  AND ($2='' OR project_id=nullif($2,'')::uuid)
  AND ($3='' OR ($3='none' AND assignee_id IS NULL) OR assignee_id=nullif(nullif($3,''),'none'))
  AND ($4='' OR strpos(lower(key||' '||title),lower($4))>0)) `
 
 type attentionInput struct {
 	BatchID                string    `json:"-"`
+	Cleanup                bool      `json:"-"`
 	EventID                int64     `json:"event_id"`
 	NodeID                 string    `json:"node_id"`
 	Revision               time.Time `json:"revision"`
@@ -93,7 +94,7 @@ type attentionPage struct {
 }
 
 func attentionKind(k string) bool {
-	return k == "" || k == "proposed" || k == "triage" || k == "cancel" || k == "blocked" || k == "missed"
+	return k == "" || k == "proposed" || k == "triage" || k == "cancel" || k == "blocked" || k == "missed" || k == "invalid_missed"
 }
 
 const attentionOrder = `CASE kind WHEN 'proposed' THEN 0 WHEN 'triage' THEN 1 WHEN 'cancel' THEN 2 WHEN 'blocked' THEN 3 ELSE 4 END`
@@ -301,12 +302,20 @@ func (m *Module) prepareAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
  WHERE j.project_node_id=$1 AND r.state='planning' AND n.deleted_at IS NULL
  AND NOT EXISTS(SELECT 1 FROM journey_tickets t WHERE t.ticket_node_id=$2 AND t.release_node_id IS NOT NULL)`, item.ProjectID, item.NodeID).Scan(&item.ReleaseID, &item.ReleaseTitle, &item.ReleaseRevision, &item.ReleaseProjectRevision)
 		if errors.Is(err, pgx.ErrNoRows) {
-			item.Applicable = false
-			item.Unavailable = "Choose a planning release in the ticket’s project first."
+			var planning bool
+			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_projects j JOIN journey_releases r ON r.tenant_id=j.tenant_id AND r.release_node_id=j.current_release_node_id JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id WHERE j.project_node_id=$1 AND r.state='planning' AND n.deleted_at IS NULL)`, item.ProjectID).Scan(&planning); err != nil {
+				return err
+			}
+			if planning {
+				item.Applicable = false
+				item.Unavailable = "Choose a planning release in the ticket’s project first."
+			} else {
+				item.To = "no_release_needed"
+			}
 		} else if err != nil {
 			return err
 		}
-		if p.Kind != tenant.Person || authz.RequireTx(ctx, tx, p, "releases.write", scope) != nil {
+		if p.Kind != tenant.Person || item.To == "release" && authz.RequireTx(ctx, tx, p, "releases.write", scope) != nil {
 			item.Applicable = false
 			item.Unavailable = "Adding to a release needs permission to manage releases."
 		}
@@ -476,6 +485,9 @@ func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 	if err = authz.RequireTx(ctx, tx, p, "nodes.write", scope); err != nil {
 		return err
 	}
+	if in.Cleanup && !classic(c.Node) && !c.MergedAt.IsZero() {
+		return events.ErrConflict
+	}
 	if !c.Node.Updated.Equal(in.Revision) {
 		return events.ErrConflict
 	}
@@ -486,6 +498,12 @@ func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 	err = tx.QueryRow(ctx, attentionCTE+`SELECT event_id,node_id::text,key,title,coalesce(project_id::text,''),revision,kind,source,target,reason,at,stale FROM filtered WHERE event_id=$5 AND node_id=$6`, "", "", "", "", in.EventID, in.NodeID).Scan(&item.EventID, &item.NodeID, &item.Key, &item.Title, &item.ProjectID, &item.Revision, &item.Kind, &item.From, &item.To, &item.Reason, &item.At, &item.stale)
 	if err != nil {
 		return err
+	}
+	if in.Cleanup {
+		if action != "dismiss" || item.To != "missed_release" {
+			return events.ErrConflict
+		}
+		item.Reason = "Cleared incorrect missed-release flag: classic history or no recorded merge."
 	}
 	originalTarget := item.To
 	if err = m.prepareAttention(ctx, tx, p, &item); err != nil {
@@ -563,6 +581,11 @@ func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 				return err
 			}
 			membershipChange = &change
+		} else if item.To == "no_release_needed" {
+			if c.Node.Fields == nil {
+				c.Node.Fields = map[string]json.RawMessage{}
+			}
+			c.Node.Fields["no_release_needed"] = json.RawMessage(`true`)
 		} else {
 			if item.To == "delivered" || item.To == "accepted" {
 				if pending(c.Node) {
@@ -581,9 +604,13 @@ func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 	if err != nil {
 		return err
 	}
+	fields, err := json.Marshal(c.Node.Fields)
+	if err != nil {
+		return err
+	}
 	var after []byte
 	var revision time.Time
-	if err = tx.QueryRow(ctx, `UPDATE nodes SET state=$2,status_autopilot=$3,updated_at=clock_timestamp() WHERE id=$1 RETURNING to_jsonb(nodes),updated_at`, in.NodeID, c.Node.State, marks).Scan(&after, &revision); err != nil {
+	if err = tx.QueryRow(ctx, `UPDATE nodes SET state=$2,status_autopilot=$3,fields=$4,updated_at=clock_timestamp() WHERE id=$1 RETURNING to_jsonb(nodes),updated_at`, in.NodeID, c.Node.State, marks, fields).Scan(&after, &revision); err != nil {
 		return err
 	}
 	if resolution.Proposal {
@@ -689,13 +716,18 @@ func (m *Module) undoAttention(ctx context.Context, tx pgx.Tx, p tenant.Principa
 		}
 		membershipUndo = &change
 	}
+	// Restore the captured fields along with flags at the unchanged revision.
+	fields, err := json.Marshal(before.Fields)
+	if err != nil {
+		return err
+	}
 	marks, err := json.Marshal(before.Marks)
 	if err != nil {
 		return err
 	}
 	var restored []byte
 	var revision time.Time
-	if err = tx.QueryRow(ctx, `UPDATE nodes SET state=$2,status_autopilot=$3,updated_at=clock_timestamp() WHERE id=$1 RETURNING to_jsonb(nodes),updated_at`, in.NodeID, before.State, marks).Scan(&restored, &revision); err != nil {
+	if err = tx.QueryRow(ctx, `UPDATE nodes SET state=$2,status_autopilot=$3,fields=$4,updated_at=clock_timestamp() WHERE id=$1 RETURNING to_jsonb(nodes),updated_at`, in.NodeID, before.State, marks, fields).Scan(&restored, &revision); err != nil {
 		return err
 	}
 	if res.Proposal {

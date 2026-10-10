@@ -29,12 +29,12 @@ const waitingNames: Record<string, [string, string, string]> = {
   triage: ['ticket on the triage list', 'tickets on the triage list', 'Nothing on the triage list'],
   cancel: ['cancel suggestion', 'cancel suggestions', 'No cancel suggestions'],
   blocked: ['blocked reminder', 'blocked reminders', 'No blocked reminders'],
-  missed: ['missed release', 'missed releases', 'No missed releases'],
+  missed: ['ticket done, but in no release', 'tickets done, but in no release', 'No tickets done outside a release'],
 }
 const explanations: Record<string, string> = {
   proposed: 'Proposed moves leave tickets untouched until someone applies them.', triage: 'New tickets waiting to be triaged.',
   cancel: 'Untouched backlog tickets suggested for cancellation.', blocked: 'Tickets that have stayed blocked and need a reminder.',
-  missed: 'Merged tickets that have not reached a release.',
+  missed: 'Done for 14+ days and not in any release. The configured delay starts at the recorded merge; classic history is skipped.',
 }
 const needs = computed<NeedsYouItem[]>(() => ATTENTION_KINDS.map(kind => {
   const count = attention.value?.counts[kind.id] ?? 0
@@ -50,7 +50,7 @@ const rules: { key: RuleKey; from: string; fromLabel: string; to: string; toLabe
   { key: 'backlog', from: 'backlog', fromLabel: 'Backlog', to: 'cancelled', toLabel: 'Cancel suggested', label: 'Cancel suggested when untouched for', aria: 'Days untouched in Backlog before Cancelled is suggested' },
   { key: 'blocked', from: 'blocked', fromLabel: 'Blocked', to: 'reminder', toLabel: 'Reminder', glyph: 'clock', label: 'Reminder when blocked for', aria: 'Days blocked before a reminder' },
   { key: 'progress', from: 'in_progress', fromLabel: 'In progress', to: 'open', toLabel: 'Open', label: 'Back to Open, with a comment, when no session, branch or PR for', aria: 'Days without a session, branch or PR before In progress goes back to Open' },
-  { key: 'done', from: 'done', fromLabel: 'Done', to: 'missed_release', toLabel: 'Missed release', glyph: 'alert', label: 'Flagged when merged but not released for', aria: 'Days merged but not released before the missed release flag' },
+  { key: 'done', from: 'done', fromLabel: 'Done', to: 'missed_release', toLabel: 'Done, but in no release', glyph: 'alert', label: 'Flagged when merged but not released for', aria: 'Days merged but not released before the missed release flag' },
   { key: 'publish', from: 'done', fromLabel: 'Done', to: 'delivered', toLabel: 'Delivered', label: 'When a release with the ticket is published' },
   { key: 'accept', from: 'delivered', fromLabel: 'Delivered', to: 'accepted', toLabel: 'Accepted', label: 'Accepted when delivered without objection for', aria: 'Days delivered without objection before Accepted' },
 ]

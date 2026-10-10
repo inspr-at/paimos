@@ -353,7 +353,8 @@ func mergeOwnerCandidate(ctx context.Context, tx pgx.Tx, tid string, project *st
 	return nil, nil
 }
 
-// prepareMergeTx mutates only leaf state, retaining all fields and human checks.
+// prepareMergeTx records the merge time with leaf completion, retaining other
+// fields and human checks.
 // Receipt lookup and writes share the tenant/tree fence. Events are returned
 // for the caller to append after the whole batch's resource locks and writes.
 func prepareMergeTx(ctx context.Context, tx pgx.Tx, tid, repo string, e *mergeEntry) (*events.Change, error) {
@@ -374,7 +375,7 @@ func prepareMergeTx(ctx context.Context, tx pgx.Tx, tid, repo string, e *mergeEn
 		return nil, nil
 	}
 	var after json.RawMessage
-	if err := tx.QueryRow(ctx, `UPDATE nodes SET state=$2,status_autopilot='{}',updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING to_jsonb(nodes)`, e.Ticket, e.To).Scan(&after); err != nil {
+	if err := tx.QueryRow(ctx, `UPDATE nodes SET state=$2,fields=jsonb_set(fields,'{merged_at}',to_jsonb($3::text)),status_autopilot='{}',updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING to_jsonb(nodes)`, e.Ticket, e.To, e.MergedAt.UTC().Format(time.RFC3339Nano)).Scan(&after); err != nil {
 		return nil, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE status_autopilot_proposals SET status='applied' WHERE node_id=$1 AND rule='merge_refused' AND anchor LIKE $2`, e.Ticket, identity+"/%"); err != nil {

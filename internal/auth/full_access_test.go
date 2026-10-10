@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -242,5 +243,43 @@ func TestFullAccessLiveCatalogAndBoundaries(t *testing.T) {
 	}
 	if err := authz.Require(authz.BindPool(tenant.WithPrincipal(ctx, p), m.pool), "nodes.write", authz.Scope{ProjectID: project}); !errors.Is(err, authz.ErrForbidden) {
 		t.Fatal("full-access key escaped its creator's current permissions")
+	}
+}
+
+// Risk: even a full-access key is rejected before the read handler, or the
+// allowlist accidentally grants writes and unknown subpaths.
+func TestStatusAutopilotFullAccessAgentReadAllowlist(t *testing.T) {
+	m, owner := keyFixture(t)
+	key := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "autopilot-reader", "full_access": true}))
+	var project string
+	if err := db.InTenant(dbtest.Seed(t.Context()), m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,'AUTO','Autopilot','open' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, owner.TenantID).Scan(&project)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	statusautopilot.New(m.pool).Mount(mux)
+	for _, path := range []string{"/api/settings/status-autopilot", "/api/projects/" + project + "/status-autopilot", "/api/status-autopilot/attention", "/api/status-autopilot/attention/groups?by=kind", "/api/status-autopilot/changes", "/api/status-autopilot/projects", "/api/status-autopilot/proposals"} {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		if scope, ok := coreAgentScope(r); !ok || scope != "nodes.read" {
+			t.Fatalf("read scope: %s %q %v", path, scope, ok)
+		}
+		r.Header.Set("Authorization", "Bearer "+key.Token)
+		_, r.Pattern = mux.Handler(r)
+		w := httptest.NewRecorder()
+		m.Middleware(mux).ServeHTTP(w, r)
+		if w.Code != 200 {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body)
+		}
+	}
+	for _, route := range []struct{ method, path string }{
+		{"PUT", "/api/settings/status-autopilot"}, {"PUT", "/api/projects/" + project + "/status-autopilot"},
+		{"POST", "/api/status-autopilot/attention/actions"}, {"POST", "/api/status-autopilot/attention/bulk"},
+		{"GET", "/api/status-autopilot/attention/bulk"}, {"GET", "/api/status-autopilot/unknown"},
+		{"GET", "/api/projects/bad/status-autopilot"}, {"GET", "/api/status-autopilot/attention/groups/extra"},
+	} {
+		if scope, ok := coreAgentScope(httptest.NewRequest(route.method, route.path, nil)); ok || scope != "" {
+			t.Fatalf("unexpected allowlist: %+v %s", route, scope)
+		}
 	}
 }

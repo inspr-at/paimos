@@ -9,7 +9,7 @@ paths:
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: after, in: query, schema: {type: string, maxLength: 120}}
-        - {name: kind, in: query, schema: {type: string, enum: [proposed, triage, cancel, blocked, missed]}}
+        - {name: kind, in: query, schema: {type: string, enum: [proposed, triage, cancel, blocked, missed, invalid_missed]}}
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: assignee, in: query, schema: {type: string, maxLength: 36, description: 'Principal UUID, or none for unassigned'}}
         - {name: q, in: query, schema: {type: string, maxLength: 200}}
@@ -120,7 +120,7 @@ paths:
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: by, in: query, required: true, schema: {type: string, enum: [project, kind]}}
-        - {name: kind, in: query, schema: {type: string, enum: [proposed, triage, cancel, blocked, missed]}}
+        - {name: kind, in: query, schema: {type: string, enum: [proposed, triage, cancel, blocked, missed, invalid_missed]}}
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: assignee, in: query, schema: {type: string, maxLength: 36}}
         - {name: q, in: query, schema: {type: string, maxLength: 200}}
@@ -298,7 +298,7 @@ components:
       additionalProperties: false
       properties:
         project_id: {type: string, format: uuid}
-        kind: {type: string, enum: [proposed, triage, cancel, blocked, missed]}
+        kind: {type: string, enum: [proposed, triage, cancel, blocked, missed, invalid_missed], description: 'invalid_missed selects classic history and flags without recorded delivery merge evidence; bulk dismiss clears them with per-ticket audit and batch undo.'}
         assignee: {type: string, maxLength: 36}
         q: {type: string, maxLength: 200}
     AutopilotAttentionBulkSkipped:

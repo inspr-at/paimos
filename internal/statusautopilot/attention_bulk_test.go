@@ -264,10 +264,12 @@ func TestAttentionBulkAllKindsAndReleaseUndo(t *testing.T) {
 	f.add("AUT-2", "work", "new", 8, nil)
 	f.add("AUT-3", "work", "backlog", 91, nil)
 	f.add("AUT-4", "work", "blocked", 15, nil)
-	f.add("AUT-5", "work", "done", 15, nil)
-	f.add("AUT-6", "work", "done", 15, nil)
+	first := f.add("AUT-5", "work", "done", 15, nil)
+	second := f.add("AUT-6", "work", "done", 15, nil)
+	release := planningAttentionRelease(f)
+	f.merge(first, 15)
+	f.merge(second, 15)
 	f.run(f.now)
-	release := f.release(nil)
 	f.tx(func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='planning',released_at=NULL,version=NULL,version_scheme=NULL WHERE release_node_id=$1`, release); err != nil {
 			return err
@@ -414,8 +416,9 @@ func TestAttentionBulkUnavailableProposalsAndAgentReleaseRights(t *testing.T) {
 	}
 	t.Setenv("AEON_STATUS_AUTOPILOT", "on")
 	missed := f.add("AUT-3", "work", "done", 15, nil)
+	release := planningAttentionRelease(f)
+	f.merge(missed, 15)
 	f.run(f.now)
-	release := f.release(nil)
 	f.tx(func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='planning',released_at=NULL,version=NULL,version_scheme=NULL WHERE release_node_id=$1`, release); err != nil {
 			return err
@@ -511,5 +514,113 @@ func TestAttentionBulkInterruptedCommitResumesWithoutRepeating(t *testing.T) {
 	})
 	if undone := bulkUndo(f, f.p, final.BatchID, 200); undone.Changed != 1 || len(undone.Failed) != 0 || f.state(id).State != "new" {
 		t.Fatalf("recovered undo %+v", undone)
+	}
+}
+
+// Risk: cleanup clears genuine release reminders, changes status/other fields,
+// repeats writes, or cannot be undone through the normal bulk receipt.
+func TestInvalidMissedReleaseCleanupReplayAndUndo(t *testing.T) {
+	f := setup(t)
+	classicID := f.add("AUT-1147", "work", "done", 100, nil)
+	unmerged := f.add("AUT-1148", "work", "done", 100, nil)
+	merged := f.add("AUT-1149", "work", "done", 100, nil)
+	f.merge(merged, 20)
+	for _, id := range []string{classicID, unmerged, merged} {
+		f.tx(func(tx pgx.Tx) error {
+			fields := `{"note":"preserved"}`
+			if id == classicID {
+				fields = `{"classic":{},"note":"preserved"}`
+			}
+			if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2,status_autopilot='{"blocked_reminder":true}' WHERE id=$1`, id, fields); err != nil {
+				return err
+			}
+			c, _, err := loadCandidate(t.Context(), tx, id, f.now)
+			if err != nil {
+				return err
+			}
+			return apply(t.Context(), tx, f.p, c.Node, decision{Rule: "done", Flag: "missed_release", Anchor: "old-done-anchor", Reason: "Old rule without merge evidence"})
+		})
+	}
+	in, preview := bulkPreview(f, f.p, "dismiss", attentionScope{Kind: "invalid_missed"})
+	if preview.Total != 2 {
+		t.Fatalf("cleanup preview: %+v", preview)
+	}
+	out := bulkRun(f, f.p, in, "missed-release-cleanup")
+	if !out.Completed || out.Changed != 2 || len(out.Failed) != 0 {
+		t.Fatalf("cleanup: %+v", out)
+	}
+	if replay := bulkRun(f, f.p, in, "missed-release-cleanup"); replay.Changed != 2 || replay.BatchID != out.BatchID {
+		t.Fatalf("replay: %+v", replay)
+	}
+	for _, id := range []string{classicID, unmerged} {
+		n := f.state(id)
+		if n.State != "done" || n.Marks["missed_release"] || !n.Marks["blocked_reminder"] || fieldString(n, "note") != "preserved" {
+			t.Fatalf("cleanup changed ticket: %+v", n)
+		}
+	}
+	if !f.state(merged).Marks["missed_release"] {
+		t.Fatal("genuine merged flag cleared")
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE metadata->>'batch_id'=$1 AND type='status_autopilot.attention_dismiss' AND metadata->>'reason' LIKE 'Cleared incorrect missed-release flag:%'`, out.BatchID).Scan(&count); err != nil {
+			return err
+		}
+		if count != 2 {
+			t.Fatalf("per-ticket audit count: %d", count)
+		}
+		return nil
+	})
+	_, again := bulkPreview(f, f.p, "dismiss", attentionScope{Kind: "invalid_missed"})
+	if again.Total != 0 {
+		t.Fatalf("cleanup not idempotent: %+v", again)
+	}
+	undone := bulkUndo(f, f.p, out.BatchID, 200)
+	if undone.Changed != 2 || !undone.Completed || len(undone.Failed) != 0 {
+		t.Fatalf("cleanup undo: %+v", undone)
+	}
+	for _, id := range []string{classicID, unmerged} {
+		if !f.state(id).Marks["missed_release"] {
+			t.Fatal("undo did not restore flag")
+		}
+	}
+	// A fresh merge between preview and mutation must preserve its flag even
+	// when the fixture does not advance the ticket revision.
+	fresh, _ := bulkPreview(f, f.p, "dismiss", attentionScope{Kind: "invalid_missed", Q: "AUT-1148"})
+	f.merge(unmerged, 20)
+	guarded := bulkRun(f, f.p, fresh, "cleanup-fresh-merge")
+	if guarded.Changed != 0 || len(guarded.Failed) != 1 || !f.state(unmerged).Marks["missed_release"] {
+		t.Fatalf("new merge was cleared: %+v", guarded)
+	}
+}
+
+// Risk: a missing planning release strands the row, or Apply reports success
+// without writing the content-work mark and preserving its reversible fields.
+func TestAttentionWithoutPlanningReleaseMarksNoReleaseNeededAndUndoes(t *testing.T) {
+	f := setup(t)
+	id := f.add("AUT-1150", "work", "done", 20, nil)
+	f.merge(id, 20)
+	f.run(f.now)
+	items := attentionRead(f, f.p, "").Items
+	if len(items) != 1 || items[0].To != "no_release_needed" || !items[0].Applicable {
+		t.Fatalf("no release action: %+v", items)
+	}
+	in, preview := bulkPreview(f, f.p, "apply", attentionScope{Kind: "missed"})
+	if len(preview.Moves) != 1 || preview.Moves[0].To != "no_release_needed" || len(preview.Skipped) != 0 {
+		t.Fatalf("fallback preview: %+v", preview)
+	}
+	out := bulkRun(f, f.p, in, "no-release-needed")
+	if out.Changed != 1 || len(out.Failed) != 0 {
+		t.Fatalf("fallback write: %+v", out)
+	}
+	if n := f.state(id); !noReleaseNeeded(n) || n.State != "done" || n.Marks["missed_release"] {
+		t.Fatalf("false fallback result: %+v", n)
+	}
+	undone := bulkUndo(f, f.p, out.BatchID, 200)
+	if undone.Changed != 1 || len(undone.Failed) != 0 {
+		t.Fatalf("fallback undo: %+v", undone)
+	}
+	if n := f.state(id); noReleaseNeeded(n) || !n.Marks["missed_release"] || n.State != "done" {
+		t.Fatalf("fallback undo fields: %+v", n)
 	}
 }

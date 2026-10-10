@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/jackc/pgx/v5"
@@ -137,6 +138,23 @@ func TestMergeDoneRecordedWebhookReplay(t *testing.T) {
 		}
 		if n != 1 {
 			t.Fatalf("completion receipts %d", n)
+		}
+		var fields map[string]json.RawMessage
+		if err := tx.QueryRow(t.Context(), `SELECT fields FROM nodes WHERE id=$1`, f.ticket).Scan(&fields); err != nil {
+			return err
+		}
+		var mergedAt string
+		if json.Unmarshal(fields["merged_at"], &mergedAt) != nil || mergedAt != f.at.UTC().Format(time.RFC3339Nano) {
+			t.Fatalf("merge timestamp not recorded: %q", mergedAt)
+		}
+		var original map[string]json.RawMessage
+		if json.Unmarshal([]byte(mergeBenefits), &original) != nil {
+			t.Fatal("fixture benefits")
+		}
+		for key, want := range original {
+			if string(fields[key]) != string(want) {
+				t.Fatalf("merge lost field %s", key)
+			}
 		}
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='delivered' WHERE id=$1`, f.ticket)
 		return err

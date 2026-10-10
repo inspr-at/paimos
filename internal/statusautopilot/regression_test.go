@@ -232,6 +232,9 @@ func TestHumanChecksPermitNonDeliveryDailyRules(t *testing.T) {
 		days        int
 	}{{"new", "triage_list", 7}, {"backlog", "cancel_suggested", 90}, {"blocked", "blocked_reminder", 14}, {"in_progress", "", 3}, {"done", "missed_release", 14}} {
 		id := f.add(fmt.Sprintf("AUT-%d", i+2), "work", tc.state, tc.days, &human)
+		if tc.state == "done" {
+			f.merge(id, tc.days)
+		}
 		f.run(f.now.Add(time.Duration(i) * 24 * time.Hour))
 		n := f.state(id)
 		if tc.flag == "" {
@@ -457,6 +460,9 @@ func TestCurrentFlagsOutliveRecentChangesAndDisappearOnResolution(t *testing.T) 
 		days  int
 	}{{"backlog", 100}, {"blocked", 20}, {"done", 20}} {
 		ids = append(ids, f.add(fmt.Sprintf("AUT-%d", i+100), "work", tc.state, tc.days, nil))
+		if tc.state == "done" {
+			f.merge(ids[len(ids)-1], tc.days)
+		}
 	}
 	f.run(f.now)
 	f.tx(func(tx pgx.Tx) error {
