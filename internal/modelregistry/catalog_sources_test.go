@@ -98,6 +98,27 @@ func TestCatalogSourcesPreserveNativePrecedenceAndUnknown(t *testing.T) {
 	if len(discoveryObservations("openai", "fixture", []string{"gpt-6.1-sol"})) != 0 {
 		t.Fatal("ID-only discovery borrowed seed levels")
 	}
+	xai, err := ParseProviderCatalog("xai", catalogFixture(t, "xai"), at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chosen := ResolveCatalogFacts(xai.Facts, "")
+	if string(chosen["native_levels"].Value) != `["low","medium","high","xhigh"]` || string(chosen["default_level"].Value) != `"high"` {
+		t.Fatalf("xAI native fields lost: %+v", chosen)
+	}
+	dev, err := ParseProviderCatalog("modelsdev", catalogFixture(t, "modelsdev"), at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range dev.Facts {
+		if f.Provider == "openai" && f.ModelID == "gpt-5.4" && f.Fact == "native_levels" && string(f.Value) != `["none","low","medium","high","xhigh"]` {
+			t.Fatalf("models.dev effort values lost: %s", f.Value)
+		}
+		if f.Provider == "anthropic" && f.Fact == "native_levels" && string(f.Value) != "null" {
+			t.Fatal("models.dev budget range was expanded into invented levels")
+		}
+	}
+
 	pin, ok := observedPin(Observation{Harness: "claude", Model: "claude-opus-5", Effort: "ultra"})
 	if !ok || pin.Effort != "ultra" {
 		t.Fatal("bounded native name rejected by old allowlist")

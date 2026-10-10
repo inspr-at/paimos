@@ -231,7 +231,9 @@ func TestV2UpgradePreservesPinsCustomRoutesAndOverrides(t *testing.T) {
 			})
 			var before []Route
 			inRegistry(t, p, func(tx pgx.Tx) error { var err error; before, err = listRoutes(t.Context(), tx); return err })
-			NewWithVault(appPool, nil).sweep(t.Context())
+			m := NewWithVault(appPool, nil)
+			m.discovery = fixtureCatalogClient(t, nil)
+			m.sweep(t.Context())
 			profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
 			if profileBySlug(profiles, "codex-6-1-sol-high").ID == "" || profileBySlug(profiles, "grok-4-7-xhigh").ID == "" {
 				t.Fatal("v3 profiles missing")
@@ -458,19 +460,16 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 func TestDefaultRefreshNoNetworkAndOneAuditPerRun(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "no-network", "person", "Owner", []string{"admin"})
-	called := false
+	seen := []string{}
 	m := NewWithVault(appPool, []byte(strings.Repeat("x", 32)))
-	m.discovery = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		called = true
-		t.Error("unexpected outbound call")
-		return nil, io.EOF
-	})}
+	m.discovery = fixtureCatalogClient(t, &seen)
 	if _, err := m.runRefresh(tenant.WithPrincipal(t.Context(), p), p, false); err != nil {
 		t.Fatal(err)
 	}
-	if called {
-		t.Fatal("default called vendor")
+	if !reflect.DeepEqual(seen, publicCatalogSources) {
+		t.Fatalf("default keyless discovery did not use exactly the recorded sources: %v", seen)
 	}
+
 	if eventCount(t, p, "model.catalog_refreshed") != 1 {
 		t.Fatal("refresh audit missing")
 	}
@@ -591,6 +590,9 @@ func TestDiscoveryVaultIsAccountBoundAndOutageKeepsPolicy(t *testing.T) {
 	}
 	outage := false
 	m.discovery = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != vendorURLs["openai"] {
+			return fixtureCatalogClient(t, nil).Transport.RoundTrip(r)
+		}
 		if r.URL.String() != vendorURLs["openai"] || r.Header.Get("Authorization") != "Bearer "+key {
 			t.Fatal("unexpected discovery destination")
 		}
@@ -604,13 +606,21 @@ func TestDiscoveryVaultIsAccountBoundAndOutageKeepsPolicy(t *testing.T) {
 	if err := json.Unmarshal(send(p, "POST", "/api/models/refresh", "{}", 200), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Added != 1 || len(result.Sources) != 1 || result.Sources[0].State != "fresh" || result.LadderChanged {
+	if len(result.Sources) != 4 || result.Sources[0].State != "fresh" || result.LadderChanged {
 		t.Fatalf("refresh result %+v", result)
 	}
 	current := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
-	if len(current) != len(profiles)+1 {
-		t.Fatal("advertised API profiles missing")
+	if len(current) != len(profiles)+result.Added {
+		t.Fatal("sourced proposals did not match reported additions")
 	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var guessed int
+		err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_profiles WHERE model='gpt-future'`).Scan(&guessed)
+		if err == nil && guessed != 0 {
+			t.Fatal("OpenAI ID-only list invented an effort/profile")
+		}
+		return err
+	})
 	send(p, "POST", "/api/models/refresh", "{}", 429)
 	outage = true
 	inRegistry(t, p, func(tx pgx.Tx) error {
