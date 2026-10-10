@@ -2274,7 +2274,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	if (isSetting(req.Operation) && !validSettingValue(req.Operation, req.Value)) || (!isSetting(req.Operation) && req.Value != "") {
 		return Receipt{}, ErrUnsupported
 	}
-	if len(req.Text) > 64<<10 || (req.Operation != "steer" && !inbox && req.Text != "") {
+	if len(req.Text) > 64<<10 && !(inbox && len(req.Text) <= inboxTextLimit) || (req.Operation != "steer" && !inbox && req.Text != "") {
 		return Receipt{}, errors.New("invalid control body")
 	}
 	s.mu.Lock()

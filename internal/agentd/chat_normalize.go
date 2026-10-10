@@ -4,6 +4,7 @@ package agentd
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -323,6 +324,9 @@ type pendingCodexChat struct {
 
 // Fast app-server output can precede turn/start's reply. Hold only normalized
 // projections, then release them only if the acknowledged owned turn agrees.
+// The completed agent message is one bounded, turn-scoped final candidate:
+// a completion seen before acknowledgement queues it ahead of that turn's idle
+// state; otherwise flushCodexChat hands it to codexFinal for the completion.
 func (p *codexProcess) observeCodexChat(raw json.RawMessage) {
 	if p.acknowledged {
 		p.observeChat(Codex, raw)
@@ -333,8 +337,14 @@ func (p *codexProcess) observeCodexChat(raw json.RawMessage) {
 		Params struct {
 			TurnID string `json:"turnId"`
 			Turn   struct {
-				ID string `json:"id"`
+				ID     string `json:"id"`
+				Status string `json:"status"`
 			} `json:"turn"`
+			Item struct {
+				Type  string `json:"type"`
+				Text  string `json:"text"`
+				Phase string `json:"phase"`
+			} `json:"item"`
 		} `json:"params"`
 	}
 	if len(raw) > 8<<20 || !utf8.Valid(raw) || json.Unmarshal(raw, &f) != nil {
@@ -350,6 +360,30 @@ func (p *codexProcess) observeCodexChat(raw json.RawMessage) {
 	if !known {
 		p.chatDropped.Add(1)
 		return
+	}
+	if validChatID(turn, 256) {
+		switch f.Method {
+		case "turn/started":
+			if p.chatCandidate.turn == turn {
+				p.chatCandidate = pendingCodexChat{}
+			}
+		case "item/completed":
+			if f.Params.Item.Type == "agentMessage" && (f.Params.Item.Phase == "" || f.Params.Item.Phase == "final_answer") {
+				p.chatCandidate = pendingCodexChat{turn, chatFinal(f.Params.Item.Text)}
+			}
+		case "turn/completed", "turn/failed":
+			if candidate := p.chatCandidate; candidate.turn == turn {
+				p.chatCandidate = pendingCodexChat{}
+				if f.Method == "turn/completed" && f.Params.Turn.Status == "completed" && candidate.update.Content.Text != "" {
+					// At most one final waits; it is not one of the four chunks.
+					if !candidate.update.valid() || slices.ContainsFunc(p.chatPending, func(c pendingCodexChat) bool { return c.update.SessionUpdate == "final" }) {
+						p.chatDropped.Add(1)
+					} else {
+						p.chatPending = append(p.chatPending, candidate)
+					}
+				}
+			}
+		}
 	}
 	for _, update := range updates {
 		// At most 4 large chunks (256 KiB) before acknowledgement.
@@ -371,4 +405,12 @@ func (p *codexProcess) flushCodexChat(turn string) {
 		}
 	}
 	p.chatPending = nil
+	// The acknowledged turn's own completion record releases its candidate.
+	p.chatFinal = ""
+	if p.chatCandidate.turn == turn {
+		p.chatFinal = p.chatCandidate.update.Content.Text
+	} else if p.chatCandidate.turn != "" {
+		p.chatDropped.Add(1)
+	}
+	p.chatCandidate = pendingCodexChat{}
 }

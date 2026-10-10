@@ -167,6 +167,46 @@ func TestCodexChatPreAcknowledgementKeepsExactTurn(t *testing.T) {
 	}
 }
 
+// Risk: a Codex answer completed before turn/start replied was discarded, so
+// the acknowledged turn's successful completion persisted no final answer.
+func TestCodexFinalCompletedBeforeAcknowledgementIsKept(t *testing.T) {
+	const (
+		message   = `{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","text":"early answer"}}}`
+		completed = `{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}}`
+		failed    = `{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"failed"}}}`
+		foreign   = `{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"foreign","status":"completed"}}}`
+	)
+	for _, tc := range []struct {
+		name       string
+		early, ack []string
+		want       []ChatUpdate
+	}{
+		{"completion after acknowledgement", []string{message, foreign}, []string{completed}, []ChatUpdate{chatFinal("early answer"), chatState("idle")}},
+		{"completion before acknowledgement", []string{message, completed}, nil, []ChatUpdate{chatFinal("early answer"), chatState("idle")}},
+		{"failed turn", []string{message}, []string{failed}, []ChatUpdate{chatState("idle")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []ChatUpdate
+			p := &codexProcess{wireProcess: &wireProcess{threadID: "thread-1", turnID: "turn-0", observe: func(ev AdapterEvent) { got = append(got, *ev.Chat) }}}
+			for _, raw := range tc.early {
+				p.observeCodexChat(json.RawMessage(raw))
+			}
+			if len(got) != 0 {
+				t.Fatal("pre-ack output published")
+			}
+			// What startTurn does once turn/start replies with the owned turn.
+			p.turnID, p.acknowledged = "turn-1", true
+			p.flushCodexChat("turn-1")
+			for _, raw := range tc.ack {
+				p.observeCodexChat(json.RawMessage(raw))
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("published %+v", got)
+			}
+		})
+	}
+}
+
 func TestChatLiveOnlyBindingOverflowAndJournalIsolation(t *testing.T) {
 	// No API or journal exists: any accidental fallthrough to durable telemetry
 	// fails this test, including if a producer mistakenly also sets Kind.

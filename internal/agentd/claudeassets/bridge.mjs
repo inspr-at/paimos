@@ -13,6 +13,8 @@ const [, , sdkPath, claudePath, workspace] = process.argv;
 const MAX_INPUT_FRAME_BYTES = 8 * 1024 * 1024;
 const MAX_PROMPT_BYTES = 256 * 1024;
 const MAX_STEER_BYTES = 64 * 1024;
+// Mirrors agentd's inboxTextLimit: a 64 KiB person message after JSON escaping.
+const MAX_INBOX_BYTES = 7 * 64 * 1024;
 const MAX_PENDING_STEERS = 256;
 const CORRELATION_TTL_MS = 60 * 1000;
 const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;
@@ -491,7 +493,7 @@ const handleControlLine = (line) => {
       if (request.op === "steer" || request.op === "inbox") {
         expireCorrelations();
         if (typeof request.text !== "string" || request.text.length === 0 ||
-            Buffer.byteLength(request.text) > MAX_STEER_BYTES || request.text.includes("\0") || (request.op === "steer" && !interruptReceipt)) {
+            Buffer.byteLength(request.text) > (request.op === "inbox" ? MAX_INBOX_BYTES : MAX_STEER_BYTES) || request.text.includes("\0") || (request.op === "steer" && !interruptReceipt)) {
           fail("app_server_protocol", correlationID);
           return;
         }

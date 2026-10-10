@@ -1270,7 +1270,13 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestChatRelayBoundedQueueBackoffRebindAndUnsupported","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestChatRelayCloseFlushesWithinTheDeadline","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestChatRelayRebindingResetsInputCursor","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestChatRelayReceiptsFollowExplicitTurnMarkers","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestChatRelayReceiptsNeedAConfirmedWrite","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestChatSubscriberBoundAndCancellation","tier":"ESSENTIAL"}
     ,
@@ -1357,6 +1363,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestCodexDrainRequiresEOFAndOwnedExit","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexFallbackEnumeratesThreeHomes","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestCodexFinalCompletedBeforeAcknowledgementIsKept","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexFinishedTurnDoesNotWake","tier":"GATED-FULL"}
     ,
@@ -1907,6 +1915,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestSupervisorBoundsStartupByAcceptedDuration","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSupervisorClaimControlReplayAndScope","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSupervisorDeliversMaximumEscapedChatInput","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSupervisorPersistsLaunchAndReportsRunCommits","tier":"GATED-FULL"}
     ,

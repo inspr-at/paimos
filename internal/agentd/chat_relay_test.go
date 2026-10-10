@@ -682,3 +682,247 @@ func TestNewAgentdAgainstServerWithoutRelayKeepsRunsAndLogsOnce(t *testing.T) {
 		t.Fatal("payload logged")
 	}
 }
+
+// Risk: turn markers seen while a write is blocked, then failed, became
+// delivered/read receipts for an input the harness never received.
+func TestChatRelayReceiptsNeedAConfirmedWrite(t *testing.T) {
+	api := newFakeRelayAPI()
+	api.inputs = []ChatInput{chatInput("m1", "sent")}
+	ticks := make(chan time.Time)
+	entered := make(chan string, 2)
+	release := make(chan error)
+	r := NewChatRelay(api, HarnessSession{ID: "session", Lease: "lease"}, ChatRelayOptions{
+		After: func(time.Duration) <-chan time.Time { return ticks },
+		Deliver: func(_ context.Context, id, _ string) error {
+			entered <- id
+			return <-release
+		},
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go r.Run(ctx)
+	waitCall(t, api.calls, "lookup")
+	state := func(seq uint64, s string) {
+		u := chatState(s)
+		r.Observe(ChatSessionEvent{Sequence: seq, Update: &u})
+	}
+	state(1, "idle")
+	if id := receive(t, entered); id != "m1" {
+		t.Fatalf("writing %s", id)
+	}
+	// An unrelated turn runs while the write is blocked; then the write fails.
+	state(2, "running")
+	state(3, "idle")
+	release <- errors.New("harness refused the input")
+	ticks <- time.Time{} // ends the failure backoff
+	// Receipts go before queued items, so the final proves none was queued.
+	final := chatFinal("after the failed write")
+	r.Observe(ChatSessionEvent{Sequence: 4, Update: &final})
+	waitCall(t, api.calls, "final")
+	api.mu.Lock()
+	if len(api.receipts) != 0 {
+		t.Fatalf("receipts for an unwritten input: %v", api.receipts)
+	}
+	api.inputs = append(api.inputs, chatInput("m2", "sent"))
+	api.mu.Unlock()
+	// A turn that starts while a write is in flight counts once it succeeds.
+	ticks <- time.Time{}
+	if id := receive(t, entered); id != "m2" {
+		t.Fatalf("writing %s", id)
+	}
+	state(5, "running")
+	release <- nil
+	waitCall(t, api.calls, "receipt")
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if !reflect.DeepEqual(api.receipts, []string{"m2:delivered"}) {
+		t.Fatalf("receipts %v", api.receipts)
+	}
+}
+
+// Risk: a valid 64 KiB person message whose JSON envelope exceeds the inbox
+// bound never reaches the harness while the message stays attempted.
+func TestSupervisorDeliversMaximumEscapedChatInput(t *testing.T) {
+	relay := newFakeRelayAPI()
+	in := chatInput("m1", "sent")
+	// Every byte escapes to six: \u0001 and the HTML-safe <.
+	in.Message.Body = strings.Repeat("\x01<", chatChunkBytes/2)
+	relay.inputs = []ChatInput{in}
+	api := &relaySupervisorAPI{fakeAPI: &fakeAPI{}, relay: relay}
+	var logged []string
+	s, p := relaySupervisor(t, api, &logged)
+	if err := s.PollOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	entry := s.runs["run"]
+	waitCall(t, relay.calls, "lookup")
+	idle := chatState("idle")
+	s.observe(entry, AdapterEvent{Chat: &idle})
+	eventually(t, "maximum input written to the owned process", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return len(p.texts) == 1
+	})
+	p.mu.Lock()
+	text := p.texts[0]
+	p.mu.Unlock()
+	header, frame, ok := strings.Cut(text, "\n")
+	var got struct {
+		MessageID string `json:"message_id"`
+		Body      string `json:"body"`
+	}
+	if !ok || !strings.HasPrefix(header, "Aeon chat:") || len(text) <= 64<<10 || json.Unmarshal([]byte(frame), &got) != nil || got.MessageID != "m1" || got.Body != in.Message.Body {
+		t.Fatalf("input changed in transport (%d bytes)", len(text))
+	}
+	running := chatState("running")
+	s.observe(entry, AdapterEvent{Chat: &running})
+	waitCall(t, relay.calls, "receipt")
+	relay.mu.Lock()
+	defer relay.mu.Unlock()
+	if !reflect.DeepEqual(relay.receipts, []string{"m1:delivered"}) {
+		t.Fatalf("receipts %v", relay.receipts)
+	}
+}
+
+// epochCursorAPI rejects a cursor from another binding epoch, as the server
+// does: worker cursors carry the epoch they were issued under.
+type epochCursorAPI struct {
+	*fakeRelayAPI
+	first    []ChatInput
+	next     *string
+	conflict bool
+}
+
+func (a *epochCursorAPI) ChatInputs(_ context.Context, _ HarnessSession, b ChatRelayBinding, after string) (ChatInputPage, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	defer a.note("inputs")
+	switch {
+	case a.conflict:
+		a.conflict = false
+		return ChatInputPage{}, &client.StatusError{Status: 409, Message: "binding changed"}
+	case after != "" && !strings.HasPrefix(after, b.BindingEpoch+":"):
+		return ChatInputPage{}, &client.StatusError{Status: 400, Message: "invalid cursor"}
+	case after == "":
+		return ChatInputPage{Items: append([]ChatInput(nil), a.first...), Next: a.next}, nil
+	}
+	return ChatInputPage{}, nil
+}
+
+// Risk: after a rebinding under a newer epoch the relay kept its old cursor,
+// so every later input lookup was refused and no person input arrived.
+func TestChatRelayRebindingResetsInputCursor(t *testing.T) {
+	cursor := "1:c1"
+	api := &epochCursorAPI{fakeRelayAPI: newFakeRelayAPI(), first: []ChatInput{chatInput("done", "delivered")}, next: &cursor}
+	ticks := make(chan time.Time)
+	delivered := make(chan string, 2)
+	r := NewChatRelay(api, HarnessSession{ID: "session", Lease: "lease"}, ChatRelayOptions{
+		After:   func(time.Duration) <-chan time.Time { return ticks },
+		Deliver: func(_ context.Context, id, _ string) error { delivered <- id; return nil },
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go r.Run(ctx)
+	waitCall(t, api.calls, "lookup")
+	idle := chatState("idle")
+	r.Observe(ChatSessionEvent{Sequence: 1, Update: &idle})
+	waitCall(t, api.calls, "inputs")
+	waitCall(t, api.calls, "inputs") // the second page, under the epoch-1 cursor
+	r.mu.Lock()
+	paged := r.cursor
+	r.mu.Unlock()
+	if paged != cursor {
+		t.Fatalf("cursor %q", paged)
+	}
+	api.mu.Lock()
+	api.binding = ChatRelayBinding{"conversation", "2"}
+	api.first, api.next, api.conflict = []ChatInput{chatInput("m2", "sent")}, nil, true
+	api.mu.Unlock()
+	ticks <- time.Time{}
+	if id := receive(t, delivered); id != "m2" {
+		t.Fatalf("delivered %s", id)
+	}
+}
+
+// blockingFinalAPI holds a final request until its context ends.
+type blockingFinalAPI struct{ *fakeRelayAPI }
+
+func (a *blockingFinalAPI) PersistChatFinal(ctx context.Context, _ HarnessSession, _ ChatRelayBinding, _, _ string) error {
+	a.note("final-blocked")
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+type relayTimer struct {
+	d    time.Duration
+	fire chan time.Time
+}
+
+// Risk: Close during a retry backoff or an in-flight request let the flush
+// outlive the supervisor's settlement wait, so a queued final was lost.
+func TestChatRelayCloseFlushesWithinTheDeadline(t *testing.T) {
+	newAfter := func() (func(time.Duration) <-chan time.Time, chan relayTimer) {
+		timers := make(chan relayTimer, 16)
+		return func(d time.Duration) <-chan time.Time {
+			timer := relayTimer{d, make(chan time.Time, 1)}
+			timers <- timer
+			return timer.fire
+		}, timers
+	}
+	awaitTimer := func(timers chan relayTimer, want func(time.Duration) bool) relayTimer {
+		t.Helper()
+		guard := time.NewTimer(10 * time.Second) // hang guard only
+		defer guard.Stop()
+		for {
+			select {
+			case timer := <-timers:
+				if want(timer.d) {
+					return timer
+				}
+			case <-guard.C:
+				t.Fatal("timer never requested")
+			}
+		}
+	}
+	awaitDone := func(r *ChatRelay) {
+		t.Helper()
+		select {
+		case <-r.done:
+		case <-time.After(10 * time.Second): // hang guard only
+			t.Fatal("relay outlived its flush deadline")
+		}
+	}
+	final := chatFinal("queued final")
+
+	// Close during the backoff after a failed final: it is retried at once.
+	api := newFakeRelayAPI()
+	api.finalErrs = []error{errors.New("connection reset")}
+	after, timers := newAfter()
+	r := NewChatRelay(api, HarnessSession{ID: "session", Lease: "lease"}, ChatRelayOptions{After: after})
+	go r.Run(t.Context())
+	waitCall(t, api.calls, "lookup")
+	r.Observe(ChatSessionEvent{Sequence: 1, Update: &final})
+	waitCall(t, api.calls, "final")
+	awaitTimer(timers, func(d time.Duration) bool { return d < chatRelayFlush }) // backoff, never fired
+	r.Close()
+	waitCall(t, api.calls, "final")
+	awaitDone(r)
+	api.mu.Lock()
+	if len(api.finals) != 2 || api.finals[0] != api.finals[1] {
+		t.Fatalf("finals %v", api.finals)
+	}
+	api.mu.Unlock()
+
+	// Close during an in-flight request: the deadline starts at Close.
+	blocking := &blockingFinalAPI{newFakeRelayAPI()}
+	after, timers = newAfter()
+	r = NewChatRelay(blocking, HarnessSession{ID: "session", Lease: "lease"}, ChatRelayOptions{After: after})
+	go r.Run(t.Context())
+	waitCall(t, blocking.calls, "lookup")
+	r.Observe(ChatSessionEvent{Sequence: 1, Update: &final})
+	waitCall(t, blocking.calls, "final-blocked")
+	r.Close()
+	deadline := awaitTimer(timers, func(d time.Duration) bool { return d == chatRelayFlush })
+	deadline.fire <- time.Time{}
+	awaitDone(r)
+}
