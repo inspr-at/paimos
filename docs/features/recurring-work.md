@@ -70,6 +70,32 @@ clock inside each claim before running delayed publications, including across
 DST changes. Deferred rows yield to other ready definitions without advancing
 their event cursor.
 
+An explicit release source list, for example
+`{"kind":"event","event":"release.published","filter":{"project_ids":["<source project UUID>"]}}`,
+subscribes the output project to each publication from up to 20 readable projects
+in the same tenant. The saving caller and current definition owner need source
+read permission. The scheduler rechecks source visibility and authority under
+its tenant/tree fence; revoked or unreadable sources refuse without consuming
+pending publications. Only bounded release identifiers, names and versions
+reach generated work, never source ticket content.
+
+Explicit subscriptions consume publications in event order. With overlap
+suppression, an open ticket or unfinished routine run retains the next
+publication without a skipped receipt or cursor advance. A manual release run
+uses the same source-project/publication key; an overlap returns 409 so a later
+retry can still create it. Release choices use the configured sources, return
+at most 100 entries and disclose truncation. Omitted or empty source lists keep
+legacy same-project latest-only catch-up and overlap receipts.
+
+Automatic source subscriptions default off. This slice supplies
+`WithReleaseSubscriptionGate`, a transaction-bound integration for S04's
+person-owned output-project execution setting. Without that binding the
+scheduler creates no subscription publication events or occurrences and keeps
+its cursor. S04 is absent from this slice's baseline; the coordinator must wire
+its live gate before automatic subscriptions are available. Saving a scoped
+definition remains paused, and pending intents grant no launch authority.
+Qualification and person enablement remain separate release controls.
+
 For example, a weekly tool sweep under the code-health epic can be created with
 this body (replace project/parent UUIDs with the intended existing nodes):
 

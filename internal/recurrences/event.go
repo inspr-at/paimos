@@ -35,26 +35,28 @@ type ExternalSender struct {
 
 // EventContext contains only bounded source identifiers, never source content.
 type EventContext struct {
-	Event      string  `json:"event"`
-	EventID    int64   `json:"event_id"`
-	ProjectID  string  `json:"project_id,omitempty"`
-	NodeID     string  `json:"node_id,omitempty"`
-	NodeKey    string  `json:"node_key,omitempty"`
-	EntryID    string  `json:"entry_id,omitempty"`
-	ReleaseID  *string `json:"release_id,omitempty"`
-	Name       string  `json:"release_name,omitempty"`
-	Version    string  `json:"release_version,omitempty"`
-	DeliveryID string  `json:"delivery_id,omitempty"`
-	Source     string  `json:"source,omitempty"`
-	Ref        string  `json:"ref,omitempty"`
+	Event       string  `json:"event"`
+	EventID     int64   `json:"event_id"`
+	ProjectID   string  `json:"project_id,omitempty"`
+	NodeID      string  `json:"node_id,omitempty"`
+	NodeKey     string  `json:"node_key,omitempty"`
+	EntryID     string  `json:"entry_id,omitempty"`
+	ReleaseID   *string `json:"release_id,omitempty"`
+	Name        string  `json:"release_name,omitempty"`
+	Version     string  `json:"release_version,omitempty"`
+	DeliveryID  string  `json:"delivery_id,omitempty"`
+	Source      string  `json:"source,omitempty"`
+	Ref         string  `json:"ref,omitempty"`
+	publishedAt time.Time
 }
 
 func (t *Trigger) normalizeEvent() error {
 	switch t.Event {
 	case "release.published":
-		if t.Filter != nil || t.External != nil {
-			return fmt.Errorf("release trigger does not accept filters or sender configuration")
+		if t.External != nil {
+			return fmt.Errorf("release trigger does not accept sender configuration")
 		}
+		fallthrough
 	case "node.done", "knowledge.changed":
 		if t.External != nil {
 			return fmt.Errorf("internal events do not accept sender configuration")
@@ -63,6 +65,9 @@ func (t *Trigger) normalizeEvent() error {
 			return nil
 		}
 		f := t.Filter
+		if t.Event == "release.published" && (f.HasReleaseCopy || f.ExcludeHidden || f.EntryID != "" || f.KnowledgeType != "" || f.Tag != "") {
+			return fmt.Errorf("release trigger accepts only source project filters")
+		}
 		if len(f.ProjectIDs) > 20 {
 			return fmt.Errorf("at most 20 source projects are allowed")
 		}
@@ -128,6 +133,14 @@ func sourceProjects(in Input) []string {
 	return []string{in.ProjectID}
 }
 
+func releaseSubscription(in Input) bool {
+	return in.Trigger.Kind == "event" && in.Trigger.Event == "release.published" && in.Trigger.Filter != nil && len(in.Trigger.Filter.ProjectIDs) > 0
+}
+
+const releaseSubscriptionSQL = `r.trigger->>'kind'='event' AND r.trigger->>'event'='release.published' AND coalesce(r.trigger#>'{filter,project_ids}','[]'::jsonb)<>'[]'::jsonb`
+
+const releaseSourceSQL = `((coalesce(r.trigger#>'{filter,project_ids}','[]'::jsonb)='[]'::jsonb AND e.node_id=r.project_id) OR (r.trigger#>'{filter,project_ids}') ? e.node_id::text)`
+
 // Called under the existing access fence for writes. Explicit source IDs must
 // resolve through the caller's RLS, even when that caller has a workspace grant.
 func authorizeSources(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Input) error {
@@ -143,7 +156,7 @@ func authorizeSources(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Inp
 			return workorders.Fail(404, "external sender not found")
 		}
 	}
-	if in.Trigger.Event != "node.done" && in.Trigger.Event != "knowledge.changed" {
+	if in.Trigger.Event != "node.done" && in.Trigger.Event != "knowledge.changed" && in.Trigger.Event != "release.published" {
 		return nil
 	}
 	permission := "nodes.read"
@@ -178,7 +191,7 @@ func authorizeSources(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Inp
 const sourceProjectSQL = `EXISTS(SELECT 1 FROM nodes source WHERE source.id=e.node_id AND ((coalesce(r.trigger#>'{filter,project_ids}','[]'::jsonb)='[]'::jsonb AND source.project_id=r.project_id) OR (r.trigger#>'{filter,project_ids}') ? source.project_id::text))`
 
 const sourceTypeSQL = `(CASE r.trigger->>'event'
- WHEN 'release.published' THEN e.type='release.published' AND e.node_id=r.project_id
+ WHEN 'release.published' THEN e.type='release.published' AND ` + releaseSourceSQL + `
  WHEN 'node.done' THEN e.type IN ('node.updated','status_autopilot.changed','status_autopilot.undone','status_autopilot.derived','status_autopilot.causal_undo') AND e.before->>'state'<>e.after->>'state' AND ` + sourceProjectSQL + `
  WHEN 'knowledge.changed' THEN e.type IN ('knowledge.created','knowledge.updated','knowledge.deleted','knowledge.learning_accepted','node.updated') AND ` + sourceProjectSQL + ` AND EXISTS(SELECT 1 FROM nodes source JOIN node_kinds k ON k.tenant_id=source.tenant_id AND k.id=source.kind_id WHERE source.id=e.node_id AND k.slug IN ('runbook','guideline','memory','external_system','related_project','decision'))
  WHEN 'external.tag' THEN e.type='recurrence.external_received' AND e.node_id=r.project_id AND e.metadata->>'recurrence_id'=r.id::text
@@ -263,6 +276,16 @@ func (m *Module) consumeSource(ctx context.Context, tx pgx.Tx, actor tenant.Prin
 // before target writes; there are no event-counter locks in this read step.
 func sourceContext(ctx context.Context, tx pgx.Tx, tenantID string, r Recurrence, candidates []sourceCandidate) (*EventContext, string, error) {
 	owner := tenant.Principal{ID: r.CreatedBy, TenantID: tenantID, FullAccess: true}
+	if r.Trigger.Event == "release.published" {
+		current, err := load(ctx, tx, r.ID, false)
+		if err != nil {
+			return nil, "", err
+		}
+		r = current
+		if r.Definition != nil {
+			owner.ID = r.Definition.OwnerPrincipalID
+		}
+	}
 	if err := tx.QueryRow(ctx, `SELECT kind FROM principals WHERE id=$1 AND status='active'`, owner.ID).Scan(&owner.Kind); err != nil {
 		return nil, "", err
 	}
@@ -285,6 +308,22 @@ func sourceContext(ctx context.Context, tx pgx.Tx, tenantID string, r Recurrence
 }
 
 func inspectSource(ctx context.Context, tx pgx.Tx, owner tenant.Principal, r Recurrence, id int64) (*EventContext, string, error) {
+	if r.Trigger.Event == "release.published" {
+		pub, err := readPublication(ctx, tx, r, id)
+		if err != nil {
+			return nil, "", err
+		}
+		key := publicationKey(pub)
+		if key == "" {
+			if !releaseSubscription(r.Input) {
+				return &EventContext{Event: r.Trigger.Event, EventID: id, ProjectID: pub.ProjectID, ReleaseID: pub.ReleaseID,
+					Name: pub.Name, Version: pub.Version, publishedAt: pub.PublishedAt}, fmt.Sprintf("event:%d", id), nil
+			}
+			key = fmt.Sprintf("%s/event:%d", pub.ProjectID, id)
+		}
+		return &EventContext{Event: r.Trigger.Event, EventID: id, ProjectID: pub.ProjectID, ReleaseID: pub.ReleaseID,
+			Name: pub.Name, Version: pub.Version, publishedAt: pub.PublishedAt}, "release:" + key, nil
+	}
 	if r.Trigger.External != nil {
 		var raw []byte
 		var sender string
@@ -349,6 +388,39 @@ func inspectSource(ctx context.Context, tx pgx.Tx, owner tenant.Principal, r Rec
 		source.EntryID = nodeID
 	}
 	return source, fmt.Sprintf("event:%d", id), nil
+}
+
+// Read only bounded release metadata through the current reader's event and
+// project RLS. An inaccessible or malformed publication stays pending.
+func readPublication(ctx context.Context, tx pgx.Tx, r Recurrence, id int64) (Publication, error) {
+	var p Publication
+	var raw []byte
+	var at time.Time
+	err := tx.QueryRow(ctx, `SELECT e.node_id::text,e.at,jsonb_build_object('name',left(coalesce(e.after->>'name',''),256),
+ 'version',coalesce(e.after->>'version',''),'release_id',e.after->'release_id','published_at',e.after->'published_at')
+ FROM events e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id
+ JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+ WHERE e.id=$1 AND e.type='release.published' AND e.node_id=ANY($2::uuid[]) AND n.deleted_at IS NULL AND k.slug='project'
+ AND jsonb_typeof(e.after)='object' AND (e.after->>'project_id' IS NULL OR e.after->>'project_id'=e.node_id::text)
+ AND coalesce(jsonb_typeof(e.after->'version'),'null') IN ('string','null')
+ AND coalesce(jsonb_typeof(e.after->'name'),'null') IN ('string','null')
+ AND octet_length(coalesce(e.after->>'version',''))<=128 AND octet_length(coalesce(e.after->>'release_id',''))<=36
+ AND octet_length(coalesce(e.after->>'published_at',''))<=64`, id, sourceProjects(r.Input)).Scan(&p.ProjectID, &at, &raw)
+	if err != nil {
+		return p, err
+	}
+	project := p.ProjectID
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return p, err
+	}
+	p.ProjectID, p.Name = project, boundedText(p.Name, 256)
+	if p.ReleaseID != nil && !workorders.UUID(*p.ReleaseID) {
+		return p, workorders.Fail(400, "invalid release identifier")
+	}
+	if p.PublishedAt.IsZero() {
+		p.PublishedAt = at
+	}
+	return p, nil
 }
 
 func boundedText(value string, limit int) string {
