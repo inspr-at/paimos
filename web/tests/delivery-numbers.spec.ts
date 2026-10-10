@@ -110,11 +110,11 @@ test('tiles and charts tell partial, missing and clipped data apart and never sh
   await expect(tile(page, 'PR CI run (wall)').locator('.t-foot')).toContainText('Partial')
   await expect(tile(page, 'PR CI run (wall)').locator('.t-foot')).toContainText(/covers \d+ of 30 days/)
   await expect(tile(page, 'Merge rounds').locator('.t-value')).toHaveText('2 of 10scripted')
-  await expect(tile(page, 'Release → live (csb1)').locator('.t-line').nth(1)).toHaveText('Release 126 · 8 Oct')
+  await expect(tile(page, 'Release → live').locator('.t-line').nth(1)).toHaveText('Release 126 · 8 Oct')
   await expect(tile(page, 'Nightly full run').locator('.t-value')).toHaveText('0 of 4nights green')
   await expect(tile(page, 'Nightly full run')).toContainText('Red 4 in a row')
   // The release window before had no release: no comparison, never a zero.
-  await expect(tile(page, 'Release → live (csb1)').locator('.t-delta')).toHaveText('No data in the 30 days before')
+  await expect(tile(page, 'Release → live').locator('.t-delta')).toHaveText('No data in the 30 days before')
   // The chart readout names the bucket under the pointer; keys move it.
   const chart = page.getByRole('article').filter({ has: page.getByRole('heading', { name: 'PR CI run (wall)', level: 4 }) })
   await expect(chart.locator('.readout')).toContainText(/^Today · p50/)

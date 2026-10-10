@@ -90,7 +90,7 @@ with 210/32/33 tests, and the shared-fence inventory passed remotely.
 Fix round 2, `7ff41ce06`: merge completion also refuses when `aeon_work_pending`
 is set and no session or run is live. The refusal is one non-applicable Needs
 You item and the ticket state stays unchanged. Remote `./internal/delivery`
-passed on mbp2606. The remote merge-main static gate returned 0 (40 checks
+passed on build-6. The remote merge-main static gate returned 0 (40 checks
 passed, no optional skips). Tier, shard and audit units passed 210/32/33.
 No origin push.
 
@@ -101,5 +101,5 @@ creating person). A configured owner who lost that grant still refuses, with no
 substitute. No person with the grant, including while an agent still has it,
 writes one non-applicable Needs You proposal and leaves the state unchanged.
 No role, key or scope is created. Local and remote `./internal/delivery` passed
-on mbp2606 (`TestMergeDone` included). The merge-main static gate returned 0
+on build-6 (`TestMergeDone` included). The merge-main static gate returned 0
 (41 checks passed, no optional skips). No origin push and no live backfill.

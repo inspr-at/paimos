@@ -19,14 +19,14 @@ func TestCreateBindAndTenantIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := Create(ctx, d.App, "augmentoring", "Augmentoring")
+	b, err := Create(ctx, d.App, "example-business", "Example Business")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a == b {
 		t.Fatal("tenants share an ID")
 	}
-	for slug, id := range map[string]string{"inspr": a, "augmentoring": b} {
+	for slug, id := range map[string]string{"inspr": a, "example-business": b} {
 		got, err := ResolveSlug(ctx, d.App, slug)
 		if err != nil || got != id {
 			t.Fatalf("resolve %s: %s %v", slug, got, err)
@@ -44,7 +44,7 @@ func TestCreateBindAndTenantIsolation(t *testing.T) {
 			t.Fatalf("%s kinds=%d events=%d", slug, kinds, created)
 		}
 	}
-	first, err := BindOIDC(ctx, d.App, "augmentoring", "https://issuer.example", "operator", "Operator", "admin")
+	first, err := BindOIDC(ctx, d.App, "example-business", "https://issuer.example", "operator", "Operator", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestCreateBindAndTenantIsolation(t *testing.T) {
 	if first == second {
 		t.Fatal("shared OIDC identity merged principals")
 	}
-	if again, err := BindOIDC(ctx, d.App, "augmentoring", "https://issuer.example", "operator", "Operator", "admin"); err != nil || again != first {
+	if again, err := BindOIDC(ctx, d.App, "example-business", "https://issuer.example", "operator", "Operator", "admin"); err != nil || again != first {
 		t.Fatalf("replay: %s %v", again, err)
 	}
 	var bound int
@@ -67,7 +67,7 @@ func TestCreateBindAndTenantIsolation(t *testing.T) {
 	if bound != 1 {
 		t.Fatalf("replay added event: %d", bound)
 	}
-	if _, err := BindOIDC(ctx, d.App, "augmentoring", "https://issuer.example", "customer", "Customer", "customer"); err != nil {
+	if _, err := BindOIDC(ctx, d.App, "example-business", "https://issuer.example", "customer", "Customer", "customer"); err != nil {
 		t.Fatal(err)
 	}
 	var actor string
@@ -80,7 +80,7 @@ func TestCreateBindAndTenantIsolation(t *testing.T) {
 	if actor != first {
 		t.Fatalf("customer binding actor %s, want operator %s", actor, first)
 	}
-	if _, err := Create(ctx, d.App, "augmentoring", "Duplicate"); err == nil {
+	if _, err := Create(ctx, d.App, "example-business", "Duplicate"); err == nil {
 		t.Fatal("duplicate slug succeeded")
 	}
 }

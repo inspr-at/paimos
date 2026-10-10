@@ -36,7 +36,7 @@ first-attempt results with the pre-change run, and post on AEON-1023 after
 deployment. The reference Arion W2 full run `37815054461` has web shards
 4.8–12.8 minutes, 99.7 minutes in selected-UI steps and 71.7 summed case minutes.
 
-Validation on mbp2606 (2026-10-09, code commit `d75181f6b`) passed all 40
+Validation on build-6 (2026-10-09, code commit `d75181f6b`) passed all 40
 `ci-static --merge-main` checks without skips. Native collection compared the
 same 3,979 browser registrations and the same 1,721 selected cases in 111 specs
 across all twelve full shards. Planned execution launches changed from 84 to

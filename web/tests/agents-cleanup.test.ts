@@ -31,11 +31,11 @@ test('a paused account says why and how to resume', () => {
   assert.match(text, /Settings \/ Accounts/)
   assert.match(text, /resume/)
   assert.doesNotMatch(text, /Agents are paused for this account/)
-  const accounts: AccountInput[] = [{ id: 'c1', label: 'admin@example.test', harness: 'claude', host: 'mbp2607', state: 'draining', last_probe_ok: true }]
+  const accounts: AccountInput[] = [{ id: 'c1', label: 'admin@example.test', harness: 'claude', host: 'build-7', state: 'draining', last_probe_ok: true }]
   const paused = buildPools(buildRows(accounts, []), Date.now())
   assert.equal(plainText(poolSentence(paused[0], Date.now())), 'Paused in Settings / Accounts. Turn “Agents may use it” back on there to resume.')
   const draining = buildPools(buildRows([{ ...accounts[0], disconnecting: true }], [{ account_id: 'c1', schedule: null as never, windows: [], routing: { rank: 0, available_slots: 0, wait: { code: 'state', run_now_allowed: false } } }]), Date.now())
-  assert.equal(plainText(poolSentence(draining[0], Date.now())), 'Claude: Disconnecting from mbp2607; agents start nothing new on it.')
+  assert.equal(plainText(poolSentence(draining[0], Date.now())), 'Claude: Disconnecting from build-7; agents start nothing new on it.')
 })
 
 test('Deny is never disabled without a reason', () => {

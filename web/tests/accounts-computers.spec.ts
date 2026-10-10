@@ -37,7 +37,7 @@ function calm(capacity: ReturnType<typeof capacityWorld>) {
     })
   }
 }
-/** Claude's verification on mbp2607 ran out: the one thing that blocks agents. */
+/** Claude's verification on build-7 ran out: the one thing that blocks agents. */
 function expireClaude(capacity: ReturnType<typeof capacityWorld>) {
   const c = (capacity.computers as unknown as PairingView[])[0]!
   const e = c.enrollments.find(e => e.account_id === ACCOUNTS.claude)!
@@ -89,9 +89,9 @@ test('calm: one status line folded; unfolded, nothing needs you and the grid nam
   await expect(section(page).getByRole('heading', { name: 'Nothing needs you' })).toBeVisible()
   await expect(section(page).getByText('Everything else is working.')).toBeVisible()
   const grid = section(page).getByRole('table')
-  await expect(grid.getByRole('columnheader')).toHaveText([/Account/, /mbp2607/, /studio/])
+  await expect(grid.getByRole('columnheader')).toHaveText([/Account/, /build-7/, /studio/])
   await expect(grid.getByRole('row')).toHaveCount(7)
-  await expect(grid.getByRole('link', { name: 'Claude on mbp2607: Ready' })).toBeVisible()
+  await expect(grid.getByRole('link', { name: 'Claude on build-7: Ready' })).toBeVisible()
   await expect(grid.getByText('Claude is not signed in on studio')).toBeAttached()
   await expect(section(page).locator('.acc-foot')).toContainText('Pacing: 5 days · keep auto · no nights')
   await expect(section(page).getByRole('region', { name: /^Computer / })).toHaveCount(0)
@@ -111,8 +111,8 @@ test('a problem: the line names the first thing and counts the rest, and Verify 
     return route.fulfill({ json: { account_id: e.account_id, run_id: 'b0000000-0000-4000-8000-000000000782' } })
   })
   await open(page)
-  // Claude on mbp2607 plus Codex low (9% left this week, early warning at 10%).
-  await expect(status(page)).toHaveText('5 of 6 ready · Claude needs verifying on mbp2607 · +1')
+  // Claude on build-7 plus Codex low (9% left this week, early warning at 10%).
+  await expect(status(page)).toHaveText('5 of 6 ready · Claude needs verifying on build-7 · +1')
   const verify = section(page).locator('.fs-act .verify-button')
   const guard = await controlStability(page, { verify, toggle: title(page), manage: section(page).getByRole('link', { name: /Manage/ }) })
   await guard.check(async () => { await verify.click(); await expect(verify).toHaveAttribute('aria-busy', 'true') })
@@ -133,7 +133,7 @@ test('Needs you lists what blocks agents with the fix or its details; a low-quot
   await expect(needs).toBeVisible()
   const rows = section(page).locator('.att-row')
   await expect(rows).toHaveCount(2)
-  await expect(rows.nth(0)).toContainText('Claude verification on mbp2607')
+  await expect(rows.nth(0)).toContainText('Claude verification on build-7')
   await expect(rows.nth(0)).toContainText('Verification expired. New agents wait until the sign-in passes again.')
   await expect(rows.nth(0).getByRole('button', { name: 'Verify again' })).toBeVisible()
   await expect(rows.nth(1)).toContainText('Codex is low: 9% left this week')
@@ -151,7 +151,7 @@ test('people without account management see Details, not Verify again', async ({
   const { capacity } = await setup(page, { manage: false, unfolded: true })
   expireClaude(capacity)
   await open(page)
-  await expect(status(page)).toContainText('Claude needs verifying on mbp2607')
+  await expect(status(page)).toContainText('Claude needs verifying on build-7')
   await expect(section(page).getByRole('button', { name: 'Verify again' })).toHaveCount(0)
   await expect(section(page).locator('.att-row').first().getByRole('button', { name: 'Details' })).toBeVisible()
 })
@@ -165,15 +165,15 @@ test('a name, a cell and Details open the right panel in Settings', async ({ pag
   await expect(page).toHaveURL(/\/settings\/accounts$/)
   await expect(page.locator('section.pane')).toContainText('Shared quota')
   await page.goBack()
-  await section(page).getByRole('link', { name: 'Claude verification on mbp2607' }).click()
+  await section(page).getByRole('link', { name: 'Claude verification on build-7' }).click()
   await expect(page).toHaveURL(/\/settings\/accounts$/)
   const panel = page.locator('section.pane')
-  await expect(panel).toContainText('mbp2607')
+  await expect(panel).toContainText('build-7')
   await expect(panel.locator(`[data-signin="${ACCOUNTS.claude}"]`)).toBeVisible()
   await page.goBack()
-  await section(page).getByRole('table').getByRole('link', { name: /^Codex on mbp2607/ }).first().click()
+  await section(page).getByRole('table').getByRole('link', { name: /^Codex on build-7/ }).first().click()
   await expect(page).toHaveURL(/\/settings\/accounts$/)
-  await expect(page.locator('section.pane')).toContainText('mbp2607')
+  await expect(page.locator('section.pane')).toContainText('build-7')
   await page.goBack()
   await section(page).getByRole('table').getByRole('rowheader').first().getByRole('link').click()
   await expect(page).toHaveURL(/\/settings\/accounts$/)
@@ -196,7 +196,7 @@ test('an approval link shows the folded section once and offers that account\'s 
   const { work } = await setup(page)
   await page.goto(`/agents?verify_account=${ACCOUNTS.claude}`)
   await expect(title(page)).toHaveAttribute('aria-expanded', 'true')
-  await expect(section(page).locator('.att-row').first()).toContainText('Claude verification on mbp2607')
+  await expect(section(page).locator('.att-row').first()).toContainText('Claude verification on build-7')
   expect(work.preferences['ui.agents.sections']).toBeUndefined()
   // An explicit fold wins while the link is still in the address.
   await title(page).click()
@@ -391,7 +391,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await page.evaluate(t => { document.documentElement.dataset.theme = t }, theme)
     const toggle = section(page).locator('.fs-tog')
     const manage = section(page).getByRole('link', { name: /Manage/ })
-    await expect(section(page).locator('.fs-sum')).toContainText('Claude needs verifying on mbp2607')
+    await expect(section(page).locator('.fs-sum')).toContainText('Claude needs verifying on build-7')
     await expectStableControls({
       controls: { toggle, title: title(page), manage },
       scrollAreas: { page: page.locator('html') },

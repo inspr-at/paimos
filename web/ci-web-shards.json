@@ -714,6 +714,8 @@
       "specs": [
         {"file":"tests/a11y.spec.ts","listedTests":80,"weightSeconds":230.829268,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/account-use-matrix.spec.ts","listedTests":13,"weightSeconds":40,"weightSource":"AEON-1054 estimate: thirteen mocked matrix flows, one skipped evidence run"}
+        ,
         {"file":"tests/accounts-card-fit.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/activity-history.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
@@ -723,6 +725,8 @@
         {"file":"tests/aeon-1028-projheader.spec.ts","listedTests":42,"weightSeconds":93.219512,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/aeon-1042-headergraph.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/aeon-1062-qapolish.spec.ts","listedTests":20,"weightSeconds":24,"weightSource":"local-single-worker-AEON-1062-18.8s-plus-margin"}
         ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,

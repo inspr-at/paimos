@@ -34,13 +34,13 @@ export function agentData(world: AgentWorld) {
   const sessions = world.empty ? [] : [
     session(1, { project_id: pharos, agent_principal_id: agent(1), run_id: id('70', 1), ticket_node_id: t.fleet, harness: 'claude', host: 'imac0', role: 'coordinator', work_shape: 'ship', phase: 'working', activity: 'busy', heartbeat_at: ago(0.2), created_at: ago(72) }),
     session(2, { project_id: pharos, agent_principal_id: agent(2), run_id: id('70', 2), ticket_node_id: t.restore, harness: 'codex', host: 'mba', work_shape: 'ship', phase: 'working', activity: 'busy', heartbeat_at: ago(0.4), created_at: ago(26) }),
-    session(3, { project_id: aeon, agent_principal_id: agent(3), run_id: id('70', 3), ticket_node_id: t.web, harness: 'pi', host: 'hsb1', work_shape: 'scout', phase: 'working', activity: 'idle', heartbeat_at: ago(0.7), created_at: ago(140) }),
+    session(3, { project_id: aeon, agent_principal_id: agent(3), run_id: id('70', 3), ticket_node_id: t.web, harness: 'pi', host: 'worker-1', work_shape: 'scout', phase: 'working', activity: 'idle', heartbeat_at: ago(0.7), created_at: ago(140) }),
     session(4, { project_id: pai, agent_principal_id: agent(4), run_id: id('70', 4), ticket_node_id: t.release, harness: 'cursor', host: 'mba', work_shape: 'ship', phase: 'yielded', activity: 'idle', heartbeat_at: ago(1), created_at: ago(51) }),
-    session(5, { project_id: pharos, agent_principal_id: agent(5), run_id: null, ticket_node_id: null, harness: 'grok', host: 'csb1', management_mode: 'unmanaged', advertised_capabilities: ['inbox', 'status'], work_shape: 'unknown', phase: 'working', activity: 'busy', heartbeat_at: ago(9), created_at: ago(300) }),
+    session(5, { project_id: pharos, agent_principal_id: agent(5), run_id: null, ticket_node_id: null, harness: 'grok', host: 'prod-1', management_mode: 'unmanaged', advertised_capabilities: ['inbox', 'status'], work_shape: 'unknown', phase: 'working', activity: 'busy', heartbeat_at: ago(9), created_at: ago(300) }),
     session(6, { project_id: aeon, agent_principal_id: agent(6), run_id: id('70', 7), ticket_node_id: t.approvals, harness: 'claude', host: 'imac0', work_shape: 'ship', phase: 'starting', activity: 'unknown', heartbeat_at: ago(0.1), created_at: ago(1) }),
     session(7, { project_id: pharos, agent_principal_id: agent(1), run_id: id('70', 5), ticket_node_id: t.restore, harness: 'claude', host: 'imac0', work_shape: 'ship', phase: 'stopped', activity: 'idle', heartbeat_at: ago(130), stopped_at: ago(128), stop_reason: 'completed', created_at: ago(190) }),
     session(8, { project_id: pharos, agent_principal_id: agent(1), run_id: id('70', 6), ticket_node_id: null, harness: 'claude', host: 'imac0', work_shape: 'unknown', phase: 'stopped', activity: 'idle', heartbeat_at: ago(1500), stopped_at: ago(1490), stop_reason: 'operator_stop', created_at: ago(1600) }),
-    session(9, { project_id: pai, agent_principal_id: agent(7), run_id: id('70', 8), ticket_node_id: null, harness: 'codex', host: 'hsb1', work_shape: 'unknown', phase: 'stopped', activity: 'idle', heartbeat_at: ago(400), stopped_at: ago(395), stop_reason: 'lease_expired', created_at: ago(700) }),
+    session(9, { project_id: pai, agent_principal_id: agent(7), run_id: id('70', 8), ticket_node_id: null, harness: 'codex', host: 'worker-1', work_shape: 'unknown', phase: 'stopped', activity: 'idle', heartbeat_at: ago(400), stopped_at: ago(395), stop_reason: 'lease_expired', created_at: ago(700) }),
   ]
   const account = { claude: id('ac', 1), codex: id('ac', 2), cursor: id('ac', 3), pi: id('ac', 4), grok: id('ac', 5) }
   const run = (n: number, fields: Record<string, unknown>) => ({ id: id('70', n), work_order_id: id('0d', n), model_profile_id: null, requested_model: null, model_evidence: 'vendor_reported', input_tokens: 0, output_tokens: 0, cost_micros: 0, started_at: null, ended_at: null, ...fields })
@@ -58,7 +58,7 @@ export function agentData(world: AgentWorld) {
   const risk = (scope: string, kind: string) => kind === 'tenant' || /control|deploy|delete/.test(scope) ? 'high' : /\.read$/.test(scope) ? 'low' : 'medium'
   const approval = (n: number, fields: Record<string, unknown>) => ({ id: id('a9', n), agent_name: null as string | null, resource_id: null, run_id: null, decision: null, decided_by_principal_id: null, ...fields, risk: risk(String(fields.scope), String(fields.resource_kind)) })
   const approvals = world.empty ? [] : [
-    approval(1, { agent_principal_id: agent(1), scope: 'harness.control', resource_kind: 'node', resource_id: pharos, rationale: 'Stop the Grok scout on csb1: it lost its heartbeat and still holds the fleet list lock.', expires_at: ahead(8), proposed_at: ago(4) }),
+    approval(1, { agent_principal_id: agent(1), scope: 'harness.control', resource_kind: 'node', resource_id: pharos, rationale: 'Stop the Grok scout on prod-1: it lost its heartbeat and still holds the fleet list lock.', expires_at: ahead(8), proposed_at: ago(4) }),
     approval(2, { agent_principal_id: agent(2), scope: 'run.claim', resource_kind: 'run', resource_id: id('70', 2), run_id: id('70', 2), rationale: 'Claim the restore run on the Codex Pro account; the Claude window is ahead of pace.', expires_at: ahead(38), proposed_at: ago(3) }),
     approval(3, { agent_principal_id: agent(3), scope: 'nodes.read', resource_kind: 'node', resource_id: t.web, rationale: 'Read the web ticket and its children to scout the agents workspace.', expires_at: ahead(130), proposed_at: ago(12) }),
     approval(4, { agent_principal_id: agent(1), scope: 'run.claim', resource_kind: 'run', resource_id: id('70', 5), run_id: id('70', 5), rationale: 'Claim the fleet list run.', expires_at: ago(100), proposed_at: ago(200), decision: 'approved', decided_by_principal_id: world.me }),
@@ -72,7 +72,7 @@ export function agentData(world: AgentWorld) {
     acct('claude', 'Claude Max', 'available', [window('tokens', 5_000_000, 3_600_000, 150, 300)], 'Team'),
     acct('codex', 'Codex Pro', 'available', [window('requests', 1500, 450, 60 * 14, 60 * 24)]),
     acct('cursor', 'Cursor Business', 'available', [window('cost_micros', 200_000_000, 96_000_000, 60 * 24 * 15, 60 * 24 * 30, 'frontload')]),
-    acct('pi', 'Pi on hsb1', 'draining', []),
+    acct('pi', 'Pi on worker-1', 'draining', []),
     acct('grok', 'SuperGrok', 'unavailable', []),
   ]
   const targets = Object.entries(names).map(([principal, address], n) => ({ id: id('7a', n + 1), principal_id: principal, address, adapter: 'agentd_claude', target_kind: 'agentd_session', maximum_level: 'steer', role: 'primary', version: 1, enabled: true, has_secret: false, created_at: ago(900) }))

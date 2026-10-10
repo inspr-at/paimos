@@ -58,7 +58,8 @@ func TestOldSettlementGapCheckpointReconciliation(t *testing.T) {
 				Version int      `json:"version"`
 				Records []Record `json:"records"`
 			}
-			if err := json.Unmarshal(raw, &checkpoint); err != nil || checkpoint.Version != RecordSchemaVersion || len(checkpoint.Records) != 1 {
+			// This immutable AEON-1041 fixture was written by the v3 owner.
+			if err := json.Unmarshal(raw, &checkpoint); err != nil || checkpoint.Version != 3 || len(checkpoint.Records) != 1 {
 				t.Fatal("invalid checkpoint fixture", err)
 			}
 			r := checkpoint.Records[0]
@@ -200,7 +201,7 @@ func settlementTimeoutSupervisor(t *testing.T) (*Supervisor, *settlementTimeoutA
 		Version int      `json:"version"`
 		Records []Record `json:"records"`
 	}
-	if err := json.Unmarshal(raw, &checkpoint); err != nil || checkpoint.Version != RecordSchemaVersion || len(checkpoint.Records) != 1 {
+	if err := json.Unmarshal(raw, &checkpoint); err != nil || checkpoint.Version != 3 || len(checkpoint.Records) != 1 {
 		t.Fatal("invalid checkpoint fixture", err)
 	}
 	r := checkpoint.Records[0]

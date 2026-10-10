@@ -57,7 +57,10 @@ export async function getRefreshStatus(signal?: AbortSignal): Promise<RefreshSta
   return status
 }
 // The whole settings object is written back so the parked settings (agent reports, discovery, interval) keep their values.
-export const putRefreshSettings = (settings: RefreshSettings) => request<RefreshSettings>('/models/refresh/settings', 'PUT', settings)
+// A change of auto_add_profiles is the "New model versions" rule (AEON-1044):
+// it carries the account-use matrix revision and needs account.use.manage.
+export const putRefreshSettings = (settings: RefreshSettings, accountUseRevision?: number) =>
+  request<RefreshSettings>('/models/refresh/settings', 'PUT', accountUseRevision ? { ...settings, account_use_revision: accountUseRevision } : settings)
 export const checkNow = (signal?: AbortSignal) => request<CheckResult>('/models/refresh', 'POST', undefined, signal)
 export const createProfile = (body: Record<string, unknown>, signal?: AbortSignal) => request<RegistryProfile>('/models', 'POST', body, signal)
 const linePath = (harness: string, model: string) => `/models/lines/${encodeURIComponent(harness)}/${encodeURIComponent(model)}`

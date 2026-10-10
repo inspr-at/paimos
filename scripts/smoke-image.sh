@@ -6,6 +6,9 @@
 # cannot be exercised by an isolated, disposable Postgres fixture.
 set -euo pipefail
 
+# OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
+pgvector_image="${PGVECTOR_IMAGE:-ghcr.io/inspr-at/paimos-ci/pgvector:0.8.6-pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a}"
+
 for tool in docker curl python3 openssl; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
@@ -87,7 +90,7 @@ docker network create "$network" >/dev/null
 docker run -d --name "$db" --network "$network" \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD_FILE=/run/secrets/db-super \
   -v "$tmp/secrets:/run/secrets:ro" -v "$tmp/initdb:/docker-entrypoint-initdb.d:ro" \
-  pgvector/pgvector:0.8.6-pg18 >/dev/null
+  "$pgvector_image" >/dev/null
 ready=0
 for _ in {1..45}; do
   if docker exec "$db" pg_isready -h 127.0.0.1 -U postgres -d aeon >/dev/null 2>&1; then ready=1; break; fi

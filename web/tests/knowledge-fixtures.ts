@@ -44,13 +44,13 @@ const DEPLOY = [
   'docker push ghcr.io/inspr-at/pharos:${VERSION}',
   '```',
   '',
-  'Pin the new tag in `hosts/csb1/pharos.nix` and open a pull request. The pin is the only change in it.',
+  'Pin the new tag in `hosts/prod-1/pharos.nix` and open a pull request. The pin is the only change in it.',
   '',
   '## Roll out',
   '',
-  '### Canary on csb1',
+  '### Canary on prod-1',
   '',
-  'Switch csb1 first and watch the beacon health probes for ten minutes. A single red probe stops the rollout.',
+  'Switch prod-1 first and watch the beacon health probes for ten minutes. A single red probe stops the rollout.',
   '',
   '### The rest of the fleet',
   '',
@@ -58,9 +58,9 @@ const DEPLOY = [
   '',
   '| Host | Role | Window |',
   '|---|---|---|',
-  '| csb1 | canary | any time |',
-  '| hsb1 | production | after 18:00 |',
-  '| hsb8 | production | after 18:00 |',
+  '| prod-1 | canary | any time |',
+  '| worker-1 | production | after 18:00 |',
+  '| worker-8 | production | after 18:00 |',
   '',
   '## Roll back',
   '',
@@ -104,7 +104,7 @@ export function knowledgeWorld(options: { empty?: boolean } = {}) {
       metadata: { url: 'https://console.hetzner.cloud', purpose: 'Provisioning, DNS and firewalls', secret_path: '1Password: Studio / Hetzner API' },
       body: 'The fleet runs on Hetzner Cloud in Falkenstein and Helsinki. Every host is created through Pharos, never by hand in the console.' })
     add({ id: 'k-aeon', key: 'PHAROS-49', type: 'related-project', slug: 'aeon', title: 'Aeon', updated_at: ago(24 * 12),
-      metadata: { instance_url: 'https://pm.example.com', key: 'AEON', relationship: 'Runs on the Pharos fleet' }, body: 'Aeon is deployed by Pharos to csb1 and hsb1.' })
+      metadata: { instance_url: 'https://pm.example.com', key: 'AEON', relationship: 'Runs on the Pharos fleet' }, body: 'Aeon is deployed by Pharos to prod-1 and worker-1.' })
     add({ id: 'k-aeon-deploy', key: 'AEON-60', type: 'runbook', slug: 'deploy-release', title: 'Ship an Aeon release', project: 'p-aeon', updated_at: ago(8),
       body: 'Tag the release, let CI build the image, then ask Pharos to deploy it. Aeon never deploys itself.' })
     add({ id: 'k-aeon-cutover', key: 'AEON-61', type: 'guideline', slug: 'no-cutover-without-approval', title: 'No cutover without explicit approval', project: 'p-aeon', updated_at: ago(24 * 2),

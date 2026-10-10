@@ -121,8 +121,8 @@ export async function mockLeadFlow(page: Page, options: LeadFlowOptions = {}) {
     if (path === `/api/projects/p-pharos/harness-sessions/${LEAD_SESSION}` && method === 'GET') return json({ id: LEAD_SESSION, project_id: 'p-pharos', agent_principal_id: LEAD_AGENT, role: 'coordinator', harness: 'claude', phase: options.lead === 'paused' ? 'stopped' : 'working' })
     if (path === '/api/agents/plan') return json({ principal_id: me.id, total: 5, limits: {}, running: { codex: 1, claude: 2 }, running_total: 3, source: 'plan', updated_at: NOW })
     if (path === '/api/agent-pairing/computers') return json({ computers: [
-      pairedComputer({ request_id: '88888888-8888-4888-8888-888888888881', computer_id: HOST_A, computer_name: 'mbp2607' }),
-      pairedComputer({ request_id: '88888888-8888-4888-8888-888888888882', computer_id: HOST_B, computer_name: 'mbp2606', computer_state: 'draining' }),
+      pairedComputer({ request_id: '88888888-8888-4888-8888-888888888881', computer_id: HOST_A, computer_name: 'build-7' }),
+      pairedComputer({ request_id: '88888888-8888-4888-8888-888888888882', computer_id: HOST_B, computer_name: 'build-6', computer_state: 'draining' }),
     ] })
     const lifecycle = /^\/api\/nodes\/([^/]+)\/work-lifecycle$/.exec(path)
     if (lifecycle && method === 'GET') {

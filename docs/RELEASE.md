@@ -106,7 +106,7 @@ longer compiles anything. Both image rehearsals also check these imports.
 ### Cross-family verdict and merge queue (AEON-411)
 
 The required **`gate/cross-family`** is a commit status posted **outside
-GitHub Actions** by `inspr-mbp2606-runner` (App ID `5134402`, existing
+GitHub Actions** by the configured gate runner App (App ID `5134402`, existing
 installation `166478088`). The companion ruleset in
 `.github/cross-family-ruleset.json` binds that exact context to the App. Neither
 a successful nor a skipped Actions job with the same name can satisfy the
@@ -235,19 +235,35 @@ lead; the process runbook is PPM AEON `runbook/flywheel`, §2.5–§2.7.
 
 ### Test runner routing (AEON-438, AEON-459, AEON-777)
 
+Machine labels and host paths below are neutral examples (`build-6`,
+`prod-1`). Resolve actual labels, availability variables and paths from the
+installed controller and deployment configuration; these examples do not
+change the live routing or deployment target.
+
+The `public-names` static check scans product source, web fixtures, API and
+documentation for operator host and business names. It runs in CI and the
+existing pre-push static bundle. Replace a new match with a neutral fictional
+example or tenant-reported data. Only published release-note history may be
+allowlisted in `scripts/ci/public-names-allowlist.json`, with each exception
+pinned to its release version and the SHA-256 of its entry's compact JSON
+with object keys sorted recursively (array order is preserved). The guard
+scans all other release entries and bundle metadata. Adding a release needs
+no allowlist update; changing an exempt published entry fails the check.
+Whole files and other paths cannot be exempted.
+
 CI's hosted `runner-route` job calls `test-runner-route.yml`, requests four idle
 slots, and selects the entire Go batch behind independent event, ref and
 rerun-attempt guards. The manual smoke workflow calls its own router for one
 slot. By default, only `push` and `workflow_dispatch` on `refs/heads/main` may use the pool:
 
-- A verified main push: `runs-on: [self-hosted, Linux, ARM64, mbp2606, mbp2606-push]`.
-- A verified main dispatch: `runs-on: [self-hosted, Linux, ARM64, mbp2606, mbp2606-dispatch]`.
+- A verified main push: `runs-on: [self-hosted, Linux, ARM64, build-6, build-6-push]`.
+- A verified main dispatch: `runs-on: [self-hosted, Linux, ARM64, build-6, build-6-dispatch]`.
 
 **AEON-777 event switch:** set the repository variable `AEON_POOL_EVENTS` to
 `push,workflow_dispatch,pull_request,merge_group` to opt all four CI events
 into the pool. A nonempty comma list replaces the default event list. PRs use
-`mbp2606-pr` only when their head repository equals `github.repository`; even
-approved fork PRs stay hosted. Merge groups use `mbp2606-mq` and retain full
+`build-6-pr` only when their head repository equals `github.repository`; even
+approved fork PRs stay hosted. Merge groups use `build-6-mq` and retain full
 coverage. Each also requires its event in the controller's **schema-2 lease
 `events` array**. A schema-1 lease or missing, malformed or nonmatching event
 advertisement keeps that event hosted even with the switch on. With this router
@@ -265,7 +281,7 @@ the event from the lease also stops new routing for that event. Drain already
 routed jobs before rolling back controller admission support. The controller
 details below describe the pinned AEON-438 deployment, not an AEON-777 rollout.
 
-The controller mints the base labels `self-hosted, Linux, ARM64, mbp2606` plus
+The controller mints the base labels `self-hosted, Linux, ARM64, build-6` plus
 **exactly one** class label matching the verified run's event; the configured
 sets contain neither both classes on one runner nor hosted-looking labels
 ([default.nix:115–143](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L115-L143), [aeon_builder.py:120–123](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L120-L123), [aeon_builder.py:857–875](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L857-L875)).
@@ -533,7 +549,7 @@ and 164 ungated specs across 12 shards. No behavior or assertion was changed.
 
 The worker is forbidden to push; local checks do not close this gate. The
 coordinator must complete `CI` on the integrated branch (PR or branch dispatch,
-keeping mbp2606 off limits). Retain the run URL, checked-out SHA, logs/reports
+keeping build-6 off limits). Retain the run URL, checked-out SHA, logs/reports
 showing `clip-tip`, `aeon-632b-clip`, `aeon-632b-clip-settings`, `key-trim` and `model-prefs` actually
 executed without skips, and successful `web-setup`, all 12 `web-shard` jobs
 and the required `web` aggregate. A later revision must retain these fixes
@@ -559,12 +575,12 @@ are pinned to [nixcfg #890](https://github.com/markus-barta/nixcfg/pull/890) at
 `5e304365cad08794fc839487c8a4512928d738cd`; module filenames mean
 `modules/aeon-builder/`, and test filenames mean `tests/`. These are source
 references, not live acceptance evidence. Publishing
-`AEON_MBP2606_AVAILABILITY` remains gated on coordinator verification of all
+the configured pool-availability repository variable remains gated on coordinator verification of all
 three controls and their integration. A JIT registration is not a reservation
 for the checked job: even a base-only job fits the runner's labels
 ([aeon_builder.py:93–100](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L93-L100), [test_aeon_builder.py:615–624](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/tests/test_aeon_builder.py#L615-L624)).
 
-1. **Verified JIT minting:** `tick` selects queued jobs carrying `mbp2606` and
+1. **Verified JIT minting:** `tick` selects queued jobs carrying `build-6` and
    verifies the repository and head repository, allowed event, workflow path,
    `main` head branch and head SHA reachability; missing or mismatched run
    metadata is rejected
@@ -577,7 +593,7 @@ for the checked job: even a base-only job fits the runner's labels
    unique runner name before requesting its JIT configuration
    ([aeon_builder.py:811–828](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L811-L828), [aeon_builder.py:867–872](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L867-L872)).
    `class_ok` requires exactly the verified event's class from the configured
-   pair: `mbp2606-push` for `push`, `mbp2606-dispatch` for `workflow_dispatch`
+   pair: `build-6-push` for `push`, `build-6-dispatch` for `workflow_dispatch`
    ([aeon_builder.py:103–117](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L103-L117), [default.nix:125–143](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L125-L143)).
    At candidate selection, a missing, opposite or doubled class triggers a
    cancellation attempt and prevents that run from being served
@@ -590,7 +606,7 @@ for the checked job: even a base-only job fits the runner's labels
    `class_ok`, **including jobs of already verified runs**
    ([aeon_builder.py:899–929](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L899-L929)).
    It attempts to cancel runs failing either check, including base-only jobs
-   such as `[self-hosted, Linux, ARM64, mbp2606]`, `self-hosted`,
+   such as `[self-hosted, Linux, ARM64, build-6]`, `self-hosted`,
    `[self-hosted, linux]` or `ARM64`
    ([aeon_builder.py:909–929](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L909-L929), [test_aeon_builder.py:595–609](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/tests/test_aeon_builder.py#L595-L609), [test_aeon_builder.py:633–641](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/tests/test_aeon_builder.py#L633-L641)).
    Cancellation uses `actions:write`; JIT registration uses
@@ -715,7 +731,7 @@ next known-good copy after the external check, and scratch disks are discarded
 **Network precondition:** host `pf` rules block configured private ranges and
 host loopback for user `ci`, except the stateless Lima SSH loopback range from
 `sshPortBase - 1` through `sshPortBase + slots - 1`
-([aeon_builder.py:208–224](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L208-L224), [default.nix:222–235](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L222-L235), [hosts/mbp2606/home-ci.nix:24–35](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/hosts/mbp2606/home-ci.nix#L24-L35)).
+([aeon_builder.py:208–224](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L208-L224), [default.nix:222–235](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L222-L235)).
 The pinned defaults provide four job slots plus one base/proof port; the base
 and proof use the preceding port, with no host mounts or SSH agent forwarding
 ([default.nix:162–165](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L162-L165), [default.nix:191–200](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L191-L200), [aeon_builder.py:175–205](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L175-L205), [aeon_builder.py:573–586](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L573-L586)).
@@ -741,7 +757,7 @@ retaining the baked job-started hook as defence in depth.
 Fork-PR approval is `all_external_contributors` (set by the lead, 2026-09-30).
 That is defence in depth, not the runner admission boundary. A `merge_group` run
 executes PR code, so queueing a PR is a decision to run it on the Mac if routing
-is enabled for that event. **It is excluded from the mbp2606 allowlist in the
+is enabled for that event. **It is excluded from the build-6 allowlist in the
 pinned AEON-438 deployment**: GitHub documents exact pinned workflow refs; matching
 `gh-readonly-queue/…` refs to the selected `main` workflows is unverified.
 Merge-queue CI stays hosted until both the event switch and a schema-2 lease
@@ -750,7 +766,7 @@ See GitHub's
 [runner-group workflow restrictions](https://docs.github.com/en/enterprise-cloud%40latest/actions/how-tos/manage-runners/self-hosted-runners/manage-access).
 
 Routing is disabled until the controller publishes the repository variable
-`AEON_MBP2606_AVAILABILITY` on `inspr-at/paimos`. The pinned NIX-600 controller
+the configured pool-availability repository variable on `inspr-at/paimos`. The pinned NIX-600 controller
 publishes schema 1, which supports only main push/dispatch routing
 ([aeon_builder.py:161–172](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L161-L172), [aeon_builder.py:388–404](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L388-L404)):
 
@@ -799,15 +815,15 @@ and evidence remain hosted.
 
 **Off/drain:** with a running controller, `off` attempts to clear availability
 and enters `draining`; `tick` keeps serving verified queued jobs carrying
-`mbp2606` and passing
+`build-6` and passing
 `class_ok`, with the same mint checks, until candidates and active slots/workers
 are gone ([aeon_builder.py:1268–1287](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1268-L1287), [aeon_builder.py:645–705](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L645-L705), [aeon_builder.py:849–869](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L849-L869)).
 **Pause:** a ruleset/network failure or failed post-job attribution calls
 `pause`, stops minting and attempts to clear availability and cancel runs with
 queued jobs matching the combined `pool_labels` by case-insensitive subset
 ([aeon_builder.py:615–643](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L615-L643), [aeon_builder.py:719–723](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L719-L723), [aeon_builder.py:849–854](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L849-L854), [aeon_builder.py:1083–1091](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1083-L1091), [aeon_builder.py:1149–1157](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1149-L1157)).
-`pool_labels` contains the base labels plus **both** `mbp2606-push` and
-`mbp2606-dispatch` ([aeon_builder.py:126–128](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L126-L128), [default.nix:115–130](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L115-L130)).
+`pool_labels` contains the base labels plus **both** `build-6-push` and
+`build-6-dispatch` ([aeon_builder.py:126–128](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L126-L128), [default.nix:115–130](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L115-L130)).
 **Hard stop:** with a running controller, `off --now` enters `stopping` and
 attempts to clear availability and cancel runs with queued or in-progress jobs
 matching that same combined set; monitored workers stop and retire their VMs
@@ -827,7 +843,7 @@ duties cover already queued jobs ([aeon_builder.py:645–705](https://github.com
 
 **Go shard integration (AEON-459):** `go-test` depends on `runner-route` and
 uses its guarded runner selection and class to choose **4 Go shards on
-mbp2606, 7 on hosted**. The same event/ref/attempt guards protect the matrix
+build-6, 7 on hosted**. The same event/ref/attempt guards protect the matrix
 when GitHub evaluates it. A failed-job or individual-job rerun may retain
 earlier matrix values; do not assume it creates seven hosted shards. Use
 **Re-run all jobs** to refresh both the router and the entire shard layout.
@@ -855,7 +871,7 @@ completion of the required `go` aggregate; the aggregate's own short duration
 does not measure the tests. Include queue delay within that phase. Keep this
 route only if the Mac median is lower; otherwise retain hosted routing.
 
-Every evidence-producing Go test on mbp2606 uses **`go test -count=1`** to bypass
+Every evidence-producing Go test on build-6 uses **`go test -count=1`** to bypass
 cached test results. Routed action caches are written only by main pushes.
 The controller's persistent Go, npm and Playwright slot cache is for verified
 pushes; dispatches receive disposable scratch copies of known-good
@@ -877,9 +893,9 @@ The hosted `release-check` runs both guard and router tests. Release workflows,
 image build/relink, attestation and pin gates always stay hosted; attestation
 verification must retain `--deny-self-hosted-runners` in its owning gate.
 
-The lead accepted mbp2606 green evidence for tree-keyed reuse of **tests/evals**
+The lead accepted build-6 green evidence for tree-keyed reuse of **tests/evals**
 only (AEON-438, 2026-09-30). Successful routed jobs record their actual
-`runner_class=hosted|mbp2606`, source commit and event in the job summary. Any
+`runner_class=hosted|build-6`, source commit and event in the job summary. Any
 future reuse record must preserve that class. Image provenance, attestations and
 pin gates may never reuse that evidence. This change adds no tree-skip mechanism.
 
@@ -892,7 +908,7 @@ The server image pipeline starts independently of the macOS jobs (AEON-407, AEON
 3. Prepare the runtime closure cold: build `scripts/Dockerfile.runtime` (the digest-pinned Alpine base plus the pinned `chromium` and `tini`) with `no-cache` and without any registry cache, in every tag build and every rehearsal (see [Runtime closure](#runtime-closure-prepared-cold-on-every-build)). Bind the exported OCI runtime manifest digest as the `aeon-runtime` named context and print it per architecture. The main Dockerfile only copies `dist/image-input/paimos` and `NOTICE`, retaining UID/GID 65532 and the tini entrypoint. Import the existing `:buildcache` or `:buildcache-arm64` assembly cache and load the native image. Resolve its tag with `docker image ls --quiet --no-trunc`, require exactly one full ID, then run the full smoke gate on that immutable ID. Both assembly and export use the same working-directory context, base digest and single-platform arguments, with `rewrite-timestamp=true` and OCI media types.
 4. Record assembly plus smoke timing and require two clean same-input rebuilds (below). After these gates pass, export the same image inputs with BuildKit `provenance: mode=max` and push **by digest only**. Update that architecture's assembly cache in `mode=max`. Platform jobs never assign the release tag. Before anything is attested, `scripts/verify-pushed-image.mjs` reads the pushed digest back, walks to its `linux/<arch>` manifest and requires the image config digest of the smoked build; a mismatch fails the job and prints both digests. Each job then creates and verifies a GitHub build-provenance attestation bound to its digest, repository, workflow, source tag and commit, and uploads its digest artifact. That handoff is the job's last step.
 5. The `image` job waits for both platform jobs to succeed, rechecks release/tag immutability, and combines their immutable references using `docker buildx imagetools create`. Before publishing and after reading back, require exactly linux/amd64 and linux/arm64 runtime manifests with separate bound BuildKit provenance descriptors. Publish one multi-arch OCI index at `ghcr.io/inspr-at/aeon:<version>`, without a `latest` alias.
-6. Attest and verify the index digest too. Preserve `needs.image.outputs.version` and `needs.image.outputs.digest`; **digest is the index digest**, also recorded in the summary and draft release notes. The notes keep exactly one `Digest:` line (the index, which `scripts/verify-live.mjs` requires) and add one `Runtime closure linux/<arch>:` line per architecture. Production **csb1 is x86_64 and automatically pulls linux/amd64 from this index**. ARM servers and Apple-silicon Linux VMs pull linux/arm64 from the same tag or digest, without emulation.
+6. Attest and verify the index digest too. Preserve `needs.image.outputs.version` and `needs.image.outputs.digest`; **digest is the index digest**, also recorded in the summary and draft release notes. The notes keep exactly one `Digest:` line (the index, which `scripts/verify-live.mjs` requires) and add one `Runtime closure linux/<arch>:` line per architecture. Production **prod-1 is x86_64 and automatically pulls linux/amd64 from this index**. ARM servers and Apple-silicon Linux VMs pull linux/arm64 from the same tag or digest, without emulation.
 
 The index is the deployment and rollback pin. Partial by-digest platform exports are untagged and cannot be deployed through the release coordinate. Once an index tag has been published, a later failure still requires a new coordinate; reruns cannot replace it. Real registry push/attestation and deployment verification remain coordinator release gates.
 
@@ -917,7 +933,7 @@ The attestation action uses the existing `packages`, `attestations` and OIDC wri
 Immediately after the multi-arch index attestation passes, the `image` job
 runs `scripts/release-pin-pr.mjs`. The only foreign-repository write path this
 bot may use is a **draft PR** against `markus-barta/nixcfg` `main`, changing
-exactly the Aeon image line in `hosts/csb1/docker/compose-spec.nix`. It preserves
+exactly the Aeon image line in `hosts/prod-1/docker/compose-spec.nix`. It preserves
 the rest of the file, including comments. This implements AEON-413 as a proposal;
 the worker brief supersedes the older ticket's `--auto` request. The bot never
 enables auto-merge, merges, approves, pushes to main, publishes or deploys.
@@ -1107,7 +1123,7 @@ No job that produces a shipped binary restores a Go cache. `actions/setup-go`
 runs with `cache: false` in every job of `release.yml` and
 `release-image-check.yml`. The reason: the go command never re-verifies a
 build-cache entry, and the caches `setup-go` restores are also written by CI
-jobs, including main-push shards on the self-hosted mbp2606 pool. A poisoned
+jobs, including main-push shards on the self-hosted build-6 pool. A poisoned
 entry would be compiled into a release, outside what
 `--deny-self-hosted-runners` on the attestation covers.
 
@@ -1363,7 +1379,7 @@ must supply these fields and dispatch after pin merge; its integration and
 first attended live run remain coordinator acceptance, not worker evidence.
 
 `scripts/verify-live.mjs` rechecks the actual merged main pin PR and its single
-image-line diff in `hosts/csb1/docker/compose-spec.nix`, annotated release tag,
+image-line diff in `hosts/prod-1/docker/compose-spec.nix`, annotated release tag,
 source commit on main, tagged version/scheme and the hosted image attestation.
 It requires the exact nine-asset release, qualified checksum-file hash and
 downloaded SHA-256 of every binary. It polls `/api/version` for at most ten
@@ -1903,7 +1919,7 @@ container while this check fails. Existing schema-conflict, backup, human
 approval, paused-writer and release gates remain authoritative; the worker's
 preflight does not grant deployment approval.
 
-OPS's 2026-10-04 csb1 real-data rehearsal (AEON-684) migrated 241 files from
+OPS's 2026-10-04 prod-1 real-data rehearsal (AEON-684) migrated 241 files from
 schema 1148 through 1230 in 8 seconds. Epic 317 + task 811 + ticket 5239 became
 6367 work nodes; keys, parents, titles, counters and relations were
 byte-identical. These are OPS-provided facts, not a rehearsal performed by this
