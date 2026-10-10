@@ -64,15 +64,16 @@ prepare_go() {
 require_buildinfo() {
   local bin="$1" os="$2" arch="$3" cgo="$4" info
   info="$(go version -m "$bin")"
-  if ! printf '%s\n' "$info" | grep -F -q "CGO_ENABLED=${cgo}"; then
+  # An early grep exit must not give a pipe writer SIGPIPE under pipefail.
+  if ! grep -F -q "CGO_ENABLED=${cgo}" <<< "$info"; then
     echo "$bin missing CGO_ENABLED=${cgo}" >&2
     exit 1
   fi
-  if ! printf '%s\n' "$info" | grep -F -q "GOOS=${os}"; then
+  if ! grep -F -q "GOOS=${os}" <<< "$info"; then
     echo "$bin missing GOOS=${os}" >&2
     exit 1
   fi
-  if ! printf '%s\n' "$info" | grep -F -q "GOARCH=${arch}"; then
+  if ! grep -F -q "GOARCH=${arch}" <<< "$info"; then
     echo "$bin missing GOARCH=${arch}" >&2
     exit 1
   fi
