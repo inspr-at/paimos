@@ -30,6 +30,7 @@
     "POST /api/chat-threads/{id}/outbox": true
   },
   "project_filtered": {
+    "GET /api/chat-sessions/{sessionId}/thread": true,
     "GET /api/chat-threads/{id}": true,
     "GET /api/chat-threads/{id}/live": true,
     "GET /api/chat-threads/{id}/outbox": true
@@ -85,6 +86,7 @@
     }
   ],
   "routes": {
+    "GET /api/chat-sessions/{sessionId}/thread": "chat.read",
     "GET /api/chat-threads/{id}": "chat.read",
     "GET /api/chat-threads/{id}/live": "chat.read",
     "GET /api/chat-threads/{id}/messages": "chat.read",
