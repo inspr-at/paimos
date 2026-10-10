@@ -54,6 +54,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{projectId}/chat-roles", handle(m, m.createRole))
 	mux.HandleFunc("POST /api/projects/{projectId}/chat-threads/resolve", handle(m, m.resolveThread))
 	mux.HandleFunc("GET /api/chat-threads/{id}", handle(m, m.getThread))
+	mux.HandleFunc("GET /api/chat-sessions/{sessionId}/thread", handle(m, m.sessionThread))
 	mux.HandleFunc("GET /api/chat-threads/{id}/messages", handle(m, m.listMessages))
 	mux.HandleFunc("GET /api/chat-threads/{id}/read-marker", handle(m, m.getSeen))
 	mux.HandleFunc("PUT /api/chat-threads/{id}/read-marker", handle(m, m.unionSeen))
@@ -299,6 +300,33 @@ func (m *Module) getThread(r *http.Request, tx pgx.Tx, p tenant.Principal, _ str
 	}
 	var project string
 	if err = tx.QueryRow(r.Context(), `SELECT project_id::text FROM chat_threads WHERE id=$1 AND person_id=$2 AND archived_at IS NULL`, id, person).Scan(&project); err != nil {
+		return nil, err
+	}
+	if err = require(r.Context(), tx, p, "chat.read", project); err != nil {
+		return nil, err
+	}
+	return loadThread(r.Context(), tx, id)
+}
+
+// sessionThread finds the caller's own conversation whose current binding is
+// this session, so the session panel can open the live stream (AEON-1071). It
+// reveals nothing about other people's threads or past bindings.
+func (m *Module) sessionThread(r *http.Request, tx pgx.Tx, p tenant.Principal, _ struct{}) (any, error) {
+	session := r.PathValue("sessionId")
+	if !workorders.UUID(session) {
+		return nil, unavailable()
+	}
+	if err := accessFence(r.Context(), tx, p); err != nil {
+		return nil, err
+	}
+	person, err := personID(r.Context(), tx, p)
+	if err != nil {
+		return nil, err
+	}
+	var id, project string
+	if err = tx.QueryRow(r.Context(), `SELECT t.id::text,t.project_id::text FROM chat_session_bindings b
+ JOIN chat_threads t ON t.tenant_id=b.tenant_id AND t.role_id=b.role_id AND t.person_id=b.owner_person_id
+ WHERE b.session_id=$1 AND b.valid_to IS NULL AND b.owner_person_id=$2 AND t.archived_at IS NULL`, session, person).Scan(&id, &project); err != nil {
 		return nil, err
 	}
 	if err = require(r.Context(), tx, p, "chat.read", project); err != nil {
