@@ -80,6 +80,15 @@ func (b ActionBinding) valid() bool {
 	return false
 }
 
+func (b ActionBinding) matches(other ActionBinding) bool {
+	if !b.TargetUpdatedAt.Equal(other.TargetUpdatedAt) {
+		return false
+	}
+	// PostgreSQL and JSON may use different locations for the same instant.
+	b.TargetUpdatedAt, other.TargetUpdatedAt = time.Time{}, time.Time{}
+	return b == other
+}
+
 func actionPermission(kind string) string {
 	switch kind {
 	case "work.create", "work.update":
@@ -209,7 +218,7 @@ func VerifyEvaluation(sources []Source, c Context, current ActionBinding, r Eval
 		return d, err
 	}
 	closed := func(reason string) (Decision, error) { return d, errors.New(reason) }
-	if !r.valid() || current != r.Binding || c.Action != current.Kind || c.Checkpoint != "action" || d.PolicyDigest != r.PolicyDigest || d.ContextDigest != r.ContextDigest || Digest(policy) != Digest(r.FamilyPolicy) {
+	if !r.valid() || !current.matches(r.Binding) || c.Action != current.Kind || c.Checkpoint != "action" || d.PolicyDigest != r.PolicyDigest || d.ContextDigest != r.ContextDigest || Digest(policy) != Digest(r.FamilyPolicy) {
 		return closed("evaluation binding or policy changed; reevaluation required")
 	}
 	if now.Before(r.CreatedAt) || !now.Before(r.Deadline) || status != "completed" {

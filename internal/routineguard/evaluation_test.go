@@ -36,6 +36,16 @@ func TestIndependentEvaluationBindsEvidenceAndCannotBootstrap(t *testing.T) {
 	if err != nil || !accepted.CanExecuteFor(r) {
 		t.Fatalf("independent exact result: %+v %v", accepted, err)
 	}
+	requestJSON, _ := json.Marshal(r)
+	var persisted EvaluationRequest
+	if err := json.Unmarshal(requestJSON, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	localBinding := b
+	localBinding.TargetUpdatedAt = now.In(time.FixedZone("fixture", 2*60*60))
+	if got, err := verify(persisted, localBinding, c, evidence, v, r.FamilyPolicy, now, "completed"); err != nil || !got.CanExecuteFor(persisted) {
+		t.Fatalf("equivalent persisted timestamp lost exact binding: %v", err)
+	}
 	for name, mutate := range map[string]func(*EvaluationRequest, *ActionBinding, *Context, *modelregistry.VerifiedModel, *StructuredVerdict, *reviewgate.FamilyPolicy, *time.Time, *string){
 		"same provider": func(r *EvaluationRequest, _ *ActionBinding, _ *Context, e *modelregistry.VerifiedModel, _ *StructuredVerdict, _ *reviewgate.FamilyPolicy, _ *time.Time, _ *string) {
 			r.Author = *e
@@ -68,6 +78,9 @@ func TestIndependentEvaluationBindsEvidenceAndCannotBootstrap(t *testing.T) {
 		},
 		"changed revision": func(_ *EvaluationRequest, b *ActionBinding, _ *Context, _ *modelregistry.VerifiedModel, _ *StructuredVerdict, _ *reviewgate.FamilyPolicy, _ *time.Time, _ *string) {
 			b.TargetRevision++
+		},
+		"changed timestamp": func(_ *EvaluationRequest, b *ActionBinding, _ *Context, _ *modelregistry.VerifiedModel, _ *StructuredVerdict, _ *reviewgate.FamilyPolicy, _ *time.Time, _ *string) {
+			b.TargetUpdatedAt = b.TargetUpdatedAt.Add(time.Second)
 		},
 		"changed head": func(_ *EvaluationRequest, b *ActionBinding, _ *Context, _ *modelregistry.VerifiedModel, _ *StructuredVerdict, _ *reviewgate.FamilyPolicy, _ *time.Time, _ *string) {
 			b.HeadSHA = strings.Repeat("c", 40)
