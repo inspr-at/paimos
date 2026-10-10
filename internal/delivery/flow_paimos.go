@@ -101,11 +101,13 @@ type flowSourceEvent struct {
 func (m *Module) SyncFlow(ctx context.Context, tid string) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	more := false
 	service := db.AllProjects(ctx, "delivery flow projector: PAIMOS rounds, reviews and holds into project flow steps")
-	_, err := m.flowWrite(service, tid, nil, func(ctx context.Context, tx pgx.Tx, apply func([]flowBatch) error) error {
+	var batch []flowSourceEvent
+	// The event scan may cross a large unrelated tail. Read it without the
+	// tenant fence so an idle projector never holds up tenant writers.
+	err := db.InTenantReadSnapshot(service, m.pool, tid, func(tx pgx.Tx) error {
 		var after int64
-		err := tx.QueryRow(ctx, `SELECT last_event_id FROM delivery_flow_cursors FOR NO KEY UPDATE`).Scan(&after)
+		err := tx.QueryRow(ctx, `SELECT last_event_id FROM delivery_flow_cursors`).Scan(&after)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
@@ -115,7 +117,6 @@ func (m *Module) SyncFlow(ctx context.Context, tid string) (bool, error) {
 		if err != nil {
 			return err
 		}
-		var batch []flowSourceEvent
 		for rows.Next() {
 			var e flowSourceEvent
 			if err := rows.Scan(&e.ID, &e.Type, &e.NodeID, &e.At, &e.Before, &e.After, &e.Metadata); err != nil {
@@ -125,11 +126,26 @@ func (m *Module) SyncFlow(ctx context.Context, tid string) (bool, error) {
 			batch = append(batch, e)
 		}
 		rows.Close()
-		if err := rows.Err(); err != nil {
+		return rows.Err()
+	})
+	if err != nil || len(batch) == 0 {
+		return false, err
+	}
+	more := len(batch) == flowSyncBatch
+	_, err = m.flowWrite(service, tid, nil, func(ctx context.Context, tx pgx.Tx, apply func([]flowBatch) error) error {
+		var after int64
+		err := tx.QueryRow(ctx, `SELECT last_event_id FROM delivery_flow_cursors FOR NO KEY UPDATE`).Scan(&after)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		more = len(batch) == flowSyncBatch
+		if batch[len(batch)-1].ID <= after {
+			return nil
+		}
 		for _, e := range batch {
+			// Another pass may have committed while this batch was read.
+			if e.ID <= after {
+				continue
+			}
 			// Applied one event at a time: a close reads what earlier events opened.
 			b, err := flowFromPaimosTx(ctx, tx, tid, e)
 			if err != nil {
@@ -141,9 +157,6 @@ func (m *Module) SyncFlow(ctx context.Context, tid string) (bool, error) {
 				}
 			}
 			after = e.ID
-		}
-		if len(batch) == 0 {
-			return nil
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO delivery_flow_cursors(tenant_id,last_event_id,updated_at) VALUES($1,$2,$3)
 			ON CONFLICT(tenant_id) DO UPDATE SET last_event_id=EXCLUDED.last_event_id,updated_at=EXCLUDED.updated_at`, tid, after, m.now())
