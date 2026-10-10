@@ -233,6 +233,9 @@ func loadQueueProjection(ctx context.Context, tx pgx.Tx, node *nodeJSON) error {
 }
 
 func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCreate) (nodeJSON, error) {
+	if _, err := prepareNodeCreate(in); err != nil {
+		return nodeJSON{}, err
+	}
 	var out nodeJSON
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -242,21 +245,27 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 	return out, err
 }
 
-func (m *Module) createNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in nodeCreate) (nodeJSON, error) {
+type preparedNodeCreate struct {
+	humanCheck                            *string
+	kindID, explicit, prefix, body, state string
+	parentID, beforeID                    *string
+}
+
+func prepareNodeCreate(in nodeCreate) (preparedNodeCreate, error) {
 	humanCheck, err := parseHumanCheck(in.HumanCheck)
 	if err != nil {
-		return nodeJSON{}, err
+		return preparedNodeCreate{}, err
 	}
 	kindID, ok := parseUUID(in.KindID)
 	if !ok {
-		return nodeJSON{}, badRequest("invalid kind_id")
+		return preparedNodeCreate{}, badRequest("invalid kind_id")
 	}
 	if !nonBlank(in.Title) {
-		return nodeJSON{}, badRequest("title is required")
+		return preparedNodeCreate{}, badRequest("title is required")
 	}
 	explicit, prefix, err := createKeyChoice(in.Key, in.KeyPrefix)
 	if err != nil {
-		return nodeJSON{}, err
+		return preparedNodeCreate{}, err
 	}
 	body := ""
 	if in.Body != nil {
@@ -265,18 +274,27 @@ func (m *Module) createNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	state := "open"
 	if in.State != nil {
 		if !nonBlank(*in.State) {
-			return nodeJSON{}, badRequest("invalid state")
+			return preparedNodeCreate{}, badRequest("invalid state")
 		}
 		state = *in.State
 	}
 	parentID, err := optionalUUID(in.ParentID, "invalid parent_id")
 	if err != nil {
-		return nodeJSON{}, err
+		return preparedNodeCreate{}, err
 	}
 	beforeID, err := optionalUUID(in.BeforeID, "invalid before_id")
 	if err != nil {
+		return preparedNodeCreate{}, err
+	}
+	return preparedNodeCreate{humanCheck, kindID, explicit, prefix, body, state, parentID, beforeID}, nil
+}
+
+func (m *Module) createNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in nodeCreate) (nodeJSON, error) {
+	v, err := prepareNodeCreate(in)
+	if err != nil {
 		return nodeJSON{}, err
 	}
+	humanCheck, kindID, explicit, prefix, body, state, parentID, beforeID := v.humanCheck, v.kindID, v.explicit, v.prefix, v.body, v.state, v.parentID, v.beforeID
 	var node nodeJSON
 	err = func(ctx context.Context, tx pgx.Tx) error {
 		if err := armPortalModeration(ctx, tx, p); err != nil {
@@ -395,6 +413,9 @@ func (m *Module) createNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 }
 
 func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, raw map[string]json.RawMessage, expected *time.Time) (nodeJSON, error) {
+	if err := validateNodePatch(raw); err != nil {
+		return nodeJSON{}, err
+	}
 	var out nodeJSON
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -404,20 +425,27 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 	return out, err
 }
 
-func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, raw map[string]json.RawMessage, expected *time.Time) (nodeJSON, error) {
+func validateNodePatch(raw map[string]json.RawMessage) error {
 	if len(raw) == 0 {
-		return nodeJSON{}, badRequest("patch is empty")
+		return badRequest("patch is empty")
 	}
 	for key := range raw {
 		switch key {
 		case "title", "body", "fields", "estimate_hours", "state", "human_check", "kind_id", "type", "kind":
 		case "key":
-			return nodeJSON{}, badRequest("key is immutable")
+			return badRequest("key is immutable")
 		case "parent_id":
-			return nodeJSON{}, badRequest("parent is immutable; use move")
+			return badRequest("parent is immutable; use move")
 		default:
-			return nodeJSON{}, badRequest("unknown field")
+			return badRequest("unknown field")
 		}
+	}
+	return nil
+}
+
+func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, raw map[string]json.RawMessage, expected *time.Time) (nodeJSON, error) {
+	if err := validateNodePatch(raw); err != nil {
+		return nodeJSON{}, err
 	}
 	var node nodeJSON
 	err := func(ctx context.Context, tx pgx.Tx) error {
