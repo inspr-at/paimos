@@ -75,7 +75,7 @@ func (m *module) listen(w http.ResponseWriter, r *http.Request) {
 	}
 	deadline := time.Now().Add(time.Duration(waitMS) * time.Millisecond)
 	for len(page.Items) == 0 && time.Now().Before(deadline) {
-		waitErr := waitTenantNotify(ctx, conn, p.TenantID, deadline)
+		waitErr := m.waitNotify(ctx, conn, p.TenantID, deadline)
 		if ctx.Err() != nil {
 			return
 		}
@@ -163,7 +163,7 @@ func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64
 		}
 		rows, err := tx.Query(ctx, `SELECT `+messageCols+`
 			FROM inbox_messages
-			WHERE recipient_principal_id = $1::uuid
+			WHERE content_mode='durable' AND chat_thread_id IS NULL AND recipient_principal_id = $1::uuid
 			  AND ((recipient_session_id IS NULL AND NOT $5) OR recipient_session_id=$4::uuid)
               AND sent_event_id > $2
 			  AND acked_at IS NULL

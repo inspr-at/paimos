@@ -7,7 +7,9 @@ withDefaults(defineProps<{ state: AgentState; size?: number }>(), { size: 14 })
 
 <template>
   <svg class="agent-state-mark" :class="{ clock: state === 'waiting' || state === 'awaiting' }" :data-mark="state" :width="size" :height="size" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
-    <template v-if="state === 'problem'"><path d="M7 1.5 13 12H1Z" /><path d="M7 5v3m0 2v.2" /></template>
+    <template v-if="state === 'paused'"><rect x="2" y="2" width="10" height="10" rx="2" /><path d="M5 4.5v5m4-5v5" /></template>
+    <template v-else-if="state === 'pausing'"><circle cx="7" cy="7" r="5.5" /><path d="M5 4.5v5m4-5v5" /></template>
+    <template v-else-if="state === 'problem'"><path d="M7 1.5 13 12H1Z" /><path d="M7 5v3m0 2v.2" /></template>
     <template v-else-if="state === 'unresponsive'"><circle cx="7" cy="7" r="5.5" stroke-dasharray="2 2" /><path d="M3 7h2l1-2 2 4 1-2h2" /></template>
     <template v-else-if="state === 'throttled'"><path d="m4 1.5-3 3v5l3 3h6l3-3v-5l-3-3Z" /><path d="M5 4.5v5m4-5v5" /></template>
     <template v-else-if="state === 'done'"><circle cx="7" cy="7" r="5.5" /><path d="m4.4 7.2 1.9 1.9 3.3-3.7" /></template>

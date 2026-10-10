@@ -70,6 +70,7 @@ func TagOnce(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 		return 0, err
 	}
 	defer conn.Release()
+	ctx = db.WithConnection(ctx, pool, conn)
 	var locked bool
 	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, taggerLockKey).Scan(&locked); err != nil || !locked {
 		return 0, err
@@ -81,7 +82,7 @@ func TagOnce(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 			_ = conn.Conn().Close(unlockCtx)
 		}
 	}()
-	rows, err := pool.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	rows, err := conn.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
 	if err != nil {
 		return 0, err
 	}
@@ -171,7 +172,7 @@ func tagTenantPass(ctx context.Context, pool *pgxpool.Pool, tenantID string) (in
 	var run tagRun
 	err := db.InTenant(db.AllProjects(ctx, "method learning tagger"), pool, tenantID, func(tx pgx.Tx) error {
 		run = tagRun{}
-		// Match delete/updateNode and queue writers: pairing, then tree, then
+		// Match delete/updateNode and queue writers: tenant, tree, pairing, then
 		// rows. Node UPDATE triggers also take this tree lock; taking a node
 		// row first can deadlock with the status autopilot's startup pass.
 		if err := agentpairing.Lock(ctx, tx); err != nil {
@@ -281,7 +282,7 @@ func tagClosedTickets(ctx context.Context, tx pgx.Tx, tenantID string, cursor ta
 	rows, err := tx.Query(ctx, `SELECT n.id::text, n.title, n.updated_at, n.project_id::text
 		FROM nodes n
 		JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-		WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND k.slug='ticket'
+		WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND k.slug IN ('work','ticket')
 		  AND n.state = ANY($2::text[])
 		  AND n.project_id IS NOT NULL
 		  AND (($5::uuid IS NULL AND n.updated_at > $3) OR (n.updated_at, n.id) > ($3, $5::uuid))

@@ -9,7 +9,7 @@ import { me } from './work-fixtures'
 const mira = { id: '22222222-2222-4222-8222-222222222222', name: 'Mira Holm' }
 const now = Date.parse('2026-09-23T12:00:00Z')
 const ago = (hours: number) => new Date(now - hours * 3_600_000).toISOString()
-type Type = 'runbook' | 'guideline' | 'memory' | 'external-system' | 'related-project'
+type Type = 'runbook' | 'guideline' | 'memory' | 'external-system' | 'related-project' | 'decision'
 type Status = 'active' | 'proposed' | 'archived'
 const PROJECTS: Record<string, { id: string; key: string; title: string; prefix: string }> = {
   'p-pharos': { id: 'p-pharos', key: 'PRJ-17', title: 'Pharos', prefix: 'PHAROS' },
@@ -44,13 +44,13 @@ const DEPLOY = [
   'docker push ghcr.io/inspr-at/pharos:${VERSION}',
   '```',
   '',
-  'Pin the new tag in `hosts/csb1/pharos.nix` and open a pull request. The pin is the only change in it.',
+  'Pin the new tag in `hosts/prod-1/pharos.nix` and open a pull request. The pin is the only change in it.',
   '',
   '## Roll out',
   '',
-  '### Canary on csb1',
+  '### Canary on prod-1',
   '',
-  'Switch csb1 first and watch the beacon health probes for ten minutes. A single red probe stops the rollout.',
+  'Switch prod-1 first and watch the beacon health probes for ten minutes. A single red probe stops the rollout.',
   '',
   '### The rest of the fleet',
   '',
@@ -58,9 +58,9 @@ const DEPLOY = [
   '',
   '| Host | Role | Window |',
   '|---|---|---|',
-  '| csb1 | canary | any time |',
-  '| hsb1 | production | after 18:00 |',
-  '| hsb8 | production | after 18:00 |',
+  '| prod-1 | canary | any time |',
+  '| worker-1 | production | after 18:00 |',
+  '| worker-8 | production | after 18:00 |',
   '',
   '## Roll back',
   '',
@@ -104,7 +104,7 @@ export function knowledgeWorld(options: { empty?: boolean } = {}) {
       metadata: { url: 'https://console.hetzner.cloud', purpose: 'Provisioning, DNS and firewalls', secret_path: '1Password: Studio / Hetzner API' },
       body: 'The fleet runs on Hetzner Cloud in Falkenstein and Helsinki. Every host is created through Pharos, never by hand in the console.' })
     add({ id: 'k-aeon', key: 'PHAROS-49', type: 'related-project', slug: 'aeon', title: 'Aeon', updated_at: ago(24 * 12),
-      metadata: { instance_url: 'https://pm.example.com', key: 'AEON', relationship: 'Runs on the Pharos fleet' }, body: 'Aeon is deployed by Pharos to csb1 and hsb1.' })
+      metadata: { instance_url: 'https://pm.example.com', key: 'AEON', relationship: 'Runs on the Pharos fleet' }, body: 'Aeon is deployed by Pharos to prod-1 and worker-1.' })
     add({ id: 'k-aeon-deploy', key: 'AEON-60', type: 'runbook', slug: 'deploy-release', title: 'Ship an Aeon release', project: 'p-aeon', updated_at: ago(8),
       body: 'Tag the release, let CI build the image, then ask Pharos to deploy it. Aeon never deploys itself.' })
     add({ id: 'k-aeon-cutover', key: 'AEON-61', type: 'guideline', slug: 'no-cutover-without-approval', title: 'No cutover without explicit approval', project: 'p-aeon', updated_at: ago(24 * 2),
@@ -116,7 +116,10 @@ export function knowledgeWorld(options: { empty?: boolean } = {}) {
     renames: { 'deploy-flow': 'k-deploy' } as Record<string, string>,
     counter: { next: 90, event: 500, clock: 0 },
     learnings: [] as MockLearning[],
-    decisions: [] as { event_id: number; item: MockLearning }[],
+    // Full server scans that end before any open learning (AEON-788): each is an
+    // empty page with a continuation cursor.
+    emptyScans: 0,
+    decisions: [] as { event_id: number; item: MockLearning; reason?: string; lesson?: string }[],
   }
 }
 export interface MockLearning {
@@ -125,6 +128,10 @@ export interface MockLearning {
   // Mock only: the server answers 409 learning_sensitive with these ranges
   // until a person confirms.
   sensitive?: { field: 'text' | 'title'; start: number; end: number }[]
+  recommendation?: {
+    decision: 'accept' | 'dismiss'; knowledge_id?: string; knowledge_title?: string; lesson?: string; reason?: string
+    by: { id: string; name: string } | null; at: string; event_id: number; stale: boolean; target_missing: boolean
+  }
 }
 export type KnowledgeWorld = ReturnType<typeof knowledgeWorld>
 export interface KnowledgeMockOptions {
@@ -193,14 +200,29 @@ export async function mockKnowledge(page: Page, world: KnowledgeWorld, options: 
     calls.push({ path: url.pathname, method, query, body, headers: request.headers() })
     const parts = url.pathname.replace(/^\/api\/knowledge\/?/, '').split('/').filter(Boolean)
     if (parts[0] === 'learnings') {
-      if (method === 'GET') return json(route, 200, { items: world.learnings.map(({ sensitive: _sensitive, ...item }) => item), truncated: false })
+      if (method === 'GET') {
+        const scan = Number(query.get('cursor')?.match(/^scan-(\d+)$/)?.[1] ?? 0)
+        if (scan < world.emptyScans && !/^\d+$/.test(query.get('cursor') ?? '')) {
+          return json(route, 200, { items: [], truncated: true, next_cursor: `scan-${scan + 1}` })
+        }
+        // 50 per page like the server; the mock cursor is the next offset.
+        const offset = Number(query.get('cursor') ?? '0') || 0
+        const page = world.learnings.slice(offset, offset + 50).map(({ sensitive: _sensitive, ...item }) => item)
+        const more = offset + 50 < world.learnings.length
+        return json(route, 200, { items: page, truncated: more, ...(more ? { next_cursor: String(offset + 50) } : {}) })
+      }
       const id = decodeURIComponent(parts[1] ?? '')
       const found = world.learnings.find(item => item.id === id)
       if (!found) return json(route, 404, { error: 'This learning is no longer open.', code: 'learning_closed' })
       if (options.readOnly) return json(route, 403, { error: 'you can read knowledge but not change it', code: 'forbidden' })
+      // Like the server: a decision on text that changed since the person reviewed it is refused.
+      const reviewed = (body as { learning_text?: string } | null)?.learning_text
+      if ((parts[2] === 'accept' || parts[2] === 'dismiss') && method === 'POST' && reviewed !== undefined && reviewed !== found.text) {
+        return json(route, 409, { error: 'This learning changed since you reviewed it. Review it again.', code: 'learning_changed' })
+      }
       if (parts[2] === 'dismiss' && method === 'POST') {
         const eventId = ++world.counter.event
-        world.decisions.push({ event_id: eventId, item: found })
+        world.decisions.push({ event_id: eventId, item: found, reason: (body as { reason?: string } | null)?.reason })
         world.learnings = world.learnings.filter(item => item.id !== id)
         return json(route, 200, { id, decision: 'dismissed', event_id: eventId })
       }
@@ -208,20 +230,20 @@ export async function mockKnowledge(page: Page, world: KnowledgeWorld, options: 
         return json(route, 409, { error: 'This looks like a credential — remove it, or confirm it is not one.', code: 'learning_sensitive', ranges: found.sensitive })
       }
       if (parts[2] === 'accept' && method === 'POST') {
-        const input = body as { knowledge_id?: string }
+        const input = body as { knowledge_id?: string; lesson?: string }
         const entry = world.entries.find(candidate => candidate.id === input.knowledge_id && !candidate.deleted)
         if (!entry) return json(route, 404, { error: 'knowledge entry not found', code: 'not_found' })
         const expected = request.headers()['if-unmodified-since']
         if (expected && expected !== entry.updated_at) return json(route, 412, { error: 'the entry changed since you opened it', code: 'stale', entry: full(entry) })
         const before = structuredClone(entry)
         const date = new Date().toISOString().slice(0, 10)
-        const line = `- ${date}: ${found.text}. Source: [${found.key}](${found.href}).`
+        const line = `- ${date}: ${input.lesson ?? found.text}. Source: [${found.key}](${found.href}).`
         entry.body = `${entry.body.replace(/\s*$/, '')}\n\n${line}\n`
         entry.updated_at = tick()
         entry.updated_by = me
         entry.imported = false
         const eventId = record('knowledge.learning_accepted', before, entry)
-        world.decisions.push({ event_id: eventId, item: found })
+        world.decisions.push({ event_id: eventId, item: found, lesson: input.lesson })
         world.learnings = world.learnings.filter(item => item.id !== id)
         return json(route, 200, { id, decision: 'accepted', event_id: eventId, knowledge_id: entry.id, heading: 'Changelog', line, entry: full(entry, { event_id: eventId }) })
       }

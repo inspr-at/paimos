@@ -9,6 +9,7 @@ import { linkBody, linkedSentence, relationLabel, unlinkedSentence, type Relatio
 import { benefitGateError } from './doneGate'
 import { toast } from './toast'
 import { statusMeta } from './work'
+import { epicStats } from './outline'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Something went wrong' }
 
@@ -24,7 +25,7 @@ export function keyPrefix(routeKey: string | undefined): string | undefined {
 // A freshly created node in list-item shape, so lists and the panel can show it at once.
 export function asListItem(node: WorkNode, kind: Kind, parent: ListParent | null, project: ListItem['project']): ListItem {
   const priority = typeof node.fields.priority === 'string' ? node.fields.priority : null
-  return { ...node, kind_slug: kind.slug, kind_label: kind.label, priority, assignee: null, parent, children_count: 0, project }
+  return { ...node, kind_slug: kind.slug, kind_label: node.level_name || kind.label, priority, assignee: null, parent, children_count: node.work_children_count ?? 0, project }
 }
 
 export type SaveResult = 'ok' | 'conflict' | 'error'
@@ -43,8 +44,8 @@ export async function guardedMove(given: ListItem, parent: ListParent, after?: (
   const fromParentId = item.parent_id
   const since = rows.shown(item.id)?.updated_at ?? item.updated_at
   const sent = rows.mark()
-  const conflict = (latest: WorkNode) => {
-    rows.adoptNode(latest, sent)
+  const conflict = (latest: WorkNode, authoritative: boolean) => {
+    rows.adoptNode(latest, sent, { authoritative })
     rows.reshow(item.id)
     toast(`${item.key} was changed elsewhere, so it was not moved. The newer version is shown.`, { tone: 'error' })
     return 'conflict' as const
@@ -55,16 +56,17 @@ export async function guardedMove(given: ListItem, parent: ListParent, after?: (
     catch (e) {
       if (!(e instanceof APIError) || e.status !== 412) throw e
       const current = e.body.node as WorkNode | undefined
-      return conflict(current && typeof current.updated_at === 'string' ? current : await getNode(item.id))
+      const partial = current && typeof current.updated_at === 'string'
+      return conflict(partial ? current : await getNode(item.id), !partial)
     }
     // The answer is in the row store (this tab's write); the parent chip and
     // the epic a list groups by are known here, for this answer's revision
     // and parent only: a newer move that landed first keeps its own.
     rows.wrote(node, sent)
-    const epic = parent.kind_slug === 'epic' ? { epic: { id: parent.id, key: parent.key, title: parent.title } } : parent.kind_slug === 'project' ? { epic: null } : {}
+    const epic = ['work','epic'].includes(parent.kind_slug) ? { epic: { id: parent.id, key: parent.key, title: parent.title } } : parent.kind_slug === 'project' ? { epic: null } : {}
     rows.amend(item.id, node.updated_at, { parent, ...epic })
     after?.(item, fromParentId)
-    const where = parent.kind_slug === 'project' ? 'out of its epic' : `to ${parent.key} ${parent.title}`
+    const where = parent.kind_slug === 'project' ? 'to the project root' : `to ${parent.key} ${parent.title}`
     toast(`${item.key} moved ${where}`, from ? { action: { label: 'Undo', run: () => void guardedMove(item, from, after, rows) } } : {})
     return 'ok'
   } catch (e) {
@@ -96,6 +98,9 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   const readOnly = ref(false)
   const children = ref<ListItem[]>([])
   const childrenLoading = ref(false)
+  const leafProgress = ref<{ done: number; total: number; percent: number } | null>(null)
+  const progressError = ref('')
+  let progressRun = 0
   const related = ref<RelatedNode[]>([])
   // Whether this ticket's relations have been read (or failed): the blocks below them
   // wait for it, so relations never push activity down after it shows.
@@ -153,7 +158,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     if (item.value?.id !== target.id) return
     if (change) {
       if (change.fields.includes('project_id') && target.project) away = change.projectId !== target.project.id
-      if (!mine(change)) heldFields = [...new Set([...heldFields, ...change.fields])]
+      if (!mine(change) && change.type !== 'status_autopilot.derived') heldFields = [...new Set([...heldFields, ...change.fields])]
     }
     const deleted = rows.isDeleted(target.id) || away
     if (busy() && editing(target.id)) {
@@ -231,10 +236,30 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   // The children as the row store has them: its newest copy of each, none it
   // knows deleted. A page read before a gap is read again, like any other.
   // again: after a gap, the children shown stay until the new page lands.
+  async function loadLeafProgress() {
+    const target = item.value, request = ++progressRun, identity = generation
+    leafProgress.value = null; progressError.value = ''
+    if (!target) return
+    const current = () => request === progressRun && identity === generation && item.value?.id === target.id
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const sent = rows.mark()
+        const page = await listNodes({ within: target.id, kind: ['work', 'epic', 'ticket', 'task'], shape: ['leaf'], facets: ['state'], limit: 1 })
+        if (!current()) return
+        if (rows.gapSince(sent)) continue
+        if (!page.facets?.state) throw new Error('Leaf progress is unavailable.')
+        const stats = epicStats(page.facets.state, s => statusMeta(s).closed, s => ['done', 'delivered', 'accepted'].includes(statusMeta(s).key), s => statusMeta(s).key === 'cancelled')
+        leafProgress.value = { done: stats.done, total: stats.scope, percent: stats.scope ? Math.round(stats.done / stats.scope * 100) : 0 }
+        return
+      }
+      throw new Error('Leaf progress was interrupted by live updates.')
+    } catch (e) { if (current()) progressError.value = message(e) }
+  }
   async function loadChildren(again = false) {
     const target = item.value
     if (!again) children.value = []
-    if (!target || (target.kind_slug !== 'epic' && !target.children_count)) return
+    if (!target || (target.is_leaf !== false && target.kind_slug !== 'epic' && !target.children_count)) { progressRun++; leafProgress.value = null; progressError.value = ''; return }
+    void loadLeafProgress()
     if (!again) childrenLoading.value = true
     try {
       for (;;) {
@@ -276,7 +301,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     // The open ticket changed: a retry or an editor for the previous one must not land here.
     gapRetry.clear()
     release()
-    gone.value = false; error.value = ''
+    gone.value = false; error.value = ''; progressRun++; leafProgress.value = null; progressError.value = ''
     away = false; heldFields = []; seen = item.value?.updated_at ?? null; seenParent = item.value?.parent_id ?? null
     liveHeld.value = null; liveFields.value = []; liveMessage.value = ''
     if (!id) return
@@ -286,9 +311,9 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     void refresh(); void loadChildren(); void loadRelations()
   }, { immediate: true })
 
-  async function patch(change: TicketChange, onOk?: (node: WorkNode) => void): Promise<SaveResult> {
+  async function patch(change: TicketChange, onOk?: (node: WorkNode) => void, expectedId: string | null = item.value?.id ?? null): Promise<SaveResult> {
     const target = item.value
-    if (!target) return 'error'
+    if (!target || target.id !== expectedId) return 'error'
     const copy = base() ?? target
     const body: NodePatch = {}
     if (change.title !== undefined) body.title = change.title
@@ -326,7 +351,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
         return 'conflict'
       }
       if (e instanceof APIError && e.status === 403 && e.message !== 'only a person can mark a human check checked' && e.message !== 'only a person can undo a human check') {
-        readOnly.value = true
+        if (item.value?.id === target.id) readOnly.value = true
         toast(`You can read ${target.key} but not change it.`, { tone: 'error' })
         return 'error'
       }
@@ -373,11 +398,10 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     const target = item.value
     if (!target || target.parent?.id === epic.id) return
     // A move that found the ticket gone told the store; the panel follows it.
-    if (await guardedMove(target, { id: epic.id, key: epic.key, title: epic.title, kind_slug: 'epic' }, context.onMoved, rows) === 'error') sync(target, null)
+    if (await guardedMove(target, { id: epic.id, key: epic.key, title: epic.title, kind_slug: target.kind_slug === 'work' ? 'work' : 'epic' }, context.onMoved, rows) === 'error') sync(target, null)
   }
 
-  async function remove(): Promise<boolean> {
-    const target = item.value
+  async function remove(target: ListItem | null = item.value): Promise<boolean> {
     if (!target) return false
     const sent = rows.mark()
     try {
@@ -464,7 +488,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     if (!target || !title.trim()) return null
     try {
       const all = await kinds()
-      const kind = all.find(k => k.slug === (target.kind_slug === 'epic' ? 'ticket' : 'task'))
+      const kind = all.find(k => k.slug === 'work') ?? all.find(k => k.slug === (target.kind_slug === 'epic' ? 'ticket' : 'task'))
       if (!kind) throw new Error('this workspace has no such kind')
       const sent = rows.mark()
       const node = await createNode({ kind_id: kind.id, title: title.trim(), parent_id: target.id, state: 'new', key_prefix: keyPrefix(routeKey) })
@@ -472,6 +496,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
       // The child and the parent's count go through the row store: the count
       // follows once for this child, however many views report it.
       if (rows.adopt(created, sent, { full: false }) && item.value?.id === target.id) children.value = [...children.value, rows.latest(node.id)!]
+      if (item.value?.id === target.id) void loadLeafProgress()
       rows.child(target.id, node.id, true)
       context.onCreated(created)
       return created
@@ -499,7 +524,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     try {
       const preview = (await lookupNodes([id])).items.find(node => node.id === id)
       if (!preview || target.parent_id !== id) return
-      set({ id, key: preview.key, title: preview.title, kind_slug: target.kind_slug === 'task' ? 'ticket' : 'epic' })
+      set({ id, key: preview.key, title: preview.title, kind_slug: target.kind_slug === 'work' ? 'work' : target.kind_slug === 'task' ? 'ticket' : 'epic' })
     } catch { /* the chip keeps the former parent until the next load */ }
   }
   const liveView: LiveView = {
@@ -512,10 +537,12 @@ export function useTicket(item: Ref<ListItem | null>, context: {
         // moved elsewhere) stays until the next load.
         const at = children.value.findIndex(entry => entry.id === change.id)
         const copy = at >= 0 && node && !rows.isDeleted(change.id) ? rows.latest(change.id) : undefined
-        if (copy && copy.parent_id === target.id && compareRevision(copy.updated_at, children.value[at].updated_at) > 0) children.value = children.value.map((child, i) => i === at ? copy : child)
+        if (copy && copy.parent_id === target.id && (compareRevision(copy.updated_at, children.value[at].updated_at) > 0 || change.type === 'status_autopilot.derived')) children.value = children.value.map((child, i) => i === at ? copy : child)
+        void loadLeafProgress()
         return
       }
       sync(target, change)
+      if (target.is_leaf === false || target.kind_slug === 'epic' || target.children_count) void loadLeafProgress()
     },
     // After a gap nothing is known to have changed: read the ticket again.
     // While the viewer edits the answer waits like a live change. A failed
@@ -527,6 +554,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   // The open ticket stays in the store while the panel shows it.
   onScopeDispose(rows.hold(() => item.value ? [item.value.id] : []))
   onScopeDispose(() => {
+    progressRun++
     gapRetry.clear()
     clearTimeout(flashTimer)
     release()
@@ -541,12 +569,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     sync(target, null)
   })
 
-  function childProgress() {
-    const list = children.value
-    const scope = list.filter(child => statusMeta(child.state).key !== 'cancelled')
-    const done = scope.filter(child => ['done', 'delivered', 'accepted'].includes(statusMeta(child.state).key)).length
-    return { done, total: scope.length, percent: scope.length ? Math.round((done / scope.length) * 100) : 0 }
-  }
+  function childProgress() { return leafProgress.value }
 
   async function convert(toKind: string) {
     const target = item.value
@@ -561,5 +584,5 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     if (item.value?.id === target.id) await loadChildren()
   }
 
-  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, hold, base, setEstimate, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink, convert, liveFields, liveMessage, liveHeld }
+  return { loading, error, gone, readOnly, children, childrenLoading, progressError, related, relationsReady, refresh, patch, hold, release, base, setEstimate, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink, convert, liveFields, liveMessage, liveHeld }
 }

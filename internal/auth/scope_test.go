@@ -78,6 +78,7 @@ func TestAgentScopeSeparatesProjectSubpathsAndUnknownRoutes(t *testing.T) {
 		{"POST", "/api/knowledge/learnings/n-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/accept", ""},
 		{"POST", "/api/knowledge/learnings/n-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/dismiss", ""},
 		{"POST", "/api/knowledge/learnings/n-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/draft", ""},
+		{"PUT", "/api/knowledge/learnings/n-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/recommendation", "knowledge.write"},
 		{"GET", "/api/tickets/graph", "nodes.read"},
 		{"GET", "/api/tickets", ""},
 		{"POST", "/api/knowledge", "knowledge.write"},
@@ -102,6 +103,15 @@ func TestAgentScopeSeparatesProjectSubpathsAndUnknownRoutes(t *testing.T) {
 		{"PUT", "/api/plugins/foo/installation", ""},
 		{"GET", "/api/unlisted", ""},
 		{"GET", "/api/me", selfScope},
+		{"GET", "/api/status/help", authz.AuthenticatedRoute},
+		{"HEAD", "/api/status/help", authz.AuthenticatedRoute},
+		{"GET", "/api/status/help?project_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", authz.AuthenticatedRoute},
+		{"POST", "/api/status/help", ""},
+		{"PUT", "/api/status/help", ""},
+		{"PATCH", "/api/status/help", ""},
+		{"DELETE", "/api/status/help", ""},
+		{"GET", "/api/status/help/extra", ""},
+		{"GET", "/api/status/other", ""},
 		{"GET", "/api/me/profile", ""},
 		{"GET", "/api/tags", "nodes.read"},
 		{"PATCH", "/api/tags/bug", "nodes.configure"},
@@ -176,7 +186,7 @@ func TestEmptyAgentKeyDeniedAcrossRegisteredAPIRoutes(t *testing.T) {
 	reset(t)
 	tenantID := insertTenant(t, "scope-audit", "Scope audit")
 	m := newMod(t, Config{})
-	key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "empty-audit", "", []string{}, nil)
+	key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, "empty-audit", "", []string{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,14 +196,13 @@ func TestEmptyAgentKeyDeniedAcrossRegisteredAPIRoutes(t *testing.T) {
 		path = routeValue.ReplaceAllString(path, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 		req := httptest.NewRequest(method, path, bytes.NewReader(nil))
 		setPolicyPattern(req)
-		if scope, _ := coreAgentScope(req); scope == selfScope {
-			// Reading its own identity is the one route every key may call.
-			continue
-		}
 		req.Header.Set("Authorization", "Bearer "+key.Token)
 		res := httptest.NewRecorder()
 		handler.ServeHTTP(res, req)
 		want := http.StatusForbidden
+		if pattern == "GET /api/me" || pattern == "GET /api/status/help" {
+			want = http.StatusNoContent // Only these two reads need no key scope.
+		}
 		if pattern == "GET /api/inbox/messages/{messageId}/receipt" {
 			want = http.StatusNotFound // Sender-only receipts conceal permission denial.
 		}
@@ -207,7 +216,7 @@ func TestCoordinatorScopesReachWorkRoutes(t *testing.T) {
 	reset(t)
 	tenantID := insertTenant(t, "coordinator-audit", "Coordinator audit")
 	m := newMod(t, Config{})
-	key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "aeon-coordinator", "", []string{"harness.worker", "inbox.read", "inbox.send", "nodes.read"}, nil)
+	key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, "aeon-coordinator", "", []string{"harness.worker", "inbox.read", "inbox.send", "nodes.read"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +256,7 @@ func TestAccountMetadataScopeAtMiddleware(t *testing.T) {
 		{"empty", []string{}, http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, tc.name, "", tc.scopes, nil)
+			key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, tc.name, "", tc.scopes, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -277,7 +286,7 @@ func TestServicePrincipalsCannotReceiveAgentKeys(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, name, "", []string{"nodes.read"}, nil); !errors.Is(err, errServicePrincipal) {
+			if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, name, "", []string{"nodes.read"}, nil); !errors.Is(err, errServicePrincipal) {
 				t.Fatalf("service key error: %v", err)
 			}
 		})
@@ -289,11 +298,11 @@ func TestServicePrincipalsCannotReceiveAgentKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "person-service", "", nil, nil); !errors.Is(err, errServicePrincipal) {
+	if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, "person-service", "", nil, nil); !errors.Is(err, errServicePrincipal) {
 		t.Fatalf("person service name collision: %v", err)
 	}
 	// A colliding ordinary agent must not hide a service principal of the same name.
-	normalKey, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "collision", "", []string{"nodes.read"}, nil)
+	normalKey, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, "collision", "", []string{"nodes.read"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +313,7 @@ func TestServicePrincipalsCannotReceiveAgentKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "collision", "", nil, nil); !errors.Is(err, errServicePrincipal) {
+	if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, "collision", "", nil, nil); !errors.Is(err, errServicePrincipal) {
 		t.Fatalf("collision key error: %v", err)
 	}
 	if got := countInTenant(t, tenantID, `SELECT count(*) FROM agent_keys WHERE name='collision'`); got != 1 {

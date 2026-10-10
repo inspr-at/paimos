@@ -140,7 +140,7 @@ func nodeRoute(ctx context.Context, tx pgx.Tx, tenantID, kind, classicID string)
 		  FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
 		  JOIN nodes p ON p.tenant_id=n.tenant_id AND p.id=n.project_id AND p.deleted_at IS NULL
 		  WHERE n.tenant_id=$1::uuid AND n.deleted_at IS NULL AND n.fields->'classic'->>'id'=$2
-		    AND k.slug IN ('ticket','task','epic') LIMIT 2`
+		    AND k.slug IN ('work','ticket','task','epic') LIMIT 2`
 	}
 	rows, err := tx.Query(ctx, query, tenantID, classicID)
 	if err != nil {

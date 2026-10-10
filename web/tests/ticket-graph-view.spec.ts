@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
-import { mockView } from './work-fixtures'
+import { me, mockView } from './work-fixtures'
+import { headerStorageKey } from '../src/lib/projectHeader'
 
 test.use({ viewport: { width: 1600, height: 1000 }, launchOptions: { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } })
 test.setTimeout(60_000)
 const canvas = (page: Page) => page.locator('.ticket-graph-canvas')
+const expectNodes = (page: Page, total: number, parents: number) => expect(canvas(page)).toHaveAttribute('aria-label', new RegExp(`${total - parents} ${total - parents === 1 ? 'leaf' : 'leaves'} · ${parents} ${parents === 1 ? 'parent' : 'parents'} ·`))
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
 const views = (page: Page) => page.getByRole('tablist', { name: 'Ticket views' })
 const ready = async (page: Page) => {
@@ -72,41 +74,41 @@ test('Hide closed reloads the graph projection; the legend and bounded-result no
   const world = ticketGraphWorld(); world.graph.truncated = true
   const { calls } = await mockTicketGraph(page, world)
   await page.goto('/p/PHAROS/tickets?view=graph'); await ready(page)
-  await expect(canvas(page)).toHaveAttribute('aria-label', /50 tickets/)
-  expect(calls[0].get('include_closed')).toBeNull()
+  await expectNodes(page, 50, 5)
+  expect(calls[0].get('include_closed')).toBe('true')
   const legend = page.getByRole('group', { name: 'Ticket graph legend' })
-  for (const label of ['Open', 'In progress', 'Closed', 'Epic hub', 'Parent', 'Blocks', 'Relates', 'Implements', 'Duplicates']) await expect(legend.getByText(label, { exact: true })).toBeVisible()
+  for (const label of ['Open', 'In progress', 'Closed', 'Parent hub', 'Parent', 'Blocks', 'Relates', 'Implements', 'Duplicates']) await expect(legend.getByText(label, { exact: true })).toBeVisible()
   await expect(page.getByText('This project’s graph is truncated; some tickets or links are not shown.')).toBeVisible()
   await page.getByRole('checkbox', { name: 'Hide closed', exact: true }).uncheck()
   await expect(page).toHaveURL(/closed=1/)
-  await expect(canvas(page)).toHaveAttribute('aria-label', /60 tickets/)
+  await expectNodes(page, 60, 5)
   expect(calls.at(-1)!.get('include_closed')).toBe('true')
   await page.getByRole('checkbox', { name: 'Hide closed', exact: true }).check()
-  await expect(canvas(page)).toHaveAttribute('aria-label', /50 tickets/)
+  await expectNodes(page, 50, 5)
 })
 
 test('status, priority, type and search use the Tickets query', async ({ page }) => {
   const { calls } = await mockTicketGraph(page)
   await page.goto('/p/PHAROS/tickets?view=graph'); await ready(page)
-  await expect(canvas(page)).toHaveAttribute('aria-label', /50 tickets/)
+  await expectNodes(page, 50, 5)
   await expect(page.getByRole('button', { name: /^Assignee/ })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /^Display:/ })).toHaveCount(0)
   await page.getByRole('button', { name: 'Filter by more' }).click()
-  await expect(page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem')).toHaveText(['Status', 'Priority', 'Type'])
+  await expect(page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem')).toHaveText(['Status', 'Priority', 'Parents / Leaves', 'Depth', 'Legacy type'])
   await page.keyboard.press('Escape')
   await page.locator('.facet-btn[data-dim="status"]').click()
   await page.getByRole('checkbox', { name: /^In progress/ }).check()
   await page.keyboard.press('Escape')
-  await expect(canvas(page)).toHaveAttribute('aria-label', /20 tickets/)
+  await expectNodes(page, 20, 5)
   await page.locator('.facet-btn[data-dim="priority"]').click()
   await page.getByRole('checkbox', { name: /^High/ }).check()
   await page.keyboard.press('Escape')
   await page.locator('.facet-btn[data-dim="type"]').click()
   await page.getByRole('checkbox', { name: /^Epic/ }).check()
   await page.keyboard.press('Escape')
-  await expect(canvas(page)).toHaveAttribute('aria-label', /5 tickets/)
+  await expectNodes(page, 5, 5)
   await page.getByRole('searchbox', { name: 'Search tickets in this project' }).fill('Reliable')
-  await expect(canvas(page)).toHaveAttribute('aria-label', /1 ticket/)
+  await expectNodes(page, 1, 1)
   expect(calls.length).toBeGreaterThan(1)
   await expect(page).toHaveURL(/q=Reliable/)
   await views(page).getByRole('tab', { name: 'List', exact: true }).click()
@@ -115,6 +117,7 @@ test('status, priority, type and search use the Tickets query', async ({ page })
 
 test('saved assignee, type, priority, status and body search match the header context', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await page.addInitScript(({ key }) => localStorage.setItem(key, JSON.stringify({ density: 'comfortable', roomy: 'comfortable' })), { key: headerStorageKey('t1', me.id) })
   const world = ticketGraphWorld(), owner = world.work.people[0].id
   const view = mockView({ id: '11111111-1111-4111-8111-111111111111', name: 'My planned work', filters: { assignee: owner, type: 'ticket', priority: 'high', status: 'in_progress', q: 'acceptance' } })
   world.work.views.push(view)
@@ -132,7 +135,7 @@ test('saved assignee, type, priority, status and body search match the header co
   await page.locator('.project-head').hover()
   await page.getByRole('button', { name: 'Open graph', exact: true }).click()
   await ready(page)
-  await expect(canvas(page)).toHaveAttribute('aria-label', /12 tickets/)
+  await expectNodes(page, 12, 0)
   await expect(page).toHaveURL(/v=11111111-1111-4111-8111-111111111111/)
   await page.locator('.facet-btn[data-dim="status"]').click()
   await expect(page.locator('.facet-option').filter({ has: page.getByRole('checkbox', { name: /^In progress/ }) }).locator('.count')).toHaveText('12')
@@ -144,7 +147,7 @@ test('mobile filters contain only supported dimensions and Hide closed', async (
   await page.goto('/p/PHAROS/tickets?view=graph'); await ready(page)
   await page.getByRole('button', { name: 'Filters', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
-  await expect(sheet.locator('.sheet-section > .eyebrow')).toHaveText(['Status', 'Priority', 'Type'])
+  await expect(sheet.locator('.sheet-section > .eyebrow')).toHaveText(['Display', 'Status', 'Priority', 'Parents / Leaves', 'Depth', 'Legacy type'])
   await sheet.getByRole('checkbox', { name: 'Hide closed tickets' }).uncheck()
   await expect(sheet.getByRole('button', { name: 'Show 60 tickets' })).toBeVisible()
   await sheet.getByRole('button', { name: 'Show 60 tickets' }).click()

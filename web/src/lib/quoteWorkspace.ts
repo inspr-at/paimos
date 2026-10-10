@@ -19,6 +19,8 @@ export interface LiveQuote {
   readonly view: ShallowRef<SessionView | null>
   readonly presence: ShallowRef<PresenceSnapshot | null>
   readonly recovery: ShallowRef<RecoveryDraft | null>
+  // Layout can render before the IndexedDB recovery decision is complete.
+  readonly recoveryReady: Ref<boolean>
   readonly projection: ShallowRef<QuoteProjection | null>
   // The frozen document of the current version once the quote is issued.
   readonly frozen: ShallowRef<QuoteVersion | null>
@@ -42,7 +44,7 @@ function open(scope: Scope, quoteId: string): Entry {
   const quote: LiveQuote = {
     quoteId, session,
     view: shallowRef(null), presence: shallowRef(null), recovery: shallowRef(null), projection: shallowRef(null), frozen: shallowRef(null),
-    error: ref(''), draftMissing: ref(false), editor: null, presenceClient: null, canSaveNow: null,
+    error: ref(''), draftMissing: ref(false), recoveryReady: ref(false), editor: null, presenceClient: null, canSaveNow: null,
     ready: new Promise<void>(resolve => { markReady = resolve }),
     refresh,
   }
@@ -74,6 +76,7 @@ function open(scope: Scope, quoteId: string): Entry {
       ])
       if (closed) return
       quote.recovery.value = recovery
+      quote.recoveryReady.value = true
       markReady()
       // Opening the draft marks it clean; an issued quote stays read-only whichever answered first.
       const known = quote.projection.value

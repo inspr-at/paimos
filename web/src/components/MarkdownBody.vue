@@ -6,9 +6,10 @@ import { ATTACHMENT_REF, contentUrl } from '../lib/attachments'
 import { headingSlug, type Heading } from '../lib/knowledge'
 import { installMarkdownTicketLinks } from '../lib/markdownLinks'
 import TicketLink from './releases/TicketLink.vue'
+import ChatCodeBlock from './agents/ChatCodeBlock.vue'
 // anchors (knowledge pages): headings get ids and a link to themselves, the
 // outline is emitted for a table of contents, and web links open in a new tab.
-const props = defineProps<{ body: string; anchors?: boolean }>()
+const props = defineProps<{ body: string; anchors?: boolean; chat?: boolean }>()
 const emit = defineEmits<{ openAttachment: [id: string]; headings: [items: Heading[]]; anchor: [id: string]; jump: [id: string] }>()
 // Raw HTML stays text; markdown-it rejects script/data links. linkify stays off:
 // bare http(s) addresses and ticket keys are linked by our own pass, which skips
@@ -48,7 +49,8 @@ installMarkdownTicketLinks(markdown)
 
 // Heading anchors: the DOM id carries a prefix so a heading can never take an id the
 // page itself uses; the link (and the URL hash) is the bare slug.
-interface AnchorEnv { [key: string]: unknown; anchors?: boolean; used?: Map<string, number>; headings?: Heading[] }
+interface ChatCode { code: string; language: string }
+interface AnchorEnv { [key: string]: unknown; anchors?: boolean; chat?: boolean; codes?: ChatCode[]; used?: Map<string, number>; headings?: Heading[] }
 const LINK_ICON = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6.6 9.4 9.4 6.6M7.2 4.4l1.2-1.2a2.6 2.6 0 0 1 3.7 3.7l-1.2 1.2M8.8 11.6l-1.2 1.2a2.6 2.6 0 0 1-3.7-3.7l1.2-1.2"/></svg>'
 const inlineText = (token: { children?: { type: string; content: string }[] | null } | undefined) =>
   (token?.children ?? []).filter(child => child.type === 'text' || child.type === 'code_inline' || child.type === 'ticket_ref').map(child => child.content).join('').trim()
@@ -81,15 +83,24 @@ markdown.renderer.rules.link_open = (tokens, index, options, rawEnv, self) => {
 
 // Code blocks and tables scroll sideways when wide; keyboard users can reach and scroll them.
 const renderFence = markdown.renderer.rules.fence!
-markdown.renderer.rules.fence = (tokens, index, options, env, self) => renderFence(tokens, index, options, env, self).replace(/^<pre>/, '<pre tabindex="0">')
+function chatCode(code: string, language: string, env: AnchorEnv) {
+  const codes = env.codes ??= []
+  const index = codes.push({ code, language }) - 1
+  return `<div data-chat-code="${index}"></div>`
+}
+markdown.renderer.rules.fence = (tokens, index, options, env, self) => env?.chat
+  ? chatCode(tokens[index].content, tokens[index].info.trim().split(/\s+/)[0] ?? '', env)
+  : renderFence(tokens, index, options, env, self).replace(/^<pre>/, '<pre tabindex="0">')
 const renderCodeBlock = markdown.renderer.rules.code_block!
-markdown.renderer.rules.code_block = (tokens, index, options, env, self) => renderCodeBlock(tokens, index, options, env, self).replace(/^<pre>/, '<pre tabindex="0">')
+markdown.renderer.rules.code_block = (tokens, index, options, env, self) => env?.chat
+  ? chatCode(tokens[index].content, '', env)
+  : renderCodeBlock(tokens, index, options, env, self).replace(/^<pre>/, '<pre tabindex="0">')
 markdown.renderer.rules.table_open = (tokens, index, options, _env, self) => { tokens[index].attrSet('tabindex', '0'); return self.renderToken(tokens, index, options) }
 
 const result = computed(() => {
-  const env: AnchorEnv = { anchors: !!props.anchors }
+  const env: AnchorEnv = { anchors: !!props.anchors, chat: !!props.chat }
   const html = markdown.render(props.body, env as Parameters<typeof markdown.render>[1])
-  return { html, headings: env.headings ?? [] }
+  return { html, codes: env.codes ?? [], headings: env.headings ?? [] }
 })
 const rendered = computed(() => result.value.html)
 watch(() => result.value.headings, headings => { if (props.anchors) emit('headings', headings) }, { immediate: true })
@@ -104,27 +115,51 @@ const appContext: AppContext | null = instance
   ? { ...instance.appContext, provides: (instance as unknown as { provides: AppContext['provides'] }).provides }
   : null
 const slots = new Set<HTMLElement>()
+const codeStates = new Map<number, { expanded: boolean; top: number; left: number; follow: boolean }>()
 function unmountTickets() {
   for (const el of slots) render(null, el)
   slots.clear()
 }
 function mountTickets() {
-  unmountTickets()
   const root = host.value
   if (!root || !appContext) return
+  // Keep code components when only their text changes: keyboard focus and
+  // reader intent survive appended output. Removed HTML owns no live mounts.
+  for (const el of slots) if (!root.contains(el)) { render(null, el); slots.delete(el) }
   for (const el of root.querySelectorAll<HTMLElement>('[data-ticket-key]')) {
     const key = el.dataset.ticketKey
     if (!key) continue
     // v-html left the key as text. Mounting adds the link beside it unless that text goes first.
-    el.replaceChildren()
+    if (!slots.has(el)) el.replaceChildren()
     const vnode = createVNode(TicketLink, { ticketKey: key, variant: 'inline' })
     vnode.appContext = appContext
     render(vnode, el)
     slots.add(el)
   }
+  for (const el of root.querySelectorAll<HTMLElement>('[data-chat-code]')) {
+    const index = Number(el.dataset.chatCode)
+    const code = result.value.codes[index]
+    if (!code) continue
+    let state = codeStates.get(index)
+    if (!state) codeStates.set(index, state = { expanded: false, top: 0, left: 0, follow: true })
+    const vnode = createVNode(ChatCodeBlock, { ...code, state })
+    vnode.appContext = appContext
+    render(vnode, el)
+    slots.add(el)
+  }
+  for (const index of codeStates.keys()) if (index >= result.value.codes.length) codeStates.delete(index)
 }
 onMounted(mountTickets)
-watch(rendered, () => { mountTickets() }, { flush: 'post' })
+// Capture scroll before v-html replaces a host. Do not render during this
+// pre-flush: render() flushes Vue's queue and would mount before the DOM patch.
+watch(result, () => {
+  for (const el of slots) {
+    const state = codeStates.get(Number(el.dataset.chatCode))
+    const pre = el.querySelector('pre')
+    if (state && pre) { state.top = pre.scrollTop; state.left = pre.scrollLeft }
+  }
+}, { flush: 'pre' })
+watch(result, () => { mountTickets() }, { flush: 'post' })
 onBeforeUnmount(unmountTickets)
 function click(event: MouseEvent) {
   const target = event.target as HTMLElement
@@ -137,9 +172,10 @@ function click(event: MouseEvent) {
   if (link) { event.preventDefault(); emit('jump', decodeURIComponent(link.getAttribute('href')!.slice(1))) }
 }
 </script>
-<template><div ref="host" class="markdown-body" :class="{ anchored: anchors }" v-html="rendered" @click="click" /></template>
+<template><div ref="host" class="markdown-body" :class="{ anchored: anchors, 'chat-markdown': chat }" v-html="rendered" @click="click" /></template>
 <style scoped>
 .markdown-body { overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; color: var(--ink); }
+.chat-markdown { font-size: 14.5px; line-height: 1.6; }
 .markdown-body > :deep(:first-child) { margin-top: 0; }
 .markdown-body :deep(p) { margin: 0 0 .85em; color: var(--ink); }
 .markdown-body :deep(h1), .markdown-body :deep(h2), .markdown-body :deep(h3), .markdown-body :deep(h4) { font-family: var(--font); font-weight: 650; letter-spacing: -.01em; line-height: 1.3; margin: 1.4em 0 .5em; color: var(--ink); }
@@ -173,8 +209,8 @@ function click(event: MouseEvent) {
 .markdown-body :deep(td), .markdown-body :deep(th) { padding: 6px 10px; border: 1px solid var(--line); text-align: left; }
 .markdown-body :deep(th) { font: 500 10.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
 .markdown-body :deep(.md-ticket) { display: contents; }
-.markdown-body :deep(a:not(.ticket-link)) { color: var(--teal); text-decoration: underline; text-decoration-color: var(--gold); text-underline-offset: 3px; }
-.markdown-body :deep(.md-attachment) { display: block; max-width: 100%; margin: .4em 0 1em; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: var(--surface-sunken, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line), 0 10px 26px -18px rgba(16, 35, 39, .5); cursor: zoom-in; }
+.markdown-body :deep(a:not(.ticket-link)) { color: var(--primary-ink); text-decoration: underline; text-decoration-color: var(--secondary-line); text-underline-offset: 3px; }
+.markdown-body :deep(.md-attachment) { display: block; max-width: 100%; margin: .4em 0 1em; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: var(--surface-sunken, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line), 0 10px 26px -18px color-mix(in srgb, var(--shadow-color) 50%, transparent); cursor: zoom-in; }
 .markdown-body :deep(.md-attachment img) { display: block; max-width: 100%; height: auto; }
 .markdown-body :deep(.md-attachment:focus-visible) { box-shadow: var(--focus-ring); }
 .markdown-body :deep(pre:focus-visible), .markdown-body :deep(table:focus-visible) { box-shadow: var(--focus-ring); }

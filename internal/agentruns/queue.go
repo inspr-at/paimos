@@ -9,22 +9,28 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/escalation"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
-type queueTarget struct {
-	Agent   string  `json:"agent_principal_id,omitempty"`
-	Profile string  `json:"model_profile_id,omitempty"`
-	Account *string `json:"requested_account_id,omitempty"`
+type queueTarget = workqueue.RouteTarget
+
+type queueUndoToken struct {
+	RunID    string    `json:"run_id"`
+	Revision time.Time `json:"revision"`
 }
 type queueEntry struct {
+	Undo       *queueUndoToken   `json:"undo,omitempty"`
 	NodeID     string            `json:"node_id"`
 	ProjectID  *string           `json:"project_id"`
 	Key        string            `json:"key"`
@@ -53,6 +59,7 @@ type queueTicket struct {
 	ProjectID                         *string
 	Fields                            map[string]any
 	Raw                               json.RawMessage
+	Stale                             bool
 	NamedBlocker                      bool
 }
 type queueError struct {
@@ -66,12 +73,17 @@ func (e *queueError) Error() string     { return e.Message }
 func (e *queueError) HTTPStatus() int   { return e.Status }
 func (e *queueError) ErrorCode() string { return e.Code }
 
-// Same tree lock as nodes, work orders and status autopilot, after pairing and
+// Same tree lock as nodes, work orders and status autopilot, after the shared tenant/tree/pairing entry and
 // before order/run/account rows and the tenant event counter. Claim and queue edits
 // serialize; an entry cannot be removed while pickup commits.
 func queueLock(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`)
-	return err
+	return db.LockWorkTreeTx(ctx, tx)
+}
+func (m *module) queueDeadline(ctx context.Context, duration time.Duration) (context.Context, context.CancelFunc) {
+	if m.queueTimeout != nil {
+		return m.queueTimeout(ctx, duration)
+	}
+	return context.WithTimeout(ctx, duration)
 }
 func (m *module) mountQueue(mux *http.ServeMux) {
 	for _, route := range []struct {
@@ -82,7 +94,12 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 		{"GET /api/queue", false, m.queueList},
 		{"GET /api/queue/{nodeId}/readiness", false, m.queueReadiness},
 		{"POST /api/queue/{nodeId}/estimate", true, m.queueEstimate},
+		{"POST /api/queue/{nodeId}/undo", true, m.queueUndo},
 		{"POST /api/queue", true, m.queueAdd},
+		{"POST /api/queue/{nodeId}/snapshots", true, m.queueSnapshotCapture},
+		{"GET /api/queue-snapshots/{snapshotId}", false, m.queueSnapshotGet},
+		{"POST /api/queue-snapshots/{snapshotId}/apply", true, m.queueSnapshotApply},
+		{"DELETE /api/queue-snapshots/{snapshotId}", true, m.queueSnapshotCancel},
 		{"DELETE /api/queue/{nodeId}", true, m.queueRemove},
 		{"POST /api/queue/{nodeId}/move", true, m.queueMove},
 		{"POST /api/queue/reset", true, m.queueReset},
@@ -90,6 +107,15 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 	} {
 		mux.HandleFunc(route.pattern, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-store")
+			if strings.Contains(route.pattern, "snapshot") {
+				ctx, cancel := m.queueDeadline(r.Context(), 5*time.Second)
+				defer cancel()
+				r = r.WithContext(ctx)
+				if id := r.PathValue("snapshotId"); id != "" && !workorders.UUID(id) {
+					httpapi.WriteError(w, 400, "invalid snapshot id")
+					return
+				}
+			}
 			p, ok := tenant.PrincipalFrom(r.Context())
 			if !ok {
 				httpapi.WriteError(w, 401, "unauthorized")
@@ -99,7 +125,15 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 				httpapi.WriteError(w, 400, "invalid node id")
 				return
 			}
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			ctx, cancel := m.queueDeadline(r.Context(), 30*time.Second)
+			defer cancel()
+			r = r.WithContext(ctx)
+			// Decode only buffered memory inside the write, never transport
+			// input while retaining tenant/tree/pairing fences.
+			if err := workorders.BufferEndpointBody(w, r); err != nil {
+				workorders.WriteError(w, err)
+				return
+			}
 			var out any
 			err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 				if err := authz.RequireTx(r.Context(), tx, p, "nodes.read", authz.Scope{AnyProject: true}); err != nil {
@@ -111,10 +145,7 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 					}
 				}
 				if route.write {
-					if err := agentpairing.Lock(r.Context(), tx); err != nil {
-						return err
-					}
-					if err := queueLock(r.Context(), tx); err != nil {
+					if err := agentpairing.LockMutation(r.Context(), tx); err != nil {
 						return err
 					}
 				}
@@ -171,10 +202,22 @@ func queueLoadTicket(ctx context.Context, tx pgx.Tx, id string, lock bool) (queu
 			}
 		}
 	}
+	if err == nil && workqueue.Progress(t.State) {
+		var stale map[string]bool
+		stale, err = workqueue.Stale(ctx, tx, []string{id})
+		t.Stale = stale[id]
+	}
+	if err == nil && t.Kind == "work" {
+		var leaf bool
+		err = tx.QueryRow(ctx, `SELECT aeon_work_leaf($1::uuid) AND aeon_work_pending($1::uuid) IS NULL`, id).Scan(&leaf)
+		if !leaf {
+			t.Kind = "parent"
+		}
+	}
 	return t, err
 }
 func readiness(t queueTicket) workqueue.Readiness {
-	return workqueue.Check(t.Kind, t.State, t.Title, t.Body, t.Fields, t.NamedBlocker)
+	return workqueue.Check(t.Kind, t.State, t.Title, t.Body, t.Fields, t.NamedBlocker, t.Stale)
 }
 func (m *module) queueReadiness(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	t, err := queueLoadTicket(r.Context(), tx, r.PathValue("nodeId"), false)
@@ -219,18 +262,33 @@ func (m *module) queueEstimate(r *http.Request, tx pgx.Tx, p tenant.Principal) (
 	}
 	return readiness(t), nil
 }
-func queueUpdateTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, event string) error {
+func queueUpdateTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, event string, runID ...string) error {
+	change, _, err := queueUpdateTicketDeferred(ctx, tx, t, event, runID...)
+	if err != nil {
+		return err
+	}
+	_, err = events.Append(ctx, tx, p, change)
+	return err
+}
+
+func queueUpdateTicketDeferred(ctx context.Context, tx pgx.Tx, t queueTicket, event string, runID ...string) (events.Change, time.Time, error) {
 	raw, err := json.Marshal(t.Fields)
 	if err != nil {
-		return err
+		return events.Change{}, time.Time{}, err
 	}
 	var after json.RawMessage
-	err = tx.QueryRow(ctx, `UPDATE nodes SET state=$2,fields=$3,updated_at=clock_timestamp() WHERE id=$1 RETURNING to_jsonb(nodes)`, t.ID, t.State, raw).Scan(&after)
+	var revision time.Time
+	err = tx.QueryRow(ctx, `UPDATE nodes SET state=$2,fields=$3,updated_at=clock_timestamp() WHERE id=$1 RETURNING to_jsonb(nodes),updated_at`, t.ID, t.State, raw).Scan(&after, &revision)
 	if err != nil {
-		return err
+		return events.Change{}, time.Time{}, err
 	}
-	return workorders.Record(ctx, tx, p, t.ID, event, t.Raw, after)
+	change := events.Change{NodeID: &t.ID, Type: event, Before: t.Raw, After: after}
+	if len(runID) > 0 {
+		change.Metadata, _ = json.Marshal(map[string]string{"run_id": runID[0]})
+	}
+	return change, revision, nil
 }
+
 func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
 		NodeID string `json:"node_id"`
@@ -253,26 +311,60 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err = queuePermission(ctx, tx, p, t.ProjectID, true); err != nil {
 		return nil, err
 	}
+	prepared, err := m.queuePrepare(ctx, tx, p, t, in.queueTarget)
+	if err != nil {
+		return nil, err
+	}
+	for _, change := range prepared.Changes {
+		if _, err = events.Append(ctx, tx, p, change); err != nil {
+			return nil, err
+		}
+	}
+	entry, err := m.queueEntry(ctx, tx, t.ID)
+	entry.Undo = prepared.Undo
+	return entry, err
+}
+
+type queuePrepared struct {
+	Run     Run
+	Changes []events.Change
+	Undo    *queueUndoToken
+}
+
+// queuePrepare shares single-leaf eligibility and creation with parent snapshots.
+// It does not acquire the event counter; composite callers flush audit last.
+func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, in queueTarget) (queuePrepared, error) {
+	if err := queuePermission(ctx, tx, p, t.ProjectID, true); err != nil {
+		return queuePrepared{}, err
+	}
+	if err := escalation.CheckLaunchTx(ctx, tx, t.ID, "", "", nil); err != nil {
+		return queuePrepared{}, err
+	}
 	existing, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM agent_runs WHERE queue_node_id=$1 AND status IN ('queued','starting','running','waiting')`, t.ID))
 	if err == nil {
 		if existing.Status != "queued" {
-			return nil, workorders.Fail(409, "ticket already has an active run")
+			return queuePrepared{}, workorders.Fail(409, "ticket already has an active run")
 		}
-		if !sameTarget(existing, in.queueTarget) {
-			return nil, workorders.Fail(409, "ticket already queued with another target; remove it first")
+		if !sameTarget(existing, in) {
+			return queuePrepared{}, workorders.Fail(409, "ticket already queued with another target; remove it first")
 		}
-		return m.queueEntry(ctx, tx, t.ID)
+		return queuePrepared{Run: existing}, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, err
+		return queuePrepared{}, err
 	}
+	// Preserve the existing readiness refusal before writer exclusion. Both
+	// checks remain under the tenant/tree fence and precede every queue write.
 	ready := readiness(t)
 	if !ready.Ready {
-		return nil, &queueError{Status: 422, Message: "Not ready to queue: " + strings.Join(ready.Missing, ", "), Code: "queue_not_ready", Readiness: &ready}
+		return queuePrepared{}, &queueError{Status: 422, Message: "Not ready to queue: " + strings.Join(ready.Missing, ", "), Code: "queue_not_ready", Readiness: &ready}
+	}
+	if err = requireWriterFree(ctx, tx, t.ID, ""); err != nil {
+		return queuePrepared{}, err
 	}
 	if in.Agent != "" {
-		if err = queueValidateTarget(ctx, tx, in.queueTarget); err != nil {
-			return nil, err
+		if err = queueValidateTarget(ctx, tx, in); err != nil {
+			return queuePrepared{}, err
 		}
 	}
 	agent := in.Agent
@@ -282,41 +374,59 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		agent = p.TenantID
 		_, err = tx.Exec(ctx, `INSERT INTO principals(id,tenant_id,kind,name) VALUES($1,$1,'agent','Next free agent (queue holder)') ON CONFLICT(id) DO NOTHING`, agent)
 		if err != nil {
-			return nil, err
+			return queuePrepared{}, err
 		}
 		var inert bool
 		err = tx.QueryRow(ctx, `SELECT kind='agent' AND name='Next free agent (queue holder)' AND NOT EXISTS(SELECT 1 FROM agent_keys WHERE principal_id=$1) FROM principals WHERE id=$1`, agent).Scan(&inert)
 		if err != nil {
-			return nil, err
+			return queuePrepared{}, err
 		}
 		if !inert {
-			return nil, workorders.Fail(409, "queue holder identity conflicts")
+			return queuePrepared{}, workorders.Fail(409, "queue holder identity conflicts")
 		}
 	}
-	o, err := workorders.Create(ctx, tx, p, workorders.CreateInput{Title: t.Title, Body: t.Body, Parent: &t.ID, Criteria: workqueue.Criteria(t.Fields)})
+	o, changes, err := workorders.CreateDeferred(ctx, tx, p, workorders.CreateInput{Title: t.Title, Body: t.Body, Parent: &t.ID, Criteria: workqueue.Criteria(t.Fields)})
 	if err != nil {
-		return nil, err
+		return queuePrepared{}, err
 	}
 	_, err = tx.Exec(ctx, `UPDATE work_orders SET status='ready',revision=revision+1 WHERE node_id=$1`, o.NodeID)
 	if err != nil {
-		return nil, err
+		return queuePrepared{}, err
+	}
+	person := modelprefs.PrefsPerson(ctx, tx, p)
+	requirement, trace, err := modelprefs.OrderRequirementTrace(ctx, tx, o.NodeID, person)
+	if err != nil {
+		return queuePrepared{}, err
+	}
+	if in.Account != nil {
+		var now time.Time
+		if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
+			return queuePrepared{}, err
+		}
+		qualifies, err := agentaccounts.AccountMeetsResidency(ctx, tx, *in.Account, in.Profile, requirement, now)
+		if err != nil {
+			return queuePrepared{}, err
+		}
+		if !qualifies {
+			return queuePrepared{}, &modelprefs.ResidencyUnmet{}
+		}
 	}
 	var model *string
 	if in.Profile != "" {
 		if err = tx.QueryRow(ctx, `SELECT model FROM model_profiles WHERE id=$1 AND enabled`, in.Profile).Scan(&model); err != nil {
-			return nil, err
+			return queuePrepared{}, err
 		}
 	}
 	var rank *int
 	if in.Agent == "" {
 		if rank, err = workqueue.AppendRank(ctx, tx); err != nil {
-			return nil, err
+			return queuePrepared{}, err
 		}
 	}
-	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,queue_node_id,queue_by_principal_id,queue_at,queue_target_agent_id,queue_rank,queue_security_review_required)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,clock_timestamp(),$9,$10,$11) RETURNING `+columns, p.TenantID, o.NodeID, agent, optional(in.Profile), model, in.Account, t.ID, p.ID, optional(in.Agent), rank, ready.SecurityReviewRequired))
+	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,queue_node_id,queue_by_principal_id,queue_at,queue_target_agent_id,queue_rank,queue_security_review_required,residency,prefs_person_id,trace)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,clock_timestamp(),$9,$10,$11,$12,$13,$14) RETURNING `+columns, p.TenantID, o.NodeID, agent, optional(in.Profile), model, in.Account, t.ID, p.ID, optional(in.Agent), rank, ready.SecurityReviewRequired, modelprefs.Stamp(requirement), person, trace))
 	if err != nil {
-		return nil, err
+		return queuePrepared{}, err
 	}
 	if workqueue.State(t.State) != "blocked" {
 		t.State = "open"
@@ -326,14 +436,19 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		t.Fields["needs_review"] = true
 		t.Fields["review_route"] = "review-gate"
 	}
-	if err = queueUpdateTicket(ctx, tx, p, t, "queue.added"); err != nil {
-		return nil, err
+	change, revision, err := queueUpdateTicketDeferred(ctx, tx, t, "queue.added", v.ID)
+	if err != nil {
+		return queuePrepared{}, err
 	}
-	if err = workorders.Record(ctx, tx, p, o.NodeID, "run.created", nil, v); err != nil {
-		return nil, err
+	changes = append(changes, change)
+	changes = append(changes, events.Change{NodeID: &o.NodeID, Type: "run.created", After: v})
+	prepared := queuePrepared{Run: v, Changes: changes}
+	if ready.Stale {
+		prepared.Undo = &queueUndoToken{RunID: v.ID, Revision: revision}
 	}
-	return m.queueEntry(ctx, tx, t.ID)
+	return prepared, nil
 }
+
 func sameTarget(v Run, in queueTarget) bool {
 	agent := ""
 	if v.QueueTargetAgentID != nil {
@@ -373,7 +488,7 @@ func queueValidateTarget(ctx context.Context, tx pgx.Tx, in queueTarget) error {
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals p JOIN model_profiles m ON m.tenant_id=p.tenant_id
  WHERE p.id=$1 AND p.kind='agent' AND m.id=$2 AND m.enabled AND EXISTS(SELECT 1 FROM agent_accounts a
  WHERE a.registered_by_principal_id=p.id AND a.harness=m.harness AND ($3::uuid IS NULL OR a.id=$3)
- AND (a.allowed_model_profile_ids IS NULL OR m.id=ANY(a.allowed_model_profile_ids))))`, in.Agent, in.Profile, in.Account).Scan(&ok)
+ AND aeon_account_allows_profile(a.harness,a.allowed_model_profile_ids,m.id)))`, in.Agent, in.Profile, in.Account).Scan(&ok)
 	if err != nil {
 		return err
 	}

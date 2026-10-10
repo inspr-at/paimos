@@ -105,10 +105,18 @@ func canonicalUUID(s string) bool {
 func (m *module) draftLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, layerID, setID string, confirm bool) (LearningDecision, error) {
 	var out LearningDecision
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		// Undo already holds this fence before taking the learning lock. Take
+		// it first here too, and recheck write access while it is held.
+		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
+			return err
+		}
 		if !canWrite(ctx, tx, p, "knowledge.write") {
 			return fail(http.StatusForbidden, "forbidden", "you can read knowledge but not change it")
 		}
-		// Learning lock first, then the rules tenant lock inside PrepareWrite.
+		// Enter tenant/tree before learning/resource locks.
+		if err := rules.PrepareWrite(ctx, tx, p); err != nil {
+			return asKnowledgeRule(err)
+		}
 		if err := lockLearning(ctx, tx, p.TenantID, publicID); err != nil {
 			return err
 		}
@@ -126,9 +134,6 @@ func (m *module) draftLearning(ctx context.Context, p tenant.Principal, publicID
 		rule, err := learningRule(item, publicID, nodeID, commentID, comment)
 		if err != nil {
 			return err
-		}
-		if err = rules.PrepareWrite(ctx, tx, p); err != nil {
-			return asKnowledgeRule(err)
 		}
 		audit := learningDraftAudit{
 			SourceKey: publicID, Source: item.Source, NodeID: item.NodeID, CommentID: item.CommentID,
@@ -260,11 +265,11 @@ func undoLearningDrafted(ctx context.Context, tx pgx.Tx, p tenant.Principal, e e
 	if json.Unmarshal(e.After, &audit) != nil || e.NodeID == nil || audit.NodeID != *e.NodeID || audit.SourceKey == "" || audit.Rule.Identity == "" {
 		return events.Change{}, events.ErrConflict
 	}
-	if err := lockLearning(ctx, tx, p.TenantID, audit.SourceKey); err != nil {
-		return events.Change{}, err
-	}
 	if err := rules.PrepareWrite(ctx, tx, p); err != nil {
 		return events.Change{}, undoRuleErr(err)
+	}
+	if err := lockLearning(ctx, tx, p.TenantID, audit.SourceKey); err != nil {
+		return events.Change{}, err
 	}
 	var layerID, setID, projectID string
 	err := tx.QueryRow(ctx, `DELETE FROM method_learning_decisions

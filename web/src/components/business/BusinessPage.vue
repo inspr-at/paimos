@@ -76,13 +76,13 @@ onMounted(() => { void business.loadPlugins() })
 @media (max-width: 600px) { .summary { min-height: 40px; } }
 .summary :deep(b) { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.biz-tabs { display: flex; gap: 4px; margin: 0 0 18px; padding: 3px; width: max-content; max-width: 100%; overflow-x: auto; border-radius: 999px; background: var(--seg-bg); box-shadow: inset 0 1px 2px rgba(32, 60, 61, .08); scrollbar-width: none; }
+.biz-tabs { display: flex; gap: 4px; margin: 0 0 18px; padding: 3px; width: max-content; max-width: 100%; overflow-x: auto; border-radius: 999px; background: var(--seg-bg); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent); scrollbar-width: none; }
 .biz-tabs::-webkit-scrollbar { display: none; }
 .biz-tab { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; height: 30px; padding: 0 14px 0 12px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .biz-tab svg { color: var(--ink-3); }
 @media (hover: hover) { .biz-tab:hover { color: var(--teal-ink); background: var(--row-hover); } }
 .biz-tab:focus-visible { box-shadow: var(--focus-ring); }
-.biz-tab[aria-current="page"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px rgba(32, 60, 61, .12), inset 0 0 0 1px var(--glass-edge); }
+.biz-tab[aria-current="page"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--glass-edge); }
 .biz-tab[aria-current="page"] svg { color: var(--teal); }
 .gate { display: grid; justify-items: center; gap: 8px; max-width: 560px; margin: 24px auto; padding: 44px 28px; text-align: center; }
 .gate h2 { font-size: 17px; }

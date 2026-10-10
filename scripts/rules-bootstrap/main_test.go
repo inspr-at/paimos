@@ -656,3 +656,163 @@ func TestCheckCannotBeRedirectedToAnotherIndex(t *testing.T) {
 		t.Fatal("checked an ambient index instead of the bound checkout")
 	}
 }
+
+func TestCodeHealthDoctrineProposals(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "code-health-doctrine-proposals.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proposals struct {
+		Instructions []string `json:"submission_instructions"`
+		Drafts       []struct {
+			Rule    int             `json:"rule"`
+			TLDRDE  string          `json:"tldr_de"`
+			InboxID json.RawMessage `json:"inbox_id"`
+		} `json:"drafts"`
+	}
+	if err := json.Unmarshal(raw, &proposals); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("bilingual submission", func(t *testing.T) {
+		var submit, warning string
+		for _, instruction := range proposals.Instructions {
+			if strings.Contains(instruction, "doctrine propose --repo") {
+				submit = instruction
+			}
+			if strings.Contains(instruction, "Passing --tldr without --tldr-de") {
+				warning = instruction
+			}
+		}
+		if !strings.Contains(submit, "--tldr TLDR --tldr-de TLDR_DE") {
+			t.Error("submit command must pass both --tldr and --tldr-de")
+		}
+		if !strings.Contains(warning, "stores an empty German line") {
+			t.Error("instructions must warn that --tldr without --tldr-de stores an empty German line")
+		}
+	})
+	t.Run("pending German drafts", func(t *testing.T) {
+		if len(proposals.Drafts) != 7 {
+			t.Fatalf("want seven code-health drafts, got %d", len(proposals.Drafts))
+		}
+		for i, draft := range proposals.Drafts {
+			t.Run(fmt.Sprintf("rule %d", i+1), func(t *testing.T) {
+				if draft.Rule != i+1 {
+					t.Errorf("want rule %d, got %d", i+1, draft.Rule)
+				}
+				if strings.TrimSpace(draft.TLDRDE) == "" {
+					t.Error("draft must retain a non-empty tldr_de")
+				}
+				if !bytes.Equal(bytes.TrimSpace(draft.InboxID), []byte("null")) {
+					t.Error("draft inbox_id must be explicitly null until a real submission response")
+				}
+			})
+		}
+	})
+}
+
+func TestCodeHealthIntroNamesLayoutCompanion(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, section, found := strings.Cut(string(raw), "## Code health (AEON-574)\n\n")
+	if !found {
+		t.Fatal("missing AEON-574 code-health section")
+	}
+	intro, _, found := strings.Cut(section, "\n\n1.")
+	if !found {
+		t.Fatal("missing numbered code-health rules after the introduction")
+	}
+	for _, phrase := range []string{"Rules 1–6", "AEON-545", "rule 7", "companion layout rule", "AEON-541"} {
+		if !strings.Contains(intro, phrase) {
+			t.Errorf("code-health introduction must name %q", phrase)
+		}
+	}
+}
+
+// AEON-984: workers who follow AGENTS.md must edit the authored fragments.
+// The generated bundle is rebuilt; hand-editing it is discarded on the next generate.
+func TestAgentsOpenAPIContractNamesAuthoredFragments(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	_, layout, found := strings.Cut(text, "## Layout\n\n```\n")
+	if !found {
+		t.Fatal("missing layout block")
+	}
+	block, _, found := strings.Cut(layout, "\n```")
+	if !found {
+		t.Fatal("layout block is not closed")
+	}
+	var layoutLine string
+	for _, line := range strings.Split(block, "\n") {
+		if !strings.Contains(line, "openapi") {
+			continue
+		}
+		if layoutLine != "" {
+			t.Fatal("layout block has more than one openapi line")
+		}
+		layoutLine = line
+	}
+	if layoutLine == "" {
+		t.Fatal("layout block does not name the OpenAPI contract")
+	}
+	sites := []struct{ name, line string }{
+		{"stack", agentsLine(t, text, "one OpenAPI 3.1 contract")},
+		{"layout", layoutLine},
+		{"scope", agentsLine(t, text, "**Your ticket is your scope.**")},
+		{"contract", agentsLine(t, text, "**Contract first.**")},
+	}
+	const generated = "node api/generate.mjs --write"
+	for _, site := range sites {
+		for _, phrase := range []string{"api/areas/*.yaml", "api/openapi.base.yaml", "api/openapi.yaml", generated} {
+			if !strings.Contains(site.line, phrase) {
+				t.Errorf("%s must name %q on the same instruction line", site.name, phrase)
+			}
+		}
+		if !strings.Contains(site.line, "generated output rebuilt by") || !strings.Contains(site.line, generated) {
+			t.Errorf("%s must say api/openapi.yaml is generated output rebuilt by %s", site.name, generated)
+		}
+	}
+	for _, stale := range []string{
+		"the contract; change it first, then code",
+		"Endpoints are added to `api/openapi.yaml`",
+	} {
+		if strings.Contains(text, stale) {
+			t.Errorf("AGENTS.md still directs workers to hand-edit the generated bundle: %q", stale)
+		}
+	}
+	rolloutRaw, err := os.ReadFile("rollout.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rollout struct {
+		AgentsSHA string `json:"existing_agents_sha256"`
+	}
+	if err := json.Unmarshal(rolloutRaw, &rollout); err != nil {
+		t.Fatal(err)
+	}
+	if rollout.AgentsSHA != digest(raw) {
+		t.Errorf("existing_agents_sha256 = %s, AGENTS.md digest = %s", rollout.AgentsSHA, digest(raw))
+	}
+}
+
+func agentsLine(t *testing.T, text, anchor string) string {
+	t.Helper()
+	var found string
+	for _, line := range strings.Split(text, "\n") {
+		if !strings.Contains(line, anchor) {
+			continue
+		}
+		if found != "" {
+			t.Fatalf("anchor %q matches more than one line", anchor)
+		}
+		found = line
+	}
+	if found == "" {
+		t.Fatalf("missing anchor %q", anchor)
+	}
+	return found
+}

@@ -1,0 +1,12 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "project_filtered": {
+    "GET /api/usage/dashboard": true,
+    "GET /api/usage/model-estimates": true
+  },
+  "routes": {
+    "GET /api/projects/{projectId}/lead/usage": "harness.read",
+    "GET /api/usage/dashboard": "harness.read",
+    "GET /api/usage/model-estimates": "harness.read"
+  }
+}

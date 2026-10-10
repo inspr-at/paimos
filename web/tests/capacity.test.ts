@@ -30,7 +30,7 @@ function win(fields: { kind?: CapacityWindow['reading']['window_kind']; used: nu
     },
   }
 }
-const acct = (id: string, label: string, harness: string, fields: Partial<AccountInput> = {}): AccountInput => ({ id, label, harness, host: 'mbp2607', state: 'available', last_probe_ok: true, ...fields })
+const acct = (id: string, label: string, harness: string, fields: Partial<AccountInput> = {}): AccountInput => ({ id, label, harness, host: 'build-7', state: 'available', last_probe_ok: true, ...fields })
 const cap = (id: string, windows: CapacityWindow[], s = schedule()): AccountCapacity => ({ account_id: id, schedule: s, windows })
 const pools = (accounts: AccountInput[], capacity: AccountCapacity[]) => buildPools(buildRows(accounts, capacity), now)
 
@@ -135,12 +135,12 @@ test('one quota is one gauge, and a group is its own pool', () => {
   const group = '11111111-1111-4111-8111-111111111111'
   const built = pools(
     [
-      acct('a', 'Spare', 'codex', { host: 'mbp2607', fingerprint: fp }),
+      acct('a', 'Spare', 'codex', { host: 'build-7', fingerprint: fp }),
       acct('b', 'Spare', 'codex', { host: 'studio', fingerprint: fp }),
       acct('c', 'Client door', 'codex', { host: 'studio', groupId: group, groupName: 'Client' }),
     ],
     [
-      { ...cap('a', [win({ used: 10, budget: 10, reset: '2026-10-02T07:14:00Z' })]), quota_fingerprint: fp, hosts: ['mbp2607'], routing: { rank: 1, available_slots: 1 } },
+      { ...cap('a', [win({ used: 10, budget: 10, reset: '2026-10-02T07:14:00Z' })]), quota_fingerprint: fp, hosts: ['build-7'], routing: { rank: 1, available_slots: 1 } },
       { ...cap('b', [win({ used: 10, budget: 10, reset: '2026-10-02T07:14:00Z' })]), quota_fingerprint: fp, hosts: ['studio'], same_quota_as: 'a', routing: { rank: 2, available_slots: 0, same_quota_as: 'a' } },
       { ...cap('c', [win({ used: 20, budget: 10, reset: '2026-10-03T07:14:00Z' })]), group_id: group, group_name: 'Client', routing: { rank: 1, available_slots: 1 } },
     ],
@@ -149,10 +149,10 @@ test('one quota is one gauge, and a group is its own pool', () => {
   assert.equal(built[0].name, 'Codex')
   assert.equal(built[0].mark, 'codex')
   assert.equal(built[0].rows.length, 1)
-  assert.deepEqual(built[0].rows[0].hosts, ['mbp2607', 'studio'])
+  assert.deepEqual(built[0].rows[0].hosts, ['build-7', 'studio'])
   assert.equal(built[0].parallelRuns, 1)
-  assert.equal(sameAccountCopy(built[0].rows[0].hosts), 'Same account on mbp2607 and studio')
-  assert.equal(sameAccountCopy(['mbp2607', 'studio', 'desk']), 'Same account on mbp2607, studio and desk')
+  assert.equal(sameAccountCopy(built[0].rows[0].hosts), 'Same account on build-7 and studio')
+  assert.equal(sameAccountCopy(['build-7', 'studio', 'desk']), 'Same account on build-7, studio and desk')
   assert.equal(built[1].id, `group:${group}`)
   assert.equal(built[1].name, 'Client · Codex')
   assert.equal(built[1].mark, 'codex')
@@ -206,18 +206,18 @@ test('days off: rest, would expire, and unused capacity', () => {
 
 test('sign-in and offline pools pause with the one fixing step', () => {
   const [cursor] = pools([acct('u', 'markus', 'cursor', { last_probe_ok: false })], [{ ...cap('u', [win({ kind: 'monthly', used: 43, budget: 6, reset: '2026-10-14T07:00:00Z', readMin: 2 * 24 * 60 })]), probe_failure: 'auth_failed' }])
-  assert.equal(plainText(poolSentence(cursor, now, TZ)), 'Paused until you sign in again on mbp2607. 57% left, resets Wed 14 Oct.')
+  assert.equal(plainText(poolSentence(cursor, now, TZ)), 'Paused until you sign in again on build-7. 57% left, resets Wed 14 Oct.')
   assert.deepEqual(todayCell(cursor.rows[0], null), { kind: 'signin', command: 'cursor-agent login' })
   assert.equal(sourceLine(cursor.rows[0], now), 'Sign-in expired · last read 2 d ago')
   const [quiet] = pools([acct('g', 'markus', 'grok', { last_probe_ok: false })], [{ ...cap('g', [win({ used: 10, budget: 12, reset: '2026-10-06T11:10:00Z' })]), probe_failure: 'unavailable' }])
-  assert.equal(plainText(poolSentence(quiet, now, TZ)), 'Reading unavailable on mbp2607. Agents skip it until the next check succeeds.')
+  assert.equal(plainText(poolSentence(quiet, now, TZ)), 'Reading unavailable on build-7. Agents skip it until the next check succeeds.')
   assert.deepEqual(todayCell(quiet.rows[0], accountPlan(quiet.rows[0], now)), { kind: 'quiet', text: 'reading unavailable' })
   assert.equal(sourceLine(quiet.rows[0], now), 'Codex reported · 2 min ago'.replace('Codex', 'Grok'))
-  const [none] = pools([acct('p', 'Pi on hsb1', 'pi')], [])
-  assert.equal(plainText(poolSentence(none, now, TZ)), 'No reading yet — starts with the first run.')
+  const [none] = pools([acct('p', 'Pi on worker-1', 'pi')], [])
+  assert.equal(plainText(poolSentence(none, now, TZ)), 'Usage unknown · reserve not enforceable')
   assert.equal(sourceLine(none.rows[0], now), '')
-  const [next] = pools([acct('p', 'Pi on hsb1', 'pi')], [{ ...cap('p', []), awaiting_reading: true }])
-  assert.equal(plainText(poolSentence(next, now, TZ)), 'No reading yet — starts with the next run.')
+  const [next] = pools([acct('p', 'Pi on worker-1', 'pi')], [{ ...cap('p', []), awaiting_reading: true }])
+  assert.equal(plainText(poolSentence(next, now, TZ)), 'Usage unknown · reserve not enforceable')
   assert.equal(sourceLine(next.rows[0], now), '')
 })
 
@@ -415,4 +415,18 @@ test('displayed account command round trips in fish, zsh and bash with arbitrary
   }
   assert.equal(accountUseCommand({ id: '$(false)', harness: 'claude' }), '')
   assert.equal(accountUseCommand({ id, harness: 'claude;false' }), '')
+})
+
+
+test('AEON-623: unsupported quota readers say so before learning or first work', () => {
+  for (const harness of ['cursor', 'grok', 'pi']) {
+    for (const awaiting_reading of [false, true]) {
+      const [pool] = pools([acct(harness, harness, harness)], [{ ...cap(harness, []), awaiting_reading }])
+      assert.equal(plainText(poolSentence(pool, now, TZ)), 'Usage unknown · reserve not enforceable')
+      assert.doesNotMatch(plainText(poolSentence(pool, now, TZ)), /first run|next run|No reading yet/)
+    }
+  }
+  const [codex] = pools([acct('c', 'Codex', 'codex')], [])
+  assert.match(plainText(poolSentence(codex, now, TZ)), /No reading yet — readings need a managed run/)
+  assert.doesNotMatch(plainText(poolSentence(codex, now, TZ)), /automatically|idle/)
 })

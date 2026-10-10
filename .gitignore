@@ -10,7 +10,13 @@
 .env
 *.env
 .DS_Store
+# Python bytecode. A tracked .pyc dirties every worktree that runs tests (AEON-837).
+__pycache__/
+*.pyc
 /tmp/
 # The release history manifest is generated at build time (internal/releasehistory/generate).
 /internal/releasehistory/data/history.json
 .agent-shots/
+
+# Durable local daemon checkout ownership (never source).
+/.aeon-agentd/

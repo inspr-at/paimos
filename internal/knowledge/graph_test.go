@@ -52,6 +52,34 @@ func graphHas(g Graph, source, target, kind string) bool {
 	}
 	return false
 }
+
+func TestHistoricalSlugFollowsRenameOrderAfterBodyEdit(t *testing.T) {
+	f := setup(t)
+	a := createEntry(t, f, f.a, map[string]any{"type": "memory", "slug": "reused", "title": "First"})
+	expect(t, call(t, f, f.a, "PATCH", "/api/knowledge/"+a.ID, map[string]any{"slug": "first"}), 200)
+	b := createEntry(t, f, f.a, map[string]any{"type": "memory", "slug": "reused", "title": "Second"})
+	expect(t, call(t, f, f.a, "PATCH", "/api/knowledge/"+b.ID, map[string]any{"slug": "second"}), 200)
+	source := createEntry(t, f, f.a, map[string]any{"type": "memory", "slug": "referrer", "title": "Referrer", "body": "[[reused]]"})
+	check := func() {
+		t.Helper()
+		w := call(t, f, f.a, "GET", "/api/knowledge/resolve?project_id="+f.project+"&type=memory&slug=reused", nil)
+		expect(t, w, 200)
+		if got := decode[Entry](t, w); got.ID != b.ID {
+			t.Errorf("alias retargeted: got %s want %s", got.ID, b.ID)
+		}
+		g := graphCall(t, f, "")
+		if !graphHas(g, source.ID, b.ID, "mention") || graphHas(g, source.ID, a.ID, "mention") {
+			t.Error("graph alias retargeted")
+		}
+	}
+	check()
+	expect(t, call(t, f, f.a, "PATCH", "/api/knowledge/"+a.ID, map[string]any{"body": "An unrelated edit."}), 200)
+	// Set explicit timestamps: no dependence on clock resolution or sleeps.
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE nodes SET updated_at=CASE WHEN id=$1::uuid THEN '2030-01-02'::timestamptz ELSE '2030-01-01'::timestamptz END WHERE id IN ($1::uuid,$2::uuid)`, a.ID, b.ID); err != nil {
+		t.Fatal(err)
+	}
+	check()
+}
 func TestGraphResolutionRelationsFiltersAndIsolation(t *testing.T) {
 	f := setup(t)
 	target := createEntry(t, f, f.a, map[string]any{"type": "memory", "slug": "adr-old", "title": "Foundation"})
@@ -169,7 +197,7 @@ func TestGraphTicketSatellitesIncludeRelationsWithoutExpandingHops(t *testing.T)
 		// expansion must only inspect the knowledge body's references.
 		for i, id := range []*string{&satellite, &distant} {
 			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id,body)
- SELECT $1,$2,id,'Satellite',$3,'PHAROS-9' FROM node_kinds WHERE tenant_id=$1 AND slug='ticket' RETURNING id::text`, f.a.TenantID, fmt.Sprintf("PHAROS-%d", i+8), f.other).Scan(id); err != nil {
+ SELECT $1,$2,id,'Satellite',$3,'PHAROS-9' FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, f.a.TenantID, fmt.Sprintf("PHAROS-%d", i+8), f.other).Scan(id); err != nil {
 				return err
 			}
 		}

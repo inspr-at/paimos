@@ -24,6 +24,8 @@ test.beforeAll(({}, info) => {
 for (const width of [1600, 390]) test(`historic notes in a non-PPM tenant: filters and views at ${width}`, async ({ page }) => {
   await page.setViewportSize({ width, height: 1000 })
   const data = fixtures()
+  // Exercise all five historic rows, including the two reservations hidden by default.
+  data.preferences['developer-ui'] = { show_reserved_versions: true }
   data.projects = data.projects.filter(p => p.id !== 'p-aeon')
   data.nodes = data.nodes.filter(n => n.project !== 'p-aeon')
   await mockWork(page, data)
@@ -33,7 +35,7 @@ for (const width of [1600, 390]) test(`historic notes in a non-PPM tenant: filte
   const detail = sheet.locator('article.detail')
   await expect(detail.getByRole('region', { name: 'Features, 1' })).toContainText('Historic feature')
   await expect(detail.getByRole('region', { name: 'Fixes, 1' })).toContainText('Historic fix')
-  await expect(detail.getByRole('region', { name: 'Other changes, 1' })).toContainText('Maintenance without benefit text')
+  await expect(detail.getByRole('region', { name: 'Other, 1' })).toContainText('Maintenance without benefit text')
   await expect(detail).toContainText('Existing benefit.')
   await expect(detail).toContainText('Existing fix benefit.')
   await expect(detail).toContainText('Notes written after release')

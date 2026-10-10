@@ -148,7 +148,13 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/settings/status-autopilot", m.settings)
 	mux.HandleFunc("GET /api/projects/{projectId}/status-autopilot", m.project)
 	mux.HandleFunc("PUT /api/projects/{projectId}/status-autopilot", m.project)
+	mux.HandleFunc("GET /api/status-autopilot/attention", m.attention)
+	mux.HandleFunc("POST /api/status-autopilot/attention/actions", m.attentionActions)
+	mux.HandleFunc("GET /api/status-autopilot/attention/groups", m.attentionGroups)
+	mux.HandleFunc("POST /api/status-autopilot/attention/bulk", m.attentionBulk)
+	mux.HandleFunc("POST /api/status-autopilot/attention/bulk/{batch_id}/undo", m.attentionBulkUndo)
 	mux.HandleFunc("GET /api/status-autopilot/changes", m.changes)
+	mux.HandleFunc("GET /api/status-autopilot/projects", m.projects)
 	mux.HandleFunc("GET /api/status-autopilot/proposals", m.proposals)
 	mux.HandleFunc("PUT /api/status-autopilot/proposals/{eventId}", m.resolveProposal)
 }
@@ -190,7 +196,7 @@ func respond(w http.ResponseWriter, v any, err error) {
 	}
 }
 func admin(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
-	if p.Kind != tenant.Person {
+	if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 		return authz.ErrForbidden
 	}
 	return authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{})
@@ -222,7 +228,10 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 			if err := admin(r.Context(), tx, p); err != nil {
 				return err
 			}
-			if err := lock(r.Context(), tx); err != nil {
+			if err := authz.LockProjectMutation(r.Context(), tx, p.TenantID); err != nil {
+				return err
+			}
+			if err := admin(r.Context(), tx, p); err != nil {
 				return err
 			}
 		}
@@ -285,7 +294,10 @@ func (m *Module) project(w http.ResponseWriter, r *http.Request) {
 			if err := admin(r.Context(), tx, p); err != nil {
 				return err
 			}
-			if err := lock(r.Context(), tx); err != nil {
+			if err := authz.LockProjectMutation(r.Context(), tx, p.TenantID); err != nil {
+				return err
+			}
+			if err := admin(r.Context(), tx, p); err != nil {
 				return err
 			}
 		}

@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 )
 
 var estimatePattern = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?|\.[0-9]+)(h|m)?$`)
@@ -53,7 +51,7 @@ func withEstimateHints(warnings []string) []string {
 	return out
 }
 func validEstimate(value any) bool {
-	h, ok := value.(float64)
+	h, ok := fieldNumber(value)
 	return ok && h > 0 && h <= 200 && !math.IsInf(h, 0) && !math.IsNaN(h)
 }
 
@@ -64,7 +62,7 @@ func (rt *runtime) cmdIssueEstimate() *Command {
 		addFlags: func(fs *flagSet) {
 			fs.string(&hours, "hours", 0, "agent hours: 2h, 90m or 1.5")
 			fs.string(&source, "source", 0, "source assertion: agent or person (must match the caller)")
-			fs.bool(&missing, "missing", 0, "only fill missing ticket and task estimates in this project")
+			fs.bool(&missing, "missing", 0, "only fill missing work leaf estimates in this project")
 			fs.string(&project, "project", 'p', "project key for a bulk plan")
 			fs.string(&file, "from-file", 0, `JSON array of {"key":"AEON-1","hours":2}; - for stdin`)
 			fs.bool(&dryRun, "dry-run", 0, "validate and preview without writing")
@@ -148,13 +146,21 @@ func (rt *runtime) estimateMissing(project, file string, apply bool) error {
 	if err != nil {
 		return err
 	}
-	nodes, err := rt.walkNodes(url.Values{"within": {proj.ID}, "kind": {"ticket,task"}}, nil)
+	query := url.Values{"within": {proj.ID}, "kind": {"ticket,task"}}
+	if _, migrated := kinds.bySlug["work"]; migrated {
+		query.Set("kind", "work")
+		query.Set("shape", "leaf")
+	}
+	nodes, err := rt.walkNodes(query, nil)
 	if err != nil {
 		return err
 	}
 	byKey := map[string]apiNode{}
 	for _, n := range nodes {
-		if kind := kinds.slug(n.KindID); kind == "ticket" || kind == "task" {
+		kind := kinds.slug(n.KindID)
+		canonicalLeaf := kind == "work" && n.IsLeaf != nil && *n.IsLeaf
+		legacyLeaf := (kind == "ticket" || kind == "task") && (n.IsLeaf == nil || *n.IsLeaf)
+		if canonicalLeaf || legacyLeaf {
 			byKey[n.Key] = n
 		}
 	}
@@ -164,7 +170,7 @@ func (rt *runtime) estimateMissing(project, file string, apply bool) error {
 	for _, entry := range plan {
 		n, ok := byKey[entry.Key]
 		if !ok {
-			return usagef("%s is not a visible ticket or task in project %s", entry.Key, project)
+			return usagef("%s is not a visible work leaf in project %s", entry.Key, project)
 		}
 		action := estimateAction{Key: entry.Key, Hours: entry.Hours, Status: "planned", node: n}
 		if validEstimate(fieldMap(n.Fields)["estimate_hours"]) {
@@ -182,7 +188,7 @@ func (rt *runtime) estimateMissing(project, file string, apply bool) error {
 		fields := fieldMap(action.node.Fields)
 		estimateFields(fields, action.Hours, "agent")
 		var updated apiNode
-		if err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(action.node.ID), map[string]any{"fields": fields}, &updated, map[string]string{"If-Unmodified-Since": action.node.UpdatedAt.Format(time.RFC3339Nano)}); err != nil {
+		if err := rt.patchNode(action.node, map[string]any{"fields": fields}, &updated); err != nil {
 			fmt.Fprintf(rt.stderr, "estimate plan stopped at %s; earlier applied entries remain applied\n", action.Key)
 			return err
 		}

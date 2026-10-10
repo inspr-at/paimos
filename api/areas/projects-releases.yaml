@@ -1,0 +1,342 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/releases
+# aeon:owner internal/stagehandoff
+paths:
+  /projects/{projectId}/releases:
+    get:
+      operationId: listPlanningReleases
+      summary: Read recent release planning metadata
+      description: "Returns at most 100 releases, newest first. The truncated flag reports another page. Pass the last returned number as before_number for bounded keyset pagination."
+      security: *auth
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: before_number, in: query, schema: {type: integer, minimum: 1, maximum: 2147483647}}
+      responses:
+        '200':
+          description: Recent releases
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [releases, truncated]
+                properties:
+                  truncated: {type: boolean}
+                  releases:
+                    type: array
+                    maxItems: 100
+                    items:
+                      type: object
+                      required: [id, title, number, state]
+                      properties:
+                        id: {type: string, format: uuid}
+                        title: {type: string}
+                        number: {type: integer, minimum: 1}
+                        state: {type: string}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createPlanningRelease
+      summary: Open a planning release with existing work
+      description: "Person-only atomic release creation and membership. A repeated idempotency key returns the originally created release. Existing active releases must be finished first. No Flow stages, gates or handoffs run."
+      security: [{session: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [idempotency_key, ticket_node_ids]
+              properties:
+                idempotency_key: {type: string, minLength: 1, maxLength: 96}
+                ticket_node_ids: {type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}}
+      responses:
+        '200': {description: Original release membership, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseMembershipResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/candidate-artifact:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      deprecated: true
+      operationId: getNativeCandidateArtifact
+      summary: Read a release's immutable candidate artifact and version pin
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
+      security: *auth
+      responses:
+        '410': {$ref: '#/components/responses/Error'}
+        '200': {description: Release identity and recorded candidate, content: {application/json: {schema: {$ref: '#/components/schemas/NativeCandidateArtifact'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    put:
+      deprecated: true
+      operationId: registerNativeCandidateArtifact
+      summary: Pin a built artifact for a current native deployment handoff
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NativeCandidateArtifactWrite'}}}}
+      responses:
+        '410': {$ref: '#/components/responses/Error'}
+        '200': {description: Recorded candidate or exact replay, content: {application/json: {schema: {$ref: '#/components/schemas/NativeCandidateArtifact'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/membership:
+    post:
+      operationId: addReleaseMembership
+      summary: Add or explicitly move existing tickets into the current planning release
+      description: Accepts 1–100 work node IDs and expands parents into their current leaves, bounded to 1000 leaves. Parent placement is remembered for future leaves. A new leaf inherits while the release is planning; otherwise it enters the backlog with release_inheritance_note=parent_release_closed. Directly selected closed leaves are excluded; parent placement includes its current closed leaves too. Leaves in active or released releases cannot move. Moving from another planning release requires confirm_move. The event_id can be undone through the events API while the result remains current.
+      security: [{session: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseMembershipWrite'}}}}
+      responses:
+        '200': {description: Updated walker and undoable event, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseMembershipResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/note-snapshot:
+    get:
+      operationId: releaseNoteSnapshot
+      summary: Capture linked ticket benefit fields in one database snapshot
+      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). A published release with a stored snapshot returns that snapshot (frozen true), so later ticket edits do not change it. A published release with no stored snapshot was published before snapshots existed and returns ReleaseNotes with fallback historical-tag-headline; current ticket fields are not read. The release sheet labels that fallback "Historical tag headline". An operator backfill can insert one later, labelled backfilled, with the original released_at and captured_at set to that later time. The release sheet then says Notes written after release. Before publication the response is a live preview (frozen false). At reservation, review and freeze a ReleaseNoteSnapshot with internal/releasehistory/packnotes before tagging; package only its public projection, never raw hidden fields or the historical fallback. This request does not itself publish, freeze or backfill a release.
+      parameters:
+        - {in: path, name: projectId, required: true, schema: {type: string, format: uuid}}
+        - {in: path, name: releaseId, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Point-in-time membership and field snapshot (including hidden tickets for provenance), or ReleaseNotes with fallback historical-tag-headline when a published release has no stored snapshot
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/ReleaseNoteSnapshot'}
+                  - {$ref: '#/components/schemas/ReleaseNotes'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/plan:
+    put:
+      operationId: replaceReleasePlan
+      summary: Replace ticket selection and order
+      description: While planning, atomically replaces the selected ticket set and walker order. Selection changes emit an undoable membership event; Undo restores the complete prior order and membership, fenced against intervening project/release revisions and changes to any ordered ticket. Feature tri-state, partial-pick memory, and arrow navigation are client projections; no client may move a ticket after build starts.
+      security: [{session: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReleasePlanWrite'}}}}
+      responses:
+        '200': {description: Walker projection, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseWalker'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/ticket-options:
+    get:
+      operationId: listReleaseTicketOptions
+      summary: Find existing project tickets eligible for release planning
+      description: Returns at most 100 project tickets, including unprojected ticket nodes. Parent availability follows current leaf memberships, never the parent's historical membership. All leaves already in the target means included; any released or active source prevents placement; otherwise another planning source requires confirm_move. Parent release identity is returned only when all current leaves share one release. Parent summaries are bounded to 1000 leaves and fail with 409 above that limit. Only addable and other_release are selectable; active_release covers nonplanning or unavailable sources. The target must be the current planning release.
+      security: [{session: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: q, in: query, schema: {type: string, maxLength: 256}}
+        - {name: status, in: query, schema: {type: string}}
+        - {name: epic, in: query, schema: {type: string, format: uuid}}
+        - {name: type, in: query, schema: {type: string, enum: [work, ticket, task]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: Ticket options, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseTicketOptions'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/tickets:
+    post:
+      operationId: createReleaseTicket
+      summary: Create a manual ticket in the release plan or backlog
+      description: A person creates a ticket under the project or the selected feature epic. Only the current planning release accepts new tickets. Creation, plan revision, scope invalidation and events are atomic. Idempotency keys share the project's journey action namespace; exact retries return the current walker without another write, even if the release has since left planning. Reusing a key with a different request or actor conflicts.
+      security: [{session: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseTicketCreate'}}}}
+      responses:
+        '200': {description: Updated walker projection, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseWalker'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/walker:
+    get:
+      operationId: getReleaseWalker
+      summary: Read the A3 release walker
+      description: Stable A3 feature and ticket order, epic node keys, ticket inclusion and linked screens. Feature checkbox state is derived from included open tickets.
+      security: *auth
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Walker projection, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseWalker'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    NativeCandidateArtifact:
+      type: object
+      additionalProperties: false
+      required: [project_node_id, release_node_id, version_scheme, version, release_sequence, registration]
+      properties:
+        project_node_id: {type: string, format: uuid}
+        release_node_id: {type: string, format: uuid}
+        version_scheme: {type: [string, 'null'], enum: [legacy, inspr-calendar-v1, inspr-calendar-v2, null]}
+        version: {type: [string, 'null']}
+        release_sequence: {type: integer, minimum: 1}
+        registration:
+          oneOf:
+            - {type: 'null'}
+            - {$ref: '#/components/schemas/NativeCandidateRegistration'}
+    NativeCandidateArtifactWrite:
+      type: object
+      additionalProperties: false
+      required: [handoff_id, expected_attempt, expected_authority_epoch, expected_journey_revision, idempotency_key, artifact, qa_digest]
+      properties:
+        handoff_id: {type: string, format: uuid}
+        expected_attempt: {type: integer, minimum: 1}
+        expected_authority_epoch: {type: integer, minimum: 1}
+        expected_journey_revision: {type: integer, minimum: 1}
+        idempotency_key: {type: string, minLength: 8, maxLength: 80, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{7,79}$'}
+        artifact: {$ref: '#/components/schemas/StageArtifact'}
+        qa_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+    NativeCandidateRegistration:
+      type: object
+      additionalProperties: false
+      required: [handoff_id, attempt, authority_epoch, journey_revision, artifact, qa_digest, recorded_at]
+      properties:
+        handoff_id: {type: string, format: uuid}
+        attempt: {type: integer, minimum: 1}
+        authority_epoch: {type: integer, minimum: 1}
+        journey_revision: {type: integer, minimum: 1}
+        artifact: {$ref: '#/components/schemas/StageArtifact'}
+        qa_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        recorded_at: {type: string, format: date-time}
+    ReleaseMembershipResult:
+      type: object
+      required: [walker, event_id]
+      properties:
+        walker: {$ref: '#/components/schemas/ReleaseWalker'}
+        leaf_node_ids: {type: array, maxItems: 1000, uniqueItems: true, items: {type: string, format: uuid}}
+        event_id: {type: integer, minimum: 1}
+    ReleaseMembershipWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, ticket_node_ids]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        ticket_node_ids: {type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}, description: Leaves or parents; overlapping descendants are deduplicated.}
+        confirm_move: {type: boolean, default: false}
+    ReleaseNoteSnapshot:
+      type: object
+      required: [schema, tenant_id, project_node_id, release_node_id, version, version_scheme, release_revision, captured_at, membership_source, field_source, tickets]
+      properties:
+        schema: {type: string, const: aeon.release-note-snapshot.v1}
+        tenant_id: {type: string, format: uuid}
+        project_node_id: {type: string, format: uuid}
+        release_node_id: {type: string, description: Journey release UUID; empty for a version-keyed manifest backfill}
+        version: {type: string, description: Empty until a version is assigned; tagged file path then declares the build binding and notes preserve that gap}
+        version_scheme: {type: string}
+        release_revision: {type: integer, minimum: 1}
+        captured_at: {type: string, format: date-time}
+        membership_source: {type: string, enum: [journey_tickets.release_node_id, release-manifest-tickets]}
+        backfilled: {type: boolean, description: True for an explicit post-publication capture}
+        actor_principal_id: {type: string, format: uuid, description: Person who authorized the backfill}
+        field_source: {type: string, const: nodes.fields}
+        frozen: {type: boolean, description: True when publication stored this snapshot and later ticket edits no longer change it. False on a live preview. Absent on snapshots exported before this field existed.}
+        label: {type: string, enum: [backfilled], description: "Set only when an operator inserted this snapshot after publication because none was stored at release time. Absent on a live preview and on a snapshot frozen at publication."}
+        released_at: {type: string, format: date-time, description: "The release's original released_at. Present on a backfilled snapshot so the capture time is not mistaken for the release time."}
+        tickets:
+          type: array
+          items:
+            type: object
+            required: [id, key, position, updated_at, fields, unavailable]
+            properties:
+              id: {type: string, format: uuid}
+              key: {type: string}
+              position: {type: integer}
+              group: {type: string, enum: [features, fixes, other], description: Frozen ticket classification; absent on historical snapshots that did not capture it}
+              updated_at: {type: [string, 'null'], format: date-time}
+              fields: {type: [object, 'null'], description: Exact values of the five benefit fields only; unavailable members retain only their hide flag when readable}
+              unavailable: {type: string}
+    ReleasePlanWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, ordered_ticket_ids, included_ticket_ids]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        ordered_ticket_ids: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
+        included_ticket_ids: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
+    ReleaseTicketCreate:
+      type: object
+      additionalProperties: false
+      required: [title, expected_revision, idempotency_key]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 512}
+        feature_node_id: {type: string, format: uuid}
+        included: {type: boolean, default: true}
+        expected_revision: {type: integer, minimum: 1}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+    ReleaseTicketOption:
+      type: object
+      required: [ticket_node_id, key, title, status, type, feature_node_id, release_node_id, release_title, availability]
+      properties:
+        ticket_node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        status: {type: string}
+        is_parent: {type: boolean}
+        type: {type: string, enum: [work, ticket, task]}
+        feature_node_id: {type: [string, 'null'], format: uuid}
+        release_node_id: {type: [string, 'null'], format: uuid}
+        release_title: {type: [string, 'null']}
+        availability: {type: string, enum: [addable, included, closed, released, other_release, active_release, unsupported]}
+    ReleaseTicketOptions:
+      type: object
+      required: [expected_revision, tickets]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        tickets: {type: array, items: {$ref: '#/components/schemas/ReleaseTicketOption'}}
+    ReleaseWalker:
+      type: object
+      required: [release_node_id, project_node_id, state, revision, features, tickets]
+      properties:
+        warnings: {type: array, items: {type: string}, description: Non-blocking guidance returned by quick ticket creation}
+        release_node_id: {type: string, format: uuid}
+        project_node_id: {type: string, format: uuid}
+        state: {type: string, enum: [planning, building, candidate, deploying, refused, access, released, superseded]}
+        revision: {type: integer, minimum: 1}
+        features: {type: array, items: {$ref: '#/components/schemas/WalkerFeature'}}
+        tickets: {type: array, items: {$ref: '#/components/schemas/WalkerTicket'}}
+    WalkerFeature:
+      type: object
+      required: [feature_node_id, epic_key, title, selection]
+      properties:
+        feature_node_id: {type: string, format: uuid}
+        epic_key: {type: string}
+        title: {type: string}
+        selection: {type: string, enum: [empty, none, some, all]}
+        included_count: {type: integer, minimum: 0}
+        open_count: {type: integer, minimum: 0}
+    WalkerTicket:
+      type: object
+      required: [ticket_node_id, key, title, included, position]
+      properties:
+        ticket_node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        feature_node_id: {type: [string, 'null'], format: uuid}
+        included: {type: boolean}
+        position: {type: integer, minimum: 0}
+        estimated_hours: {type: [number, 'null'], minimum: 0}
+        screen_node_ids: {type: array, items: {type: string, format: uuid}}

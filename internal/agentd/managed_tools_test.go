@@ -27,6 +27,7 @@ type fakeRunTools struct {
 	approval        string
 	approvalRequest ApprovalRequest
 	reply           string
+	replyTarget     InboxReplyTarget
 }
 
 func (f *fakeRunTools) WorkOrder(context.Context, string) (WorkOrder, error) {
@@ -54,8 +55,9 @@ func (f *fakeRunTools) RequestApproval(_ context.Context, run string, in Approva
 	f.approvalRequest = in
 	return nil
 }
-func (f *fakeRunTools) ReplyInbox(_ context.Context, id, recipient, body, key string) error {
+func (f *fakeRunTools) ReplyInbox(_ context.Context, id string, target InboxReplyTarget, body, key string) error {
 	f.reply = id + ":" + body
+	f.replyTarget = target
 	return nil
 }
 
@@ -76,11 +78,11 @@ func TestManagedToolsRunBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	host, err := startManagedTools(token, toolBinding{api: f, workOrderID: "order-a", runID: "run-a", workspace: workspace, branch: "aeon/run-a", active: func() bool { return active }, requestDone: func() { doneRequested = true }, replySender: func(id string) (string, bool) {
+	host, err := startManagedTools(token, toolBinding{api: f, workOrderID: "order-a", runID: "run-a", workspace: workspace, branch: "aeon/run-a", active: func() bool { return active }, requestDone: func() { doneRequested = true }, replySender: func(id string) (InboxReplyTarget, bool) {
 		if id == "33333333-3333-3333-3333-333333333333" {
-			return "44444444-4444-4444-4444-444444444444", true
+			return InboxReplyTarget{PrincipalID: "44444444-4444-4444-4444-444444444444", ProjectID: "55555555-5555-4555-8555-555555555555", SenderSessionID: "66666666-6666-4666-8666-666666666666"}, true
 		}
-		return "", false
+		return InboxReplyTarget{}, false
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +125,9 @@ func TestManagedToolsRunBinding(t *testing.T) {
 	call("aeon_evidence", map[string]any{"criterion_id": "11111111-1111-1111-1111-111111111111", "reference": "tests pass"}, false)
 	call("aeon_reply", map[string]any{"message_id": "22222222-2222-2222-2222-222222222222", "body": "wrong", "idempotency_key": "reply-1"}, true)
 	call("aeon_reply", map[string]any{"message_id": "33333333-3333-3333-3333-333333333333", "body": "received", "idempotency_key": "reply-2"}, false)
+	if f.reply != "33333333-3333-3333-3333-333333333333:received" || f.replyTarget.ProjectID != "55555555-5555-4555-8555-555555555555" || f.replyTarget.SenderSessionID != "66666666-6666-4666-8666-666666666666" {
+		t.Fatal("managed reply lost its authenticated session binding")
+	}
 	if len(f.comments) != 1 || f.comments[0] != "order-a:progress" || f.status != "order-a:blocked" || !doneRequested || f.evidence != "order-a:run-a:11111111-1111-1111-1111-111111111111:tests pass" {
 		t.Fatalf("wrong binding: %+v", f)
 	}
@@ -192,7 +197,9 @@ func (*doneToolAPI) Evidence(context.Context, string, string, string, string) er
 func (*doneToolAPI) RequestApproval(context.Context, string, ApprovalRequest) error {
 	return nil
 }
-func (*doneToolAPI) ReplyInbox(context.Context, string, string, string, string) error { return nil }
+func (*doneToolAPI) ReplyInbox(context.Context, string, InboxReplyTarget, string, string) error {
+	return nil
+}
 
 func TestDoneRequestAppliesAfterRunFinishes(t *testing.T) {
 	s, base, process := testSupervisor(t)
@@ -554,11 +561,14 @@ func TestTerminalGitChecksUseBoundProbe(t *testing.T) {
 }
 
 func TestClaudeEnvironmentDoesNotInheritDaemonSettings(t *testing.T) {
+	for _, name := range []string{"USER", "LOGNAME", "TMPDIR"} {
+		t.Setenv(name, "login-session-fixture")
+	}
 	for _, name := range []string{"AEON_DATABASE_URL", "AEON_TEST_DATABASE_URL", "AEON_RUNTIME_KEY", "DATABASE_URL", "ANTHROPIC_API_KEY", "NODE_OPTIONS", "DYLD_INSERT_LIBRARIES", "PATH", "HOME", "CLAUDE_CONFIG_DIR"} {
 		t.Setenv(name, "inherited-fixture-value")
 	}
 	values := claudeEnvironment("/fixture/account", "/fixture/node/bin/node", "/fixture/claude/bin/claude")
-	if len(values) != 5 {
+	if len(values) != 8 {
 		t.Fatal("unexpected bridge environment surface")
 	}
 	for _, value := range values {

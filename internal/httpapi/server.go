@@ -59,7 +59,7 @@ type Server struct {
 	// not draining; liveness (GET /api/health) ignores both.
 	serving  atomic.Bool
 	draining atomic.Bool
-	// readyProbe overrides the readiness database ping. Nil uses Pool.Ping.
+	// readyProbe overrides the readiness database ping. Nil uses db.Probe.
 	// Tests inject it; production leaves it nil.
 	readyProbe func(context.Context) error
 
@@ -139,6 +139,11 @@ func (s *Server) build() {
 	spa := commonMiddleware(view)
 	if publicMounted {
 		root.Handle("GET /aithema/preview/{design_rev}", commonMiddleware(publicMux))
+		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}/llms.txt", commonMiddleware(publicMux))
+		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}/catalog.json", commonMiddleware(publicMux))
+		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}/roadmap.json", commonMiddleware(publicMux))
+		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}/roadmap", spa)
+		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}", spa)
 		root.Handle("GET /portal/{tenantSlug}/llms.txt", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/catalog.json", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/roadmap.json", commonMiddleware(publicMux))

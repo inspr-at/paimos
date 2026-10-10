@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
@@ -25,6 +23,10 @@ const homebrew = (harness: string) => `env "$(brew --prefix)/bin/aeon-agentd" ad
 const nix = (harness: string) => `env "$HOME/.nix-profile/bin/aeon-agentd" add-harness --harness ${harness}`
 const direct = (harness: string) => `env "$HOME/.local/bin/aeon-agentd" add-harness --harness ${harness}`
 const CALM = 'Sign-in happens on the machine; the password never reaches AEON.'
+const MEMBER = 'Only account owners with management permission can act. This view shows the status available to you.'
+const CREDENTIAL = 'Every sign-in stays on its computer. PAIMOS stores status and timestamps, never the vendor credential.'
+const CONNECT = 'Connect a computer'
+const accountsList = (page: Page) => page.getByRole('region', { name: /^Accounts \d+$/ })
 
 async function setup(page: Page, options: { manage?: boolean; desk?: boolean; computers?: Computers } = {}) {
   if (options.desk) await page.clock.setSystemTime(NOW)
@@ -62,7 +64,6 @@ async function setup(page: Page, options: { manage?: boolean; desk?: boolean; co
 async function shoot(page: Page, name: string, locator: Locator) {
   const dir = process.env.ADD_ACCOUNT_SHOTS
   if (!dir) return
-  mkdirSync(dir, { recursive: true })
   const previous = page.viewportSize()
   for (const theme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: theme })
@@ -71,7 +72,7 @@ async function shoot(page: Page, name: string, locator: Locator) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await locator.scrollIntoViewIfNeeded()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
-      await locator.screenshot({ path: join(dir, `${name}-${width}-${theme}.png`) })
+      await locator.screenshot({ path: test.info().outputPath(`${name}-${width}-${theme}.png`) })
     }
   }
   if (previous) await page.setViewportSize(previous)
@@ -79,7 +80,7 @@ async function shoot(page: Page, name: string, locator: Locator) {
   await page.evaluate(() => { document.documentElement.dataset.theme = 'light' })
 }
 
-const noBar = (page: Page) => page.locator('#add-account, #add-account *').evaluateAll(els => els.filter(el => {
+const noBar = (page: Page) => page.locator('#add-account-panel, #add-account-panel *').evaluateAll(els => els.filter(el => {
   const style = getComputedStyle(el)
   return ['Left', 'Top'].some(side => parseFloat(style[`border${side}Width` as 'borderLeftWidth']) >= 3 && style[`border${side}Style` as 'borderLeftStyle'] !== 'none')
 }).length)
@@ -89,7 +90,7 @@ test('the steps name the machine, the known sign-in, and a path-proof add-harnes
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await setup(page)
   await page.goto('/settings/accounts')
-  const accounts = page.getByRole('region', { name: 'Accounts', exact: true })
+  const accounts = accountsList(page)
   await expect(accounts).toContainText('Claude Max')
   await expect(page.getByText(CALM)).toHaveCount(0)
   const open = page.getByRole('button', { name: 'Add an account' })
@@ -98,9 +99,9 @@ test('the steps name the machine, the known sign-in, and a path-proof add-harnes
   await expect(panel).toBeVisible()
   await expect(open).toHaveAttribute('aria-expanded', 'true')
   await expect(page.getByText(CALM)).toHaveCount(1)
-  await expect(page.getByRole('combobox', { name: 'Machine' }).locator('option')).toHaveText(['mbp2607', 'studio'])
+  await expect(page.getByRole('combobox', { name: 'Machine' }).locator('option')).toHaveText(['build-7', 'studio'])
   const harness = page.getByRole('combobox', { name: 'Harness' })
-  await expect(harness.locator('option')).toHaveText(['Pi', 'Another Codex account', 'Another Claude account', 'Another Grok account', 'Another Cursor account'])
+  await expect(harness.locator('option')).toHaveText(['Pi', 'Gemini CLI', 'OpenCode', 'Another Codex account', 'Another Claude account', 'Another Grok account', 'Another Cursor account'])
   await expect(page.getByRole('combobox', { name: 'Installed with' }).locator('option')).toHaveText(['Homebrew', 'Nix profile', 'Direct download'])
   await expect(page.getByLabel('Sign-in step')).toHaveValue('For pi, use /login and /model in pi first.')
   await expect(page.getByLabel('Enroll command')).toHaveValue(homebrew('pi'))
@@ -108,7 +109,14 @@ test('the steps name the machine, the known sign-in, and a path-proof add-harnes
   await page.getByRole('combobox', { name: 'Machine' }).selectOption({ label: 'studio' })
   await expect(harness.locator('option').first()).toHaveText('Claude')
   await expect(page.getByLabel('Sign-in command')).toHaveValue('claude /login')
-  await page.getByRole('combobox', { name: 'Machine' }).selectOption({ label: 'mbp2607' })
+  await page.getByRole('combobox', { name: 'Machine' }).selectOption({ label: 'build-7' })
+
+  await harness.selectOption({ label: 'Gemini CLI' })
+  await expect(page.getByLabel('Sign-in command')).toHaveValue('gemini')
+  await expect(page.getByLabel('Enroll command')).toHaveValue(homebrew('gemini'))
+  await harness.selectOption({ label: 'OpenCode' })
+  await expect(page.getByLabel('Sign-in command')).toHaveValue('opencode auth login')
+  await expect(page.getByLabel('Enroll command')).toHaveValue(homebrew('opencode'))
 
   await harness.selectOption({ label: 'Another Grok account' })
   await expect(page.getByLabel('Sign-in step')).toHaveValue("Sign in with Grok's CLI.")
@@ -127,7 +135,7 @@ test('the steps name the machine, the known sign-in, and a path-proof add-harnes
   await expect(page.getByLabel('Enroll command')).toHaveValue(direct('claude'))
   await page.getByRole('combobox', { name: 'Installed with' }).selectOption('homebrew')
   expect(await noBar(page)).toBe(0)
-  await shoot(page, 'panel', page.locator('#add-account'))
+  await shoot(page, 'panel', page.locator('#add-account-panel'))
 
   const steps = panel.getByRole('listitem')
   await steps.nth(0).getByRole('button', { name: 'Copy' }).click()
@@ -145,18 +153,18 @@ test('the steps name the machine, the known sign-in, and a path-proof add-harnes
   expect(errors).toEqual([])
 })
 
-test('Add an account on the agents card opens the steps; Manage accounts does not', async ({ page }) => {
+test('the Agents page links to Settings; Add an account lives there and opens the steps', async ({ page }) => {
   const errors = watchErrors(page)
   await setup(page, { desk: true })
   await page.goto('/agents')
-  const cap = page.getByRole('region', { name: 'Accounts' })
+  const cap = page.getByRole('region', { name: 'Accounts and computers' })
   await expect(cap.getByRole('link', { name: /Manage/ })).toHaveAttribute('href', '/settings/accounts')
-  const add = cap.getByRole('link', { name: 'Add an account' })
-  await expect(add).toHaveAttribute('href', '/settings/accounts#add-account')
-  await shoot(page, 'agents', cap.locator('.ac-head'))
-  await add.click()
-  await expect(page.getByRole('region', { name: 'Add an account' })).toBeVisible()
+  // AEON-782: the section is a status line; adding an account is a Settings action.
+  await expect(cap.getByRole('link', { name: 'Add an account' })).toHaveCount(0)
+  await cap.getByRole('link', { name: /Manage/ }).click()
   await expect(page).toHaveURL(/\/settings\/accounts$/)
+  await page.getByRole('button', { name: 'Add an account' }).click()
+  await expect(page.getByRole('region', { name: 'Add an account' })).toBeVisible()
   await expect(page.getByLabel('Sign-in step')).toHaveValue('For pi, use /login and /model in pi first.')
   expect(errors).toEqual([])
 })
@@ -164,14 +172,15 @@ test('Add an account on the agents card opens the steps; Manage accounts does no
 test('without account.manage the action is gone and the hint stays', async ({ page }) => {
   await setup(page, { manage: false })
   await page.goto('/settings/accounts')
-  await expect(page.getByRole('region', { name: 'Accounts', exact: true })).toContainText('Claude Max')
-  await expect(page.getByText(CALM)).toBeVisible()
+  await expect(accountsList(page)).toContainText('Claude Max')
+  await expect(page.getByText(MEMBER)).toBeVisible()
+  await expect(page.getByText(CREDENTIAL)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Add an account' })).toHaveCount(0)
-  await expect(page.getByRole('link', { name: 'Connect your machine' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: CONNECT })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Add an account' })).toHaveCount(0)
-  await shoot(page, 'hint', page.locator('#add-account'))
+  await shoot(page, 'hint', page.locator('#agent-accounts'))
   await page.goto('/agents')
-  await expect(page.getByRole('region', { name: 'Accounts' }).getByRole('link', { name: 'Add an account' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Accounts and computers' }).getByRole('link', { name: 'Add an account' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: /Manage/ })).toBeVisible()
 })
 
@@ -179,16 +188,17 @@ test('no paired machine links to Connect your machine, including from the hash',
   const { release } = await setup(page, { computers: 'hold' })
   try {
     await page.goto('/settings/accounts')
-    await expect(page.getByRole('region', { name: 'Accounts', exact: true })).toContainText('Claude Max')
-    await expect(page.getByRole('link', { name: 'Connect your machine' })).toHaveCount(0)
+    await expect(accountsList(page)).toContainText('Claude Max')
     await expect(page.getByRole('button', { name: 'Add an account' })).toHaveCount(0)
   } finally { release() }
-  const connect = page.getByRole('link', { name: 'Connect your machine' })
+  const connect = page.getByRole('link', { name: CONNECT })
   await expect(connect).toBeVisible()
   await expect(connect).toHaveAttribute('href', '/agents/register-agent')
-  await shoot(page, 'connect', page.locator('#add-account'))
+  await expect(page.getByText('No paired computers yet.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Add an account' })).toHaveCount(0)
+  await shoot(page, 'connect', page.locator('#agent-accounts'))
   await page.goto('/settings/accounts#add-account')
-  await expect(page.getByRole('link', { name: 'Connect your machine' })).toBeVisible()
+  await expect(page.getByRole('link', { name: CONNECT })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Add an account' })).toHaveCount(0)
   await connect.click()
   await expect(page).toHaveURL('/agents/register-agent')
@@ -198,15 +208,16 @@ test('a failed computer list offers Try again and then the steps', async ({ page
   const errors = watchErrors(page)
   const { setComputers } = await setup(page, { computers: 'error' })
   await page.goto('/settings/accounts')
-  const alert = page.getByRole('alert')
-  await expect(alert).toContainText('Paired machines could not be loaded.')
-  await expect(page.getByRole('link', { name: 'Connect your machine' })).toHaveCount(0)
+  // AEON-686: load failures are reported in the page's one status line.
+  const alert = page.locator('#agent-accounts .loading-state[role="status"]')
+  await expect(alert).toHaveText('Accounts or computers could not be loaded. Try again')
+  await expect(page.getByText('No paired computers yet.')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Add an account' })).toHaveCount(0)
   setComputers('ready')
   await alert.getByRole('button', { name: 'Try again' }).click()
   await page.getByRole('button', { name: 'Add an account' }).click()
   await expect(page.getByRole('region', { name: 'Add an account' })).toBeVisible()
-  await expect(alert).toHaveCount(0)
+  await expect(alert).toHaveText('')
   expect(errors).toEqual([])
 })
 

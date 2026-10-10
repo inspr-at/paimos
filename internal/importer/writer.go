@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -51,7 +52,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 				return id, nil
 			}
 			var id string
-			prefix := map[string]string{"project": "PRJ", "epic": "EPC", "ticket": "TKT", "task": "TSK", "release": "REL", "sprint": "SPR", "cost_unit": "CU", "memory": "MEM", "runbook": "RUN", "guideline": "GUI", "external_system": "EXT", "related_project": "RPR"}[slug]
+			prefix := map[string]string{"project": "PRJ", "work": "TKT", "release": "REL", "sprint": "SPR", "cost_unit": "CU", "memory": "MEM", "runbook": "RUN", "guideline": "GUI", "external_system": "EXT", "related_project": "RPR"}[slug]
 			if prefix == "" {
 				return "", fmt.Errorf("unsupported classic issue type %q", slug)
 			}
@@ -245,6 +246,11 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 }
 
 func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot, conflicts *[]ImportConflict) (string, map[int64]string, error) {
+	// Imports later write tree rows and bindings. Match project writes and
+	// invite/link enrollment: tenant, tree, alias, then principal/resource rows.
+	if err := authz.LockProjectMutation(ctx, tx, tenantID); err != nil {
+		return "", nil, err
+	}
 	// Share the invite/link lock before reading or inserting people. Row locks
 	// alone cannot stop a new matching email from making a candidate ambiguous.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,532))`, tenantID); err != nil {
@@ -439,6 +445,17 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 			})
 			return id, false, false, nil
 		}
+		parent, err := db.WorkStatusParentTx(ctx, tx, id)
+		if err != nil {
+			return "", false, false, err
+		}
+		if parent && state != oldState {
+			classicID, _ := intField(original, "id")
+			*conflicts = appendConflict(*conflicts, ImportConflict{ClassicID: classicID, Key: key, Reason: "parent_status_derived"})
+			// Preserve the canonical state while still importing permitted
+			// content. The source status remains in its classic provenance.
+			state = oldState
+		}
 		var now any
 		var prior any
 		if err := decodeExactJSON(bodyJSON, &now); err != nil {
@@ -524,12 +541,34 @@ func importNodeDiverged(ctx context.Context, tx pgx.Tx, tenantID, nodeID string)
 	if err != nil {
 		return false, err
 	}
+	parent, err := db.WorkStatusParentTx(ctx, tx, nodeID)
+	if err != nil {
+		return false, err
+	}
 	var have, baseline map[string]any
 	if err := json.Unmarshal(current, &have); err != nil {
 		return false, err
 	}
 	if err := json.Unmarshal(imported, &baseline); err != nil {
 		return false, err
+	}
+	if parent {
+		baseline["state"] = have["state"]
+	}
+	// The work-kind migration changes kind_id alone, retaining the original
+	// importer snapshot and fields.classic.type. Normalize only the exact
+	// recorded substitution; all person edits still compare to the old baseline.
+	if !reflect.DeepEqual(have["kind_id"], baseline["kind_id"]) {
+		var migrated bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events
+		 WHERE tenant_id=$1 AND node_id=$2 AND type='node.work_kind_migrated'
+		 AND after->>'migration'='AEON-649' AND before->>'kind_id'=$3
+		 AND after->>'kind_id'=$4)`, tenantID, nodeID, baseline["kind_id"], have["kind_id"]).Scan(&migrated); err != nil {
+			return false, err
+		}
+		if migrated {
+			baseline["kind_id"] = have["kind_id"]
+		}
 	}
 	for _, field := range []string{"title", "body", "fields", "kind_id", "parent_id", "deleted_at"} {
 		if !reflect.DeepEqual(have[field], baseline[field]) {

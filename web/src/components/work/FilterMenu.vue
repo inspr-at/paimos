@@ -10,7 +10,7 @@ import StatusIcon from './StatusIcon.vue'
 const props = withDefaults(defineProps<{ anchor: HTMLElement | null; filters: ListFilters; dimensions?: Dimension[]; showDate?: boolean }>(), { showDate: true })
 const dimensions = computed(() => DIMENSIONS.filter(d => !props.dimensions || props.dimensions.includes(d.key)))
 const emit = defineEmits<{ choose: [dimension: Dimension | 'date']; close: [restoreFocus: boolean] }>()
-const ICONS: Record<Dimension, IconName> = { status: 'check', priority: 'gauge', assignee: 'user', type: 'ticket', tag: 'tag', epic: 'epic', cost: 'coin', release: 'box', human_check: 'person-check' }
+const ICONS: Record<Dimension, IconName> = { shape: 'tree', depth: 'layers', status: 'check', priority: 'gauge', assignee: 'user', type: 'ticket', tag: 'tag', epic: 'epic', cost: 'coin', release: 'box', human_check: 'person-check' }
 const list = ref<HTMLElement>()
 function move(event: KeyboardEvent) {
   const items = [...(list.value?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
@@ -56,7 +56,7 @@ function move(event: KeyboardEvent) {
 @media (hover: hover) { .menu-item:hover { background: var(--row-hover); } }
 .menu-item:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
 .lead { flex-shrink: 0; color: var(--ink-3); }
-.lead.epic { color: var(--gold); }
+.lead.epic { color: var(--kind-parent); }
 .label { flex: 1; }
 .on-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-size: 10.5px; font-weight: 700; }
 .go { color: var(--ink-3); }

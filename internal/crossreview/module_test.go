@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -43,7 +44,9 @@ func (f *fixture) tx(t *testing.T, fn func(pgx.Tx) error) {
 		t.Fatal(err)
 	}
 }
-func newFixture(t *testing.T) *fixture {
+func newFixture(t *testing.T) *fixture { return newCatalogFixture(t, true) }
+
+func newCatalogFixture(t *testing.T, complete bool, cold ...bool) *fixture {
 	t.Helper()
 	f := &fixture{d: dbtest.Open(t), mux: http.NewServeMux()}
 	tid := testID()
@@ -68,14 +71,32 @@ func newFixture(t *testing.T) *fixture {
 		}
 		dbtest.BindRole(t, f.d, p.TenantID, p.ID, "admin")
 	}
+	if complete {
+		request := httptest.NewRequest("GET", "/api/models", nil)
+		if err := modelregistry.PrepareCatalog(t.Context(), f.d.App, f.person, modelregistry.CatalogPreparation{Operation: modelregistry.CatalogRead, Request: request}); err != nil {
+			t.Fatal(err)
+		}
+		// An explicit saved policy narrows the complete catalog to this fixture's
+		// three profiles and two unavailable cross-provider fallback entries.
+		f.tx(t, func(tx pgx.Tx) error { _, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes`); return err })
+	}
 	f.profile = testID()
 	f.account = testID()
 	f.tx(t, func(tx pgx.Tx) error {
-		for i, row := range []struct{ id, harness, family string }{{testID(), "codex", "openai"}, {testID(), "cursor", "xai"}, {f.profile, "claude", "anthropic"}} {
-			if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,$3,'test-version',$4,$5,'review-model','xhigh','frontier')`, tid, row.id, "review-"+row.id, row.harness, row.family); err != nil {
-				return err
+		if len(cold) == 0 || !cold[0] {
+			for i, row := range []struct{ id, harness, family string }{{testID(), "codex", "openai"}, {testID(), "cursor", "xai"}, {f.profile, "claude", "anthropic"}} {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,$3,'test-version',$4,$5,'review-model','xhigh','frontier')`, tid, row.id, "review-"+row.id, row.harness, row.family); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state) VALUES($1,'review-gate',$2,$3,'available')`, tid, i+1, row.id); err != nil {
+					return err
+				}
 			}
-			if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state) VALUES($1,'review-gate',$2,$3,'available')`, tid, i+1, row.id); err != nil {
+		}
+		if complete {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state)
+          SELECT $1,'review-gate',CASE harness WHEN 'gemini' THEN 4 ELSE 5 END,id,'available'
+          FROM model_profiles WHERE slug IN ('gemini-gemini-2-5-pro-32768','opencode-google-gemini-2-5-pro-default')`, tid); err != nil {
 				return err
 			}
 		}
@@ -95,19 +116,19 @@ func newFixture(t *testing.T) *fixture {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour','tokens',10000000)`, tid, f.account); err != nil {
 			return err
 		}
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,body,fields) SELECT $1,'REVIEW-1',id,'Guard tenant boundary','Every mutation checks tenant isolation.', '{"acceptance_criteria":"Cross-tenant tests pass"}' FROM node_kinds WHERE slug='ticket' RETURNING id::text`, tid).Scan(&f.ticket)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,body,fields) SELECT $1,'REVIEW-1',id,'Guard tenant boundary','Every mutation checks tenant isolation.', '{"acceptance_criteria":"Cross-tenant tests pass"}' FROM node_kinds WHERE slug='work' RETURNING id::text`, tid).Scan(&f.ticket)
 	})
-	prefix, secret := strings.ReplaceAll(testID(), "-", ""), testID()
+	prefix, secret := strings.ReplaceAll(tid, "-", "")+strings.ReplaceAll(testID(), "-", "")[:16], testID()
 	sum := sha256.Sum256([]byte(secret))
 	f.tx(t, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'review fixture',$3,$4,$5)`, tid, f.agent.ID, prefix, hex.EncodeToString(sum[:]), f.agent.Scopes)
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'review fixture',$3,$4,$5,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, tid, f.agent.ID, prefix, hex.EncodeToString(sum[:]), f.agent.Scopes)
 		return err
 	})
 	f.token = "aeon_" + prefix + "_" + secret
 	f.m = New(f.d.App, nil)
 	f.m.Mount(f.mux)
 	workorders.New(f.d.App).Mount(f.mux)
-	agentruns.NewWithReviews(f.d.App, nil, f.m.RequestForRun).Mount(f.mux)
+	agentruns.NewWithReviews(f.d.App, nil, f.m.RequestForRun, f.m.PrepareForRun).Mount(f.mux)
 	return f
 }
 func (f *fixture) call(t *testing.T, p tenant.Principal, method, path string, body any, want int, dst any) {
@@ -145,17 +166,29 @@ func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 	if v.Status != "queued" || v.ReviewerFamily == nil || *v.ReviewerFamily != "anthropic" || v.GateOpen || v.RunID == nil {
 		t.Fatalf("invalid queued review: %+v", v)
 	}
-	if len(v.Ladder) != 5 || !strings.Contains(strings.Join(v.Ladder[0].SkipReasons, ","), "author family") || len(v.Ladder[1].SkipReasons) == 0 || v.Ladder[2].ProfileID != f.profile || !v.Ladder[2].Selected {
-		t.Fatal("fallback reasons were lost")
-	}
-	for _, candidate := range v.Ladder[3:] {
-		if candidate.Selected || len(candidate.SkipReasons) == 0 {
-			t.Fatal("unqualified new fallback selected", candidate)
+	// A deliberately incomplete catalog receives all required missing profiles.
+	// Find the original custom policy entries by identity, not fixed indices.
+	selected, authorSkipped, unavailableSkipped := false, false, false
+	for _, candidate := range v.Ladder {
+		if candidate.ProfileID == f.profile {
+			selected = candidate.Selected
 		}
+		if strings.Contains(strings.Join(candidate.SkipReasons, ","), "author family") {
+			authorSkipped = true
+		}
+		if candidate.ProfileID != f.profile && candidate.Selected {
+			t.Fatal("upgrade displaced saved reviewer")
+		}
+		if !candidate.Selected && len(candidate.SkipReasons) > 0 {
+			unavailableSkipped = true
+		}
+	}
+	if !selected || !authorSkipped || !unavailableSkipped {
+		t.Fatal("fallback reasons were lost")
 	}
 	var replay Review
 	f.call(t, f.person, "POST", path, in, 201, &replay)
-	if replay.OrderID != v.OrderID {
+	if replay.OrderID != v.OrderID || replay.RunID == nil || *replay.RunID != *v.RunID || replay.TicketID != f.ticket {
 		t.Fatal("replay started another review")
 	}
 	// Replaying a person's external request cannot bypass the agent author check.
@@ -281,26 +314,64 @@ func TestChangesStatusRequiresVerifiedPinnedModel(t *testing.T) {
 }
 
 func TestCompletedBuilderAutomaticallyRequestsIndependentReview(t *testing.T) {
+	for _, migrated := range []bool{false, true} {
+		t.Run(fmt.Sprintf("migrated=%v", migrated), func(t *testing.T) {
+			f := newFixture(t)
+			if migrated {
+				migrateReviewWork(t, f)
+			}
+			var order workorders.Order
+			f.call(t, f.agent, "POST", "/api/work-orders", map[string]any{"title": "Builder", "parent_id": f.ticket, "assignee_principal_id": f.agent.ID, "criteria": []string{"Pass isolation tests"}}, 201, &order)
+			var source string
+			f.tx(t, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,status,account_id,daemon_id,daemon_generation,started_at)
+       SELECT $1,$2,$3,p.id,p.model,'running',$4,'review-daemon','review-generation',clock_timestamp() FROM model_profiles p WHERE p.family='openai' AND p.version='test-version' RETURNING id::text`, f.person.TenantID, order.NodeID, f.agent.ID, f.account).Scan(&source)
+			})
+			report := agentruns.Telemetry{Sequence: 1, Kind: "finished", Status: "completed", ReviewRange: &reviewgate.CommitRange{Repository: "example/review-fixture", BaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40)}}
+			f.call(t, f.agent, "POST", "/api/runs/"+source+"/telemetry", report, 200, nil)
+			var rows []Review
+			f.call(t, f.person, "GET", "/api/nodes/"+f.ticket+"/reviews", nil, 200, &rows)
+			if len(rows) != 1 || rows[0].AuthorRunID == nil || *rows[0].AuthorRunID != source || rows[0].AuthorFamily != "openai" || rows[0].RunID == nil {
+				t.Fatal("builder completion did not queue the exact independent review")
+			}
+			created := rows[0]
+			if created.TicketID != f.ticket || created.RequestID != source || created.Repository != report.ReviewRange.Repository || created.BaseSHA != report.ReviewRange.BaseSHA || created.HeadSHA != report.ReviewRange.HeadSHA || created.Status != "queued" || created.GateOpen || created.ReviewerFamily == nil || *created.ReviewerFamily != "anthropic" {
+				t.Fatalf("automatic work-leaf review lost its binding: %+v", created)
+			}
+			f.call(t, f.agent, "POST", "/api/runs/"+source+"/telemetry", report, 200, nil)
+			f.call(t, f.person, "GET", "/api/nodes/"+f.ticket+"/reviews", nil, 200, &rows)
+			if len(rows) != 1 {
+				t.Fatal("completion replay queued another review")
+			}
+		})
+	}
+}
+
+func TestReviewRejectsWorkParentWithoutCreatingOrders(t *testing.T) {
 	f := newFixture(t)
-	var order workorders.Order
-	f.call(t, f.agent, "POST", "/api/work-orders", map[string]any{"title": "Builder", "parent_id": f.ticket, "assignee_principal_id": f.agent.ID, "criteria": []string{"Pass isolation tests"}}, 201, &order)
-	var source string
 	f.tx(t, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,status,account_id,daemon_id,daemon_generation,started_at)
-       SELECT $1,$2,$3,p.id,p.model,'running',$4,'review-daemon','review-generation',clock_timestamp() FROM model_profiles p WHERE p.family='openai' RETURNING id::text`, f.person.TenantID, order.NodeID, f.agent.ID, f.account).Scan(&source)
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id)
+          SELECT $1,'REVIEW-2',kind_id,'Child work',$2 FROM nodes WHERE id=$2`, f.person.TenantID, f.ticket)
+		return err
 	})
-	report := agentruns.Telemetry{Sequence: 1, Kind: "finished", Status: "completed", ReviewRange: &reviewgate.CommitRange{Repository: "example/review-fixture", BaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40)}}
-	f.call(t, f.agent, "POST", "/api/runs/"+source+"/telemetry", report, 200, nil)
-	var rows []Review
-	f.call(t, f.person, "GET", "/api/nodes/"+f.ticket+"/reviews", nil, 200, &rows)
-	if len(rows) != 1 || rows[0].AuthorRunID == nil || *rows[0].AuthorRunID != source || rows[0].AuthorFamily != "openai" || rows[0].RunID == nil {
-		t.Fatal("builder completion did not queue the exact independent review")
+	var failure struct {
+		Code string `json:"code"`
 	}
-	f.call(t, f.agent, "POST", "/api/runs/"+source+"/telemetry", report, 200, nil)
-	f.call(t, f.person, "GET", "/api/nodes/"+f.ticket+"/reviews", nil, 200, &rows)
-	if len(rows) != 1 {
-		t.Fatal("completion replay queued another review")
+	f.call(t, f.person, "POST", "/api/nodes/"+f.ticket+"/reviews", f.input(), 409, &failure)
+	if failure.Code != "work_leaf_required" {
+		t.Fatalf("review rejected for the wrong reason: %s", failure.Code)
 	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var orders, reviews, runs int
+		if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM work_orders),
+          (SELECT count(*) FROM work_order_reviews),(SELECT count(*) FROM agent_runs)`).Scan(&orders, &reviews, &runs); err != nil {
+			return err
+		}
+		if orders != 0 || reviews != 0 || runs != 0 {
+			t.Fatalf("parent review left partial writes: orders=%d reviews=%d runs=%d", orders, reviews, runs)
+		}
+		return nil
+	})
 }
 
 func TestReviewRespectsProjectVisibilityAndSealsSnapshot(t *testing.T) {
@@ -372,4 +443,38 @@ func TestLegacyDaemonCannotSeeOrClaimAReview(t *testing.T) {
 	if w.Code != 409 || !strings.Contains(w.Body.String(), "review-capable") {
 		t.Fatal("legacy daemon could claim a writable review")
 	}
+}
+
+func migrateReviewWork(t *testing.T, f *fixture) {
+	t.Helper()
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET kind_id=(SELECT id FROM node_kinds WHERE tenant_id=$1 AND slug='work') WHERE id=$2`, f.person.TenantID, f.ticket)
+		return err
+	})
+}
+
+func TestReviewHistoryAndActionsAfterWorkMigration(t *testing.T) {
+	f := newFixture(t)
+	path := "/api/nodes/" + f.ticket + "/reviews"
+	in := f.input()
+	var before Review
+	f.call(t, f.person, "POST", path, in, 201, &before)
+	migrateReviewWork(t, f)
+	var rows []Review
+	f.call(t, f.person, "GET", path, nil, 200, &rows)
+	if len(rows) != 1 || rows[0].OrderID != before.OrderID || rows[0].TicketID != f.ticket || rows[0].HeadSHA != in.HeadSHA {
+		t.Fatalf("migration lost review: %+v", rows)
+	}
+	var replay, next Review
+	f.call(t, f.person, "POST", path, in, 201, &replay)
+	if replay.OrderID != before.OrderID {
+		t.Fatal("migration broke review replay")
+	}
+	f.call(t, f.agent, "POST", path, in, 403, nil)
+	f.call(t, f.person, "POST", path, f.input(), 201, &next)
+	if next.OrderID == before.OrderID || next.TicketID != f.ticket || next.GateOpen {
+		t.Fatalf("new work review: %+v", next)
+	}
+	f.call(t, f.foreign, "GET", path, nil, 404, nil)
+	f.call(t, f.foreign, "POST", path, f.input(), 404, nil)
 }

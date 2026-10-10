@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/hmac"
 	"encoding/json"
 	"errors"
@@ -112,6 +113,11 @@ func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
 		fail("failed", "missing_code")
 		return
 	}
+	if payload.StepUp != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		r = r.WithContext(ctx)
+	}
 	provider, oc, err := m.oidcProvider(r.Context())
 	if err != nil {
 		fail("unavailable", "provider_discovery")
@@ -147,6 +153,10 @@ func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	if idt.Subject == "" {
 		fail("failed", "missing_subject")
+		return
+	}
+	if payload.StepUp != nil {
+		m.finishStepUp(w, r, payload, idt)
 		return
 	}
 	var claims struct {

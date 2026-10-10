@@ -63,7 +63,12 @@ export interface CapacityWindow {
   freshness: 'fresh' | 'aging' | 'stale' | 'expired'; usage_today_known?: boolean; pacing: CapacityPacing
 }
 export interface CapacityRouting { rank: number; available_slots: number; resets_at?: string; cap_percent?: number; wait?: CapacityWait; same_quota_as?: string }
+export interface CapacityBudget {
+  currency: 'USD'; source: 'agentd'; read_at: string; key_usage_usd: number
+  key_limit_usd: number | null; key_remaining_usd: number | null; balance_usd: number | null
+}
 export interface AccountCapacity {
+  budget?: CapacityBudget
   learning?: CapacityLearning
   routing?: CapacityRouting
   account_id: string; ongoing_use_approved?: boolean; schedule: CapacitySchedule; windows: CapacityWindow[]
@@ -281,6 +286,16 @@ export function when(iso: string | number, now: number, timezone?: string): stri
   if (diff > 1 && diff < 6) return `${WD[p.wd]} ${hm}`
   return `${WD[p.wd]} ${p.d} ${MO[p.m]}`
 }
+/** The day alone, for credits and plans: "today", "tomorrow", "Fri", "6 Nov". */
+export function dayLabel(iso: string, now: number, timezone?: string): string {
+  const p = parts(Date.parse(iso), timezone), diff = dayNumber(p) - dayNumber(parts(now, timezone))
+  return diff === 0 ? 'today' : diff === 1 ? 'tomorrow' : diff > 1 && diff < 6 ? WD[p.wd]! : `${p.d} ${MO[p.m]}`
+}
+/** The wall-clock time alone: "18:00". */
+export function clockLabel(iso: string, timezone?: string): string {
+  const p = parts(Date.parse(iso), timezone)
+  return `${pad(p.h)}:${pad(p.mi)}`
+}
 export function whenFull(iso: string, timezone?: string): string {
   const p = parts(Date.parse(iso), timezone)
   return `${WD[p.wd]} ${p.d} ${MO[p.m]} ${pad(p.h)}:${pad(p.mi)}`
@@ -366,6 +381,11 @@ export function accountUseCommand(account: { id: string; harness: string }): str
 }
 /** The vendor's own sign-in command, shown to copy. Aeon never takes the password. */
 export const LOGIN_COMMAND: Record<string, string> = { codex: 'codex login', claude: 'claude /login', cursor: 'cursor-agent login', gemini: 'gemini', opencode: 'opencode auth login' }
+/** These harnesses expose no quota reader; a first run cannot produce one. */
+export const hidesCapacityLimit = (harness: string) => ['cursor', 'grok', 'pi'].includes(harness)
+export const unreportedCapacity = (harness: string) => hidesCapacityLimit(harness)
+  ? 'Usage unknown · reserve not enforceable'
+  : harness === 'codex' ? 'No reading yet — readings need a managed run' : harness === 'claude' ? 'No reading yet — captured during a managed run' : 'No reading yet'
 
 const KIND_RANK: Record<string, number> = { monthly: 0, weekly: 1, other: 2, '5h': 3 }
 /** The long window is the bar; the 5-hour window, when there is another, is the small line under it. */
@@ -430,7 +450,7 @@ function uniqueHosts(hosts: string[]): string[] {
   for (const host of hosts) if (host && !out.includes(host)) out.push(host)
   return out
 }
-/** Two doors of one login: "Same account on mbp2607 and studio". */
+/** Two doors of one login: "Same account on build-7 and studio". */
 export function sameAccountCopy(hosts: string[]): string {
   const list = uniqueHosts(hosts)
   if (list.length < 2) return ''
@@ -516,6 +536,31 @@ export function buildPools(rows: AccountRow[], now: number): PoolView[] {
   return pools
 }
 
+// ---------- Sprint, Hold and Back to the plan, per pool ----------
+// One wording for the account menus on /agents and in Settings (AEON-786).
+/** The pool an account row paces with: its door, or its group's or harness's pool. */
+export const poolOfRow = (pools: PoolView[], row: Pick<AccountRow, 'id' | 'groupId' | 'harness'>): PoolView | undefined =>
+  pools.find(p => p.rows.some(r => r.id === row.id)) ?? pools.find(p => p.id === (row.groupId ? `group:${row.groupId}` : row.harness))
+/** The pool's own override; Away comes from the person's schedule and ends in the header. */
+export const ownOverride = (pool: PoolView | undefined): Override => (!pool || pool.override === 'away' ? '' : pool.override)
+export interface HoldOption { label: string; hint: string; name: string; until: string | undefined }
+/** Hold for two hours, until the next work day starts, or until resumed. */
+export function holdOptions(schedule: CapacitySchedule, now: number): HoldOption[] {
+  const later = new Date(Math.floor((now + 2 * 3600e3) / 60_000) * 60_000).toISOString()
+  const tomorrow = new Date(workStart(schedule, now, 1)).toISOString()
+  const [day, time] = when(tomorrow, now).split(' ')
+  return [
+    { label: 'For 2 hours', hint: `until ${when(later, now)}`, name: 'Hold for 2 hours', until: later },
+    { label: `Until ${day}`, hint: time ?? '', name: `Hold until ${when(tomorrow, now)}`, until: tomorrow },
+    { label: 'Until I resume', hint: '', name: 'Hold until I resume', until: undefined },
+  ]
+}
+/** What a saved override now does, said after the write succeeded. */
+export function overrideDone(pool: Pick<PoolView, 'name'>, value: Override, until: string | undefined, now: number): string {
+  return value === 'sprint' ? `Sprint: agents may use everything left on ${pool.name} until it resets.`
+    : value === 'hold' ? `Holding ${pool.name}${until ? ` until ${when(until, now)}` : ''}. Running steps finish.` : `${pool.name} follows your work week again.`
+}
+
 // ---------- The plan per account ----------
 export interface AccountPlan {
   left: number; used: number; budget: number; night: number; leftAtStart: number
@@ -575,7 +620,7 @@ export function todayCell(row: AccountRow, plan: AccountPlan | null): TodayCell 
   if (row.state === 'paused') return { kind: 'quiet', text: 'paused' }
   if (row.state === 'unavailable') return { kind: 'quiet', text: 'reading unavailable' }
   if (row.sharedQuotaName) return { kind: 'quiet', text: '' }
-  if (!plan) return { kind: 'quiet', text: row.learning ? consumptionLine(row.learning) : 'no reading yet' }
+  if (!plan) return { kind: 'quiet', text: row.learning ? consumptionLine(row.learning) : hidesCapacityLimit(row.harness) ? unreportedCapacity(row.harness) : 'no reading yet' }
   if (plan.override === 'hold') return { kind: 'quiet', text: 'on hold' }
   if (plan.override === 'sprint' || plan.override === 'away') return { kind: 'sprint', text: `all ${pct(plan.left)}` }
   if (plan.dayOff && !plan.expiring) return { kind: 'quiet', text: 'day off' }
@@ -692,9 +737,8 @@ function planSentence(pool: PoolView, now: number, timezone?: string): Sentence 
     if (first.state === 'unavailable') return { segs: [b(`Reading unavailable on ${first.host}.`), t(' Agents skip it until the next check succeeds.')] }
     if (first.state === 'paused' && first.disconnecting) return { segs: [b(`Disconnecting from ${first.host}.`), t(' Agents start nothing new on it.')] }
     if (first.state === 'paused') return { segs: [b('Paused in Settings / Accounts.'), t(' Turn “Agents may use it” back on there to resume.')] }
-    if (first.awaitingReading) return { segs: [b('No reading yet'), t(' — starts with the next run.')] }
-    if (first.learning && ['grok', 'cursor', 'pi'].includes(first.harness)) return { segs: [b(`${pool.name} doesn't show its limit.`), t(' One run at a time by day.')] }
-    return { segs: [b('No reading yet'), t(' — starts with the first run.')] }
+    if (hidesCapacityLimit(first.harness)) return { segs: [t(unreportedCapacity(first.harness))] }
+    return { segs: [t(`${unreportedCapacity(first.harness)}.`)] }
   }
   if (pool.override === 'hold') {
     if (pool.overrideUntil) return { segs: [b(`On hold until ${at(pool.overrideUntil)}.`), t(` Agents leave ${pool.name} alone until then; today's share moves to the coming days.`)] }

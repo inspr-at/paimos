@@ -38,11 +38,14 @@ jobs:
       - run: npm ci
         working-directory: web
       - name: Install shells required by existing unit tests
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+        timeout-minutes: 4
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" apt zsh fish
       - run: npm run test:unit
         working-directory: web
-      - run: npx playwright install --with-deps chromium
+      - name: Install Playwright system dependencies
+        timeout-minutes: 13
         working-directory: web
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install --with-deps chromium
       - name: Capture the base table and test the candidate table
         working-directory: web
         env:

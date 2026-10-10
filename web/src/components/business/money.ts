@@ -237,7 +237,7 @@ export function formatAmount(value: string, currency: string, options: { signed?
 export function parseQuantityInput(text: string): string | null {
   const value = text.trim().replace(',', '.')
   if (!/^\d{1,14}(\.\d{1,4})?$/.test(value)) return null
-  const units = toUnits(value, AMOUNT_SCALE)
+  const units = toUnits(value.replace(/^0+(?=\d)/, ''), AMOUNT_SCALE)
   if (units <= 0n) return null
   return fromUnits(units, AMOUNT_SCALE).replace(/\.?0+$/, '')
 }
@@ -246,7 +246,7 @@ export function parseQuantityInput(text: string): string | null {
 export function parsePercentInput(text: string): string | null {
   const value = text.trim().replace(/\s*%$/, '').replace(',', '.')
   if (!/^\d{1,3}(\.\d{1,3})?$/.test(value)) return null
-  const percent = toUnits(value, 3)
+  const percent = toUnits(value.replace(/^0+(?=\d)/, ''), 3)
   if (percent > 100_000n) return null
   return fromUnits(percent, TAX_SCALE)
 }
@@ -261,5 +261,5 @@ export function ratePercent(rate: string): string {
 export function parseAmountInput(text: string): string | null {
   const value = text.trim().replace(/[\s,](?=\d{3}\b)/g, '').replace(',', '.')
   if (!/^\d{1,14}(\.\d{1,4})?$/.test(value)) return null
-  return fromUnits(toUnits(value, AMOUNT_SCALE), AMOUNT_SCALE)
+  return fromUnits(toUnits(value.replace(/^0+(?=\d)/, ''), AMOUNT_SCALE), AMOUNT_SCALE)
 }

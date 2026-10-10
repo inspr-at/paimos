@@ -168,7 +168,8 @@ test('search shows matches with their ancestors, dimmed and opened, and counts m
   await expect(row(page, 'PHAROS-12')).toHaveClass(/dimmed/)
   await expect(row(page, 'PHAROS-11')).not.toHaveClass(/dimmed/)
   await expect(row(page, 'PHAROS-13')).toHaveAttribute('aria-level', '3')
-  await expect(page.getByRole('toolbar').getByText('2 tickets')).toBeVisible()
+  // The count lives in the footer (footer-summary.spec.ts); the toolbar no longer repeats it.
+  await expect(page.getByRole('toolbar').getByText('2 tickets')).toHaveCount(0)
   await expect(outline(page).locator('mark')).toHaveText(['Hetzner', 'Hetzner'])
   await row(page, 'PHAROS-12').getByRole('button', { name: 'Collapse PHAROS-12' }).click()
   await expect(row(page, 'PHAROS-13')).toHaveCount(0)
@@ -261,14 +262,14 @@ test('a drag onto an epic does not move a ticket that changed elsewhere', async 
   expect(ticket.parent_id).toBe('p-pharos')
 })
 
-test('docked, the toolbar keeps a labelled Closed toggle and epic counts stay readable on hover', async ({ page }) => {
+test('docked, the header keeps a labelled Hide toggle and epic counts stay readable on hover', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
   const calls = await mockWork(page, tree())
   await page.goto('/p/PHAROS/PHAROS-14?view=outline')
-  const pill = page.getByRole('button', { name: 'Hide closed tickets' })
-  await expect(pill).toBeVisible()
-  await expect(pill).toHaveText('Closed')
-  await expect(pill).toHaveAttribute('aria-pressed', 'true')
+  const toggle = page.getByRole('checkbox', { name: 'Hide closed', exact: true })
+  await expect(toggle).toBeVisible()
+  await expect(toggle).toBeChecked()
+  await expect(page.locator('.closed-switch .hide-label-slot > .label:not(.measure)')).toHaveText('Hide closed')
   await expect(ticketViews(page).getByRole('tab', { name: 'Outline' })).toHaveAttribute('aria-selected', 'true')
   const toolbar = (await page.getByRole('toolbar', { name: 'Ticket list controls' }).boundingBox())!
   expect(toolbar.height).toBeLessThan(60)
@@ -277,9 +278,10 @@ test('docked, the toolbar keeps a labelled Closed toggle and epic counts stay re
   const actions = (await row(page, 'PHAROS-10').locator('.row-actions').boundingBox())!
   const numbers = (await count.boundingBox())!
   expect(numbers.x + numbers.width).toBeLessThanOrEqual(actions.x)
-  await pill.click()
+  await toggle.uncheck()
   await expect(page).toHaveURL(/closed=1/)
-  await expect(page.getByRole('button', { name: 'Hide closed tickets' })).toHaveAttribute('aria-pressed', 'false')
+  await expect(toggle).not.toBeChecked()
+  await expect(row(page, 'PHAROS-15')).toBeVisible()
   void calls
 })
 

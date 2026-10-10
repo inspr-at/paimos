@@ -1,0 +1,1318 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/harness
+paths:
+  /projects/{projectId}/harness-sessions:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: listProjectHarnessSessions
+      description: Project generations with lineage and caller-specific move permission for the Agents tree.
+      responses:
+        '200': {description: Public generations, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/HarnessSessionHierarchy'}}}}}
+    post:
+      operationId: registerHarnessSession
+      description: Agent callers must also hold harness.worker in the target project and on their key, so every registered generation can heartbeat and stop. Registers a generation or returns an exact active replay. A restarted coordinator with the same principal, harness and native reference adopts live children from its stopped or heartbeat-lost predecessor atomically. succeeds_session_id selects a same-principal predecessor with a different native reference. A healthy predecessor is never replaced. At most 1000 direct children may be adopted in one handover, including paused children on resume; larger scopes return 409 atomically. Audit buffering is capped at 32 MiB; excess returns 429 atomically. Emits harness.adopted per child and harness.handed_over on the predecessor, with public lineage fields. Emits harness.registered on the existing events stream after commit; stopping emits harness.stopped. Labels are public display metadata, never identity or authority.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HarnessRegistration'}
+      responses:
+        '201':
+          description: Registered or exact active replay
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HarnessSessionHierarchy'}
+        '400': {description: Invalid registration or label}
+        '403': {description: Scope required or another agent requested}
+        '409': {description: 'Active harness_session_ref has a different worker lease or registration metadata, vendor_session_ref is already active for this agent in the tenant across any harness, or hierarchy/predecessor binding conflicts. Vendor binding conflicts identify the supplied reference by the first 16 hex characters of its domain-separated SHA-256 digest. Private references and leases are never returned.'}
+  /projects/{projectId}/harness-sessions/pause:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: pauseProjectHarnessSessions
+      description: Applies to up to 200 pause-capable generations controlled by this person or proven coordinator in this project. Repeat when more is true. Excluded session UUIDs are preserved. Managed generations without inbox delivery remain running and are reported in skipped (up to 200, with skipped_more indicating omitted reports); they do not consume the pause limit.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatch'}}}}
+      responses:
+        '200': {description: Controlled and skipped generations, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatchResult'}}}}
+        '403': {description: Scope or coordinator proof rejected}
+  /projects/{projectId}/harness-sessions/remove-stale:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: removeStaleHarnessSessions
+      description: Human with harness.read project access only. Removes unarchived records whose last accepted heartbeat is more than 15 minutes old, using creation time if none was accepted, at most 200 per request; `more` is true while eligible records remain and the client repeats. Eligibility is checked under row locks against one server cutoff; stopped records with a recent heartbeat are retained. Each removal event records actor, reason, the server-generated batch_id and the cutoff. Repeating the request never duplicates removal events. Does not signal processes.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveRequest'}}}}
+      responses:
+        '200': {description: Removed records and server eligibility cutoff, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveStaleResult'}}}}
+        '400': {description: Invalid reason}
+        '403': {description: Human project access required}
+        '404': {description: Project not visible}
+  /projects/{projectId}/harness-sessions/resume:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: resumeProjectHarnessSessions
+      description: Applies to up to 200 eligible generations controlled by this person or proven coordinator in this project. Repeat when more is true. Excluded session UUIDs are preserved. Resume returns durable launch recipes; each successor registers with fresh private proofs and succeeds_session_id.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatch'}}}}
+      responses:
+        '200': {description: Controlled generations, content: {application/json: {schema: {type: object, required: [items, more], properties: {items: {type: array, items: {$ref: '#/components/schemas/HarnessResume'}}, more: {type: boolean}}}}}}
+        '403': {description: Scope or coordinator proof rejected}
+  /projects/{projectId}/harness-sessions/{sessionId}:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getHarnessSession
+      description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
+      responses:
+        '200': {description: Session detail, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}, Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/archive:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: archiveHarnessSession
+      description: Human-only harness.recover operation. Archives the registration, revokes its worker generation, and retains history. Does not signal any process or claim remote exit. Exact retry is idempotent; any changed observation requires a fresh confirmation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, confirmation, request_id, reason]
+              properties:
+                expected_revision: {type: string, pattern: '^[0-9a-f]{64}$'}
+                confirmation: {type: string, minLength: 1, maxLength: 256}
+                request_id: {type: string, format: uuid}
+                reason: {type: string, minLength: 1, maxLength: 240}
+      responses:
+        '200': {description: Archived session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '400': {description: Invalid confirmation or request}
+        '403': {description: Human recovery permission required}
+        '409': {description: 'Stale observation, divergent retry, active force authorization or legacy managed daemon without safe detachment'}
+  /projects/{projectId}/harness-sessions/{sessionId}/complete-delivery:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof}
+    post:
+      security: *auth
+      operationId: completeHarnessDelivery
+      description: Settle an exact worker lease. Omitted outcome means handed_off; failed requires a bounded reason and advances the sender receipt without reinjecting uncertain input.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [delivery_id, cursor]
+              properties:
+                delivery_id: {type: string, format: uuid}
+                cursor: {type: integer, minimum: 1}
+                effective_level: {type: string, enum: [simple, steer], default: simple}
+                outcome: {type: string, enum: [handed_off, failed], default: handed_off}
+                failure_reason: {type: string, enum: [outcome_unconfirmed, child_unavailable]}
+      responses:
+        '200': {description: Exact leased delivery settled idempotently}
+        '400': {description: Invalid settlement}
+        '409': {description: Lease cursor mismatch or released lease}
+        '410': {description: Archived generation}
+  /projects/{projectId}/harness-sessions/{sessionId}/confirm-exit:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof}
+    post:
+      operationId: confirmHarnessExit
+      security: *auth
+      description: Requires current harness.worker authority and the exact generation's agent and lease. The owned executor reports confirmed process exit after an uncertain stop, including lost ownership, heartbeat loss or administrative archive/removal. Active generations are rejected. Persists the confirmed reason and emits harness.stop_confirmed; exact replay is idempotent and divergent replay returns 409. Retains stopped_at, archived_at, recovery receipts and historical bindings; archived worker APIs still return 410. No process is signalled or generation revived. The original recovery_process_state remains the administrative action's observation, not this later executor report.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: {type: string, enum: [process_exited, process_failed, force_stopped]}
+      responses:
+        '200': {description: Confirmed closed generation, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '400': {description: Invalid exit reason}
+        '403': {description: Exact worker proof and current harness.worker authority required}
+        '409': {description: Generation is active or exit confirmation conflicts}
+  /projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: forceStopHarnessSession
+      description: Human-only harness.force_stop permission. Exact current session/process confirmation, freshness and generation are checked before queueing. The owning daemon rechecks its in-memory process identity and unreaped process group before signaling. Children outside that process group are never targeted. An offline or unverified generation is unavailable; queued does not mean terminated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, confirmation, request_id, reason]
+              properties:
+                expected_revision: {type: string, pattern: '^[0-9a-f]{64}$'}
+                confirmation: {type: string, maxLength: 300}
+                request_id: {type: string, format: uuid}
+                reason: {type: string, minLength: 1, maxLength: 240}
+      responses:
+        '201': {description: Idempotent typed force control; inspect its state and outcome, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRecoveryControl'}}}}
+        '403': {description: Human force permission required}
+        '409': {description: 'Stale confirmation, offline host or unverified process generation'}
+  /projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: controlId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+    post:
+      operationId: completeHarnessControl
+      security: *auth
+      description: Exact session agent and private generation lease required. Session requests may complete directly from pending or claimed; owned process controls still require claimed. Exact completion replay is idempotent. An expired request returns its terminal rejected outcome with request_expired reason and cannot be applied.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [outcome, reason]
+              properties:
+                outcome: {type: string, enum: [applied, rejected]}
+                reason: {type: string, minLength: 1, maxLength: 128}
+      responses:
+        '200': {description: Control outcome; inspect outcome and reason, content: {application/json: {schema: {type: object}}}}
+        '403': {description: Wrong session agent or generation lease}
+        '409': {description: 'divergent control completion means the control is already finished. setting authorization expired means an applied setting missed the database deadline. Both are terminal for the worker. Other conflicts, including an unclaimed control, stay retryable.'}
+  /projects/{projectId}/harness-sessions/{sessionId}/drain:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+    post:
+      operationId: drainHarnessInbox
+      description: "Existing managed inbox or an explicitly paired attached hook. Attached hooks lease only exact-session messages; an unfinished lease is replayed until the foreground hook confirms handoff. Reconnect never acknowledges messages. Requires existing harness.worker authority and this registration's worker lease."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                delivery_level: {type: string, enum: [steer], description: "While a turn is busy, lease only boundary input; omitted selects the ordinary FIFO between turns."}
+      responses:
+        '200': {description: Empty or one replayable delivery, content: {application/json: {schema: {type: array, maxItems: 1, items: {type: object, required: [delivery_id, message_id, cursor, sender_principal_id, body, leased_at], properties: {delivery_level: {type: string, enum: [simple, steer], description: "Requested input timing; simple waits for the current turn to end and steer uses the supported input boundary"}, delivery_id: {type: string, format: uuid}, message_id: {type: string, format: uuid}, cursor: {type: integer, format: int64}, sender_principal_id: {type: string, format: uuid}, project_id: {type: string, format: uuid, description: 'Originating project for a project message; omitted for principal inbox messages'}, reply_to_id: {type: string, format: uuid, description: 'Project message parent for replies; may differ from the inbox message ID'}, sender_session_id: {type: string, format: uuid, description: 'Original sender generation, when bound'}, body: {type: string}, leased_at: {type: string, format: date-time}}}}}}}
+        '403': {description: Worker proof rejected}
+        '409': {description: An existing managed inbox or paired attached hook is required}
+        '410': {description: Archived generation}
+  /projects/{projectId}/harness-sessions/{sessionId}/heartbeat:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: heartbeatHarnessSession
+      description: The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket, and only while that ticket still belongs to the session's project. Omission preserves an estimate; JSON null clears it and its report time. An instant from 30 days ago through 365 days ahead is accepted; a past instant inside that window is overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction. Model and effort reports update the current generation without re-registration; omitted values preserve the accepted identity. The current generation's worker lease is required. A generation the server closed as heartbeat_lost (Lost contact) is revived by its own worker's next heartbeat, unless it was removed or a newer generation registered the same session reference (AEON-291).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phase, activity_sequence]
+              properties:
+                max_session_file_bytes: {$ref: '#/components/schemas/RulesClientMaximum'}
+                rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80}
+                process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+                attached_hook: {type: boolean, default: false, description: "Bind an existing unmanaged inbox hook to its paired daemon and exact process identity. Requires the current worker lease, inbox capability and active pairing; never grants process controls or watch consent."}
+                phase: {type: string, enum: [starting, working, yielded, stopping]}
+                activity: {type: string, enum: [unknown, busy, idle, throttled]}
+                activity_sequence: {type: integer, format: int64, minimum: 0}
+                activity_note: {type: string, minLength: 1, maxLength: 120, description: "Public plain text; whitespace trimmed and control characters stripped. Uses the activity credential filter before storage and display."}
+                doing: {type: string, minLength: 1, maxLength: 60, description: "Public agent summary without credentials, paths, URLs or command arguments. Collected only in agent_summary mode."}
+                doing_at: {type: string, format: date-time, description: "Optional observation time; defaults to server receipt. Older than ten minutes is ignored; future times beyond thirty seconds are rejected."}
+                tool_activity: {$ref: '#/components/schemas/CurrentAgentActivity'}
+                step: {$ref: '#/components/schemas/HarnessPauseProgress/properties/step'}
+                next_point: {$ref: '#/components/schemas/HarnessPauseProgress/properties/next_point'}
+                next_point_in_min: {$ref: '#/components/schemas/HarnessPauseProgress/properties/next_point_in_min'}
+                finish_in_min: {$ref: '#/components/schemas/HarnessPauseProgress/properties/finish_in_min'}
+                finish_outcome: {$ref: '#/components/schemas/HarnessPauseProgress/properties/finish_outcome'}
+                interrupt: {$ref: '#/components/schemas/HarnessPauseProgress/properties/interrupt'}
+                command: {$ref: '#/components/schemas/HarnessPauseProgress/properties/command'}
+                command_left_min: {$ref: '#/components/schemas/HarnessPauseProgress/properties/command_left_min'}
+                display_label: {type: [string, 'null'], maxLength: 128, description: Optional current session name; omission preserves the label; trimmed empty or null clears it; control characters rejected.}
+                model: {$ref: '#/components/schemas/HarnessModel'}
+                reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
+                account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
+                model_reports: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/ModelObservationWrite'}}
+                harness_version: {$ref: '#/components/schemas/HarnessVersion'}
+                brief: {$ref: '#/components/schemas/HarnessBrief'}
+                worktree: {$ref: '#/components/schemas/HarnessWorktree'}
+                branch: {$ref: '#/components/schemas/HarnessBranch'}
+                commits: {type: array, maxItems: 20, description: 'New commits to append, oldest first; duplicate SHAs are ignored and only the latest 20 are retained.', items: {$ref: '#/components/schemas/HarnessCommit'}}
+                eta_ready_at: {type: [string, 'null'], format: date-time, description: "Worker only. RFC3339 instant the bound ticket is ready for review, from 30 days ago through 365 days ahead. Omission preserves; null clears. A past instant inside that window is overdue."}
+                eta_live_at: {type: [string, 'null'], format: date-time, description: "Coordinator only. RFC3339 instant the bound ticket is live, from 30 days ago through 365 days ahead. Omission preserves; null clears. The ticket's current project is checked on every write."}
+                progress_pct: {type: [integer, 'null'], minimum: 0, maximum: 100, description: "Worker only. Percent done for the bound ticket, 0 through 100. Omission preserves; null clears."}
+      responses:
+        '200': {description: Updated session with non-blocking estimate guidance, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '400': {description: Invalid note or heartbeat}
+        '403': {description: Worker proof rejected}
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /projects/{projectId}/harness-sessions/{sessionId}/lead-decisions:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: recordLeadDecision
+      description: >-
+        Requires harness.worker, the owning active coordinator generation and its exact lease.
+        Authority is rechecked under the existing tenant/pairing/tree fence before append or replay.
+        Fixed enums, bounded numeric revisions/attempts, gate timestamps and same-project result IDs only;
+        unknown fields, prompts, account details and arbitrary URLs are rejected. Reports grant no authority
+        and do not launch, merge, deploy, change policy or open review gates. Admission reports must include
+        all four gates; unreadable, missing timestamps, future timestamps or readings older than 120 seconds
+        turn a reported success into wait. Gate freshness is frozen at server recording time.
+        request_id is idempotent within the project: exact metadata replays the original evidence, divergent
+        reuse returns 409. A different, stopped, archived or revoked generation cannot replay the request.
+        Tenant/project/request identity remains unique even when a referenced node moves out of visibility;
+        conflicts never return hidden evidence or bypass event visibility.
+        Review links are checked against the existing exact-commit binding and freeze its base/head hashes.
+      parameters:
+        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LeadDecisionWrite'}
+      responses:
+        '200': {description: Appended or replayed evidence, content: {application/json: {schema: {$ref: '#/components/schemas/LeadDecisionRecorded'}}}}
+        '400': {description: Invalid or unbounded evidence}
+        '403': {description: Worker ownership or authorization rejected}
+        '409': {description: Request identity or result binding conflict}
+        '410': {description: Authenticated archived generation}
+  /projects/{projectId}/harness-sessions/{sessionId}/lookup:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: lookupHarnessSession
+      description: Active-generation check for the caller's own ambient sender session. One row, no lock, and no activity, history, or controls. A session owned by another principal is not found.
+      responses:
+        '200':
+          description: Session identity and end times
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HarnessSessionLookup'}
+        '400': {description: Invalid id}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {description: No such session for this caller}
+  /projects/{projectId}/harness-sessions/{sessionId}/managed-context:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+    post:
+      parameters:
+        - {name: X-Aeon-Max-Session-File-Bytes, in: header, schema: {type: integer, minimum: 2000, maximum: 512000}, description: "Omission means 12000. Delivery also respects the registered maximum; whole-rule compatibility cut with note, never dropping locked rules."}
+      operationId: managedHarnessContext
+      description: Bound managed worker only. ADR-004 rules merge for this exact tenant/project/key creator/agent/task; delivered in ephemeral context. No repository writes. A receipt proves received bytes, not model obedience. No caller-selectable context or broader rules access.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        '200': {description: ADR-004 merged rules envelope}
+        '403': {description: Invalid worker lease or owner}
+        '409': {description: Managed run required}
+  /projects/{projectId}/harness-sessions/{sessionId}/managed-controls:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: requestManagedHarnessControl
+      description: Person-only harness.control. Requires harness=claude, daemon-qualified managed_control_v1, a live run and fresh exact process ownership. A self-advertised capability alone does not qualify an adapter. Text is transient (never audit or journal content); expiry or server restart rejects undelivered text. Reusing request_id requires identical actor and payload. Claiming is at most once; an uncertain outcome is never automatically reinjected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, kind, expected_ownership]
+              properties:
+                request_id: {type: string, format: uuid}
+                kind: {type: string, enum: [steer, interrupt, stop, rename, model, effort]}
+                text: {type: string, maxLength: 8192, description: Required only for steer; UTF-8 byte limit 8192.}
+                value: {type: string, minLength: 1, maxLength: 128, description: Required only for rename/model/effort. Name is public session metadata; model and effort must match the enrolled account catalog.}
+                expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+      responses:
+        '201': {description: Pending or identical replay; reason authorization_expired means expired., content: {application/json: {schema: {$ref: '#/components/schemas/HarnessManagedControl'}}}}
+        '400': {description: Invalid typed value or model/effort outside the enrolled account catalog}
+        '403': {description: Person with project harness.control required}
+        '409': {description: 'Unmanaged, unsupported, stale ownership, changed retry or session unavailable'}
+        '429': {description: Session control quota reached}
+  /projects/{projectId}/harness-sessions/{sessionId}/managed-settings:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getManagedHarnessSettings
+      description: Person with harness.control reads only model and effort choices from this run's enrolled account catalog. Missing enrollment returns no choices.
+      responses:
+        '200':
+          description: Account-scoped model choices, filtered to supported Claude efforts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [models]
+                properties:
+                  models:
+                    type: array
+                    items:
+                      type: object
+                      required: [model, efforts]
+                      properties:
+                        model: {type: string}
+                        efforts: {type: array, items: {type: string, enum: [low, medium, high, xhigh, max]}}
+        '403': {description: Person with project harness.control required}
+        '409': {description: Managed Claude session required}
+  /projects/{projectId}/harness-sessions/{sessionId}/model-reports:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+    post:
+      operationId: reportHarnessModels
+      description: Existing harness.worker authority plus the exact live worker lease reports only this session's harness. Agent evidence also requires an available account owned by the caller on this harness; registering a session does not enroll an account. Health evidence must match this exact session's stored model and effort or its managed run pin; usage for another model is insufficient. No extra key grant is needed. Failures must be five minutes apart to suppress routing, and receipt retention and rate limits also apply here. Evidence is validated, idempotent and content-free; discovered pins remain disabled until person acceptance, and no profile metadata or ladder writes are accepted.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/ModelObservationWrite'}}}}}
+      responses:
+        '200': {description: Evidence recorded}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/harness-sessions/{sessionId}/notifications:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+    get:
+      operationId: watchHarnessNotifications
+      description: "Content-free SSE wake hints for this managed generation's controls and inbox, over the existing committed event notification channel. Requires current harness.worker authority and the exact worker lease. harness.wake on connection and relevant changes tells the daemon to claim controls and drain through their existing authorized routes; stream.ping is a keepalive. Hints grant no process authority, carry no message text, and acknowledge nothing. Reconnect triggers a fresh drain to cover missed hints. Authority is rechecked on wakes and every 15 seconds."
+      responses:
+        '200': {description: "SSE harness.wake and stream.ping events with empty JSON objects", content: {text/event-stream: {schema: {type: string}}}}
+        '403': {description: "Worker proof or current permission rejected"}
+        '409': {description: "Managed worker required"}
+        '410': {description: "Archived generation"}
+  /projects/{projectId}/harness-sessions/{sessionId}/pause:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: pauseHarnessSession
+      description: Requires harness.control. People control their owned generations (or project admins); coordinators control their direct children using their own lease. Managed sessions must advertise inbox delivery; unsupported harnesses return 409. Pause is a cooperative stop control, never a process signal. Resume persists a continuation request; supplying a fresh registration creates its successor atomically.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseRequest'}}}}
+      responses:
+        '200': {description: Durable idempotent transition, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '400': {description: Invalid payload}
+        '403': {description: 'Ownership, scope or worker proof rejected'}
+        '409': {description: Session or pause transition conflicts}
+  /projects/{projectId}/harness-sessions/{sessionId}/pause-plan:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: planHarnessPause
+      description: Requires harness.worker and the exact worker lease. People control their owned generations (or project admins); coordinators control their direct children using their own lease. Pause is a cooperative stop control, never a process signal. Resume persists a continuation request; supplying a fresh registration creates its successor atomically.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPausePlan'}}}}
+      responses:
+        '200': {description: Durable idempotent transition, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '400': {description: Invalid payload}
+        '403': {description: 'Ownership, scope or worker proof rejected'}
+        '409': {description: Session or pause transition conflicts}
+  /projects/{projectId}/harness-sessions/{sessionId}/provenance:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getHarnessInstructionProvenance
+      description: Newest instruction-provenance revisions for a visible session. Each item is an allowlisted logical name, a hash_kind, and an optional version. content_sha256 is present only when hash_kind is content. A prompt template recorded without an explicit template digest uses hash_kind absent and a null digest; the version identifier is not hashed. rules_merged and rules_set are appended when a rules receipt is recorded. Contents, rule text, secrets and local paths are not stored. Query across sessions with GET /projects/{projectId}/instruction-provenance.
+      responses:
+        '200': {description: Provenance revisions, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessProvenancePage'}}}}
+        '404': {description: Session is not visible}
+    post:
+      operationId: recordHarnessInstructionProvenance
+      description: The attributed worker appends one provenance revision for allowlisted instruction files or a prompt template, or replays the latest revision when the canonical set digest matches. Requires harness.worker and X-Aeon-Worker-Lease. rules_merged and rules_set are rejected here; a rules receipt records them. Heartbeat registration may post AGENTS.md and CLAUDE.md hashes when those files are present in the worktree.
+      parameters:
+        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private per-generation proof; never returned or logged}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HarnessProvenanceWrite'}
+      responses:
+        '200': {description: Created or replayed revision, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessProvenanceRecorded'}}}}
+        '400': {description: 'Item is not an allowlisted name, digest or version'}
+        '403': {description: Worker proof rejected}
+        '410': {description: Authenticated archived generation; existing provenance remains readable}
+  /projects/{projectId}/harness-sessions/{sessionId}/read-marker:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getSessionReadMarker
+      description: The signed-in person's read watermark for this session. Null fields mean nothing has been marked. Requires harness.read. Agents receive 403. Another person's marker is never returned. An invisible session is 404.
+      responses:
+        '200':
+          description: This person's marker, or nulls when unset
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionReadMarker'}
+        '401': {description: Authentication required}
+        '403': {description: Signed-in person with harness.read required}
+        '404': {description: Session is not visible}
+    put:
+      operationId: putSessionReadMarker
+      description: Move this person's watermark forward. last_read_message_id is a message in this session, including an unbound reply linked to its messages. last_read_event_id is that message's sent_event_id, or the sent_event_id of a later message in the same session. A lower or equal event leaves the stored marker unchanged and returns it. Requires harness.read. Agents receive 403. Does not change message resources.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [last_read_message_id, last_read_event_id]
+              properties:
+                last_read_message_id: {type: string, format: uuid}
+                last_read_event_id: {type: integer, format: int64, minimum: 0}
+      responses:
+        '200':
+          description: The stored marker, which may be ahead of the request
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionReadMarker'}
+        '400': {description: 'Invalid marker, or the message is not in this session'}
+        '401': {description: Authentication required}
+        '403': {description: Signed-in person with harness.read required}
+        '404': {description: Session is not visible}
+  /projects/{projectId}/harness-sessions/{sessionId}/recover-agent:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: diagnoseAgentRecovery
+      summary: Diagnose reporting loss and the available daemon recovery action
+      description: "Person-only harness.control. Uses tenant-scoped paired-host, credential and process evidence; silence alone never proves process exit or auth 401. Attached sessions without an exact daemon hook binding fail closed. A stale host observation reports host_not_reporting. No credentials or process arguments are returned."
+      responses:
+        '200':
+          description: Bounded diagnosis and exact session observation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentRecoveryDiagnosis'}
+        '403': {description: Person with harness.control required}
+    post:
+      operationId: requestAgentRecovery
+      summary: Request generation-bound Restart or Reconnect
+      description: "Person-only harness.control, and run.create for Restart, rechecked inside the tenant access/tree fence. request_id is idempotent only for the same actor and payload. Requires the exact observed revision and session_recovery_v1 advertised by a paired daemon. Accepted means requested, never restarted. Restart gracefully closes only the exact owned process; it never escalates to a group kill. A continuation is queued only after verified root exit and terminal run settlement. Same work order/account, approved model/effort and tier, and last recorded handover are retained; routing and admission still apply. Reconnect restores daemon-owned heartbeat/inbox reporting without signals or credential changes. One live request per session; 45-second single-use claim, no uncertain replay."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [request_id, expected_revision, action], additionalProperties: false, properties: {request_id: {type: string, format: uuid}, expected_revision: {type: string, minLength: 64, maxLength: 64}, action: {type: string, enum: [restart, reconnect]}}}
+      responses:
+        '201': {description: Durable pending request; poll its status before reporting a result, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
+        '403': {description: Person and current recovery/create permissions required}
+        '409': {description: Observation changed or exact paired recovery unavailable}
+  /projects/{projectId}/harness-sessions/{sessionId}/recover-agent/{requestId}:
+    get:
+      operationId: readAgentRecovery
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: "Pending, claimed, completed or expired; expired claims have unconfirmed outcome", content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/recovery:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: previewHarnessRecovery
+      description: Human-only harness.recover or harness.force_stop permission in the target project. Returns an exact observed revision and confirmation for record recovery. Missing heartbeat is not proof of process exit.
+      responses:
+        '200': {description: Recovery preview, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRecovery'}}}}
+        '403': {description: Human recovery permission required}
+        '404': {description: Session not visible}
+  /projects/{projectId}/harness-sessions/{sessionId}/remove:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: removeHarnessSession
+      description: Human with harness.read project access only. Archives any registration under a row lock, without a client revision or process-ownership precondition. Revokes the generation and rejects outstanding controls; authenticated late worker writes return 410. Repeated removal returns the retained record without another audit event. Keeps ticket links and history. No process is signalled; an already delivered force signal or legacy daemon reaction cannot be recalled or ruled out.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveRequest'}}}}
+      responses:
+        '200': {description: Record removed; process state unknown, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveResult'}}}}
+        '400': {description: Invalid reason}
+        '403': {description: Human project access required}
+        '404': {description: Session not visible}
+  /projects/{projectId}/harness-sessions/{sessionId}/reparent:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: reparentHarnessSession
+      description: A person owning both registrations or an owner/admin in their project moves a live worker to a live coordinator in the same project. Requires harness.write; verifies expected_revision and prevents cycles. Emits harness.reparented. Undo rechecks permissions, liveness and subsequent hierarchy changes; heartbeats do not invalidate undo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, parent_harness_session_id]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                parent_harness_session_id: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Updated worker and undo event
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session, event_id, undoable]
+                properties:
+                  session: {$ref: '#/components/schemas/HarnessSessionHierarchy'}
+                  event_id: {type: integer, format: int64}
+                  undoable: {type: boolean}
+        '403': {description: Person must own both registrations or administer the project}
+        '404': {description: Session or destination not visible in this project}
+        '409': {description: 'Stale revision, ended session or invalid hierarchy'}
+  /projects/{projectId}/harness-sessions/{sessionId}/requests:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: requestHarnessSessionChange
+      security: *auth
+      description: Person with harness.control permission requests a change to an unmanaged session. The immutable session UUID is its generation; expected_generation must equal it. Requests expire after ten minutes. Exact request_id replay returns the original control; divergent reuse conflicts. Rename labels permit only ASCII letters, digits, spaces and -_.:()/# (at most 64 characters). Model requests require a granted enabled catalog profile and a supported harness effort. No metadata changes until the session acknowledges application and reports it on a heartbeat.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, expected_generation, kind]
+              properties:
+                request_id: {type: string, format: uuid}
+                expected_generation: {type: string, format: uuid}
+                kind: {type: string, enum: [rename_request, model_request]}
+                display_label: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9 _.:()/#-]+$'}
+                account_id: {type: string, format: uuid}
+                model_profile_id: {type: string, format: uuid}
+      responses:
+        '201': {description: Requested; waiting for the session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSessionRequest'}}}}
+        '400': {description: Invalid rename or catalog selection}
+        '403': {description: Person with harness.control permission required}
+        '409': {description: 'Closed or managed generation, stale generation, or divergent replay'}
+  /projects/{projectId}/harness-sessions/{sessionId}/resume:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: resumeHarnessSession
+      description: Requires harness.control. People control their owned generations (or project admins); coordinators control their direct children using their own lease. Pause is a cooperative stop control, never a process signal. Resume persists a continuation request; supplying a fresh registration creates its successor atomically.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessResumeRequest'}}}}
+      responses:
+        '200': {description: Durable idempotent transition, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessResume'}}}}
+        '400': {description: Invalid payload}
+        '403': {description: 'Ownership, scope or worker proof rejected'}
+        '409': {description: Session or pause transition conflicts}
+  /projects/{projectId}/harness-sessions/{sessionId}/rules-receipts:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getHarnessRulesReceipts
+      description: Requires harness.read and session project visibility. Newest 32 append-only worker-reported received receipts, separate from instruction provenance. History remains readable after stop/archive. Use before_revision for older history; the newest receipt revision is the next write's expected_revision, or zero for empty history.
+      parameters:
+        - {name: before_revision, in: query, schema: {type: integer, minimum: 1}, description: Exclusive revision cursor. Omit to read newest receipts.}
+      responses:
+        '200': {description: Receipt history, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRulesReceiptPage'}}}}
+        '400': {description: Invalid revision cursor}
+        '404': {description: Session is not visible}
+    post:
+      operationId: recordHarnessRulesReceipt
+      description: >-
+        Explicit worker report of receiving particular merged bytes; never publishes rules or proves
+        model load, obedience or execution, and grants no authority. A newly appended receipt also
+        appends session instruction provenance for that merged version and body hash, plus constituent
+        set versions from the one manifest served with those bytes. When that serve was not recorded, or
+        more than one set list was served for the same bytes, only the merged identity is stored. Replay does not append another provenance
+        revision. The receipt row itself stays free of rule text.
+        Requires harness.worker and the exact active owning generation lease. Server verifies tenant,
+        project, agent, canonical key creator, registered harness and any task's current session/project
+        binding. Role, bytes, version and source remain worker-reported; publication is not verified.
+        No offline recording or deferred automatic submission. Cache/floor-only source reports remain
+        unverified even when recorded online. expected_revision is a receipt revision, independent of
+        session/provenance revisions. Append only when it equals the latest revision (initially zero).
+        An identical request_id and normalized metadata replays its original receipt, including after newer appends;
+        divergent reuse or competing stale writes return 409. All authorization and generation checks
+        precede replay, so expired/revoked credentials and stopped/archived generations cannot replay.
+      parameters:
+        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof; never stored in a receipt or returned}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HarnessRulesReceiptWrite'}
+      responses:
+        '200': {description: Appended or replayed receipt, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRulesReceiptRecorded'}}}}
+        '400': {description: Invalid or unbounded metadata; unknown fields rejected}
+        '403': {description: Worker proof or context binding rejected}
+        '409': {description: Expected receipt revision conflict or divergent request reuse}
+        '410': {description: Authenticated archived generation; receipt history remains readable}
+  /projects/{projectId}/harness-sessions/{sessionId}/stop:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: markHarnessStopped
+      description: Exact worker lease required. Reason paused requires a planned cooperative stop and a handover; persists the note on the session and bound ticket atomically, then closes the old generation. Exact paused-stop replays are idempotent. No process is signalled by this endpoint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: {type: string, enum: [stopped, process_exited, process_failed, ownership_lost, force_stopped, token_budget_exhausted, turn_budget_exhausted, paused]}
+                handover: {$ref: '#/components/schemas/HarnessHandover'}
+      responses:
+        '200': {description: Closed generation, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '400': {description: Invalid stop reason or handover}
+        '403': {description: Exact worker proof required}
+        '409': {description: Missing planned pause or divergent replay}
+        '410': {description: Archived generation}
+  /projects/{projectId}/harness-sessions/{sessionId}/tier:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      security: *auth
+      operationId: getSessionServiceTier
+      description: Read active/reported tier, pending change, adapter provenance and agent requests. Unmanaged and ended sessions are read-only.
+      responses:
+        '200': {description: Session service tier, content: {application/json: {schema: {$ref: '#/components/schemas/SessionServiceTier'}}}}
+        '403': {description: Project harness.read required}
+        '404': {description: Session not visible in this tenant/project}
+    post:
+      security: *auth
+      operationId: setSessionServiceTier
+      description: Person-only project harness.control; live exact process ownership and tier revision required. Returns a pending control; the daemon confirms at the next safe point. Undo is another change. A request for the active tier cancels an unclaimed pending change; a claimed change must finish before undo. Request IDs are bound to the person and full body, including when the requested tier is already active.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ServiceTierChange'}}}
+      responses:
+        '201': {description: Pending change or cancelled pending change, content: {application/json: {schema: {$ref: '#/components/schemas/SessionServiceTier'}}}}
+        '400': {description: Invalid tier or missing price}
+        '403': {description: Person with harness.control required}
+        '409': {description: 'Read-only session, changed revision/ownership or request ID reused with a different body'}
+  /projects/{projectId}/harness-sessions/{sessionId}/tier/ask:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      security: *auth
+      operationId: askSessionServiceTier
+      description: The session's own agent asks for a tier; its daemon lease is not required. No switch is performed. Requests are exposed on the tier read for the Decision Desk.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, tier, reason]
+              properties:
+                request_id: {type: string, format: uuid}
+                tier: {$ref: '#/components/schemas/ServiceTier'}
+                reason: {type: string, minLength: 1, maxLength: 500}
+      responses:
+        '201': {description: Pending person decision, content: {application/json: {schema: {$ref: '#/components/schemas/ServiceTierRequest'}}}}
+        '403': {description: Session-bound agent required}
+        '409': {description: Read-only or outstanding request}
+  /projects/{projectId}/harness-sessions/{sessionId}/tier/report:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Exact generation worker proof}
+    post:
+      security: *auth
+      operationId: reportSessionServiceTiers
+      description: Session-bound agent worker lease reports vendor capability facts per exact model. Offered tiers and multipliers must match the pinned vendor catalog; paid tiers require a cited vendor price and mechanism with checked-at provenance. Unpublished factors remain null. Only unmanaged sessions may report their active tier here; managed tier changes require a person control and daemon completion. No secrets or vendor credentials.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reports]
+              properties:
+                reports: {type: array, minItems: 1, maxItems: 32, items: {$ref: '#/components/schemas/ServiceTierReport'}}
+                active_tier: {$ref: '#/components/schemas/ServiceTier'}
+      responses:
+        '200': {description: Stored report}
+        '400': {description: Invalid capability report or factors differing from the pinned vendor catalog}
+        '403': {description: Worker proof rejected}
+        '409': {description: Managed active tier cannot be self-escalated}
+  /projects/{projectId}/harness-sessions/{sessionId}/tier/requests/{requestId}/decision:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      security: *auth
+      operationId: decideSessionServiceTier
+      description: Person with project harness.control approves or declines an agent request. Approval creates a fenced pending tier control atomically; a direct set to the requested tier also approves it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/ServiceTierChange'}
+                - type: object
+                  required: [decision]
+                  properties:
+                    decision: {type: string, enum: [approve, decline]}
+      responses:
+        '201': {description: Recorded decision and tier state, content: {application/json: {schema: {$ref: '#/components/schemas/SessionServiceTier'}}}}
+        '403': {description: Person with harness.control required}
+        '409': {description: Decided request or stale/read-only session}
+  /projects/{projectId}/harness-sessions/{sessionId}/usage:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: reportHarnessSessionUsage
+      security: *auth
+      description: >-
+        Requires harness.worker and the owning agent's generation lease. Accepts managed and unmanaged
+        sessions, including final reporting after normal stop. Archived generations are rejected before receipt replay. Counters are cumulative per exact model within
+        the entire session, never deltas or source-local totals. Input includes cached input. Known
+        counters and uncached input cannot decrease or become unknown. Sequences must increase.
+        Exact report_id replay returns the current row without another event; reuse with different
+        normalized input conflicts. Final counters and metadata are immutable. Null counters mean
+        unknown and force provisional=true. Latest available tenant model pricing is pinned once;
+        subsequent price versions never reprice a row. An unpriced row may acquire pricing on a later
+        report. Subscription metadata is self-reported and never reduces the list-price estimate.
+        No run telemetry, budgets or account settlement are modified. Consumers must not add managed
+        run totals to reported session totals. reported_at is observation time, not token spend time.
+        Positive output supplies model-health evidence only for an available account owned by the
+        caller on this harness, while the session is live and the model and effort match its stored
+        identity. Usage for another model remains accounting data and cannot clear model suppression.
+      parameters:
+        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessUsageReport'}}}}
+      responses:
+        '410': {description: 'Authenticated archived generation; usage proof revoked, existing usage retained'}
+        '200':
+          description: Accepted cumulative report or exact replay
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [usage, replayed]
+                properties:
+                  usage: {$ref: '#/components/schemas/SessionModelUsage'}
+                  replayed: {type: boolean}
+        '400': {description: Invalid or out-of-bounds report}
+        '403': {description: Worker proof or scope rejected}
+        '409': {description: 'Conflicting replay, stale sequence, decreasing counters or changed final report'}
+    get:
+      operationId: getHarnessSessionUsage
+      security: *auth
+      description: Requires harness.read and project visibility. Empty items means unreported, never measured zero. Only current cumulative rows are returned; no aggregation or inferred billing.
+      responses:
+        '200':
+          description: Current per-model session usage
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, reported, items]
+                properties:
+                  session_id: {type: string, format: uuid}
+                  reported: {type: boolean}
+                  items: {type: array, items: {$ref: '#/components/schemas/SessionModelUsage'}}
+        '403': {description: Scope rejected}
+        '404': {description: Session not visible}
+  /projects/{projectId}/harness-sessions/{sessionId}/watch:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: watchAttachedSession
+      summary: Live-only inert text; requires explicit harness.watch, never implied by read
+      description: >-
+        Person-only SSE. No replay or history. Authorization and lease are rechecked
+        on each chunk and every second. Events are text (JSON string), end, and keepalive.
+        Agent-written text is unverified; never interpret HTML, Markdown or terminal escapes.
+        Stream is no-store and bounded to 16 viewers per session, 256 per server.
+      responses:
+        '200':
+          description: Memory-only live stream
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '403': {description: Explicit conversation-view permission required}
+        '410': {description: Watch unavailable or lease expired}
+  /projects/{projectId}/harness-sessions/{sessionId}/yield:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof}
+    post:
+      security: *auth
+      operationId: yieldHarnessSession
+      description: 'Managed worker claims pending owned controls in sequence. Cooperative stop controls with request_payload.pause=true are delivered by heartbeat and claimed only by pause-plan; they never authorize an immediate process signal. Expired controls are settled first and omitted. expires_in_ms is the remaining authorization on the database clock, rounded down and capped at 45000. Workers anchor that budget to the monotonic start of this request and fail closed when it is missing or zero.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        '200':
+          description: Session and the controls just claimed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session, controls]
+                properties:
+                  session: {$ref: '#/components/schemas/HarnessSession'}
+                  controls: {type: array, items: {$ref: '#/components/schemas/HarnessYieldedControl'}}
+        '400': {description: Invalid JSON}
+        '403': {description: Worker proof rejected}
+        '409': {description: Managed worker required}
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+components:
+  headers:
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.10']}}
+  schemas:
+    HarnessManagedControl:
+      type: object
+      required: [id, session_id, kind, state, sequence, outcome, reason, created_at, expected_ownership, expires_at]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        kind: {type: string, enum: [steer, interrupt, stop, rename, model, effort, tier]}
+        value: {type: string, description: Public setting value; absent for steering and process controls}
+        state: {type: string, enum: [pending, claimed, completed]}
+        sequence: {type: integer, format: int64}
+        outcome: {type: [string, 'null'], enum: [applied, rejected, null]}
+        reason: {type: [string, 'null'], description: Content-free outcome. authorization_expired means expired before claim; outcome_unconfirmed means no safe retry. queued_next_turn acknowledges queued input rather than model obedience.}
+        expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+        expires_at: {type: string, format: date-time}
+        expires_in_ms:
+          type: integer
+          minimum: 0
+          maximum: 45000
+          description: Yield-only remaining authorization lifetime from the database clock, rounded down. Workers anchor this to the monotonic start of the yield request (deducting the full round trip), retain that deadline across queueing and retries, and fail closed if absent or zero. expires_at remains an audit timestamp, never a worker wall-clock deadline.
+        created_at: {type: string, format: date-time}
+        claimed_at: {type: [string, 'null'], format: date-time}
+        completed_at: {type: [string, 'null'], format: date-time}
+    HarnessPausePlan:
+      type: object
+      additionalProperties: false
+      required: [control_id, handover_point]
+      properties:
+        control_id: {type: string, format: uuid}
+        handover_point: {type: string, minLength: 1, maxLength: 1000}
+    HarnessPauseRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        level: {$ref: '#/components/schemas/HarnessPauseLevel', description: Omitted uses the person's workspace default; agents default to pause.}
+        note: {type: string, maxLength: 2000, description: Optional steer note saved with the pause request.}
+        reason: {type: string, maxLength: 240}
+        deadline_minutes: {type: integer, minimum: 1, maximum: 60, default: 10}
+        coordinator_session_id: {type: string, format: uuid, description: Agents must prove a live parent coordinator using X-Aeon-Worker-Lease.}
+    HarnessProvenanceItem:
+      type: object
+      required: [kind, logical_name, hash_kind]
+      properties:
+        kind: {type: string, enum: [agents, claude, skill, prompt_template, rules_merged, rules_set]}
+        logical_name: {type: string, maxLength: 80, description: 'AGENTS.md, CLAUDE.md, one skill slug plus /SKILL.md, prompt-template, merged-rules, or a published rule-set UUID. Not a filesystem path.'}
+        hash_kind: {type: string, enum: [content, absent], description: content means content_sha256 is a digest of the instruction or template bytes. absent is only valid for a prompt template recorded with a version and no template digest.}
+        content_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$', description: Required when hash_kind is content. Null when hash_kind is absent. Never a hash of the version identifier.}
+        version: {type: [string, 'null'], maxLength: 80, description: 'Required for prompt_template. A version identifier, not prompt text.'}
+        byte_size: {type: [integer, 'null'], minimum: 0, maximum: 1048576, description: Present for instruction files. Absent for a prompt template.}
+    HarnessProvenancePage:
+      type: object
+      required: [session_id, revisions, truncated]
+      properties:
+        session_id: {type: string, format: uuid}
+        revisions: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/HarnessProvenanceRevision'}}
+        truncated: {type: boolean}
+    HarnessProvenanceRecorded:
+      allOf:
+        - {$ref: '#/components/schemas/HarnessProvenanceRevision'}
+        - type: object
+          required: [replayed]
+          properties:
+            replayed: {type: boolean, description: True when the latest revision already had this set digest.}
+    HarnessProvenanceRevision:
+      type: object
+      required: [id, session_id, revision, set_sha256, recorded_by_principal_id, recorded_at, items]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        set_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        recorded_by_principal_id: {type: string, format: uuid}
+        recorded_at: {type: string, format: date-time}
+        items: {type: array, items: {$ref: '#/components/schemas/HarnessProvenanceItem'}}
+    HarnessProvenanceWrite:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, minItems: 1, maxItems: 16, items: {$ref: '#/components/schemas/HarnessProvenanceItem'}}
+    HarnessRecovery:
+      type: object
+      required: [session_id, host, observed_revision, confirmation, process_state, process_scope, can_archive, force_stop_available, force_stop_reason]
+      properties:
+        session_id: {type: string, format: uuid}
+        host: {type: string}
+        display_label: {type: [string, 'null']}
+        observed_revision: {type: string}
+        confirmation: {type: string}
+        process_state: {type: string, enum: [unknown]}
+        process_scope: {type: string}
+        can_archive: {type: boolean}
+        archive_unavailable_reason: {type: string}
+        force_stop_available: {type: boolean}
+        force_stop_reason: {type: string}
+        force_confirmation: {type: string}
+        process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+    HarnessRecoveryControl:
+      type: object
+      required: [id, session_id, kind, state, sequence, outcome, reason, created_at, expected_ownership, expires_at]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        kind: {type: string, enum: [force_stop]}
+        state: {type: string, enum: [pending, claimed, completed]}
+        sequence: {type: integer, format: int64}
+        outcome: {type: [string, 'null'], enum: [applied, rejected, null]}
+        reason: {type: [string, 'null'], description: Applied requires owned_group_signalled_root_exited; queued alone never proves exit.}
+        expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+        expires_at: {type: string, format: date-time}
+        expires_in_ms:
+          type: integer
+          minimum: 0
+          maximum: 45000
+          description: Yield-only database-derived remaining authorization lifetime. Workers deduct the full round trip and use the resulting local monotonic deadline through the final process signal lock. Missing or zero lifetime cannot authorize a signal.
+        created_at: {type: string, format: date-time}
+        claimed_at: {type: [string, 'null'], format: date-time}
+        completed_at: {type: [string, 'null'], format: date-time}
+    HarnessRemoveRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 240}
+    HarnessRemoveResult:
+      type: object
+      required: [session, message, processes_signalled, process_state]
+      properties:
+        session: {$ref: '#/components/schemas/HarnessSession'}
+        message: {type: string, const: 'Record removed; process not stopped by removal.'}
+        processes_signalled: {type: boolean, const: false}
+        process_state: {type: string, const: unknown}
+        event_id: {type: integer, format: int64, description: 'The harness.removed event; POST /events/{eventId}/undo restores the record as it was (AEON-291). Omitted when the record was already removed.'}
+        undoable: {type: boolean, description: 'Whether the caller may undo event_id (events.undo in the project). Answered by a single removal with event_id; remove-stale items omit it.'}
+    HarnessRemoveStaleResult:
+      type: object
+      required: [items, cutoff, more]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/HarnessRemoveResult'}}
+        cutoff: {type: string, format: date-time}
+        more: {type: boolean, description: Eligible records remain after this batch; repeat the request}
+    HarnessResumeRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        coordinator_session_id: {type: string, format: uuid}
+        registration:
+          type: object
+          additionalProperties: false
+          required: [harness_session_ref, worker_lease]
+          properties:
+            harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
+            worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
+            host: {type: string, minLength: 1, maxLength: 128}
+    HarnessRulesReceipt:
+      type: object
+      required: [request, id, session_id, revision, recorded_by_principal_id, recorded_at, evidence, publication_verified, load_verified, execution_verified, authority_granted]
+      properties:
+        request: {$ref: '#/components/schemas/HarnessRulesReceiptWrite'}
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        revision: {type: integer, format: int64, minimum: 1}
+        recorded_by_principal_id: {type: string, format: uuid}
+        recorded_at: {type: string, format: date-time}
+        evidence: {type: string, const: worker_reported_received}
+        publication_verified: {type: boolean, const: false}
+        load_verified: {type: boolean, const: false}
+        execution_verified: {type: boolean, const: false}
+        authority_granted: {type: boolean, const: false}
+    HarnessRulesReceiptContext:
+      type: object
+      additionalProperties: false
+      required: [tenant_id, project_id, person_id, agent_id, role, harness]
+      description: Identity/binding checked against the authenticated generation at recording time; role is a worker-reported merge selector, never a permission. Registered harness is metadata, not attestation of the running executable. Optional task must match the session ticket and remain in the project.
+      properties:
+        tenant_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        person_id: {type: string, format: uuid}
+        agent_id: {type: string, format: uuid}
+        task_id: {type: string, format: uuid}
+        role: {type: string, enum: [coordinator, builder, reviewer, operator]}
+        harness: {type: string, enum: [claude-code, codex, grok, pi, cursor, gemini, opencode]}
+    HarnessRulesReceiptPage:
+      type: object
+      required: [session_id, receipts, next_before_revision]
+      properties:
+        session_id: {type: string, format: uuid}
+        receipts: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/HarnessRulesReceipt'}}
+        next_before_revision: {type: [integer, 'null'], format: int64}
+    HarnessRulesReceiptRecorded:
+      type: object
+      required: [receipt, replayed]
+      properties:
+        receipt: {$ref: '#/components/schemas/HarnessRulesReceipt'}
+        replayed: {type: boolean}
+    HarnessRulesReceiptWrite:
+      type: object
+      additionalProperties: false
+      required: [request_id, expected_revision, context, body_sha256, version, byte_size, source]
+      properties:
+        request_id: {type: string, format: uuid, description: Caller-generated idempotency ID scoped to the session; reuse only with the identical payload}
+        expected_revision: {type: integer, format: int64, minimum: 0, maximum: 9223372036854775806}
+        context: {$ref: '#/components/schemas/HarnessRulesReceiptContext'}
+        body_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: 'Worker-reported SHA256 of exact merged bytes, never a hash of a version label'}
+        version: {type: string, maxLength: 16, pattern: '^(floor-only|[0-9]{12}\.0\.0)$', description: Worker-reported calendar version or floor-only; no assertion of publication}
+        byte_size: {type: integer, minimum: 1, maximum: 512000}
+        source: {type: string, enum: [online, cache, floor-only], description: Worker-reported source; cache/floor-only are stale fallback evidence and never fresh authority}
+    HarnessSessionLookup:
+      type: object
+      description: Enough to decide whether an ambient tell may name this generation. Returned only for the caller's own session. Null end times mean it is still active.
+      required: [id, project_id, agent_principal_id, stopped_at, archived_at]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        agent_principal_id: {type: string, format: uuid}
+        stopped_at: {type: [string, 'null'], format: date-time}
+        archived_at: {type: [string, 'null'], format: date-time}
+    HarnessUsageReport:
+      type: object
+      additionalProperties: false
+      required: [report_id, model, sequence, provisional, billing_mode]
+      properties:
+        service_tier: {$ref: '#/components/schemas/ServiceTier'}
+        model_time_ms: {type: [integer, 'null'], minimum: 0, maximum: 1000000000000, description: Optional cumulative measured model time for this session and model; missing is unknown.}
+        report_id: {type: string, format: uuid}
+        model: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'}
+        sequence: {type: integer, format: int64, minimum: 1, maximum: 1000000000000}
+        input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        output_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        reasoning_tokens: {$ref: '#/components/schemas/UsageTokenCount', description: Subset of output_tokens. Null or omitted means unknown. Not added to estimated_cost_usd.}
+        provisional: {type: boolean}
+        account_id: {type: [string, 'null'], format: uuid}
+        account_label: {type: [string, 'null'], minLength: 1, maxLength: 128, description: 'Public self-reported label; trimmed, valid Unicode without control characters.'}
+        billing_mode: {type: string, enum: [unknown, api, subscription]}
+        subscription_label: {type: [string, 'null'], minLength: 1, maxLength: 120, description: 'Allowed only with billing_mode subscription. Public self-reported label, not a credential.'}
+    HarnessYieldedControl:
+      type: object
+      description: 'One control claimed by yield. expires_in_ms is the only authorization lifetime a worker may use. expires_at is audit metadata.'
+      required: [id, session_id, kind, state, sequence, created_at, expires_in_ms]
+      properties:
+        expected_generation: {type: string, format: uuid}
+        request_payload:
+          type: object
+          properties:
+            stop_now: {type: boolean}
+            level: {$ref: '#/components/schemas/HarnessPauseLevel'}
+            note: {type: string, maxLength: 2000}
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        kind: {type: string, description: 'steer, interrupt, stop, rename, model, effort, tier, force_stop, rename_request or model_request.'}
+        value: {type: string, description: Public setting value. Absent for steering and process controls.}
+        text: {type: string, description: 'Steer text for this claim only. It is not stored and is omitted for every other kind.'}
+        state: {type: string, enum: [claimed]}
+        sequence: {type: integer, format: int64}
+        outcome: {type: [string, 'null'], enum: [applied, rejected, null]}
+        reason: {type: [string, 'null']}
+        expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+        expires_at: {type: string, format: date-time}
+        expires_in_ms: {type: integer, minimum: 0, maximum: 45000, description: 'Remaining authorization from the database clock, rounded down.'}
+        created_at: {type: string, format: date-time}
+        claimed_at: {type: [string, 'null'], format: date-time}
+        completed_at: {type: [string, 'null'], format: date-time}
+    LeadDecisionRecorded:
+      type: object
+      required: [decision, replayed]
+      properties:
+        decision: {$ref: '#/components/schemas/LeadDecision'}
+        replayed: {type: boolean}
+    ServiceTierChange:
+      type: object
+      required: [request_id, tier, expected_revision, expected_ownership]
+      properties:
+        request_id: {type: string, format: uuid}
+        tier: {$ref: '#/components/schemas/ServiceTier'}
+        undo_of_control_id: {type: string, format: uuid, description: Exact completed or pending tier control being undone.}
+        expected_revision: {type: integer, minimum: 0}
+        expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+    ServiceTierEstimate:
+      type: object
+      required: [tier, n, basis, run_id, cost_usd, duration_ms]
+      properties:
+        tier: {$ref: '#/components/schemas/ServiceTier'}
+        n: {type: integer, minimum: 0, maximum: 1, description: 'One last completed matching run, never a sample average.'}
+        basis: {type: string}
+        actual: {type: boolean, description: True for the sample's single measured tier; false or absent for projections.}
+        run_id: {type: [string, 'null'], format: uuid}
+        cost_usd: {type: [string, 'null']}
+        duration_ms: {type: [number, 'null'], minimum: 0, description: Only reported model time scales; all other elapsed time stays unchanged.}
+    ServiceTierHistory:
+      type: object
+      required: [id, action, from_tier, to_tier, actor_id, actor_name, at, asked_by_name]
+      properties:
+        id: {type: integer, format: int64}
+        action: {type: string, enum: [requested, switch_requested, approved, declined, changed, cancelled, undo_requested, undone, rejected]}
+        from_tier: {type: [string, 'null'], enum: [default, fast, fastest, null]}
+        to_tier: {$ref: '#/components/schemas/ServiceTier'}
+        actor_id: {type: string, format: uuid}
+        actor_name: {type: string}
+        reason: {type: string, description: Completed control reason when available.}
+        asked_by_name: {type: [string, 'null']}
+        at: {type: string, format: date-time}
+    ServiceTierRequest:
+      type: object
+      required: [id, session_id, tier, reason, requested_by_principal_id, state, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        tier: {$ref: '#/components/schemas/ServiceTier'}
+        reason: {type: string}
+        requested_by_principal_id: {type: string, format: uuid}
+        state: {type: string, enum: [pending, approved, declined]}
+        decided_by_principal_id: {type: [string, 'null'], format: uuid}
+        created_at: {type: string, format: date-time}
+        decided_at: {type: [string, 'null'], format: date-time}
+        control_id: {type: [string, 'null'], format: uuid}
+    ServiceTierRunCost:
+      type: object
+      required: [model, run_id, cost_usd, default_cost_usd, segments, provisional]
+      properties:
+        model: {type: string}
+        run_id: {type: string, format: uuid}
+        cost_usd: {type: string, description: Frozen token-price estimate; never billed cost.}
+        default_cost_usd: {type: string}
+        provisional: {type: boolean}
+        segments:
+          type: array
+          maxItems: 128
+          items:
+            type: object
+            required: [tier, price_multiplier]
+            properties:
+              tier: {$ref: '#/components/schemas/ServiceTier'}
+              price_multiplier: {type: number, exclusiveMinimum: 0}
+    SessionModelUsage:
+      type: object
+      required: [session_id, model, sequence, input_tokens, output_tokens, cached_input_tokens, provisional, price_version, estimated_cost_usd, cost_status, currency, account_id, account_label, billing_mode, subscription_label, metadata_source, reported_at]
+      properties:
+        service_tier: {type: [string, 'null'], enum: [default, fast, fastest, null]}
+        model_time_ms: {type: [integer, 'null'], minimum: 0, maximum: 1000000000000, description: Optional cumulative measured model time for this session and model; missing is unknown.}
+        tier_segments:
+          type: array
+          items:
+            type: object
+            properties:
+              tier: {type: [string, 'null'], enum: [default, fast, fastest, null]}
+              price_multiplier: {type: [number, 'null']}
+              speed_factor: {type: [number, 'null'], exclusiveMinimum: 0}
+              model_time_ms: {type: [integer, 'null'], minimum: 0, maximum: 1000000000000}
+              usage_multiplier: {type: [number, 'null']}
+              input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+              output_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+              cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        session_id: {type: string, format: uuid}
+        model: {type: string, maxLength: 128}
+        sequence: {type: integer, format: int64}
+        input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        output_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        reasoning_tokens: {$ref: '#/components/schemas/UsageTokenCount', description: 'Subset of output_tokens. Null means unknown, not zero. Not added to estimated_cost_usd.'}
+        provisional: {type: boolean, description: 'True when the reporter marks partial or any of input, output, or cached input is unknown. A missing reasoning count does not by itself make the row provisional. Cost remains an estimate even when false.'}
+        price_version: {type: [integer, 'null'], format: int64, description: Null unless billing_mode is api.}
+        estimated_cost_usd: {type: [string, 'null'], pattern: '^[0-9]+\.[0-9]{12}$', description: 'Sum of exact tier segment token estimates at their frozen price multiplier; legacy reports use list price, with no binary floats or intermediate rounding. Present only when billing_mode is api and every counter and price is known. Subscription and unknown stay null. Never actual billed cost.'}
+        cost_status: {type: string, enum: [estimated, unknown]}
+        currency: {type: string, const: USD}
+        account_id: {type: [string, 'null'], format: uuid}
+        account_label: {type: [string, 'null'], maxLength: 128}
+        billing_mode: {type: string, enum: [unknown, api, subscription]}
+        subscription_label: {type: [string, 'null']}
+        metadata_source: {type: string, const: reported}
+        reported_at: {type: string, format: date-time}
+    SessionReadMarker:
+      type: object
+      additionalProperties: false
+      required: [session_id, last_read_message_id, last_read_event_id, read_at]
+      properties:
+        session_id: {type: string, format: uuid}
+        last_read_message_id: {type: [string, 'null'], format: uuid}
+        last_read_event_id: {type: [integer, 'null'], format: int64, minimum: 0}
+        read_at: {type: [string, 'null'], format: date-time}
+    SessionServiceTier:
+      type: object
+      required: [session_id, revision, active_tier, pending, read_only, reports, requests]
+      properties:
+        session_id: {type: string, format: uuid}
+        revision: {type: integer}
+        active_tier: {type: [string, 'null'], enum: [default, fast, fastest, null], description: Null until reported or confirmed.}
+        pending: {oneOf: [{$ref: '#/components/schemas/HarnessManagedControl'}, {type: 'null'}]}
+        last_change: {oneOf: [{$ref: '#/components/schemas/HarnessManagedControl'}, {type: 'null'}], description: Most recently completed tier control including its outcome and reason.}
+        read_only: {type: boolean}
+        read_only_reason: {type: string}
+        reports: {type: array, items: {$ref: '#/components/schemas/ServiceTierReport'}}
+        history: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/ServiceTierHistory'}}
+        history_truncated: {type: boolean}
+        run_cost: {oneOf: [{$ref: '#/components/schemas/ServiceTierRunCost'}, {type: 'null'}]}
+        estimates: {type: array, minItems: 3, maxItems: 3, items: {$ref: '#/components/schemas/ServiceTierEstimate'}}
+        requests: {type: array, items: {$ref: '#/components/schemas/ServiceTierRequest'}}
+    UsageTokenCount:
+      type: [integer, 'null']
+      format: int64
+      minimum: 0
+      maximum: 1000000000000
+      description: Null or omitted on input means unknown, not zero.

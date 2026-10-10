@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -46,6 +47,9 @@ func unchanged(current, after nodeSnap) bool {
 }
 
 func guard(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event, deleted bool) (nodeSnap, nodeSnap, nodeSnap, error) {
+	if err := lockKnowledgeTree(ctx, tx); err != nil {
+		return nodeSnap{}, nodeSnap{}, nodeSnap{}, err
+	}
 	if !canWrite(ctx, tx, p, "knowledge.write") {
 		return nodeSnap{}, nodeSnap{}, nodeSnap{}, events.ErrForbidden
 	}
@@ -64,6 +68,16 @@ func guard(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event, d
 		return before, after, current, events.ErrConflict
 	}
 	return before, after, current, nil
+}
+
+// Match generic node writers and their triggers: tenant, tree, pairing, then rows and
+// slug reservations. Restores and field edits can also invoke tree guards.
+func lockKnowledgeTree(ctx context.Context, tx pgx.Tx) error {
+	if err := agentpairing.Lock(ctx, tx); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`)
+	return err
 }
 
 // slugFree re-checks uniqueness for a restored slug under the project lock.

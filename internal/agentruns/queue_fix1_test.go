@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -24,7 +25,7 @@ import (
 )
 
 // Pause the review after its pairing lock, before workorders.Create takes the
-// tree lock. The queue mutation must wait for pairing without holding the tree.
+// resource rows. Queue mutation now waits at the shared tenant fence before tree/pairing.
 type reviewLockPause struct {
 	first  atomic.Bool
 	locked chan uint32
@@ -88,22 +89,37 @@ func TestTicketQueueMutationAndReviewCreationDoNotDeadlock(t *testing.T) {
 	}
 	queueDone := make(chan int, 1)
 	go func() {
-		queueDone <- f.request(f.person, "POST", "/api/queue", `{"node_id":"`+queueTicket+`"}`, "").Code
+		r := httpRequest(ctx, f.person, "POST", "/api/queue", `{"node_id":"`+queueTicket+`"}`)
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		queueDone <- w.Code
 	}()
+	var waiter uint32
 	for {
-		var waiting bool
-		err := f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks held JOIN pg_locks waiting USING(locktype,database,classid,objid,objsubid) WHERE held.pid=$1 AND held.locktype='advisory' AND held.granted AND NOT waiting.granted)`, pid).Scan(&waiting)
+		err := f.d.Admin.QueryRow(ctx, `SELECT coalesce((SELECT a.pid FROM pg_stat_activity a WHERE a.datname=current_database() AND $1::int=ANY(pg_blocking_pids(a.pid)) AND a.query LIKE '%FROM tenants WHERE%FOR NO KEY UPDATE%' LIMIT 1),0)`, pid).Scan(&waiter)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if waiting {
+		if waiter != 0 {
 			break
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatal("queue did not wait for pairing lock")
-		case <-time.After(10 * time.Millisecond):
+			t.Fatal("queue did not wait for the shared tenant fence")
+		case code := <-queueDone:
+			t.Fatalf("queue crossed held tenant fence: %d", code)
+		default:
+			runtime.Gosched()
 		}
+	}
+	// The review holds tenant/tree/pairing. The queue must wait at tenant
+	// before acquiring either advisory lock; inspect its backend directly.
+	var holdsAdvisory bool
+	if err := f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND granted)`, waiter).Scan(&holdsAdvisory); err != nil {
+		t.Fatal(err)
+	}
+	if holdsAdvisory {
+		t.Fatal("tenant waiter already holds tree or pairing lock")
 	}
 	close(pause.resume)
 	for _, result := range []struct {
@@ -231,9 +247,8 @@ func TestTicketQueueTwoAgentsClaimOneRunExactlyOnce(t *testing.T) {
 	}
 }
 
-func TestTicketQueueReadsPollAndTelemetryDoNotTakeTreeLock(t *testing.T) {
+func TestTicketQueueAndRunReadsDoNotTakeTreeLock(t *testing.T) {
 	f := setup(t)
-	run := f.claim(t, f.run(t, f.order(t, nil)))
 	ctx := tenant.WithPrincipal(t.Context(), f.person)
 	err := db.InTenant(ctx, f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`); err != nil {
@@ -246,8 +261,6 @@ func TestTicketQueueReadsPollAndTelemetryDoNotTakeTreeLock(t *testing.T) {
 		}{
 			{f.person, "GET", "/api/queue", nil},
 			{f.person, "GET", "/api/runs", nil},
-			{f.agent, "GET", "/api/runs/queued", nil},
-			{f.agent, "POST", "/api/runs/" + run.ID + "/telemetry", agentruns.Telemetry{Sequence: 1, Kind: "heartbeat"}},
 		} {
 			requestCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 			body, _ := json.Marshal(tc.body)

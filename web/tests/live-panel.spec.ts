@@ -192,12 +192,12 @@ test('a move answer that lands after a newer move elsewhere leaves the newer epi
   })
   try {
     const ws = panel(page)
-    const noEpic = ws.getByRole('button', { name: 'No epic. Choose an epic' })
+    const noEpic = ws.getByRole('button', { name: 'No parent. Choose a parent' })
     await expect(noEpic).toBeVisible()
     await ws.getByRole('button', { name: 'More actions' }).click()
-    await page.getByRole('menuitem', { name: 'Move to another epic…' }).click()
-    await page.getByLabel('Find an epic').fill('guarded')
-    await expect(page.getByRole('listbox', { name: 'Epics' }).getByRole('option')).toHaveCount(1)
+    await page.getByRole('menuitem', { name: 'Move to another parent…' }).click()
+    await page.getByLabel('Find a parent').fill('guarded')
+    await expect(page.getByRole('listbox', { name: 'Parents' }).getByRole('option')).toHaveCount(1)
     await page.keyboard.press('Enter')
     await expect.poll(() => moved).toBe(true)
     const node = data.nodes.find(n => n.id === 'n-4')!

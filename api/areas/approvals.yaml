@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/approvals
+paths:
+  /approvals:
+    get:
+      operationId: listApprovals
+      description: Workspace readers see their tenant's approvals. Project-only readers see approvals in projects where they hold approvals.read; workspace-level approvals require a workspace binding. agent_name is conditional as documented on Approval.
+      security: *auth
+      parameters: [{$ref: '#/components/parameters/Limit'}, {name: pending, in: query, schema: {type: boolean}, description: Only undecided unexpired requests; filtering precedes the limit.}]
+      responses:
+        '200': {description: Approval requests, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}, Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Approval'}}}}}
+    post:
+      operationId: proposeApproval
+      description: An agent may propose only for itself. Writes approval.proposed event without granting authority.
+      security: [{agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApprovalProposal'}}}}
+      responses:
+        '201': {description: Proposal, headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /approvals/{approvalId}:
+    get:
+      operationId: getApproval
+      description: "Read the original permission request and decision history. A person needs current source read access; an agent can read only its own request."
+      security: *auth
+      parameters: [{name: approvalId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: "Original approval and decision", headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /approvals/{approvalId}/decision:
+    post:
+      operationId: decideApproval
+      description: Only a person can decide. Decision event and any matching scoped grant commit together; agents cannot self-approve. Denial and expiry never grant authority.
+      security: [{session: []}]
+      parameters: [{name: approvalId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApprovalDecisionWrite'}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Decision, headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /approvals/{approvalId}/revoke:
+    post:
+      operationId: revokeApprovalGrant
+      description: A person revokes an approved grant and appends approval.revoked. Repeated revocation is idempotent.
+      security: [{session: []}]
+      parameters: [{name: approvalId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Revoked grant, headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+components:
+  headers:
+    ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
+  schemas:
+    ApprovalDecisionWrite:
+      type: object
+      required: [decision]
+      properties:
+        decision: {type: string, enum: [approved, denied]}
+        reason: {type: string}

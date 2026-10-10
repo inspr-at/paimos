@@ -38,7 +38,7 @@ for (const theme of ['light', 'dark']) {
       await expect(art).toHaveCSS('height', `${size}px`)
       // Signal colour is the agent state palette, not the brand teal, amber or backlog grey.
       const colors = await art.evaluate((element, state) => {
-        const token = state === 'working' ? '--agent-standard-working' : state === 'waiting' ? '--agent-standard-waiting' : '--agent-standard-inactive'
+        const token = state === 'working' ? '--agent-working' : state === 'waiting' ? '--agent-waiting' : '--agent-idle'
         return {
           actual: getComputedStyle(element).getPropertyValue('--signal').trim(),
           expected: getComputedStyle(document.documentElement).getPropertyValue(token).trim(),

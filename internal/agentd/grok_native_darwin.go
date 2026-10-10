@@ -160,9 +160,7 @@ func (a *GrokAdapter) startNative(ctx context.Context, r StartRequest, b GrokBin
 	if err := os.WriteFile(seatbeltPath, []byte(seatbelt), 0600); err != nil {
 		return nil, err
 	}
-	args := []string{"-f", seatbeltPath, b.BinaryPath, "--no-auto-update", "--no-memory", "--no-subagents", "--disable-web-search",
-		"--permission-mode", "dontAsk", "--cwd", filepath.Join(scratch, "work"), "agent", "--agent-profile", profilePath,
-		"--no-leader", "-m", grokModel, "--reasoning-effort", grokEffort, "stdio"}
+	args := grokNativeArguments(seatbeltPath, b.BinaryPath, filepath.Join(scratch, "work"), profilePath, r.Profile.Effort)
 	env := []string{"HOME=" + os.Getenv("HOME"), "USER=" + os.Getenv("USER"), "LOGNAME=" + os.Getenv("LOGNAME"),
 		"PATH=/usr/bin:/bin", "LANG=C.UTF-8", "TERM=dumb", "GROK_HOME=" + filepath.Join(scratch, "home"), "GROK_AUTH_PATH=" + b.AuthPath,
 		"TMPDIR=" + filepath.Join(scratch, "tmp"), "XDG_CACHE_HOME=" + filepath.Join(scratch, "cache"),
@@ -228,7 +226,7 @@ func (a *GrokAdapter) startNative(ctx context.Context, r StartRequest, b GrokBin
 			effort = option.Value
 		}
 	}
-	if model != grokModel || effort != grokEffort || proxy.violation.Load() || gp.violation.Load() || verifyGrokAssets(scratch) != nil || !grokProfileMarkerObserved(scratch, profilePath) {
+	if model != grokModel || effort != r.Profile.Effort || proxy.violation.Load() || gp.violation.Load() || verifyGrokAssets(scratch) != nil || !grokProfileMarkerObserved(scratch, profilePath) {
 		return fail(errors.New("native Grok profile was not verified"))
 	}
 	gp.mu.Lock()

@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -44,6 +45,7 @@ func person(t *testing.T, d *dbtest.DB, slug, email string) tenant.Principal {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindRole(t, d, p.TenantID, p.ID, "member")
 	return p
 }
 func mux(d *dbtest.DB, store attachments.Store) *http.ServeMux {
@@ -174,7 +176,8 @@ func TestProfileTenantUniquenessAvatarAndUndo(t *testing.T) {
 	}
 	other.TenantID = a.TenantID
 	other.Kind = tenant.Person
-	h := mux(d, attachments.Store{FilesDir: t.TempDir()})
+	store := attachments.Store{FilesDir: t.TempDir()}
+	h := mux(d, store)
 	patch := func(p tenant.Principal, s string) *httptest.ResponseRecorder {
 		return req(t, h, p, "PATCH", "/api/me/profile", "application/json", bytes.NewBufferString(s))
 	}
@@ -193,6 +196,32 @@ func TestProfileTenantUniquenessAvatarAndUndo(t *testing.T) {
 	if len(withAvatar.AvatarHashes) != 4 {
 		t.Fatalf("hashes %+v", withAvatar.AvatarHashes)
 	}
+	// Current avatar bytes, including independently addressed size variants,
+	// survive cleanup at an age that would qualify a true orphan.
+	old := time.Now().Add(-8 * 24 * time.Hour)
+	if err := filepath.WalkDir(store.FilesDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		return os.Chtimes(path, old, old)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertAvatarInventory := func() {
+		t.Helper()
+		gc, err := attachments.GC(t.Context(), d.App, store, a.TenantID, true)
+		if err != nil || gc.Candidates != 0 || gc.Removed != 0 {
+			t.Fatalf("avatar GC %+v: %v", gc, err)
+		}
+		verified, err := attachments.Verify(t.Context(), d.App, store, a.TenantID)
+		if err != nil || verified.Checked < 4 || len(verified.Issues) != 0 {
+			t.Fatalf("avatar inventory %+v: %v", verified, err)
+		}
+	}
+	assertAvatarInventory()
 	hash := withAvatar.AvatarHashes["64"]
 	path := "/api/people/" + a.ID + "/avatar/64?v=" + hash
 	got := req(t, h, b, "GET", path, "", nil)
@@ -218,6 +247,8 @@ func TestProfileTenantUniquenessAvatarAndUndo(t *testing.T) {
 	if len(deleted.AvatarHashes) != 0 || deleted.Initials != "AB" {
 		t.Fatalf("delete %+v", deleted)
 	}
+	// The avatar is now referenced only by history; undo must still work.
+	assertAvatarInventory()
 	var eventID int64
 	err = db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT id FROM events WHERE tenant_id=$1 AND type='profile.updated' AND after->>'avatar_original_hash'='' ORDER BY id DESC LIMIT 1`, a.TenantID).Scan(&eventID)

@@ -1,0 +1,163 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/aithema/host
+# aeon:owner internal/plugins
+paths:
+  /plugins:
+    get:
+      operationId: listPlugins
+      summary: List first-party plugins
+      description: Lists compiled first-party manifests and the tenant's pinned enabled state. No runtime plugin upload or arbitrary code loading.
+      security: *auth
+      responses:
+        '200': {description: Plugin registry, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/PluginManifest'}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /plugins/aithema/settings:
+    get:
+      operationId: aithemaSettingsGet
+      summary: Read typed Aithema settings with masked service credential
+      security: [{session: []}]
+      responses:
+        '200':
+          description: Tenant settings; service_jwt is always masked and never returned.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AithemaSettings'}
+        '403': {description: Person with plugins.manage required}
+    put:
+      operationId: aithemaSettingsPut
+      summary: Replace Aithema settings and optionally rotate the write-only service JWT
+      description: Requires a person with plugins.manage. Service URLs are checked against the deployment outbound policy before writing and again at each dial. HTTPS public addresses are the default; operator-local loopback/private destinations require an exact host-and-port entry in server configuration. Tenant location cannot grant that exception. Omitting service_jwt preserves the credential; an empty value clears it. Secrets are encrypted at rest; audit records contain only changed field names. Processing policy is immutable while sessions or callbacks are active; preview pins and credentials may rotate.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AithemaSettingsWrite'}
+      responses:
+        '200':
+          description: Masked settings
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AithemaSettings'}
+        '400': {description: Invalid typed setting}
+        '403': {description: Person with plugins.manage required}
+        '409': {description: Pending callbacks prevent endpoint changes}
+  /plugins/{pluginId}/installation:
+    put:
+      operationId: configurePluginInstallation
+      summary: Configure a tenant plugin
+      description: Tenant admin enables a compiled plugin at its exact manifest digest with an explicit permission subset; changes are audited.
+      security: [{session: []}]
+      parameters: [{name: pluginId, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_]*$'}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PluginInstallationWrite'}}}}
+      responses:
+        '200': {description: Installation, content: {application/json: {schema: {$ref: '#/components/schemas/PluginInstallation'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    AithemaPreviewJWKS:
+      type: object
+      additionalProperties: false
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            type: object
+            additionalProperties: false
+            required: [kty, crv, alg, use, kid, x]
+            properties:
+              kty: {const: OKP}
+              crv: {const: Ed25519}
+              alg: {const: EdDSA}
+              use: {const: sig}
+              kid: {type: string, minLength: 1, maxLength: 128}
+              x: {type: string}
+    AithemaSettings:
+      type: object
+      additionalProperties: false
+      properties:
+        service_url: {type: string, format: uri}
+        location: {type: string, enum: [cloud, operator]}
+        plugin_principal_id: {type: string, format: uuid}
+        preview_keys: {$ref: '#/components/schemas/AithemaPreviewJWKS'}
+        picker_sha256: {type: string, description: Base64-encoded SHA-256 of the sole allowed picker script}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        session_cap_micro: {type: integer, minimum: 0, maximum: 9007199254740991}
+        principal_day_cap_micro: {type: integer, minimum: 0, maximum: 9007199254740991}
+        tenant_day_cap_micro: {type: integer, minimum: 0, maximum: 9007199254740991}
+        evidence_verified: {type: boolean, default: false, description: Host-qualified processor evidence approval; false denies paid processing}
+        service_jwt: {type: string, readOnly: true, enum: ['', '********']}
+        service_jwt_set: {type: boolean, readOnly: true}
+    AithemaSettingsWrite:
+      type: object
+      additionalProperties: false
+      required: [service_url, location, plugin_principal_id, preview_keys, picker_sha256, currency, session_cap_micro, principal_day_cap_micro, tenant_day_cap_micro]
+      properties:
+        service_url: {type: string, format: uri}
+        location: {type: string, enum: [cloud, operator]}
+        plugin_principal_id: {type: string, format: uuid}
+        preview_keys: {$ref: '#/components/schemas/AithemaPreviewJWKS'}
+        picker_sha256: {type: string}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        session_cap_micro: {type: integer, minimum: 0, maximum: 9007199254740991}
+        principal_day_cap_micro: {type: integer, minimum: 0, maximum: 9007199254740991}
+        tenant_day_cap_micro: {type: integer, minimum: 0, maximum: 9007199254740991}
+        evidence_verified: {type: boolean, default: false}
+        service_jwt: {type: string, writeOnly: true, maxLength: 16384}
+    PluginCapability:
+      type: object
+      required: [id, permission]
+      properties:
+        id: {type: string}
+        permission: {type: string}
+    PluginInstallation:
+      allOf:
+        - {$ref: '#/components/schemas/PluginInstallationWrite'}
+        - {type: object, required: [plugin_id, version, updated_at], properties: {plugin_id: {type: string}, version: {type: string}, updated_at: {type: string, format: date-time}}}
+    PluginInstallationWrite:
+      type: object
+      additionalProperties: false
+      required: [manifest_digest_sha256, enabled, permissions]
+      properties:
+        manifest_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        enabled: {type: boolean}
+        permissions: {type: array, uniqueItems: true, items: {type: string}}
+    PluginManifest:
+      type: object
+      required: [id, version, digest_sha256, owner, permissions, node_kinds, views, workflow_steps, agent_tools, integrations, background_jobs, installation]
+      properties:
+        id: {type: string, pattern: '^[a-z][a-z0-9_]*$'}
+        version: {type: string}
+        digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        owner: {type: string, description: First-party source package and accountable team}
+        permissions: {type: array, uniqueItems: true, items: {type: string}}
+        node_kinds: {type: array, items: {$ref: '#/components/schemas/PluginNodeKind'}}
+        views: {type: array, items: {$ref: '#/components/schemas/PluginView'}}
+        workflow_steps: {type: array, items: {$ref: '#/components/schemas/PluginWorkflowStep'}}
+        agent_tools: {type: array, items: {$ref: '#/components/schemas/PluginCapability'}}
+        integrations: {type: array, items: {$ref: '#/components/schemas/PluginCapability'}}
+        background_jobs: {type: array, items: {$ref: '#/components/schemas/PluginCapability'}}
+        installation: {$ref: '#/components/schemas/PluginInstallation'}
+    PluginNodeKind:
+      type: object
+      required: [slug, field_schema]
+      properties:
+        slug: {type: string}
+        field_schema: {type: object, description: JSON Schema for tenant-configured node fields}
+        allowed_child_kinds: {type: [array, 'null'], items: {type: string}}
+    PluginView:
+      type: object
+      required: [id, panels]
+      properties:
+        id: {type: string}
+        panels: {type: array, items: {type: string}}
+    PluginWorkflowStep:
+      type: object
+      required: [key, gates]
+      properties:
+        key: {type: string}
+        gates: {type: array, items: {type: string}}

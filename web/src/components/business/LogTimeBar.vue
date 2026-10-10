@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script lang="ts">
 export interface LogTicket { id: string; key: string; title: string }
-export interface LogRequest { ticket: LogTicket; costUnitId: string; currency: string; day: Date; seconds: number; startMinutes: number | null; note: string }
+export interface LogRequest { ticket: LogTicket; costUnitId: string; currency: string; day: Date; seconds: number; startedAt: string; note: string }
 // The cost unit last used, for the session (no device storage, like other preferences).
 let lastCostUnit = ''
 </script>
@@ -24,6 +24,7 @@ import PickerMenu, { type PickOption } from './PickerMenu.vue'
 // what changed, Escape cancels. An agent run's ticket and time stay as measured.
 const props = defineProps<{
   days: Date[]; suggestions: LogTicket[]; busy: boolean; preset?: LogTicket | null
+  defaultStartMinutes?: (day: Date) => number
   entry?: TimeEntry | null; entryTicket?: LogTicket | null; bounds?: { starts_at: string; ends_at: string } | null
   // Another form on the page holds the primary action.
   quiet?: boolean; saveLabel?: string
@@ -67,9 +68,14 @@ const seconds = computed(() => parseDurationInput(duration.value))
 const startMinutes = computed(() => start.value.trim() ? parseTimeInput(start.value) : null)
 const startChanged = computed(() => !!seed && start.value.trim() !== seedClock)
 const durationChanged = computed(() => !!seed && duration.value.trim() !== seedDuration)
-// The corrected start and length; untouched fields keep their exact stored values.
+// One start instant for pricing and submission. New entries use the same
+// stacked start as the week; corrections retain their untouched stored start.
 const newStart = computed<Date | null>(() => {
-  if (!seed || !seedStart || !day.value) return null
+  if (!day.value) return null
+  if (!seed || !seedStart) {
+    const minutes = start.value.trim() ? startMinutes.value : props.defaultStartMinutes?.(day.value) ?? 9 * 60
+    return minutes === null ? null : new Date(day.value.getFullYear(), day.value.getMonth(), day.value.getDate(), 0, minutes)
+  }
   if (dayKey(day.value) === dayKey(seedStart) && !startChanged.value) return seedStart
   const minutes = startChanged.value ? startMinutes.value : seedStart.getHours() * 60 + seedStart.getMinutes()
   if (minutes === null) return null
@@ -78,11 +84,13 @@ const newStart = computed<Date | null>(() => {
 const newSeconds = computed(() => seed ? (durationChanged.value ? seconds.value : seed.duration_seconds) : seconds.value)
 // The server prices a new entry and re-prices a correction on the start's UTC date.
 const utcDay = computed(() => {
-  if (seed) return newStart.value ? newStart.value.toISOString().slice(0, 10) : seed.started_at.slice(0, 10)
-  return day.value ? new Date(Date.UTC(day.value.getFullYear(), day.value.getMonth(), day.value.getDate())).toISOString().slice(0, 10) : ''
+  return newStart.value ? newStart.value.toISOString().slice(0, 10) : seedStart?.toISOString().slice(0, 10) ?? ''
 })
+// Keep selector choices while a time such as "9:" is incomplete. Rates and
+// submission still use the actual start; a completed time revalidates choices.
+const eligibilityDay = computed<string>(previous => newStart.value ? utcDay.value : previous ?? '')
 const inForce = (r: { unit: string; currency: string; effective_from: string; effective_until: string | null }) =>
-  r.unit === 'hour' && (!seed || r.currency === seed.currency) && r.effective_from <= utcDay.value && (!r.effective_until || r.effective_until > utcDay.value)
+  r.unit === 'hour' && (!seed || r.currency === seed.currency) && r.effective_from <= eligibilityDay.value && (!r.effective_until || r.effective_until > eligibilityDay.value)
 // Hourly cost units with a rate on that day (in the entry's currency when correcting).
 const hourly = computed(() => business.costUnits.filter(unit => unit.node.id === seed?.cost_unit_node_id || (!['cancelled', 'archived', 'done'].includes(unit.node.state) && unit.rates.some(inForce))))
 watch(hourly, units => { if (!seed && !units.some(unit => unit.node.id === costUnitId.value)) costUnitId.value = units.length === 1 ? units[0].node.id : '' }, { immediate: true })
@@ -170,7 +178,8 @@ function submit() {
   tried.value = true
   if (problem.value || props.busy || !ticket.value || !rate.value || !newSeconds.value || !day.value) return
   if (seed) { emit('save', changes(), ticket.value); return }
-  emit('log', { ticket: ticket.value, costUnitId: costUnitId.value, currency: rate.value.currency, day: day.value, seconds: newSeconds.value, startMinutes: startMinutes.value, note: note.value.trim() })
+  if (!newStart.value) return
+  emit('log', { ticket: ticket.value, costUnitId: costUnitId.value, currency: rate.value.currency, day: day.value, seconds: newSeconds.value, startedAt: newStart.value.toISOString(), note: note.value.trim() })
 }
 function reset() { duration.value = ''; start.value = ''; note.value = ''; tried.value = false; void nextTick(() => durationInput.value?.focus()) }
 function keys(event: KeyboardEvent) {
@@ -243,7 +252,7 @@ defineExpose({ reset, focus: focusFirst, openPicker: () => { picker.value = pick
 .pick:disabled, .field:disabled, .days button:disabled { cursor: not-allowed; opacity: .55; }
 .log-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; min-height: 18px; }
 .log-status { flex: 1; min-width: 0; font-size: 12px; color: var(--ink-3); }
-.log-status.warn { color: var(--gold-ink); }
+.log-status.warn { color: var(--warn-ink); }
 .edit-keys { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
 .remove-btn { gap: 6px; }
 /* Correcting an entry: the same line plus Cancel beside Save. */

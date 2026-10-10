@@ -160,7 +160,7 @@ func TestCompatEndToEnd(t *testing.T) {
 	}
 
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "get", key}, "")
-	if code != 0 || !strings.Contains(out, key+"  Calendar compat") || !strings.Contains(out, "type:     ticket") || !strings.Contains(out, "status:   open") || !strings.Contains(out, "priority: high") {
+	if code != 0 || !strings.Contains(out, key+"  Calendar compat") || !strings.Contains(out, "type:     work") || !strings.Contains(out, "status:   open") || !strings.Contains(out, "priority: high") {
 		t.Fatalf("get code %d out %q err %q", code, out, errOut)
 	}
 
@@ -200,7 +200,7 @@ func TestCompatEndToEnd(t *testing.T) {
 		t.Fatalf("json get %+v", got)
 	}
 
-	// AEON-256: CLI uses the same server gate; hidden tickets cannot bypass it.
+	// AEON-256/655: the ticket alias creates work; hiding it cannot bypass the server gate.
 	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "update", key, "--status", "done", "--hide-from-release-notes", "true"}, "")
 	if code == 0 || !strings.Contains(errOut, "benefit_de") {
 		t.Fatalf("missing benefits accepted: %d %s", code, errOut)
@@ -219,7 +219,7 @@ func TestCompatEndToEnd(t *testing.T) {
 	}
 
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "search", "Calendar", "-p", "AEON"}, "")
-	if code != 0 || !strings.Contains(out, "KEY           TYPE     STATUS         TITLE") || !strings.Contains(out, key) || !strings.Contains(out, "ticket") {
+	if code != 0 || !strings.Contains(out, "KEY           TYPE     STATUS         TITLE") || !strings.Contains(out, key) || !strings.Contains(out, "work") {
 		t.Fatalf("search code %d out %q err %q", code, out, errOut)
 	}
 
@@ -307,6 +307,12 @@ func TestCompatEndToEnd(t *testing.T) {
 	bundleRT := &runtime{program: "paimos", stdout: &bundleOut, stderr: &bytes.Buffer{}, configPath: missing, jsonOut: true}
 	if err := bundleRT.harnessSessionFull("AEON", "worker", "json", session.ID); err != nil || !strings.Contains(bundleOut.String(), key) {
 		t.Fatalf("full bundle %s: %v", bundleOut.String(), err)
+	}
+	_, groups := decodeSessionBundle(t, bundleOut.Bytes())
+	for _, name := range []string{"work", "tickets", "tasks", "epics"} {
+		if len(groups[name]) != 1 || groups[name][0]["key"] != key || groups[name][0]["kind"] != "work" {
+			t.Fatalf("migrated full bundle %s: %#v", name, groups[name])
+		}
 	}
 
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "onboard", "--project", "AEON", "--agent", "worker"}, "")

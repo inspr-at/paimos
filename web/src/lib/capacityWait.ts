@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-export const WAIT_CODES = ['schedule', 'reserve', 'reading', 'vendor', 'offline', 'sign_in', 'hold', 'approval', 'capacity', 'allowance', 'models', 'state'] as const
+import { hostCapacityReason } from './hostCapacity.ts'
+export const WAIT_CODES = ['schedule', 'reserve', 'reading', 'vendor', 'offline', 'sign_in', 'hold', 'approval', 'capacity', 'allowance', 'models', 'state', 'residency', 'context'] as const
 export interface CapacityWait {
   code: typeof WAIT_CODES[number]
+  host_reason?: string
   until?: string
   read_at?: string
   timezone?: string
   run_now_allowed: boolean
+  /** AEON-1044: the work context the account is not allowed for (wait code `context`). */
+  context?: unknown
 }
 export function isCapacityWait(value: unknown): value is CapacityWait {
   if (!value || typeof value !== 'object') return false
@@ -33,8 +37,10 @@ export function capacityWaitText(wait: CapacityWait, subject = 'Agents', now = D
     case 'sign_in': return 'Sign in again on the computer'
     case 'hold': return at ? `On hold until ${at}` : 'On hold until you resume'
     case 'approval': return 'Allow agents in Settings / Accounts'
-    case 'capacity': return 'Waiting for the current run to finish'
+    case 'capacity': return wait.host_reason ? `Waiting for host capacity: ${hostCapacityReason(wait.host_reason)}` : 'Waiting for the current run to finish'
     case 'allowance': return at ? `Capacity available after ${at}` : 'Waiting for capacity'
+    case 'residency': return 'Waiting for an account within the allowed providers'
+    case 'context': return typeof wait.context === 'string' && wait.context.trim() && wait.context.length <= 128 ? `Not allowed for ${wait.context.trim()}` : 'No account is allowed for this project’s context'
     case 'models': return 'No model is granted for this account'
     // Why and how to resume, not just that it is paused (AEON-402).
     case 'state': return 'Paused in Settings / Accounts; turn “Agents may use it” back on to resume'

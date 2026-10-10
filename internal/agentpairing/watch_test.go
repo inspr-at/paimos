@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -56,14 +57,21 @@ func TestAttachActivityRequiresActiveApprovalAndHonorsPolicy(t *testing.T) {
 	}
 }
 
-func watchFixture(t *testing.T) (*fixture, string, attachwatch.DeviceRequest) {
+func watchFixture(t *testing.T, messages ...*attachedmsg.Service) (*fixture, string, attachwatch.DeviceRequest) {
 	t.Helper()
-	return watchFixtureWithKey(t, "")
+	return watchFixtureWithHarness(t, "", "codex", messages...)
 }
 func watchFixtureWithKey(t *testing.T, publicKey string) (*fixture, string, attachwatch.DeviceRequest) {
 	t.Helper()
-	f := newFixture(t)
-	p := f.proposePlatformKey("darwin", "arm64", publicKey, "codex")
+	return watchFixtureWithHarness(t, publicKey, "codex")
+}
+func watchFixtureWithHarness(t *testing.T, publicKey, harness string, messages ...*attachedmsg.Service) (*fixture, string, attachwatch.DeviceRequest) {
+	t.Helper()
+	return watchFixtureFromFixture(t, newFixture(t, messages...), publicKey, harness)
+}
+func watchFixtureFromFixture(t *testing.T, f *fixture, publicKey, harness string) (*fixture, string, attachwatch.DeviceRequest) {
+	t.Helper()
+	p := f.proposePlatformKey("darwin", "arm64", publicKey, harness)
 	f.approve(p, "connect_only")
 	v := f.redeem(p)
 	project, ticket := uuid(t, f.db), uuid(t, f.db)
@@ -72,17 +80,19 @@ func watchFixtureWithKey(t *testing.T, publicKey string) (*fixture, string, atta
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id) SELECT $1,$2,id,'WATCH-2','Watch ticket',$3 FROM node_kinds WHERE slug='ticket'`, f.tenantID, ticket, project)
+		_, err = tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id) SELECT $1,$2,id,'WATCH-2','Watch ticket',$3 FROM node_kinds WHERE slug='work'`, f.tenantID, ticket, project)
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	in := attachwatch.DeviceRequest{Operation: "request", RequestID: uuid(t, f.db), ComputerID: *v.ComputerID, DeviceProof: p.lifecycle, Snapshot: attachwatch.Snapshot{ComputerID: *v.ComputerID, ProjectID: project, TicketID: ticket, Host: "Test workstation", Harness: "codex", Process: attachwatch.Process{PID: 123, UID: 501, Started: "fixture-start", Executable: "/usr/local/bin/codex", CWD: "/tmp/pairing-fixture/repo"}, Transcript: "/tmp/fixture/transcript.jsonl", FileID: "1:234"}}
+	in.Snapshot.Harness = harness
+	in.Snapshot.Process.Executable = "/usr/local/bin/" + harness
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	in.PollKey = nonce()
 	in.Digest = in.Snapshot.Digest()
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, Operation: "register", ComputerID: in.ComputerID, DeviceProof: p.lifecycle, PollKey: in.PollKey}, false, key, 200)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{MessageProtocol: attachedmsg.Protocol, AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, Operation: "register", ComputerID: in.ComputerID, DeviceProof: p.lifecycle, PollKey: in.PollKey}, false, key, 200)
 	return f, key, in
 }
 func requestWatch(t *testing.T, f *fixture, key string, in attachwatch.DeviceRequest) attachwatch.View {
@@ -305,7 +315,10 @@ func TestAttachCannotRenewChangedSession(t *testing.T) {
 		t.Run(change, func(t *testing.T) {
 			f, key, in := watchFixture(t)
 			v := activateWatch(t, f, key, &in)
-			if _, err := f.db.Admin.Exec(t.Context(), "UPDATE harness_sessions SET "+change+" WHERE id=$1", *v.SessionID); err != nil {
+			if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), "UPDATE harness_sessions SET "+change+" WHERE id=$1", *v.SessionID)
+				return err
+			}); err != nil {
 				t.Fatal(err)
 			}
 			in.Sequence++
@@ -426,4 +439,19 @@ func TestAttachRegisteredKeyStillRequiresSnapshotDigest(t *testing.T) {
 	f.call("POST", "/api/agent-pairing/attach", in, false, key, 409)
 	in.Digest = in.Snapshot.Digest()
 	f.call("POST", "/api/agent-pairing/attach", in, false, key, 410)
+}
+
+func TestAttachRequestEmitsOneRedactedCommittedEvent(t *testing.T) {
+	f, key, in := watchFixture(t)
+	requestWatch(t, f, key, in)
+	requestWatch(t, f, key, in) // Registration replay must not wake a new request.
+	var count int
+	var request, owner string
+	var fields int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*),min(after->>'request_id'),min(after->>'owner_id'),min((SELECT count(*) FROM jsonb_object_keys(after))) FROM events WHERE tenant_id=$1 AND type='harness.attach_requested'`, f.tenantID).Scan(&count, &request, &owner, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || request != in.RequestID || owner != f.person || fields != 2 {
+		t.Fatalf("attach event: count=%d request=%s owner=%s fields=%d", count, request, owner, fields)
+	}
 }

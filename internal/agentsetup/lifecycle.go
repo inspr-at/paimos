@@ -111,11 +111,12 @@ func (e *Engine) Disconnect(ctx context.Context, accountID string) (Progress, er
 }
 
 func (e *Engine) proof(s *snapshot) ProofRequest {
+	refreshHookCapabilities(s)
 	tenant := s.Response.TenantID
 	if tenant == "" {
 		tenant = s.Request.TenantID
 	}
-	return ProofRequest{TenantID: tenant, RequestID: s.LifecycleRequestID, LifecycleSecret: s.Lifecycle}
+	return ProofRequest{HookCapabilities: s.HookCapabilities, TenantID: tenant, RequestID: s.LifecycleRequestID, LifecycleSecret: s.Lifecycle}
 }
 
 func (e *Engine) applyFences(ctx context.Context, s *snapshot, v View) error {
@@ -141,7 +142,13 @@ func (e *Engine) applyFences(ctx context.Context, s *snapshot, v View) error {
 
 // SyncFences is the daemon-side reconnect operation. It neither unloads its own
 // service nor acknowledges cleanup. The separate helper owns those steps.
-func (e *Engine) SyncFences(ctx context.Context) error {
+func (e *Engine) SyncFences(ctx context.Context) (resultErr error) {
+	cause := PairingLocalUnavailable
+	defer func() {
+		if resultErr != nil {
+			resultErr = &pairingSyncError{err: resultErr, detail: cause}
+		}
+	}()
 	if err := e.Store.Lock(); err != nil {
 		return err
 	}
@@ -159,13 +166,16 @@ func (e *Engine) SyncFences(ctx context.Context) error {
 			proof.Progress = observedProgress(s.View, local)
 		}
 	}
+	cause = PairingServerUnavailable
 	v, err := e.API.Reconcile(ctx, proof)
 	if err != nil {
 		return err
 	}
+	cause = PairingViewInvalid
 	if err = validateView(s, v, false); err != nil {
 		return err
 	}
+	cause = PairingFenceUnavailable
 	if err = e.applyFences(ctx, s, v); err != nil {
 		return err
 	}
@@ -174,6 +184,7 @@ func (e *Engine) SyncFences(ctx context.Context) error {
 	prefix := s.View.RuntimePrefix
 	s.View = v
 	s.View.RuntimePrefix = prefix
+	cause = PairingLocalUnavailable
 	return e.save(s, false)
 }
 
@@ -261,6 +272,20 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 			if len(local.SettlementPending) > 0 {
 				p.Action = "Local process exit confirmed; retained usage journal needs authorized server accounting recovery."
 			}
+			// User hook settings are shared by every enrollment of a harness.
+			// Keep them for connected accounts and for accounts whose local
+			// processes have not finished draining and cleanup yet.
+			shared := false
+			for _, other := range v.Enrollments {
+				if other.AccountID != a.AccountID && other.Harness == a.Harness && !known[other.AccountID] {
+					shared = true
+					break
+				}
+			}
+			if !shared {
+				e.removeUserHook(ctx, s, a.Harness)
+			}
+			p.HookCapabilities = s.HookCapabilities
 			if err = e.removeAccount(a.AccountID); err != nil {
 				return p, err
 			}
@@ -278,6 +303,11 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 				if e.Services == nil && s.Service != nil {
 					return p, errors.New("service cleanup requires its owning manager")
 				}
+				if e.LeaveLedger != nil {
+					if err = e.LeaveLedger(ctx); err != nil {
+						return p, err
+					}
+				}
 				if s.Service != nil {
 					if err = e.Services.Remove(ctx, e.Store, s.Service, true); err != nil {
 						return p, err
@@ -287,6 +317,8 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 				if err = e.Store.RemoveExact("runtime.key", Hash(key)); err != nil {
 					return p, err
 				}
+				e.removeUserHooks(ctx, s)
+				p.HookCapabilities = s.HookCapabilities
 				s.ComputerCleaned = true
 				s.Runtime = ""
 				s.Device = ""
@@ -351,6 +383,7 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 		if err == nil && local.DaemonID == v.DaemonID {
 			accountReport := local.AccountStatuses != nil
 			local = enrollmentReadiness(v, local)
+			p.AccountStatuses = local.AccountStatuses
 			p.HarnessDetails, p.HarnessStatuses = local.HarnessDetails, local.HarnessStatuses
 			p.BlockedAccounts = append([]BlockedAccount(nil), local.BlockedAccounts...)
 			// A Claude hold keeps its own stage: repin is a Claude-only flow.
@@ -420,7 +453,7 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 		}
 	}
 	if p.Stage != "provisioning" {
-		pending, failed, unavailable := false, false, false
+		pending, failed, unavailable, expired := false, false, false, false
 		for _, a := range v.Enrollments {
 			if a.VerificationRunID == "" || a.State != "connected" {
 				continue
@@ -429,7 +462,15 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 			case "completed":
 			case "unavailable":
 				unavailable = true
-			case "failed", "cancelled", "ownership_lost", "expired":
+			case "expired":
+				// Expiry belongs to the old request, not a fresh account probe.
+				// A ready sibling alone cannot establish this account's readiness.
+				if p.AccountStatuses[a.AccountID].State == "ready" {
+					expired = true
+				} else {
+					failed = true
+				}
+			case "failed", "cancelled", "ownership_lost":
 				failed = true
 			default:
 				pending = true
@@ -445,6 +486,9 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 		case pending:
 			p.Stage = "verification_pending"
 			p.Action = "Approved verification is queued or running; setup will not create another run."
+		case expired:
+			p.Stage = "connected"
+			p.Action = "Verification expired — run verification again. No automatic retry or allowance refill was performed; pending local cleanup is preserved."
 		default:
 			p.Stage = "connected"
 			p.Action = "Computer connected; ongoing limits remain separately controlled."

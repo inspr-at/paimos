@@ -9,10 +9,13 @@ import {
 } from '../../lib/accountLimits'
 import { putQuotaPool, type AgentAccount, type AllowanceWindow } from '../../lib/agents'
 import { pct, when, type AccountCapacity, type AccountRow, type CapacityReading } from '../../lib/capacity'
+import { learnedUseText } from '../../lib/computerAccounts'
 import { confirmAction, type ConfirmRequest } from '../../lib/confirm'
 import AppIcon from '../AppIcon.vue'
 import PiAccountModel from '../settings/PiAccountModel.vue'
 import ClaudeStatuslineToggle from '../settings/ClaudeStatuslineToggle.vue'
+import UsageProbeToggle from '../settings/UsageProbeToggle.vue'
+import { useSession } from '../../stores/session'
 
 // The inline detail of one account in Settings → Accounts (AEON-384): its
 // name, each window with source and freshness, the last three readings,
@@ -23,9 +26,14 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ changed: [] }>()
 
+const session = useSession()
+const mayProbe = computed(() => props.mayManage && session.identity?.principal.kind === 'person' && props.account.owner_person_id === session.identity?.principal.id && (['grok', 'claude', 'codex'].includes(props.account.harness) || props.account.harness === 'pi' && props.account.provider === 'openrouter'))
+const budget = computed(() => props.cap?.budget ?? props.account.usage_budget)
 const name = computed(() => accountName(props.account))
 const host = computed(() => props.row?.host || props.account.host_label || '')
 const windows = computed(() => sortWindows(props.cap?.windows ?? []))
+// Spend already observed when this vendor reported no window (AEON-792). The Agents page no longer draws that capacity cell.
+const learnedSpend = computed(() => props.row ? learnedUseText(props.row) : '')
 const primary = computed(() => windows.value[0] ?? null)
 const offline = computed(() => props.row?.state === 'offline')
 const use = computed(() => props.cap?.limit)
@@ -191,13 +199,14 @@ async function drop(w: AllowanceWindow) {
 
 <template>
   <div class="detail">
+    <UsageProbeToggle v-if="mayProbe" :account="account" @changed="emit('changed')" />
     <PiAccountModel v-if="account.harness === 'pi'" :account="account" :editable="mayManage" @saved="emit('changed')" />
     <ClaudeStatuslineToggle v-if="mayManage && account.harness === 'claude' && account.statusline_opt_in" :account="account" @changed="emit('changed')" />
     <dl class="account-facts">
       <div class="fact">
         <dt>Name</dt>
         <dd v-if="!renaming" class="name-line">
-          <span class="nm" :title="name">{{ name }}</span>
+          <span class="nm">{{ name }}</span>
           <button v-if="mayManage" ref="nameButton" type="button" class="icon-btn flat sm" :aria-label="`Rename ${name}`" data-tip="Rename" @click="startRename()"><AppIcon name="edit" :size="14" /></button>
         </dd>
         <dd v-else>
@@ -221,6 +230,16 @@ async function drop(w: AllowanceWindow) {
         </dd>
       </div>
 
+      <div v-if="budget" class="fact">
+        <dt>Dollar budget</dt>
+        <dd>
+          <span class="num">${{ budget.key_usage_usd.toFixed(2) }} used</span>
+          <span v-if="budget.key_limit_usd != null"> · ${{ budget.key_limit_usd.toFixed(2) }} key limit</span>
+          <span v-if="budget.key_remaining_usd != null"> · ${{ budget.key_remaining_usd.toFixed(2) }} key remaining</span>
+          <span> · {{ budget.balance_usd == null ? 'Account balance unknown' : `$${budget.balance_usd.toFixed(2)} account balance` }}</span>
+          <span class="src"> · Read {{ when(budget.read_at, now, timezone) }}</span>
+        </dd>
+      </div>
       <template v-if="windows.length">
         <div v-for="w in windows" :key="`${w.reading.window_kind}/${w.reading.bucket}`" class="fact window" :class="{ frozen: windowFacts(w, now, timezone).stale }">
           <dt>{{ windowLabel(w, account.harness) }}</dt>
@@ -230,9 +249,9 @@ async function drop(w: AllowanceWindow) {
           </dd>
         </div>
       </template>
-      <div v-else class="fact">
+      <div v-else-if="!budget" class="fact">
         <dt>Limits</dt>
-        <dd class="quiet">{{ noWindowLine(account.harness, host) }}</dd>
+        <dd class="quiet">{{ noWindowLine(account.harness, host) }}<p v-if="learnedSpend" class="learned-use">{{ learnedSpend }}</p></dd>
       </div>
 
       <div v-if="recent.length" class="fact">
@@ -310,10 +329,12 @@ dd { min-width: 0; margin: 0; padding-top: 4px; font-size: 13px; line-height: 1.
 .num { font-variant-numeric: tabular-nums; }
 b.num { font-weight: 650; }
 .sep, .src, .by, .quiet { color: var(--ink-2); }
+.learned-use { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.4; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .src { font-size: 12.5px; }
 .window.frozen dd { color: var(--ink-2); }
-.name-line { display: flex; align-items: center; gap: 4px; min-height: 28px; padding-top: 0; }
-.nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.name-line { display: flex; align-items: flex-start; gap: 4px; min-height: 28px; padding-top: 0; }
+.name-line .icon-btn { flex: none; }
+.nm { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; font-weight: 600; }
 .rename { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .rename .field { flex: 1 1 200px; max-width: 320px; height: 30px; }
 .readings { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 0; padding: 0; list-style: none; }
@@ -335,6 +356,17 @@ b.num { font-weight: 650; }
 .mine { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .mine li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 16px; min-height: 30px; }
 .mine .what { font-variant-numeric: tabular-nums; }
+/* In Settings' docked pane (AEON-686) the card is phone-narrow at any viewport
+   width: labels go above their values so a limit's actions never overflow. */
+.detail { container: account-detail / inline-size; }
+@container account-detail (max-width: 420px) {
+  .account-facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  dt, .limit:has(.sentence) dt, .mine-fact dt { padding-top: 10px; }
+  .fact:first-child dt { padding-top: 0; }
+  dd { padding-top: 0; }
+  .sentence .actions, .mine .actions { margin-left: -10px; }
+  .sentence .actions { flex-basis: 100%; }
+}
 @media (max-width: 600px) {
   .detail { margin: 0 0 10px; padding: 12px; }
   .account-facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }

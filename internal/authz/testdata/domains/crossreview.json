@@ -1,0 +1,8 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "routes": {
+    "GET /api/nodes/{nodeId}/reviews": "work_orders.read",
+    "POST /api/nodes/{nodeId}/reviews": "work_orders.write",
+    "POST /api/reviews/github": "public"
+  }
+}

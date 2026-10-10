@@ -427,10 +427,11 @@ func (m *Module) ProcessNext(ctx context.Context, tenantID string) (bool, error)
 	if renderErr != nil {
 		return true, m.markFailed(ctx, tenantID, j, "PDF render failed")
 	}
-	prepared, err := m.store.Put(ctx, tenantID, bytes.NewReader(pdf))
+	prepared, err := m.store.Stage(ctx, tenantID, bytes.NewReader(pdf))
 	if err != nil {
 		return true, m.markFailed(ctx, tenantID, j, "receipt storage failed")
 	}
+	defer prepared.Close()
 	if prepared.ContentType != "application/pdf" {
 		return true, m.markFailed(ctx, tenantID, j, "invalid receipt type")
 	}
@@ -445,8 +446,19 @@ func (m *Module) ProcessNext(ctx context.Context, tenantID string) (bool, error)
 		if current.State != "rendering" || current.Attempts != j.Attempts || current.ReceiptSHA256 != nil {
 			return errors.New("render lease lost")
 		}
+		// serviceActor may append principal.created. Keep its domain lock before
+		// the blob lock, and reserve the receipt before any possible event.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "quote-confirmation:"+tenantID); err != nil {
+			return err
+		}
+		if err := attachments.LockBlobs(ctx, tx, tenantID, prepared.SHA256); err != nil {
+			return err
+		}
 		p, err := serviceActor(ctx, tx, tenantID)
 		if err != nil {
+			return err
+		}
+		if err := attachments.Publish(ctx, tx, attachments.OwnerReceipt, prepared); err != nil {
 			return err
 		}
 		id := j.QuoteNodeID

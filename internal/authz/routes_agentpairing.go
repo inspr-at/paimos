@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package authz
+
+// Route and scope declarations for agentpairing.
+func init() {
+	registerRoutes("agentpairing", map[string]string{
+		"GET /api/agent-pairing/account-links":                                              "profile.write",
+		"GET /api/agent-pairing/attach/pending":                                             "account.manage",
+		"GET /api/agent-pairing/attach/{requestId}/messages":                                "account.manage",
+		"GET /api/agent-pairing/computers":                                                  "account.read",
+		"GET /api/agent-pairing/computers/{computerId}":                                     "account.read",
+		"GET /api/agent-pairing/guide":                                                      "public",
+		"GET /api/agent-pairing/self":                                                       "run.claim",
+		"GET /api/me/security/session-watching":                                             "profile.read",
+		"GET /api/projects/{projectId}/harness-sessions/{sessionId}/watch":                  "harness.watch",
+		"POST /api/agent-pairing/account-link":                                              "account.probe",
+		"POST /api/agent-pairing/account-link/lookup":                                       "profile.write",
+		"POST /api/agent-pairing/account-link/{requestId}/approve":                          "profile.write",
+		"POST /api/agent-pairing/account-links/{accountId}/unlink":                          "profile.write",
+		"POST /api/agent-pairing/accounts/sign-out":                                         "account.manage",
+		"POST /api/agent-pairing/attach":                                                    "harness.worker",
+		"POST /api/agent-pairing/attach/lookup":                                             "account.manage",
+		"POST /api/agent-pairing/attach/{requestId}/approve":                                "account.manage",
+		"POST /api/agent-pairing/attach/{requestId}/messages/approve":                       "account.manage",
+		"POST /api/agent-pairing/attach/{requestId}/messages/revoke":                        "account.manage",
+		"POST /api/agent-pairing/attach/{requestId}/revoke":                                 "account.manage",
+		"POST /api/agent-pairing/computers/{computerId}/disconnect":                         "account.manage",
+		"POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/disconnect": "account.manage",
+		"POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/verify":     "account.manage",
+		"POST /api/agent-pairing/computers/{computerId}/remove":                             "account.manage",
+		"POST /api/agent-pairing/device":                                                    "public",
+		"POST /api/agent-pairing/lookup":                                                    "account.manage",
+		"POST /api/agent-pairing/reconcile":                                                 "public",
+		"POST /api/agent-pairing/redeem":                                                    "public",
+		"POST /api/agent-pairing/requests/{requestId}/approve":                              "account.manage",
+		"POST /api/agent-pairing/requests/{requestId}/deny":                                 "account.manage",
+		"POST /api/agent-pairing/self/ledger":                                               "run.claim",
+		"POST /api/agent-pairing/self/capacity":                                             "run.claim",
+		"POST /api/agent-pairing/self/disconnect":                                           "run.claim",
+		"PUT /api/agent-pairing/computers/{computerId}/capacity":                            "account.manage",
+		"PUT /api/agent-pairing/computers/{computerId}/name":                                "account.manage",
+		"PUT /api/me/security/session-watching":                                             "profile.write",
+	})
+	registerDeclarations("agentpairing", "project_filtered", ProjectFilteredRoutes, map[string]bool{
+		"GET /api/me/security/session-watching": true,
+		"PUT /api/me/security/session-watching": true,
+	})
+}

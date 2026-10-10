@@ -44,7 +44,7 @@ func TestLexicalPaginationFiltersAndTenants(t *testing.T) {
 	insertNode(t, d.App, tenantA, n3, "PAI-3", "project", "Alpha signal", "Alpha signal", "open")
 	insertNode(t, d.App, tenantA, german, "PAI-4", "project", "Deutscher Begriff", "Text", "open")
 	insertNode(t, d.App, tenantA, other, "PAI-5", "project", "English search title", "Markdown body", "open")
-	insertNode(t, d.App, tenantA, ticket, "TKT-1", "ticket", "Sharedtoken project", "body", "open")
+	insertNode(t, d.App, tenantA, ticket, "TKT-1", "work", "Sharedtoken project", "body", "open")
 	insertNode(t, d.App, tenantA, doneID, "PAI-6", "project", "Sharedtoken project", "body", "done")
 	insertNode(t, d.App, tenantA, gone, "PAI-7", "project", "Alpha signal", "Alpha signal", "open")
 	insertNode(t, d.App, tenantB, bNode, "PAI-1", "project", "Alpha signal", "Alpha signal", "open")
@@ -112,7 +112,7 @@ func TestLexicalPaginationFiltersAndTenants(t *testing.T) {
 		t.Fatalf("english %+v", page.Items)
 	}
 
-	kindID := kindBySlug(t, d.App, tenantA, "ticket")
+	kindID := kindBySlug(t, d.App, tenantA, "work")
 	status, raw = call(mux, &ada, "/api/search?q=Sharedtoken&kind_id="+kindID)
 	page = mustOK(t, status, raw)
 	if len(page.Items) != 1 || page.Items[0].Node.ID != ticket {

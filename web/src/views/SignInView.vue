@@ -35,7 +35,7 @@ const flowErrors = computed<Record<string, { title: string; body: string }>>(() 
   denied: { title: 'Sign-in was cancelled', body: `Access was declined${providerName.value ? ` at ${providerName.value}` : ''}. Sign in again whenever you are ready.` },
   expired: { title: 'Your session ended', body: 'For your security you were signed out after a while. Sign in again to pick up where you left off.' },
   not_member: { title: 'Not a member of this workspace yet', body: `${providerAccount.value} works, but this workspace has not added you. Ask its owner for an invitation.` },
-  imported_account: { title: 'Your earlier account was found', body: 'Your earlier PMA account was found; ask an admin to invite you. Your verified email can connect its history when you accept. An admin can help with multiple matches or inactive accounts.' },
+  imported_account: { title: 'Your earlier account was found', body: 'Your earlier account from classic PAIMOS was found; ask an admin to invite you. Your verified email can connect its history when you accept. An admin can help with multiple matches or inactive accounts.' },
   unavailable: { title: 'Sign-in is not available right now', body: 'The workspace is not ready to accept sign-ins. Please try again in a moment.' },
 }))
 const flowError = computed(() => {
@@ -138,7 +138,7 @@ function dismiss() { const { error: _error, ...rest } = route.query; void router
 }
 .signin-card::after { content: ''; position: absolute; left: 12%; right: 12%; top: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--glass-edge), var(--aqua), var(--glass-edge), transparent); }
 .brand { display: flex; align-items: center; gap: 11px; }
-.mark-backing { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim), 0 8px 20px -12px rgba(14, 111, 108, .6); }
+.mark-backing { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: var(--brand-plate); box-shadow: 0 0 0 1px var(--glass-rim), 0 8px 20px -12px color-mix(in srgb, var(--primary-line) 60%, transparent); }
 .wordmark { font: 600 13px/1 var(--mono); letter-spacing: .28em; color: var(--ink); font-variant-ligatures: none; }
 .wordmark sup { position: relative; top: -.15em; margin-left: 2px; font: 600 8px/1 var(--mono); letter-spacing: .16em; color: var(--teal-ink); }
 h1 { margin-top: 26px; font-size: 34px; }

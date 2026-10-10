@@ -10,6 +10,7 @@ import { confirmAction } from '../../lib/confirm'
 import { relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import TargetSummary from '../deploy/TargetSummary.vue'
+import ExpandableText from '../ExpandableText.vue'
 import HarnessMark from './HarnessMark.vue'
 import AgentStateMark from '../indicators/AgentStateMark.vue'
 import { useAgentAppearance } from '../../lib/agentAppearance'
@@ -232,7 +233,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
           </div>
         </li>
         <li
-          v-else class="item agent-state-surface" :class="[riskFor(approval), { active: cursor === `a:${approval.id}`, open: open?.id === approval.id }]"
+          v-else class="item permission agent-state-surface" :class="[riskFor(approval), { active: cursor === `a:${approval.id}`, open: open?.id === approval.id }]"
           :data-row="`a:${approval.id}`" tabindex="-1" :aria-label="`${scopeLabel(approval.scope)}, asked by ${named(approval).name}`"
           @click="emit('focusRow', `a:${approval.id}`)" @focusin="emit('focusRow', `a:${approval.id}`)"
         >
@@ -262,14 +263,18 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
               </span>
             </p>
             <TargetSummary :approval="approval" compact />
-            <p v-if="approval.rationale" class="why">{{ approval.rationale }}</p>
+            <div v-if="open?.id !== approval.id && canDecideApproval(approval)" class="row-actions">
+              <button type="button" class="btn sm ghost" aria-keyshortcuts="d" @click.stop="begin(approval.id, 'deny')"><AppIcon name="close" :size="13" />Deny</button>
+              <button type="button" class="btn sm" :class="cursor === `a:${approval.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(approval.id, 'approve')"><AppIcon name="check" :size="13" />Approve</button>
+            </div>
+            <ExpandableText v-if="approval.rationale" class="why" :text="approval.rationale" :expanded="open?.id === approval.id" />
             <form v-if="open?.id === approval.id" class="decision" @submit.prevent="submit(approval)" @click.stop>
               <label :for="`reason-${approval.id}`">{{ open.mode === 'approve' ? 'Reason (optional)' : 'Why not? The agent sees this.' }}</label>
               <textarea
                 :id="`reason-${approval.id}`" ref="reasonField" v-model="reason" class="field" rows="2" maxlength="4000"
                 :placeholder="open.mode === 'approve' ? 'Fine for this run.' : 'Use the staging account instead.'" :disabled="busy" @keydown="reasonKeys($event, approval)"
               />
-              <p v-if="error" class="error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p>
+              <div class="decision-feedback"><p v-if="error" class="error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p></div>
               <div class="decision-actions">
                 <span class="hint"><kbd class="keycap"><AppIcon name="enter" /></kbd> to {{ open.mode }} · <kbd class="keycap">esc</kbd> to cancel</span>
                 <button type="button" class="btn sm ghost" :disabled="busy" @click="cancel">Cancel</button>
@@ -278,10 +283,6 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
                 </button>
               </div>
             </form>
-          </div>
-          <div v-if="open?.id !== approval.id && canDecideApproval(approval)" class="row-actions">
-            <button type="button" class="btn sm ghost" aria-keyshortcuts="d" @click.stop="begin(approval.id, 'deny')"><AppIcon name="close" :size="13" />Deny</button>
-            <button type="button" class="btn sm" :class="cursor === `a:${approval.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(approval.id, 'approve')"><AppIcon name="check" :size="13" />Approve</button>
           </div>
         </li>
         </template>
@@ -302,7 +303,14 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
             </button>
             <span class="asks">to</span><span class="to" :title="request.to">{{ request.to.split(':').pop() }}</span>
           </p>
-          <p class="why body-text">{{ request.body }}</p>
+          <div v-if="open?.id !== request.id" class="row-actions">
+            <button type="button" class="btn sm ghost answer" @click.stop="emit('openAgent', request.sender_principal_id)"><AppIcon name="send" :size="13" />Answer</button>
+            <template v-if="canResolve">
+              <button type="button" class="btn sm ghost" aria-keyshortcuts="d" @click.stop="begin(request.id, 'dismiss')"><AppIcon name="close" :size="13" />Dismiss</button>
+              <button type="button" class="btn sm" :class="cursor === `m:${request.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(request.id, 'resolve')"><AppIcon name="check" :size="13" />Resolve</button>
+            </template>
+          </div>
+          <ExpandableText class="why body-text" :text="request.body" :lines="3" :expanded="open?.id === request.id" />
           <form v-if="open?.id === request.id" class="decision" @submit.prevent="settle(request)" @click.stop>
             <label :for="`note-${request.id}`">Note (optional)</label>
             <textarea
@@ -310,7 +318,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
               :placeholder="open.mode === 'resolve' ? 'Merged it myself after CI.' : 'Not needed; camy already has the lock.'" :disabled="busy" @keydown="noteKeys($event, request)"
             />
             <p class="fine-print">Resolving records your answer. The held message is not delivered.</p>
-            <p v-if="error" class="error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p>
+            <div class="decision-feedback"><p v-if="error" class="error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p></div>
             <div class="decision-actions">
               <span class="hint"><kbd class="keycap"><AppIcon name="enter" /></kbd> to {{ open.mode }} · <kbd class="keycap">esc</kbd> to cancel</span>
               <button type="button" class="btn sm ghost" :disabled="busy" @click="cancel">Cancel</button>
@@ -319,13 +327,6 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
               </button>
             </div>
           </form>
-        </div>
-        <div v-if="open?.id !== request.id" class="row-actions">
-          <button type="button" class="btn sm ghost answer" @click.stop="emit('openAgent', request.sender_principal_id)"><AppIcon name="send" :size="13" />Answer</button>
-          <template v-if="canResolve">
-            <button type="button" class="btn sm ghost" aria-keyshortcuts="d" @click.stop="begin(request.id, 'dismiss')"><AppIcon name="close" :size="13" />Dismiss</button>
-            <button type="button" class="btn sm" :class="cursor === `m:${request.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(request.id, 'resolve')"><AppIcon name="check" :size="13" />Resolve</button>
-          </template>
         </div>
       </li>
       <li v-for="row in signins ?? []" :key="row.id" class="item signin" :data-row="`g:${row.id}`" tabindex="-1" :aria-label="`${vendor(row)} needs a new sign-in on ${row.host}`">
@@ -364,7 +365,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 
 <style scoped>
 .queue { overflow: clip; container: queue / inline-size; }
-.attach-terminal { display: flex; align-items: center; gap: 6px; color: var(--gold-ink); font-size: 12.5px; font-weight: 600; }
+.attach-terminal { display: flex; align-items: center; gap: 6px; color: var(--warn-ink); font-size: 12.5px; font-weight: 600; }
 .attach-item .expiry:not(.soon), .attach-item .res-title { color: var(--ink-2); }
 .attach-detail { color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
 .wait-mac { font-size: 12px; color: var(--ink-2); white-space: nowrap; }
@@ -391,8 +392,11 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 @media (hover: hover) { .item:hover { background: var(--row-hover); } }
 .item.active { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .item.open { background: var(--row-selected); }
+/* Decision controls precede the preview, so revealing context grows below them. */
+.item.permission, .item.held { grid-template-columns: 30px minmax(0, 1fr); }
+.body > .row-actions { grid-column: auto; justify-self: start; align-self: start; }
 .mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
-.item.medium .mark { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--gold-ink); }
+.item.medium .mark { background: var(--gold-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 35%, transparent); color: var(--warn-ink); }
 .item.high .mark { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); }
 .item.held .mark { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
 .body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; }
@@ -406,7 +410,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .res-link:hover { color: var(--teal-ink); text-decoration: underline; }
 .risk.high { color: var(--danger); font-weight: 600; }
 .expiry { font-size: 12px; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.expiry.soon { color: var(--gold-ink); font-weight: 600; }
+.expiry.soon { color: var(--warn-ink); font-weight: 600; }
 .line2 { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: 12.5px; color: var(--ink-2); }
 .phrase { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .who { display: inline-flex; align-items: center; gap: 5px; height: 24px; margin-left: -4px; padding: 0 6px 0 4px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font-size: 12.5px; font-weight: 600; }
@@ -430,18 +434,20 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .res-key.plain:hover { text-decoration: none; }
 .res-title { min-width: 0; max-width: 42ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .res-label { color: var(--ink); }
-.why { margin-top: 2px; font-size: 13px; color: var(--ink-2); line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
-.body-text { -webkit-line-clamp: 3; line-clamp: 3; color: var(--ink); }
+.why { margin-top: 2px; font-size: 13px; color: var(--ink-2); line-height: 1.45; }
+.body-text { color: var(--ink); }
 .row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; align-self: center; min-width: 0; max-width: 100%; }
 .decision { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 8px; }
 .decision label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
-.decision textarea { width: 100%; min-height: 58px; resize: vertical; padding: 8px 10px; font: inherit; font-size: 13.5px; line-height: 1.4; }
+.decision textarea { width: 100%; height: 58px; min-height: 58px; resize: none; padding: 8px 10px; font: inherit; font-size: 13.5px; line-height: 1.4; }
+.decision-feedback { height: 38px; overflow: auto; scrollbar-gutter: stable; }
+.decision-actions .btn[type="submit"] { width: 190px; flex: none; }
 .decision-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .decision-actions .hint { margin-right: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-3); }
 /* One primary at a time: only the selected request's Approve is filled. */
 .btn.approve-soft { border-color: transparent; background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .btn.approve-soft:hover { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--teal); }
-.btn.deny { color: #fff; background: var(--danger); border-color: transparent; }
+.btn.deny { color: var(--danger-on); background: var(--danger); border-color: transparent; }
 .btn.deny:hover { filter: brightness(1.06); background: var(--danger); }
 .fine-print { font-size: 11.5px; color: var(--ink-3); }
 .answer { color: var(--teal-ink); }
@@ -487,7 +493,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
   .revoke { grid-column: 2 / -1; justify-self: start; }
 }
 .item .mark { color: var(--agent-state-color); background: color-mix(in srgb, var(--agent-state-color) 10%, var(--surface-raised)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent-state-color) 25%, transparent); }
-.count-badge { background: var(--agent-state-color); color: var(--surface-raised); }
+.count-badge { background: var(--surface-raised); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-2); }
 /* A decided request (AEON-505): the outcome in the card's place, a quiet full tint and a
    hairline ring (approved in the ok hue, denied neutral), then a height fold whose negative
    margin takes the list gap with it, so nothing below jumps when the card goes. */

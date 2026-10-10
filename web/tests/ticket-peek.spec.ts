@@ -146,6 +146,15 @@ test('a ticket from another project in the tickets graph opens the peek', async 
     links: [], truncated: false,
   }
   await mockTicketGraph(page, data)
+  // This component fixture deliberately projects a cross-project relation.
+  // Supply the same membership for the shared context read while retaining
+  // AEON-1's real project for the peek and Open in project assertions below.
+  await page.route('**/api/nodes?*', route => {
+    const query = new URL(route.request().url()).searchParams
+    return query.get('within') === 'p-pharos' && query.get('limit') === '500'
+      ? route.fulfill({ json: { items: [{ id: 'n-a1' }], next_cursor: null } })
+      : route.fallback()
+  })
   await page.setViewportSize({ width: 1600, height: 1000 })
   await page.goto('/p/PHAROS/tickets?view=graph')
   const canvas = page.locator('.ticket-graph-canvas')

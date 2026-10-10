@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/deskdelivery"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -56,9 +57,10 @@ type Handover struct {
 }
 
 type Continuation struct {
-	SucceedsID string   `json:"succeeds_session_id"`
-	Handover   Handover `json:"handover"`
-	Brief      string   `json:"brief"`
+	DeskAnswers []deskdelivery.Answer `json:"desk_answers,omitempty"`
+	SucceedsID  string                `json:"succeeds_session_id"`
+	Handover    Handover              `json:"handover"`
+	Brief       string                `json:"brief"`
 }
 
 type pauseRequest struct {
@@ -131,11 +133,19 @@ func pauseController(r *http.Request, tx pgx.Tx, p tenant.Principal, coordinator
 }
 
 func pauseAllowed(s Session, owner string, admin bool, parent string) bool {
-	return admin || owner != "" && s.ownerID != nil && *s.ownerID == owner || parent != "" && s.ParentID != nil && *s.ParentID == parent
+	return admin || owner != "" && s.OwnerPrincipalID != nil && *s.OwnerPrincipalID == owner || parent != "" && s.ParentID != nil && *s.ParentID == parent
 }
 
 func savePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, next Pause, event string) (Session, error) {
 	before := s
+	s, err := writePause(ctx, tx, s, next)
+	if err != nil {
+		return s, err
+	}
+	return s, record(ctx, tx, p, s, event, before, s)
+}
+
+func writePause(ctx context.Context, tx pgx.Tx, s Session, next Pause) (Session, error) {
 	raw, err := json.Marshal(next)
 	if err != nil {
 		return s, err
@@ -144,7 +154,7 @@ func savePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, ne
 	if err != nil {
 		return s, err
 	}
-	return s, record(ctx, tx, p, s, event, before, s)
+	return s, nil
 }
 
 func (m *Module) requestPause(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -275,7 +285,7 @@ func expirePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session) 
 	next := *s.Pause
 	next.State = "cancelled"
 	s, err = savePause(ctx, tx, p, s, next, "pause_cancelled")
-	if err != nil || next.Level == "" || s.StoppedAt != nil || s.ArchivedAt != nil {
+	if err != nil || next.Level == "" || workHandover(&next) || s.StoppedAt != nil || s.ArchivedAt != nil {
 		return s, err
 	}
 	return stopPausedWork(ctx, tx, p, s, "pause_deadline")
@@ -453,7 +463,7 @@ type resumeResult struct {
 }
 
 func resumeRecipe(s Session) resumeResult {
-	c := Continuation{SucceedsID: s.ID, Handover: *s.Pause.Handover, Brief: handoverBrief(*s.Pause.Handover)}
+	c := Continuation{SucceedsID: s.ID, Handover: *s.Pause.Handover, Brief: handoverBrief(*s.Pause.Handover) + deskdelivery.Brief(s.DeskAnswers), DeskAnswers: s.DeskAnswers}
 	out := resumeResult{Session: s, Continuation: c, Registration: map[string]any{
 		"succeeds_session_id": s.ID, "agent_principal_id": s.AgentPrincipalID, "harness": s.Harness, "host": s.Host, "management_mode": s.Management, "role": s.Role, "parent_harness_session_id": s.ParentID, "ticket_node_id": s.TicketNodeID, "work_shape": s.WorkShape, "advertised_capabilities": s.Capabilities,
 		"display_label": s.DisplayLabel, "model": s.Model, "reasoning_effort": s.ReasoningEffort, "account_label": s.AccountLabel, "harness_version": s.HarnessVersion, "worktree": s.Worktree, "branch": s.Branch, "brief": "Continuation of " + s.ID,
@@ -468,28 +478,49 @@ func resumeRecipe(s Session) resumeResult {
 }
 
 func requestResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session) (resumeResult, error) {
-	if s.ArchivedAt != nil || s.StoppedAt == nil || s.StopReason == nil || *s.StopReason != "paused" || s.Pause == nil || s.Pause.Handover == nil || (s.Pause.State != "paused" && s.Pause.State != "resume_requested" && s.Pause.State != "resumed") {
-		return resumeResult{}, workorders.Fail(409, "paused session with a handover required")
+	out, event, err := prepareResume(ctx, tx, p, s)
+	if err == nil && event != nil {
+		err = event()
 	}
+	return out, err
+}
+
+func prepareResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session) (resumeResult, func() error, error) {
+	if s.ArchivedAt != nil || s.StoppedAt == nil || s.StopReason == nil || *s.StopReason != "paused" || s.Pause == nil || s.Pause.Handover == nil || (s.Pause.State != "paused" && s.Pause.State != "resume_requested" && s.Pause.State != "resumed") {
+		return resumeResult{}, nil, workorders.Fail(409, "paused session with a handover required")
+	}
+	var event func() error
 	if s.Pause.State == "paused" {
+		before := s
 		next := *s.Pause
 		var now time.Time
 		if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
-			return resumeResult{}, err
+			return resumeResult{}, nil, err
 		}
 		next.State, next.ResumeRequestedAt = "resume_requested", &now
 		var err error
-		s, err = savePause(ctx, tx, p, s, next, "resume_requested")
+		s, err = writePause(ctx, tx, s, next)
 		if err != nil {
-			return resumeResult{}, err
+			return resumeResult{}, nil, err
 		}
+		event = func() error { return record(ctx, tx, p, s, "resume_requested", before, s) }
 	}
-	return resumeRecipe(s), nil
+	return resumeRecipe(s), event, nil
 }
 
-func (m *Module) resumePause(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+func (m *Module) resumePause(r *http.Request, tx pgx.Tx, p tenant.Principal) (result any, err error) {
+	// Registration and adoption still acquire resource locks after requestResume.
+	// Flush both predecessor and successor snapshots after all those writes.
+	r, flush := deferControlEvents(r, tx)
+	defer flush(&err)
 	var in resumeRequest
 	if err := workorders.Decode(r, &in); err != nil {
+		return nil, err
+	}
+	// Inline registration uses the same tenant -> hierarchy -> session order as
+	// ordinary registration and chat binding, including its access re-check.
+	var tenantID string
+	if err := tx.QueryRow(r.Context(), `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID).Scan(&tenantID); err != nil {
 		return nil, err
 	}
 	if err := lockHierarchy(r.Context(), tx, r.PathValue("projectId")); err != nil {
@@ -506,8 +537,14 @@ func (m *Module) resumePause(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	if !pauseAllowed(s, owner, admin, parent) {
 		return nil, workorders.Fail(403, "session owner or proven parent coordinator required")
 	}
-	out, err := requestResume(r.Context(), tx, p, s)
-	if err != nil || in.Registration == nil {
+	out, event, err := prepareResume(r.Context(), tx, p, s)
+	if err != nil {
+		return out, err
+	}
+	if in.Registration == nil {
+		if event != nil {
+			err = event()
+		}
 		return out, err
 	}
 	if err = authz.RequireTx(r.Context(), tx, p, "harness.write", authz.Scope{ProjectID: s.ProjectID}); err != nil {
@@ -526,7 +563,7 @@ func (m *Module) resumePause(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	}
 	rr := r.Clone(r.Context())
 	rr.Body = ioBody(raw)
-	next, err := m.register(rr, tx, p)
+	next, err := m.registerBeforeEvents(rr, tx, p, event)
 	if err != nil {
 		return nil, err
 	}
@@ -784,13 +821,25 @@ func inheritPauseRegistration(ctx context.Context, tx pgx.Tx, projectID string, 
 	return nil
 }
 
-func completeResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, old, next Session) (Session, error) {
-	c := Continuation{SucceedsID: old.ID, Handover: *old.Pause.Handover, Brief: handoverBrief(*old.Pause.Handover)}
+// storeContinuation reuses the durable handover format without changing worker
+// parents. Explicit project-lead succession chooses its own generation fence.
+func storeContinuation(ctx context.Context, tx pgx.Tx, old, next Session) (Session, error) {
+	c := Continuation{SucceedsID: old.ID, Handover: *old.Pause.Handover, Brief: handoverBrief(*old.Pause.Handover) + deskdelivery.Brief(old.DeskAnswers), DeskAnswers: old.DeskAnswers}
 	raw, err := json.Marshal(c)
 	if err != nil {
 		return next, err
 	}
-	next, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET continuation_handover=$2::jsonb,owner_principal_id=$3,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, next.ID, string(raw), old.ownerID))
+	// Registration already resolved the retained owner before validating native
+	// context ownership. Completing resume must not change that identity later.
+	next, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET continuation_handover=$2::jsonb,desk_answers=coalesce($2::jsonb->'desk_answers','[]'::jsonb),revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, next.ID, string(raw)))
+	if err != nil {
+		return next, err
+	}
+	return next, nil
+}
+
+func completeResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, old, next Session) (Session, error) {
+	next, err := storeContinuation(ctx, tx, old, next)
 	if err != nil {
 		return next, err
 	}
@@ -798,35 +847,8 @@ func completeResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, old, nex
 		if err = adoptChildren(ctx, tx, p, old, next); err != nil {
 			return next, err
 		}
-		// Closed paused children still need a live parent for their continuation.
-		// Ordinary ended children keep their historical parent, as before.
-		rows, e := tx.Query(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE parent_id=$1 AND stop_reason='paused' AND archived_at IS NULL AND pause_record->>'state' IN ('paused','resume_requested') ORDER BY id FOR UPDATE`, old.ID)
-		if e != nil {
-			return next, e
-		}
-		children := []Session{}
-		for rows.Next() {
-			child, e := scanSession(rows)
-			if e != nil {
-				rows.Close()
-				return next, e
-			}
-			children = append(children, child)
-		}
-		e = rows.Err()
-		rows.Close()
-		if e != nil {
-			return next, e
-		}
-		for _, child := range children {
-			adopted, e := scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET parent_id=$2,adopted_from_id=$3,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, child.ID, next.ID, old.ID))
-			if e != nil {
-				return next, e
-			}
-			if e = record(ctx, tx, p, adopted, "adopted", child, adopted); e != nil {
-				return next, e
-			}
-		}
+		// adoptChildren includes paused continuations in the same bounded scope.
+		// Ordinary ended children retain their historical parent.
 	} else {
 		_, err = tx.Exec(ctx, `UPDATE harness_sessions SET handed_over_to_id=$2,revision=revision+1 WHERE id=$1`, old.ID, next.ID)
 		if err != nil {

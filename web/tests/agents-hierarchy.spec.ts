@@ -49,13 +49,14 @@ async function setup(page: Page) {
 test('workers nest by session ID, display their label, harness and ticket, and expand with the keyboard', async ({ page }) => {
   await setup(page)
   await page.goto('/agents')
-  await expect(row(page, lead)).toContainText('1 working')
+  await expect(row(page, lead)).toContainText('1 sub-agent')
   await expect(row(page, child)).toHaveAttribute('data-depth', '1')
   await expect(row(page, child)).toHaveAttribute('data-parent', lead)
   await expect(row(page, child)).toContainText('AC4 hierarchy')
   await expect(row(page, child).locator('.live-bot')).toHaveAttribute('data-harness', 'codex')
   await expect(row(page, child).getByRole('link', { name: 'PHAROS-12' })).toBeVisible()
-  const toggle = row(page, lead).getByRole('button', { name: 'Collapse 1 worker of Release lead' })
+  // The fold button is reached from its row: ← and → fold and unfold; Enter and Space work on the button.
+  const toggle = row(page, lead).getByRole('button', { name: 'Fold Release lead: 1 sub-agent, 1 working' })
   await toggle.focus()
   await page.keyboard.press('Enter')
   await expect(row(page, child)).toHaveCount(0)
@@ -100,7 +101,8 @@ test('returning to a visible tab refreshes immediately and failed reads keep the
     document.dispatchEvent(new Event('visibilitychange'))
   })
   await expect(row(page, child)).toContainText('Returned worker', { timeout: 3000 })
-  await expect(page.locator('.live')).toHaveText('Live')
+  // Only a delay is said in the head; once updates land again it goes (AEON-780: no "Live").
+  await expect(page.locator('.page-head .freshness')).toHaveCount(0)
 })
 
 test('a stopped lead with a live grandchild stays visible and direct worker links open their ancestors', async ({ page }) => {

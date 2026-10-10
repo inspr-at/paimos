@@ -10,6 +10,7 @@ import { useProjects } from '../../stores/projects'
 import AppIcon from '../AppIcon.vue'
 import { useAgentIndicator } from '../../lib/agentIndicator'
 import LiveBot from './LiveBot.vue'
+import { openModelPrefs } from '../../lib/modelPrefsCommand'
 import AgentStateLabel from '../agents/AgentStateLabel.vue'
 import { STATE_LABEL, leadingState } from '../../lib/agentSignals'
 import { useAgentAppearance } from '../../lib/agentAppearance'
@@ -52,6 +53,11 @@ const ticketHref = (agent: LiveAgent) => {
   if (!agent.ticket) return ''
   const routeKey = projects.byId(agent.ticket.project_id)?.routeKey ?? (agent.ticket.project_id === agent.project_id ? props.project.routeKey : '')
   return routeKey ? `/p/${encodeURIComponent(routeKey)}/${encodeURIComponent(agent.ticket.key)}` : ''
+}
+
+function preferences() {
+  const project = projects.byRouteKey(props.project.routeKey)
+  if (project) { hide(); openModelPrefs({ project: { id: project.id, title: project.title }, level: 'project' }) }
 }
 
 // ---------- Opening ----------
@@ -98,7 +104,7 @@ function keydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && open.value) { event.preventDefault(); event.stopPropagation(); hide(true); return }
   if (event.key === 'ArrowDown' && event.target === trigger.value) { event.preventDefault(); show(true); return }
   if (event.key !== 'Tab' || !panel.value?.contains(event.target as Node)) return
-  const links = [...panel.value.querySelectorAll<HTMLElement>('a[href]')]
+  const links = [...panel.value.querySelectorAll<HTMLElement>('a[href], button:not(:disabled)')]
   const edge = event.shiftKey ? links[0] : links[links.length - 1]
   // Leaving the list at either end returns to the chip, so Tab goes on from there.
   if (event.target === edge) { event.preventDefault(); hide(true) }
@@ -167,6 +173,7 @@ onBeforeUnmount(() => {
         <p class="pop-head">
           <span>{{ headLabel }}</span>
           <span class="pop-project">{{ project.title }}</span>
+          <button type="button" class="icon-btn sm flat" :aria-label="`Model preferences for ${project.title}`" @click="preferences"><AppIcon name="gear" :size="14" /></button>
         </p>
         <ul class="pop-list">
           <li v-for="(agent, i) in shown" :key="agent.session_id ?? `${agent.since}${i}`" class="pop-agent agent-state-surface" :style="appearance(agent.state ?? 'working')">
@@ -265,6 +272,7 @@ a.agent-line:hover .go { color: var(--teal-ink); }
 .chip-state :deep(.state-word) { white-space: nowrap; }
 .live-chip { opacity: var(--agent-state-opacity, 1); }
 .live-chip :deep(.live-bot), .live-chip :deep(.agent-state-label) { opacity: 1; }
+.live-pop :deep(.icon-btn) { transition: opacity .12s, transform .12s; }
 /* A narrow card keeps one line by showing two robots; the count still says how many. */
 @container live-card (max-width: 300px) {
   .as-card .face:nth-child(n+3) { display: none; }

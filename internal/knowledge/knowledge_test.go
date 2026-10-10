@@ -71,7 +71,7 @@ func setup(t *testing.T) fixture {
 	}
 	f.project = node(tenants[0], "PRJ-1", "project", "Pharos", nil)
 	f.other = node(tenants[0], "PRJ-2", "project", "Glint", nil)
-	f.ticket = node(tenants[0], "PHAROS-7", "ticket", "Rotate the fleet keys", &f.project)
+	f.ticket = node(tenants[0], "PHAROS-7", "work", "Rotate the fleet keys", &f.project)
 	f.elsewhere = node(tenants[1], "PRJ-1", "project", "Theirs", nil)
 	f.handler = (&httpapi.Server{Pool: d.App, Modules: []httpapi.Module{New(d.App), events.New(d.App, events.WithUndoHandlers(UndoHandlers()))}}).Handler()
 	return f
@@ -130,14 +130,14 @@ func createEntry(t *testing.T, f fixture, p tenant.Principal, body map[string]an
 func TestCreateReadListAndIsolation(t *testing.T) {
 	f := setup(t)
 	deploy := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "deploy-flow", "title": "Deploy flow", "key_prefix": "PHAROS",
-		"body": "# Deploy flow\n\nBuild the image, then **roll out** to `csb1`.\n\n## Rollback\n\nPin the previous tag."})
+		"body": "# Deploy flow\n\nBuild the image, then **roll out** to `prod-1`.\n\n## Rollback\n\nPin the previous tag."})
 	if deploy.Key != "PHAROS-8" || deploy.Type != "runbook" || deploy.Kind != "runbook" || deploy.Slug != "deploy-flow" || deploy.Status != "active" || deploy.State != "backlog" {
 		t.Fatalf("created %+v", deploy.Item)
 	}
 	if deploy.Project == nil || deploy.Project.ID != f.project || deploy.Author == nil || deploy.Author.Name != "Markus Barta" || deploy.UpdatedBy == nil || deploy.EventID == nil {
 		t.Fatalf("created entry context %+v", deploy)
 	}
-	if deploy.Excerpt != "Build the image, then roll out to csb1. Rollback: Pin the previous tag." {
+	if deploy.Excerpt != "Build the image, then roll out to prod-1. Rollback: Pin the previous tag." {
 		t.Fatalf("excerpt %q", deploy.Excerpt)
 	}
 	// external-system needs its kind: created on first use, with kind.created.
@@ -362,7 +362,7 @@ func TestLinksAuthorAndImportedEntries(t *testing.T) {
 			runbook = &got.Links[i]
 		}
 	}
-	if ticket == nil || ticket.Type != "cites" || ticket.Direction != "out" || ticket.Node.Key != "PHAROS-7" || ticket.Node.Kind != "ticket" || ticket.Node.Slug != "" || *ticket.Node.ProjectID != f.project {
+	if ticket == nil || ticket.Type != "cites" || ticket.Direction != "out" || ticket.Node.Key != "PHAROS-7" || ticket.Node.Kind != "work" || ticket.Node.Slug != "" || *ticket.Node.ProjectID != f.project {
 		t.Fatalf("ticket link %+v", ticket)
 	}
 	if runbook == nil || runbook.Node.Type != "runbook" || runbook.Node.Slug != "rotate-keys" {

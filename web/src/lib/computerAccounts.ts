@@ -2,13 +2,13 @@
 // Accounts and computers on /agents (AEON-499): one card per computer, its
 // accounts nested inside with exactly one readiness state each, and capacity
 // shown only as the server measured it. An offline computer never says
-// "ready", a missing reading is said once with Check now (for every vendor:
-// no reading is never taken as "no limit"), and the legend
+// "ready"; missing readings distinguish supported readers from harnesses
+// that do not report a limit, and the legend
 // appears only where a bar is drawn. Everything here is a pure mapping of the
 // capacity projection, the pairing list and the person's schedule.
-import { agentUpdateAdvice, describeEnrollmentStatus, describeHarnessFix, describeHarnessHint, platformCaption, type PairingEnrollment, type PairingView } from './agentPairing.ts'
+import { agentUpdateAdvice, describeEnrollmentDiagnostic, describeEnrollmentStatus, describeHarnessFix, describeHarnessHint, platformCaption, verificationFailureText, type PairingEnrollment, type PairingView } from './agentPairing.ts'
 import {
-  HARNESS_NAME, LOGIN_COMMAND, accountPlan, activeOverride, estimateLabel, gauge as gaugeOf, hourLabel, pct, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
+  HARNESS_NAME, LOGIN_COMMAND, accountPlan, activeOverride, consumptionLine, estimateLabel, gauge as gaugeOf, hidesCapacityLimit, hourLabel, pct, unreportedCapacity, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
 } from './capacity.ts'
 import { capacityWaitText } from './capacityWait.ts'
 
@@ -35,12 +35,14 @@ export interface AccountLine {
   harness: string
   /** The vendor's name: Codex, Claude, Cursor. */
   vendor: string
-  /** The full sign-in identity, e.g. admin@augmentoring.com. */
+  /** The full sign-in identity, e.g. admin@example.com. */
   identity: string
   /** Its group when kept separate from the vendor's pool ("Client"). */
   group: string
   readiness: Readiness
   capacity: CapacityCell
+  /** Observed spend when this vendor reported no window. Empty without numeric evidence. */
+  learnedUse: string
   row: AccountRow
 }
 export interface ComputerNotice { title: string; body: string; command: string }
@@ -112,18 +114,25 @@ export function offlineNotice(view: PairingView, now: number): ComputerNotice | 
  * paused), then the server's routing wait (limit, kept for you, hold, hours).
  */
 export function readiness(row: AccountRow, computer: PairingView | null, now: number): Readiness {
-  const enrollment = computer?.enrollments.find(e => e.account_id === row.id)
+  const enrollment = computer?.enrollments.find(e => e.account_id === row.id && e.state !== 'revoked')
   if (computer?.computer_state === 'connected' && computer.connectivity === 'offline') return { kind: 'offline', text: 'Paused · computer offline', tone: 'warn', tip: `Agents can't start on ${computer.computer_name} until it reports again.` }
   if (!computer && row.state === 'offline') return { kind: 'offline', text: 'Paused · computer offline', tone: 'warn', tip: `Agents can't start on ${row.host} until it reports again.` }
   if (computer?.computer_state === 'draining' || enrollment?.state === 'draining' || row.disconnecting) return { kind: 'paused', text: 'Paused · disconnecting', tone: 'mute', tip: `Disconnecting from ${computer?.computer_name ?? row.host}: agents start nothing new on it.` }
   if (computer && computer.computer_state === 'connected' && computer.setup_state !== 'connected' && computer.connectivity !== 'online') return { kind: 'setup', text: 'Waiting for setup', tone: 'mute', tip: `${computer.computer_name} has not confirmed that setup finished.` }
+  const diagnostic = computer && enrollment ? describeEnrollmentDiagnostic(computer, enrollment) : null
+  if (diagnostic?.hint) {
+    const signedOut = /sign in/i.test(describeEnrollmentStatus(computer!, enrollment!))
+    return { kind: signedOut ? 'signin' : 'attention', text: signedOut ? 'Signed out' : 'Sign-in check failed', tone: 'warn', ...diagnostic }
+  }
   if (row.state === 'signin') return { kind: 'signin', text: 'Signed out', tone: 'warn', command: LOGIN_COMMAND[row.harness] ?? '', tip: `Sign in again on ${computer?.computer_name ?? row.host}; the password stays with the vendor.` }
   if (computer && enrollment) {
     const label = describeEnrollmentStatus(computer, enrollment)
     if (label && label !== 'Ready') {
-      const command = describeHarnessFix(computer, row.harness)
+      const soleAccount = computer.enrollments.filter(e => e.harness === row.harness && e.state !== 'revoked').length === 1
+      const command = /^Verif/.test(label) ? '' : diagnostic?.command ?? (soleAccount ? describeHarnessFix(computer, row.harness) : '')
       const signin = /sign in/i.test(label)
-      return { kind: signin ? 'signin' : 'attention', text: signin ? 'Signed out' : label, tone: 'warn', ...(command ? { command } : {}), tip: `${HARNESS_NAME[row.harness] ?? row.harness} on ${computer.computer_name}: ${label}.` }
+      const waiting = /^(Verification queued|Verifying account)/.test(label)
+      return { kind: waiting ? 'waiting' : signin ? 'signin' : 'attention', text: signin ? 'Signed out' : label, tone: waiting ? 'mute' : 'warn', ...(command ? { command } : {}), tip: label === 'Verification failed' || label === 'Verification stalled' ? verificationFailureText(enrollment) : `${HARNESS_NAME[row.harness] ?? row.harness} on ${computer.computer_name}: ${label}.` }
     }
   }
   if (row.state === 'paused') return { kind: 'paused', text: 'Paused in Settings', tone: 'mute', tip: 'Turn “Agents may use it” back on in Settings / Accounts to resume.' }
@@ -142,6 +151,7 @@ export function readiness(row: AccountRow, computer: PairingView | null, now: nu
       case 'state': return { kind: 'paused', text: 'Paused in Settings', tone: 'mute', tip }
       case 'approval': return { kind: 'paused', text: 'Not allowed for agents', tone: 'mute', tip }
       case 'models': return { kind: 'attention', text: 'No model granted', tone: 'warn', tip }
+      case 'residency': return { kind: 'attention', text: 'Outside allowed providers', tone: 'warn', tip }
       // The server starts nothing here until its run ends or a reading arrives: not ready, nothing to fix.
       case 'capacity': return { kind: 'busy', text: 'Busy · run in progress', tone: 'mute', tip }
       case 'reading': return { kind: 'waiting', text: 'Waiting for a reading', tone: 'mute', tip }
@@ -157,16 +167,27 @@ export function readiness(row: AccountRow, computer: PairingView | null, now: nu
   const spent = [row.primary, row.five].filter((w): w is CapacityWindow => !!w && w.remaining_percent < 1)
     .sort((a, b) => Date.parse(b.reading.resets_at) - Date.parse(a.reading.resets_at))[0]
   if (spent) return { kind: 'limit', text: `At limit until ${at(spent.reading.resets_at)}`, tone: 'warn', tip: `${HARNESS_NAME[row.harness] ?? row.harness} reported its limit used up; it resets ${at(spent.reading.resets_at)}.` }
-  return { kind: 'ready', text: 'Ready', tone: 'ok' }
+  return { kind: 'ready', text: 'Ready', tone: 'ok', ...(enrollment?.verification_state === 'expired' ? { tip: 'Verification expired; the live account probe is ready.' } : {}) }
 }
 
 const WINDOW_WORD: Record<string, string> = { weekly: 'this week', monthly: 'this month', '5h': 'this window', other: 'this period' }
+
+/**
+ * Spend Aeon already observed, when the vendor reported no window.
+ * A missing quota stays the unknown-usage sentence; this does not invent a bar or a reserve.
+ */
+export function learnedUseText(row: AccountRow): string {
+  const learning = row.learning
+  if (row.primary || !learning) return ''
+  if (learning.runs <= 0 && learning.cost_micros <= 0 && learning.tokens <= 0) return ''
+  return consumptionLine(learning)
+}
 
 /** The capacity cell: a bar only for a real reading, otherwise one honest sentence. */
 export function capacityCell(row: AccountRow, ready: Readiness, now: number, sharedWith = ''): CapacityCell {
   if (sharedWith) return { kind: 'quiet', text: `Shares quota with ${sharedWith}` }
   const w = row.primary
-  if (!w) return ready.kind === 'offline' ? { kind: 'offline' } : { kind: 'none' }
+  if (!w) return ready.kind === 'offline' ? { kind: 'offline' } : hidesCapacityLimit(row.harness) ? { kind: 'quiet', text: unreportedCapacity(row.harness) } : { kind: 'none' }
   const plan = accountPlan(row, now)
   const g = gaugeOf(row, plan)
   const left = Math.max(0, Math.min(100, w.remaining_percent))
@@ -198,18 +219,22 @@ export function buildComputerCards(input: { computers: PairingView[]; rows: Acco
   const live = input.computers.filter(c => c.computer_state !== 'revoked' && c.computer_id)
   const owner = new Map<string, PairingView>()
   for (const c of live) for (const e of c.enrollments) if (e.state !== 'revoked') owner.set(e.account_id, c)
-  const byId = new Map(input.rows.map(r => [r.id, r]))
+  // A stale accounts read must not resurrect a revoked binding as an unpaired
+  // live account. A newer active binding wins; unrelated unpaired rows remain.
+  const revoked = new Set(input.computers.flatMap(c => c.enrollments.filter(e => c.computer_state === 'revoked' || e.state === 'revoked').map(e => e.account_id)))
+  const rows = input.rows.filter(row => !revoked.has(row.id) || owner.has(row.id))
+  const byId = new Map(rows.map(r => [r.id, r]))
   const line = (row: AccountRow, computer: PairingView | null): AccountLine => {
     const state = readiness(row, computer, now)
     // The harness hint, but not its "n of m accounts" summary: each row says its own state.
     const hint = computer && !state.kind.match(/^(offline|paused|setup)$/) ? describeHarnessHint(computer, row.harness) : ''
-    if (hint && !/accounts? needs? attention$/.test(hint)) state.hint = hint
+    if (!state.hint && hint && !/accounts? needs? attention$/.test(hint)) state.hint = hint
     const shared = row.sameQuotaAs && byId.has(row.sameQuotaAs) && byId.get(row.sameQuotaAs)!.primary ? byId.get(row.sameQuotaAs)! : null
     const sharedWith = shared ? `${shared.name}${shared.host && shared.host !== row.host ? ` on ${shared.host}` : ''}` : ''
-    return { id: row.id, harness: row.harness, vendor: HARNESS_NAME[row.harness] ?? row.harness, identity: row.name, group: row.groupName, readiness: state, capacity: capacityCell(row, state, now, sharedWith), row }
+    return { id: row.id, harness: row.harness, vendor: HARNESS_NAME[row.harness] ?? row.harness, identity: row.name, group: row.groupName, readiness: state, capacity: capacityCell(row, state, now, sharedWith), learnedUse: learnedUseText(row), row }
   }
   const cards: ComputerCard[] = live.map(computer => {
-    const own = input.rows.filter(r => owner.get(r.id) === computer)
+    const own = rows.filter(r => owner.get(r.id) === computer)
     // An account the pairing names but the account list does not (no access to it,
     // or not read yet) still shows, judged by its computer alone.
     const known = new Set(own.map(r => r.id))
@@ -223,7 +248,7 @@ export function buildComputerCards(input: { computers: PairingView[]; rows: Acco
     }
   })
   const loose = new Map<string, AccountRow[]>()
-  for (const row of input.rows) if (!owner.has(row.id)) loose.set(row.host || 'Unknown computer', [...(loose.get(row.host || 'Unknown computer') ?? []), row])
+  for (const row of rows) if (!owner.has(row.id)) loose.set(row.host || 'Unknown computer', [...(loose.get(row.host || 'Unknown computer') ?? []), row])
   for (const [host, rows] of loose) {
     const accounts = rows.map(r => line(r, null))
     // Accounts from an older pairing of a listed computer stay on its card.
@@ -250,7 +275,7 @@ function enrollmentRow(e: PairingEnrollment, computer: PairingView): AccountRow 
   }
 }
 
-/** The header pill: "2 of 2 ready", "0 of 2 ready · mbp2607 offline". */
+/** The header pill: "2 of 2 ready", "0 of 2 ready · build-7 offline". */
 export function readySummary(cards: ComputerCard[]): { text: string; tone: Tone } | null {
   const lines = cards.flatMap(c => c.accounts)
   if (!lines.length) return null
@@ -264,7 +289,7 @@ export function readySummary(cards: ComputerCard[]): { text: string; tone: Tone 
 
 /**
  * Middle ellipsis for an identity that does not fit: the start and the domain
- * stay readable ("admin@augmen…ring.com"). Short ones are returned whole.
+ * stay readable ("admin@exam…mple.com"). Short ones are returned whole.
  */
 export function middleEllipsis(text: string, max: number): string {
   if (text.length <= max || max < 5) return text

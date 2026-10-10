@@ -38,7 +38,7 @@ test('the list API gets exclusions with their spellings, kinds without the exclu
   const filters = filtersFromQuery({ status: 'new,!in-progress', type: '!epic', tag: 'BUG,!none', cost: 'Support', release: 'v4', epic: '!e1', date: 'created:30d', priority: '!none', assignee: 'none' })
   const params = apiParams('p1', filters, { now })
   assert.deepEqual(params.state, ['new', '!in-progress', '!in_progress'])
-  assert.deepEqual(params.kind, ['ticket', 'task'])
+  assert.deepEqual(params.kind, ['work', 'ticket', 'task', '!epic'])
   assert.deepEqual(params.tag, ['BUG', '!none'])
   assert.deepEqual(params.cost_unit, ['Support'])
   assert.deepEqual(params.release, ['v4'])
@@ -47,7 +47,7 @@ test('the list API gets exclusions with their spellings, kinds without the exclu
   assert.equal(params.date_field, 'created')
   assert.equal(params.date_from, localInstant(new Date(2026, 7, 25)))
   assert.equal(params.date_to, localInstant(new Date(2026, 8, 24)))
-  assert.deepEqual(apiParams('p1', filtersFromQuery({ type: '!epic,!ticket,!task' })).kind, ['none'])
+  assert.deepEqual(apiParams('p1', filtersFromQuery({ type: '!work,!epic,!ticket,!task' })).kind, ['none', '!work', '!epic', '!ticket', '!task'])
   assert.deepEqual(apiParams('p1', filters, { omit: 'tag' }).tag, [])
   assert.equal(apiParams('p1', filtersFromQuery({})).date_field, undefined)
 })
@@ -70,7 +70,7 @@ test('dates: presets stay relative, custom ranges include their last day, labels
 test('a saved view is the list state with a name; order of values is no change', () => {
   const filters = filtersFromQuery({ status: 'new,backlog', q: 'fleet', sort: 'priority,-updated_at', group: 'status', cols: 'status,assignee', closed: '1' })
   const shape = viewShape(filters)
-  assert.deepEqual(shape, { filters: { q: 'fleet', status: 'new,backlog', closed: '1' }, sort_keys: ['priority', '-updated_at'], group_by: 'status', columns: ['status', 'assignee'] })
+  assert.deepEqual(shape, { filters: { q: 'fleet', status: 'new,backlog', closed: '1' }, sort_keys: ['priority', '-updated_at'], group_by: 'status', columns: ['key', 'title', 'status', 'assignee'], mode: 'list' })
   const back = filtersFromView({ id: '11111111-aaaa-4aaa-8aaa-000000000001', ...shape })
   assert.equal(back.view, '11111111-aaaa-4aaa-8aaa-000000000001')
   assert.ok(sameListState(back, filters))
@@ -107,7 +107,7 @@ test('options and chip words for labels, epics and people', () => {
   assert.deepEqual(labels.map(o => [o.value, o.count]), [['none', 3], ['BUG', 3], ['docs', 1], ['ops', 0]])
   assert.equal(labels[1].color, 'red')
   const epics = facetOptions('epic', {}, ['e9'], new Map(), undefined, { epics: [{ id: 'e1', key: 'P-1', title: 'Fleet' }] })
-  assert.deepEqual(epics.map(o => o.label), ['No epic', 'Fleet', 'Epic'])
+  assert.deepEqual(epics.map(o => o.label), ['No parent', 'Fleet', 'Parent'])
   assert.equal(valueLabel('assignee', 'me', { me: 'me' }), 'Me')
   assert.equal(valueLabel('epic', 'e1', { epics: [{ id: 'e1', key: 'P-1', title: 'Fleet' }] }), 'Fleet')
   assert.equal(valueLabel('tag', 'none'), 'No labels')
@@ -134,4 +134,22 @@ test('the palette offers a project’s views by name, after recent work and befo
   assert.deepEqual(empty.map(g => g.id), ['views', 'actions'])
   const typed = assemble('bugs', { recent: [], tickets: [], projects: [], actions: [], views: viewResults('bugs', views) })
   assert.deepEqual(typed.map(g => g.id), ['views'])
+})
+
+// AEON-718 regression: modes are saved even for List, and a pinned-only choice
+// remains explicit rather than falling back to the person's columns.
+test('saved views retain each mode and an explicit pinned-only column choice', () => {
+  for (const mode of ['list', 'outline', 'graph'] as const) {
+    const filters = filtersFromQuery({ view: mode, cols: 'key,title', priority: 'high' })
+    const shape = viewShape(filters)
+    assert.equal(shape.mode, mode)
+    assert.deepEqual(shape.columns, ['key', 'title'])
+    assert.equal(shape.filters.view, undefined)
+    const reopened = filtersFromView({ id: '11111111-aaaa-4aaa-8aaa-000000000001', ...shape })
+    assert.equal(reopened.mode, mode)
+    assert.deepEqual(reopened.cols, [])
+    assert.equal(sameListState(filters, reopened), true)
+    assert.equal(sameListState({ ...reopened, mode: mode === 'list' ? 'graph' : 'list' }, reopened), false)
+    assert.equal(sameListState({ ...reopened, cols: ['updated'] }, reopened), false)
+  }
 })

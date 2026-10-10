@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,10 @@ import (
 // resources are reachable; pairing never grants tenant administration.
 func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 	return db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if authz.OwnerWorkstation(p) {
+			_, _, _, err := authz.WorkstationKeyTx(r.Context(), tx, p)
+			return err
+		}
 		paired, err := agentpairing.PairedPrincipal(r.Context(), tx, p.ID)
 		if err != nil || !paired {
 			return err
@@ -34,9 +39,32 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 			return deny
 		}
 		switch parts[1] {
+		case "status":
+			// A live paired computer may read the same tenant status metadata;
+			// this does not admit other paths or bypass pairing revocation.
+			if len(parts) == 3 && parts[2] == "help" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+				return nil
+			}
 		case "me":
 			if r.Method == "GET" && len(parts) == 2 {
 				return nil
+			}
+		case "agentd":
+			if r.Pattern == "GET /api/agentd/step-ups/{challenge_id}" {
+				return nil // Handler requires the runtime key plus the computer lifecycle proof.
+			}
+		case "harness-recoveries":
+			if r.Method == "POST" && len(parts) == 3 && parts[2] == "claim" {
+				return nil // The claim handler selects only this principal's exact daemon generation.
+			}
+			if r.Method == "POST" && len(parts) == 4 && validRouteUUID(parts[2]) && parts[3] == "complete" {
+				var own bool
+				if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM harness_recoveries q JOIN harness_sessions s ON s.tenant_id=q.tenant_id AND s.id=q.session_id WHERE q.id=$1 AND s.agent_principal_id=$2)`, parts[2], p.ID).Scan(&own); err != nil {
+					return err
+				}
+				if own {
+					return nil
+				}
 			}
 		case "agent-pairing":
 			if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/account-link" {
@@ -45,7 +73,7 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 			if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/attach" {
 				return nil
 			}
-			if r.URL.Path == "/api/agent-pairing/self" && r.Method == "GET" || r.URL.Path == "/api/agent-pairing/self/disconnect" && r.Method == "POST" {
+			if r.URL.Path == "/api/agent-pairing/self" && r.Method == "GET" || (r.URL.Path == "/api/agent-pairing/self/disconnect" || r.URL.Path == "/api/agent-pairing/self/capacity" || r.URL.Path == "/api/agent-pairing/self/ledger") && r.Method == "POST" {
 				return nil
 			}
 		case "models":

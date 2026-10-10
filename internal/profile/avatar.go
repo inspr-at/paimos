@@ -226,33 +226,31 @@ func jpegOrientation(data []byte) int {
 	}
 	return 1
 }
-func (m *Module) storeAvatar(ctx *http.Request, tenantID string, data []byte, crop Crop) (string, map[string]string, error) {
-	return storeAvatarData(ctx.Context(), m.Store, tenantID, data, crop)
+func (m *Module) stageAvatar(ctx *http.Request, tenantID string, data []byte, crop Crop) ([]*attachments.Staged, error) {
+	return stageAvatarData(ctx.Context(), m.Store, tenantID, data, crop)
 }
 
-func storeAvatarData(ctx context.Context, store attachments.Store, tenantID string, data []byte, crop Crop) (string, map[string]string, error) {
-	var original string
-	hashes := map[string]string{}
-	err := processAvatar(ctx, data, crop, func(img image.Image, variants map[int]image.Image) error {
-		first, err := store.PutGeneratedPNG(ctx, tenantID, img)
+func stageAvatarData(ctx context.Context, store attachments.Store, tenantID string, data []byte, crop Crop) (staged []*attachments.Staged, err error) {
+	defer func() {
 		if err != nil {
-			return err
+			for _, blob := range staged {
+				_ = blob.Close()
+			}
 		}
-		original = first.SHA256
-		for _, size := range []int{32, 64, 128, 256} {
-			v, err := store.PutGeneratedPNG(ctx, tenantID, variants[size])
+	}()
+	err = processAvatar(ctx, data, crop, func(img image.Image, variants map[int]image.Image) error {
+		for _, avatar := range []image.Image{img, variants[32], variants[64], variants[128], variants[256]} {
+			blob, err := store.StageGeneratedPNG(ctx, tenantID, avatar)
 			if err != nil {
 				return err
 			}
-			hashes[strconv.Itoa(size)] = v.SHA256
+			staged = append(staged, blob)
 		}
 		return nil
 	})
-	if err != nil {
-		return "", nil, err
-	}
-	return original, hashes, nil
+	return staged, err
 }
+
 func (m *Module) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 	p, ok := actor(w, r)
 	if !ok {
@@ -300,7 +298,7 @@ func (m *Module) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 400, "invalid crop")
 		return
 	}
-	original, hashes, err := m.storeAvatar(r, p.TenantID, file, crop)
+	staged, err := m.stageAvatar(r, p.TenantID, file, crop)
 	if err != nil {
 		var invalid invalidInput
 		if errors.As(err, &invalid) {
@@ -310,6 +308,11 @@ func (m *Module) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	defer func() {
+		for _, blob := range staged {
+			_ = blob.Close()
+		}
+	}()
 	var out Profile
 	err = db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
 		email, err := identityEmail(r.Context(), tx, p.TenantID, p.ID)
@@ -320,9 +323,15 @@ func (m *Module) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if err := attachments.Publish(r.Context(), tx, attachments.OwnerAvatar, staged...); err != nil {
+			return err
+		}
 		after := before
-		after.AvatarOriginalHash = original
-		after.AvatarHashes = hashes
+		after.AvatarOriginalHash = staged[0].SHA256
+		after.AvatarHashes = map[string]string{}
+		for i, size := range []int{32, 64, 128, 256} {
+			after.AvatarHashes[strconv.Itoa(size)] = staged[i+1].SHA256
+		}
 		if err := change(r.Context(), tx, p, before, exists, after); err != nil {
 			return err
 		}

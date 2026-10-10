@@ -27,7 +27,7 @@ func TestRoadmapPublicationMigrationPreservesCustomSchema(t *testing.T) {
 	const ticketSchema = `{"type":"object","additionalProperties":false,"required":["custom"],"properties":{"custom":{"type":"string","description":"tenant note"},"legacy_score":{"type":"integer","minimum":0}}}`
 	const taskSchema = `{"type":"object","additionalProperties":false,"properties":{"task_note":{"type":"string"}}}`
 	var id string
-	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+	err = migrateLegacyWorkWithHook(t, d, func(name string) error {
 		if name != "1048_roadmap_publication.sql" {
 			return nil
 		}
@@ -59,7 +59,7 @@ func TestRoadmapPublicationMigrationPreservesCustomSchema(t *testing.T) {
 		if !jsonEqual(t, string(fields), `{"custom":"keep","legacy_score":2}`) {
 			t.Fatalf("rewritten history: %s", fields)
 		}
-		// Later expansions add work classification and human checks to tasks.
+		// Later expansions add work classification, human checks and area to tasks.
 		// Remove only those declared extensions to compare the historical
 		// roadmap result; publication must still not add anything to tasks.
 		var taskFields map[string]any
@@ -67,7 +67,7 @@ func TestRoadmapPublicationMigrationPreservesCustomSchema(t *testing.T) {
 			return err
 		}
 		properties := taskFields["properties"].(map[string]any)
-		for _, key := range []string{"route_role_source", "area_source", "route_role_confirmed", "area_confirmed", "complexity", "complexity_source", "complexity_by", "complexity_at", "complexity_confirmed", "human_check_completed"} {
+		for _, key := range []string{"route_role_source", "area_source", "route_role_confirmed", "area_confirmed", "complexity", "complexity_source", "complexity_by", "complexity_at", "complexity_confirmed", "human_check_completed", "area"} {
 			delete(properties, key)
 		}
 		priorTask, err := json.Marshal(taskFields)
@@ -86,7 +86,7 @@ func TestRoadmapPublicationMigrationPreservesCustomSchema(t *testing.T) {
 		if err := json.Unmarshal(schema, &parsed); err != nil {
 			return err
 		}
-		if parsed.Type != "object" || parsed.Additional == nil || *parsed.Additional || len(parsed.Required) != 1 || parsed.Required[0] != "custom" || len(parsed.Properties) != 16 {
+		if parsed.Type != "object" || parsed.Additional == nil || *parsed.Additional || len(parsed.Required) != 1 || parsed.Required[0] != "custom" || len(parsed.Properties) != 17 {
 			t.Fatalf("custom schema lost: %s", schema)
 		}
 		for _, key := range []string{"custom", "legacy_score", "roadmap_public", "roadmap_public_source", "roadmap_public_by", "roadmap_public_at", "human_check_completed"} {
@@ -139,7 +139,7 @@ func TestRoadmapPublicationMigrationPreservesCustomSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
+	if err := migrateLegacyWorkWithHook(t, d, nil); err != nil {
 		t.Fatal("reapply:", err)
 	}
 }

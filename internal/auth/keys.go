@@ -44,23 +44,30 @@ type identityJSON struct {
 }
 
 type meJSON struct {
-	DevMode         bool          `json:"dev_mode"`
-	OIDCDisplayName string        `json:"oidc_display_name"`
-	Principal       principalJSON `json:"principal"`
-	Tenant          tenantJSON    `json:"tenant"`
-	Identity        *identityJSON `json:"identity"`
+	FullAccess            bool          `json:"full_access"`
+	OwnerWorkstation      bool          `json:"owner_workstation,omitempty"`
+	WorkstationComputerID string        `json:"workstation_computer_id,omitempty"`
+	DevMode               bool          `json:"dev_mode"`
+	OIDCDisplayName       string        `json:"oidc_display_name"`
+	Principal             principalJSON `json:"principal"`
+	Tenant                tenantJSON    `json:"tenant"`
+	Identity              *identityJSON `json:"identity"`
 }
 
 type agentKeyJSON struct {
-	ID          string     `json:"id"`
-	PrincipalID string     `json:"principal_id"`
-	Name        string     `json:"name"`
-	Prefix      string     `json:"prefix"`
-	Scopes      []string   `json:"scopes"`
-	CreatedAt   time.Time  `json:"created_at"`
-	ExpiresAt   *time.Time `json:"expires_at"`
-	LastUsedAt  *time.Time `json:"last_used_at"`
-	RevokedAt   *time.Time `json:"revoked_at"`
+	FullAccess            bool       `json:"full_access"`
+	CreatedByPrincipalID  *string    `json:"created_by_principal_id"`
+	OwnerWorkstation      bool       `json:"owner_workstation"`
+	WorkstationComputerID *string    `json:"workstation_computer_id"`
+	ID                    string     `json:"id"`
+	PrincipalID           string     `json:"principal_id"`
+	Name                  string     `json:"name"`
+	Prefix                string     `json:"prefix"`
+	Scopes                []string   `json:"scopes"`
+	CreatedAt             time.Time  `json:"created_at"`
+	ExpiresAt             *time.Time `json:"expires_at"`
+	LastUsedAt            *time.Time `json:"last_used_at"`
+	RevokedAt             *time.Time `json:"revoked_at"`
 }
 
 type agentKeyCreatedJSON struct {
@@ -74,8 +81,11 @@ func (m *Module) meJSONFrom(v meView) meJSON {
 		roles = []string{}
 	}
 	out := meJSON{
-		DevMode:         m.cfg.Dev(),
-		OIDCDisplayName: m.cfg.OIDCDisplayName,
+		FullAccess:            v.Principal.FullAccess,
+		OwnerWorkstation:      v.Principal.OwnerWorkstation,
+		WorkstationComputerID: v.Principal.WorkstationComputerID,
+		DevMode:               m.cfg.Dev(),
+		OIDCDisplayName:       m.cfg.OIDCDisplayName,
 		Principal: principalJSON{
 			ID:       v.Principal.ID,
 			TenantID: v.Principal.TenantID,
@@ -100,19 +110,23 @@ func (m *Module) meJSONFrom(v meView) meJSON {
 
 func keyJSON(rec keyRecord) agentKeyJSON {
 	scopes := rec.Scopes
-	if scopes == nil {
+	if scopes == nil || rec.FullAccess {
 		scopes = []string{}
 	}
 	return agentKeyJSON{
-		ID:          rec.ID,
-		PrincipalID: rec.PrincipalID,
-		Name:        rec.Name,
-		Prefix:      rec.Prefix,
-		Scopes:      scopes,
-		CreatedAt:   rec.CreatedAt,
-		ExpiresAt:   rec.ExpiresAt,
-		LastUsedAt:  rec.LastUsedAt,
-		RevokedAt:   rec.RevokedAt,
+		FullAccess:            rec.FullAccess,
+		CreatedByPrincipalID:  rec.CreatedByPrincipalID,
+		OwnerWorkstation:      rec.OwnerWorkstation,
+		WorkstationComputerID: rec.WorkstationComputerID,
+		ID:                    rec.ID,
+		PrincipalID:           rec.PrincipalID,
+		Name:                  rec.Name,
+		Prefix:                rec.Prefix,
+		Scopes:                scopes,
+		CreatedAt:             rec.CreatedAt,
+		ExpiresAt:             rec.ExpiresAt,
+		LastUsedAt:            rec.LastUsedAt,
+		RevokedAt:             rec.RevokedAt,
 	}
 }
 
@@ -122,7 +136,11 @@ func (m *Module) requireKeyManagement(w http.ResponseWriter, r *http.Request) (t
 		writeUnauthorized(w)
 		return tenant.Principal{}, false
 	}
-	if p.Kind != tenant.Person || authz.Require(authz.BindPool(r.Context(), m.pool), "keys.manage", authz.Scope{}) != nil {
+	permission := "keys.manage"
+	if r.Method == http.MethodGet && authz.OwnerWorkstation(p) {
+		permission = "keys.read"
+	}
+	if (p.Kind != tenant.Person && !authz.OwnerWorkstation(p)) || authz.Require(authz.BindPool(r.Context(), m.pool), permission, authz.Scope{}) != nil {
 		writeForbidden(w)
 		return tenant.Principal{}, false
 	}
@@ -135,6 +153,7 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		FullAccess     *bool      `json:"full_access"`
 		RotateKeyID    *string    `json:"rotate_key_id"`
 		RotationScopes []string   `json:"rotation_scopes"`
 		Name           string     `json:"name"`
@@ -154,6 +173,10 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 			writeBadRequest(w, "rotation requires rotate_key_id and optional expires_at or rotation_scopes only")
 			return
 		}
+		if body.FullAccess != nil && *body.FullAccess && len(body.RotationScopes) > 0 {
+			writeBadRequest(w, "full_access cannot include rotation_scopes")
+			return
+		}
 		var scopes []string
 		if body.RotationScopes != nil {
 			var err error
@@ -163,7 +186,7 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		rec, err := m.rotateAgentKeyWithScopes(r.Context(), p, *body.RotateKeyID, body.ExpiresAt, scopes)
+		rec, err := m.rotateAgentKeyWithScopes(r.Context(), p, *body.RotateKeyID, body.ExpiresAt, scopes, body.FullAccess)
 		m.writeCreatedAgentKey(w, rec, err)
 		return
 	}
@@ -181,12 +204,16 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, "name is required")
 		return
 	}
+	if body.FullAccess != nil && *body.FullAccess && len(body.Scopes) > 0 {
+		writeBadRequest(w, "full_access cannot include scopes")
+		return
+	}
 	scopes, err := cleanScopes(body.Scopes)
 	if err != nil {
 		writeBadRequest(w, "invalid scopes")
 		return
 	}
-	rec, err := m.createAgentKey(r.Context(), p, name, principalID, scopes, body.ExpiresAt)
+	rec, err := m.createAgentKey(r.Context(), p, name, principalID, scopes, body.ExpiresAt, body.FullAccess != nil && *body.FullAccess)
 	m.writeCreatedAgentKey(w, rec, err)
 }
 
@@ -265,6 +292,10 @@ func (m *Module) handleRevokeAgentKey(w http.ResponseWriter, r *http.Request) {
 const maxScopeInput = 256
 
 func cleanScopes(in []string) ([]string, error) {
+	return cleanKeyScopes(in, false)
+}
+
+func cleanKeyScopes(in []string, marked bool) ([]string, error) {
 	if len(in) > maxScopeInput {
 		return nil, errors.New("too many scopes")
 	}
@@ -275,8 +306,7 @@ func cleanScopes(in []string) ([]string, error) {
 			return nil, errors.New("bad scope")
 		}
 		key := strings.ReplaceAll(s, ":", ".")
-		perm, ok := authz.Lookup(key)
-		if !ok || !perm.AgentGrantable {
+		if !authz.KeyGrantable(key, marked) {
 			return nil, errors.New("unknown scope")
 		}
 		if slices.Contains(out, key) {

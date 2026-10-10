@@ -20,8 +20,11 @@ const at = (event: MouseEvent) => event.currentTarget as HTMLElement
   <div class="bulk-dock" :style="frame ? { left: `${frame.left}px`, width: `${frame.width}px` } : undefined">
     <div class="bulk-bar" role="toolbar" :aria-label="`${plural(count, 'selected ticket')}`" :aria-busy="busy">
       <span class="count" aria-live="polite"><b class="mono">{{ count.toLocaleString('en-GB') }}</b><span class="count-word">selected</span></span>
-      <span v-if="deleted" class="gone" role="status"><AppIcon name="alert" :size="13" />{{ plural(deleted, 'selected ticket was', 'selected tickets were') }} deleted</span>
-      <button v-else-if="total !== null && count < total && count >= loaded && loaded < total" type="button" class="link" @click="emit('selectAll')">Select all {{ total.toLocaleString('en-GB') }}</button>
+      <div class="selection-slot">
+        <span v-if="deleted" class="gone" role="status"><AppIcon name="alert" :size="13" />{{ plural(deleted, 'selected ticket was', 'selected tickets were') }} deleted</span>
+        <button v-else-if="total !== null && count < total && count >= loaded && loaded < total" type="button" class="link" :disabled="busy" @click="emit('selectAll')">Select all {{ total.toLocaleString('en-GB') }}</button>
+        <span v-else class="selection-note">{{ plural(count, 'selected ticket') }}</span>
+      </div>
       <span class="rule" aria-hidden="true" />
       <button v-if="canQueue" type="button" class="act" aria-label="Queue" aria-keyshortcuts="q" data-tip="Queue for the next free agent · q" :disabled="busy" @click="emit('queue')"><AppIcon name="queue-add" :size="14" /><span class="label">Queue</span></button>
       <template v-if="canWrite">
@@ -29,7 +32,7 @@ const at = (event: MouseEvent) => event.currentTarget as HTMLElement
         <button type="button" class="act" aria-label="Assignee" aria-keyshortcuts="a" data-tip="Assignee · a" :disabled="busy" @click="emit('assignee', at($event))"><AppIcon name="user" :size="14" /><span class="label">Assignee</span></button>
         <button type="button" class="act" aria-label="Priority" aria-keyshortcuts="p" data-tip="Priority · p" :disabled="busy" @click="emit('priority', at($event))"><AppIcon name="gauge" :size="14" /><span class="label">Priority</span></button>
         <button type="button" class="act" aria-label="Labels" aria-keyshortcuts="l" data-tip="Labels · l" :disabled="busy" @click="emit('labels', at($event))"><AppIcon name="tag" :size="14" /><span class="label">Labels</span></button>
-        <button type="button" class="act" aria-label="Move" aria-keyshortcuts="m" data-tip="Move to an epic · m" :disabled="busy" @click="emit('move', at($event))"><AppIcon name="epic" :size="14" /><span class="label">Move</span></button>
+        <button type="button" class="act" aria-label="Move" aria-keyshortcuts="m" data-tip="Move to a parent · m" :disabled="busy" @click="emit('move', at($event))"><AppIcon name="epic" :size="14" /><span class="label">Move</span></button>
         <button v-if="canRelease" type="button" class="act" aria-label="Add to release" aria-keyshortcuts="g" data-tip="Add to release · g" :disabled="busy" @click="emit('release', at($event))"><AppIcon name="layers" :size="14" /><span class="label">Release</span></button>
         <button type="button" class="act" aria-label="Archive" data-tip="Archive · closed, and hidden with Hide closed" :disabled="busy" @click="emit('archive')"><AppIcon name="archive" :size="14" /><span class="label">Archive</span></button>
       </template>
@@ -49,6 +52,8 @@ const at = (event: MouseEvent) => event.currentTarget as HTMLElement
 }
 .count { display: inline-flex; align-items: baseline; gap: 6px; margin-right: 6px; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
 .count b { font-size: 14px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.selection-slot { display: contents; }
+.selection-note { display: none; }
 .link { height: 30px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 .link:hover { background: var(--row-hover); }
 .rule { width: 1px; height: 22px; margin: 0 6px; background: var(--line-2); }
@@ -66,6 +71,10 @@ const at = (event: MouseEvent) => event.currentTarget as HTMLElement
 .esc { font-size: 10px; }
 .clear-word { display: none; }
 @media (max-width: 1100px) { .act .label { display: none; } .act { width: 38px; padding: 0; justify-content: center; } }
+@media (min-width: 721px) and (max-width: 900px) {
+  .selection-slot { display: flex; align-items: center; justify-content: center; flex: none; width: 156px; height: 30px; }
+  .selection-slot .gone { max-width: 100%; overflow: hidden; }
+}
 @media (max-width: 720px) {
   .bulk-dock { padding: 0 10px; box-sizing: border-box; bottom: calc(var(--footer-h, 0px) + 8px + env(safe-area-inset-bottom)); }
   .bulk-bar {
@@ -74,7 +83,11 @@ const at = (event: MouseEvent) => event.currentTarget as HTMLElement
   }
   /* The list header already says how many. The toolbar keeps the count for its name. */
   .count { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .esc, .rule, .link, .gone { display: none; }
+  .esc, .rule { display: none; }
+  .selection-slot { display: flex; align-items: center; justify-content: center; grid-column: 1 / -1; height: 44px; min-width: 0; border-bottom: 1px solid var(--line); }
+  .selection-slot .link, .selection-slot .gone, .selection-note { display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 44px; min-width: 0; margin: 0; padding: 0 8px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .selection-note { color: var(--ink-2); }
+  .selection-slot .gone { background: transparent; border-radius: 0; }
   .act, .close {
     flex-direction: column; gap: 2px; width: 100%; height: 52px; min-width: 0; min-height: 44px; margin: 0; padding: 4px 2px;
     justify-content: center; border-radius: 12px; background: transparent; color: var(--ink); font-size: 10px; font-weight: 600; line-height: 1;

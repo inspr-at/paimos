@@ -25,10 +25,10 @@ func (m *Module) privateGuard(ctx context.Context, tx pgx.Tx, actor tenant.Princ
 		return nil, err
 	}
 	for _, s := range sources {
-		if s.Repository != privateRepository {
+		if !m.repositories.IsPrivate(s.Repository) {
 			continue
 		}
-		if s.Visibility != "private" || s.IndexedAt == nil || s.IndexError != "" || s.CredentialRef == "" || m.credentials.authorize(s.CredentialRef, actor.TenantID, s.Repository) != nil {
+		if s.Visibility != "private" || s.IndexedAt == nil || s.IndexError != "" || s.CredentialRef == "" || m.credentials.authorizeSource(s, actor.TenantID) != nil {
 			return nil, unavailable()
 		}
 		raw, err := loadGuardCorpus(ctx, tx, s)

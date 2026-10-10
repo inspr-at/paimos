@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { expect, test } from '@playwright/test'
+import { fixtures, mockWork, watchErrors } from './work-fixtures'
+
+test('S8-001: accepted discard clears description and comment drafts before opening B', async ({ page }) => {
+  const errors = watchErrors(page), calls = await mockWork(page, fixtures())
+  await page.goto('/p/PHAROS/PHAROS-12')
+  const panel = page.getByRole('complementary', { name: 'Ticket details' })
+  await panel.getByRole('button', { name: 'Add a description' }).click()
+  await panel.getByLabel('Description, Markdown').fill('Only for A')
+  await panel.getByLabel('Add a comment').fill('A comment draft')
+  await panel.getByRole('button', { name: 'Next ticket' }).click()
+  await page.getByRole('dialog', { name: 'Discard unsaved changes?' }).getByRole('button', { name: 'Discard changes' }).click()
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-13')
+  await expect(panel.getByRole('heading', { name: 'Run the disposable Hetzner end-to-end check' })).toBeVisible()
+  await expect(panel.getByLabel('Description, Markdown')).toHaveCount(0)
+  await expect(panel.getByLabel('Add a comment')).toHaveValue('')
+  expect(calls.filter(call => ['PATCH', 'POST'].includes(call.method) && call.path.startsWith('/api/nodes'))).toEqual([])
+  await panel.getByRole('button', { name: 'Add a description' }).click()
+  await panel.getByLabel('Description, Markdown').fill('Only for B')
+  await panel.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(panel.getByRole('region', { name: 'Description' })).toContainText('Only for B')
+  expect(calls.filter(call => call.method === 'PATCH').map(call => [call.path, call.body])).toEqual([['/api/nodes/n-3', { body: 'Only for B' }]])
+  expect(errors).toEqual([])
+})
+
+test('the same ticket keeps its comment draft when expanding and returning', async ({ page }) => {
+  const errors = watchErrors(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  await page.goto('/p/PHAROS/PHAROS-12')
+  const panel = page.getByRole('complementary', { name: 'Ticket details' })
+  await panel.getByLabel('Add a comment').fill('Stay with this ticket')
+  await panel.getByRole('button', { name: 'Open as full page' }).click()
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-12?view=full')
+  const full = page.getByRole('article', { name: 'Ticket details' })
+  await expect(full.getByLabel('Add a comment')).toHaveValue('Stay with this ticket')
+  await full.getByRole('button', { name: 'Show beside the list' }).click()
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-12')
+  await expect(panel.getByLabel('Add a comment')).toHaveValue('Stay with this ticket')
+  expect(errors).toEqual([])
+})

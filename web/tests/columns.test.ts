@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { automaticColumns, COLUMN_BY_ID, layoutWidths, moveColumn, orderOf, releaseLabel, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf, type ColumnId } from '../src/lib/columns.ts'
+import { readFileSync } from 'node:fs'
+import { automaticColumns, COLUMN_BY_ID, layoutWidths, loadedFitWidth, moveColumn, orderOf, releaseLabel, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnId } from '../src/lib/columns.ts'
+import { groupRows, selectLoadedGroup, filtersFromQuery, filtersToQuery, type TicketRow } from '../src/lib/ticketList.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
 const ids = (width: number, options: Parameters<typeof visibleColumns>[1]) => visibleColumns(width, options).columns.map(c => c.id)
@@ -23,7 +25,7 @@ test('automatic columns follow the table width and the data', () => {
   assert.deepEqual(ids(2400, { phone: false, present }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'release', 'tags', 'estimate', 'created', 'updated'])
 })
 
-test('a saved choice fixes order and visibility across desktop widths', () => {
+test('a saved choice fixes order and visibility across desktop and phone widths', () => {
   const prefs = { order: ['updated', 'status', 'epic'] as const, visible: ['updated', 'status', 'epic', 'estimate'] as const }
   const p = { order: [...prefs.order], visible: [...prefs.visible] }
   assert.deepEqual(ids(2000, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
@@ -31,12 +33,12 @@ test('a saved choice fixes order and visibility across desktop widths', () => {
   assert.deepEqual(ids(900, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
   assert.deepEqual(ids(700, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
   assert.equal(visibleColumns(2000, { phone: false, prefs: p }).customised, true)
-  assert.deepEqual(ids(390, { phone: true, prefs: p }), ['key', 'title', 'status', 'priority', 'updated'])
+  assert.deepEqual(ids(390, { phone: true, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
   assert.deepEqual(ids(390, { phone: true, present: { estimate: true } }), ['key', 'title', 'status', 'priority', 'updated', 'estimate'])
-  assert.deepEqual(ids(390, { phone: true, present: { eta: true, estimate: true }, prefs: { visible: ['status'] } }), ['key', 'title', 'status', 'priority', 'updated', 'eta', 'estimate'])
+  assert.deepEqual(ids(390, { phone: true, present: { eta: true, estimate: true }, prefs: { visible: ['status'] } }), ['key', 'title', 'status'])
   // A saved choice that hides Assignee stays hidden when a live worker is present.
   assert.deepEqual(ids(1600, { phone: false, present: { workers: true }, prefs: { visible: ['status', 'updated'] } }), ['key', 'title', 'status', 'updated'])
-  assert.deepEqual(ids(390, { phone: true, present: { workers: true }, prefs: p }), ['key', 'title', 'status', 'priority', 'updated'])
+  assert.deepEqual(ids(390, { phone: true, present: { workers: true }, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
 })
 
 test('order keeps Key and Title first and appends unknown or missing columns', () => {
@@ -127,7 +129,7 @@ test('release and tags read the classic fields', () => {
   assert.equal(releaseLabel({ release: '1.10.0' }), '1.10.0')
   assert.equal(releaseLabel({ release: null }), '')
   assert.equal(releaseLabel(undefined), '')
-  assert.deepEqual(tagList({ tags: [{ id: 16, name: 'CUSTOMERPORTAL', color: 'blue' }, 'hsb8', { name: ' ' }, 7] }), [{ name: 'CUSTOMERPORTAL', color: 'blue' }, { name: 'hsb8', color: '' }])
+  assert.deepEqual(tagList({ tags: [{ id: 16, name: 'CUSTOMERPORTAL', color: 'blue' }, 'worker-8', { name: ' ' }, 7] }), [{ name: 'CUSTOMERPORTAL', color: 'blue' }, { name: 'worker-8', color: '' }])
   assert.deepEqual(tagList({ tags: null }), [])
 })
 
@@ -152,8 +154,119 @@ test('planning joins Automatic when filled; saved ticks retain empty columns', (
   assert.deepEqual(ids(1600, { phone: false, prefs, present: {} }), saved)
   assert.deepEqual(ids(700, { phone: false, prefs, present: all }), saved)
   assert.deepEqual(ids(1600, { phone: false, prefs, present: all, costAllowed: false }), saved.filter(id => id !== 'list_cost'))
-  assert.deepEqual(ids(390, { phone: true, prefs, present: all }), ['key', 'title', 'status', 'priority', 'updated'])
+  assert.deepEqual(ids(390, { phone: true, prefs, present: all }), saved)
   assert.equal(COLUMN_BY_ID.get('list_cost')!.label, 'Cost')
   assert.equal(COLUMN_BY_ID.get('list_cost')!.width, 128)
   assert.equal(COLUMN_BY_ID.has('paid'), false)
+})
+
+// AEON-628: the phone picker must change the actual cells, including an empty
+// saved choice and cost visibility. Legacy ids and order use desktop rules.
+test('phone cards honor saved optional columns and cost access', () => {
+  const prefs = { order: ['paid', 'cost', 'assignee'] as ColumnId[], visible: ['paid', 'cost', 'assignee'] as ColumnId[] }
+  assert.deepEqual(ids(390, { phone: true, prefs, costAllowed: true }), ['key', 'title', 'list_cost', 'cost', 'assignee'])
+  assert.deepEqual(ids(390, { phone: true, prefs, costAllowed: false }), ['key', 'title', 'cost', 'assignee'])
+  assert.equal(visibleColumns(390, { phone: true, prefs }).customised, true)
+  assert.deepEqual(ids(390, { phone: true, prefs: { visible: [] }, present: { estimate: true, eta: true, progress: true } }), ['key', 'title'])
+  assert.deepEqual(prefs.visible, ['paid', 'cost', 'assignee'])
+})
+
+// AEON-913 risk: one host must never alter the global picker or another host's widths.
+test('AEON-913: host column definitions preserve the picker and size within their bounds', () => {
+  const base = [COLUMN_BY_ID.get('key')!, COLUMN_BY_ID.get('title')!]
+  const extra: ColumnDef = { id: 'suggestion', label: 'Suggestion', sort: null, width: 180, min: 120, max: 340 }
+  const columns = withHostColumns(base, [extra, extra, { ...extra, id: 'status' }, { ...extra, id: 'bad"selector' }])
+  assert.deepEqual(columns.map(column => column.id), ['key', 'title', 'suggestion'])
+  assert.equal(COLUMN_BY_ID.has('suggestion' as ColumnId), false)
+  const definitions = new Map<string, ColumnDef>(columns.map(column => [column.id, column]))
+  assert.equal(widthOf('suggestion', { widths: { suggestion: 900 } }, definitions), 340)
+  assert.equal(widthOf('suggestion', { widths: { suggestion: 1 } }, definitions), 120)
+  const widths = layoutWidths(['key', 'title', 'suggestion'], 1000, null, { suggestion: 260 }, definitions)
+  assert.equal(widths.suggestion, 260)
+  assert.equal(1000 - Object.values(widths).reduce<number>((sum, value) => sum + (value ?? 0), 0), 622)
+  const fitted = { key: 190, suggestion: 220 }
+  assert.deepEqual(layoutWidths(['key', 'title', 'suggestion'], 1000, null, {}, definitions, fitted), fitted)
+  // Fitted widths remain flexible for a deliberate Title resize; saved widths win.
+  assert.deepEqual(layoutWidths(['key', 'title', 'suggestion'], 1000, { widths: { title: 600, suggestion: 260 } }, {}, definitions, fitted), { key: 140, suggestion: 260 })
+  assert.deepEqual(base.map(column => column.id), ['key', 'title'])
+})
+
+test('AEON-913: project grouping retains metadata, loaded totals, held placement and URL state', () => {
+  const project = { id: 'p-a', key: 'AEON', title: 'Aeon' }
+  const row = (id: string, p: typeof project | null, project_key?: string) => ({ id, key: `WORK-${id}`, project: p, project_key }) as TicketRow
+  const rows = [row('a', project), row('b', { id: 'p-z', key: 'ZED', title: 'Zed' }), row('c', project), row('d', null, 'HOST')]
+  const groups = groupRows(rows, 'project', { 'p-a': 120 })
+  assert.deepEqual(groups.map(group => group.project?.key), ['AEON', 'HOST', 'ZED'])
+  assert.deepEqual(groups[0].project, project)
+  assert.deepEqual(groups[0].rows, [rows[0], rows[2]])
+  assert.equal(groups[0].total, 120)
+  assert.equal(groups[0].loaded, 2)
+  assert.equal(groups[0].hasMore, true)
+  assert.equal(groups[2].hasMore, false)
+  const held = groupRows([rows[0]], 'project', {}, { layout: row => ({ ...row, project: rows[1].project }) })
+  assert.equal(held[0].project?.key, 'ZED')
+  assert.equal(held[0].rows[0], rows[0])
+  assert.equal(filtersToQuery(filtersFromQuery({ group: 'project' })).group, 'project')
+})
+
+// AEON-913: a content fit replaces defaults. On a normal list the table stays
+// at the card width, so those fits must give width back until Title keeps its
+// minimum. A saved or dragged width stays. Reproduced at 1000px: the fit used
+// to leave Title at 188px; the same defaults leave it at 372px.
+test('AEON-913: automatic fits give width back until Title keeps its minimum', () => {
+  const shown = ['key', 'title', 'status', 'priority', 'assignee', 'updated'] as const
+  const table = 1000
+  const titleMin = COLUMN_BY_ID.get('title')!.min
+  const sum = (w: Partial<Record<string, number>>) => Object.values(w).reduce((total: number, value) => total + (value ?? 0), 0)
+  const titleOf = (w: Partial<Record<string, number>>) => table - sum(w)
+  assert.equal(titleMin, 240)
+  assert.equal(titleOf(layoutWidths([...shown], table)), 372)
+  const modest = { key: 140, status: 140, priority: 112, assignee: 160, updated: 100 }
+  assert.equal(titleOf(layoutWidths([...shown], table, null, {}, COLUMN_BY_ID, modest)), 348)
+  assert.deepEqual(layoutWidths([...shown], table, null, {}, COLUMN_BY_ID, modest), modest)
+  const fitted = { key: 180, status: 160, priority: 112, assignee: 240, updated: 120 }
+  const widths = layoutWidths([...shown], table, null, {}, COLUMN_BY_ID, fitted)
+  assert.equal(titleOf(widths), titleMin)
+  // The column after Title gives way first and stops at its own minimum.
+  assert.deepEqual(widths, { key: 180, status: 108, priority: 112, assignee: 240, updated: 120 })
+  const saved = layoutWidths(['key', 'title', 'assignee', 'status', 'updated'], table, { widths: { assignee: 300 } }, {}, COLUMN_BY_ID, { key: 200, status: 200, updated: 180 })
+  assert.equal(saved.assignee, 300)
+  assert.equal(saved.status, COLUMN_BY_ID.get('status')!.min)
+  assert.equal(saved.updated, 176)
+  assert.equal(saved.key, 200)
+  assert.equal(titleOf(saved), titleMin)
+  const dragged = layoutWidths(['key', 'title', 'status', 'assignee'], table, null, { assignee: 800 }, COLUMN_BY_ID, { key: 84, status: 84 })
+  assert.deepEqual(dragged, { key: 84, status: 84, assignee: 800 })
+  assert.equal(titleOf(dragged), 32)
+})
+
+// The model column's designed 176px slot already holds its marks and name.
+// A loaded measurement of that row is narrower, and the pixels move with the
+// font (152 here, 156 in CI). Keep 176 until the value is wider.
+test('AEON-913: a loaded fit keeps the designed width until the value is wider', () => {
+  const model = COLUMN_BY_ID.get('model')!
+  assert.equal(loadedFitWidth(model, 152), 176)
+  assert.equal(loadedFitWidth(model, 156), 176)
+  assert.equal(loadedFitWidth(model, 200), 200)
+  assert.equal(loadedFitWidth(model, 400), model.max)
+  assert.equal(loadedFitWidth(model, Number.NaN), model.width)
+})
+
+test('AEON-915: the ticket grid keeps a narrow loaded fit at the designed width', () => {
+  const source = readFileSync(new URL('../src/components/work/TicketTable.vue', import.meta.url), 'utf8')
+  assert.match(source, /next\[id\] = loadedFitWidth\(definitions\.value\.get\(id\)!/)
+  assert.equal(COLUMN_BY_ID.get('key')!.max, 480)
+})
+
+test('AEON-913: group selection caps loaded rows at 100 and preserves other groups', () => {
+  const rows = Array.from({ length: 120 }, (_, id) => ({ id: `row-${id}` }) as TicketRow)
+  const group = { key: 'a', label: 'A', rows, total: 500, loaded: 120, hasMore: true }
+  const selected = new Set(['other'])
+  const next = selectLoadedGroup(group, selected, true)
+  assert.equal(next.size, 100)
+  assert.equal(next.has('other'), true)
+  assert.equal(next.has('row-98'), true)
+  assert.equal(next.has('row-99'), false)
+  assert.deepEqual([...selectLoadedGroup(group, next, false)], ['other'])
+  assert.deepEqual([...selected], ['other'])
 })

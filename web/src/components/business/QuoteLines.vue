@@ -196,7 +196,7 @@ defineExpose({ focusFirst: () => focusCell(0, 'description'), focusLast: () => f
 .line > span { min-width: 0; display: flex; align-items: center; }
 @media (hover: hover) { .editing .line:hover { background: var(--row-hover); } }
 .line:focus-within { background: var(--row-selected); }
-.line.problem .c-pos { color: var(--gold-ink); }
+.line.problem .c-pos { color: var(--warn-ink); }
 .line.dragging { opacity: .45; }
 /* Where a dragged line lands: a caret in the gap between lines, not an edge of either. */
 .line.drop-before::before, .line.drop-after::after { content: ''; position: absolute; left: 10px; right: 10px; height: 2px; border-radius: 2px; background: var(--teal); pointer-events: none; }
@@ -215,7 +215,7 @@ defineExpose({ focusFirst: () => focusCell(0, 'description'), focusLast: () => f
 .cell { width: 100%; min-width: 0; height: 30px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font-size: 13.5px; }
 .cell::placeholder { color: var(--ink-3); }
 .cell:hover:not([readonly]):not(:disabled) { background: var(--surface-raised-2); box-shadow: inset 0 0 0 1px var(--line); }
-.cell:focus { background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--teal), 0 0 0 3px rgba(164, 229, 223, .35); }
+.cell:focus { background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--teal), 0 0 0 3px color-mix(in srgb, var(--primary-tint) 35%, transparent); }
 .cell.mono { font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
 .cell.num { text-align: right; }
 .cell.bad { color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger-line); }
@@ -227,10 +227,10 @@ defineExpose({ focusFirst: () => focusCell(0, 'description'), focusLast: () => f
 .c-tax small { margin-left: 2px; font-size: 11px; color: var(--ink-3); }
 .c-tax .cell { padding-right: 2px; }
 .c-rate { padding: 0 4px; font-size: 12.5px; color: var(--ink-2); }
-.no-rate { display: inline-flex; align-items: center; gap: 4px; color: var(--gold-ink); font-size: 12px; font-family: var(--font); }
+.no-rate { display: inline-flex; align-items: center; gap: 4px; color: var(--warn-ink); font-size: 12px; font-family: var(--font); }
 .c-amount { padding: 0 4px; font-size: 12.5px; color: var(--ink); font-weight: 600; flex-direction: column; align-items: flex-end !important; justify-content: center; }
 .rate-hint { display: none; font-size: 10.5px; font-weight: 400; color: var(--ink-3); }
-.rate-hint.warn { color: var(--gold-ink); font-family: var(--font); }
+.rate-hint.warn { color: var(--warn-ink); font-family: var(--font); }
 .faint { color: var(--ink-3); font-weight: 400; }
 .c-act { justify-content: center; }
 .remove { width: 26px; height: 26px; color: var(--ink-3); opacity: 0; }

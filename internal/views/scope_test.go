@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -43,7 +44,7 @@ func TestProjectViewsRoundTripSoftDeleteAndUndo(t *testing.T) {
 		}
 		projectA = insert("project", "PRJ-1", nil)
 		projectB = insert("project", "PRJ-2", nil)
-		ticket = insert("ticket", "TKT-1", &projectA)
+		ticket = insert("work", "TKT-1", &projectA)
 		return nil
 	}))
 
@@ -53,7 +54,7 @@ func TestProjectViewsRoundTripSoftDeleteAndUndo(t *testing.T) {
 	request := func(principalID, method, path, body string) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
-		req = req.WithContext(tenant.WithPrincipal(req.Context(), tenant.Principal{ID: principalID, TenantID: tenantID, Roles: []string{"member"}}))
+		req = req.WithContext(tenant.WithPrincipal(req.Context(), tenant.Principal{ID: principalID, TenantID: tenantID, Kind: tenant.Person, Roles: []string{"member"}}))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
 		return w
@@ -79,8 +80,8 @@ func TestProjectViewsRoundTripSoftDeleteAndUndo(t *testing.T) {
 	}
 
 	// The full list shape round-trips; sort is optional and defaults.
-	mine := decode(request(ownerID, http.MethodPost, "/api/views", `{"name":"  My open work ","project_id":"`+projectA+`","filters":{"assignee":["me"],"status":["!done"]},"sort_keys":["state","-updated_at"],"group_by":"assignee","columns":["status","assignee"]}`), http.StatusCreated)
-	if mine.Name != "My open work" || mine.ProjectID == nil || *mine.ProjectID != projectA || strings.Join(mine.SortKeys, ",") != "state,-updated_at" || mine.GroupBy != "assignee" || mine.Sort.Field != "position" || mine.Shared {
+	mine := decode(request(ownerID, http.MethodPost, "/api/views", `{"name":"  My open work ","project_id":"`+projectA+`","filters":{"assignee":["me"],"status":["!done"]},"sort_keys":["state","-updated_at"],"group_by":"assignee","mode":"outline","columns":["status","assignee"]}`), http.StatusCreated)
+	if mine.Name != "My open work" || mine.ProjectID == nil || *mine.ProjectID != projectA || strings.Join(mine.SortKeys, ",") != "state,-updated_at" || mine.GroupBy != "assignee" || mine.Sort.Field != "position" || mine.Mode != "outline" || mine.Shared {
 		t.Fatalf("created = %#v", mine)
 	}
 	shared := decode(request(ownerID, http.MethodPost, "/api/views", `{"name":"Team bugs","project_id":"`+projectA+`","filters":{"tag":["bug"]},"columns":[],"shared":true}`), http.StatusCreated)
@@ -136,7 +137,7 @@ func TestProjectViewsRoundTripSoftDeleteAndUndo(t *testing.T) {
 		t.Fatalf("list after delete = %#v", got)
 	}
 	back := decode(request(ownerID, http.MethodPost, "/api/views/"+mine.ID+"/restore", ""), http.StatusOK)
-	if back.ID != mine.ID || back.DeletedAt != nil || back.Name != "Mine" {
+	if back.ID != mine.ID || back.DeletedAt != nil || back.Name != "Mine" || back.Mode != "outline" {
 		t.Fatalf("restored = %#v", back)
 	}
 	if w := request(ownerID, http.MethodPost, "/api/views/"+mine.ID+"/restore", ""); w.Code != http.StatusConflict {
@@ -178,3 +179,122 @@ func TestProjectViewsRoundTripSoftDeleteAndUndo(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// AEON-718 migration regression: FORCE RLS, every tenant, exactly empty columns,
+// idempotent audit snapshots, and the existing owner-only restore endpoint.
+func TestLegacyViewsMigrationScopeEventsAndRestore(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx := t.Context()
+	sql, err := os.ReadFile("../db/migrations/1249_saved_view_mode.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type fixture struct{ tenant, owner, legacy, shared, kept, deleted string }
+	var fixtures []fixture
+	for _, slug := range []string{"legacy-ppm", "legacy-pma"} {
+		var f fixture
+		if err := d.Admin.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES($1,'Legacy views') RETURNING id::text`, slug).Scan(&f.tenant); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','owner') RETURNING id::text`, f.tenant).Scan(&f.owner); err != nil {
+			t.Fatal(err)
+		}
+		dbtest.BindRole(t, d, f.tenant, f.owner, "member")
+		for i, dest := range []*string{&f.legacy, &f.shared, &f.kept, &f.deleted} {
+			columns := []string{}
+			if i == 2 {
+				columns = []string{"key", "title", "updated"}
+			}
+			if err := d.Admin.QueryRow(ctx, `INSERT INTO saved_views(tenant_id,owner_principal_id,name,filters,columns,shared,deleted_at,mode,updated_at)
+    VALUES($1,$2,'Retained snapshot','{"priority":"high"}',$3,$4,CASE WHEN $5 THEN '2026-01-01'::timestamptz END,CASE WHEN $6 THEN 'graph' ELSE 'list' END,'2026-01-01'::timestamptz) RETURNING id::text`, f.tenant, f.owner, columns, i == 1, i == 3, i == 2).Scan(dest); err != nil {
+				t.Fatal(err)
+			}
+		}
+		fixtures = append(fixtures, f)
+	}
+	// Replay the whole migration twice, using the restricted schema owner. This
+	// catches accidental dependence on a superuser or a single selected tenant.
+	for i := 0; i < 2; i++ {
+		tx, err := d.App.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = tx.Exec(ctx, string(sql)); err != nil {
+			_ = tx.Rollback(ctx)
+			t.Fatal(err)
+		}
+		if err = tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mux := http.NewServeMux()
+	New(d.App).Mount(mux)
+	for _, f := range fixtures {
+		var retired, kept, eventsCount int
+		if err := d.Admin.QueryRow(ctx, `SELECT count(*) FILTER (WHERE deleted_at IS NOT NULL), count(*) FILTER (WHERE deleted_at IS NULL) FROM saved_views WHERE tenant_id=$1`, f.tenant).Scan(&retired, &kept); err != nil {
+			t.Fatal(err)
+		}
+		if retired != 3 || kept != 1 {
+			t.Fatalf("retired=%d kept=%d", retired, kept)
+		}
+		if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1 AND type='view.deleted'`, f.tenant).Scan(&eventsCount); err != nil {
+			t.Fatal(err)
+		}
+		if eventsCount != 2 {
+			t.Fatalf("deletion events=%d want 2", eventsCount)
+		}
+		var validActors int
+		if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id
+            WHERE e.tenant_id=$1 AND e.type='view.deleted' AND p.kind='agent' AND p.name='System' AND p.roles @> ARRAY['system']::text[]`, f.tenant).Scan(&validActors); err != nil {
+			t.Fatal(err)
+		}
+		if validActors != 2 {
+			t.Fatalf("system-attributed events=%d want 2", validActors)
+		}
+		var keptMode, keptUpdated string
+		var keptColumns []string
+		if err := d.Admin.QueryRow(ctx, `SELECT mode,columns,updated_at::text FROM saved_views WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL`, f.tenant, f.kept).Scan(&keptMode, &keptColumns, &keptUpdated); err != nil {
+			t.Fatal(err)
+		}
+		if keptMode != "graph" || strings.Join(keptColumns, ",") != "key,title,updated" || !strings.HasPrefix(keptUpdated, "2026-01-01") {
+			t.Fatal("nonempty-column view changed")
+		}
+		for _, id := range []string{f.legacy, f.shared} {
+			var before, after savedView
+			var b, a []byte
+			if err := d.Admin.QueryRow(ctx, `SELECT before,after FROM events WHERE tenant_id=$1 AND type='view.deleted' AND after->>'id'=$2`, f.tenant, id).Scan(&b, &a); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(b, &before); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(a, &after); err != nil {
+				t.Fatal(err)
+			}
+			if before.ID != id || before.DeletedAt != nil || after.ID != id || after.DeletedAt == nil || !after.UpdatedAt.After(before.UpdatedAt) || after.Mode != "list" || string(after.Filters) != string(before.Filters) || before.Sort.Field != "position" || len(after.Columns) != 0 {
+				t.Fatalf("snapshots: before=%s after=%s", b, a)
+			}
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/views/"+f.legacy+"/restore", nil)
+		req = req.WithContext(tenant.WithPrincipal(ctx, tenant.Principal{ID: f.owner, TenantID: f.tenant}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("restore: %d %s", w.Code, w.Body.String())
+		}
+		var restored savedView
+		if err := json.Unmarshal(w.Body.Bytes(), &restored); err != nil {
+			t.Fatal(err)
+		}
+		if restored.ID != f.legacy || restored.DeletedAt != nil || restored.Mode != "list" || len(restored.Columns) != 0 {
+			t.Fatalf("restored=%#v", restored)
+		}
+		var deletedAt string
+		if err := d.Admin.QueryRow(ctx, `SELECT deleted_at::text FROM saved_views WHERE tenant_id=$1 AND id=$2`, f.tenant, f.deleted).Scan(&deletedAt); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(deletedAt, "2026-01-01") {
+			t.Fatal("already deleted row changed")
+		}
+	}
+}

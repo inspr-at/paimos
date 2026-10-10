@@ -1,48 +1,8 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
-/* State colours are independent of brand/button accents. Every text colour
-   keeps at least 4.5:1 on the raised, canvas and sunken surfaces of its theme
-   (tests/agent-palettes.test.ts). Protan, Deutan and Tritan keep the states
-   apart under a simulation of that colour vision; words and marks still carry
-   the state, since no palette suits every kind of colour vision. */
-:root {
-  --agent-standard-working: #287b2c; --agent-standard-waiting: #916400;
-  --agent-standard-throttled: #7945b7; --agent-standard-problem: #c33532;
-  --agent-protan-working: #2f63c4; --agent-protan-waiting: #8c4a00;
-  --agent-protan-throttled: #5b2d94; --agent-protan-problem: #8a1239;
-  --agent-deutan-working: #1767c4; --agent-deutan-waiting: #a85000;
-  --agent-deutan-throttled: #4a3d8f; --agent-deutan-problem: #7d2537;
-  --agent-tritan-working: #0f6b3c; --agent-tritan-waiting: #b84a08;
-  --agent-tritan-throttled: #66258c; --agent-tritan-problem: #8e1420;
-  --agent-standard-inactive: #687078; --agent-protan-inactive: var(--agent-standard-inactive);
-  --agent-deutan-inactive: var(--agent-standard-inactive); --agent-tritan-inactive: var(--agent-standard-inactive);
-  --agent-monochrome-working: var(--ink); --agent-monochrome-waiting: var(--ink);
-  --agent-monochrome-throttled: var(--ink); --agent-monochrome-problem: var(--ink);
-  --agent-monochrome-inactive: var(--ink-2);
-}
-:root[data-theme="dark"] {
-  --agent-standard-working: #89d875; --agent-standard-waiting: #edc351;
-  --agent-standard-throttled: #bf9af3; --agent-standard-problem: #ff8b82;
-  --agent-protan-working: #9fd0ff; --agent-protan-waiting: #f2c14e;
-  --agent-protan-throttled: #c79af0; --agent-protan-problem: #ff7a5c;
-  --agent-deutan-working: #6fa8ff; --agent-deutan-waiting: #f2c14e;
-  --agent-deutan-throttled: #c6bdff; --agent-deutan-problem: #ff7a5c;
-  --agent-tritan-working: #4fdca5; --agent-tritan-waiting: #f5ae52;
-  --agent-tritan-throttled: #d2c3fb; --agent-tritan-problem: #ff7a6a;
-  --agent-standard-inactive: #a4aab0;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --agent-standard-working: #89d875; --agent-standard-waiting: #edc351;
-    --agent-standard-throttled: #bf9af3; --agent-standard-problem: #ff8b82;
-    --agent-protan-working: #9fd0ff; --agent-protan-waiting: #f2c14e;
-    --agent-protan-throttled: #c79af0; --agent-protan-problem: #ff7a5c;
-    --agent-deutan-working: #6fa8ff; --agent-deutan-waiting: #f2c14e;
-    --agent-deutan-throttled: #c6bdff; --agent-deutan-problem: #ff7a5c;
-    --agent-tritan-working: #4fdca5; --agent-tritan-waiting: #f5ae52;
-    --agent-tritan-throttled: #d2c3fb; --agent-tritan-problem: #ff7a6a;
-    --agent-standard-inactive: #a4aab0;
-  }
-}
+/* State marks read the active theme's tokens. Text uses the normal ink;
+   preset marks meet 3:1 on cards in both modes. Words and shapes carry state. */
+.agent-theme-preview.light { color-scheme: light; }
+.agent-theme-preview.dark { color-scheme: dark; }
 .agent-state-surface {
   opacity: var(--agent-state-opacity, 1);
 }
@@ -54,11 +14,11 @@
 .agent-state-surface .agent-state-label { opacity: 1; }
 .agent-indicator-art:not(.working) *, .live-bot:not(.working) * { animation: none !important; }
 
-.agent-indicator-art { --signal: var(--agent-state-color, var(--agent-standard-working)); }
-.agent-indicator-art:is(.waiting, .awaiting) { --signal: var(--agent-state-color, var(--agent-standard-waiting)); }
-.agent-indicator-art.throttled { --signal: var(--agent-state-color, var(--agent-standard-throttled)); }
-.agent-indicator-art:is(.problem, .unresponsive) { --signal: var(--agent-state-color, var(--agent-standard-problem)); }
-.agent-indicator-art:is(.idle, .stale, .stopped) { --signal: var(--agent-state-color, var(--agent-standard-inactive)); filter: grayscale(1); }
+.agent-indicator-art { --signal: var(--agent-state-color, var(--agent-working)); }
+.agent-indicator-art:is(.waiting, .awaiting) { --signal: var(--agent-state-color, var(--agent-waiting)); }
+.agent-indicator-art.throttled { --signal: var(--agent-state-color, var(--agent-throttled)); }
+.agent-indicator-art:is(.problem, .unresponsive) { --signal: var(--agent-state-color, var(--agent-problem)); }
+.agent-indicator-art:is(.idle, .stale, .stopped) { --signal: var(--agent-state-color, var(--agent-idle)); }
 .agent-indicator-art .agent-state-mark { color: var(--signal); }
 /* A finished session draws its ring whole: a complete circle, not a sweep (AEON-437). */
 .agent-indicator-art.done .ring-sweep { stroke-dasharray: 100 0; transform: rotate(-90deg); }

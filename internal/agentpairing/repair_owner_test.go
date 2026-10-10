@@ -3,14 +3,65 @@
 package agentpairing_test
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/jackc/pgx/v5"
 )
+
+func TestPairingLocksTenantBeforeAdvisory(t *testing.T) {
+	for name, lock := range map[string]func(context.Context, pgx.Tx) error{
+		"pairing":  agentpairing.Lock,
+		"mutation": agentpairing.LockMutation,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			dbtest.TenantBeforeAdvisory(t, f.db, f.tenantID, "aeon-pairing:"+f.tenantID, 0, func(ctx context.Context) error {
+				return db.InTenant(ctx, f.db.App, f.tenantID, func(tx pgx.Tx) error { return lock(ctx, tx) })
+			})
+		})
+	}
+}
+
+func TestPairingApprovalTenantBeforeAdvisory(t *testing.T) {
+	f := newFixture(t)
+	old := f.propose("claude")
+	f.approve(old, "connect_only")
+	paired := f.redeem(old)
+	f.call("POST", "/api/agent-pairing/computers/"+*paired.ComputerID+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "", 200)
+	fresh := f.propose("claude")
+	keys := []string{}
+	for _, account := range fresh.review.Requested {
+		keys = append(keys, account.AccountKey)
+	}
+	req := f.request("POST", "/api/agent-pairing/requests/"+fresh.id+"/approve", map[string]any{
+		"request_digest": fresh.review.Digest, "verification": "connect_only", "selected_account_keys": keys,
+	}, true, "")
+	dbtest.TenantBeforeAdvisory(t, f.db, f.tenantID, "aeon-pairing:"+f.tenantID, 0, func(ctx context.Context) error {
+		w := httptest.NewRecorder()
+		f.h.ServeHTTP(w, req.WithContext(ctx))
+		if w.Code != 200 {
+			return fmt.Errorf("approve: status %d want 200", w.Code)
+		}
+		return nil
+	})
+	var state string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT status FROM principals WHERE id=$1`, *paired.PrincipalID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "deactivated" {
+		t.Fatalf("replaced principal status=%s want deactivated", state)
+	}
+}
 
 func testLocalAuthKey(t *testing.T) string {
 	t.Helper()

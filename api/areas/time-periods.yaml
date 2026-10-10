@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /time-periods:
+    get:
+      operationId: listTimePeriods
+      summary: List time periods
+      security: *auth
+      parameters: [{name: principal_id, in: query, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Periods, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TimePeriod'}}}}}
+    post:
+      operationId: createTimePeriod
+      summary: Open a time period for one principal
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TimePeriodWrite'}}}}
+      responses:
+        '201': {description: Period, content: {application/json: {schema: {$ref: '#/components/schemas/TimePeriod'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /time-periods/{periodId}:
+    get:
+      operationId: getTimePeriod
+      summary: Read a time period and its approval state
+      security: *auth
+      parameters: [{name: periodId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Period, content: {application/json: {schema: {$ref: '#/components/schemas/TimePeriod'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /time-periods/{periodId}/approve:
+    post:
+      operationId: approveTimePeriod
+      summary: Person approves the exact set of entries in a period
+      description: Admin person only. Lock period, hash ordered entry IDs and values, then write approval and event atomically. Approved periods cannot gain entries.
+      security: [{session: []}]
+      parameters: [{name: periodId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TimePeriodApprovalWrite'}}}}
+      responses:
+        '200': {description: Approved period, content: {application/json: {schema: {$ref: '#/components/schemas/TimePeriod'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    TimePeriod:
+      allOf:
+        - {$ref: '#/components/schemas/TimePeriodWrite'}
+        - {type: object, required: [id, state, revision], properties: {id: {type: string, format: uuid}, state: {type: string, enum: [open, approved]}, revision: {type: integer, minimum: 1}, approval: {type: [object, 'null'], properties: {approved_by_principal_id: {type: string, format: uuid}, entries_sha256: {type: string}, total_seconds: {type: integer}, event_id: {type: integer}}}}}
+    TimePeriodApprovalWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, expected_entries_sha256]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        expected_entries_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    TimePeriodWrite:
+      type: object
+      additionalProperties: false
+      required: [principal_id, starts_at, ends_at]
+      properties:
+        principal_id: {type: string, format: uuid}
+        starts_at: {type: string, format: date-time}
+        ends_at: {type: string, format: date-time}

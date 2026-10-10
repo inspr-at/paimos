@@ -6,6 +6,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { can, permissionsRevoked } from '../../lib/authz'
 import { safeReturnPath } from '../../lib/signInReturn'
 import { useAccess } from '../../stores/access'
+import { useSession } from '../../stores/session'
+import { keyExpiry } from '../../lib/access'
+import { keyState } from '../../lib/settings'
+import { accessFooter } from '../../lib/footerProviders'
+import { useFooterSummary } from '../../lib/footerSummary'
 import AppIcon from '../AppIcon.vue'
 import BizIcon, { type BizIconName } from '../business/BizIcon.vue'
 import AgentsTab from './AgentsTab.vue'
@@ -24,6 +29,7 @@ type Tab = 'people' | 'invites' | 'roles' | 'projects' | 'agents' | 'audit'
 const route = useRoute()
 const router = useRouter()
 const access = useAccess()
+const session = useSession()
 const TABS: { id: Tab; label: string; icon: BizIconName; permission: string; component: Component }[] = [
   { id: 'people', label: 'People', icon: 'users', permission: 'members.read', component: PeopleTab },
   { id: 'invites', label: 'Invites', icon: 'mail', permission: 'members.read', component: InvitesTab },
@@ -59,8 +65,28 @@ function tabKeys(event: KeyboardEvent) {
 }
 // The member data needs See members; with only the access log, none is asked for.
 const needsMembers = computed(() => can('members.read'))
-onMounted(() => { if (needsMembers.value) void access.load() })
+// Keys are read only for people who may see them; the footer counts what the Agents tab would list.
+const seesKeys = computed(() => session.identity?.principal.kind === 'person' && can('keys.manage') && needsMembers.value)
+// A failed key read leaves the last keys. The Agents tab is the place that says the read failed.
+function readKeys() { void access.loadKeys().catch(() => {}) }
+onMounted(() => { if (needsMembers.value) void access.load(); if (seesKeys.value) readKeys() })
 watch(needsMembers, yes => { if (yes) void access.load() })
+watch(seesKeys, yes => { if (yes) readKeys() })
+// The footer says who is here, how many agent keys, and the keys that expire soon (AEON-785).
+useFooterSummary(() => {
+  if (!session.identity || !needsMembers.value || (access.state === 'error' && !access.members)) return null
+  const agents = access.agents.filter(agent => !agent.service)
+  const keys = access.keys
+  const expiring = seesKeys.value && keys ? keys.filter(key => keyState(key) === 'active' && keyExpiry(key).soon && agents.some(agent => agent.principal_id === key.principal_id)).length : null
+  return accessFooter({
+    loaded: access.state === 'ready', people: access.people.length, keys: agents.reduce((total, agent) => total + agent.key_count, 0), expiring,
+    act: {
+      expiring: () => void router.push({ path: '/settings/access/agents', query: { expiring: '1' } }),
+      top: () => document.querySelector('main')?.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }),
+      invite: can('members.manage') ? () => { invitePrefill.value = null; inviting.value = true } : null,
+    },
+  })
+})
 </script>
 
 <template>

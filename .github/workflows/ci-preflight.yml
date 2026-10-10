@@ -1,0 +1,180 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Aeon preflight
+run-name: preflight:${{ inputs.sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Exact candidate commit (40 lowercase hexadecimal characters)'
+        required: true
+        type: string
+      local-result:
+        description: 'Value-free Go/unit receipt produced on the configured approved runner for this SHA'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: preflight-${{ github.repository }}-${{ inputs.sha }}
+  cancel-in-progress: true
+
+jobs:
+  preflight-route:
+    uses: ./.github/workflows/test-runner-route.yml
+    with:
+      required-idle-runners: 12
+
+  preflight-setup:
+    name: preflight-web-setup
+    needs: preflight-route
+    if: github.ref == 'refs/heads/main' && needs.preflight-route.outputs.runner_class == 'hosted' && needs.preflight-route.outputs.run_attempt == github.run_attempt
+    runs-on: ${{ fromJSON(needs.preflight-route.outputs.runs_on) }}
+    timeout-minutes: 20
+    outputs:
+      browser-cache-key: ${{ steps.cache-key.outputs.browsers }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+      - name: Validate candidate and local receipt before checkout
+        env:
+          PREFLIGHT_SHA: ${{ inputs.sha }}
+          PREFLIGHT_LOCAL: ${{ inputs.local-result }}
+        run: |
+          node --input-type=module <<'JS'
+          import {validLocal, maxResultBytes} from './scripts/ci-preflight-result.mjs';
+          if (Buffer.byteLength(process.env.PREFLIGHT_LOCAL) > maxResultBytes || !validLocal(JSON.parse(process.env.PREFLIGHT_LOCAL), process.env.PREFLIGHT_SHA)) process.exit(1);
+          JS
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.sha }}
+          path: candidate
+      - name: Install candidate web dependencies once
+        working-directory: candidate/web
+        run: npm ci --no-audit --no-fund
+      - name: Build candidate web for UI and performance groups
+        working-directory: candidate/web
+        run: npm run build
+      - id: cache-key
+        env:
+          LOCKFILE_HASH: ${{ hashFiles('candidate/web/package-lock.json') }}
+        run: echo "browsers=preflight-playwright-v1-${RUNNER_OS}-${RUNNER_ARCH}-${LOCKFILE_HASH}" >> "$GITHUB_OUTPUT"
+      - name: Cache browser binaries
+        id: browsers
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.cache-key.outputs.browsers }}
+      - name: Install browser binaries once
+        if: steps.browsers.outputs.cache-hit != 'true'
+        working-directory: candidate/web
+        run: npx playwright install chromium
+      - name: Package this candidate runtime
+        run: tar -cf "$RUNNER_TEMP/preflight-web.tar" -C candidate web/node_modules web/dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: preflight-web-runtime-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/preflight-web.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+  browser:
+    name: preflight-${{ matrix.group }}
+    needs: [preflight-route, preflight-setup]
+    # Hosted-only is the existing tier-browser boundary. An unavailable or
+    # non-hosted route fails closed; OPS owns any router/pool enablement.
+    if: github.ref == 'refs/heads/main' && needs.preflight-route.outputs.runner_class == 'hosted' && needs.preflight-route.outputs.run_attempt == github.run_attempt
+    runs-on: ${{ fromJSON(needs.preflight-route.outputs.runs_on) }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [browser-1, browser-2, browser-3, browser-4, browser-5, browser-6, browser-7, browser-8, browser-9, browser-10, browser-11, browser-12]
+    env:
+      PREFLIGHT_SHA: ${{ inputs.sha }}
+      PREFLIGHT_GROUP: ${{ matrix.group }}
+      PREFLIGHT_RUNNER_CLASS: ${{ needs.preflight-route.outputs.runner_class }}
+    steps:
+      - name: Checkout reviewed preflight controller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+      - name: Checkout the exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.sha }}
+          path: candidate
+      - name: Download this candidate runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: preflight-web-runtime-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/preflight-runtime
+      - name: Restore this candidate runtime
+        run: tar -xf "$RUNNER_TEMP/preflight-runtime/preflight-web.tar" -C candidate
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ needs.preflight-setup.outputs.browser-cache-key }}
+          fail-on-cache-miss: true
+      - name: Install Chromium system dependencies on the hosted runner
+        timeout-minutes: 13
+        working-directory: candidate/web
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install-deps chromium
+      - name: Run full browser group and write SHA-bound receipt
+        run: node scripts/ci-preflight-browser.mjs
+      - name: Preserve group result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: preflight-${{ matrix.group }}-${{ github.run_attempt }}
+          path: receipts/${{ matrix.group }}.json
+          if-no-files-found: error
+          retention-days: 8
+
+  result:
+    name: preflight-result
+    needs: [preflight-route, browser]
+    if: always() && github.ref == 'refs/heads/main' && needs.preflight-route.result == 'success' && needs.preflight-route.outputs.runner_class == 'hosted' && needs.preflight-route.outputs.run_attempt == github.run_attempt
+    runs-on: ${{ fromJSON(needs.preflight-route.outputs.runs_on) }}
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: preflight-browser-*-${{ github.run_attempt }}
+          path: receipts
+          merge-multiple: true
+      - name: Assemble separate local and browser outcomes
+        env:
+          PREFLIGHT_SHA: ${{ inputs.sha }}
+          PREFLIGHT_LOCAL: ${{ inputs.local-result }}
+        run: node scripts/ci-preflight-collect.mjs
+      - name: Publish admission evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: aeon-preflight-${{ inputs.sha }}-${{ github.run_attempt }}
+          path: result/preflight.json
+          if-no-files-found: error
+          retention-days: 8

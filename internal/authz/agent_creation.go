@@ -29,7 +29,7 @@ var errAgentRole = errors.New("role is not available for agents in this scope")
 
 func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 	p := actor(r)
-	if p.Kind != tenant.Person {
+	if p.Kind != tenant.Person && !OwnerWorkstation(p) {
 		apiFail(w, 403, "forbidden", "", "Only people may create agents")
 		return
 	}
@@ -63,7 +63,7 @@ func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
 		// Serialize with role edits, demotion and legacy named-key creation.
-		if err := lockProjectMutation(ctx, tx, p.TenantID); err != nil {
+		if err := LockProjectMutation(ctx, tx, p.TenantID); err != nil {
 			return err
 		}
 		if err := requireTx(ctx, tx, p, "keys.manage", Scope{}); err != nil {

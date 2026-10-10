@@ -17,7 +17,7 @@ import (
 func lockProject(ctx context.Context, tx pgx.Tx, projectID string) error {
 	var one int
 	err := tx.QueryRow(ctx, `
-		SELECT 1 FROM journey_projects WHERE project_node_id = $1::uuid FOR UPDATE`, projectID).Scan(&one)
+		SELECT 1 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid AND k.slug='project' AND n.deleted_at IS NULL FOR UPDATE OF n`, projectID).Scan(&one)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fail(http.StatusNotFound, "project not found")
 	}
@@ -26,7 +26,7 @@ func lockProject(ctx context.Context, tx pgx.Tx, projectID string) error {
 
 func projectVisible(ctx context.Context, tx pgx.Tx, projectID string) error {
 	var one int
-	err := tx.QueryRow(ctx, `SELECT 1 FROM journey_projects WHERE project_node_id = $1::uuid`, projectID).Scan(&one)
+	err := tx.QueryRow(ctx, `SELECT 1 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid AND k.slug='project' AND n.deleted_at IS NULL`, projectID).Scan(&one)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fail(http.StatusNotFound, "project not found")
 	}

@@ -1,0 +1,68 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "tags.manage",
+      "tags.read",
+      "tags.write"
+    ],
+    "guest": [
+      "tags.read"
+    ],
+    "member": [
+      "tags.read",
+      "tags.write"
+    ],
+    "owner": [
+      "tags.manage",
+      "tags.read",
+      "tags.write"
+    ],
+    "viewer": [
+      "tags.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Manage tags",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Tags",
+      "key": "tags.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read tags",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Tags",
+      "key": "tags.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write tags",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Tags",
+      "key": "tags.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "words": {
+    "resources": {
+      "tags": "tags"
+    }
+  }
+}

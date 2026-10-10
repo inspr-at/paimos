@@ -223,7 +223,7 @@ func TestDailyAuditUndoAndIdempotence(t *testing.T) {
 		state string
 		days  int
 	}{{"new", 7}, {"backlog", 90}, {"blocked", 14}, {"in_progress", 3}, {"done", 14}, {"delivered", 30}, {"qa", 40}, {"accepted", 40}, {"cancelled", 40}, {"archived", 40}, {"open", 40}} {
-		ids[tc.state] = f.add(fmt.Sprintf("AUT-%d", i+2), "ticket", tc.state, tc.days, nil)
+		ids[tc.state] = f.add(fmt.Sprintf("AUT-%d", i+2), "work", tc.state, tc.days, nil)
 	}
 	var wg sync.WaitGroup
 	errs := make(chan error, 2)
@@ -291,9 +291,9 @@ func TestDailyAuditUndoAndIdempotence(t *testing.T) {
 func TestAutopilotHumanCheckObjectionAndStaleUndo(t *testing.T) {
 	f := setup(t)
 	human := "Touch ID"
-	flagged := f.add("AUT-2", "ticket", "delivered", 35, &human)
-	objection := f.add("AUT-3", "ticket", "delivered", 35, nil)
-	stale := f.add("AUT-4", "ticket", "in_progress", 4, nil)
+	flagged := f.add("AUT-2", "work", "delivered", 35, &human)
+	objection := f.add("AUT-3", "work", "delivered", 35, nil)
+	stale := f.add("AUT-4", "work", "in_progress", 4, nil)
 	f.tx(func(tx pgx.Tx) error {
 		_, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &objection, Type: "comment.created", After: map[string]string{"body_markdown": "This still fails."}})
 		return err
@@ -362,13 +362,13 @@ func TestSettingsAndOverrides(t *testing.T) {
 	if !o.Effective || o.Mode != "on" {
 		t.Fatalf("override %+v", o)
 	}
-	id := f.add("AUT-2", "ticket", "in_progress", 4, nil)
+	id := f.add("AUT-2", "work", "in_progress", 4, nil)
 	f.run(f.now)
 	if f.state(id).State != "open" {
 		t.Fatal("project On did not override workspace Off")
 	}
 	f.call(f.p, "PUT", path, `{"mode":"off","expected_revision":1}`, 200)
-	id = f.add("AUT-3", "ticket", "in_progress", 4, nil)
+	id = f.add("AUT-3", "work", "in_progress", 4, nil)
 	f.run(f.now.Add(24 * time.Hour))
 	if f.state(id).State != "in_progress" {
 		t.Fatal("project Off ignored")
@@ -403,13 +403,13 @@ func (f *fixture) release(ids []string) string {
 func TestReleasePublishHumanCheckReplayUndo(t *testing.T) {
 	f := setup(t)
 	human := "Touch ID"
-	done := f.add("AUT-2", "ticket", "done", 15, nil)
-	flagged := f.add("AUT-3", "ticket", "done", 15, &human)
-	cancelled := f.add("AUT-4", "ticket", "cancelled", 15, nil)
-	accepted := f.add("AUT-5", "ticket", "accepted", 15, nil)
+	done := f.add("AUT-2", "work", "done", 15, nil)
+	flagged := f.add("AUT-3", "work", "done", 15, &human)
+	cancelled := f.add("AUT-4", "work", "cancelled", 15, nil)
+	accepted := f.add("AUT-5", "work", "accepted", 15, nil)
 	unshipped := map[string]string{}
 	for i, state := range []string{"new", "backlog", "open", "blocked", "in_progress", "qa", "archived"} {
-		unshipped[state] = f.add(fmt.Sprintf("AUT-%d", i+6), "ticket", state, 15, nil)
+		unshipped[state] = f.add(fmt.Sprintf("AUT-%d", i+6), "work", state, 15, nil)
 	}
 	ids := []string{done, flagged, cancelled, accepted}
 	for _, id := range unshipped {
@@ -437,7 +437,7 @@ func TestReleasePublishHumanCheckReplayUndo(t *testing.T) {
 		t.Fatal("publish replay redid Undo")
 	}
 	// A fresh Done episode after publication is work for a later release.
-	later := f.add("AUT-20", "ticket", "done", 15, nil)
+	later := f.add("AUT-20", "work", "done", 15, nil)
 	f.tx(func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source) VALUES($1,$2,$3,$4,0,'manual')`, f.p.TenantID, later, f.project, release); err != nil {
 			return err
@@ -460,7 +460,7 @@ func TestReleasePublishHumanCheckReplayUndo(t *testing.T) {
 }
 func TestAutopilotTenantIsolation(t *testing.T) {
 	f := setup(t)
-	id := f.add("AUT-2", "ticket", "in_progress", 4, nil)
+	id := f.add("AUT-2", "work", "in_progress", 4, nil)
 	f.run(f.now)
 	foreign := tenant.Principal{TenantID: "20000000-0000-4000-8000-000000000002", Kind: tenant.Person, Name: "Other", Roles: []string{"owner"}}
 	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, foreign.TenantID, func(tx pgx.Tx) error {

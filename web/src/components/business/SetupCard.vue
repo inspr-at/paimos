@@ -126,10 +126,10 @@ void props
 .area-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
 .area-name { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 650; color: var(--ink); }
 .area-summary { font-size: 12.5px; color: var(--ink-2); }
-.area-needs { font-size: 12px; color: var(--gold-ink); }
+.area-needs { font-size: 12px; color: var(--warn-ink); }
 .switch-sk { flex-shrink: 0; width: 34px; height: 20px; }
 .state-chip { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
-.state-chip.on { background: rgba(47, 122, 90, .1); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .3); color: var(--ok); }
+.state-chip.on { background: var(--ok-bg); box-shadow: inset 0 0 0 1px var(--ok-line); color: var(--ok); }
 .setup-error { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 12px; border-radius: 10px; background: var(--danger-bg); color: var(--danger); font-size: 13px; }
 .setup-foot { display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
 .foot-note { font-size: 12.5px; color: var(--ink-3); }

@@ -37,5 +37,5 @@ defineProps<{ definition: QuoteProfileDefinition; size?: number }>()
 </template>
 
 <style scoped>
-.thumb { flex-shrink: 0; color: var(--ink); border-radius: 3px; box-shadow: 0 1px 3px rgba(32, 60, 61, .14); }
+.thumb { flex-shrink: 0; color: var(--ink); border-radius: 3px; box-shadow: 0 1px 3px color-mix(in srgb, var(--shadow-color) 14%, transparent); }
 </style>

@@ -47,7 +47,8 @@ for (const width of [1440, 390]) {
     await expect(rows(page)).toHaveCount(6)
     await expect(row(page, history.releases[2].version)).toHaveCount(0)
     await expect(sheet(page).locator('.result-count')).toHaveText('6 published · 1 reserved')
-    await expect(sheet(page).locator('.head .eyebrow')).toContainText('6 published · 1 reserved')
+    // The aggregate moved from the hero copy into the dialog's description.
+    await expect(sheet(page)).toHaveAttribute('aria-describedby', (await sheet(page).locator('.result-count').getAttribute('id'))!)
     const cadence = sheet(page).getByRole('region', { name: 'Release cadence' })
     await expect(cadence.locator('.total')).toHaveText('7 releases')
     await page.evaluate(() => document.fonts.ready)
@@ -101,8 +102,8 @@ for (const width of [1440, 390]) {
 test('Settings opt-in persists, preserves flow controls and keeps both switches under the pointer', async ({ page }) => {
   const { data } = await setup(page, { show_flow_controls: true })
   await page.goto('/settings/developer#reserved-versions')
-  const flow = page.getByRole('switch', { name: 'Show the flow controls (not yet tested end to end)' })
-  await expect(flow).toBeChecked()
+  await expect(page.getByRole('switch', { name: 'Show the flow controls (not yet tested end to end)' })).toHaveCount(0)
+  await expect(page.getByRole('switch', { name: 'Start agents manually (expert)', exact: true })).not.toBeChecked()
   await expect(toggle(page)).not.toBeChecked()
   await page.evaluate(() => document.fonts.ready)
   const switches = page.getByRole('switch')

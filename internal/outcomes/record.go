@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
@@ -25,6 +26,8 @@ const (
 	defaultLimit = 50
 	maxLimit     = 100
 )
+
+var fingerprintRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 var manualKinds = map[string]bool{
 	"review_verdict": true,
@@ -43,14 +46,16 @@ func (e *fail) Error() string { return e.msg }
 func invalid(msg string) error { return &fail{status: http.StatusBadRequest, msg: msg} }
 
 type reviewPayload struct {
-	Verdict       string `json:"verdict"`
-	ReviewerModel string `json:"reviewer_model,omitempty"`
-	Route         string `json:"route,omitempty"`
-	AuthorFamily  string `json:"author_family,omitempty"`
-	Round         *int   `json:"round,omitempty"`
-	BlockingCount *int   `json:"blocking_count,omitempty"`
-	Findings      *int   `json:"findings,omitempty"`
-	Summary       string `json:"summary,omitempty"`
+	ReviewID            string `json:"review_id,omitempty"`
+	FindingsFingerprint string `json:"findings_fingerprint,omitempty"`
+	Verdict             string `json:"verdict"`
+	ReviewerModel       string `json:"reviewer_model,omitempty"`
+	Route               string `json:"route,omitempty"`
+	AuthorFamily        string `json:"author_family,omitempty"`
+	Round               *int   `json:"round,omitempty"`
+	BlockingCount       *int   `json:"blocking_count,omitempty"`
+	Findings            *int   `json:"findings,omitempty"`
+	Summary             string `json:"summary,omitempty"`
 }
 
 type fixPayload struct {
@@ -59,11 +64,12 @@ type fixPayload struct {
 }
 
 type ciPayload struct {
-	Result  string `json:"result"`
-	Repo    string `json:"repo"`
-	Number  *int   `json:"number"`
-	Name    string `json:"name,omitempty"`
-	Summary string `json:"summary,omitempty"`
+	AttemptID string `json:"attempt_id,omitempty"`
+	Result    string `json:"result"`
+	Repo      string `json:"repo"`
+	Number    *int   `json:"number"`
+	Name      string `json:"name,omitempty"`
+	Summary   string `json:"summary,omitempty"`
 }
 
 type revertPayload struct {
@@ -103,6 +109,13 @@ func canonicalPayload(kind string, raw json.RawMessage) (json.RawMessage, error)
 		if err != nil {
 			return nil, err
 		}
+		if body.FindingsFingerprint != "" && !fingerprintRE.MatchString(body.FindingsFingerprint) {
+			return nil, invalid("findings_fingerprint must be lowercase SHA-256")
+		}
+		if body.ReviewID != "" && !validUUID(body.ReviewID) {
+			return nil, invalid("review_id must be a UUID")
+		}
+		body.ReviewID = strings.ToLower(body.ReviewID)
 		body.Verdict = verdict
 		if body.ReviewerModel, err = plain("reviewer_model", body.ReviewerModel, maxModel, false); err != nil {
 			return nil, err
@@ -155,6 +168,10 @@ func canonicalPayload(kind string, raw json.RawMessage) (json.RawMessage, error)
 		if err != nil {
 			return nil, err
 		}
+		if body.AttemptID != "" && !validUUID(body.AttemptID) {
+			return nil, invalid("attempt_id must be a UUID")
+		}
+		body.AttemptID = strings.ToLower(body.AttemptID)
 		body.Result = result
 		if body.Repo, err = plain("repo", body.Repo, maxKeyLen, true); err != nil {
 			return nil, err

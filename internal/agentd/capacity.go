@@ -9,11 +9,10 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
-	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/client"
 )
@@ -34,7 +33,12 @@ func (s *Supervisor) capacityStateName() string {
 	return "aeon-agentd-" + s.daemonID + ".capacity.json"
 }
 
-func (s *Supervisor) loadCapacityCaptures() error {
+func (s *Supervisor) loadCapacityCaptures() (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("load capacity captures %s: %w", filepath.Join(s.state.Path(), s.capacityStateName()), resultErr)
+		}
+	}()
 	raw, err := s.state.Read(s.capacityStateName(), 1<<20)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -74,6 +78,14 @@ func (s *Supervisor) rememberCapacityCapture(id string, readings []capacity.Read
 	}
 	if !changed || s.state == nil {
 		return
+	}
+	if s.capacityChecks != nil && s.capacityNow != nil {
+		v := s.capacityChecks[id]
+		v.RefreshAt = capacityRefreshAt(CapacityCapture{Readings: readings}, s.capacityNow())
+		s.capacityChecks[id] = v
+		if err := s.saveCapacityChecksLocked(); err != nil {
+			logCapacityError("capacity reset schedule could not be persisted", id, err)
+		}
 	}
 	raw, err := json.Marshal(capacityCaptureState{s.tenantID, s.principalID, s.capacitySaved})
 	if err == nil {
@@ -298,72 +310,32 @@ func (p *codexProcess) emitCapacityReadings(readings []capacity.Reading, phase s
 	}
 }
 
-// CaptureCapacity is a quota-neutral fallback for accounts without a first
-// run. The vendor owns authentication; identity is checked on the same process
-// before reading quota. No credential files or auth response are published.
-func (a *CodexAdapter) CaptureCapacity(ctx context.Context, key string) []capacity.Reading {
-	home, err := localHome(a.Homes, key)
-	if err != nil || strings.TrimSpace(a.Emails[key]) == "" {
-		return nil
-	}
-	p, err := launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, home, capacityEnvironment("CODEX_HOME", home, a.Path), "jsonrpc", func(AdapterEvent) {})
-	if err != nil {
-		return nil
-	}
-	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = p.Stop(cleanup)
-		_ = p.finishReader()
-	}()
-	op, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	if _, err := p.request(op, "jsonrpc", "initialize", map[string]any{"clientInfo": map[string]string{"name": "aeon-capacity", "version": "1"}}); err != nil {
-		return nil
-	}
-	if p.send(map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}}) != nil {
-		return nil
-	}
-	raw, err := p.request(op, "jsonrpc", "account/read", map[string]any{"refreshToken": false})
-	var identity struct {
-		Account *struct {
-			ID    string `json:"id"`
-			Type  string `json:"type"`
-			Email string `json:"email"`
-		} `json:"account"`
-	}
-	if err != nil || json.Unmarshal(raw, &identity) != nil || identity.Account == nil || identity.Account.Type != "chatgpt" || !agentsetup.CodexAccountMatches(a.Emails[key], identity.Account.Email) {
-		return nil
-	}
-	if identity.Account.ID != "" {
-		a.quotaIDs.Store(key, identity.Account.ID)
-	}
-	raw, err = p.request(op, "jsonrpc", "account/rateLimits/read", map[string]any{})
-	if err != nil {
-		return nil
-	}
-	parser := capacity.Parser{}
-	readings := parser.CodexSnapshot(raw, time.Now().UTC())
-	for i := range readings {
-		readings[i].Source = "agentd"
-	}
-	return readings
-}
-
 // RunCapacityCaptures owns its own ticker and request deadline; dispatch polling
 // never pays for an app-server launch. Cancel and join this loop before Close.
 func (s *Supervisor) RunCapacityCaptures(ctx context.Context) {
 	ticker := time.NewTicker(min(s.capacityInterval, 30*time.Second))
 	defer ticker.Stop()
+	s.runCapacityCaptureTick(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.syncStatuslines(ctx, time.Now())
-			s.publishSignals(ctx)
-			s.captureIdleCapacity(ctx, time.Now())
+			s.runCapacityCaptureTick(ctx)
+		case <-s.capacityWake:
+			s.runCapacityCaptureTick(ctx)
 		}
+	}
+}
+
+func (s *Supervisor) runCapacityCaptureTick(ctx context.Context) {
+	now := s.capacityNow()
+	s.syncStatuslines(ctx, now)
+	s.publishSignals(ctx)
+	if _, ok := s.api.(capacityChecksAPI); ok {
+		s.captureCapacityChecks(ctx, now)
+	} else {
+		s.captureIdleCapacity(ctx, now)
 	}
 }
 func (s *Supervisor) captureIdleCapacity(ctx context.Context, now time.Time) {

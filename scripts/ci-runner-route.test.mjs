@@ -9,8 +9,22 @@ import { routeRunner, trustedEvents, writeRoute } from "./ci-runner-route.mjs";
 
 const now = Date.parse("2026-09-30T10:00:00Z");
 const repository = "inspr-at/paimos";
+const enabledEvents = "push,workflow_dispatch,pull_request,merge_group";
+const eventClasses = { push: "mbp2606-push", workflow_dispatch: "mbp2606-dispatch", pull_request: "mbp2606-pr", merge_group: "mbp2606-mq" };
+const switchCases = [
+  [undefined, ["push", "workflow_dispatch"]],
+  ["", ["push", "workflow_dispatch"]],
+  [enabledEvents, Object.keys(eventClasses)],
+  ["push,workflow_dispatch", ["push", "workflow_dispatch"]],
+  ["pull_request", ["pull_request"]],
+  ["merge_group", ["merge_group"]],
+  [" pull_request, merge_group, pull_request ", ["pull_request", "merge_group"]],
+  ["pull_request_target,schedule,future_event", []],
+  ["pull_request_extra,not_merge_group", []],
+  ["PULL_REQUEST", []], [" ", []], [",", []], [null, []], [1, []],
+];
 const available = {
-  schema: 1, repository, os: "linux", arch: "arm64", online: true, busy: false,
+  schema: 2, events: Object.keys(eventClasses), repository, os: "linux", arch: "arm64", online: true, busy: false,
   observed_at: new Date(now - 1000).toISOString(), idle_runners: 4,
 };
 function route(event = "push", changes = {}, options = {}) {
@@ -18,13 +32,14 @@ function route(event = "push", changes = {}, options = {}) {
 }
 
 test("trusted events use base labels plus exactly their verified event class", () => {
-  assert.deepEqual(trustedEvents, ["push", "workflow_dispatch"]);
-  for (const [event, eventClass] of [["push", "mbp2606-push"], ["workflow_dispatch", "mbp2606-dispatch"]]) {
-    const labels = route(event).runs_on;
+  assert.deepEqual(trustedEvents, Object.keys(eventClasses));
+  for (const [event, eventClass] of Object.entries(eventClasses)) {
+    const selected = route(event, {}, { poolEvents: enabledEvents, headRepository: repository });
+    const labels = selected.runs_on;
     assert.deepEqual(labels, ["self-hosted", "Linux", "ARM64", "mbp2606", eventClass]);
-    assert.equal(labels.filter((label) => label === "mbp2606-push" || label === "mbp2606-dispatch").length, 1);
+    assert.equal(labels.filter((label) => Object.values(eventClasses).includes(label)).length, 1);
     assert.ok(labels.every((label) => !/^(ubuntu|macos|windows)-/i.test(label)));
-    assert.equal(route(event).runner_class, "mbp2606");
+    assert.equal(selected.runner_class, "mbp2606");
   }
 });
 
@@ -33,7 +48,7 @@ test("unmapped events cannot acquire the dispatch class, even if the allowlist g
   trustedEvents.push(...events);
   try {
     for (const event of [...events, null, undefined, {}, 1]) {
-      assert.deepEqual(route(event, {}, { event }), {
+      assert.deepEqual(route(event, {}, { event, poolEvents: events.join(",") }), {
         runs_on: ["ubuntu-latest"], runner_class: "hosted", reason: "untrusted-event",
       });
     }
@@ -50,10 +65,88 @@ test("PRs, privileged PR events, other events and other repositories stay hosted
 });
 
 test("pushes and dispatches outside main stay hosted even with a fresh lease", () => {
-  for (const event of trustedEvents) {
+  for (const event of ["push", "workflow_dispatch"]) {
     for (const ref of [undefined, "", "refs/heads/work/aeon-438", "refs/tags/v1", "refs/pull/34/merge", "refs/heads/gh-readonly-queue/main/pr-34"]) {
       assert.equal(route(event, {}, { ref }).reason, "untrusted-ref");
     }
+  }
+});
+
+test("PR and merge-group routing requires schema 2 and the event in both switch and lease", () => {
+  for (const event of ["pull_request", "merge_group"])
+    for (const schema of [1, 2])
+      for (const events of [undefined, [], ["push", "workflow_dispatch"], ["pull_request"], ["merge_group"], Object.keys(eventClasses)])
+        for (const poolEvents of ["", "push,workflow_dispatch", "pull_request", "merge_group", enabledEvents]) {
+          const admitted = schema === 2 && events?.includes(event) && poolEvents.split(",").includes(event);
+          const selected = route(event, { schema, events }, { poolEvents, headRepository: repository, requiredIdle: 4 });
+          const label = JSON.stringify({ event, schema, events, poolEvents });
+          assert.deepEqual(selected.runs_on, admitted ? ["self-hosted", "Linux", "ARM64", "mbp2606", eventClasses[event]] : ["ubuntu-latest"], label);
+          assert.equal(selected.runner_class, admitted ? "mbp2606" : "hosted", label);
+          if (poolEvents.split(",").includes(event) && !admitted) assert.equal(selected.reason, "unsupported-pool-event", label);
+        }
+});
+
+test("lease events must be a bounded array of unique known names before PR or merge-group routing", () => {
+  for (const event of ["pull_request", "merge_group"]) {
+    for (const events of [undefined, null, true, 1, event, { [event]: true },
+      [event, null], [event, 1], [event, {}], [event, [event]], [event, ""],
+      [event, "pull_request_target"], [event, "future_event"], [event, "constructor"],
+      [event, "toString"], [event, "__proto__"], [event, "PULL_REQUEST"],
+      [event, " merge_group"], [event, event], [...Object.keys(eventClasses), event],
+      Array(1000).fill(event)]) {
+      const selected = route(event, { events }, { poolEvents: enabledEvents, headRepository: repository, requiredIdle: 4 });
+      assert.deepEqual(selected, { runs_on: ["ubuntu-latest"], runner_class: "hosted", reason: "unsupported-pool-event" }, `${event}: ${JSON.stringify(events)}`);
+    }
+  }
+});
+
+test("push and dispatch preserve routing and lease checks under schema 1 and 2 regardless of events", () => {
+  for (const event of ["push", "workflow_dispatch"])
+    for (const schema of [1, 2])
+      for (const events of [undefined, null, "invalid", [], ["pull_request"], ["unknown"], Object.keys(eventClasses)]) {
+        const lease = { schema, events };
+        assert.deepEqual(route(event, lease), route(event, { schema: 1, events: undefined }));
+        assert.equal(route(event, lease, { ref: "refs/heads/other" }).reason, "untrusted-ref");
+        assert.equal(route(event, lease, { poolEvents: "pull_request,merge_group" }).reason, "untrusted-event");
+        for (const [changes, reason] of [
+          [{ online: false }, "offline-or-busy"], [{ busy: true }, "offline-or-busy"],
+          [{ idle_runners: 3 }, "insufficient-idle-capacity"],
+          [{ observed_at: new Date(now - 30000).toISOString() }, "expired-availability"],
+        ]) assert.equal(route(event, { ...lease, ...changes }, { requiredIdle: 4 }).reason, reason);
+      }
+});
+
+test("event x switch x head repository x ref retains defaults and opts in only listed event classes", () => {
+  for (const [poolEvents, allowed] of switchCases)
+    for (const event of [...Object.keys(eventClasses), "pull_request_target", "schedule", "workflow_call", "workflow_run", "release", "future_event"])
+      for (const headRepository of [repository, "fork/paimos", "", undefined])
+        for (const ref of ["refs/heads/main", "refs/heads/work/aeon-777", "refs/tags/v1", "refs/pull/34/merge", "refs/heads/gh-readonly-queue/main/pr-34", "", undefined]) {
+          const admitted = allowed.includes(event) &&
+            (!["push", "workflow_dispatch"].includes(event) || ref === "refs/heads/main") &&
+            (event !== "pull_request" || headRepository === repository);
+          const selected = route(event, {}, { poolEvents, headRepository, ref });
+          const label = JSON.stringify({ event, poolEvents, headRepository, ref });
+          assert.equal(selected.runner_class, admitted ? "mbp2606" : "hosted", label);
+          assert.deepEqual(selected.runs_on, admitted ? ["self-hosted", "Linux", "ARM64", "mbp2606", eventClasses[event]] : ["ubuntu-latest"], label);
+        }
+  for (const event of Object.keys(eventClasses)) {
+    assert.equal(route(event, { repository: "fork/paimos" }, { poolEvents: enabledEvents, repository: "fork/paimos", headRepository: "fork/paimos" }).reason, "different-repository");
+  }
+});
+
+test("every enabled event retains lease and whole-batch capacity checks", () => {
+  for (const event of Object.keys(eventClasses)) {
+    const options = { poolEvents: enabledEvents, headRepository: repository, requiredIdle: 4 };
+    assert.equal(route(event, {}, options).runner_class, "mbp2606");
+    for (const [changes, reason] of [
+      [{ online: false }, "offline-or-busy"], [{ busy: true }, "offline-or-busy"],
+      [{ idle_runners: 3 }, "insufficient-idle-capacity"],
+      [{ observed_at: new Date(now - 30000).toISOString() }, "expired-availability"],
+      [{ observed_at: new Date(now + 1).toISOString() }, "expired-availability"],
+    ]) assert.equal(route(event, changes, options).reason, reason, event);
+    assert.equal(route(event, {}, { ...options, availability: "" }).reason, "runner-not-enabled");
+    assert.equal(route(event, {}, { ...options, availability: "{" }).reason, "invalid-availability");
+    assert.equal(route(event, {}, { ...options, requiredIdle: 0 }).reason, "invalid-capacity-request");
   }
 });
 
@@ -63,7 +156,8 @@ test("absent, offline, busy and malformed records fall back without waiting", ()
   }
   for (const changes of [
     { online: false }, { online: "true" }, { busy: true }, { busy: undefined },
-    { schema: 2 }, { repository: "other/repo" }, { os: "macos" }, { arch: "amd64" },
+    { schema: 0 }, { schema: 3 }, { schema: "2" }, { schema: undefined },
+    { repository: "other/repo" }, { os: "macos" }, { arch: "amd64" },
     { idle_runners: 0 }, { idle_runners: "4" }, { idle_runners: 1.5 },
   ]) assert.equal(route("push", changes).runner_class, "hosted");
 });
@@ -102,6 +196,27 @@ test("CLI writes JSON runs-on, rerun attempt and value-free evidence", () => {
   assert.doesNotMatch(result.stdout, /must not be echoed/);
 });
 
+test("CLI reads the pool event switch and PR head repository from workflow environment", () => {
+  for (const [event, ref] of [["pull_request", "refs/pull/34/merge"], ["merge_group", "refs/heads/gh-readonly-queue/main/pr-34"]])
+    for (const poolEvents of ["", enabledEvents]) for (const headRepository of [repository, "fork/paimos", ""])
+      for (const lease of [{ schema: 1, events: undefined }, { schema: 2, events: ["push", "workflow_dispatch"] }, { schema: 2, events: Object.keys(eventClasses) }]) {
+      const result = spawnSync(process.execPath, [new URL("./ci-runner-route.mjs", import.meta.url).pathname], {
+        encoding: "utf8",
+        env: {
+          GITHUB_EVENT_NAME: event, GITHUB_REPOSITORY: repository, GITHUB_REF: ref, GITHUB_RUN_ATTEMPT: "1",
+          AEON_POOL_EVENTS: poolEvents, AEON_PR_HEAD_REPOSITORY: headRepository,
+          AEON_MBP2606_AVAILABILITY: JSON.stringify({ ...available, ...lease, observed_at: new Date().toISOString() }),
+          AEON_REQUIRED_IDLE_RUNNERS: "4",
+        },
+      });
+      assert.equal(result.status, 0, result.stderr);
+      const admitted = poolEvents !== "" && (event !== "pull_request" || headRepository === repository) &&
+        lease.schema === 2 && lease.events.includes(event);
+      assert.match(result.stdout, new RegExp(`runner_class=${admitted ? "mbp2606" : "hosted"}\\n`));
+      if (admitted) assert.ok(result.stdout.includes(`"${eventClasses[event]}"`));
+    }
+});
+
 test("router outputs bind each attempt and refuse a missing or invalid attempt", () => {
   for (const attempt of [1, 2, 3]) {
     assert.match(writeRoute(route(), undefined, undefined, attempt), new RegExp(`run_attempt=${attempt}\\n$`));
@@ -111,37 +226,87 @@ test("router outputs bind each attempt and refuse a missing or invalid attempt",
   }
 });
 
-test("CI expressions keep PRs and stale attempts on seven hosted shards", () => {
+test("CI expressions honor the router switch, fork boundary and attempt for runner and shard selection", () => {
   const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   const shardJob = workflow.split("  go-test:\n")[1].split("\n  go-timing:")[0];
   const runnerExpression = shardJob.match(/^    runs-on: (.+)$/m)[1];
   const shardExpression = shardJob.match(/^        shard: (.+)$/m)[1];
   // Evaluate the checked-in expressions, not a separate implementation of the
   // workflow decision. These expressions use the common JS/Actions operators.
-  function evaluate(expression, github, outputs) {
-    const source = expression.slice(3, -2).replaceAll("needs.runner-route.outputs.", "outputs.");
-    return Function("github", "outputs", "contains", "fromJSON", `return (${source});`)(
-      github, outputs, (values, value) => values.includes(value), JSON.parse,
+  function evaluate(expression, github, outputs, tierMode="essential") {
+    const source = expression.slice(3, -2).replaceAll("needs.runner-route.outputs.", "outputs.").replaceAll("needs.tier-plan.outputs.mode", "tierMode");
+    return Function("github", "outputs", "contains", "fromJSON", "tierMode", `return (${source});`)(
+      github, outputs, (values, value) => values.includes(value), JSON.parse, tierMode,
     );
   }
-  for (const event of ["push", "workflow_dispatch", "pull_request", "pull_request_target", "merge_group", "schedule"]) {
-    for (const ref of ["refs/heads/main", "refs/heads/work/aeon-459", "refs/tags/v1"]) {
-      for (const run_attempt of [1, 2]) {
-        // A forged Mac router output still cannot route a PR or a stale rerun.
-        const selected = route(event === "workflow_dispatch" ? event : "push");
+  const cases = [
+    ["push", "refs/heads/main", true], ["workflow_dispatch", "refs/heads/main", true],
+    ["push", "refs/heads/work/aeon-777", false], ["workflow_dispatch", "refs/tags/v1", false],
+    ["pull_request", "refs/pull/34/merge", true], ["merge_group", "refs/heads/gh-readonly-queue/main/pr-34", true],
+    ["pull_request_target", "refs/heads/main", false], ["schedule", "refs/heads/main", false],
+  ];
+  for (const [poolEvents, allowed] of switchCases) for (const [event, ref, validRef] of cases)
+    for (const headRepository of [repository, "fork/paimos", ""])
+      for (const run_attempt of [1, 2]) for (const forged of [false, true]) {
+        const selected = forged ? route("push") : route(event, {}, { poolEvents, ref, headRepository });
         const outputs = { ...selected, runs_on: JSON.stringify(selected.runs_on), run_attempt: "1" };
-        const github = { event_name: event, ref, run_attempt };
-        const admitted = trustedEvents.includes(event) && ref === "refs/heads/main" && run_attempt === 1;
-        assert.deepEqual(evaluate(runnerExpression, github, outputs), admitted ? selected.runs_on : ["ubuntu-latest"]);
-        assert.deepEqual(evaluate(shardExpression, github, outputs), admitted ? [1, 2, 3, 4] : [1, 2, 3, 4, 5, 6, 7]);
+        const github = { event_name: event, ref, run_attempt, repository, event: { pull_request: { head: { repo: { full_name: headRepository } } } } };
+        const admitted = validRef && (forged || allowed.includes(event)) && run_attempt === 1 &&
+          (event !== "pull_request" || headRepository === repository);
+        const label = JSON.stringify({ poolEvents, event, ref, headRepository, run_attempt, forged });
+        assert.deepEqual(evaluate(runnerExpression, github, outputs), admitted ? selected.runs_on : ["ubuntu-latest"], label);
+        assert.deepEqual(evaluate(shardExpression, github, outputs), admitted ? [1, 2, 3, 4] :
+          event === "pull_request" ? [1, 2] : [1, 2, 3, 4, 5, 6, 7], label);
+        assert.deepEqual(evaluate(shardExpression, github, outputs, "full"), admitted ? [1, 2, 3, 4] : [1, 2, 3, 4, 5, 6, 7], label);
       }
+  for (const [event, ref] of cases.filter(([, , valid]) => valid)) {
+    const github = { event_name: event, ref, run_attempt: 1, repository, event: { pull_request: { head: { repo: { full_name: repository } } } } };
+    for (const changes of [{ online: false }, { busy: true }, { idle_runners: 3 }, { observed_at: new Date(now - 30000).toISOString() }]) {
+      const selected = route(event, changes, { requiredIdle: 4, poolEvents: enabledEvents, headRepository: repository, ref });
+      const outputs = { ...selected, runs_on: JSON.stringify(selected.runs_on), run_attempt: "1" };
+      assert.deepEqual(evaluate(runnerExpression, github, outputs), ["ubuntu-latest"]);
+      assert.deepEqual(evaluate(shardExpression, github, outputs, "full"), [1, 2, 3, 4, 5, 6, 7]);
     }
   }
-  const github = { event_name: "push", ref: "refs/heads/main", run_attempt: 1 };
-  for (const changes of [{ online: false }, { busy: true }, { idle_runners: 3 }, { observed_at: new Date(now - 30000).toISOString() }]) {
-    const selected = route("push", changes, { requiredIdle: 4 });
-    const outputs = { ...selected, runs_on: JSON.stringify(selected.runs_on), run_attempt: "1" };
-    assert.deepEqual(evaluate(runnerExpression, github, outputs), ["ubuntu-latest"]);
-    assert.deepEqual(evaluate(shardExpression, github, outputs), [1, 2, 3, 4, 5, 6, 7]);
+  for (const [event, ref] of cases.filter(([event]) => ["pull_request", "merge_group"].includes(event))) {
+    const github = { event_name: event, ref, run_attempt: 1, repository, event: { pull_request: { head: { repo: { full_name: repository } } } } };
+    for (const changes of [{ schema: 1, events: undefined }, { schema: 1 }, { events: undefined },
+      { events: null }, { events: ["push", "workflow_dispatch"] },
+      { events: [event === "pull_request" ? "merge_group" : "pull_request"] },
+      { events: [event, "future_event"] }, { events: [event, event] }]) {
+      const selected = route(event, changes, { requiredIdle: 4, poolEvents: enabledEvents, headRepository: repository, ref });
+      assert.equal(selected.reason, "unsupported-pool-event");
+      const outputs = { ...selected, runs_on: JSON.stringify(selected.runs_on), run_attempt: "1" };
+      assert.deepEqual(evaluate(runnerExpression, github, outputs), ["ubuntu-latest"]);
+      assert.deepEqual(evaluate(shardExpression, github, outputs), event === "pull_request" ? [1, 2] : [1, 2, 3, 4, 5, 6, 7]);
+      assert.deepEqual(evaluate(shardExpression, github, outputs, "full"), [1, 2, 3, 4, 5, 6, 7]);
+    }
+  }
+});
+
+test("key dialog CI uses the hosted shards and covers the shared access markup", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const units = workflow.split("  web-unit:\n")[1].split("\n  web-shard:")[0];
+  assert.match(units, /timeout-minutes: 4\n\s+run: bash "\$GITHUB_WORKSPACE\/scripts\/ci\/bounded-apt\.sh" apt fish zsh/);
+  const install = units.indexOf("Install shells used by command round-trip unit tests");
+  const execute = units.indexOf("Run selected web units without retries");
+  assert.ok(install >= 0 && execute > install, 'Unit runners must install shells before running tests');
+  assert.match(units, /cli\.mjs run web --unit/);
+  assert.doesNotMatch(workflow, /Key dialog layout regression|playwright .*tests\/key-layout\.spec\.ts/);
+  const shardJob = workflow.split("  web-shard:\n")[1].split("\n  web:")[0];
+  assert.match(shardJob, /runs-on: ubuntu-latest/);
+  assert.match(shardJob, /cli\.mjs run web --shard/);
+  const manifest = JSON.parse(readFileSync(new URL("../web/ci-web-shards.json", import.meta.url), "utf8"));
+  const layoutGroups = manifest.groups.filter(group => group.specs.some(spec => spec.file === "tests/key-layout.spec.ts"));
+  assert.equal(layoutGroups.length, 1);
+  const layout = layoutGroups[0];
+  assert.notEqual(layout.gate, false);
+  assert.equal(layout.hostedOnly, true);
+  assert.equal(layout.config, "playwright.ui.config.ts");
+  assert.deepEqual(layout.flags, ["--workers=1"]);
+  const access = manifest.groups.find(group => group.id === "access-dialogs");
+  assert.equal(access.hostedOnly, true);
+  for (const file of ["tests/access.spec.ts", "tests/key-dialog.spec.ts"]) {
+    assert.ok(access.specs.some(spec => spec.file === file));
   }
 });

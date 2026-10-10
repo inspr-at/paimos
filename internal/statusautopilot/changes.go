@@ -4,6 +4,7 @@ package statusautopilot
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -14,19 +15,20 @@ import (
 )
 
 type Change struct {
-	EventID      int64     `json:"event_id"`
-	NodeID       string    `json:"node_id"`
-	Key          string    `json:"key"`
-	Title        string    `json:"title"`
-	Actor        string    `json:"actor"`
-	Rule         string    `json:"rule"`
-	Reason       string    `json:"reason"`
-	From         string    `json:"from"`
-	To           string    `json:"to"`
-	At           time.Time `json:"at"`
-	Undone       bool      `json:"undone"`
-	ChangedSince bool      `json:"changed_since"`
-	Undoable     bool      `json:"undoable"`
+	RequiresPreview bool      `json:"requires_preview,omitempty"`
+	EventID         int64     `json:"event_id"`
+	NodeID          string    `json:"node_id"`
+	Key             string    `json:"key"`
+	Title           string    `json:"title"`
+	Actor           string    `json:"actor"`
+	Rule            string    `json:"rule"`
+	Reason          string    `json:"reason"`
+	From            string    `json:"from"`
+	To              string    `json:"to"`
+	At              time.Time `json:"at"`
+	Undone          bool      `json:"undone"`
+	ChangedSince    bool      `json:"changed_since"`
+	Undoable        bool      `json:"undoable"`
 }
 
 // ChangesTx reads only events and tickets already visible under the caller's
@@ -35,7 +37,7 @@ type Change struct {
 // Suggestions reads all current marks, independently of that history limit.
 func ChangesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string, suggestions bool, limit int) ([]Change, error) {
 	from := `FROM events e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id
- WHERE e.type=$1 AND n.deleted_at IS NULL AND ($2='' OR n.id=nullif($2,'')::uuid)
+ WHERE e.type=ANY($1::text[]) AND n.deleted_at IS NULL AND ($2='' OR n.id=nullif($2,'')::uuid)
  ORDER BY e.at DESC,e.id DESC LIMIT nullif($3,0)`
 	if suggestions {
 		limit = 0
@@ -43,7 +45,7 @@ func ChangesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string
 		// listed after unrelated edits, until status changes or a guarded Undo clears it.
 		from = `FROM nodes n CROSS JOIN LATERAL jsonb_each(n.status_autopilot) mark
  JOIN LATERAL (SELECT e.* FROM events e WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id
- AND e.type=$1 AND e.metadata->>'flag'=mark.key AND e.after->>'state'=n.state
+ AND e.type=ANY($1::text[]) AND e.metadata->>'flag'=mark.key AND e.after->>'state'=n.state
  AND NOT EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id)
  ORDER BY e.at DESC,e.id DESC LIMIT 1) e ON true
  WHERE n.deleted_at IS NULL AND n.status_autopilot<>'{}'::jsonb AND ($2='' OR n.id=nullif($2,'')::uuid)
@@ -54,7 +56,7 @@ func ChangesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string
  coalesce(nullif(e.metadata->>'flag',''),e.after->>'state'),e.at,
  EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id),
  n.updated_at=(e.after->>'updated_at')::timestamptz AND n.state=e.after->>'state',n.project_id::text
- `+from, Changed, nodeID, limit)
+ `+from, []string{Changed, "status_autopilot.derived"}, nodeID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +84,14 @@ func ChangesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string
 	}
 	for i, s := range scopes {
 		out[i].ChangedSince = !s.matches
+		out[i].RequiresPreview = out[i].Rule == "work_parent"
 		if !s.matches || out[i].Undone {
+			continue
+		}
+		if out[i].Rule == "work_parent" {
+			// The existing single-click client must never bypass the new
+			// preview-confirmation contract. Package 7 owns the status menu.
+			out[i].RequiresPreview = true
 			continue
 		}
 		scope := authz.Scope{}
@@ -103,10 +112,21 @@ func (m *Module) changes(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 400, "invalid node id")
 		return
 	}
-	var out []Change
-	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
 		var err error
-		out, err = ChangesTx(r.Context(), tx, p, id, r.URL.Query().Get("suggestions") == "true", 50)
+		limit, err = strconv.Atoi(raw)
+		if err != nil || limit < 1 || limit > 50 {
+			httpapi.WriteError(w, 400, "limit must be 1 to 50")
+			return
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	var out []Change
+	err := db.InTenant(db.WithReadStatementTimeout(ctx, 8*time.Second), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = ChangesTx(ctx, tx, p, id, r.URL.Query().Get("suggestions") == "true", limit)
 		return err
 	})
 	respond(w, struct {

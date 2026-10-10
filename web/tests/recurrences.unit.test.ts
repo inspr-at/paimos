@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import type { ListItem } from '../src/lib/api'
+import { describe, expect, it } from 'vitest'
+import { copyRecurrenceInput, parseCriteria, recurrenceEstimate, renderTitle, templateFrom, templateProblems, triggerWords, type RecurrenceInput } from '../src/lib/recurrences'
+const input = (): RecurrenceInput => ({ project_id: 'p', parent_id: 'p', template: { name: 'Sweep', title: 'Sweep {{date}} #{{occurrence}}', description: '', acceptance_criteria: [], estimate_hours: 0, type: 'ticket', priority: 'medium', tags: [] }, trigger: { kind: 'time', rrule: 'FREQ=WEEKLY;BYDAY=MO', time_of_day: '09:00', timezone: 'Europe/Vienna' }, queue_each: false, overlap_policy: 'skip', catch_up_policy: 'one' })
+describe('recurrence templates', () => {
+  it('uses local dates across UTC midnight and DST, and codenames for releases', () => {
+    expect(renderTitle('Sweep {{date}} #{{occurrence}}', 2, '2026-10-02T23:30:00Z', 'Europe/Vienna')).toBe('Sweep 2026-10-03 #2')
+    expect(renderTitle('{{release_name}} · {{date}}', 3, '2026-10-25T23:30:00Z', 'Europe/Vienna', { name: 'Sunlit Sonde', version: '261002081219.0.0' })).toBe('Sunlit Sonde · 2026-10-26')
+  })
+  it('rejects invalid tokens and incomplete queued work', () => {
+    const draft = input()
+    draft.queue_each = true
+    expect(templateProblems(draft, '')).toContain('To queue each one, add an estimate and criteria.')
+    draft.template.title = '{{release_name}} {{ date }}'
+    expect(templateProblems(draft, '')).toHaveLength(3)
+    draft.trigger = { kind: 'event', event: 'release.published' }
+    draft.template.title = '{{release_name}}'
+    draft.template.estimate_hours = recurrenceEstimate('20 min')!
+    draft.template.acceptance_criteria = parseCriteria('- [ ] Check queues\n- [x] Record outcome\n')
+    expect(draft.template.acceptance_criteria).toEqual(['Check queues', 'Record outcome'])
+    expect(templateProblems(draft, '20 min')).toEqual([])
+    expect(recurrenceEstimate('2 h')).toBe(2)
+    expect(recurrenceEstimate('201 h')).toBeNull()
+  })
+  it('copies nested values and describes quarterly last-day schedules', () => {
+    const source = input(), copied = copyRecurrenceInput(source)
+    copied.template.tags.push('tag'); copied.trigger.timezone = 'UTC'
+    expect(source.template.tags).toEqual([])
+    expect(source.trigger.timezone).toBe('Europe/Vienna')
+    expect(triggerWords({ ...source.trigger, rrule: 'FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=-1' })).toBe('Every 3 months on the last day at 09:00 · Europe/Vienna')
+  })
+})
+
+it('new recurrence templates use canonical work for migrated leaves and parents', () => {
+  for (const kind_slug of ['work', 'ticket', 'task', 'epic']) {
+    expect(templateFrom({ kind_slug, title: 'Work', fields: {}, body: '', priority: 'high' } as ListItem).type).toBe('work')
+  }
+  expect(templateFrom().type).toBe('work')
+})
+
+it('preserves bilingual release copy and explicit visibility through source copying and edits', () => {
+  const copy = { pill_en: 'Clear release notes', pill_de: 'Verständliche Release Notes', benefit_en: 'Tickets explain the benefit.', benefit_de: 'Tickets erklären den Nutzen.' }
+  for (const hide_from_release_notes of [true, false]) {
+    const source = { kind_slug: 'work', title: 'Sweep', fields: { ...copy, hide_from_release_notes }, body: '', priority: 'high' } as ListItem
+    const draft = input()
+    draft.template = templateFrom(source)
+    expect(draft.template).toMatchObject({ ...copy, hide_from_release_notes })
+    const edited = copyRecurrenceInput(draft)
+    edited.template.title = 'Edited sweep'
+    expect(edited.template).toMatchObject({ ...copy, hide_from_release_notes })
+    expect(templateProblems(edited, '')).toEqual([])
+  }
+  expect(templateFrom().hide_from_release_notes).toBe(true)
+  expect(templateFrom({ title: 'Legacy', fields: {} } as ListItem).hide_from_release_notes).toBe(true)
+  for (const field of ['pill_en', 'pill_de', 'benefit_en', 'benefit_de'] as const) {
+    const draft = input()
+    draft.template[field] = 'é'.repeat((field.startsWith('pill_') ? 512 : 4096) / 2 + 1)
+    expect(templateProblems(draft, '')).toContain('The release copy exceeds its size limits.')
+    draft.template[field] = '{{unknown}}'
+    expect(templateProblems(draft, '')).toContain('Use Number, Date or Release for template variables.')
+  }
+  // Incomplete drafts remain editable; only the generated ticket's Done gate requires copy.
+  const draft = input()
+  draft.template.pill_en = 'Incomplete draft'
+  expect(templateProblems(draft, '')).toEqual([])
+})

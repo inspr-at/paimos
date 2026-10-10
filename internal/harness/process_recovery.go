@@ -39,7 +39,7 @@ func validIdentity(value string) bool {
 	b, err := hex.DecodeString(value)
 	return err == nil && len(b) == 16
 }
-func (m *Module) reportOwnership(ctx context.Context, tx pgx.Tx, s Session, identity ownedprocess.Identity) error {
+func (m *Module) reportOwnership(ctx context.Context, tx pgx.Tx, s Session, identity ownedprocess.Identity, attached bool) error {
 	daemon, err := cleanText(identity.DaemonID, 128, "daemon id")
 	if err != nil {
 		return err
@@ -50,8 +50,20 @@ func (m *Module) reportOwnership(ctx context.Context, tx pgx.Tx, s Session, iden
 	}
 	// StartedAt is an opaque part of the daemon's process identity, on that
 	// host's clock. Only the DB-stamped observation establishes freshness.
-	if s.Management != "managed" || s.RunID == nil || daemon == "" || daemon != identity.DaemonID || !validIdentity(identity.Generation) || !validIdentity(identity.ProcessID) || identity.RootPID < 2 || identity.GroupID != identity.RootPID || identity.StartedAt.IsZero() {
+	if !attached && (s.Management != "managed" || s.RunID == nil) || daemon == "" || daemon != identity.DaemonID || !validIdentity(identity.Generation) || !validIdentity(identity.ProcessID) || identity.RootPID < 2 || identity.GroupID != identity.RootPID || identity.StartedAt.IsZero() {
 		return workorders.Fail(400, "verified managed process identity required")
+	}
+	if attached {
+		if s.Management != "unmanaged" || s.RunID != nil || !has(s, "inbox") {
+			return workorders.Fail(403, "existing attached inbox hook required")
+		}
+		var paired bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.principal_id=$1 AND c.daemon_id=$2 AND c.state='connected' AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>$3))`, s.AgentPrincipalID, daemon, now).Scan(&paired); err != nil {
+			return err
+		}
+		if !paired {
+			return workorders.Fail(403, "active paired hook daemon required")
+		}
 	}
 	if s.ProcessOwnership != nil && *s.ProcessOwnership != identity {
 		return workorders.Fail(409, "process identity changed; register a new generation")
@@ -59,6 +71,11 @@ func (m *Module) reportOwnership(ctx context.Context, tx pgx.Tx, s Session, iden
 	raw, err := json.Marshal(identity)
 	if err != nil {
 		return err
+	}
+	if attached {
+		if _, err = tx.Exec(ctx, `UPDATE harness_sessions SET capabilities=array(SELECT DISTINCT unnest(capabilities || ARRAY['attached_reconnect_v1'])) WHERE id=$1`, s.ID); err != nil {
+			return err
+		}
 	}
 	_, err = tx.Exec(ctx, `UPDATE harness_sessions SET process_ownership=$2::jsonb,process_observed_at=$3 WHERE id=$1`, s.ID, string(raw), now)
 	return err
@@ -73,7 +90,7 @@ func forceConfirmation(s Session) string {
 	return fmt.Sprintf("force stop %s on %s group %d", s.ID, s.Host, s.ProcessOwnership.GroupID)
 }
 func (m *Module) forceStop(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	if p.Kind != tenant.Person {
+	if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 		return nil, workorders.Fail(403, "human force-stop confirmation required")
 	}
 	if err := authz.RequireTx(r.Context(), tx, p, "harness.force_stop", authz.Scope{ProjectID: r.PathValue("projectId")}); err != nil {

@@ -26,6 +26,8 @@ export interface LiveAgent {
   // The last persisted activity entry, withheld with the note when harness.read
   // is absent. Heartbeats and sequence changes do not advance it.
   activity_note?: string | null; activity_note_id?: number
+  // Public model display metadata and the fresh agent summary (AEON-741 lead panel).
+  model?: string | null; reasoning_effort?: string | null; current_activity?: { text: string } | null
   activity_sequence?: number
   // Derived presentation state; shared evidence and viewer thresholds decide it.
   state?: LiveBotState

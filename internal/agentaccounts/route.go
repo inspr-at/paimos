@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +18,7 @@ import (
 )
 
 type runRow struct {
+	Residency             string
 	LimitEstimates        map[string]int64
 	CapacityOverride      string
 	Purpose               string
@@ -81,6 +81,9 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		return RouteResult{}, err
 	}
 	if err := authorizeRoute(ctx, tx, r, p, run.AgentID, run.ID); err != nil {
+		return RouteResult{}, err
+	}
+	if err := agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
 		return RouteResult{}, err
 	}
 	// A person's account choice narrows the daemon's enrolled set; it never
@@ -253,15 +256,24 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	if err != nil {
 		return err
 	}
+	if err := reconcileReadinessResources(ctx, tx, a); err != nil {
+		return err
+	}
 	now, err := dbNow(ctx, tx)
 	if err != nil {
 		return err
 	}
-	if run.ProfileID == nil || a.State != "available" || !probeFresh(a, now) ||
-		(a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID)) {
+	if run.ProfileID == nil || a.State != "available" || !probeFresh(a, now) {
 		return fail(http.StatusConflict, "reserved account is not eligible")
 	}
-	eligible, err := narrowCandidates(ctx, tx, run, a.Harness, []Account{a})
+	allowed, err := AccountAllowsProfile(ctx, tx, a, *run.ProfileID)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return fail(http.StatusConflict, "reserved account is not eligible")
+	}
+	eligible, _, err := narrowCandidates(ctx, tx, run, a.Harness, []Account{a})
 	if err != nil {
 		return err
 	}
@@ -272,14 +284,24 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$2 AND r.state='active' AND w.account_id NOT IN (`+quotaAccounts+`))`, accountID, run.ID).Scan(&quotaChanged); err != nil {
 		return err
 	}
-	if quotaChanged {
+	var recoveryChanged bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_readiness_facts f WHERE f.recovery_run_id=$2 AND f.resource_id NOT IN (`+currentReadinessResources+`))`, a.ID, run.ID).Scan(&recoveryChanged); err != nil {
+		return err
+	}
+	if quotaChanged || recoveryChanged {
 		return &httpError{status: http.StatusConflict, code: "quota_pool_changed", msg: "reserved quota pool confirmation changed"}
 	}
 	all, err := lockAccountWindows(ctx, tx, []string{accountID})
 	if err != nil {
 		return err
 	}
+	var recovery []recoveryPermit
 	if run.Purpose != "pairing_verification" {
+		// Existing queued holds can predate the fact store. Preserve the
+		// telemetry's original wait before binding its canonical recovery permit.
+		if err := reconcileVendorStop(ctx, tx, a, now); err != nil {
+			return err
+		}
 		used, err := occupancy(ctx, tx)
 		if err != nil {
 			return err
@@ -288,18 +310,26 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 		if err != nil {
 			return err
 		}
-		_, wait, err := admission(ctx, tx, a, all[accountID], now, max(0, slotCount(a, used, quotaUsed)-1), run, true)
+		windows, wait, err := admission(ctx, tx, a, all[accountID], now, max(0, slotCount(a, used, quotaUsed)-1), run, true)
 		if err != nil {
 			return err
 		}
 		if wait != nil {
+			if wait.Code == "daily_limit" || wait.Code == "daily_limit_unknown" {
+				return &httpError{status: http.StatusConflict, code: wait.Code, msg: wait.Code}
+			}
 			return fail(http.StatusConflict, "reserved capacity is not eligible: "+wait.Code)
+		}
+		for _, w := range windows {
+			recovery = append(recovery, w.recoveryPermits...)
 		}
 	} else if len(activeWindows(all[accountID], now)) == 0 {
 		return fail(http.StatusConflict, "reserved capacity is not eligible")
 	}
 	var invalidCapacity bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$1 AND r.state='active' AND w.capacity_read_at IS NOT NULL AND (NOT w.capacity_allowed OR w.capacity_retired OR (w.capacity_source<>'estimate' AND w.capacity_read_at<$2::timestamptz-interval '10 minutes' AND w.capacity_refresh_run IS DISTINCT FROM r.run_id) OR w.ends_at<=$2 OR w.used+w.reserved>w.allowance))`, run.ID, now).Scan(&invalidCapacity); err != nil {
+	// A stale/retired room ledger is no longer evidence of a budget. Current
+	// hard stops are checked above against their resource/window facts.
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$1 AND r.state='active' AND w.capacity_read_at IS NOT NULL AND w.capacity_source<>'estimate' AND w.capacity_read_at>=$2::timestamptz-interval '10 minutes' AND w.ends_at>$2 AND NOT w.capacity_retired AND (NOT w.capacity_allowed OR w.used+w.reserved>w.allowance))`, run.ID, now).Scan(&invalidCapacity); err != nil {
 		return err
 	}
 	if invalidCapacity {
@@ -312,7 +342,9 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	if !enabled {
 		return fail(http.StatusConflict, "reserved model profile is not eligible")
 	}
-	return nil
+	// Claim and queued route replay run under the same tenant/pairing fence.
+	// Consume only after every eligibility check; a failure rolls back promotion.
+	return consumeRecovery(ctx, tx, run.ID, recovery)
 }
 
 func validateEstimates(estimates map[string]int64) error {
@@ -351,6 +383,10 @@ func authorizeRoute(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Pr
 }
 
 func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemonID string, enrolled map[string]bool) (RouteResult, bool, error) {
+	bound, err := computerAccountIDs(ctx, tx, principalID)
+	if err != nil {
+		return RouteResult{}, false, err
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT r.id::text, r.window_id::text, w.unit, a.id::text, a.account_key, a.daemon_id,
 		       a.registered_by_principal_id::text, a.label, a.billing_mode, a.plan, w.pairing_verification, w.ends_at, w.allowance
@@ -372,7 +408,7 @@ func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemon
 		if err := rows.Scan(&item.ReservationID, &item.WindowID, &item.Unit, &accountID, &key, &ownerDaemonID, &ownerID, &label, &billing, &plan, &window.pairingVerification, &window.EndsAt, &window.Allowance); err != nil {
 			return RouteResult{}, false, err
 		}
-		if ownerDaemonID != daemonID || ownerID != principalID || !enrolled[accountID] {
+		if ownerDaemonID != daemonID || ownerID != principalID && !bound[accountID] || !enrolled[accountID] {
 			return RouteResult{}, false, fail(http.StatusConflict, "run is routed outside daemon enrollment")
 		}
 		window.AccountID, window.Unit = accountID, item.Unit
@@ -412,6 +448,9 @@ type ranked struct {
 	reset          *time.Time
 	slots          int
 	presence       bool
+	soonest        *time.Time
+	posture        string
+	projected      float64
 }
 
 func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harness, profileID, daemonID string, accountIDs []string, estimates map[string]int64, now time.Time) (Account, []Window, map[string]int64, error) {
@@ -420,9 +459,13 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
 		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint, billing_mode
 		FROM agent_accounts
-		WHERE harness = $1 AND daemon_id = $2 AND registered_by_principal_id = $3::uuid
+		WHERE harness = $1 AND daemon_id = $2 AND (registered_by_principal_id = $3::uuid OR EXISTS (
+          SELECT 1 FROM agent_pairing_enrollments e JOIN agent_pairing_computers c
+          ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
+          WHERE e.tenant_id=agent_accounts.tenant_id AND e.account_id=agent_accounts.id
+            AND c.principal_id=$3::uuid AND c.daemon_id=$2 AND c.state='connected' AND e.state='connected'))
 		  AND id::text = ANY($4::text[]) AND state = 'available'
-          AND (allowed_model_profile_ids IS NULL OR $5::uuid = ANY(allowed_model_profile_ids))
+          AND aeon_account_allows_profile(harness,allowed_model_profile_ids,$5::uuid)
 		ORDER BY id
 		FOR UPDATE`, harness, daemonID, principalID, accountIDs, profileID)
 	if err != nil {
@@ -442,7 +485,11 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 	if err := rows.Err(); err != nil {
 		return Account{}, nil, nil, err
 	}
-	accounts, err = narrowCandidates(ctx, tx, run, harness, accounts)
+	accounts, err = attachWindows(ctx, tx, accounts)
+	if err != nil {
+		return Account{}, nil, nil, err
+	}
+	accounts, _, err = narrowCandidates(ctx, tx, run, harness, accounts)
 	if err != nil {
 		return Account{}, nil, nil, err
 	}
@@ -466,10 +513,19 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		return Account{}, nil, nil, err
 	}
 	var picks []ranked
+	dailyReason := ""
 	for _, account := range accounts {
 		slots := slotCount(account, usedSlots, quotaSlots)
 		if !probeFresh(account, now) || slots >= account.MaxParallel {
 			continue
+		}
+		if run.Purpose != "pairing_verification" {
+			if err := reconcileReadinessResources(ctx, tx, account); err != nil {
+				return Account{}, nil, nil, err
+			}
+			if err := reconcileVendorStop(ctx, tx, account, now); err != nil {
+				return Account{}, nil, nil, err
+			}
 		}
 		var active []Window
 		if run.Purpose == "pairing_verification" {
@@ -489,6 +545,9 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 				return Account{}, nil, nil, err
 			}
 			if wait != nil {
+				if wait.Code == "daily_limit_unknown" || wait.Code == "daily_limit" && dailyReason == "" {
+					dailyReason = wait.Code
+				}
 				continue
 			}
 		}
@@ -521,6 +580,9 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		picks = append(picks, pick)
 	}
 	if len(picks) == 0 {
+		if dailyReason != "" {
+			return Account{}, nil, nil, &httpError{status: http.StatusConflict, code: dailyReason, msg: dailyReason}
+		}
 		return Account{}, nil, nil, fail(http.StatusConflict, "no eligible account")
 	}
 	orderPicks(picks)
@@ -542,9 +604,22 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 	for i := range picks[0].windows {
 		w := &picks[0].windows[i]
 		if w.ID != "" {
+			if w.capacityKind == "fact" {
+				if _, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET used=$2,capacity_read_at=$3 WHERE id=$1`, w.ID, w.Used, w.capacityReadAt); err != nil {
+					return Account{}, nil, nil, err
+				}
+			}
 			continue
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_read_at,capacity_allowed,capacity_source,capacity_bucket) SELECT tenant_id,id,$2,$3,'percent',1,0,'unrestricted',0,$5,$4,true,'estimate',$6 FROM agent_accounts WHERE id=$1 RETURNING id::text`, w.AccountID, w.StartsAt, w.EndsAt, w.capacityReadAt, w.capacityKind, w.capacityBucket).Scan(&w.ID); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_read_at,capacity_allowed,capacity_source,capacity_bucket)
+ SELECT tenant_id,id,$2,$3,$7,$8,$9,'unrestricted',0,$5,$4,true,$10,$6 FROM agent_accounts WHERE id=$1
+ ON CONFLICT(tenant_id,account_id,capacity_kind,capacity_bucket,ends_at) WHERE capacity_kind IS NOT NULL
+ DO UPDATE SET used=EXCLUDED.used,capacity_read_at=EXCLUDED.capacity_read_at RETURNING id::text`, w.AccountID, w.StartsAt, w.EndsAt, w.capacityReadAt, w.capacityKind, w.capacityBucket, w.Unit, w.Allowance, w.Used, w.capacitySource).Scan(&w.ID); err != nil {
+			return Account{}, nil, nil, err
+		}
+	}
+	for _, w := range picks[0].windows {
+		if err := consumeRecovery(ctx, tx, run.ID, w.recoveryPermits); err != nil {
 			return Account{}, nil, nil, err
 		}
 	}

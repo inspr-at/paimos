@@ -93,6 +93,8 @@ export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMo
   let conflict = options.conflictNext
   await page.addInitScript(() => { (window as unknown as { printed: number }).printed = 0; window.print = () => { (window as unknown as { printed: number }).printed++ } })
   const handler = async (route: Route) => {
+    const firstEvent = world.events.length
+    const receipt = () => ({ 'X-Aeon-Event-Ids': world.events.slice(firstEvent).reverse().map(event => event.id).join(',') })
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), q = url.searchParams
     if (!path.startsWith('/api/quotes') || path === '/api/quotes/settings') return route.fallback()
     let body: Record<string, unknown> = {}
@@ -131,7 +133,7 @@ export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMo
       if (r.state !== 'draft' || r.current_version > 0) return route.fulfill({ status: 409, json: { error: 'only a draft that was never issued can be deleted; archive it instead' } })
       world.rows.splice(world.rows.indexOf(r), 1); r.revision++; world.deleted.set(qid, r)
       log(qid, 'quote.deleted', projection(r), { deleted: true, revision: r.revision })
-      return route.fulfill({ status: 204, body: '' })
+      return route.fulfill({ status: 204, headers: receipt(), body: '' })
     }
     if (rest === 'draft') {
       if (method === 'PATCH') {
@@ -170,14 +172,14 @@ export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMo
       const copy = row(id(100 + n), n, r.title, r.customer_org_node_id, r.customer_name, 'draft', r.net_total_cents, isoToday(), isoPlus(30), { revision: 1 })
       world.rows.push(copy); world.drafts.set(copy.quote_node_id, { document: structuredClone(draft.document), revision: 1 })
       log(copy.quote_node_id, 'quote.duplicated', null, { source_quote_node_id: qid, quote: projection(copy) })
-      return route.fulfill({ status: 201, json: projection(copy) })
+      return route.fulfill({ status: 201, headers: receipt(), json: projection(copy) })
     }
     if (rest === 'visibility' && method === 'PATCH') {
       if (body.expected_revision !== r.revision) return route.fulfill({ status: 409, json: { error: 'quote revision is stale' } })
       const was = r.archived
       r.archived = body.archived === true; r.revision++
       log(qid, 'quote.visibility_changed', { archived: was }, { archived: r.archived })
-      return route.fulfill({ json: projection(r) })
+      return route.fulfill({ headers: receipt(), json: projection(r) })
     }
     if (rest === 'profile' && method === 'PUT') {
       if (r.state !== 'draft' || r.archived) return route.fulfill({ status: 409, json: { error: 'quote is not editable' } })

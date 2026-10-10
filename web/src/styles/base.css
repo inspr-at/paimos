@@ -40,7 +40,7 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button, a { touch-action: manipulation; }
 button { cursor: pointer; }
 button:disabled { cursor: default; opacity: .55; }
-a { color: var(--teal); text-decoration: none; }
+a { color: var(--primary-ink); text-decoration: none; }
 svg { display: block; flex-shrink: 0; }
 h1, h2, h3, p { margin: 0; }
 h1 { font: 300 clamp(28px, 3.4vw, 36px)/1.1 var(--serif); letter-spacing: -.025em; text-wrap: balance; }
@@ -48,9 +48,9 @@ h2 { font: 500 19px/1.3 var(--serif); letter-spacing: -.01em; }
 p { color: var(--ink-2); }
 ::selection { background: var(--mark-hl); }
 
-/* Focus: the INSPR aqua glow instead of a hard outline. */
+/* Keyboard focus uses the opaque, contrast-safe line role, without a glow. */
 :focus { outline: none; }
-:focus-visible { outline: 2px solid transparent; box-shadow: var(--focus-ring); }
+:focus-visible { outline: 2px solid var(--primary-line); box-shadow: var(--focus-ring); }
 
 /* Monospace everywhere it is used: keys, eyebrows, labels, numbers. No code ligatures. */
 code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-family: var(--mono); font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
@@ -61,7 +61,7 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
 .muted { color: var(--ink-2); }
 .faint { color: var(--ink-3); }
 
-/* ---------- Buttons: glass pills and one luminous action ---------- */
+/* ---------- Buttons: glass pills and one primary action ---------- */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   height: 32px; padding: 0 14px; border: 1px solid var(--glass-edge); border-radius: 999px;
@@ -71,14 +71,20 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
 .btn:hover { background: var(--btn-bg-hover); box-shadow: var(--shadow-btn-hover); }
 .btn:active { background: var(--seg-on); box-shadow: var(--shadow-btn); transform: translateY(.5px); }
 .btn.primary {
-  color: #fff; border-color: transparent;
-  background: linear-gradient(180deg, #1a8683, #0e6f6c 60%, #0b5c59);
-  box-shadow: 0 0 0 1px rgba(14, 111, 108, .5), 0 10px 24px -10px rgba(14, 111, 108, .7), inset 0 1px 0 rgba(255, 255, 255, .35), 0 0 30px -8px rgba(164, 229, 223, .9);
+  color: var(--primary-on); border-color: transparent;
+  background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary-line) 50%, transparent), 0 6px 14px -8px color-mix(in srgb, var(--primary) 55%, transparent), inset 0 1px 0 var(--glass-edge);
 }
-.btn.primary:hover { filter: brightness(1.06); }
+.btn.primary:hover { filter: none; }
+.btn.primary .keycap { color: var(--primary-on); background: color-mix(in srgb, var(--primary-on) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary-on) 34%, transparent); }
 .btn.ghost { border-color: transparent; background: transparent; box-shadow: none; color: var(--teal-ink); }
 .btn.ghost:hover { background: var(--row-selected); }
 .btn.sm { height: 28px; padding: 0 11px; font-size: 12.5px; }
+/* A label that changes (Create → Creating…) reserves its widest form, so the
+   button keeps its label's width and its neighbours never move (AEON-730). */
+.btn-label { display: inline-grid; justify-items: center; }
+.btn-label > * { grid-area: 1 / 1; }
+.btn-label > [aria-hidden="true"] { visibility: hidden; }
 .btn.danger { color: var(--danger); }
 .btn[aria-pressed="true"], .btn.on { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--chip-teal-line); }
 
@@ -128,36 +134,37 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
 .switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; font-size: 13px; color: var(--ink-2); white-space: nowrap; user-select: none; }
 .switch input {
   appearance: none; position: relative; flex-shrink: 0; width: 34px; height: 20px; margin: 0; border-radius: 999px; cursor: pointer;
-  background: var(--track); box-shadow: inset 0 1px 3px rgba(32, 60, 61, .2);
+  background: var(--track); box-shadow: inset 0 1px 3px color-mix(in srgb, var(--shadow-color) 20%, transparent);
+  container-type: inline-size;
 }
 .switch input::after {
-  content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #fff, #eef5f3); box-shadow: 0 1px 3px rgba(32, 60, 61, .3);
+  content: ''; position: absolute; top: 2px; left: 2px; height: calc(100% - 4px); aspect-ratio: 1; border-radius: 50%;
+  background: var(--switch-knob); box-shadow: 0 1px 3px color-mix(in srgb, var(--shadow-color) 30%, transparent);
 }
-.switch input:checked { background: linear-gradient(90deg, #0e6f6c, #1a8683); box-shadow: 0 0 12px rgba(164, 229, 223, .6); }
-.switch input:checked::after { transform: translateX(14px); }
+.switch input:checked { background: linear-gradient(90deg, var(--primary), var(--primary-hi)); box-shadow: none; }
+.switch input:checked::after { background: var(--switch-knob); transform: translateX(calc(100cqw - 100% - 4px)); }
 /* Mixed: half the track and a centred knob. A full tint read as on in dark mode. */
 .switch input:indeterminate {
-  background: linear-gradient(90deg, #1a8683 0 50%, var(--track) 50% 100%);
-  box-shadow: inset 0 0 0 1px rgba(26, 134, 131, .85);
+  background: linear-gradient(90deg, var(--primary-hi) 0 50%, var(--track) 50% 100%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary-line) 85%, transparent);
 }
-.switch input:indeterminate::after { transform: translateX(7px); }
+.switch input:indeterminate::after { transform: translateX(calc((100cqw - 100% - 4px) / 2)); }
 .switch input:disabled { cursor: not-allowed; opacity: .45; }
 .switch:has(input:disabled) { cursor: not-allowed; }
 .switch input:focus-visible { box-shadow: var(--focus-ring); }
 
 /* Segmented control */
-.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--seg-bg); box-shadow: inset 0 1px 2px rgba(32, 60, 61, .08); }
+.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--seg-bg); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent); }
 .seg button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 26px; min-width: 28px; padding: 0 11px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
 @media (hover: hover) { .seg button:hover { color: var(--teal-ink); background: var(--row-hover); } }
 .seg button:active { background: var(--row-selected); }
 
-/* Keep the compact visual controls while giving fingers a full hit area. */
-@media (max-width: 600px) {
+/* Match ticket cards and touch tablets; expand hit areas without resizing controls. */
+@media (max-width: 720px), (pointer: coarse) {
   .btn, .icon-btn, .seg button, .row-menu-item, .status-btn,
   .title-link, .jump, .who, .res-key, .date-trigger, .link-btn,
   .ticket-chip, .more-link, .reach-link, .hours-chip, .prop-btn, .key-chip,
-  .project-link, .ekey, .journey-chip, .row-main {
+  .project-link, .ekey, .row-main, .twisty, .tier-mark {
     position: relative;
   }
   .btn::before, .icon-btn::before, .seg button::before, .row-menu-item::before,
@@ -166,7 +173,8 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
   .ticket-chip::before, .more-link::before, .reach-link::before,
   .hours-chip::before,
   .prop-btn::before, .key-chip::before, .project-link::before,
-  .ekey::before, .journey-chip::before, .row-main::before {
+  .ekey::before, .row-main::before,
+  .twisty::before, .tier-mark::before {
     content: '';
     position: absolute;
     top: 50%; left: 50%;
@@ -176,7 +184,7 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
   .switch { min-width: 44px; min-height: 44px; }
   .field { min-height: 44px; }
 }
-.seg button[aria-pressed="true"], .seg button[aria-checked="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px rgba(32, 60, 61, .12), inset 0 0 0 1px var(--glass-edge); }
+.seg button[aria-pressed="true"], .seg button[aria-checked="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--glass-edge); }
 .seg.icons button { padding: 0 7px; }
 
 /* Checkbox */
@@ -184,13 +192,19 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
   appearance: none; display: inline-grid; place-items: center; flex-shrink: 0; width: 16px; height: 16px; margin: 0; border-radius: 4px;
   background: var(--field-bg); box-shadow: inset 0 0 0 1px var(--line-2); cursor: pointer;
 }
-.check-box:checked { background: linear-gradient(180deg, #1a8683, #0e6f6c); box-shadow: inset 0 0 0 1px rgba(14, 111, 108, .6); }
-.check-box:checked::after { content: ''; width: 8px; height: 4.5px; border-left: 1.8px solid #fff; border-bottom: 1.8px solid #fff; transform: translateY(-1px) rotate(-45deg); }
-.check-box:focus-visible { box-shadow: 0 0 0 3px rgba(164, 229, 223, .6); }
+.check-box:checked { background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary-line) 60%, transparent); }
+.check-box:checked::after {
+  content: ''; width: 10px; height: 8px; background: var(--primary-on); transform: translateY(-1px);
+  /* A glyph, not an edge: the tick is masked ink in --primary-on. */
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 10'%3E%3Cpath d='M1.2 5.1 4.3 8.2 10.8 1.4' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 10'%3E%3Cpath d='M1.2 5.1 4.3 8.2 10.8 1.4' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain;
+}
+.check-box:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-tint) 60%, transparent); }
 
 /* Progress */
-.bar { position: relative; height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; box-shadow: inset 0 1px 2px rgba(32, 60, 61, .1); }
-.bar > i { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: linear-gradient(90deg, #0e6f6c, #a4e5df); box-shadow: 0 0 8px rgba(164, 229, 223, .7); }
+.bar { position: relative; height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-color) 10%, transparent); }
+.bar > i { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: linear-gradient(90deg, var(--primary), var(--primary-line)); box-shadow: none; }
 
 /* Popover surfaces */
 .pop {
@@ -219,11 +233,11 @@ mark { padding: 0 1px; border-radius: 3px; background: var(--mark-hl); color: in
 .icon-button:hover { background: var(--btn-bg-hover); color: var(--teal-ink); }
 .button {
   display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 10px 20px;
-  border: 1px solid transparent; border-radius: 999px; font-weight: 600; color: #fff;
-  background: linear-gradient(180deg, #1a8683, #0e6f6c 60%, #0b5c59);
-  box-shadow: 0 0 0 1px rgba(14, 111, 108, .5), 0 10px 24px -10px rgba(14, 111, 108, .6), inset 0 1px 0 rgba(255, 255, 255, .3);
+  border: 1px solid transparent; border-radius: 999px; font-weight: 600; color: var(--primary-on);
+  background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo));
+  box-shadow: 0 0 0 1px var(--primary-line), var(--shadow-btn);
 }
-.button:hover { filter: brightness(1.06); }
+.button:hover { filter: none; }
 .button.secondary { background: var(--btn-bg); color: var(--teal-ink); border-color: var(--glass-edge); box-shadow: var(--shadow-btn); }
 .button.secondary:hover { background: var(--btn-bg-hover); filter: none; }
 .glass-card {
