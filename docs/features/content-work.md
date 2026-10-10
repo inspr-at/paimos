@@ -33,3 +33,10 @@ aeon issue update EXAMPLE-12 --no-release-needed false
 boolean in node fields and write it with the existing revision-checked node
 mutation endpoints. Strings, numbers and null are rejected. Changing the mark
 does not alter the configured acceptance delay or release policy for software.
+
+
+Needs attention offers **No release needed** for a release reminder when the
+project has no current planning release. Applying it records the existing
+boolean without changing status, clears the reminder, and supports individual
+or bulk undo at the captured ticket revision. When a planning release exists,
+the existing release-membership action remains available.

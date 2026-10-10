@@ -3650,6 +3650,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestSessionCookieFlags","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestStatusAutopilotFullAccessAgentReadAllowlist","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestStatusHelpAgentMetadataAndIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestStatusHelpCustomerSessionDenied","tier":"ESSENTIAL"}
@@ -5759,6 +5761,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestMergeBackfillDeliveredNeedsPublishedMembership","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeBackfillPreviewApplyAndSafety","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeDoneAlreadyDoneRecordsEvidenceAndPreservesTicket","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeDoneOwnerFallbackWithoutLeadSettings","tier":"ESSENTIAL"}
     ,
@@ -9384,6 +9388,8 @@
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionUndoRequiresPermissionAndActorOwnership","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionWithoutPlanningReleaseMarksNoReleaseNeededAndUndoes","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAutopilotHumanCheckObjectionAndStaleUndo","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAutopilotTenantIsolation","tier":"ESSENTIAL"}
@@ -9403,6 +9409,10 @@
     {"kind":"go","package":"internal/statusautopilot","name":"TestGraceExpiryRescansWithinSameDay","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestHumanChecksPermitNonDeliveryDailyRules","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestInvalidMissedReleaseCleanupReplayAndUndo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestMissedReleaseUsesRecordedMergeEvidence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestMissingReleaseDoesNotPoisonDailyCursor","tier":"GATED-FULL"}
     ,

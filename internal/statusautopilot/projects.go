@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/jackc/pgx/v5"
@@ -42,7 +43,7 @@ func (m *Module) projects(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	out := projectSettingsPage{Items: []projectSetting{}}
 	err := db.InTenant(db.WithReadStatementTimeout(ctx, 8*time.Second), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := admin(ctx, tx, p); err != nil {
+		if err := authz.RequireTx(ctx, tx, p, "nodes.read", authz.Scope{AnyProject: true}); err != nil {
 			return err
 		}
 		s, err := Load(ctx, tx)

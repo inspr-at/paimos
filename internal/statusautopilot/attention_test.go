@@ -317,12 +317,13 @@ func TestAdditionalAttentionFencePreservesAuthenticationGuard(t *testing.T) {
 func TestAttentionMissedReleaseUsesPlanningMembershipAndUndo(t *testing.T) {
 	f := setup(t)
 	id := f.add("AUT-2", "work", "done", 15, nil)
+	f.merge(id, 15)
 	f.run(f.now)
 	initial := attentionRead(f, f.p, "")
-	if len(initial.Items) != 1 || initial.Items[0].Applicable || initial.Items[0].Unavailable == "" {
-		t.Fatalf("missing planning target %+v", initial)
+	if len(initial.Items) != 1 || !initial.Items[0].Applicable || initial.Items[0].To != "no_release_needed" {
+		t.Fatalf("missing no-release fallback %+v", initial)
 	}
-	release := f.release(nil)
+	release := planningAttentionRelease(f)
 	f.tx(func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='planning',released_at=NULL,version=NULL,version_scheme=NULL WHERE release_node_id=$1`, release); err != nil {
 			return err
@@ -504,7 +505,17 @@ func TestAttentionUndoRequiresPermissionAndActorOwnership(t *testing.T) {
 
 func planningAttentionRelease(f *fixture) string {
 	f.t.Helper()
-	release := f.release(nil)
+	var release string
+	f.tx(func(tx pgx.Tx) error {
+		err := tx.QueryRow(f.t.Context(), `SELECT release_node_id::text FROM journey_releases WHERE project_node_id=$1 ORDER BY number LIMIT 1`, f.project).Scan(&release)
+		if err == pgx.ErrNoRows {
+			return nil
+		}
+		return err
+	})
+	if release == "" {
+		release = f.release(nil)
+	}
 	f.tx(func(tx pgx.Tx) error {
 		if _, err := tx.Exec(f.t.Context(), `UPDATE journey_releases SET state='planning',released_at=NULL,version=NULL,version_scheme=NULL WHERE release_node_id=$1`, release); err != nil {
 			return err
@@ -518,7 +529,8 @@ func planningAttentionRelease(f *fixture) string {
 func TestAttentionBulkMissedReleaseSharesCapturedRevision(t *testing.T) {
 	f := setup(t)
 	for i := 2; i <= 4; i++ {
-		f.add(fmt.Sprintf("AUT-%d", i), "work", "done", 15, nil)
+		id := f.add(fmt.Sprintf("AUT-%d", i), "work", "done", 15, nil)
+		f.merge(id, 15)
 	}
 	f.run(f.now)
 	release := planningAttentionRelease(f)
@@ -551,7 +563,7 @@ func TestAttentionBulkMissedReleaseSharesCapturedRevision(t *testing.T) {
 
 func TestAttentionMissedReleaseApplyUndoApplyRefreshesIdentity(t *testing.T) {
 	f := setup(t)
-	f.add("AUT-2", "work", "done", 15, nil)
+	f.merge(f.add("AUT-2", "work", "done", 15, nil), 15)
 	f.run(f.now)
 	release := planningAttentionRelease(f)
 	in := attentionRead(f, f.p, "").Items[0].attentionInput
@@ -584,8 +596,8 @@ func TestAttentionMissedReleaseApplyUndoApplyRefreshesIdentity(t *testing.T) {
 
 func TestAttentionSharedReleaseBulkUndoUsesRefreshedFences(t *testing.T) {
 	f := setup(t)
-	f.add("AUT-2", "work", "done", 15, nil)
-	f.add("AUT-3", "work", "done", 15, nil)
+	f.merge(f.add("AUT-2", "work", "done", 15, nil), 15)
+	f.merge(f.add("AUT-3", "work", "done", 15, nil), 15)
 	f.run(f.now)
 	release := planningAttentionRelease(f)
 	items := attentionRead(f, f.p, "").Items
@@ -630,7 +642,7 @@ func TestAttentionReleaseUndoRejectsExternalProjectAndReleaseChanges(t *testing.
 	for _, table := range []string{"journey_projects", "journey_releases", "journey_tickets"} {
 		t.Run(table, func(t *testing.T) {
 			f := setup(t)
-			f.add("AUT-2", "work", "done", 15, nil)
+			f.merge(f.add("AUT-2", "work", "done", 15, nil), 15)
 			f.run(f.now)
 			release := planningAttentionRelease(f)
 			in := attentionRead(f, f.p, "").Items[0].attentionInput
