@@ -1276,9 +1276,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	relayAPI, relayable := s.api.(ChatRelayAPI)
 	// Advertise chat only for an S1-streaming harness the server's chat
-	// registration admits; person input additionally needs inbox delivery.
-	chatHarness := profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi || profile.Harness == Cursor || profile.Harness == Grok
-	if relayable && !verification && !review && chatHarness && sessionChatCapabilities(profile.Harness, caps).Deltas && s.chatGate.enabled() {
+	// registration admits and whose turns name the input they consume; person
+	// input additionally needs inbox delivery.
+	if relayable && !verification && !review && relayChatHarness(profile.Harness) && sessionChatCapabilities(profile.Harness, caps).Deltas && s.chatGate.enabled() {
 		caps = append(caps, chatCapability)
 	}
 	registration := HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB, AccountLabel: route.AccountLabel, DisplayLabel: run.RecoveryLabel}
@@ -1416,7 +1416,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		entry.mu.Lock()
 		entry.chat = newSessionChat(ChatBinding{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, Generation: s.generation, SessionID: entry.harness.ID}, sessionChatCapabilities(profile.Harness, caps))
 		if relayable && slices.Contains(caps, chatCapability) {
-			entry.relay = s.newChatRelay(relayAPI, entry, run.ID, profile.Harness)
+			entry.relay = s.newChatRelay(relayAPI, entry, run.ID)
 			entry.chat.attachRelay(entry.relay)
 			go entry.relay.Run(s.lifetime)
 		}

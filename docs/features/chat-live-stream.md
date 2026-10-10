@@ -60,8 +60,8 @@ migration or release version change is required for this server slice.
 ## Daemon relay (AEON-1074)
 
 agentd relays the chat of its own runs. A run whose harness supplies the S1
-stream and may hold a chat binding (Claude, Codex, Pi, Cursor or Grok)
-registers with the `chat` capability. The server's chat-only
+stream, may hold a chat binding and names the input each turn consumes
+(Claude, Codex, Cursor or Grok) registers with the `chat` capability. The server's chat-only
 registration check admits such a managed run, or an unmanaged registration with
 `inbox`, under the same conditions: the caller is the session's agent
 principal with its private worker lease, an owner person is set, and the
@@ -87,7 +87,7 @@ the run.
 Claude this is the SDK `result` of a successful turn. For Codex it is the last
 completed agent message of the owned turn, released by that turn's successful
 `turn/completed`; commentary-phase messages are skipped. Deltas are never
-assembled into a final. Pi and the ACP harnesses have no such marker, so their
+assembled into a final. Cursor and Grok have no such marker, so their
 runs deliver live frames only. Each final carries a client message ID derived from the session and
 stream sequence, so a retried final persists once.
 
@@ -99,11 +99,13 @@ Fetching or queueing an input is no evidence, nor is a turn another input
 started while this write waited. If no turn starts within two
 minutes, the input stays `sent`. Person read evidence remains the read markers.
 
-Receipts come only from harnesses whose turn start names the input it
-consumes: Claude, Codex, and the ACP harnesses (Cursor, OpenCode, Gemini,
-Grok). Pi's turn markers do not say which queued input started a turn, so Pi
-inputs are written but stay `sent`; Aeon never guesses. The same holds for any
-harness added later until it gains such a marker.
+**Pi** is not relayed. Its turn markers do not say which queued input started
+a turn, so agentd neither advertises `chat` for a Pi run nor writes person
+chat input to it; its chat has no live view, as with a daemon that predates
+the relay. Ordinary
+inbox and steering input to Pi works as before. Live chat for Pi follows in
+AEON-1095. The same holds for any harness added later until its turn start
+names the input it consumes.
 
 ## Upgrade order and reverse proxies
 

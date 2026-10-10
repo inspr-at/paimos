@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -415,8 +416,7 @@ func TestChatRelayReceiptsFollowExplicitTurnMarkers(t *testing.T) {
 	var settledMu sync.Mutex
 	var settled []string
 	r := NewChatRelay(api, HarnessSession{ID: "session", Lease: "lease"}, ChatRelayOptions{
-		After:    func(time.Duration) <-chan time.Time { return ticks },
-		Receipts: true,
+		After: func(time.Duration) <-chan time.Time { return ticks },
 		Now: func() time.Time {
 			clockMu.Lock()
 			defer clockMu.Unlock()
@@ -711,8 +711,7 @@ func TestChatRelayReceiptsNeedAConfirmedWrite(t *testing.T) {
 	entered := make(chan string, 2)
 	release := make(chan error)
 	r := NewChatRelay(api, HarnessSession{ID: "session", Lease: "lease"}, ChatRelayOptions{
-		After:    func(time.Duration) <-chan time.Time { return ticks },
-		Receipts: true,
+		After: func(time.Duration) <-chan time.Time { return ticks },
 		Deliver: func(_ context.Context, id, _ string, writing func()) error {
 			writing()
 			entered <- id
@@ -823,38 +822,82 @@ func TestChatReceiptsIgnoreTurnsBeforeTheInputWriteBegins(t *testing.T) {
 	}
 }
 
-// waitingChatProcess holds each write after it began, like Pi's get_state
-// check before its prompt: the harness may start other work meanwhile.
-type waitingChatProcess struct {
-	*fakeProcess
-	entered chan struct{}
-	release chan struct{}
-}
-
-func (p *waitingChatProcess) Control(ctx context.Context, op, text string) error {
-	p.entered <- struct{}{}
-	<-p.release
-	return p.fakeProcess.Control(ctx, op, text)
-}
-
-// chatReceiptsFor writes one chat input to an owned run of harness and
-// returns the receipts the relay reported. With race, a turn for earlier
-// queued input starts and completes while the write waits; the input's own
-// turn always follows the confirmed write.
-func chatReceiptsFor(t *testing.T, harness string, race bool) (receipts []string, journaled bool) {
-	t.Helper()
+// Risk: Pi's turn markers carry no input identity, so a relayed Pi chat input
+// could only stay unsettled; its chat:<id> journal entries then filled the
+// shared 240 control replay slots and ordinary inbox input was refused.
+func TestPiRunHasNoChatRelayAndKeepsOrdinaryInput(t *testing.T) {
 	relay := newFakeRelayAPI()
 	relay.inputs = []ChatInput{chatInput("m1", "sent")}
 	api := &relaySupervisorAPI{fakeAPI: &fakeAPI{}, relay: relay}
 	var logged []string
-	p := &waitingChatProcess{fakeProcess: &fakeProcess{stopped: make(chan struct{})}, entered: make(chan struct{}), release: make(chan struct{})}
-	s := relaySupervisorFor(t, api, &logged, harness, p.fakeProcess, &relayHarnessAdapter{name: harness, proc: p})
+	p := &fakeProcess{stopped: make(chan struct{})}
+	s := relaySupervisorFor(t, api, &logged, Pi, p, &relayHarnessAdapter{name: Pi, proc: p})
+	if err := s.PollOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	api.mu.Lock()
+	caps := append([]string(nil), api.harnessCaps...)
+	api.mu.Unlock()
+	entry := s.runs["run"]
+	if slices.Contains(caps, chatCapability) || entry.relay != nil {
+		t.Fatalf("Pi run advertised the chat relay: %v", caps)
+	}
+	if !slices.Contains(caps, "inbox") || !slices.Contains(caps, "steer") {
+		t.Fatalf("Pi run lost ordinary input: %v", caps)
+	}
+	idle := chatState("idle")
+	s.observe(entry, AdapterEvent{Chat: &idle})
+	const inputs = 300 // beyond the 240 control replay slots
+	for i := range inputs {
+		api.mu.Lock()
+		api.harnessDeliveries = []HarnessDelivery{{ID: fmt.Sprintf("delivery-%d", i), Cursor: int64(i + 1), Body: "ordinary input"}}
+		api.mu.Unlock()
+		if err := s.serviceHarness(t.Context(), entry); err != nil {
+			t.Fatalf("input %d: %v", i, err)
+		}
+	}
+	p.mu.Lock()
+	written := p.calls
+	p.mu.Unlock()
+	api.mu.Lock()
+	completed := api.harnessDeliveryCompletions
+	api.mu.Unlock()
+	if written != inputs || completed != inputs {
+		t.Fatalf("ordinary input: written %d completed %d of %d", written, completed, inputs)
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	for id := range entry.record.Controls {
+		if strings.HasPrefix(id, "chat:") {
+			t.Fatalf("Pi run journaled chat input %s", id)
+		}
+	}
+	select {
+	case call := <-relay.calls:
+		t.Fatalf("Pi run reached the chat relay: %s", call)
+	default:
+	}
+}
+
+// Risk: excluding Pi also stopped harnesses whose turn start identifies the
+// consuming input from relaying input and settling its journal entry.
+func TestExactTurnHarnessRelaysAndSettles(t *testing.T) {
+	for harness, want := range map[string]bool{Claude: true, Codex: true, Cursor: true, Grok: true, Pi: false, OpenCode: false, Gemini: false, "": false} {
+		if relayChatHarness(harness) != want {
+			t.Errorf("relayChatHarness(%q) = %v", harness, !want)
+		}
+	}
+	relay := newFakeRelayAPI()
+	relay.inputs = []ChatInput{chatInput("m1", "sent")}
+	api := &relaySupervisorAPI{fakeAPI: &fakeAPI{}, relay: relay}
+	var logged []string
+	s, p := relaySupervisor(t, api, &logged)
 	if err := s.PollOnce(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	entry := s.runs["run"]
 	if entry.relay == nil {
-		t.Fatalf("%s run without relay", harness)
+		t.Fatal("Codex run without relay")
 	}
 	waitCall(t, relay.calls, "lookup")
 	state := func(st string) {
@@ -862,66 +905,33 @@ func chatReceiptsFor(t *testing.T, harness string, race bool) (receipts []string
 		s.observe(entry, AdapterEvent{Chat: &u})
 	}
 	state("idle")
-	select {
-	case <-p.entered: // the write began and now waits
-	case <-time.After(10 * time.Second):
-		t.Fatal("chat input never written")
-	}
-	if race {
-		state("running")
-		state("idle")
-	}
-	p.release <- struct{}{}
+	eventually(t, "chat input written", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.calls == 1
+	})
 	eventually(t, "chat write confirmed", func() bool {
 		entry.relay.mu.Lock()
 		defer entry.relay.mu.Unlock()
-		in := entry.relay.input // a completed race turn already released it
-		return in == nil || in.written
+		return entry.relay.input != nil && entry.relay.input.written
 	})
-	// The input's own turn.
 	state("running")
 	state("idle")
-	// Receipts go before queued items, so the final proves none is pending.
 	final := chatFinal("own final")
 	s.observe(entry, AdapterEvent{Chat: &final})
 	waitCall(t, relay.calls, "final")
 	relay.mu.Lock()
-	receipts = append([]string(nil), relay.receipts...)
+	receipts := append([]string(nil), relay.receipts...)
 	relay.mu.Unlock()
-	entry.mu.Lock()
-	_, journaled = entry.record.Controls["chat:m1"]
-	entry.mu.Unlock()
-	return receipts, journaled
-}
-
-// Risk: Pi's turn markers carry no input identity, so a turn for earlier
-// queued input (even one that starts during the get_state wait) was reported
-// as this message's delivered/read receipt.
-func TestPiChatInputNeverReportsReceipts(t *testing.T) {
-	for _, race := range []bool{true, false} {
-		receipts, journaled := chatReceiptsFor(t, Pi, race)
-		if len(receipts) != 0 {
-			t.Fatalf("race %v: Pi reported receipts %v", race, receipts)
-		}
-		// It stays "sent"; the replay digest keeps a restart from re-writing it.
-		if !journaled {
-			t.Fatalf("race %v: Pi chat input left the replay journal without settlement", race)
-		}
-	}
-}
-
-// Risk: cutting Pi's receipts also silenced harnesses whose turn start
-// identifies the consuming input exactly.
-func TestExactTurnHarnessStillReportsReceipts(t *testing.T) {
-	receipts, _ := chatReceiptsFor(t, Codex, false)
 	if !reflect.DeepEqual(receipts, []string{"m1:delivered", "m1:read"}) {
 		t.Fatalf("Codex receipts %v", receipts)
 	}
-	for harness, want := range map[string]bool{Claude: true, Codex: true, Cursor: true, OpenCode: true, Gemini: true, Grok: true, Pi: false, "": false} {
-		if exactChatTurns(harness) != want {
-			t.Errorf("exactChatTurns(%q) = %v", harness, !want)
-		}
-	}
+	eventually(t, "settled chat input leaves the replay journal", func() bool {
+		entry.mu.Lock()
+		defer entry.mu.Unlock()
+		_, journaled := entry.record.Controls["chat:m1"]
+		return !journaled
+	})
 }
 
 // Risk: a valid 64 KiB person message whose JSON envelope exceeds the inbox

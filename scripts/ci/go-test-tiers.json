@@ -1462,7 +1462,7 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestExactCapacityBinaryRejectsRestoredMtime","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/agentd","name":"TestExactTurnHarnessStillReportsReceipts","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/agentd","name":"TestExactTurnHarnessRelaysAndSettles","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestExitFlushesOwnedMetadataBeforeStop","tier":"GATED-FULL"}
     ,
@@ -1698,8 +1698,6 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPiAdapterPublishesUsageFromOwnedWire","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/agentd","name":"TestPiChatInputNeverReportsReceipts","tier":"ESSENTIAL"}
-    ,
     {"kind":"go","package":"internal/agentd","name":"TestPiHeldQueueRefusesOtherGeneration","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPiKeyMeasurementFailuresKeepQualifiedExecutionHealth","tier":"GATED-FULL"}
@@ -1711,6 +1709,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestPiProbeLockIsPerAccount","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPiRPCStateAndSteer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPiRunHasNoChatRelayAndKeepsOrdinaryInput","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPiUsageAccumulatesCompletedMessagesPerModel","tier":"GATED-FULL"}
     ,
