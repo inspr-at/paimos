@@ -265,7 +265,15 @@ type seenMarker struct {
 	Next         *string     `json:"next_cursor"`
 	Revision     string      `json:"revision"`
 	Epoch        string      `json:"migration_epoch"`
+	notify       string
 }
+
+func (s seenMarker) afterCommit(m *Module) {
+	if s.notify != "" {
+		_, _ = m.live.publish(s.notify, "", "", 0, map[string]string{"type": "read_marker"})
+	}
+}
+
 type chunkRow struct {
 	index int64
 	bits  []byte
@@ -409,5 +417,9 @@ func (m *Module) unionSeen(r *http.Request, tx pgx.Tx, p tenant.Principal, in se
 			return nil, err
 		}
 	}
-	return marker(r.Context(), tx, c, 0, 64)
+	out, err := marker(r.Context(), tx, c, 0, 64)
+	if changed {
+		out.notify = liveKey(p.TenantID, c.Thread)
+	}
+	return out, err
 }
