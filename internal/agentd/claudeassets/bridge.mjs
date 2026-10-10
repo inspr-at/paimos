@@ -13,6 +13,8 @@ const [, , sdkPath, claudePath, workspace] = process.argv;
 const MAX_INPUT_FRAME_BYTES = 8 * 1024 * 1024;
 const MAX_PROMPT_BYTES = 256 * 1024;
 const MAX_STEER_BYTES = 64 * 1024;
+// Mirrors agentd's inboxTextLimit: a 64 KiB person message after JSON escaping.
+const MAX_INBOX_BYTES = 7 * 64 * 1024;
 const MAX_PENDING_STEERS = 256;
 const CORRELATION_TTL_MS = 60 * 1000;
 const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;
@@ -326,6 +328,19 @@ function observeChat(message) {
   }
 }
 
+// The final answer comes only from the SDK's own turn result record, never
+// from assembled deltas. Reviews and pairing verification are not chat.
+function observeChatFinal(message) {
+  if (start.purpose === "pairing_verification" || start.read_only_review === true) return;
+  if (message?.subtype !== "success" || message.is_error === true || message.parent_tool_use_id) return;
+  const text = message.result;
+  if (typeof text !== "string" || text.length === 0 || Buffer.byteLength(text) > 65536 || text.includes("\0")) {
+    emit({ kind: "chat_dropped" });
+    return;
+  }
+  emit({ kind: "chat_final", text });
+}
+
 // Project only the documented quota fields. Never forward arbitrary SDK data.
 let lastCapacity = null;
 let lastCapacityAt = "";
@@ -478,7 +493,7 @@ const handleControlLine = (line) => {
       if (request.op === "steer" || request.op === "inbox") {
         expireCorrelations();
         if (typeof request.text !== "string" || request.text.length === 0 ||
-            Buffer.byteLength(request.text) > MAX_STEER_BYTES || request.text.includes("\0") || (request.op === "steer" && !interruptReceipt)) {
+            Buffer.byteLength(request.text) > (request.op === "inbox" ? MAX_INBOX_BYTES : MAX_STEER_BYTES) || request.text.includes("\0") || (request.op === "steer" && !interruptReceipt)) {
           fail("app_server_protocol", correlationID);
           return;
         }
@@ -661,6 +676,7 @@ try {
     observeChat(message);
     if (message?.type === "result") {
       turnActive = false;
+      observeChatFinal(message);
       finishCapacity();
       const tokens = observeUsage(message);
       completedTurns++;

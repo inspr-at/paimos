@@ -841,7 +841,7 @@ components:
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
         work_shape: {type: string, enum: [unknown, ship, scout]}
-        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, pause, owned_stop_v1, status, steer, interrupt, stop, managed_control_v1, session_recovery_v1, rename, model, effort, service_tier_v1]}}
+        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, pause, owned_stop_v1, status, steer, interrupt, stop, managed_control_v1, session_recovery_v1, rename, model, effort, service_tier_v1, chat]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         vendor_session_ref:
           type: string
