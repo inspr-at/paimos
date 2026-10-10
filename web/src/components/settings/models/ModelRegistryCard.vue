@@ -9,6 +9,7 @@ import { createScope, scopeOwner } from '../../../lib/identityScope'
 import { toast } from '../../../lib/toast'
 import { listWorkKinds } from '../../../lib/workKinds'
 import { useSession } from '../../../stores/session'
+import { PERMISSION, readMatrix } from '../../../lib/accountUse'
 import {
   RegistryError, REMOVED_REASON, UNDONE_REASON, addLine, buildLines, changeOf, checkNow, checkReport, cooldownLabel, draftOf, draftsMatch, editLine, emptyDraft, getRefreshStatus, hasErrors, intervalLabel, lastChecked, lineWriteOf,
   listProfiles, metaParts, modelSlug, previewRemoval, putRefreshSettings, removalText, removeLine, restoreLine, shortDate, snapshotFromUsage, splitLevels, validateDraft,
@@ -26,6 +27,8 @@ const readable = computed(() => session.authenticationCurrent() && can('models.r
 const isPerson = computed(() => session.authenticationCurrent() && session.identity?.principal.kind === 'person')
 const manageable = computed(() => isPerson.value && can('models.manage'))
 const refreshable = computed(() => isPerson.value && can('models.refresh'))
+// Auto-update is the "New model versions" switch of the account matrix (AEON-1054).
+const autoManageable = computed(() => manageable.value && can(PERMISSION))
 // The scope belongs to a person who may read models; it changes when the person, the workspace or that access does.
 const scopeKey = computed(() => readable.value ? owner.value : '')
 const scope = createScope(() => scopeKey.value)
@@ -83,13 +86,14 @@ const cooldownText = computed(() => cooldownLabel(Math.max(0, (cooldownUntil.val
 
 function toggleAuto() {
   const current = status.value
-  if (!current || autoBusy.value || !manageable.value) return
+  if (!current || autoBusy.value || !autoManageable.value) return
   const next = { ...current.settings, auto_add_profiles: !current.settings.auto_add_profiles }
   autoBusy.value = true; stripError.value = ''
-  // The switch moves at once; a failed save puts it back and says so.
+  // The switch moves at once; a failed save puts it back and says so. The
+  // matrix revision is read first, so a competing rule change answers 409.
   status.value = { ...current, settings: next }
-  void scope.run(({ after }) => after(putRefreshSettings(next), saved => { if (status.value) status.value = { ...status.value, settings: saved } }), {
-    failed: () => { if (status.value) status.value = { ...status.value, settings: current.settings }; stripError.value = 'Auto-update could not be changed. Try again.' },
+  void scope.run(({ after, signal }) => after(readMatrix(signal, { limit: 1 }), matrix => after(putRefreshSettings(next, matrix.rules.revision), saved => { if (status.value) status.value = { ...status.value, settings: saved } })), {
+    failed: error => { if (status.value) status.value = { ...status.value, settings: current.settings }; stripError.value = error instanceof RegistryError && error.status === 409 ? 'Someone changed the New model versions rule meanwhile. Nothing was saved; try again.' : 'Auto-update could not be changed. Try again.' },
     settled: () => { autoBusy.value = false },
   })
 }
@@ -304,7 +308,7 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose(); stopTicker() })
     </header>
 
     <div v-if="readable" class="reg-strip" data-reg-strip>
-      <label v-if="manageable && status" class="switch reg-switch"><input type="checkbox" role="switch" data-reg-auto :checked="autoOn" :aria-busy="autoBusy" @change="toggleAuto"><span>Auto-update</span></label>
+      <label v-if="manageable && status" class="switch reg-switch" :data-tip="autoManageable ? undefined : 'Owners and admins change this as New model versions in Settings under Accounts and computers.'"><input type="checkbox" role="switch" data-reg-auto :checked="autoOn" :disabled="!autoManageable" :aria-busy="autoBusy" @change="toggleAuto"><span>Auto-update</span></label>
       <p v-if="stripError" class="reg-text reg-text-error" role="alert"><AppIcon name="alert" :size="14" />{{ stripError }}</p>
       <p v-else class="reg-text" data-reg-when>{{ stripText }}</p>
       <span class="reg-grow" />
