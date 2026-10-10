@@ -105,7 +105,9 @@ on build-6 (`TestMergeDone` included). The merge-main static gate returned 0
 (41 checks passed, no optional skips). No origin push and no live backfill.
 
 
-Recorded delivery merges also persist `fields.merged_at`. Status autopilot reads
+Recorded delivery merges also persist `fields.merged_at`. Already-Done leaves
+record this evidence without changing their state, other fields, marks or human
+checks; replay of the same merge does not write again. Status autopilot reads
 `delivery.merge_done` metadata for its merge clock, including historical events;
 editable fields and imported Done timestamps are not merge evidence. Classic
 history is skipped. Done without a recorded merge is never a missed release,

@@ -156,7 +156,7 @@ paths:
     get:
       operationId: listAutopilotProjects
       summary: Project overrides or inheriting projects, 50 per keyset page
-      description: Workspace settings.manage required. Only visible live projects are returned; inherited_count counts visible projects following the workspace. Search and cursor are bounded; reads have a ten-second deadline.
+      description: "nodes.read required, including for agent keys. Only visible live projects are returned; inherited_count counts visible projects following the workspace. Search and cursor are bounded; reads have a ten-second deadline."
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: mode, in: query, schema: {type: string, enum: [overrides, inherit], default: overrides}}
@@ -185,7 +185,7 @@ paths:
                         title: {type: string}
                         override: {$ref: '#/components/schemas/StatusAutopilotOverride'}
         '400': {description: "Invalid mode, search or cursor"}
-        '403': {description: Workspace settings.manage required}
+        '403': {description: "nodes.read required"}
   /status-autopilot/proposals:
     get:
       operationId: listStatusAutopilotProposals
