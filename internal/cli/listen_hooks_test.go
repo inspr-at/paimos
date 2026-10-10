@@ -32,6 +32,8 @@ func hookListenServer(t *testing.T, fn http.HandlerFunc) *httptest.Server {
 		switch r.URL.Path {
 		case "/api/kinds":
 			fmt.Fprint(w, `{"items":[{"id":"00000000-0000-4000-8000-000000000001","slug":"project"}]}`)
+		case "/api/projects/lookup":
+			fmt.Fprint(w, `{"id":"`+hookProjectID+`","key":"AEON-1","title":"AEON","state":"active"}`)
 		case "/api/nodes":
 			fmt.Fprint(w, `{"items":[{"id":"`+hookProjectID+`","kind_id":"00000000-0000-4000-8000-000000000001","key":"AEON-1","fields":{"project_key":"AEON"}}]}`)
 		case "/api/me":
