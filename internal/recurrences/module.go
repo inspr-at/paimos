@@ -182,7 +182,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		template, _ := json.Marshal(in.Template)
 		trigger, _ := json.Marshal(in.Trigger)
 		out, err = scanRecurrence(tx.QueryRow(r.Context(), `INSERT INTO recurrences(tenant_id,project_id,parent_id,template,trigger,queue_each,overlap_policy,catch_up_policy,next_at,event_cursor,created_by_principal_id,created_at,updated_at,active_since)
-   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,(SELECT coalesce(max(id),0) FROM events),$10,$11,$11,$11) RETURNING `+recurrenceColumns, p.TenantID, in.ProjectID, in.ParentID, template, trigger, in.QueueEach, in.OverlapPolicy, in.CatchUpPolicy, next, p.ID, now))
+   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,(SELECT coalesce(max(id),0) FROM events WHERE ($5::jsonb->>'kind'='event' AND $5::jsonb->>'event'<>'release.published') OR type='release.published'),$10,$11,$11,$11) RETURNING `+recurrenceColumns, p.TenantID, in.ProjectID, in.ParentID, template, trigger, in.QueueEach, in.OverlapPolicy, in.CatchUpPolicy, next, p.ID, now))
 		if err != nil {
 			return err
 		}
@@ -333,7 +333,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			if err = tx.QueryRow(r.Context(), `SELECT coalesce(max(id),0) FROM events`).Scan(&cursor); err != nil {
+			if err = tx.QueryRow(r.Context(), `SELECT coalesce(max(id),0) FROM events WHERE ($1='event' AND $2<>'release.published') OR type='release.published'`, in.Trigger.Kind, in.Trigger.Event).Scan(&cursor); err != nil {
 				return err
 			}
 		}
@@ -402,7 +402,7 @@ func (m *Module) setPaused(w http.ResponseWriter, r *http.Request, paused, retir
 			if err != nil {
 				return err
 			}
-			if err = tx.QueryRow(r.Context(), `SELECT coalesce(max(id),0) FROM events`).Scan(&cursor); err != nil {
+			if err = tx.QueryRow(r.Context(), `SELECT coalesce(max(id),0) FROM events WHERE ($1='event' AND $2<>'release.published') OR type='release.published'`, before.Trigger.Kind, before.Trigger.Event).Scan(&cursor); err != nil {
 				return err
 			}
 		}
