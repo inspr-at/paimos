@@ -70,8 +70,8 @@ fence, marks the run `ownership_lost`, and records `run.stale_hold_released`
 with the action ID. A `work_lifecycle_release.exit_unconfirmed` trace marker
 retains the writer fence even for runs without a durable assignment. Only a
 finished exit report from the same authorized daemon clears it. It preserves
-daemon ownership, launch uncertainty and all
-capacity/accounting holds so a later owned executor can reconcile. It never
+daemon ownership, launch uncertainty and all capacity/accounting holds so a
+later owned executor can reconcile. It never
 reports process exit or makes an uncertain writer eligible for takeover.
 A standalone running order with no reporting generation or run retains a
 two-hour hold from its last update and then settles through the same action,
@@ -88,7 +88,10 @@ Caller audit: `aeon_work_busy`, lifecycle completion and handover delivery use
 `aeon_work_session_stopped` deliberately remains confirmed-exit proof for SQL
 binding/rebinding guards, lead succession and worker-yield checkpoints, plan
 capacity, writer admission, escalation and the confirm-exit endpoint. Those
-safety gates must not accept age as evidence of process exit.
+safety gates must not accept age as evidence of process exit. Release pairing
+requires migration `1330_stale_work_holds.sql` with the new lifecycle and
+telemetry code; the pinned migration exception retains the coordinator's
+independent review and previous-binary compatibility gates.
 
 Integration seams: AEON-655's work surfaces can supply `is_leaf` to the shared
 queue helper; this package also accepts the existing estimate's `is_parent`
