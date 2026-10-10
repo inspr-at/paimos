@@ -4050,7 +4050,13 @@
     ,
     {"kind":"go","package":"internal/chat","name":"TestBindingVersusRevocationUsesFinalAccessFence","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/chat","name":"TestChatLiveFiftyHTTPViewersReleaseDatabaseBeforeWrite","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/chat","name":"TestChatLiveFiftyThreadsRemainBounded","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/chat","name":"TestChatLiveObsoleteBindingReplayRequestsResync","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/chat","name":"TestChatLiveTenantCapacityAndIdleEviction","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/chat","name":"TestChatLiveViewersReplayFinalOnlyAndReceipts","tier":"ESSENTIAL"}
     ,
