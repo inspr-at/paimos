@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -199,6 +200,12 @@ func mirrorFixture(t *testing.T, commit string) string {
 // byte limits, full-tree guard and the denied network transport stay real.
 func simulatedReadOnly(*os.File) bool { return true }
 
+// SimulateReadOnlyMirrorForTest exposes only the statfs seam to external
+// integration tests. Marker validation and tenant authorization remain real.
+func SimulateReadOnlyMirrorForTest(m *Module) {
+	m.credentials.mirrorReadOnly = simulatedReadOnly
+}
+
 func TestDoctrineHostMirrorBoundary(t *testing.T) {
 	for _, scenario := range []string{"read", "missing marker", "garbled marker", "symlink escape", "marker symlink", "writable mount", "tenant denied", "wrong repository", "oversized tree", "stale pin"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -378,5 +385,149 @@ func TestDoctrineHostDefaultPreservesTokenFileSource(t *testing.T) {
 	kept := find(f.layer(owner, "GET", "/api/rules/doctrine", nil), privateRepository)
 	if initial == nil || kept == nil || kept.ID != initial.ID || kept.Commit != privateSHA || kept.CredentialRef != ref || len(kept.Paths) != 1 || kept.Paths[0] != paths[0] || kept.State != "ready" || forge.minted != 0 {
 		t.Fatal("host default altered a tenant's token-file source")
+	}
+}
+
+// Risk: routine host exports could take down every catalog consumer, even
+// though the indexed pin remains authorized. A stale guard must still refuse
+// public proposals, and actual grant or mirror failures must hide the cache.
+func TestDoctrineHostMirrorPinnedCatalogSurvivesMarkerAdvance(t *testing.T) {
+	d := dbtest.Open(t)
+	m := New(d.App, Options{MirrorDir: mirrorFixture(t, privateSHA), GuardKey: testGuardMaster(), DefaultSource: true})
+	m.credentials.mirrorReadOnly = simulatedReadOnly
+	mux := http.NewServeMux()
+	m.Mount(mux)
+	f := doctrineFixture{t: t, d: d, mux: mux}
+	tid := f.tenant("mirror-pinned-delivery")
+	m.app.TenantID = tid
+	allowCredential(t, m.credentials.MirrorDir, "host-mirror", tid, privateRepository)
+	owner := f.principal(tid, "person", "owner", "admin", nil, "")
+	if err := m.EnsureDefaultSource(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(t.Context(), catalogCredentialsKey{}, m.credentials)
+	catalog := func() (Catalog, error) {
+		t.Helper()
+		var cat Catalog
+		err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+			var err error
+			cat, err = LoadCatalog(ctx, tx)
+			return err
+		})
+		return cat, err
+	}
+	initial, err := catalog()
+	if err != nil || len(initial.Releases) != 1 || len(initial.Rules) != 1 || initial.Releases[0].Commit != privateSHA {
+		t.Fatalf("initial catalog: %+v err=%v", initial, err)
+	}
+	tree := filepath.Join(m.credentials.MirrorDir, privateRepository)
+	if err := os.WriteFile(filepath.Join(tree, "docs/AGENTS-KERNEL.md"), []byte("# Kernel\n\n## Safety\n\n- A rule only available at the new host commit.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tree, mirrorMarker), []byte(nextCommit+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := catalog()
+	if err != nil {
+		t.Fatalf("marker advance interrupted pinned catalog delivery: %v", err)
+	}
+	if len(stale.Releases) != 1 || stale.Releases[0].Commit != privateSHA || !slices.Equal(stale.Rules, initial.Rules) {
+		t.Fatalf("marker advance changed the authorized indexed pin: %+v", stale)
+	}
+	if pointer := stale.Pointer(); !strings.Contains(pointer, privateSHA) || !strings.Contains(pointer, "stale") || strings.Contains(pointer, nextCommit) {
+		t.Fatalf("delivery did not mark the pinned release stale: %q", pointer)
+	}
+	visible := find(f.layer(owner, "GET", "/api/rules/doctrine", nil), privateRepository)
+	if visible == nil || visible.State != "ready" || visible.Commit != privateSHA || len(visible.Files) != 1 || len(visible.Files[0].Rules) != 1 || !strings.Contains(visible.Error, "stale") || visible.Files[0].Rules[0].Text != initial.Rules[0].Text {
+		t.Fatalf("visible index lost or mislabeled the stale pin: %+v", visible)
+	}
+	if err := db.InTenant(t.Context(), d.App, tid, func(tx pgx.Tx) error {
+		guard, err := m.privateGuard(t.Context(), tx, owner)
+		var failure *failure
+		if guard != nil || !errors.As(err, &failure) || failure.Code != "private_index_unavailable" {
+			t.Fatalf("stale private guard did not fail closed: guard=%v err=%v", guard, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, denied := range []string{"revoked grant", "invalid marker", "writable mount"} {
+		t.Run(denied, func(t *testing.T) {
+			allowCredential(t, m.credentials.MirrorDir, "host-mirror", tid, privateRepository)
+			if err := os.WriteFile(filepath.Join(tree, mirrorMarker), []byte(nextCommit+"\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			m.credentials.mirrorReadOnly = simulatedReadOnly
+			switch denied {
+			case "revoked grant":
+				allowCredential(t, m.credentials.MirrorDir, "host-mirror", credentialTenantB, privateRepository)
+			case "invalid marker":
+				if err := os.WriteFile(filepath.Join(tree, mirrorMarker), []byte("invalid\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			case "writable mount":
+				m.credentials.mirrorReadOnly = func(*os.File) bool { return false }
+			}
+			ctx = context.WithValue(t.Context(), catalogCredentialsKey{}, m.credentials)
+			cat, err := catalog()
+			if err == nil || len(cat.Releases) != 0 || len(cat.Rules) != 0 {
+				t.Fatalf("%s exposed cached doctrine: %+v err=%v", denied, cat, err)
+			}
+		})
+	}
+}
+
+// Risk: reindexing a person's public source could perform host-owned work for
+// another tenant, or fail and disclose host state when default setup is broken.
+func TestDoctrineReindexIsolatesHostDefaultFailures(t *testing.T) {
+	for _, scenario := range []string{"other tenant", "host grant missing", "host installation unavailable"} {
+		t.Run(scenario, func(t *testing.T) {
+			d := dbtest.Open(t)
+			m, forge := readAppModule(t)
+			m.pool = d.App
+			forge.reader.commit(fixtureRepo, fixtureCommit, fixtureFiles(), "main")
+			mux := http.NewServeMux()
+			m.Mount(mux)
+			f := doctrineFixture{t: t, d: d, mux: mux, fake: forge.reader}
+			hostTenant := f.tenant("reindex-host")
+			m.app.TenantID = hostTenant
+			tid := hostTenant
+			if scenario == "other tenant" {
+				tid = f.tenant("reindex-other")
+			}
+			allowCredential(t, m.credentials.Dir, "app-key", hostTenant, privateRepository)
+			owner := f.principal(tid, "person", "owner", "admin", nil, "")
+			source := find(f.layer(owner, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: fixtureRepo, Visibility: "public", Ref: "main"}), fixtureRepo)
+			if source == nil || source.State != "ready" {
+				t.Fatalf("public fixture not indexed: %+v", source)
+			}
+			switch scenario {
+			case "host grant missing":
+				allowCredential(t, m.credentials.Dir, "app-key", credentialTenantB, privateRepository)
+			case "host installation unavailable":
+				forge.missingInstallation = true
+			}
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			defer slog.SetDefault(previous)
+			refreshed := find(f.layer(owner, "POST", "/api/rules/doctrine/sources/"+source.ID+"/index", nil), fixtureRepo)
+			if refreshed == nil || refreshed.State != "ready" || refreshed.Error != "" || refreshed.Commit != fixtureCommit || len(refreshed.Files) != len(source.Files) {
+				t.Fatalf("host setup broke public-source reindex: %+v", refreshed)
+			}
+			var hostSources int
+			if err := d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM doctrine_sources WHERE tenant_id=$1 AND repository=$2`, hostTenant, privateRepository).Scan(&hostSources); err != nil || hostSources != 0 {
+				t.Fatalf("person's reindex registered a host source: count=%d err=%v", hostSources, err)
+			}
+			if forge.minted != 0 || forge.revoked != 0 {
+				t.Fatal("person's reindex minted host-tenant tokens")
+			}
+			if scenario == "other tenant" && strings.Contains(logs.String(), "doctrine default source") {
+				t.Fatal("another tenant's reindex attempted host-default maintenance")
+			}
+			if scenario != "other tenant" && !strings.Contains(logs.String(), "doctrine default source") {
+				t.Fatal("host-default setup failure was not logged")
+			}
+		})
 	}
 }

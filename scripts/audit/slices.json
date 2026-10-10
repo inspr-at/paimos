@@ -156,6 +156,7 @@
       "paths": [
         "internal/rules/**",
         "internal/rules/doctrine/default_source.go",
+        "internal/rules/doctrine/delivery_external_test.go",
         "internal/rules/doctrine/mirror.go",
         "internal/rules/doctrine/mirror_fs_unix.go",
         "internal/rules/doctrine/mirror_fs_unsupported.go",
