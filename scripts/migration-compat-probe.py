@@ -47,38 +47,45 @@ class Probe:
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
-    def call(self, path, body=None, *, missing_route=False):
+    def json_response(self, path, body=None):
         request = urllib.request.Request(
             self.base + path,
             data=None if body is None else json.dumps(body).encode(),
             headers={} if body is None else {'Content-Type': 'application/json'})
         try:
-            with self.opener.open(request, timeout=15) as response:
-                if response.status not in (200, 201):
-                    raise AssertionError(f'{path}: HTTP {response.status}')
-                if response.headers.get_content_type() != 'application/json':
-                    raise AssertionError(f'{path}: expected JSON')
-                raw = response.read((1 << 20) + 1)
-                if len(raw) > 1 << 20:
-                    raise AssertionError(f'{path}: response exceeds bound')
-                payload = json.loads(raw)
+            response = self.opener.open(request, timeout=15)
         except urllib.error.HTTPError as error:
-            # Do not dump headers, cookies or response bodies into CI logs.
-            with error:
-                status = error.code
-                if missing_route and status == 404 and error.headers.get_content_type() == 'application/json':
-                    raw = error.read((1 << 20) + 1)
-                    if len(raw) <= 1 << 20 and json.loads(raw) == {'error': 'not found'}:
-                        return MISSING_ROUTE
-            raise AssertionError(f'{path}: HTTP {status}') from None
+            response = error
+        # Error responses need the same bounds and validation as successful
+        # responses. Never dump headers, cookies or bodies into CI logs.
+        with response:
+            if response.headers.get_content_type() != 'application/json':
+                raise AssertionError(f'{path}: expected JSON')
+            raw = response.read((1 << 20) + 1)
+            if len(raw) > 1 << 20:
+                raise AssertionError(f'{path}: response exceeds bound')
+            try:
+                payload = json.loads(raw)
+            except ValueError:
+                raise AssertionError(f'{path}: expected JSON') from None
+            return response.status, response.headers.get('Content-Type'), payload
+
+    def call(self, path, body=None, *, missing_route=False):
+        status, content_type, payload = self.json_response(path, body)
+        if status not in (200, 201):
+            if missing_route and (status, content_type, payload) == missing_route:
+                return MISSING_ROUTE
+            raise AssertionError(f'{path}: HTTP {status}')
         print(f'previous release: {path} OK')
         return payload
 
     def account_use(self):
         # Detect the previous binary's own API, never its release number or the
-        # candidate schema. A denied/broken route is not capability absence.
+        # candidate schema. Old authenticated routers may deny missing routes;
+        # only their exact unregistered-route response proves absence.
         path = '/api/account-use?limit=1'
-        matrix = self.call(path, missing_route=True)
+        fallback = self.json_response(f'/api/aeon-compat-absent-{uuid.uuid4()}?limit=1')
+        matrix = self.call(path, missing_route=fallback)
         if matrix is MISSING_ROUTE:
             return None
         if (not isinstance(matrix, dict) or not isinstance(matrix.get('rules'), dict)

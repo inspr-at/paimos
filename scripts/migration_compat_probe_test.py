@@ -22,6 +22,8 @@ class ProbeTest(unittest.TestCase):
     def setUp(self):
         self.requests = []
         self.posts = []
+        self.api_fallback = (403, 'application/json',
+                             b'{"error":"permission denied","code":"forbidden","route":"/api/"}')
         self.responses = {
             '/': (200, 'text/html', b'<html>previous SPA</html>'),
             '/api/health': {'status': 'ok', 'db': 'ok'},
@@ -39,7 +41,9 @@ class ProbeTest(unittest.TestCase):
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 owner.requests.append(self.path)
-                value = owner.responses.get(self.path, (404, 'application/json', b'{}'))
+                fallback = (owner.api_fallback if self.path.startswith('/api/aeon-compat-absent-')
+                            else (404, 'application/json', b'{}'))
+                value = owner.responses.get(self.path, fallback)
                 if callable(value):
                     value = value()
                 if isinstance(value, dict):
@@ -179,8 +183,8 @@ class ProbeTest(unittest.TestCase):
             self.assertEqual(boundary.errors(), (1, 1))
 
     def test_capability_detection_uses_the_binary_api_and_rejects_ambiguous_responses(self):
-        # Risk: an auth failure, broken endpoint or arbitrary 200 must not be
-        # mistaken for an older binary, or for supported account-use entry.
+        # Risk: the authenticated floor returns 403 for missing API routes;
+        # only its exact fallback can prove absence, never a distinct failure.
         path = '/api/account-use?limit=1'
         matrix = {'rules': {'revision': 1, 'enforced_at': None},
                   'accounts': [], 'contexts': [], 'cells': []}
@@ -189,18 +193,53 @@ class ProbeTest(unittest.TestCase):
                 self.responses['/api/version'] = {'version': version}
                 self.responses[path] = matrix
                 self.assertEqual(self.probe.account_use(), matrix)
-                self.responses[path] = (404, 'application/json', b'{"error":"not found"}')
+                self.responses[path] = self.api_fallback
                 self.assertIsNone(self.probe.account_use())
-        for response in ({}, (200, 'application/json', b'null'),
-                         (200, 'text/html', b'<html>SPA</html>'),
-                         (200, 'application/json', b'x' * ((1 << 20) + 1)),
-                         (403, 'application/json', b'{"error":"forbidden"}'),
-                         (500, 'application/json', b'{"error":"failed"}'),
-                         (404, 'application/json', b'{"error":"account-use resource not found"}')):
+        self.api_fallback = (404, 'application/json', b'{"error":"not found"}')
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.responses[path] = self.api_fallback
+            self.assertIsNone(self.probe.account_use())
+            # Compare parsed JSON, not serialization whitespace or key order.
+            self.api_fallback = (403, 'application/json', b'{"error":"permission denied","code":"forbidden"}')
+            self.responses[path] = (403, 'application/json', b'{ "code": "forbidden", "error": "permission denied" }')
+            self.assertIsNone(self.probe.account_use())
+        self.api_fallback = (404, 'application/json', b'{"error":"not found"}')
+        for response, reason in (({}, 'invalid account-use capability response'),
+                         ((200, 'application/json', b'null'), 'invalid account-use capability response'),
+                         ((200, 'text/html', b'<html>SPA</html>'), 'expected JSON'),
+                         ((200, 'application/json', b'x' * ((1 << 20) + 1)), 'response exceeds bound'),
+                         ((403, 'application/json', b'{"error":"forbidden"}'), 'HTTP 403'),
+                         ((500, 'application/json', b'{"error":"failed"}'), 'HTTP 500'),
+                         ((404, 'application/json', b'{"error":"account-use resource not found"}'), 'HTTP 404'),
+                         ((404, 'application/json; charset=utf-8', b'{"error":"not found"}'), 'HTTP 404'),
+                         ((403, 'text/html', b'<html>denied</html>'), 'expected JSON'),
+                         ((403, 'application/json', b'not JSON'), 'expected JSON'),
+                         ((403, 'application/json', b'x' * ((1 << 20) + 1)), 'response exceeds bound')):
             with self.subTest(response=response[:2] if isinstance(response, tuple) else response):
                 self.responses[path] = response
-                with self.assertRaises(AssertionError):
+                with self.assertRaisesRegex(AssertionError, reason):
                     self.probe.account_use()
+        self.responses[path] = (403, 'application/json', b'{"error":"permission denied","code":"forbidden"}')
+        for fallback, reason in (((500, 'application/json', b'{"error":"permission denied","code":"forbidden"}'), 'HTTP 403'),
+                                ((403, 'application/json', b'{"error":"different refusal","code":"forbidden"}'), 'HTTP 403'),
+                                ((403, 'application/json; charset=utf-8', b'{"error":"permission denied","code":"forbidden"}'), 'HTTP 403'),
+                                ((403, 'text/html', b'<html>denied</html>'), 'expected JSON'),
+                                ((403, 'application/json', b'not JSON'), 'expected JSON'),
+                                ((403, 'application/json', b'x' * ((1 << 20) + 1)), 'response exceeds bound')):
+            with self.subTest(fallback=fallback[:2]):
+                self.api_fallback = fallback
+                with self.assertRaisesRegex(AssertionError, reason):
+                    self.probe.account_use()
+        # A matching successful response still needs a valid capability matrix.
+        self.api_fallback = (200, 'application/json', b'{}')
+        self.responses[path] = {}
+        with self.assertRaisesRegex(AssertionError, 'invalid account-use capability response'):
+            self.probe.account_use()
+        sentinels = [request for request in self.requests if request != path]
+        self.assertEqual(len(sentinels), len(set(sentinels)))
+        for sentinel in sentinels:
+            self.assertRegex(sentinel, r'^/api/aeon-compat-absent-[0-9a-f-]{36}\?limit=1$')
+            module.uuid.UUID(sentinel.removeprefix('/api/aeon-compat-absent-').removesuffix('?limit=1'))
         self.assertNotIn('/api/version', self.requests)
 
     def test_capable_binary_serves_strict_reads_after_activation(self):
@@ -250,7 +289,7 @@ class ProbeTest(unittest.TestCase):
         tenant = '22222222-2222-4222-8222-222222222222'
         owner = '33333333-3333-4333-8333-333333333333'
         self.responses['/api/me'] = {'principal': {'tenant_id': tenant, 'id': owner}}
-        self.responses['/api/account-use?limit=1'] = (404, 'application/json', b'{"error":"not found"}')
+        self.responses['/api/account-use?limit=1'] = self.api_fallback
         resolve = '/api/models/resolve?role=build&harness=codex'
         self.responses[resolve] = {}
         boundary = module.AccountUseBoundary(self.probe, 'fixture-container', 'aeon_legacy')
