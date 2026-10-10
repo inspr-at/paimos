@@ -112,7 +112,11 @@ func normalizeCodexChat(raw json.RawMessage, thread, turn string) ([]ChatUpdate,
 			ThreadID string `json:"threadId"`
 			TurnID   string `json:"turnId"`
 			Delta    string `json:"delta"`
-			Turn     struct {
+			Status   struct {
+				Type        string   `json:"type"`
+				ActiveFlags []string `json:"activeFlags"`
+			} `json:"status"`
+			Turn struct {
 				ID string `json:"id"`
 			} `json:"turn"`
 			Item struct {
@@ -129,6 +133,26 @@ func normalizeCodexChat(raw json.RawMessage, thread, turn string) ([]ChatUpdate,
 	switch f.Method {
 	case "account/rateLimits/updated", "rateLimits/updated", "thread/settings/updated", "thread/tokenUsage/updated", "model/rerouted", "thread/started":
 		return nil, true
+	}
+	// Runtime status is thread-scoped, including the transition after a resolved
+	// approval; it carries no turnId in the documented app-server protocol.
+	if f.Method == "thread/status/changed" {
+		if thread == "" || f.Params.ThreadID != thread || len(f.Params.Status.ActiveFlags) > 8 {
+			return nil, false
+		}
+		switch f.Params.Status.Type {
+		case "idle":
+			return []ChatUpdate{chatState("idle")}, true
+		case "active":
+			state := "running"
+			for _, flag := range f.Params.Status.ActiveFlags {
+				if flag == "waitingOnApproval" || flag == "waitingOnUserInput" {
+					state = "requires_action"
+				}
+			}
+			return []ChatUpdate{chatState(state)}, true
+		}
+		return nil, false
 	}
 	if thread == "" || turn == "" || f.Params.ThreadID != thread || firstNonempty(f.Params.TurnID, f.Params.Turn.ID) != turn {
 		return nil, false
@@ -236,6 +260,7 @@ func (p *codexProcess) observeCodexChat(raw json.RawMessage) {
 		return
 	}
 	var f struct {
+		Method string `json:"method"`
 		Params struct {
 			TurnID string `json:"turnId"`
 			Turn   struct {
@@ -243,8 +268,12 @@ func (p *codexProcess) observeCodexChat(raw json.RawMessage) {
 			} `json:"turn"`
 		} `json:"params"`
 	}
-	if len(raw) > 8<<20 || json.Unmarshal(raw, &f) != nil {
+	if len(raw) > 8<<20 || !utf8.Valid(raw) || json.Unmarshal(raw, &f) != nil {
 		p.chatDropped.Add(1)
+		return
+	}
+	if f.Method == "thread/status/changed" {
+		p.observeChat(Codex, raw)
 		return
 	}
 	turn := firstNonempty(f.Params.TurnID, f.Params.Turn.ID)

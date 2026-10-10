@@ -28,18 +28,19 @@ func TestChatHarnessFixtureParity(t *testing.T) {
 				t.Fatal(err)
 			}
 			var got []ChatUpdate
-			p := &wireProcess{threadID: "thread-1", turnID: "turn-1", observe: func(ev AdapterEvent) {
+			p := &wireProcess{threadID: "thread-1", turnID: "turn-1", readDone: make(chan struct{}), observe: func(ev AdapterEvent) {
 				if ev.Chat == nil || ev.Kind != "" {
 					t.Fatal("chat mixed with durable telemetry")
 				}
 				got = append(got, *ev.Chat)
 			}}
-			lines := bufio.NewScanner(bytes.NewReader(raw))
-			for lines.Scan() {
-				p.observeChat(harness, lines.Bytes())
+			if harness == Pi {
+				p.protocol = "pi"
 			}
-			if err := lines.Err(); err != nil {
-				t.Fatal(err)
+			p.onEvent = func(frame json.RawMessage) { p.observeChat(harness, frame) }
+			p.read(bytes.NewReader(raw))
+			if p.readErr != nil {
+				t.Fatal("unknown frame broke the wire reader", p.readErr)
 			}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("normalized updates: %#v", got)
@@ -93,6 +94,20 @@ func TestChatRejectsForeignAndOversizedFrames(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Fatal("reasoning or final snapshot emitted as a delta")
+	}
+	for _, raw := range []string{
+		`{"method":"thread/status/changed","params":{"threadId":"thread-1","status":{"type":"active","activeFlags":["waitingOnApproval"]}}}`,
+		`{"method":"thread/status/changed","params":{"threadId":"thread-1","status":{"type":"active","activeFlags":[]}}}`,
+		`{"method":"thread/status/changed","params":{"threadId":"thread-1","status":{"type":"idle"}}}`,
+	} {
+		p.observeChat(Codex, json.RawMessage(raw))
+	}
+	if !reflect.DeepEqual(got[1:], []ChatUpdate{chatState("requires_action"), chatState("running"), chatState("idle")}) {
+		t.Fatal("owned runtime state did not recover after approval")
+	}
+	p.observeChat(Codex, json.RawMessage(`{"method":"thread/status/changed","params":{"threadId":"foreign","status":{"type":"idle"}}}`))
+	if len(got) != 4 || p.DroppedChatFrames() != 7 {
+		t.Fatal("foreign thread runtime state projected")
 	}
 }
 
