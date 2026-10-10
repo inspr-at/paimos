@@ -190,10 +190,10 @@ func TestRoutineWorkspacesSeparateAndRetainWriters(t *testing.T) {
 		if err := other.acquireRoutineCheckout(item.g.AgentRunID, *item.w); !errors.Is(err, ErrProcessesUnconfirmed) {
 			t.Fatalf("crash erased owner fence: %v", err)
 		}
-		if err := item.s.releaseRoutineCheckouts(); err != nil {
-			t.Fatal(err)
+		if err := item.s.releaseRoutineCheckouts(); !errors.Is(err, ErrProcessesUnconfirmed) {
+			t.Fatalf("unknown fixture cleanup: %v", err)
 		}
-		if got := leases[item.g.LaunchID].finished; len(got) != 1 || got[0] {
+		if got := leases[item.g.LaunchID].finished; len(got) != 0 || item.s.routineResources[item.g.AgentRunID] == nil {
 			t.Fatal("unknown fixture exit released resource ownership")
 		}
 		if _, err := os.Stat(item.w.Path); err != nil {

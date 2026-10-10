@@ -351,6 +351,7 @@ func (w RoutineWorkspace) pickup() agentsetup.RoutinePickup {
 }
 
 func (s *Supervisor) releaseRoutineCheckouts() error {
+	var resultErr error
 	for runID, lease := range s.routineResources {
 		s.mu.Lock()
 		entry := s.runs[runID]
@@ -365,21 +366,33 @@ func (s *Supervisor) releaseRoutineCheckouts() error {
 				confirmed = observed.RoutineFixturesExited()
 			}
 		}
-		if err := lease.Finish(confirmed); err != nil {
-			return err
+		if !confirmed {
+			// Keep both the live lease and durable checkout owner. Closing the
+			// root process does not stop a still-disputed fixture writer.
+			resultErr = errors.Join(resultErr, ErrProcessesUnconfirmed)
+			continue
+		}
+		if err := lease.Finish(true); err != nil {
+			resultErr = errors.Join(resultErr, err)
+			continue
 		}
 		delete(s.routineResources, runID)
-	}
-	for runID, store := range s.routineCheckouts {
-		if err := store.Write("owner.json", []byte("[]"), false); err != nil {
-			return err
+		if store := s.routineCheckouts[runID]; store != nil {
+			if err := store.Write("owner.json", []byte("[]"), false); err != nil {
+				resultErr = errors.Join(resultErr, err)
+				continue
+			}
+			if err := store.Close(); err != nil {
+				resultErr = errors.Join(resultErr, err)
+				continue
+			}
+			delete(s.routineCheckouts, runID)
 		}
-		if err := store.Close(); err != nil {
-			return err
-		}
-		delete(s.routineCheckouts, runID)
 	}
-	return nil
+	if len(s.routineCheckouts) > 0 {
+		resultErr = errors.Join(resultErr, ErrProcessesUnconfirmed)
+	}
+	return resultErr
 }
 
 func (s *Supervisor) routineEnvironment(runID string, g agentsetup.RoutineGrant) ([]string, error) {
