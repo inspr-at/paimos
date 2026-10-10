@@ -557,10 +557,11 @@ func (*CursorAdapter) Name() string { return Cursor }
 
 type cursorProcess struct {
 	*wireProcess
-	promptID    string
-	done        chan struct{}
-	doneOnce    sync.Once
-	terminalErr error
+	conversation *acpProcess // Persistent chat reuses the shared ACP turn lifecycle.
+	promptID     string
+	done         chan struct{}
+	doneOnce     sync.Once
+	terminalErr  error
 }
 
 func (p *cursorProcess) finish(err error) {
@@ -568,6 +569,9 @@ func (p *cursorProcess) finish(err error) {
 }
 
 func (p *cursorProcess) Wait() (err error) {
+	if p.conversation != nil {
+		return p.conversation.Wait()
+	}
 	defer func() { err = errors.Join(err, p.finishReader()) }()
 	select {
 	case <-p.done:
@@ -581,6 +585,9 @@ func (p *cursorProcess) Wait() (err error) {
 }
 
 func (p *cursorProcess) Control(ctx context.Context, op, text string) error {
+	if p.conversation != nil {
+		return p.conversation.Control(ctx, op, text)
+	}
 	if op != "interrupt" {
 		return ErrUnsupported
 	}
@@ -628,9 +635,16 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	}
 	p.limitVendor = Cursor
 	cp := &cursorProcess{wireProcess: p, done: make(chan struct{})}
+	if r.InboxEnabled && r.Run.Purpose != VerificationPurpose && !r.Run.ReadOnlyReview {
+		cp.conversation = &acpProcess{wireProcess: p, harness: Cursor, model: r.Profile.Model, persistent: true, done: make(chan struct{}), idleTimeout: 10 * time.Minute}
+	}
 	var costMicros int64
 	usageSeen := false
 	p.setOnEvent(func(raw json.RawMessage) {
+		if cp.conversation != nil {
+			cp.conversation.event(raw)
+			return
+		}
 		var frame struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
@@ -671,11 +685,16 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 							OutputTokensDelta: usageCount(report.OutputTokens), CachedInputTokensDelta: usageCount(report.CachedInputTokens), ReasoningTokensDelta: usageCount(report.ReasoningTokens)})
 					}
 				}
+				u := chatState("idle")
+				observe(AdapterEvent{Chat: &u})
 				cp.finish(nil)
 			}
 			return
 		}
 		method := frame.Method
+		if method != "" {
+			p.observeChat(Cursor, raw)
+		}
 		if method == "session/update" && frame.Params.SessionID == p.sessionID &&
 			frame.Params.Update.SessionUpdate == "usage_update" && frame.Params.Update.Cost != nil &&
 			frame.Params.Update.Cost.Currency == "USD" {
@@ -684,7 +703,7 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 					observe(AdapterEvent{Kind: "usage", CostMicrosDelta: delta})
 				}
 			}
-		} else if method == "session/request_permission" {
+		} else if method == "session/request_permission" && frame.Params.SessionID == p.sessionID {
 			cp.finish(errors.New("Cursor ACP decision requires local operator"))
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -726,12 +745,28 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	p.eventMu.Lock()
 	p.sessionID = session.SessionID
 	p.eventMu.Unlock()
+	if cp.conversation != nil {
+		cp.conversation.mu.Lock()
+		_, err = cp.conversation.promptLocked(op, r.Prompt)
+		cp.conversation.mu.Unlock()
+		if err != nil {
+			return fail(err)
+		}
+		return cp, nil
+	}
+	p.eventMu.Lock()
 	cp.promptID = strconv.FormatInt(p.next.Add(1), 10)
 	id, _ := strconv.ParseInt(cp.promptID, 10, 64)
-	if err := p.sendContext(op, map[string]any{"jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": map[string]any{"sessionId": p.sessionID, "prompt": []map[string]string{{"type": "text", "text": r.Prompt}}}}); err != nil {
+	err = p.sendContext(op, map[string]any{"jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": map[string]any{"sessionId": p.sessionID, "prompt": []map[string]string{{"type": "text", "text": r.Prompt}}}})
+	if err == nil {
+		observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
+		u := chatState("running")
+		observe(AdapterEvent{Chat: &u})
+	}
+	p.eventMu.Unlock()
+	if err != nil {
 		return fail(err)
 	}
-	observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 	return cp, nil
 }
 

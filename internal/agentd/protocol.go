@@ -41,7 +41,8 @@ type wireProcess struct {
 	readErr     error // published before readDone closes; nil means actual EOF
 	next        atomic.Int64
 	observe     func(AdapterEvent)
-	chatDropped atomic.Uint64 // content-free count; never stores rejected frames
+	chatDropped atomic.Uint64     // content-free count; never stores rejected frames
+	chatTools   map[string]string // bounded ACP tool identities, memory-only
 	onEvent     func(json.RawMessage)
 	earlyEvents []json.RawMessage
 	threadID    string

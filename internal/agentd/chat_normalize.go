@@ -60,7 +60,15 @@ func ValidChatUpdate(u ChatUpdate) bool { return u.valid() }
 // observeChat is called only by the event reader of an owned native connection.
 // False includes unknown shapes and out-of-scope frames; none are logged.
 func (p *wireProcess) observeChat(harness string, raw json.RawMessage) {
+	if queuedChatHarness(harness) {
+		p.observeACPChat(raw)
+		return
+	}
 	updates, known := normalizeChat(harness, raw, p.threadID, p.turnID)
+	p.publishChatUpdates(updates, known)
+}
+
+func (p *wireProcess) publishChatUpdates(updates []ChatUpdate, known bool) {
 	if !known {
 		p.chatDropped.Add(1)
 		return
