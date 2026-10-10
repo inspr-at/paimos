@@ -2456,6 +2456,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestTouchIDDefaultIsMacOnlyUntilSaved","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestUnattendedMissingPlatformPreservesLegacyPairing","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestUnattendedReportOnlyFreshnessOwnershipAndClaimSeam","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestUnqualifiedVerificationNeverAdvertisedAsDispatchTarget","tier":"GATED-FULL"}
