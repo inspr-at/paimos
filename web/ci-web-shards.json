@@ -794,7 +794,7 @@
         ,
         {"file":"tests/bulk.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":28.544,"median":15.335,"min":2.126},"seconds":33.050812,"selectedTests":2},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/business.spec.ts","listedTests":6,"weightSeconds":13.317073,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/business.spec.ts","listedTests":7,"weightSeconds":13.317073,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/capacity-learning.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
         ,
@@ -868,7 +868,7 @@
         ,
         {"file":"tests/hours-edit.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/hours.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/hours.spec.ts","listedTests":12,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/html-sandbox.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":3.983,"median":3.983,"min":3.983},"seconds":5.420008,"selectedTests":1},"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
         ,
@@ -878,7 +878,7 @@
         ,
         {"file":"tests/indicator-gallery.spec.ts","listedTests":5,"weightSeconds":11.097560833,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/intake-extensions.spec.ts","listedTests":17,"weightSeconds":37.731707,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/intake-extensions.spec.ts","listedTests":12,"weightSeconds":37.731707,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/kind-convert.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
         ,

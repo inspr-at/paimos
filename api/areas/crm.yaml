@@ -87,10 +87,15 @@ paths:
   /crm/organisations/{organisationId}/contacts:
     get:
       operationId: listCRMContacts
+      description: "Bounded keyset page. The array shape is preserved; X-Next-Cursor explicitly indicates more results."
       security: *auth
-      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters:
+        - {name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: after_id, in: query, schema: {type: string, format: uuid}, description: "Previous page X-Next-Cursor; retain the other selectors."}
       responses:
-        '200': {description: Contacts, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/CRMContact'}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '200': {description: "Contacts", headers: {X-Next-Cursor: {description: "More rows available; send this UUID as after_id.", schema: {type: string, format: uuid}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/CRMContact'}}}}}
     post:
       operationId: createCRMContact
       security: [{session: []}]

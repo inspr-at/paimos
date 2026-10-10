@@ -3,6 +3,7 @@ package statusautopilot
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -36,8 +37,22 @@ type Change struct {
 // reversible event map (Activity's own cursor decides which rows to show).
 // Suggestions reads all current marks, independently of that history limit.
 func ChangesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string, suggestions bool, limit int) ([]Change, error) {
+	return changesTx(ctx, tx, p, nodeID, suggestions, limit, nil)
+}
+
+// ChangesForEventsTx hydrates only automatic changes in a bounded activity page.
+func ChangesForEventsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string, ids []int64) ([]Change, error) {
+	if len(ids) == 0 {
+		return []Change{}, nil
+	}
+	if len(ids) > 200 {
+		return nil, fmt.Errorf("too many activity events")
+	}
+	return changesTx(ctx, tx, p, nodeID, false, len(ids), ids)
+}
+func changesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string, suggestions bool, limit int, ids []int64) ([]Change, error) {
 	from := `FROM events e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id
- WHERE e.type=ANY($1::text[]) AND n.deleted_at IS NULL AND ($2='' OR n.id=nullif($2,'')::uuid)
+ WHERE e.type=ANY($1::text[]) AND ($4::bigint[] IS NULL OR e.id=ANY($4)) AND n.deleted_at IS NULL AND ($2='' OR n.id=nullif($2,'')::uuid)
  ORDER BY e.at DESC,e.id DESC LIMIT nullif($3,0)`
 	if suggestions {
 		limit = 0
@@ -48,7 +63,7 @@ func ChangesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string
  AND e.type=ANY($1::text[]) AND e.metadata->>'flag'=mark.key AND e.after->>'state'=n.state
  AND NOT EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id)
  ORDER BY e.at DESC,e.id DESC LIMIT 1) e ON true
- WHERE n.deleted_at IS NULL AND n.status_autopilot<>'{}'::jsonb AND ($2='' OR n.id=nullif($2,'')::uuid)
+ WHERE ($4::bigint[] IS NULL OR e.id=ANY($4)) AND n.deleted_at IS NULL AND n.status_autopilot<>'{}'::jsonb AND ($2='' OR n.id=nullif($2,'')::uuid)
  AND mark.value='true'::jsonb AND mark.key IN ('triage_list','cancel_suggested','blocked_reminder','missed_release')
  ORDER BY mark.key,n.key,n.id LIMIT nullif($3,0)`
 	}
@@ -56,7 +71,7 @@ func ChangesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string
  coalesce(nullif(e.metadata->>'flag',''),e.after->>'state'),e.at,
  EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id),
  n.updated_at=(e.after->>'updated_at')::timestamptz AND n.state=e.after->>'state',n.project_id::text
- `+from, []string{Changed, "status_autopilot.derived"}, nodeID, limit)
+ `+from, []string{Changed, "status_autopilot.derived"}, nodeID, limit, ids)
 	if err != nil {
 		return nil, err
 	}

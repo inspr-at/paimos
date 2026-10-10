@@ -344,6 +344,8 @@
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 390"
     ,
+    "browser:tests/business.spec.ts:the overview includes open periods older than a year in its waiting count"
+    ,
     "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 dark"
     ,
     "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 light"
@@ -537,6 +539,26 @@
     "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (short at 390)"
     ,
     "browser:tests/header-glimpse.spec.ts:the glimpse is off unless the developer setting turns it on, even after an earlier Display choice"
+    ,
+    "browser:tests/hours.spec.ts:an older week shows existing hours and logs into its existing period"
+    ,
+    "browser:tests/hours.spec.ts:open periods older than a year appear in the home waiting count and week badge"
+    ,
+    "browser:tests/hours.spec.ts:open periods older than a year appear on a direct approvals load"
+    ,
+    "browser:tests/intake-extensions.spec.ts:older extension response is discarded after selecting another ticket"
+    ,
+    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1024 dark"
+    ,
+    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1024 light"
+    ,
+    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1440 dark"
+    ,
+    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1440 light"
+    ,
+    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 390 dark"
+    ,
+    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 390 light"
     ,
     "browser:tests/knowledge-learnings.spec.ts:a learning that changed after review is refused and shown again"
     ,
@@ -6190,6 +6212,8 @@
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"the header offers Business once a business plugin is enabled","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/business.spec.ts","name":"the overview includes open periods older than a year in its waiting count","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"the overview shows the week, where it went, what waits and the rates","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"the palette logs time and goes to Business","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -8140,11 +8164,17 @@
     ,
     {"kind":"browser","file":"tests/hours.spec.ts","name":"admins switch to a colleague or an agent; agents have no manual entry","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"an older week shows existing hours and logs into its existing period","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/hours.spec.ts","name":"approving a period sends the reviewed revision and digest","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/hours.spec.ts","name":"logging time: ticket, duration like 1h30, Enter","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/hours.spec.ts","name":"members see only their own week, without approvals","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"open periods older than a year appear in the home waiting count and week badge","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"open periods older than a year appear on a direct approvals load","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -8219,6 +8249,20 @@
     {"kind":"browser","file":"tests/indicator-gallery.spec.ts","name":"robot family gallery dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/indicator-gallery.spec.ts","name":"robot family gallery light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"older extension response is discarded after selecting another ticket","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension reads respect intake permission","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13492,6 +13536,8 @@
     ,
     {"kind":"node","file":"tests/crm.test.ts","name":"money in minor units reads and parses exactly","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/crm.test.ts","name":"newline-heavy accepted notes stay within the diff allocation and render budget","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/crm.test.ts","name":"search, filters and sort; blanks sort last","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/crm.test.ts","name":"spare width goes to the contact, place and industry, not to a wide Customer column","tier":"GATED-FULL"}
@@ -15062,6 +15108,12 @@
     ,
     {"kind":"vitest","file":"tests/authz.unit.test.ts","name":"can() > unions project and workspace permissions only for that project","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"period history bounds and honest paging > accepts exactly 2,000 rows but rejects a continuation rather than returning a partial list","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"period history bounds and honest paging > includes the oldest supported open period with the explicit approval bound","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"period history bounds and honest paging > keeps the selected historical week and principal on every keyset page","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/capacity-reset.unit.test.ts","name":"clears person-owned snapshots and load state before a failed read after clearPermissions","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/capacity-reset.unit.test.ts","name":"clears person-owned snapshots and load state before a failed read after resetPositions","tier":"ESSENTIAL"}
@@ -15655,6 +15707,10 @@
     {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"Aithema extension disclosures > adds no UI for legacy drafts and empty maps","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"Aithema extension disclosures > retains unknown namespaces and coexisting majors as plain text","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"intake history continuation > keeps older drafts accessible and preserves the node filter on the next page","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"intake history continuation > reports a continuation failure instead of returning an empty successful page","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/key-trim.unit.test.ts","name":"can approve proposals beyond the first page through the native CAS endpoint","tier":"GATED-FULL"}
     ,

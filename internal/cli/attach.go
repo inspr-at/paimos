@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -111,19 +112,11 @@ func (rt *runtime) cmdAttach() *Command {
 					return err
 				}
 				if download != "" {
-					raw, err := rt.rawAPI(http.MethodGet, "/api/attachments/"+args[0]+"/content", nil, "")
-					if err != nil {
+					if err := rt.downloadAttachment(meta, download); err != nil {
 						return err
-					}
-					if int64(len(raw)) != meta.Size {
-						return rt.fail(fmt.Errorf("incomplete attachment download: got %d bytes, expected %d", len(raw), meta.Size), "")
 					}
 					if download == "-" {
-						_, err = rt.stdout.Write(raw)
-						return err
-					}
-					if err := os.WriteFile(download, raw, 0600); err != nil {
-						return err
+						return nil
 					}
 					if rt.jsonOut {
 						return rt.printJSON(map[string]any{"attachment": meta, "downloaded_to": download})
@@ -155,9 +148,55 @@ func (rt *runtime) cmdAttach() *Command {
 }
 
 func (rt *runtime) findAttachment(id string) (attachmentView, error) {
-	var a attachmentView
-	if err := rt.do(http.MethodGet, "/api/attachments/"+url.PathEscape(id), nil, &a); err != nil {
-		return attachmentView{}, err
+	var meta attachmentView
+	err := rt.do(http.MethodGet, "/api/attachments/"+url.PathEscape(id), nil, &meta)
+	return meta, err
+}
+
+// Verify bytes in a unique private spool before publishing any output. A file
+// destination uses a spool in the same directory so rename is atomic.
+func (rt *runtime) downloadAttachment(meta attachmentView, destination string) error {
+	if meta.Size < 0 || meta.Size == math.MaxInt64 {
+		return fmt.Errorf("invalid attachment size")
 	}
-	return a, nil
+	resp, key, err := rt.rawResponse(http.MethodGet, "/api/attachments/"+url.PathEscape(meta.ID)+"/content", nil, "")
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, err = readRawResponse(resp, maxRawResponseBytes)
+		return rt.fail(err, key)
+	}
+	defer resp.Body.Close()
+	dir := ""
+	if destination != "-" {
+		dir = filepath.Dir(destination)
+	}
+	tmp, err := os.CreateTemp(dir, ".aeon-download-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+	n, err := io.Copy(tmp, io.LimitReader(resp.Body, meta.Size+1))
+	if err != nil {
+		return rt.fail(err, key)
+	}
+	if n != meta.Size {
+		return rt.fail(fmt.Errorf("incomplete attachment download: got %d bytes, expected %d", n, meta.Size), key)
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if destination == "-" {
+		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		_, err = io.Copy(rt.stdout, tmp)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), destination)
 }

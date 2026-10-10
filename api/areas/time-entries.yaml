@@ -5,13 +5,19 @@ paths:
     get:
       operationId: listTimeEntries
       summary: List time entries with period, principal or node filters
+      description: "Bounded keyset page. The array shape is preserved; X-Next-Cursor explicitly indicates more results."
       security: *auth
       parameters:
         - {name: period_id, in: query, schema: {type: string, format: uuid}}
         - {name: principal_id, in: query, schema: {type: string, format: uuid}}
         - {name: node_id, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: after_id, in: query, schema: {type: string, format: uuid}, description: "Previous page X-Next-Cursor; retain the other selectors."}
+        - {name: since, in: query, schema: {type: string, format: date-time}, description: "Inclusive lower date bound."}
+        - {name: until, in: query, schema: {type: string, format: date-time}, description: "Exclusive upper date bound."}
       responses:
-        '200': {description: Entries, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TimeEntry'}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '200': {description: "Entries", headers: {X-Next-Cursor: {description: "More rows available; send this UUID as after_id.", schema: {type: string, format: uuid}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TimeEntry'}}}}}
     post:
       operationId: createTimeEntry
       summary: Record principal time against a node

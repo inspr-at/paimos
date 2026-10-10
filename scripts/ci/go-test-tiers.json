@@ -588,6 +588,8 @@
     ,
     {"kind":"go","package":"internal/activity","name":"TestLinkedActivityAuthorsAndCommentWrites","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/activity","name":"TestLongTicketHistoryUsesBoundedSuccessivePages","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/activity","name":"TestNativeLabelChange","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/activity","name":"TestReadOnlyImportedDataset","tier":"GATED-FULL"}
@@ -3150,6 +3152,8 @@
     ,
     {"kind":"go","package":"internal/aithema/journal","name":"TestJournalCASReplayRestartAndClosureHydration","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/aithema/journal","name":"TestJournalHoldLookupIsBoundedByAdmission","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/aithema/journal","name":"TestLedgerCrashBoundariesAndRepeatedRecovery","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/aithema/journal","name":"TestLockAuthoritySharesTheLifecycleFence","tier":"GATED-FULL"}
@@ -3273,6 +3277,8 @@
     {"kind":"go","package":"internal/attachments","name":"TestLimitSniffAndPatchPrecondition","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestManifestConstructor","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/attachments","name":"TestMetadataLookupHonorsNodeVisibilityAndDeletion","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestSandboxHostBoundary","tier":"GATED-FULL"}
     ,
@@ -3764,6 +3770,8 @@
     ,
     {"kind":"go","package":"internal/business/crm","name":"TestConcurrentBindIsOneEvent","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/business/crm","name":"TestContactPageBatchesRecordsInsteadOfHydratingEachRow","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/business/crm","name":"TestCustomerArchiveListAndUndo","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/business/crm","name":"TestCustomerRevisionNoteDraftAndProjectLink","tier":"GATED-FULL"}
@@ -3791,6 +3799,8 @@
     {"kind":"go","package":"internal/business/hours","name":"TestApprovalLocksOutConcurrentCorrections","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/business/hours","name":"TestApprovalLocksOutConcurrentEntry","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/business/hours","name":"TestBusinessHistoryPagesBoundRowsAndReads","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/business/hours","name":"TestComparableEntryAndLegacyDigest","tier":"GATED-FULL"}
     ,
@@ -4156,7 +4166,11 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestAttachedAcceptanceRejectsUndeliverableHookOutput","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestAttachmentDownloadPublishesOnlyVerifiedBytes","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestAttachmentGetCLIEndToEnd","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestAttachmentLookupIsOneRequest","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestAuthLoginDoesNotEchoKey","tier":"ESSENTIAL"}
     ,
@@ -4245,6 +4259,8 @@
     {"kind":"go","package":"internal/cli","name":"TestCoordinatorHeartbeatRetryStopsWithOwner","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestCoordinatorHeartbeatUsesNativeReference","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestCurlRejectsResponseOverCapWithoutOutput","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestCurrentOwnerStampIsPublishable","tier":"GATED-FULL"}
     ,
@@ -4659,6 +4675,8 @@
     {"kind":"go","package":"internal/cli","name":"TestQueueCLIJSONKeepsDispatchMetadata","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestQueueCLILocalValidationAndIssueProjection","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestRawResponseInclusiveCap","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestReadAgentStatusKeepsTheValidFieldWhenTheOtherIsInvalid","tier":"GATED-FULL"}
     ,
@@ -6650,7 +6668,11 @@
     ,
     {"kind":"go","package":"internal/intake","name":"TestIntakeErrorCatalogue","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/intake","name":"TestIntakeHistoryContinuesBeyond200","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/intake","name":"TestIntakePreservesPersonEdits","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/intake","name":"TestLongIntakeTranscriptContinuesBeyond200","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/intake","name":"TestNativeRequestHasRoomForAithemaLimits","tier":"GATED-FULL"}
     ,
@@ -6659,6 +6681,8 @@
     {"kind":"go","package":"internal/intake","name":"TestReplacementTransportRefusals","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/intake","name":"TestSessionAuthorityRefusals","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/intake","name":"TestSingleDraftDoesNotMaterializeProjectHistory","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/intake","name":"TestTargetRefusalCodes","tier":"GATED-FULL"}
     ,
@@ -8508,6 +8532,8 @@
     ,
     {"kind":"go","package":"internal/rules","name":"TestRuleValidation","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/rules","name":"TestRulesDeadlineBoundsSaturatedPool","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/rules","name":"TestRulesMutationTenantBeforeTree","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/rules","name":"TestRulesPublishDoesNotDeadlockWithAForeignKeyReference","tier":"GATED-FULL"}
@@ -8789,6 +8815,8 @@
     {"kind":"go","package":"internal/rulesimport","name":"TestBuildRejectsUnknownLayerMapping","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rulesimport","name":"TestCodeExamplesNeverBecomeRules","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/rulesimport","name":"TestContainedCustomCapSurvivesGrowthDuringRead","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rulesimport","name":"TestDirectiveOppositionRespectsTighteningAudienceAndHeadings","tier":"GATED-FULL"}
     ,

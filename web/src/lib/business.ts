@@ -85,6 +85,21 @@ async function send<T>(path: string, method = 'GET', body?: unknown, headers: Re
   return { data: data as T, response }
 }
 async function call<T>(path: string, method = 'GET', body?: unknown): Promise<T> { return (await send<T>(path, method, body)).data }
+async function listAll<T>(path: string): Promise<T[]> {
+  const out: T[] = []
+  const seen = new Set<string>()
+  let cursor = ''
+  for (let page = 0; page < 20; page++) {
+    const suffix = `${path.includes('?') ? '&' : '?'}limit=100${cursor ? `&after_id=${encodeURIComponent(cursor)}` : ''}`
+    const { data, response } = await send<T[]>(path + suffix)
+    out.push(...data)
+    cursor = response.headers.get('X-Next-Cursor') ?? ''
+    if (!cursor) return out
+    if (seen.has(cursor)) throw new Error('History paging did not advance.')
+    seen.add(cursor)
+  }
+  throw new Error('More than 2,000 history records. Narrow the period or principal selection.')
+}
 const id = (value: string) => encodeURIComponent(value)
 const int = (value: unknown) => typeof value === 'string' ? Number(value) : typeof value === 'number' ? value : 0
 
@@ -136,7 +151,13 @@ export const bindContact = (contactId: string, principalId: string) => call<Bind
 export const listPrincipals = () => call<Principal[]>('/business/principals').then(items => { learnPictures(items); return items })
 
 // ---------- Hours ----------
-export const listPeriods = async (principalId?: string) => (await call<TimePeriod[]>(`/time-periods${principalId ? `?principal_id=${id(principalId)}` : ''}`)).map(period)
+// Approvals need the complete history: valid period intervals start in year 1.
+// Omitting since uses the server's one-year window instead.
+export const PERIOD_HISTORY_START = '0001-01-01T00:00:00Z'
+export const listPeriods = async (principalId?: string, bounds: { since?: string; until?: string } = {}) => {
+  const params = new URLSearchParams({ ...(principalId ? { principal_id: principalId } : {}), ...bounds }).toString()
+  return (await listAll<TimePeriod>(`/time-periods${params ? `?${params}` : ''}`)).map(period)
+}
 // The entries digest travels in a header; approval must send it back unchanged.
 export async function getPeriod(periodId: string): Promise<{ period: TimePeriod; digest: string }> {
   const { data, response } = await send<TimePeriod>(`/time-periods/${id(periodId)}`)
@@ -161,7 +182,7 @@ export const approvePeriod = async (periodId: string, revision: number, digest: 
   period(await call<TimePeriod>(`/time-periods/${id(periodId)}/approve`, 'POST', { expected_revision: revision, expected_entries_sha256: digest }))
 export const listEntries = async (filter: { period_id?: string; principal_id?: string; node_id?: string }) => {
   const params = new URLSearchParams(Object.entries(filter).filter(([, v]) => v) as [string, string][]).toString()
-  return (await call<TimeEntry[]>(`/time-entries${params ? `?${params}` : ''}`)).map(entry)
+  return (await listAll<TimeEntry>(`/time-entries${params ? `?${params}` : ''}`)).map(entry)
 }
 export const createEntry = async (body: { period_id: string; cost_unit_node_id: string; currency: string; principal_id: string; node_id: string; started_at: string; ended_at: string; note: string }) =>
   entry(await call<TimeEntry>('/time-entries', 'POST', { ...body, source: 'manual' }))

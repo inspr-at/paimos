@@ -37,7 +37,7 @@ func (m *Module) content(w http.ResponseWriter, r *http.Request) {
 	var a Attachment
 	err := db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
-		a, err = scan(tx.QueryRow(r.Context(), `SELECT `+columns+` FROM attachments WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL`, p.TenantID, id))
+		a, err = readAttachment(r.Context(), tx, p.TenantID, id)
 		return err
 	})
 	if err != nil {

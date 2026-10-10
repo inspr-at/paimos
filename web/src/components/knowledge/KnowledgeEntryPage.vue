@@ -615,7 +615,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
           <ol class="diff-lines" aria-label="Their text against your draft">
             <li v-for="(line, i) in diffLines" :key="i" class="diff-line" :class="line.kind">
               <span class="gutter" aria-hidden="true"><AppIcon v-if="line.kind === 'add'" name="plus" :size="11" /><AppIcon v-else-if="line.kind === 'remove'" name="minus" :size="11" /></span>
-              <span v-if="line.kind !== 'same'" class="sr-only">{{ line.kind === 'add' ? 'Only in your draft:' : 'Only in theirs:' }}</span>
+              <span v-if="line.kind === 'add' || line.kind === 'remove'" class="sr-only">{{ line.kind === 'add' ? 'Only in your draft:' : 'Only in theirs:' }}</span>
               <span class="text">{{ line.text || ' ' }}</span>
             </li>
             <li v-if="!diffLines.some(line => line.kind !== 'same')" class="diff-line same"><span class="gutter" /><span class="text calm">The text is the same; they changed the {{ conflictFields.length ? listWords(conflictFields) : 'details' }}.</span></li>

@@ -309,7 +309,7 @@ paths:
     get:
       operationId: listNodeActivity
       summary: Merged comment and visible field-change timeline
-      description: Reverse chronological by (at, event ID). The opaque cursor binds tenant, node and event watermark. Imported snapshots with no visible changes are omitted; the first snapshot is a baseline. Comments retain their creation position after edits; deleted comments are omitted. Imported comments are read-only. Native updates also show a labels change (field tags).
+      description: "Reverse chronological by (at, event ID). The opaque cursor binds tenant, node and event watermark. Imported snapshots with no visible changes are omitted; the first snapshot is a baseline. Comments retain their creation position after edits; deleted comments are omitted. Imported comments are read-only. Native updates also show a labels change (field tags). Each read has a five-second deadline and a bounded candidate batch; a sparse history may return fewer items with a continuation cursor. Continue until next_cursor is null."
       security: *auth
       parameters:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
