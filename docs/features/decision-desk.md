@@ -62,11 +62,12 @@ outbox state `delivered` means dispatched, while `receipt_state` reports `queued
 
 The question dispatcher (AEON-1111) wakes on committed answer, reused-answer and
 session-ended receipt notifications. Reused answers create immediately due inbox
-and comment effects, without another grace window. A single tenant-scoped read selects up to 32 due effects
-and the earliest persisted delivery or retry deadline; the ten-second grace and
-30-second retry windows remain unchanged. Startup, listener reconnect and a
-30-second reconciliation recover missed notifications. Notifications only prompt
-a durable read; each effect still checks current authority in its write transaction.
+and comment effects, without another grace window. A single tenant-scoped read
+selects up to 32 due effects and the earliest persisted delivery or retry deadline;
+the ten-second grace and 30-second retry windows remain unchanged. Startup,
+listener reconnect and a 30-second reconciliation recover missed notifications.
+Notifications only prompt a durable read; each effect still checks current
+authority in its write transaction.
 
 A signed-in addressed person with inbox management and question permissions can
 use `tell --reply-to UUID --session-cookie-file PATH` on a held request. The
