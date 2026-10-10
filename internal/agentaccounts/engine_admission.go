@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/accountprivacy"
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/hostcapacity"
@@ -26,7 +27,7 @@ type EngineCapacity struct {
 // EngineCapacityTx reuses the overview's account admission/pacing/limit rules.
 // It additionally requires fresh measurable capacity and a fresh enrolled host;
 // the runtime's blind one-run recovery fallback never authorizes this shadow gate.
-func EngineCapacityTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner, harness string, hours float64, now time.Time) (EngineCapacity, error) {
+func EngineCapacityTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner, harness string, hours float64, now time.Time, projectIDs ...string) (EngineCapacity, error) {
 	permission := "account.read"
 	if p.Kind == tenant.Agent {
 		permission = "account.overview.read"
@@ -44,7 +45,11 @@ func EngineCapacityTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner,
 	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`); err != nil {
 		return EngineCapacity{}, err
 	}
-	out, err := engineCapacityInputs(ctx, tx, p, owner, harness, hours, now)
+	projectID := ""
+	if len(projectIDs) > 0 {
+		projectID = projectIDs[0]
+	}
+	out, err := engineCapacityInputs(ctx, tx, p, owner, harness, hours, now, projectID)
 	if err != nil {
 		return EngineCapacity{}, err
 	}
@@ -52,7 +57,7 @@ func EngineCapacityTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner,
 	return out, err
 }
 
-func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner, harness string, hours float64, now time.Time) (EngineCapacity, error) {
+func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner, harness string, hours float64, now time.Time, projectID string) (EngineCapacity, error) {
 
 	for _, bound := range []struct {
 		query   string
@@ -90,6 +95,7 @@ func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, ow
 		return EngineCapacity{}, err
 	}
 	out := EngineCapacity{Reason: "account_unavailable"}
+	denied, allowedCandidate := false, false
 	for _, a := range accounts {
 		if a.Harness != harness || !privacy[a.ID] {
 			continue
@@ -101,6 +107,15 @@ func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, ow
 		if !own {
 			continue
 		}
+		allowed, err := accountuse.AllowedForProject(ctx, tx, a.ID, projectID)
+		if err != nil {
+			return EngineCapacity{}, err
+		}
+		if !allowed {
+			denied = true
+			continue
+		}
+		allowedCandidate = true
 		var model bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$1 AND aeon_account_allows_profile($1,$2::uuid[],id))`, harness, a.AllowedProfileIDs).Scan(&model); err != nil {
 			return EngineCapacity{}, err
@@ -172,6 +187,9 @@ func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, ow
 			continue
 		}
 		return EngineCapacity{Reason: "allowed"}, nil
+	}
+	if denied && !allowedCandidate {
+		return EngineCapacity{Reason: "context"}, nil
 	}
 	return out, nil
 }

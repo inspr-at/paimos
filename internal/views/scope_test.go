@@ -189,7 +189,7 @@ func TestLegacyViewsMigrationScopeEventsAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	type fixture struct{ tenant, owner, legacy, shared, kept, deleted string }
+	type fixture struct{ tenant, owner, other, legacy, shared, kept, deleted string }
 	var fixtures []fixture
 	for _, slug := range []string{"legacy-ppm", "legacy-pma"} {
 		var f fixture
@@ -200,6 +200,10 @@ func TestLegacyViewsMigrationScopeEventsAndRestore(t *testing.T) {
 			t.Fatal(err)
 		}
 		dbtest.BindRole(t, d, f.tenant, f.owner, "member")
+		if err := d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','other') RETURNING id::text`, f.tenant).Scan(&f.other); err != nil {
+			t.Fatal(err)
+		}
+		dbtest.BindRole(t, d, f.tenant, f.other, "member")
 		for i, dest := range []*string{&f.legacy, &f.shared, &f.kept, &f.deleted} {
 			columns := []string{}
 			if i == 2 {
@@ -275,6 +279,40 @@ func TestLegacyViewsMigrationScopeEventsAndRestore(t *testing.T) {
 				t.Fatalf("snapshots: before=%s after=%s", b, a)
 			}
 		}
+		// AEON-884: the actual migration evidence identifies upgrade retirement;
+		// even a tenant-shared deleted view remains private to its owner.
+		for _, principal := range []string{f.owner, f.other} {
+			req := httptest.NewRequest(http.MethodGet, "/api/views/deleted", nil)
+			req = req.WithContext(tenant.WithPrincipal(ctx, tenant.Principal{ID: principal, TenantID: f.tenant}))
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("deleted list: %d %s", w.Code, w.Body.String())
+			}
+			var page deletedViewPage
+			if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+				t.Fatal(err)
+			}
+			if principal == f.other {
+				if len(page.Items) != 0 {
+					t.Fatalf("other person saw retired views: %#v", page)
+				}
+				continue
+			}
+			if len(page.Items) != 2 || page.NextCursor != nil {
+				t.Fatalf("retired list = %#v", page)
+			}
+			seen := map[string]bool{}
+			for _, v := range page.Items {
+				if (v.ID != f.legacy && v.ID != f.shared) || v.DeletionReason != "retired_by_upgrade" || v.Mode != "list" {
+					t.Fatalf("upgrade-retired view = %#v", v)
+				}
+				seen[v.ID] = true
+			}
+			if !seen[f.legacy] || !seen[f.shared] {
+				t.Fatal("retired fixture missing from list")
+			}
+		}
 		req := httptest.NewRequest(http.MethodPost, "/api/views/"+f.legacy+"/restore", nil)
 		req = req.WithContext(tenant.WithPrincipal(ctx, tenant.Principal{ID: f.owner, TenantID: f.tenant}))
 		w := httptest.NewRecorder()
@@ -288,6 +326,19 @@ func TestLegacyViewsMigrationScopeEventsAndRestore(t *testing.T) {
 		}
 		if restored.ID != f.legacy || restored.DeletedAt != nil || restored.Mode != "list" || len(restored.Columns) != 0 {
 			t.Fatalf("restored=%#v", restored)
+		}
+		req = httptest.NewRequest(http.MethodGet, "/api/views/"+f.legacy, nil)
+		req = req.WithContext(tenant.WithPrincipal(ctx, tenant.Principal{ID: f.owner, TenantID: f.tenant}))
+		w = httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("restored link: %d %s", w.Code, w.Body.String())
+		}
+		if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1 AND type='view.restored' AND after->>'id'=$2`, f.tenant, f.legacy).Scan(&eventsCount); err != nil {
+			t.Fatal(err)
+		}
+		if eventsCount != 1 {
+			t.Fatalf("restore events=%d want 1", eventsCount)
 		}
 		var deletedAt string
 		if err := d.Admin.QueryRow(ctx, `SELECT deleted_at::text FROM saved_views WHERE tenant_id=$1 AND id=$2`, f.tenant, f.deleted).Scan(&deletedAt); err != nil {

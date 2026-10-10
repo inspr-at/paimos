@@ -95,7 +95,7 @@ func planReason(r Request, s agentplan.Snapshot) string {
 
 func retry(reason string, until *time.Time, now time.Time) *int64 {
 	switch reason {
-	case "allowed", "shadow_disabled", "harness_required", "harness_off":
+	case "allowed", "shadow_disabled", "harness_required", "harness_off", "context":
 		return nil
 	}
 	seconds := int64(30)

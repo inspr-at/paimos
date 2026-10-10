@@ -280,6 +280,7 @@ components:
         author_family: {type: string, enum: ['', openai, anthropic, xai, cursor, google, local], description: Normalised author family used for exclusion; empty when none was supplied.}
         profile: {oneOf: [{$ref: '#/components/schemas/ModelProfile'}, {type: 'null'}]}
         ladder: {type: array, items: {type: object, required: [profile_id, selected, skip_reasons], properties: {stage: {type: string, enum: [column, default, role]}, profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
+        preview: {type: boolean, description: "Catalog-only choice when no harness accounts exist; never executable."}
         command_template: {type: string}
         owner_required: {type: boolean}
         source: {type: string, enum: [aeon]}
