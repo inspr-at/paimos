@@ -5042,6 +5042,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestWorkAliasNeverRemapsNonWorkKinds","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestWorkListRetryRetainsPaginationAndExplicitFailure","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestWorkMCPCancelAndListBounds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestWorkTypeAliasesUseCanonicalIDAndExposeShape","tier":"NIGHTLY"}
@@ -5103,6 +5105,8 @@
     {"kind":"go","package":"internal/client","name":"TestStepUpSecondChallengeDoesNotPromptAgain","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/client","name":"TestSuppliedStepUpProofIsNeverRedirectedOrReconfirmed","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/client","name":"TestWorkAggregateReadRetryIsOptInOnceAndCancellable","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/config","name":"TestChatEnabledFromEnv","tier":"ESSENTIAL"}
     ,
@@ -7441,6 +7445,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestListCursorFiltersAndTree","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestListEpicMembershipSetBasedAndScoped","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestListEstimateSortBoundedConcurrentMatchesBaseline","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestListFiltersExclusionsLabelsEpicsAndDates","tier":"GATED-FULL"}
     ,
