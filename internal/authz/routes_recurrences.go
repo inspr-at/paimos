@@ -2,7 +2,10 @@
 
 package authz
 
-// Route and scope declarations for recurrences.
+// Route and scope declarations for recurrences. Target route scope is the
+// output project; handlers additionally check the definition scope and owner.
+// Personal definitions require the canonical person, workspace definitions a
+// workspace grant, and project definitions a grant in their scope project.
 func init() {
 	registerRoutes("recurrences", map[string]string{
 		"DELETE /api/recurrences/{recurrenceId}": "recurrences.manage",
