@@ -23,10 +23,11 @@ type publicMainSnapshot struct {
 func (m *Module) readPublicMain(ctx context.Context, tenantID string, s Source) *publicMainSnapshot {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
-	r, err := m.reader(tenantID, s.Repository, s.CredentialRef)
+	r, cleanup, err := m.reader(ctx, tenantID, s.Repository, s.CredentialRef)
 	if err != nil {
 		return nil
 	}
+	defer cleanup()
 	observed := time.Now()
 	main, err := r.Commit(ctx, s.Repository, "main")
 	if err != nil {
