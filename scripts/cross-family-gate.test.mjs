@@ -187,6 +187,8 @@ test("PR events reject stale heads and head changes, while main may advance inde
   const api = { pull: async () => pr, statuses };
   const options = { eventName: "pull_request", event, config, repository, git: f.git, api };
   assert.equal((await checkEvent(options))[0].reviewed, f.reviewed);
+  await assert.rejects(checkEvent({ ...options, api: { ...api, statuses: async () => [] } }),
+    /PR #411: no trusted gate\/verdict; a new branch commit requires review/);
   await assert.rejects(checkEvent({ ...options, event: { ...event, pull_request: f.pr(f.head) } }), /changed since/);
   assert.equal((await checkEvent({ ...options, api: { ...api, pull: async () => ({ ...pr, base: { ...pr.base, sha: f.base } }) } }))[0].reviewed, f.reviewed);
   let calls = 0;
@@ -234,6 +236,7 @@ test("diagnostic workflow is PR/queue-only, unconditional and cannot emit the Ap
   assert.match(gate, /fetch-depth: 0/);
   assert.match(gate, /git show "\$GATE_BASE_SHA:scripts\/cross-family-gate.mjs"/);
   assert.match(gate, /git show "\$GATE_BASE_SHA:.github\/gate-posters.json"/);
+  assert.match(gate, /non-required preview reports missing PR verdicts until review is posted/);
   assert.doesNotMatch(gate, /: write|continue-on-error|node --test|pull_request_target/);
   const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   assert.doesNotMatch(ci, /gate\/cross-family/);
@@ -255,14 +258,22 @@ assert.deepEqual(policy.posters, ${JSON.stringify(config.posters)});
 console.log('trusted base gate ran');
 process.exit(policy.fixtureExitCode);
 `;
-  function run(files, baseOverride) {
+  function run(files, baseOverride, eventName = "pull_request", ref) {
     const runner = mkdtempSync(join(tmpdir(), "aeon-preview-runner-"));
     const summary = join(runner, "summary.txt");
+    const eventPath = join(runner, "event.json");
     writeFileSync(summary, "existing summary\n");
     const base = f.commit(files, [f.main]);
+    const event = { repository: { full_name: repository }, ...(eventName === "merge_group"
+      ? { action: "checks_requested", merge_group: f.group(f.merge(base, f.reviewed), base) }
+      : { action: "synchronize", pull_request: { ...f.pr(), base: { ...f.pr().base, sha: base } } }) };
+    writeFileSync(eventPath, JSON.stringify(event));
     const result = spawnSync("bash", ["-c", shell], {
       cwd: f.cwd, encoding: "utf8", timeout: 10_000,
-      env: { PATH: process.env.PATH, GATE_BASE_SHA: baseOverride ?? base, RUNNER_TEMP: runner, GITHUB_STEP_SUMMARY: summary },
+      env: { PATH: process.env.PATH, GATE_BASE_SHA: baseOverride ?? base, RUNNER_TEMP: runner, GITHUB_STEP_SUMMARY: summary,
+        GITHUB_EVENT_NAME: eventName, GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: repository,
+        GITHUB_REF: ref ?? event.merge_group?.head_ref ?? "refs/pull/411/merge",
+        GITHUB_SHA: event.merge_group?.head_sha ?? f.reviewed },
     });
     assert.ifError(result.error);
     assert.equal(result.signal, null);
@@ -290,6 +301,78 @@ process.exit(policy.fixtureExitCode);
   assert.equal(invalid.status, 1, invalid.stderr);
   assert.equal(invalid.stdout, "Invalid gate base commit\n");
   assert.equal(invalid.summary, "existing summary\n");
+  // The real merge-group event skips only this diagnostic, before extracting
+  // the base checker that would otherwise fail for a missing review verdict.
+  const queueNotice = "gate/policy-preview: merge-group preview skipped; required gate/cross-family enforces PR review verdicts (non-required diagnostic)";
+  const installed = { [checkerPath]: checker, [policyPath]: JSON.stringify({ ...config, fixtureExitCode: 7 }) };
+  const skipped = run(installed, undefined, "merge_group");
+  assert.equal(skipped.status, 0, skipped.stderr);
+  assert.equal(skipped.stdout, `::notice::${queueNotice}\n`);
+  assert.equal(skipped.summary, `existing summary\n${queueNotice}\n`);
+  assert.equal(existsSync(join(skipped.runner, "cross-family-gate.mjs")), false);
+  assert.equal(existsSync(join(skipped.runner, "gate-posters.json")), false);
+  // A main ref alone cannot skip a PR diagnostic failure.
+  const checked = run(installed, undefined, "pull_request", "refs/heads/main");
+  assert.equal(checked.status, 7, checked.stderr);
+  assert.equal(checked.stdout, "trusted base gate ran\n");
+  assert.equal(checked.summary, "existing summary\n");
+});
+
+test("merge-group diagnostic CLI skips explicitly while required gates still reject missing verdicts", async () => {
+  const queueNotice = "gate/policy-preview: merge-group preview skipped; required gate/cross-family enforces PR review verdicts (non-required diagnostic)";
+  const event = { repository: { full_name: repository }, action: "checks_requested",
+    merge_group: f.group(f.merge(f.main, f.reviewed)) };
+  // The CLI needs no config, Git checkout or read credentials for the diagnostic
+  // skip; the same event must still fail the required gate and external poster.
+  const runner = mkdtempSync(join(tmpdir(), "aeon-preview-cli-"));
+  const eventPath = join(runner, "event.json");
+  const summary = join(runner, "summary.txt");
+  const configPath = join(runner, "policy.json");
+  writeFileSync(eventPath, JSON.stringify(event));
+  writeFileSync(summary, "existing summary\n");
+  const env = { PATH: process.env.PATH, GITHUB_EVENT_NAME: "merge_group", GITHUB_EVENT_PATH: eventPath,
+    GITHUB_REPOSITORY: repository, GITHUB_STEP_SUMMARY: summary };
+  const runCLI = (changes = {}) => spawnSync(process.execPath,
+    [new URL("./cross-family-gate.mjs", import.meta.url).pathname, configPath],
+    { cwd: runner, encoding: "utf8", timeout: 10_000, env: { ...env, ...changes } });
+  const cli = runCLI();
+  assert.ifError(cli.error);
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.equal(cli.stdout, `::notice::${queueNotice}\n`);
+  assert.equal(cli.stderr, "");
+  assert.equal(readFileSync(summary, "utf8"), `existing summary\n${queueNotice}\n`);
+  assert.equal(existsSync(configPath), false);
+  const withoutSummary = runCLI({ GITHUB_STEP_SUMMARY: "" });
+  assert.ifError(withoutSummary.error);
+  assert.equal(withoutSummary.status, 0, withoutSummary.stderr);
+  assert.equal(withoutSummary.stdout, `::notice::${queueNotice}\n`);
+  const api = { pulls: async () => [f.pr()], pull: async () => f.pr(), statuses: async () => [] };
+  const options = { eventName: "merge_group", event, config, repository, git: f.git, api };
+  const missingVerdict = /PR #411: no trusted gate\/verdict; a new branch commit requires review/;
+  await assert.rejects(checkEvent(options), missingVerdict);
+  const emitted = [];
+  const posted = await postGate({ ...options, write: true, publish: async (sha, body) => emitted.push({ sha, ...body }) });
+  assert.equal(posted.state, "failure");
+  assert.equal(posted.description, "Trusted main policy refused missing, revoked or changed review evidence");
+  assert.deepEqual(emitted.map((status) => [status.sha, status.context, status.state]),
+    [[event.merge_group.head_sha, "gate/cross-family", "pending"], [event.merge_group.head_sha, "gate/cross-family", "failure"]]);
+  // The skip is confined to checks_requested main-queue events from this repo.
+  writeFileSync(configPath, JSON.stringify(config));
+  const push = { repository: event.repository, ref: "refs/heads/main", after: event.merge_group.head_sha };
+  for (const [payload, eventName, expected] of [
+    [push, "push", /only accepts pull_request or merge_group/],
+    [event, "workflow_dispatch", /only accepts pull_request or merge_group/],
+    [{ ...event, action: "destroyed" }, "merge_group", /only accepts pull_request or merge_group/],
+    [{ ...event, repository: { full_name: "fork/paimos" } }, "merge_group", /event repository mismatch/],
+  ]) {
+    writeFileSync(eventPath, JSON.stringify(payload));
+    const rejected = runCLI({ GITHUB_EVENT_NAME: eventName, GH_TOKEN: "fixture-token" });
+    assert.ifError(rejected.error);
+    assert.equal(rejected.status, 1, rejected.stderr);
+    assert.equal(rejected.stdout, "");
+    assert.match(rejected.stderr, expected);
+    assert.equal(readFileSync(summary, "utf8"), `existing summary\n${queueNotice}\n`);
+  }
 });
 
 test("required status binds to the external App, preserving the existing ruleset separately", () => {

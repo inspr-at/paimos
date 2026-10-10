@@ -1,5 +1,69 @@
 # Web workspace
 
+## Product role and release evidence
+
+PAIMOS is INSPR's **What**: projects, tickets and knowledge, plus the
+agent-platform engine. GUI-22 (`paimos-agent-platform-core` in AEON Knowledge)
+sets these public product badges and responsibilities:
+
+| Product | Public badge | Role in the public flow |
+| --- | --- | --- |
+| Aithema | Why | Requirements |
+| PAIMOS | What | Plan and the agent-platform engine |
+| PHAROS | Where | Deploy |
+| JANUS | Who | Access |
+| Doctrine | How | Rules underneath the flow |
+
+The public flow is **Idea → Requirements → Plan → Build → Deploy → Access →
+Learn**. These words describe the product direction; the planned configurable
+workflow is Flow 2 below.
+
+### Shipped capabilities
+
+Checked on 9 October 2026 against the running PPM release history: **Hidden
+Helium**, [261009095632.0.0](https://github.com/inspr-at/paimos/releases/tag/v261009095632.0.0).
+The [frozen product notes](../../internal/releasehistory/data/product-notes.json)
+record the shipped tickets in the releases cited here. Optional integrations
+still require their documented configuration and permissions.
+
+| Available behavior | Shipped ticket and release evidence | Feature detail |
+| --- | --- | --- |
+| Projects, tickets and knowledge in one work tree; terminal access | AEON-19 and AEON-18, [Cyan Cell notes](../../internal/releasehistory/data/product-notes.json) (260923143005.0.0) | [Hierarchy](../PLANNING_HIERARCHY.md), [CLI](command-line.md) |
+| Per-harness agent limit controls | AEON-647, [Coral Cargo](https://github.com/inspr-at/paimos/releases/tag/v261005070923.0.0) | [Agents plan](agents-daily-plan.md) |
+| Decision Desk questions and approval requests with recorded answers; durable agent inbox | AEON-567, [Awake Alpha](https://github.com/inspr-at/paimos/releases/tag/v261003065316.0.0); AEON-27, [Even Era notes](../../internal/releasehistory/data/product-notes.json) (260923154901.0.0) | [Decision Desk](decision-desk.md), [Inbox](../AGENT_INTEGRATION.md#inbox) |
+| Linked delivery state and merge audit with configured GitHub evidence | AEON-848, AEON-852 and AEON-853, [Fuzzy Facet](https://github.com/inspr-at/paimos/releases/tag/v261008161926.0.0) | [Ticket detail](ticket-detail-panel.md) |
+| Shadow previews of admission, fair queueing, model routing, review and shipping | AEON-887–891, [Fuzzy Facet](https://github.com/inspr-at/paimos/releases/tag/v261008161926.0.0) | [Start gate](agents-start-gate.md), [Work queue](ticket-work-queue.md) |
+| Recurring tickets with schedules, pause/resume and Run now | AEON-573, [Coral Cargo](https://github.com/inspr-at/paimos/releases/tag/v261005070923.0.0) | [Recurring work](recurring-work.md) |
+| Reported release steps and supported change steps for Delivery › Flow | AEON-1004, [Glassy Geoid](https://github.com/inspr-at/paimos/releases/tag/v261009063244.0.0) | [Delivery Flow data](delivery-flow-data.md) |
+
+The engine previews record proposals alongside the current delivery process.
+AEON-775's broader controller is still being completed: shadow shipping does
+not merge or deploy a change. Delivery › Flow reports delivery evidence; it
+does not provide Flow 2 or restore the retired Journey stages.
+
+### Planned work
+
+- **Routines (AEON-680)** build on shipped recurring tickets. Saved agent
+  assignments, typed action gates, run budgets and run logbooks are planned;
+  the simplest routine today creates a recurring ticket. Later learning remains
+  planned separately (AEON-693). **Hosted assistant governance (AEON-754)**
+  is also planned; existing inbox/webhook transport does not establish that
+  complete capability.
+- **PHAROS and JANUS integrations (AEON-820 and AEON-819)** are planned.
+  They are separate products with their own repositories and releases, usable
+  independently of PAIMOS. PAIMOS will reach them through the public tool
+  contract: **request → policy → approval if needed → execution → receipt**.
+  Zitadel remains the identity provider for people. Retired stage plugins are
+  not the new tool integrations.
+- **INSPR Flow 2 (AEON-821)** is planned as a configurable workflow over the
+  delivery engine, using the public flow above, with Routines feeding Learn.
+  It does not reuse the [retired INSPR Flow / Journey](../PLANNING_HIERARCHY.md#retired-flow).
+- **Voice and Aithema requirements intake (AEON-822)** are planned. Existing
+  intake routes and plugin groundwork do not prove a usable voice-to-ticket
+  intake flow.
+
+## Workspace behavior
+
 Quote presence coalesces selection changes made during an outstanding request and sends the latest state after completion, preserving throttling, rejoin backoff and disposal. In Hours, an incomplete start time keeps the selected cost unit and its options; completing the time rechecks rate eligibility against that start's UTC date. Incomplete times cannot be logged.
 
 **Settings → Access → Access log** reads the newest 2,000 access changes and says when older changes are omitted. The API keeps its existing ascending `after` pagination; `GET /api/audit?category=access&order=desc` returns newest first, with `next_before` for older pages through `before`. Each page is bounded to 50 events.

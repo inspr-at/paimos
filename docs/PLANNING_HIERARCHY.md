@@ -39,7 +39,14 @@ The release walker and membership APIs continue to read and edit planning work.
 
 ## Retired Flow
 
-The eight-stage INSPR Flow is retired by AEON-723. Its view, actions, gates,
+The historical eight-stage INSPR Flow / Journey is retired by AEON-723,
+shipped in [Direct Dome](https://github.com/inspr-at/paimos/releases/tag/v261007035250.0.0).
+Its view, actions, gates,
 handoffs and external-stage CLI are removed. Historical data stays in place;
 compatibility HTTP routes return authenticated 410 errors. A later contract-phase
 change will migrate shared release storage before removing dormant Flow data.
+
+[INSPR Flow 2 (AEON-821) is planned](features/web-workspace.md#planned-work)
+as a configurable workflow on the delivery engine: Idea → Requirements → Plan →
+Build → Deploy → Access → Learn. It does not reuse the retired Journey code or
+make those historical stages available again.

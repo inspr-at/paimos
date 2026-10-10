@@ -112,6 +112,19 @@ test('keyboard focus is a solid contrast-safe ring for extreme primary accents',
     }
   }
 })
+test('AEON-644: the filled approval count badge uses contrast-safe waiting ink in both modes', () => {
+  const queue = readFileSync(new URL('../src/components/agents/ApprovalQueue.vue', import.meta.url), 'utf8')
+  const filled = [...queue.matchAll(/\.count-badge\s*\{([^}]+)\}/g)].find(rule => /background:\s*var\(--agent-waiting\)/.test(rule[1]!))
+  assert.ok(filled, 'the filled waiting badge style exists')
+  const ink = /(?:^|;)\s*color:\s*var\((--[\w-]+)\)/.exec(filled[1]!)?.[1]
+  assert.equal(ink, '--agent-waiting-ink')
+  for (const preset of AGENT_PALETTES) for (const mode of ['light', 'dark'] as const) {
+    const tokens = agentTokens({ ...PORCELAIN.agents, palette: preset.id }, mode)
+    const fill = tokens['--agent-waiting']!, contrast = colourContrast(tokens[ink]!, fill)
+    assert.equal(contrast, Math.max(colourContrast('#ffffff', fill), colourContrast('#102327', fill)), `${preset.id} ${mode}: better-contrasting waiting badge ink`)
+    if (preset.id === 'standard') assert.ok(contrast >= 4.5, `${preset.id} ${mode}: waiting badge label`)
+  }
+})
 test('Porcelain generated accent blocks cannot drift from the engine in CI', () => {
   const css = readFileSync(new URL('../src/styles/tokens.css', import.meta.url), 'utf8')
   const blocks = [...css.matchAll(/^[ \t]*\/\* BEGIN GENERATED THEME (light|dark)[^\n]*\*\/[\s\S]*?^[ \t]*\/\* END GENERATED THEME \1 \*\//gm)]

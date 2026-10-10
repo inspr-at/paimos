@@ -31,6 +31,13 @@ jobs:
           GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
+          # This non-required preview reports missing PR verdicts until review is posted.
+          # Merge-queue reviews are enforced by the required external App gate.
+          if [[ "$GITHUB_EVENT_NAME" == 'merge_group' ]]; then
+            echo 'gate/policy-preview: merge-group preview skipped; required gate/cross-family enforces PR review verdicts (non-required diagnostic)' >> "$GITHUB_STEP_SUMMARY"
+            echo '::notice::gate/policy-preview: merge-group preview skipped; required gate/cross-family enforces PR review verdicts (non-required diagnostic)'
+            exit 0
+          fi
           [[ "$GATE_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'Invalid gate base commit'; exit 1; }
           # First installation skips this diagnostic preview until the coordinator lands this policy.
           # Subsequent PRs cannot add themselves to the allowlist or change their checker.

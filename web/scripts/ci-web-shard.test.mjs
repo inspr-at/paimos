@@ -539,20 +539,25 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const noShiftOnMain = 10.171603
   assert.ok(noShift && noShift.weightSeconds >= noShiftOnMain, 'No-shift regressions must remain in the gate')
   const deskGrowth = deskAdded.reduce((sum, spec) => sum + spec.weightSeconds, 0) + noShift.weightSeconds - noShiftOnMain
+  // AEON-644 adds its ten application regressions to the gate. Preserve the
+  // unchanged prior budget, then charge this separately measured spec's weight.
+  const themeApply = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/theme-apply.spec.ts')
+  assert.ok(themeApply && themeApply.listedTests === 10, 'Theme application regressions must remain in the gate')
+  assert.ok(gated.some(spec => spec.file === themeApply.file), 'Theme application must remain gated')
   const priorGate = {
     ...real,
     groups: real.groups.filter(group => group !== attention).map(group => ({
       ...group,
-      specs: group.specs.filter(spec => !deskFiles.has(spec.file)).map(spec =>
+      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && spec !== themeApply).map(spec =>
         spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
           spec === noShift ? { ...spec, weightSeconds: noShiftOnMain } : spec),
     })),
   }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
-    'expanded gate exceeds the prior estimate plus the attention, autopilot and cutover specs')
+    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover and theme application specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {

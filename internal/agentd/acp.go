@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
@@ -94,6 +96,13 @@ type acpTurn struct {
 
 func (t *acpTurn) accept() { t.once.Do(func() { close(t.accepted) }) }
 
+func boundedACPAction(op string) string {
+	if validChatID(op, 32) {
+		return op
+	}
+	return "unsupported"
+}
+
 type acpProcess struct {
 	*wireProcess
 	mu                               sync.Mutex
@@ -106,6 +115,10 @@ type acpProcess struct {
 	terminalErr                      error
 	timer                            *time.Timer
 	idleTimeout                      time.Duration
+	idleGeneration                   uint64
+	turnTimeout                      time.Duration
+	beforePrompt                     func() error
+	turnComplete                     func() error
 	costMicros                       int64
 	input, output, cached, reasoning int64
 }
@@ -161,11 +174,30 @@ func (p *acpProcess) promptLocked(ctx context.Context, text string) (*acpTurn, e
 	if p.turn != nil {
 		return nil, ErrUnsupported
 	}
+	if len(text) == 0 || len(text) > rules.MaxBytes+64<<10 {
+		return nil, errors.New("ACP prompt exceeds the input bound")
+	}
+	if p.beforePrompt != nil {
+		if err := p.beforePrompt(); err != nil {
+			p.finishLocked(err)
+			return nil, err
+		}
+	}
+	p.idleGeneration++
 	if p.timer != nil {
 		p.timer.Stop()
 	}
 	t := &acpTurn{id: strconv.FormatInt(p.next.Add(1), 10), accepted: make(chan struct{})}
 	p.turn, p.idle = t, make(chan struct{})
+	if p.turnTimeout > 0 {
+		p.timer = time.AfterFunc(p.turnTimeout, func() {
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			if p.turn == t {
+				p.finishLocked(errors.New("ACP turn exceeded its deadline"))
+			}
+		})
+	}
 	n, _ := strconv.ParseInt(t.id, 10, 64)
 	if err := p.sendContext(ctx, map[string]any{"jsonrpc": "2.0", "id": n, "method": "session/prompt", "params": map[string]any{
 		"sessionId": p.sessionID, "prompt": []map[string]string{{"type": "text", "text": text}},
@@ -174,12 +206,23 @@ func (p *acpProcess) promptLocked(ctx context.Context, text string) (*acpTurn, e
 		return nil, err
 	}
 	p.observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1, Activity: "busy"})
+	u := chatState("running")
+	p.observe(AdapterEvent{Chat: &u})
 	return t, nil
 }
 
 func (p *acpProcess) Control(ctx context.Context, op, text string) error {
 	if op != "inbox" && op != "steer" && op != "interrupt" {
-		return ErrUnsupported
+		return fmt.Errorf("%w: ACP has no %s action", ErrUnsupported, boundedACPAction(op))
+	}
+	if (op == "inbox" || op == "steer") && (len(text) == 0 || len(text) > 64<<10) || op == "interrupt" && text != "" {
+		return errors.New("invalid ACP control body")
+	}
+	// Grok's qualified native transport has no cancellation acknowledgement.
+	// Gemini steering never invokes cancel implicitly: replacement is lossy
+	// and requires a separately labelled, explicitly authorized product action.
+	if p.harness == Grok && op == "interrupt" {
+		return fmt.Errorf("%w: native Grok interrupt is unavailable; use Stop", ErrUnsupported)
 	}
 	p.mu.Lock()
 	if p.closed {
@@ -261,9 +304,11 @@ func (p *acpProcess) event(raw json.RawMessage) {
 	}
 	if frame.Method != "" {
 		if frame.Params.SessionID != p.sessionID {
+			p.chatDropped.Add(1)
 			return
 		}
 		if frame.Method == "session/request_permission" {
+			p.observeACPChat(raw)
 			// Never select a permission option on behalf of a person. Reject
 			// explicitly so the owned child does not hang on an unanswered call.
 			_ = p.send(map[string]any{"jsonrpc": "2.0", "id": frame.ID, "result": map[string]any{"outcome": map[string]string{"outcome": "cancelled"}}})
@@ -271,11 +316,17 @@ func (p *acpProcess) event(raw json.RawMessage) {
 			return
 		}
 		if frame.Method != "session/update" {
+			p.chatDropped.Add(1)
 			if len(frame.ID) > 0 {
 				_ = p.send(map[string]any{"jsonrpc": "2.0", "id": frame.ID, "error": map[string]any{"code": -32601, "message": "client method unavailable"}})
 			}
 			return
 		}
+		if p.turn == nil {
+			p.chatDropped.Add(1)
+			return
+		}
+		p.observeACPChat(raw)
 		if p.turn != nil && (frame.Params.Update.Kind == "agent_message_chunk" || frame.Params.Update.Kind == "tool_call") {
 			p.turn.accept()
 		}
@@ -308,9 +359,18 @@ func (p *acpProcess) event(raw json.RawMessage) {
 			} `json:"quota"`
 		} `json:"_meta"`
 	}
-	if len(frame.Error) > 0 && string(frame.Error) != "null" || decodeProbeJSON(frame.Result, &result) != nil || result.StopReason != "end_turn" && result.StopReason != "cancelled" {
+	if len(frame.Error) > 0 && string(frame.Error) != "null" || decodeProbeJSON(frame.Result, &result) != nil || result.StopReason != "end_turn" && result.StopReason != "cancelled" || p.harness == Grok && result.StopReason != "end_turn" {
+		if hit := capacity.VendorLimit(p.harness, raw, nil, time.Now().UTC()); hit != nil {
+			p.observe(limitEvent(hit))
+		}
 		p.finishLocked(errors.New("ACP prompt failed"))
 		return
+	}
+	if p.turnComplete != nil {
+		if err := p.turnComplete(); err != nil {
+			p.finishLocked(err)
+			return
+		}
 	}
 	model := p.model
 	// OpenCode v1.14.48's prompt response contains only the last assistant
@@ -324,7 +384,14 @@ func (p *acpProcess) event(raw json.RawMessage) {
 	if p.harness == Gemini && (len(result.Meta.Quota.Models) != 1 || result.Meta.Quota.Models[0].Model != model) {
 		model = ""
 	}
-	if report, ok := sessionusage.ACPPromptUsage(p.harness, result.Usage, model); ok {
+	report, ok := sessionusage.ACPPromptUsage(p.harness, result.Usage, model)
+	if p.harness == Cursor {
+		var usage map[string]json.RawMessage
+		if json.Unmarshal(result.Usage, &usage) == nil {
+			report, ok = sessionusage.CursorPromptUsage(usage, model)
+		}
+	}
+	if ok {
 		in, out, cached, thought := usageCount(report.InputTokens), usageCount(report.OutputTokens), usageCount(report.CachedInputTokens), usageCount(report.ReasoningTokens)
 		p.input += in
 		p.output += out
@@ -340,16 +407,23 @@ func (p *acpProcess) event(raw json.RawMessage) {
 	}
 	p.turn.accept()
 	p.turn = nil
+	p.chatTools = nil
+	if p.timer != nil {
+		p.timer.Stop()
+	}
 	close(p.idle)
+	u := chatState("idle")
+	p.observe(AdapterEvent{Chat: &u})
 	if !p.persistent {
 		p.finishLocked(nil)
 		return
 	}
 	p.observe(AdapterEvent{Kind: "turn", Activity: "idle"})
+	generation := p.idleGeneration
 	p.timer = time.AfterFunc(p.idleTimeout, func() {
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		if p.turn == nil {
+		if p.turn == nil && p.idleGeneration == generation {
 			p.finishLocked(nil)
 		}
 	})
@@ -388,7 +462,7 @@ func (a *ACPAdapter) Start(ctx context.Context, r StartRequest, observe func(Ada
 	if timeout <= 0 {
 		timeout = 10 * time.Minute
 	}
-	p := &acpProcess{wireProcess: w, harness: a.Harness, model: r.Profile.Model, persistent: r.InboxEnabled, done: make(chan struct{}), idleTimeout: timeout}
+	p := &acpProcess{wireProcess: w, harness: a.Harness, model: r.Profile.Model, persistent: r.InboxEnabled && r.Run.Purpose != VerificationPurpose && !r.Run.ReadOnlyReview, done: make(chan struct{}), idleTimeout: timeout}
 	w.setOnEvent(p.event)
 	op, cancel := operationContext(ctx)
 	defer cancel()

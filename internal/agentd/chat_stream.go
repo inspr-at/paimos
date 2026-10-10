@@ -21,22 +21,29 @@ type ChatCapabilities struct {
 // alone. Exact per-session controls remain the authority for mutations.
 func sessionChatCapabilities(harness string, caps []string) ChatCapabilities {
 	result := ChatCapabilities{Steer: "queue"}
-	if harness != Claude && harness != Codex && harness != Pi {
+	if harness != Claude && harness != Codex && harness != Pi && !queuedChatHarness(harness) {
 		return result
 	}
 	result.Deltas = true
 	for _, cap := range caps {
 		switch cap {
 		case "interrupt":
-			result.Interrupt = true
+			result.Interrupt = harness != Grok
 		case "steer":
-			result.Steer = "native"
-			if harness == Pi {
+			if harness == Claude || harness == Codex {
+				result.Steer = "native"
+			} else if harness == Pi {
 				result.Steer = "next-step"
 			}
 		}
 	}
 	return result
+}
+
+// ACP prompt turns cannot consume ordinary input while running. Emulation
+// retains the authorized input lease until a clean turn-end notification.
+func queuedChatHarness(harness string) bool {
+	return harness == Cursor || harness == OpenCode || harness == Gemini || harness == Grok
 }
 
 // ChatBinding contains public identifiers only; never expose the worker lease.

@@ -10,6 +10,7 @@ import { leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { compareModelSort, planningSortValue, type PlanningColumn } from '../src/lib/planning.ts'
 import { defaultStatusHelp } from '../src/lib/statusDefinitions.ts'
+import { PORCELAIN } from '../src/lib/themeEngine.ts'
 
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
 const mira = { id: '22222222-2222-4222-8222-222222222222', name: 'Mira Holm' }
@@ -317,6 +318,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     Object.assign(window, { EventSource: QuietStream })
   })
   const calls: Call[] = []
+  const defaultTheme = { id: 'fixture-default-theme', tenant_id: 't1', name: 'Porcelain', scope: 'default', owner_principal_id: null, revision: 1, created_at: '', updated_at: '', values: structuredClone(PORCELAIN) }
   const started = Date.now()
   const bucketOf = (node: MockNode) => options.workBuckets?.[node.kind_slug]?.[canonicalWorkStatus(node.state)] ?? workBucket(node.state)
   await page.route('**/api/**', async arrived => {
@@ -331,6 +333,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = request.postData() }
     calls.push({ path, method, query, body, headers: request.headers() })
+    if (path === '/api/me/theme' && method === 'GET') return route.fulfill({ json: { theme: defaultTheme, default_theme_id: defaultTheme.id, selected_theme_id: null, revision: 0, fallback_notice: null } })
+    if (path === '/api/themes' && method === 'GET') return route.fulfill({ json: { items: [defaultTheme], next_cursor: null } })
     if (path === '/api/status/help' && method === 'GET') return route.fulfill({ json: defaultStatusHelp() })
     // ---------- Preferences ----------
     const prefPath = /^\/api\/preferences\/([^/]+)$/.exec(path)

@@ -590,6 +590,8 @@
     ,
     "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 390"
     ,
+    "browser:tests/palette.spec.ts:knowledge keys open visible scoped entries and superseded responses stay discarded"
+    ,
     "browser:tests/phone-approvals.spec.ts:ended requests offer context without a decision button"
     ,
     "browser:tests/phone-approvals.spec.ts:personal phone settings save quiet hours and revoke a device"
@@ -997,6 +999,14 @@
     "browser:tests/theme-agents.spec.ts:members can preview a workspace theme but cannot change it; reduced motion stills all artwork"
     ,
     "browser:tests/theme-agents.spec.ts:visible screenshots and Personal agent behaviour controls stay stable in all viewport modes"
+    ,
+    "browser:tests/theme-settings.spec.ts:Load more is disabled while the current theme is unavailable and works again after Reload (1024 dark)"
+    ,
+    "browser:tests/theme-settings.spec.ts:Load more is disabled while the current theme is unavailable and works again after Reload (1024 light)"
+    ,
+    "browser:tests/theme-settings.spec.ts:Load more is disabled while the current theme is unavailable and works again after Reload (390 dark)"
+    ,
+    "browser:tests/theme-settings.spec.ts:Load more is disabled while the current theme is unavailable and works again after Reload (390 light)"
     ,
     "browser:tests/theme-settings.spec.ts:Theme settings 1024 dark: preview, derived colours, marker and overlay stay still"
     ,
@@ -1617,6 +1627,70 @@
     "vitest:tests/theme-editor.unit.test.ts:theme editor matrix is complete > every phase has a fixture"
     ,
     "vitest:tests/theme-editor.unit.test.ts:theme editor matrix is complete > pending tokens are unique and their predecessors belong to no state"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > activeConflict: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > choosing: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > clean: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > confirming: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > confirmingConflict: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > createConflict: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > defaultManager: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > defaultMember: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > deletingActive: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > deletingOther: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > dirty: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > dirtyConflict: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > duplicating: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > fallback: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > fallbackFailed: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > invalid: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > lastPage: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > loadFailed: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > loading: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > otherConflict: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > paging: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > reader: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > readingDefault: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > reloading: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > renaming: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > saving: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > selectingCopy: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > selectingCopyConflicted: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > selectionConflict: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > signedOut: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > unfinished: Load more is enabled exactly when pagination starts"
+    ,
+    "vitest:tests/theme-editor.unit.test.ts:theme editor pagination control > unfinishedMissing: Load more is enabled exactly when pagination starts"
     ,
     "vitest:tests/theme-editor.unit.test.ts:theme editor runner > an identity change drops a delayed save result"
     ,
@@ -9580,6 +9654,8 @@
     ,
     {"kind":"browser","file":"tests/palette.spec.ts","name":"inside a project the search is scoped; Backspace on an empty input widens it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/palette.spec.ts","name":"knowledge keys open visible scoped entries and superseded responses stay discarded","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/palette.spec.ts","name":"no results suggest a key, and a scoped search can widen with one click","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/palette.spec.ts","name":"on a phone the palette fits the screen in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -12186,9 +12262,37 @@
     ,
     {"kind":"browser","file":"tests/theme-agents.spec.ts","name":"visible screenshots and Personal agent behaviour controls stay stable in all viewport modes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"a reload waits for the saved colours before rendering the app","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"extreme saved accents keep personal appearance links readable in both modes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"system mode follows the OS without losing the chosen colours","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"theme colours and filled ink stay stable at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"theme colours and filled ink stay stable at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"theme colours and filled ink stay stable at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"theme colours and filled ink stay stable at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"theme colours and filled ink stay stable at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"theme colours and filled ink stay stable at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"waiting glyph ink survives the robot clock styles in both modes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/theme-control-geometry.spec.ts","name":"the attachment stage keeps a radial wash in every theme even if canvas-lo is missing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/theme-control-geometry.spec.ts","name":"the shared switch centres its knob on any track and the agents label keeps a 44px hit target","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Load more is disabled while the current theme is unavailable and works again after Reload (1024 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Load more is disabled while the current theme is unavailable and works again after Reload (1024 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Load more is disabled while the current theme is unavailable and works again after Reload (390 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Load more is disabled while the current theme is unavailable and works again after Reload (390 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"New theme duplicates the default even on a later list page; managers may edit it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13252,6 +13356,8 @@
     ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"web fixes and labels follow the shared daemon/server vocabulary","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/agent-palettes.test.ts","name":"CSS token rules match complete selectors in reordered and wrapped lists","leaf":"CSS token rules match complete selectors in reordered and wrapped lists","line":47,"tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/agent-palettes.test.ts","name":"every approved look defines five marks with 3:1 contrast on cards in both modes","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agent-palettes.test.ts","name":"seven approved looks, with the saved colour-blind choice read as Deutan","tier":"GATED-FULL"}
@@ -14042,6 +14148,8 @@
     ,
     {"kind":"node","file":"tests/palette.test.ts","name":"key queries recognise a project key with an optional number","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/palette.test.ts","name":"knowledge keys retain their entry identity, project scope and bounded result group","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/palette.test.ts","name":"projects: exact key first, archived projects only on an exact key","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/palette.test.ts","name":"recents follow the scope","tier":"GATED-FULL"}
@@ -14584,6 +14692,8 @@
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"5000 deterministic colours satisfy ink, line and fill-label contrast in both modes","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"AEON-644: the filled approval count badge uses contrast-safe waiting ink in both modes","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"OKLCH round trips sRGB and maps excessive chroma without changing hue","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"Porcelain generated accent blocks cannot drift from the engine in CI","tier":"ESSENTIAL"}
@@ -14609,6 +14719,18 @@
     {"kind":"node","file":"tests/theme-control-geometry.test.ts","name":"the shared checkbox tick is primary-on ink and not a left or top edge","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/theme-control-geometry.test.ts","name":"the shared switch sizes its knob from the track and the agents label keeps the 44px hit target","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-values.test.ts","name":"every recurring source resolves per mode with ink for its actual fill","leaf":"every recurring source resolves per mode with ink for its actual fill","line":42,"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/theme-values.test.ts","name":"extreme dark accents produce readable text without changing their chosen value","leaf":"extreme dark accents produce readable text without changing their chosen value","line":9,"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/theme-values.test.ts","name":"extreme light accents produce readable text without changing their chosen value","leaf":"extreme light accents produce readable text without changing their chosen value","line":9,"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/theme-values.test.ts","name":"filled ink chooses higher contrast consistently for actual accent fills","leaf":"filled ink chooses higher contrast consistently for actual accent fills","line":20,"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/theme-values.test.ts","name":"main approved dark derivation and explicit dark choices remain authoritative","leaf":"main approved dark derivation and explicit dark choices remain authoritative","line":34,"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/theme-values.test.ts","name":"saved presets and Custom previews each choose ink within their own mode","leaf":"saved presets and Custom previews each choose ink within their own mode","line":49,"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/ticket-agent-work.test.ts","name":"a numeric cost in the payload is unknown, not displayed","tier":"GATED-FULL"}
     ,
@@ -14811,6 +14933,8 @@
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > rejects an estimated quota, a reading older than ten minutes, and a window that already reset","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > says all ready with the computers online when nothing blocks agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-appearance.unit.test.ts","name":"personal behaviour writes preserve stored accessibility choices while a theme is active","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agent-appearance.unit.test.ts","name":"reports a failed state save and lets the same choice be retried","tier":"GATED-FULL"}
     ,
@@ -15153,6 +15277,20 @@
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > uses the approved wind-down, zero, full and room wording","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > walks the entire ladder with the same ends in both views","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"a deleted selection applies the returned default and explains the fallback","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"a late person/workspace response cannot publish or announce their theme","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"a newer load owns both editor and runtime when the old response resolves last","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"applies server values, palette and inks, then clears owned CSS on identity reset","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"confirmed edits publish through the same editor and stylesheet as restoration","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"invalid, failed and oversized initial answers expose an honest default-colour error","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"reset invalidates pending reads and the shared editor before another sign-in","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/approval-settle.unit.test.ts","name":"a failed call returns the card to pending, actionable, and passes the error on","tier":"GATED-FULL"}
     ,
@@ -17527,6 +17665,70 @@
     {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor matrix is complete > every phase has a fixture","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor matrix is complete > pending tokens are unique and their predecessors belong to no state","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > activeConflict: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > choosing: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > clean: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > confirming: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > confirmingConflict: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > createConflict: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > defaultManager: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > defaultMember: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > deletingActive: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > deletingOther: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > dirty: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > dirtyConflict: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > duplicating: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > fallback: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > fallbackFailed: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > invalid: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > lastPage: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > loadFailed: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > loading: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > otherConflict: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > paging: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > reader: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > readingDefault: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > reloading: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > renaming: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > saving: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > selectingCopy: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > selectingCopyConflicted: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > selectionConflict: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > signedOut: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > unfinished: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor pagination control > unfinishedMissing: Load more is enabled exactly when pagination starts","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor runner > an identity change drops a delayed save result","tier":"NIGHTLY"}
     ,
@@ -20226,6 +20428,10 @@
     ,
     {"kind":"vitest","file":"tests/theme-editor.unit.test.ts","name":"theme editor state model > unfinishedMissing × sign out","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"AEON-644: a HTTP failure keeps the current display mode","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"AEON-644: a missing preference keeps the current display mode","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"a newer restoration owns runtime and editor in both response orders: editor first","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"a newer restoration owns runtime and editor in both response orders: restoration first","tier":"NIGHTLY"}
@@ -20383,6 +20589,8 @@
     {"kind":"vitest","file":"tests/work-creation-vocabulary.unit.test.ts","name":"unsaved naming drafts and late reads cannot overwrite the accepted names","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-creation-vocabulary.unit.test.ts","name":"workspace naming reads are shared and stale identities cannot restore old names","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-fixtures.unit.test.ts","name":"AEON-644: shared work fixtures supply matching active and listed themes at authenticated load","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-fixtures.unit.test.ts","name":"HTTP snapshot scenarios keep a healthy stream while explicit event transports remain in control","tier":"GATED-FULL"}
     ,
