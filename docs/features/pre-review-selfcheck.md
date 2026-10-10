@@ -150,3 +150,12 @@ time and audit findings together, retaining unknown/partial coverage and
 watching escaped defects. The initial weekly artifact awaits coordinator
 dispatch and completed audits after merge; deployment and that follow-up are
 outside a builder's handoff.
+
+Builder validation for the implementation commit: 7 behavior tests, 282 tier
+policy tests, 32 shard policy tests and 33 ownership tests passed; the remote
+Go workflow guard passed. The locked remote `ci-static --merge-main` completed
+with exit 0, 42 checks passed and zero optional skips. A read-only collection
+for 2026-09-28–2026-10-05 found 245 merged PRs and selected five; their audits
+remain pending coordinator dispatch. The generated plan and current-commit
+builder evidence are retained under ignored `tmp/review/` for attachment at
+handoff. No review verdict, metric write, origin push or deployment was made.
