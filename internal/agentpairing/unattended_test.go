@@ -87,7 +87,7 @@ func TestUnattendedReportOnlyFreshnessOwnershipAndClaimSeam(t *testing.T) {
 	if got := read(f.tenantID, actor.ID); got.Reason != "unattended_signals_unknown" {
 		t.Fatal("invalid report changed stored signals", got)
 	}
-	other := newFixture(t)
+	other := newFixtureInTenant(t, f.db, "unattended-other")
 	if got := read(other.tenantID, actor.ID); got.Reason != "unattended_computer_unknown" {
 		t.Fatal("cross-tenant host evidence leaked", got)
 	}
