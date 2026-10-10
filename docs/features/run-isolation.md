@@ -64,7 +64,15 @@ be confirmed: retained evidence remains visible and its resources are not
 reallocated. Saved PIDs are informational and never authorize cleanup. Operator
 reconciliation must establish exact process identity and exit before archival.
 The registry retains temporary files and receipts after confirmed completion.
-Malformed, missing or oversized evidence and capped scans return an error;
+Checks take the existing allocator lock before scanning, so an in-progress
+allocation is never mistaken for abandoned evidence. A failed allocation removes
+only the directory it just created, before returning any lease. A process crash
+before its record is saved leaves an `incomplete` report identified by allocation
+ID, without invented owner or resource values. Such attempts count toward the
+1,024 bound, refuse replay and retain their files; other attempts can continue.
+An incomplete attempt without a held lease is reported as an orphan, including
+when the crash occurred before the lease lock was created.
+Malformed or oversized evidence and capped scans return an error;
 partial reports are never claimed complete.
 
 The behavior checks cover simultaneous allocation, socket reservation, retained

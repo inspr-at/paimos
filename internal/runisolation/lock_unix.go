@@ -75,14 +75,14 @@ func openLock(root *os.Root, name string, flags int, create bool) (*os.File, err
 	return root.OpenFile(name, flags|unix.O_NOFOLLOW, 0600)
 }
 
-func waitLock(ctx context.Context, root *os.Root, name string) (*os.File, error) {
+func waitLock(ctx context.Context, root *os.Root, name string, create bool) (*os.File, error) {
 	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	for {
 		if err := bounded.Err(); err != nil {
 			return nil, err
 		}
-		f, err := lockFile(root, name, true)
+		f, err := lockFile(root, name, create)
 		if !errors.Is(err, ErrBusy) {
 			return f, err
 		}

@@ -15,4 +15,6 @@ func lockFile(*os.Root, string, bool) (*os.File, error) {
 func openRecord(*os.Root) (*os.File, error) {
 	return nil, errors.New("run isolation ownership unsupported")
 }
-func waitLock(context.Context, *os.Root, string) (*os.File, error) { return lockFile(nil, "", false) }
+func waitLock(context.Context, *os.Root, string, bool) (*os.File, error) {
+	return lockFile(nil, "", false)
+}

@@ -43,7 +43,7 @@ type Record struct {
 	Database string    `json:"database"`
 	Ports    []int     `json:"ports"`
 	TempDir  string    `json:"temp_dir"`
-	State    string    `json:"state"`              // reserved, running, stopped, unknown
+	State    string    `json:"state"`              // reserved, running, stopped, unknown; incomplete in reports
 	RootPID  int       `json:"root_pid,omitempty"` // informational; never signal authority
 	Updated  time.Time `json:"updated_at"`
 }
@@ -115,7 +115,7 @@ func Acquire(ctx context.Context, path string, owner Owner) (_ *Lease, resultErr
 			l.closeHandles()
 		}
 	}()
-	global, err := waitLock(ctx, root, "allocator.lock")
+	global, err := waitLock(ctx, root, "allocator.lock", true)
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +138,14 @@ func Acquire(ctx context.Context, path string, owner Owner) (_ *Lease, resultErr
 		}
 		return nil, err
 	}
+	defer func() {
+		if resultErr != nil {
+			// This call created the directory under allocator.lock and has not
+			// returned a lease, so no fixture can own anything inside it yet.
+			// Keep the global lock through cleanup; never remove retained runs.
+			resultErr = errors.Join(resultErr, root.RemoveAll(id))
+		}
+	}()
 	l.run, err = root.OpenRoot(id)
 	if err != nil {
 		return nil, err
@@ -273,12 +281,19 @@ func (l *Lease) save() error {
 // Check is report-only: no directory creation, signals, cleanup or PID lookup.
 // A nonterminal record without a held lease is an orphan. Unknown fixtures stay
 // visible and reserved even if their owner process can no longer be observed.
+// Incomplete allocations retain their ID and evidence, without inventing owner
+// or resource values that were never durably recorded.
 func Check(ctx context.Context, path string) ([]Report, error) {
 	root, err := openRoot(path, false)
 	if err != nil {
 		return nil, err
 	}
 	defer root.Close()
+	global, err := waitLock(ctx, root, "allocator.lock", false)
+	if err != nil {
+		return nil, err
+	}
+	defer global.Close()
 	records, err := readRecords(root)
 	if err != nil {
 		return nil, err
@@ -296,8 +311,19 @@ func Check(ctx context.Context, path string) ([]Report, error) {
 		if lock != nil {
 			// Completion may have raced the initial scan. Re-read after taking
 			// the released lease so a completed run is not a false orphan.
-			r, err = readRecord(run, r.ID, path)
+			fresh, readErr := readRecord(run, r.ID, path)
+			if r.State == "incomplete" && errors.Is(readErr, os.ErrNotExist) {
+				readErr = nil
+			} else if readErr == nil {
+				r = fresh
+			}
+			err = readErr
 			lock.Close()
+		}
+		if r.State == "incomplete" && errors.Is(lockErr, os.ErrNotExist) {
+			// A crash can happen before lease.lock is created. No held lease
+			// exists in that case, but the directory remains operator evidence.
+			lockErr = nil
 		}
 		run.Close()
 		if err != nil {
@@ -338,6 +364,12 @@ func readRecords(root *os.Root) ([]Record, error) {
 		}
 		r, err := readRecord(run, entry.Name(), root.Name())
 		run.Close()
+		if errors.Is(err, os.ErrNotExist) {
+			// A process crash bypasses Acquire's error cleanup. Count this
+			// retained attempt toward maxRuns and refuse replay, while allowing
+			// other attempts and report-only checks to continue.
+			r, err = Record{ID: entry.Name(), State: "incomplete"}, nil
+		}
 		if err != nil {
 			return nil, err
 		}

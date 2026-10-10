@@ -8994,6 +8994,8 @@
     ,
     {"kind":"go","package":"internal/runisolation","name":"TestIsolationHelper","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/runisolation","name":"TestIsolationIncompleteAllocationsDoNotBlockRegistry","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/runkind","name":"TestExecutionLabels","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/scopecode","name":"FuzzCodeRoundTrip","tier":"GATED-FULL"}

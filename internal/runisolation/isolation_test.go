@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -22,6 +23,176 @@ import (
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/ownedprocess/processtest"
 )
+
+// Pause at the first cancellation check after the run directory exists. This
+// establishes a partial allocation without sleeps or a production test hook.
+type allocationBarrierContext struct {
+	context.Context
+	directory string
+	ready     chan struct{}
+	release   chan struct{}
+	once      sync.Once
+}
+
+func (c *allocationBarrierContext) Err() error {
+	if _, err := os.Stat(c.directory); err == nil {
+		c.once.Do(func() {
+			close(c.ready)
+			<-c.release
+		})
+	}
+	return c.Context.Err()
+}
+
+// R3/R11: canceled or crashed partial allocations must not poison the shared
+// registry; checking during allocation must respect the publication lock.
+func TestIsolationIncompleteAllocationsDoNotBlockRegistry(t *testing.T) {
+	t.Run("cancel-mid-acquire", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "registry")
+		owner := Owner{"tenant", "account", "host", "canceled-attempt"}
+		id, err := owner.id()
+		if err != nil {
+			t.Fatal(err)
+		}
+		parent, cancel := context.WithCancel(t.Context())
+		ctx := &allocationBarrierContext{Context: parent, directory: filepath.Join(root, id), ready: make(chan struct{}), release: make(chan struct{})}
+		done := make(chan error, 1)
+		go func() {
+			lease, err := Acquire(ctx, root, owner)
+			if lease != nil {
+				_ = lease.Finish(true)
+			}
+			done <- err
+		}()
+		var release sync.Once
+		t.Cleanup(func() {
+			cancel()
+			release.Do(func() { close(ctx.release) })
+		})
+		select {
+		case <-ctx.ready:
+		case err := <-done:
+			t.Fatalf("allocation finished before the partial-directory barrier: %v", err)
+		case <-time.After(10 * time.Second):
+			t.Fatal("partial-allocation barrier hung")
+		}
+		cancel()
+		release.Do(func() { close(ctx.release) })
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("allocation failed for wrong reason: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("canceled allocation hung")
+		}
+		reports, err := Check(t.Context(), root)
+		if err != nil || len(reports) != 0 {
+			t.Fatalf("canceled allocation poisoned the registry: %+v %v", reports, err)
+		}
+		owner.RunID = "next-attempt"
+		lease, err := Acquire(t.Context(), root, owner)
+		if err != nil {
+			t.Fatalf("new allocation after cancellation: %v", err)
+		}
+		t.Cleanup(func() { _ = lease.Finish(true) })
+		reports, err = Check(t.Context(), root)
+		if err != nil || len(reports) != 1 || reports[0].Owner != owner || reports[0].Orphan {
+			t.Fatalf("new allocation report: %+v %v", reports, err)
+		}
+	})
+	t.Run("crashed-incomplete-allocation", func(t *testing.T) {
+		root := t.TempDir()
+		owner := Owner{"tenant", "account", "host", "crashed-attempt"}
+		id, err := owner.id()
+		if err != nil {
+			t.Fatal(err)
+		}
+		directory := filepath.Join(root, id)
+		if err := os.Mkdir(directory, 0700); err != nil {
+			t.Fatal(err)
+		}
+		witness := filepath.Join(directory, "retained-evidence")
+		if err := os.WriteFile(witness, []byte("kept"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		// Establish an existing registry lock; Check must never create it.
+		registry, err := openRoot(root, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer registry.Close()
+		global, err := lockFile(registry, "allocator.lock", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer global.Close()
+		checking, cancel := context.WithCancel(t.Context())
+		cancel()
+		if _, err := Check(checking, root); !errors.Is(err, context.Canceled) {
+			t.Errorf("check scanned an allocation under the held global lock: %v", err)
+		}
+		global.Close()
+		reports, err := Check(t.Context(), root)
+		if err != nil || len(reports) != 1 || reports[0].ID != id || reports[0].State != "incomplete" || !reports[0].Orphan {
+			t.Fatalf("incomplete crash report: %+v %v", reports, err)
+		}
+		run, err := registry.OpenRoot(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer run.Close()
+		ownership, err := lockFile(run, "lease.lock", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ownership.Close()
+		reports, err = Check(t.Context(), root)
+		if err != nil || len(reports) != 1 || reports[0].State != "incomplete" || reports[0].Orphan {
+			t.Fatalf("held incomplete lease was reported orphan: %+v %v", reports, err)
+		}
+		ownership.Close()
+		reports, err = Check(t.Context(), root)
+		if err != nil || len(reports) != 1 || reports[0].ID != id || reports[0].State != "incomplete" || !reports[0].Orphan {
+			t.Fatalf("released incomplete lease report: %+v %v", reports, err)
+		}
+		if _, err := Acquire(t.Context(), root, owner); !errors.Is(err, ErrRetained) {
+			t.Fatalf("incomplete attempt replay: %v", err)
+		}
+		owner.RunID = "after-crash"
+		lease, err := Acquire(t.Context(), root, owner)
+		if err != nil {
+			t.Fatalf("new allocation after crash: %v", err)
+		}
+		t.Cleanup(func() { _ = lease.Finish(true) })
+		reports, err = Check(t.Context(), root)
+		if err != nil || len(reports) != 2 {
+			t.Fatalf("registry after crash recovery: %+v %v", reports, err)
+		}
+		if data, err := os.ReadFile(witness); err != nil || string(data) != "kept" {
+			t.Fatal("recovery destroyed retained crash evidence")
+		}
+	})
+	t.Run("incomplete-attempts-count-toward-cap", func(t *testing.T) {
+		root := t.TempDir()
+		for n := range maxRuns {
+			if err := os.Mkdir(filepath.Join(root, fmt.Sprintf("%032x", n)), 0700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		lease, err := Acquire(t.Context(), root, Owner{"tenant", "account", "host", "over-cap"})
+		if lease != nil {
+			_ = lease.Finish(true)
+		}
+		if err == nil || err.Error() != "isolation registry full; retained evidence requires operator archival" {
+			t.Fatalf("incomplete allocations bypassed the retained-attempt bound: %v", err)
+		}
+		reports, err := Check(t.Context(), root)
+		if err != nil || len(reports) != maxRuns {
+			t.Fatalf("bounded incomplete allocation report: %d %v", len(reports), err)
+		}
+	})
+}
 
 // R3/R9/R11: concurrent allocations must not share external resources; lost
 // ownership must be reported, never recycled or used as signaling authority.
