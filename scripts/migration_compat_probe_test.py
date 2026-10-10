@@ -183,7 +183,7 @@ class ProbeTest(unittest.TestCase):
         tenant, owner, agent, account, run, order, request = [str(uuid.UUID(int=i)) for i in range(1, 8)]
         self.responses['/api/me'] = {'principal': {'id': owner, 'tenant_id': tenant}}
         preview = {'preview': True, 'profile': {'id': 'catalog-only'}, 'ladder': []}
-        resolutions = iter([preview, preview, {'profile': None, 'ladder': [{'skip_reasons': ['context']}]}])
+        resolutions = iter([preview, preview, {'profile': None, 'ladder': [{'skip_reasons': [module.CONTEXT_SKIP_REASON]}]}])
         self.responses['/api/models/resolve?role=build&harness=codex'] = lambda: next(resolutions)
         capacity = iter([{'accounts': [], 'parallel_runs': 0, 'wait': {'code': reason}}
                          for reason in ('offline', 'context')])
@@ -240,11 +240,34 @@ class ProbeTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(AssertionError, 'denied pool lacks its context refusal'):
                 boundary.selection(True, 'account')
-            self.responses[path] = {'profile': None, 'ladder': [{'skip_reasons': ['context']}]}
+            self.responses[path] = {'profile': None, 'ladder': [{'skip_reasons': [module.CONTEXT_SKIP_REASON]}]}
             self.responses['/api/agent-accounts/capacity/next?harness=codex'] = {
                 'accounts': [{'account_id': 'denied'}], 'parallel_runs': 1, 'wait': {'code': 'context'}}
             with self.assertRaisesRegex(AssertionError, 'pool supplied capacity or lost its refusal'):
                 boundary.selection(True, 'account')
+
+    # Risk: the released ladder names the full context refusal, never a bare
+    # category. CI against the published binary failed on the bare token; a
+    # substring match would also accept unrelated reasons that mention context.
+    def test_supported_previous_release_matches_released_context_reason(self):
+        go = (Path(__file__).resolve().parent.parent / 'internal/agentaccounts/use_policy.go').read_text()
+        self.assertIn('const ContextSkipReason = ' + json.dumps(module.CONTEXT_SKIP_REASON), go)
+        path = '/api/models/resolve?role=build&harness=codex'
+        self.responses['/api/agent-accounts/capacity/next?harness=codex'] = {
+            'accounts': [], 'parallel_runs': 0, 'wait': {'code': 'context'}}
+        self.responses['/api/agent-accounts/use?harness=codex&account_id=account'] = (
+            409, 'application/json', b'{"error":"account_not_allowed_for_context"}')
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
+        released = {'profile': None, 'preview': False, 'ladder': [
+            {'profile_id': 'other', 'skip_reasons': ['harness filter']},
+            {'profile_id': 'codex', 'skip_reasons': ["no account allowed for this project's context"]}]}
+        self.responses[path] = released
+        with contextlib.redirect_stdout(io.StringIO()):
+            boundary.selection(True, 'account')
+            for reasons in (['context'], ['account availability: context pending']):
+                self.responses[path] = {'profile': None, 'ladder': [{'skip_reasons': reasons}]}
+                with self.subTest(reasons=reasons), self.assertRaisesRegex(AssertionError, 'denied pool lacks its context refusal'):
+                    boundary.selection(True, 'account')
 
     def test_pinned_release_floor_selects_checks_without_http_fallback(self):
         with patch.object(module.subprocess, 'run') as run:

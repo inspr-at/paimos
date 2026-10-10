@@ -141,6 +141,9 @@ class Probe:
 
 
 CAPABILITY_ERROR = 'account-use capability required: this binary is below the rollback floor'
+# Released agentaccounts.ContextSkipReason: the ladder names the whole refusal,
+# never a bare category, so membership must match this exact text.
+CONTEXT_SKIP_REASON = "no account allowed for this project's context"
 
 
 class AccountUseBoundary:
@@ -195,7 +198,7 @@ class AccountUseBoundary:
             if resolved.get('preview') is not True or not isinstance(resolved.get('profile'), dict):
                 raise AssertionError(f'{path}: empty pool is not a catalog-only preview')
         elif (resolved.get('profile') is not None or resolved.get('preview', False)
-              or not any('context' in item.get('skip_reasons', []) for item in resolved.get('ladder', []))):
+              or not any(CONTEXT_SKIP_REASON in item.get('skip_reasons', []) for item in resolved.get('ladder', []))):
             raise AssertionError(f'{path}: denied pool lacks its context refusal')
         next_path = '/api/agent-accounts/capacity/next?harness=codex'
         next_account = self.probe.call(next_path)
