@@ -1038,6 +1038,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestACPProbeOutcomesGateDispatchAndRecover","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestACPQueuedControlSettlesWhileBusy","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestACPVendorFixture","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestACPVersionOnlyProbeNeverEstablishesReadiness","tier":"GATED-FULL"}
@@ -9149,6 +9151,14 @@
     {"kind":"go","package":"internal/rulesimport","name":"TestUnrepresentableDraftKeepsPlan","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rulesimport","name":"TestUnsupportedDoctrineReadFailsClosed","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/runisolation","name":"TestIsolationAllocationAndOrphanReport","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/runisolation","name":"TestIsolationControllerCrashCleansOnlyOwnedFixtures","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/runisolation","name":"TestIsolationHelper","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/runisolation","name":"TestIsolationIncompleteAllocationsDoNotBlockRegistry","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/runkind","name":"TestExecutionLabels","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
