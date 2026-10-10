@@ -53,6 +53,10 @@ func (u ChatUpdate) valid() bool {
 	return false
 }
 
+// ValidChatUpdate exposes the same allowlist to the authenticated server relay.
+// Raw vendor frames, reasoning and tool payloads never cross this boundary.
+func ValidChatUpdate(u ChatUpdate) bool { return u.valid() }
+
 // observeChat is called only by the event reader of an owned native connection.
 // False includes unknown shapes and out-of-scope frames; none are logged.
 func (p *wireProcess) observeChat(harness string, raw json.RawMessage) {

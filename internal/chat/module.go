@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -28,14 +29,21 @@ import (
 
 type Options struct{ Enabled bool }
 type Module struct {
-	pool    *pgxpool.Pool
-	enabled bool
+	pool       *pgxpool.Pool
+	enabled    bool
+	live       liveRelay
+	liveChecks chan struct{}
 }
 
-// New ships disabled. Enabling supplies R1 identity and R2 participant history,
-// never native wake, delivery or implicit permission to launch/resume an agent.
+// New ships disabled. Enabling supplies identity, participant history and
+// authenticated live/final outbox routes. It never wakes or launches an agent.
 func New(pool *pgxpool.Pool, options ...Options) *Module {
 	m := &Module{pool: pool}
+	checks := 4
+	if pool != nil {
+		checks = max(1, min(checks, int(pool.Config().MaxConns-db.ForegroundReserve)))
+	}
+	m.liveChecks = make(chan struct{}, checks)
 	if len(options) > 0 {
 		m.enabled = options[0].Enabled
 	}
@@ -51,6 +59,13 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/chat-threads/{id}/read-marker", handle(m, m.unionSeen))
 	mux.HandleFunc("POST /api/chat-threads/{id}/binding", handle(m, m.bindThread))
 	mux.HandleFunc("POST /api/chat-deliveries/binding/resolve", handle(m, m.resolveWorker))
+	mux.HandleFunc("GET /api/chat-threads/{id}/live", m.streamLive)
+	mux.HandleFunc("POST /api/chat-deliveries/live", handle(m, m.publishLive))
+	mux.HandleFunc("GET /api/chat-threads/{id}/outbox", handle(m, m.listOutbox))
+	mux.HandleFunc("POST /api/chat-threads/{id}/outbox", handle(m, m.sendOutbox))
+	mux.HandleFunc("POST /api/chat-deliveries/outbox", handle(m, m.workerOutbox))
+	mux.HandleFunc("POST /api/chat-deliveries/final", handle(m, m.finalMessage))
+	mux.HandleFunc("POST /api/chat-deliveries/outbox/receipt", handle(m, m.workerReceipt))
 }
 
 func unavailable() error { return workorders.Fail(404, "chat binding unavailable") }
@@ -79,6 +94,10 @@ func handle[Input any](m *Module, op func(*http.Request, pgx.Tx, tenant.Principa
 				workorders.WriteError(w, err)
 				return
 			}
+			if !utf8.Valid(raw) {
+				httpapi.WriteError(w, 400, "invalid UTF-8 request body")
+				return
+			}
 			r.Body = io.NopCloser(bytes.NewReader(raw))
 			if err := workorders.Decode(r, &in); err != nil {
 				workorders.WriteError(w, err)
@@ -98,6 +117,9 @@ func handle[Input any](m *Module, op func(*http.Request, pgx.Tx, tenant.Principa
 			workorders.WriteError(w, err)
 			return
 		}
+		if committed, ok := out.(interface{ afterCommit(*Module) }); ok {
+			committed.afterCommit(m)
+		}
 		httpapi.WriteJSON(w, 200, out)
 	}
 }
@@ -110,6 +132,12 @@ func readBody(ctx context.Context, w http.ResponseWriter, r *http.Request) ([]by
 		}
 	}
 	limit := int64(8192)
+	if strings.HasSuffix(r.URL.Path, "/outbox") || strings.HasSuffix(r.URL.Path, "/final") {
+		limit = 512 << 10
+	}
+	if strings.HasSuffix(r.URL.Path, "/live") {
+		limit = 128 << 10
+	}
 	if r.Method == http.MethodPut {
 		limit = 16384
 	}
@@ -499,6 +527,10 @@ func verifyNativeContext(ctx context.Context, tx pgx.Tx, s harness.ExternalRegis
 }
 
 func workerKeyTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal) error {
+	return workerKeyPermissionTx(ctx, tx, r, p, "chat.receive")
+}
+
+func workerKeyPermissionTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal, permission string) error {
 	scheme, token, ok := strings.Cut(strings.TrimSpace(r.Header.Get("Authorization")), " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") {
 		return unavailable()
@@ -513,7 +545,7 @@ func workerKeyTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Princ
 	}
 	sum := sha256.Sum256([]byte(secret))
 	var allowed bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_keys WHERE principal_id=$1 AND prefix=$2 AND hash=$3 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp()) AND ((coalesce(full_access,false) AND $4::boolean) OR 'chat.receive'=ANY(scopes)))`, p.ID, prefix, hex.EncodeToString(sum[:]), authz.KeyGrantable("chat.receive", false)).Scan(&allowed)
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_keys WHERE principal_id=$1 AND prefix=$2 AND hash=$3 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp()) AND ((coalesce(full_access,false) AND $4::boolean) OR $5=ANY(scopes)))`, p.ID, prefix, hex.EncodeToString(sum[:]), authz.KeyGrantable(permission, false), permission).Scan(&allowed)
 	if err != nil {
 		return err
 	}
