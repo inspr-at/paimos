@@ -621,7 +621,7 @@ func pairedPreflight(ctx context.Context, root, origin string, api agentsetup.Pa
 	if api == nil {
 		api = agentsetup.HTTPClient{Origin: origin}
 	}
-	e := agentsetup.Engine{Store: store, API: api, Local: localPairing{root: root}}
+	e := agentsetup.Engine{Store: store, API: api, Local: localPairing{root: root}, InstallMethod: installMethod()}
 	if err = e.SyncFences(ctx); err != nil {
 		return false, err
 	}
