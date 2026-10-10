@@ -418,7 +418,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "harness.read", true
 		}
 	case "projects":
-		if len(parts) == 1 && read {
+		if read && (len(parts) == 1 || len(parts) == 2 && parts[1] == "lookup") {
 			return "nodes.read", true
 		}
 		if len(parts) < 3 {
