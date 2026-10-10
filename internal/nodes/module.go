@@ -50,6 +50,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/nodes", m.handleListNodes)
 	mux.HandleFunc("GET /api/projects", m.handleListProjects)
+	mux.HandleFunc("GET /api/projects/lookup", m.handleLookupProject)
 	mux.HandleFunc("POST /api/nodes", m.handleCreateNode)
 	mux.HandleFunc("POST /api/nodes/bulk", m.handleBulk)
 	mux.HandleFunc("GET /api/nodes/lookup", m.handleLookupNodes)

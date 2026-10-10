@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,8 +35,8 @@ type hbCall struct {
 	body   map[string]any
 }
 
-// R10: an optional list/status 503 must not suppress an owned liveness POST
-// when the coordinator explicitly supplies its known project and harness.
+// R10/AEON-1107: an optional list/status 503 must not suppress an owned
+// liveness POST through either exact lookup or an explicit known project ID.
 func TestHeartbeatKnownProjectBypassesProjection(t *testing.T) {
 	var calls []hbCall
 	base := heartbeatFixture(t, &calls, "", "")
@@ -53,12 +54,17 @@ func TestHeartbeatKnownProjectBypassesProjection(t *testing.T) {
 	defer srv.Close()
 	rt, _, _ := heartbeatRuntime(t, srv)
 	o := heartbeatTestOptions(t.TempDir())
+	// Match the one-shot harness below; the shared fixture defaults to Claude.
+	o.Harness = "codex"
 	session := heartbeatSession{id: transcriptSessionID, lease: "known-project-lease-00000000000001"}
-	if err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session); heartbeatStatus(err) != 503 {
+	if _, err := rt.projectNodeCtx(t.Context(), o.Project); heartbeatStatus(err) != 503 {
 		t.Fatalf("legacy lookup did not reproduce the list 503: %v", err)
 	}
 	if len(blockedQueries) != 1 || !strings.Contains(blockedQueries[0], "kind_id=project-kind") || !strings.Contains(blockedQueries[0], "limit=200") || len(hbWhere(calls, "POST", "/heartbeat")) != 0 {
 		t.Fatalf("unexpected failing reporter chain: queries=%v calls=%v", blockedQueries, calls)
+	}
+	if err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session); err != nil {
+		t.Fatalf("exact project lookup still depended on read projections: %v", err)
 	}
 	o.ProjectID = transcriptProjectID
 	if err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session); err != nil {
@@ -85,15 +91,24 @@ func TestHeartbeatKnownProjectBypassesProjection(t *testing.T) {
 	args := []string{"aeon", "harness", "heartbeat", "--project", "AEON", "--session", transcriptSessionID,
 		"--agent", "worker", "--worker-lease-file", leaseFile, "--activity-sequence", "1"}
 	if code, _, stderr := runCLI(args, ""); code == 0 || !strings.Contains(stderr, "api 503: Work aggregates exceeded") {
-		t.Fatalf("one-shot legacy lookup did not reproduce the list 503: code=%d %s", code, stderr)
+		t.Fatalf("one-shot without known harness did not reproduce the status 503: code=%d %s", code, stderr)
 	}
-	args = append(args, "--project-id", transcriptProjectID, "--harness", "codex")
+	args = append(args, "--harness", "codex")
+	if code, _, stderr := runCLI(args, ""); code != 0 {
+		t.Fatalf("one-shot exact lookup still depended on read projections: code=%d %s", code, stderr)
+	}
+	args = append(args, "--project-id", transcriptProjectID)
 	if code, _, stderr := runCLI(args, ""); code != 0 {
 		t.Fatalf("known one-shot project still depended on read projections: code=%d %s", code, stderr)
 	}
 	beats := hbWhere(calls, "POST", "/heartbeat")
-	if len(blockedQueries) != 2 || len(beats) != 2 || beats[1].path != harnessPath(transcriptProjectID, transcriptSessionID)+"/heartbeat" || beats[1].lease != session.lease || beats[1].body["max_session_file_bytes"] != float64(rules.SessionFileLimit("codex")) {
-		t.Fatalf("known reporter bypassed ownership or sent wrong client limit: queries=%v beats=%v", blockedQueries, beats)
+	if len(blockedQueries) != 2 || len(beats) != 4 || len(hbWhere(calls, "GET", "/projects/lookup")) != 3 {
+		t.Fatalf("reporter did extra projection work or lost a beat: queries=%v beats=%v", blockedQueries, beats)
+	}
+	for _, beat := range beats {
+		if beat.path != harnessPath(transcriptProjectID, transcriptSessionID)+"/heartbeat" || beat.lease != session.lease || beat.body["max_session_file_bytes"] != float64(rules.SessionFileLimit("codex")) {
+			t.Fatalf("known reporter bypassed ownership or sent wrong client limit: queries=%v beats=%v", blockedQueries, beats)
+		}
 	}
 }
 
@@ -120,6 +135,8 @@ func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *http
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
 			_, _ = w.Write([]byte(`{"items":[{"id":"project-kind","slug":"project"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects/lookup":
+			_ = json.NewEncoder(w).Encode(project)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{project}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/models":
@@ -975,6 +992,8 @@ func hbServer(t *testing.T, calls *[]hbCall, handle func(r *http.Request, body m
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
 			_, _ = w.Write([]byte(`{"items":[{"id":"project-kind","slug":"project"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects/lookup":
+			_ = json.NewEncoder(w).Encode(project)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{project}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/models":
@@ -2028,10 +2047,15 @@ func TestReadLimitedLineHonorsCancelAndBudget(t *testing.T) {
 
 func TestHeartbeatBeatLookupHonorsCancellation(t *testing.T) {
 	var calls []hbCall
-	slow := false
+	var block atomic.Bool
+	entered := make(chan struct{})
+	released := make(chan struct{})
 	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
-		if slow && r.URL.Path == "/api/nodes" {
-			time.Sleep(250 * time.Millisecond)
+		if block.Load() && r.URL.Path == "/api/projects/lookup" {
+			close(entered)
+			<-r.Context().Done()
+			close(released)
+			return true
 		}
 		return false
 	})
@@ -2043,18 +2067,26 @@ func TestHeartbeatBeatLookupHonorsCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer session.hold.release()
-	slow = true
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	block.Store(true)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	started := time.Now()
-	err = rt.heartbeatBeat(ctx, opts, heartbeatDeps{}, &session)
-	elapsed := time.Since(started)
-	if err == nil {
-		t.Fatal("deadline did not return an error")
+	done := make(chan error, 1)
+	go func() { done <- rt.heartbeatBeat(ctx, opts, heartbeatDeps{}, &session) }()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("lookup did not reach the cancellation barrier")
 	}
-	if elapsed > 150*time.Millisecond {
-		t.Fatalf("20 ms cancellation took %v in project lookup", elapsed)
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "context canceled") {
+			t.Fatalf("canceled lookup returned %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("canceled beat did not return")
 	}
+	<-released
 }
 
 func TestFinalUsageDrainsBacklog(t *testing.T) {
