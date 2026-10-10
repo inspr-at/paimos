@@ -87,6 +87,22 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	}
 	query := modelprefs.BoardQuery{Column: q.Column, Area: q.Area, Labels: q.Labels, Situation: q.Situation, Review: review, Concept: q.Concept, AuthorFamily: q.AuthorFamily, EstimateHours: q.EstimateHours, FixRound: q.FixRound}
 	d := modelprefs.ResolveModelsBoard(s, query)
+	chain, err := modelprefs.LoadChain(ctx, tx, q.PersonID, q.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	lockedProfiles := map[string]bool{}
+	cell := modelprefs.ResolveCell(chain, d.Column, modelprefs.BucketOf(q.Complexity, q.Role))
+	lockedEscalation := q.Escalation && cell.LockedBy != "" && cell.Cell != nil && cell.Cell.Mode != "auto"
+	if lockedEscalation {
+		profiles := []Profile{}
+		for _, ps := range c.profiles {
+			profiles = append(profiles, ps...)
+		}
+		for _, profile := range expandPreference(*cell.Cell, profiles) {
+			lockedProfiles[profile.ID] = true
+		}
+	}
 	out := WorkResolution{Resolution: Resolution{Role: roleName, AuthorFamily: q.AuthorFamily, Source: "aeon", Ladder: []Candidate{}, OwnerRequired: true}, Residency: requirement}
 	out.Trace = PreferenceTrace{PersonID: q.PersonID, Kind: d.Column, KindSource: "ticket", Complexity: q.Complexity, ComplexitySource: q.ComplexitySource, Bucket: modelprefs.BucketOf(q.Complexity, q.Role), SetBy: "default", Mode: "auto", QualifyingAccountIDs: []string{}}
 	health, err := agentaccounts.HarnessHealthAt(ctx, tx, now, q.ProjectID)
@@ -146,6 +162,9 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			if q.Escalation && escalationRank(profile, q.Area) >= 99 {
 				reasons = append(reasons, "not a stronger route for this work area")
 			}
+			if lockedEscalation && !lockedProfiles[profile.ID] {
+				reasons = append(reasons, "locked model preference")
+			}
 			if slices.Contains(excluded, profile.ID) || excludedIdentity[profile.Harness+":"+profile.Model+":"+profile.Effort] {
 				reasons = append(reasons, "already attempted")
 			}
@@ -203,10 +222,6 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	}
 	if d.Lock != nil {
 		out.Trace.LockedBy = d.Lock.Scope
-	}
-	chain, err := modelprefs.LoadChain(ctx, tx, q.PersonID, q.ProjectID)
-	if err != nil {
-		return nil, err
 	}
 	out.Trace.Residency = modelprefs.ResolveResidency(chain)
 	out.Trace.Residency.Value = requirement
@@ -313,6 +328,9 @@ func modelsRouteCandidates(ps []Profile, effort string, level int, review bool) 
 		levels := []int{}
 		exact := false
 		for _, p := range route.profiles {
+			if !p.Enabled || p.Retired {
+				continue
+			}
 			if p.EffortLevel != nil {
 				levels = append(levels, *p.EffortLevel)
 			}
@@ -347,7 +365,7 @@ func automaticReviewSteps(c boardCatalog, author string) []modelprefs.BoardStep 
 	strength := func(line string) int {
 		best := 0
 		for _, p := range c.profiles[line] {
-			if qualifiedReviewProfile(p) {
+			if p.Enabled && !p.Retired && qualifiedReviewProfile(p) {
 				rank := 1
 				if p.Tier == "frontier" {
 					rank = 2
