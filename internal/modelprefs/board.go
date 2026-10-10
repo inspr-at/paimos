@@ -136,16 +136,17 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 	review := q.Review
 	q.Review = false
 	q.PreviousFamily = "" // A stored order is never silently reordered.
+	smallHours := s.SmallHours
+	if smallHours == 0 {
+		smallHours = 2
+	}
 	if q.Situation == "" {
 		q.Situation = "first"
-		small, fix := s.SmallHours, s.FixRounds
-		if small == 0 {
-			small = 2
-		}
+		fix := s.FixRounds
 		if fix == 0 {
 			fix = 3
 		}
-		if q.EstimateHours > 0 && q.EstimateHours <= float64(small) {
+		if q.EstimateHours > 0 && q.EstimateHours <= float64(smallHours) {
 			q.Situation = ModelsSmallSituation
 		}
 		if q.FixRound > 0 {
@@ -222,7 +223,8 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 		order, found = exact, true
 	}
 	if !hasExact && d.Effort == "" {
-		if q.Situation == ModelsSmallSituation || q.Situation == "fix" {
+		smallWork := q.Situation == ModelsSmallSituation && (ModelsSmallSituation != "first" || q.EstimateHours > 0 && q.EstimateHours <= float64(smallHours))
+		if smallWork || q.Situation == "fix" {
 			d.EffortLevel--
 		}
 		if q.Situation == "stuck" {

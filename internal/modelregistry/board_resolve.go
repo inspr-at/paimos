@@ -114,6 +114,8 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if review && d.Automatic {
 		d.Steps = automaticReviewSteps(c, q.AuthorFamily)
 		out.Trace.OrderMode = reviewOrderLegacy
+	} else if review {
+		out.Trace.OrderMode = reviewOrderSaved
 	}
 	if roleName == "scout" || roleName == "mechanical" {
 		quick, err := quickJobSteps(ctx, tx, c, role.effort)
