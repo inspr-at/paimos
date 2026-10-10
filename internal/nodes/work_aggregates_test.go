@@ -297,12 +297,12 @@ func BenchmarkWorkAggregatesRLS(b *testing.B) {
 					if err := db.InTenant(dbtest.Seed(ctx), appPool, tenantID, func(tx pgx.Tx) error {
 						var leaves int
 						if mode == "total" {
-							return tx.QueryRow(ctx, `SELECT leaf_count FROM aeon_work_aggregates(ARRAY[$1::uuid])`, root).Scan(&leaves)
+							return tx.QueryRow(ctx, `SELECT leaf_count FROM (`+eta.AggregateSQL("ARRAY[$1::uuid]")+`) aggregate`, root).Scan(&leaves)
 						}
 						column := map[string]string{"progress_sort": "progress_pct", "estimate_sort": "hours", "eta_sort": "eta_ready_at"}[mode]
 						// Scope discovery is performed once; all requested sort values are one batch.
 						return tx.QueryRow(ctx, `WITH targets AS MATERIALIZED(SELECT id FROM aeon_work_scope(ARRAY[$1::uuid])),
-      values AS MATERIALIZED(SELECT * FROM aeon_work_aggregates(ARRAY(SELECT id FROM targets))),
+      values AS MATERIALIZED(`+eta.AggregateSQL("ARRAY(SELECT id FROM targets)")+`),
       page AS(SELECT id FROM values ORDER BY `+column+` DESC NULLS LAST,id LIMIT 50)
       SELECT count(*)::int FROM page`, root).Scan(&leaves)
 					}); err != nil {
