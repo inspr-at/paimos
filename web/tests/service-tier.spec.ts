@@ -45,6 +45,10 @@ async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: bool
   else state.estimates = report.tiers.map(t => ({ tier: t.tier, n: 0, basis: 'No estimate yet · 0 runs. A completed run with final tokens and frozen prices is required.', run_id: null, cost_usd: null, duration_ms: null }))
   let releaseTierRead!: () => void
   const tierReadGate = new Promise<void>(resolve => { releaseTierRead = resolve })
+  await page.route('**/api/decision-desk/projection?**', route => {
+    const items = state.requests.filter(q => q.state === 'pending').map(q => ({ id: q.id, kind: 'tier_request', project_id: data.sessions[0]!.project_id, revision: state.revision, title: 'Tier request', created_at: q.created_at, held: false, can_decide: !options.denied, href: `/decision-desk?item=t:${q.id}`, source: `/api/projects/${data.sessions[0]!.project_id}/harness-sessions/${id}/tier` }))
+    return route.fulfill({ json: { items, counts: { open: items.length, held: 0, chores: 0 }, has_more: false, as_of: new Date().toISOString() } })
+  })
   const writes: Record<string, unknown>[] = []
   let reads = 0
   function cancel(requestID: string) {
@@ -328,19 +332,23 @@ for (const kind of ['unmanaged', 'ended', 'denied'] as const) test(`${kind} sess
   await expect(page.getByRole('region', { name: 'Service tier', exact: true }).getByRole('button', { name: 'Change tier', exact: true })).toHaveCount(0)
   expect(writes).toHaveLength(0)
 })
-for (const width of [1440, 390]) test(`${width}: the panel request retains its actions after approval`, async ({ page }) => {
+for (const width of [1440, 390]) test(`${width}: the panel request points to stable desk actions for approval`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 })
   const { writes } = await setup(page, { request: true })
   await page.goto(`/agents/${id}`)
   const request = page.locator('.tier-request')
   await expect(request).toContainText('QA waits on this screen')
-  await expectStableControls({ controls: { approve: request.getByRole('button', { name: 'Approve Fast' }), decline: request.getByRole('button', { name: 'Decline' }) }, interactions: [{ name: 'approve', run: async () => { await request.getByRole('button', { name: 'Approve Fast' }).click(); await expect(request).toContainText('Approved · Fast') } }] })
+  await expect(request.getByRole('link', { name: 'Review in Decision Desk' })).toHaveAttribute('href', '/decision-desk?item=t:request-fixture')
+  await request.getByRole('link', { name: 'Review in Decision Desk' }).click()
+  await expect(page.getByTestId('choice-0')).toBeEnabled()
+  await expectStableControls({ controls: { approve: page.getByTestId('choice-0'), decline: page.getByTestId('choice-1'), decide: page.getByTestId('desk-decide') }, interactions: [{ name: 'choose the protected approval', run: async () => { await page.getByTestId('choice-0').click() } }, { name: 'approve through the native desk adapter', run: async () => { await page.getByTestId('desk-decide').click(); await expect(page.getByTestId('desk-announcement')).toContainText('application waits for the next safe point') } }] })
   expect(writes[0]).toMatchObject({ decision: 'approve', tier: 'fast', expected_ownership: ownership })
 })
-test('the panel request can be declined without a tier change', async ({ page }) => {
+test('the panel request can be declined in the desk without a tier change', async ({ page }) => {
   const { writes, getState } = await setup(page, { request: true })
-  await page.goto(`/agents/${id}`); await page.locator('.tier-request').getByRole('button', { name: 'Decline' }).click()
-  await expect(page.locator('.tier-request')).toContainText('Declined · Fast'); expect(getState().active_tier).toBe('default'); expect(writes[0]?.decision).toBe('decline')
+  await page.goto(`/agents/${id}`); await page.locator('.tier-request').getByRole('link', { name: 'Review in Decision Desk' }).click()
+  await page.getByTestId('choice-1').click(); await page.getByTestId('desk-decide').click()
+  await expect.poll(() => getState().requests[0]?.state).toBe('declined'); expect(getState().active_tier).toBe('default'); expect(writes[0]?.decision).toBe('decline')
 })
 test('a rejected write reports the error and offers no false-success Undo', async ({ page }) => {
   await setup(page, { fail: true }); await page.goto('/agents')

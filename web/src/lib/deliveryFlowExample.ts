@@ -38,7 +38,7 @@ const r126: FlowRun = {
     step('19:55', '19:59', 'work', 'ops', 'd · Draft inspection + attestation', 'd · Entwurf prüfen + Attestierung', 'Release draft inspected', 'Release-Entwurf geprüft', { stepKey: 'd' }),
     step('19:57', '19:58', 'work', 'ops', 'e · agentd qualification · QUALIFIED', 'e · agentd-Qualifizierung · QUALIFIED', 'Agent app tested on a Mac: OK', 'Agent-App auf einem Mac getestet: OK', { side: true, stepKey: 'e' }),
     step('19:59', '20:03', 'work', 'ci', 'f · Publish 20:00 + Homebrew tap', 'f · Veröffentlichen 20:00 + Homebrew-Tap', 'Published', 'Veröffentlicht', { stepKey: 'f' }),
-    step('20:03', '20:05', 'work', 'ops', 'g · csb1 pin PR #936', 'g · csb1-Pin-PR #936', 'Server update prepared', 'Server-Update vorbereitet', { stepKey: 'g' }),
+    step('20:03', '20:05', 'work', 'ops', 'g · prod-1 pin PR #936', 'g · prod-1-Pin-PR #936', 'Server update prepared', 'Server-Update vorbereitet', { stepKey: 'g' }),
     step('20:05', '20:06', 'work', 'review', 'h · Pin gate r1 · changes: facts truncated', 'h · Pin-Gate r1 · Änderungen: Fakten abgeschnitten', 'First review: changes asked', 'Erstes Review: Änderungen verlangt', { stepKey: 'h' }),
     step('20:06', '20:07', 'rework', 'ops', 'Rework · full facts into #936', 'Nacharbeit · vollständige Fakten in #936', 'Fixing the server update', 'Server-Update korrigieren', { stepKey: 'h' }),
     step('20:07', '20:09', 'work', 'review', 'h · Pin gate r2 · ok', 'h · Pin-Gate r2 · ok', 'Second review: OK', 'Zweites Review: OK', { stepKey: 'h' }),
@@ -53,7 +53,7 @@ const r126: FlowRun = {
     step('20:32', '20:33:13', 'work', 'ops', '#937 merged (20:32:40)', '#937 gemergt (20:32:40)', 'Fix merged', 'Fix gemergt', { incident: true }),
     step('20:33:13', '20:34:01', 'work', 'ops', 'k · Re-switch', 'k · Erneuter Switch', 'Server switched again', 'Server erneut umgestellt', { incident: true, stepKey: 'k' }),
     step('20:34:01', '20:35', 'work', 'ops', 'l · Live check 2 green · full verify', 'l · Live-Check 2 grün · volle Prüfung', 'Healthy again, fully checked', 'Wieder gesund, voll geprüft', { stepKey: 'l' }),
-    step('20:35', '20:47', 'wait', 'you', 'agm1 GO (Markus, after his test)', 'agm1-GO (Markus, nach seinem Test)', 'Waiting for you: agm1 GO', 'Wartet auf dich: agm1-GO', { after: true }),
+    step('20:35', '20:47', 'wait', 'you', 'release GO (after your test)', 'Release-Freigabe (nach dem Test)', 'Waiting for you: release GO', 'Warten auf Release-Freigabe', { after: true }),
   ],
 }
 const c991: FlowRun = {
@@ -102,7 +102,7 @@ function factsOf(step: FlowStep, source: StepFacts['source']): StepFacts {
   const outcome = /DEGRADED/.test(en) ? 'degraded' : /changes/.test(en) ? 'changes' : /flake/i.test(en) ? 'flaky' : /\bred\b/.test(en) ? 'red' : /green|QUALIFIED|\bok\b/.test(en) ? 'ok' : null
   const m = en.match(/\br(\d)\b|run (\d)|check (\d)/), round = m ? Number(m[1] ?? m[2] ?? m[3]) : undefined
   const waitReason = step.kind !== 'wait' ? null : /reviewer|copy gate/.test(en) ? 'reviewer' : /re-run/.test(en) ? 'rerun' : /Held/.test(en) ? 'dependency' : /GO/.test(en) ? 'human_gate' : null
-  const waitsFor = /Held/.test(en) ? 'AEON-991' : /GO/.test(en) ? 'agm1 GO' : null
+  const waitsFor = /Held/.test(en) ? 'AEON-991' : /GO/.test(en) ? 'release GO' : null
   return { round, outcome, waitReason, waitsFor, source: step.lane === 'ci' ? 'github_app' : source, norm: norm ? { p50: norm[0], p90: null, arion: norm[1] } : null }
 }
 const at = (value: string | null) => value == null ? null : hm(value)
@@ -114,7 +114,7 @@ function withFacts(run: FlowRun, source: StepFacts['source'], facts: Omit<RunFac
   }
   return run
 }
-withFacts(r126, 'ops_rollout', { kind: 'release', ref: '126', ended: null, pct: 93, gate: 'agm1 GO', eta: ['20:35', '20:45'] })
+withFacts(r126, 'ops_rollout', { kind: 'release', ref: '126', ended: null, pct: 93, gate: 'release GO', eta: ['20:35', '20:45'] })
 withFacts(c991, 'paimos', { kind: 'change', ref: 'AEON-991', ended: null, pct: 75, gate: null, eta: ['20:50', '21:08'] })
 withFacts(c983, 'paimos', { kind: 'change', ref: 'AEON-983', ended: null, pct: 70, gate: null, eta: ['21:11', '21:40'] })
 withFacts(c993, 'paimos', { kind: 'change', ref: 'AEON-993', ended: null, pct: null, gate: null, eta: null, reason: 'first build on this model' })

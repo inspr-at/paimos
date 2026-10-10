@@ -98,7 +98,7 @@
 // NewPMAAdapter and PostgresWriter (this package does not edit cmd/aeon):
 //
 //	paimos import pma --source-instance NAME --source-url URL \
-//	    --api-key-file FILE --tenant augmentoring [--project KEY] \
+//	    --api-key-file FILE --tenant example-business [--project KEY] \
 //	    [--dry-run] [--concurrency N] [--delay DURATION]
 //
 // Source access and target tenant must be confirmed by the operator before

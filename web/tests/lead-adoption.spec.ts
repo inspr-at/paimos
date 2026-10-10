@@ -8,8 +8,8 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
     await page.setViewportSize({ width, height: width < 600 ? 844 : 1100 })
     const { data, state } = await mockLeadFlow(page, { lead: 'none', queue: ['n-4'], longText: true })
     const candidates = [
-      { id: LEAD_SESSION, display_label: 'AEON-LEAD · Bestehender Projektkontext und gespeicherte Arbeitsnotizen bleiben erhalten', host: 'mbp2607', harness: 'codex', management_mode: 'unmanaged', reported_at: new Date().toISOString() },
-      { id: 'second-session', display_label: 'Projektkoordination mit einer anderen laufenden Sitzung', host: 'mbp2606', harness: 'claude', management_mode: 'unmanaged', reported_at: new Date().toISOString() },
+      { id: LEAD_SESSION, display_label: 'AEON-LEAD · Bestehender Projektkontext und gespeicherte Arbeitsnotizen bleiben erhalten', host: 'build-7', harness: 'codex', management_mode: 'unmanaged', reported_at: new Date().toISOString() },
+      { id: 'second-session', display_label: 'Projektkoordination mit einer anderen laufenden Sitzung', host: 'build-6', harness: 'claude', management_mode: 'unmanaged', reported_at: new Date().toISOString() },
     ]
     const writes: unknown[] = []
     await page.route('**/api/projects/p-pharos/lead/*', async route => {
@@ -27,7 +27,7 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
     await expect(toggle).toBeVisible(); await toggle.click()
     const options = card.getByRole('radiogroup', { name: 'Running coordinator sessions' }), first = options.getByRole('radio').nth(0), second = options.getByRole('radio').nth(1)
     const confirm = card.getByRole('button', { name: 'Confirm adoption' }), cancel = card.locator('[data-act="adopt-cancel"]')
-    await expect(first).toContainText('mbp2607'); await expect(first).toContainText('Fresh heartbeat')
+    await expect(first).toContainText('build-7'); await expect(first).toContainText('Fresh heartbeat')
     await expect(confirm).toHaveAttribute('aria-disabled', 'true')
     await expectStableControls({ controls: { toggle, confirm, cancel, options, 'first clicked row': first, 'second clicked row': second }, scrollAreas: { options }, interactions: [
       { name: 'select the first root coordinator', run: async () => { await first.click(); await expect(first).toHaveAttribute('aria-checked', 'true'); await expect(confirm).toHaveAttribute('aria-disabled', 'false') } },
@@ -84,7 +84,7 @@ test('candidate errors and rejected confirmations remain visible with no false a
   const { state } = await mockLeadFlow(page, { lead: 'none', queue: [] })
   let unavailable = true
   await page.route('**/api/projects/p-pharos/lead/*', route => {
-    if (new URL(route.request().url()).pathname.endsWith('/candidates')) return route.fulfill(unavailable ? { status: 503, json: { error: 'Running sessions unavailable' } } : { json: { items: [{ id: LEAD_SESSION, display_label: 'AEON-LEAD', host: 'mbp2607', harness: 'codex', management_mode: 'unmanaged', reported_at: new Date().toISOString() }], next_cursor: null } })
+    if (new URL(route.request().url()).pathname.endsWith('/candidates')) return route.fulfill(unavailable ? { status: 503, json: { error: 'Running sessions unavailable' } } : { json: { items: [{ id: LEAD_SESSION, display_label: 'AEON-LEAD', host: 'build-7', harness: 'codex', management_mode: 'unmanaged', reported_at: new Date().toISOString() }], next_cursor: null } })
     return route.fulfill({ status: 409, json: { error: 'The selected coordinator is no longer reporting' } })
   })
   await page.goto('/p/PHAROS')
@@ -104,7 +104,7 @@ test('cancelling an unclaimed adoption clears only the selection', async ({ page
   const pauses: string[] = []
   await page.route('**/api/projects/p-pharos/lead/**', async route => {
     const path = new URL(route.request().url()).pathname
-    if (path.endsWith('/candidates')) return route.fulfill({ json: { items: [{ id: LEAD_SESSION, display_label: 'AEON-LEAD', host: 'mbp2607', harness: 'codex', management_mode: 'unmanaged', reported_at: new Date().toISOString() }], next_cursor: null } })
+    if (path.endsWith('/candidates')) return route.fulfill({ json: { items: [{ id: LEAD_SESSION, display_label: 'AEON-LEAD', host: 'build-7', harness: 'codex', management_mode: 'unmanaged', reported_at: new Date().toISOString() }], next_cursor: null } })
     if (path.endsWith('/adopt/cancel')) {
       cancels.push(route.request().postDataJSON())
       const current = state.leads['p-pharos']!

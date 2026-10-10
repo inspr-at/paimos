@@ -361,7 +361,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 }
 .panel-head { flex-shrink: 0; padding: 8px 10px 10px 18px; border-bottom: 1px solid var(--line); }
 .head-top { display: flex; align-items: flex-start; gap: 8px; min-height: 36px; }
-.head-actions { display: flex; align-items: center; gap: 4px; min-width: 0; margin-top: 6px; }
+/* Actions that no longer fit wrap to a right-aligned second line; none shrinks under its label (AEON-1062). */
+.head-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; min-width: 0; margin-top: 6px; }
 .head-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap; }
 .outside-note { margin: 2px 0 0; font-size: 12px; line-height: 1.4; color: var(--ink-3); }
 .host-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; }

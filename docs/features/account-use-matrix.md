@@ -26,8 +26,24 @@ unconditional principal-entry guard explicitly refuses older binaries, even
 when the account pool is empty. The bound pairing verification run alone is
 exempt. Boot checks enforce the database capability floor for future binaries.
 
-Matrix UI, model activation and daemon enrolment are
-separate slices of the same release. This core alone is not a complete release
+Settings › Accounts › "Where accounts may work" shows the matrix to people with
+`account.use.manage`: the four switches for new accounts, contexts, projects
+and model versions; Allow all and Allow none; tri-state row and column boxes;
+single cells; Undo (button or U outside text fields) for the last save; and the
+context menu for rename, "New accounts: never" and archive. A failed save takes
+back what it showed at once, reads the stored state again and says nothing was
+saved; when that read fails too, the screen says the state may be out of date.
+Rename, "never" and archive carry the revision the menu opened on, so a change
+made meanwhile is refused rather than overwritten. A migrated "Only with PAIMOS
+updates" model rule keeps its place once left, as a choice that can no longer be
+picked. Running work outside the matrix is listed and keeps running. Project
+settings choose the project's context and find it on any matrix page; the
+account count spans up to 1,000 accounts and says when it stops short. The
+pairing review shows the ticks the rule gives new accounts, and model
+Auto-update sends the matrix revision as the "New model versions" rule.
+
+Model activation and daemon enrolment are separate
+slices of the same release. This core alone is not a complete release
 of the account matrix. Exact-byte migration-policy records are review artifacts
 and require the coordinator's review and previous-image compatibility gate.
 

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -15,6 +16,10 @@ import (
 
 const preflightWorkflow = ".github/workflows/ci-preflight.yml"
 const preflightGroups = 12
+
+// The authorized controller declares its approved lane in the receipt. A label
+// identifies evidence; repository-bound workflow/artifact reads supply trust.
+var preflightRunnerLabel = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 
 type preflightCheck struct {
 	ID     string `json:"id"`
@@ -68,7 +73,7 @@ func PreflightReason(raw []byte, sha string, run int64, attempt int) string {
 		return "preflight_stale_sha"
 	}
 	if result.Schema != 1 || result.Run != run || result.Attempt != attempt || result.Local.Schema != 1 || result.Local.Kind != "local" ||
-		result.Local.Runner != "mbp2606" || !reviewgate.ValidSHA(result.Local.Base) || len(result.Browsers) != preflightGroups {
+		!preflightRunnerLabel.MatchString(result.Local.Runner) || !reviewgate.ValidSHA(result.Local.Base) || len(result.Browsers) != preflightGroups {
 		return "preflight_invalid"
 	}
 	names := []string{"static", "go-strict", "go-packages", "web-unit", "web-strict"}

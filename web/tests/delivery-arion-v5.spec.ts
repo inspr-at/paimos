@@ -36,7 +36,7 @@ test('the v5 readings sit in their tiles with exact counts and the plan’s targ
   // Targets are v5's: no "3 on a reuse hit", release 61 now and 54 later.
   await expect(tile(page, 'PR CI run (wall)').locator('.t-target')).toHaveText('Target 10 min, then 7')
   await expect(tile(page, 'Merge-queue run').locator('.t-target')).toHaveText('Target 10 min, then 7')
-  await expect(tile(page, 'Release → live (csb1)').locator('.t-target')).toHaveText('Target ~61 min + W, then ~54 + W')
+  await expect(tile(page, 'Release → live').locator('.t-target')).toHaveText('Target ~61 min + W, then ~54 + W')
   await expect(tiles).not.toContainText('reuse')
   // Required checks stand beside the workflow's green; exact counts, not shares turned back into counts.
   await expect(tile(page, 'Green on first try').locator('.t-line').nth(0)).toHaveText(/^Required checks \d+% · \d+ of \d+$/)

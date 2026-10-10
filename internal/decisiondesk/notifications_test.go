@@ -141,7 +141,7 @@ func TestNotificationPointersAndNormalBriefingItem(t *testing.T) {
 	if err = json.Unmarshal(b, &fields); err != nil {
 		t.Fatal(err)
 	}
-	if len(fields) != 4 || fields["url"] != "/agents?needs=q:"+q.ID || fields["item_id"] != q.ID {
+	if len(fields) != 4 || fields["url"] != "/decision-desk?item=q:"+q.ID || fields["item_id"] != q.ID {
 		t.Fatalf("incorrect pointer: %s", b)
 	}
 	item.Kind = "doctrine"

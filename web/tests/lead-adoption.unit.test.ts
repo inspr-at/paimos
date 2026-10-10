@@ -5,7 +5,7 @@ import { flatten, mountView, settle, textOf, type RenderNode } from './webcore-v
 import { leadBand, type ProjectLead } from '../src/lib/lead'
 import * as leadAPI from '../src/lib/lead'
 
-const candidate = { id: 'running', display_label: 'AEON-LEAD', harness: 'codex', host: 'mbp2607', management_mode: 'unmanaged', reported_at: '2026-10-09T11:50:00Z' }
+const candidate = { id: 'running', display_label: 'AEON-LEAD', harness: 'codex', host: 'build-7', management_mode: 'unmanaged', reported_at: '2026-10-09T11:50:00Z' }
 const deferred = <T>() => { let resolve!: (v: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
 const click = async (node: RenderNode) => { await (node.props.onClick as () => unknown)(); await settle() }
 function adoption(read = async () => ({ items: [candidate], next_cursor: null as string | null })) {
@@ -25,7 +25,7 @@ it('the inline card confirms the selected running session with the revision disp
   const view = adoption()
   try {
     await click(view.button('adopt-open'))
-    expect(textOf(view.root)).toContain('AEON-LEAD'); expect(textOf(view.root)).toContain('mbp2607')
+    expect(textOf(view.root)).toContain('AEON-LEAD'); expect(textOf(view.root)).toContain('build-7')
     expect(view.button('adopt-confirm').props['aria-disabled']).toBe(true)
     await click(view.option()); expect(view.option().props['aria-checked']).toBe(true)
     await click(view.button('adopt-confirm'))

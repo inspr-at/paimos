@@ -67,17 +67,20 @@ for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 1000 })
     await setup(page, true)
     await page.goto('/agents')
-    const card = page.getByRole('region', { name: 'Needs you' }).locator('[data-row^="a:"]').first()
-    await card.getByRole('button', { name: 'Approve', exact: true }).click()
-    const form = card.locator('.decision')
-    const submit = form.locator('button[type="submit"]')
+    const data = await page.locator('.desk-panel .desk-item').first().getAttribute('href')
+    expect(data).toMatch(/^\/decision-desk\?item=a:/)
+    await page.locator('.desk-panel .desk-item').first().click()
+    const memo = page.getByRole('dialog', { name: 'Decision Desk memo' })
+    const submit = page.getByTestId('desk-decide')
+    const reason = memo.getByRole('textbox', { name: 'Reason', exact: true })
+    await page.getByTestId('choice-0').click()
     await expectStableControls({
-      controls: { card, form, reason: form.locator('textarea'), cancel: form.getByRole('button', { name: 'Cancel' }), submit },
-      scrollAreas: { feedback: form.locator('.decision-feedback') },
+      controls: { frame: page.getByTestId('desk-frame'), actions: page.getByTestId('desk-actions').locator('.action-buttons'), selector: page.getByTestId('desk-choices'), approve: page.getByTestId('choice-row-0'), deny: page.getByTestId('choice-row-1'), cancel: page.getByTestId('desk-close'), submit },
+      scrollAreas: { body: page.getByTestId('desk-body') },
       interactions: [
-        ...['d', 'a'].map(key => ({ name: `switch to ${key === 'd' ? 'deny' : 'approve'}`, run: async () => { await card.focus(); await page.keyboard.press(key); await expect(submit).toContainText(key === 'd' ? 'Deny permission' : 'Approve permission') } })),
-        { name: 'type a long reason', run: () => form.locator('textarea').fill('Keep the controls still. '.repeat(100)) },
-        { name: 'failed decision feedback', run: async () => { await submit.click(); await expect(form.getByRole('alert')).toBeVisible(); await expect(submit).toBeEnabled() } },
+        ...['1', '2', '1'].map(key => ({ name: `switch approval choice ${key}`, run: async () => { await page.getByTestId('desk-paper').focus(); await page.keyboard.press(key); await expect(page.getByTestId(`choice-${Number(key) - 1}`)).toHaveAttribute('aria-checked', 'true') } })),
+        { name: 'type a long reason', run: async () => { await reason.fill('Keep the controls still. '.repeat(100)); await reason.press('Enter') } },
+        { name: 'failed decision feedback', run: async () => { await submit.click(); await expect(page.getByTestId('desk-status')).toContainText('expired'); await expect(submit).toBeEnabled(); await expect(memo).toBeVisible() } },
       ],
     })
   })

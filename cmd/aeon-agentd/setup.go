@@ -133,10 +133,12 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	}
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
 	f.SetOutput(io.Discard)
+	var instance string
 	var root, origin, tenantID, tenantSlug, workspace, computer, account, contextLabel, nodePath, sdkPath string
 	var harnesses stringsFlag
 	var jsonOutput, startService, once, yes, installHooks bool
 	var hookExecutable string
+	f.StringVar(&instance, "instance", "", "named pairing instance")
 	f.StringVar(&root, "state-root", "", "private pairing state directory")
 	f.StringVar(&origin, "url", "", "HTTPS Aeon instance origin")
 	f.StringVar(&tenantID, "tenant-id", "", "tenant UUID")
@@ -167,7 +169,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		valid := true
 		f.Visit(func(v *flag.Flag) {
 			switch v.Name {
-			case "state-root", "harness", "node-path", "claude-sdk-path", "yes", "json":
+			case "state-root", "instance", "harness", "node-path", "claude-sdk-path", "yes", "json":
 			default:
 				valid = false
 			}
@@ -203,8 +205,11 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	if err != nil {
 		return err
 	}
+	if err := agentsetup.ValidateInstance(instance); err != nil {
+		return err
+	}
 	if root == "" {
-		root, err = agentsetup.DefaultStateRoot(platform.OS, home, os.Getenv("XDG_STATE_HOME"))
+		root, err = agentsetup.InstanceStateRoot(platform.OS, home, os.Getenv("XDG_STATE_HOME"), instance)
 		if err != nil {
 			return err
 		}
@@ -245,8 +250,17 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	if err != nil && !(command == "setup" && errors.Is(err, os.ErrNotExist)) {
 		return err
 	}
-	manager := &agentsetup.ServiceManager{Platform: platform, Home: home, UID: os.Getuid(), Executable: executable, Systemctl: systemctl}
+	manager := &agentsetup.ServiceManager{Instance: instance, Platform: platform, Home: home, UID: os.Getuid(), Executable: executable, Systemctl: systemctl}
 	engine := &agentsetup.Engine{Store: store, Services: manager, Local: localPairing{root: root, readOnly: command == "status"}}
+	if instance != "" {
+		if platform.OS != "darwin" {
+			return agentsetup.ErrDeclarative
+		}
+		engine.PrepareLedger = func(ctx context.Context, c agentsetup.RuntimeConfig) error {
+			return prepareSharedPairing(ctx, *manager, root, c)
+		}
+	}
+	engine.LeaveLedger = func(ctx context.Context) error { return leaveSharedPairing(ctx, root) }
 	engine.Hooks = &agentsetup.HookInstaller{Enabled: installHooks, Executable: hookExecutable, Scope: "user"}
 	if command == "status" {
 		defer store.Close()
@@ -311,6 +325,11 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		return err
 	}
 	engine.API = agentsetup.HTTPClient{Origin: origin}
+	if instance != "" && command == "setup" {
+		if err := checkSharedPairing(context.Background(), manager, root, origin, tenantID); err != nil {
+			return err
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if command == "repin" {

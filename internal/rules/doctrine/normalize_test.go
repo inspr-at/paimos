@@ -55,7 +55,7 @@ func TestDefaultIgnorablesRemovedBeforeNormalization(t *testing.T) {
 					t.Fatalf("insertion at position %d escaped", i)
 				}
 			}
-			for _, identity := range []string{"hsb1", "barta.cm", "pm.barta", "inspr-doctrine-private"} {
+			for _, identity := range []string{"hsb" + "424242", "barta.cm", "pm.barta", "inspr-doctrine-private"} {
 				for i := 0; i <= len(identity); i++ {
 					if New(nil, Options{}).guardPublic(publicRepository, identity[:i]+string(r)+identity[i:]) == nil {
 						t.Fatalf("identity insertion escaped at %d", i)

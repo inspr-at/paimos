@@ -393,6 +393,7 @@ type AccountMetadata struct {
 }
 
 type EnrolledAccount struct {
+	VerifiedIdentity string // local verified login ID; never sent to another server
 	ID, Key, Harness string
 	Metadata         *AccountMetadata
 	// DependencyBlocked means this enrollment's interpreter pin is missing,

@@ -113,7 +113,7 @@
       "specs": [
         {"file":"tests/brand.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":1.88,"median":1.384,"min":0.888},"seconds":2.895969,"selectedTests":2},"weightSeconds":2.552486,"weightSource":"web-4"}
         ,
-        {"file":"tests/header-menus.spec.ts","listedTests":90,"tierTiming":{"caseSeconds":{"max":4.504,"median":0,"min":0},"seconds":67.417583,"selectedTests":92},"weightSeconds":114.861878,"weightSource":"web-4"}
+        {"file":"tests/header-menus.spec.ts","listedTests":92,"tierTiming":{"caseSeconds":{"max":4.504,"median":0,"min":0},"seconds":67.417583,"selectedTests":92},"weightSeconds":114.861878,"weightSource":"web-4"}
         ,
         {"file":"tests/release-codenames.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":5.85,"median":1.7745,"min":1.213},"seconds":76.126791,"selectedTests":24},"weightSeconds":30.62983392,"weightSource":"web-4"}
         ,
@@ -147,7 +147,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/service-tier.spec.ts","listedTests":41,"tierTiming":{"caseSeconds":{"max":5.255,"median":2.296,"min":1.647},"seconds":110.591375,"selectedTests":41},"weightSeconds":91,"weightSource":"web-6"}
+        {"file":"tests/service-tier.spec.ts","listedTests":44,"tierTiming":{"caseSeconds":{"max":5.255,"median":2.296,"min":1.647},"seconds":110.591375,"selectedTests":41},"weightSeconds":91,"weightSource":"web-6"}
       ]
     }
     ,
@@ -322,9 +322,9 @@
         ,
         {"file":"tests/agent-recovery.spec.ts","listedTests":9,"weightSeconds":20}
         ,
-        {"file":"tests/agents-top.spec.ts","listedTests":33,"tierTiming":{"caseSeconds":{"max":7.262,"median":2.31,"min":0},"seconds":74.572143,"selectedTests":33},"weightSeconds":81.824561,"weightSource":"web-13"}
+        {"file":"tests/agents-top.spec.ts","listedTests":4,"tierTiming":{"caseSeconds":{"max":7.262,"median":2.31,"min":0},"seconds":74.572143,"selectedTests":33},"weightSeconds":81.824561,"weightSource":"web-13"}
         ,
-        {"file":"tests/approval-feedback.spec.ts","listedTests":13,"tierTiming":{"caseSeconds":{"max":7.243,"median":3.129,"min":0.039},"seconds":58.110583,"selectedTests":13},"weightSeconds":32.233918,"weightSource":"web-13"}
+        {"file":"tests/approval-feedback.spec.ts","listedTests":18,"tierTiming":{"caseSeconds":{"max":7.243,"median":3.129,"min":0.039},"seconds":58.110583,"selectedTests":13},"weightSeconds":32.233918,"weightSource":"web-13"}
         ,
         {"file":"tests/managed-controls.spec.ts","listedTests":25,"tierTiming":{"caseSeconds":{"max":3.674,"median":1.823,"min":1.574},"seconds":50.762087,"selectedTests":25},"weightSeconds":61.988304,"weightSource":"web-13"}
         ,
@@ -332,7 +332,7 @@
         ,
         {"file":"tests/no-shift-dialogs.spec.ts","listedTests":22,"tierTiming":{"caseSeconds":{"max":6.489,"median":3.533,"min":2.056},"derivedFrom":"tests/no-shift.spec.ts","estimatedTests":0,"measuredTests":22,"overheadSeconds":2.707689,"seconds":87.247689,"selectedTests":22},"weightSeconds":36.564633,"weightSource":"tierTiming:37377299349"}
         ,
-        {"file":"tests/no-shift.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":5.356,"median":2.966,"min":0.151},"derivedFrom":"tests/no-shift.spec.ts","estimatedTests":0,"measuredTests":8,"overheadSeconds":2.707689,"seconds":24.270689,"selectedTests":8},"weightSeconds":10.171603,"weightSource":"tierTiming:37377299349"}
+        {"file":"tests/no-shift.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":5.356,"median":2.966,"min":0.151},"derivedFrom":"tests/no-shift.spec.ts","estimatedTests":12,"measuredTests":8,"overheadSeconds":2.707689,"seconds":64.270689,"selectedTests":20},"weightSeconds":40.171603,"weightSource":"tierTiming:37377299349 plus conservative AEON-569 estimate for twelve new cases"}
         ,
         {"file":"tests/record-ownership.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
@@ -400,7 +400,11 @@
       ]
       ,
       "specs": [
-        {"file":"tests/decision-desk.spec.ts","listedTests":35,"tierTiming":{"caseSeconds":{"max":13.265,"median":1.782,"min":1.257},"seconds":133.356542,"selectedTests":35},"weightSeconds":128,"weightSource":"web-14"}
+        {"file":"tests/decision-desk-fix2.spec.ts","listedTests":8,"weightSeconds":40,"weightSource":"AEON-569 regression port; conservative initial estimate"}
+        ,
+        {"file":"tests/decision-desk-fix3.spec.ts","listedTests":9,"weightSeconds":40,"weightSource":"AEON-569 regression port; conservative initial estimate"}
+        ,
+        {"file":"tests/decision-desk.spec.ts","listedTests":60,"tierTiming":{"caseSeconds":{"max":13.265,"median":1.782,"min":1.257},"seconds":133.356542,"selectedTests":35},"weightSeconds":128,"weightSource":"web-14"}
       ]
     }
     ,
@@ -430,7 +434,7 @@
       "specs": [
         {"file":"tests/account-link.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":3.299,"median":1.7945,"min":0.733},"seconds":20.685759,"selectedTests":10},"weightSeconds":19.833333,"weightSource":"web-15"}
         ,
-        {"file":"tests/attach-discoverable.spec.ts","listedTests":41,"tierTiming":{"caseSeconds":{"max":9.262,"median":2.303,"min":1.11},"seconds":119.445446,"selectedTests":41},"weightSeconds":81.316667,"weightSource":"web-15"}
+        {"file":"tests/attach-discoverable.spec.ts","listedTests":47,"tierTiming":{"caseSeconds":{"max":9.262,"median":2.303,"min":1.11},"seconds":119.445446,"selectedTests":41},"weightSeconds":81.316667,"weightSource":"web-15"}
         ,
         {"file":"tests/attach-security.spec.ts","listedTests":50,"tierTiming":{"caseSeconds":{"max":6.215,"median":1.3445,"min":0.84},"seconds":86.253166,"selectedTests":50},"weightSeconds":99.166667,"weightSource":"web-15"}
         ,
@@ -708,6 +712,8 @@
       "specs": [
         {"file":"tests/a11y.spec.ts","listedTests":80,"weightSeconds":230.829268,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/account-use-matrix.spec.ts","listedTests":13,"weightSeconds":40,"weightSource":"AEON-1054 estimate: thirteen mocked matrix flows, one skipped evidence run"}
+        ,
         {"file":"tests/accounts-card-fit.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/activity-history.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
@@ -717,6 +723,8 @@
         {"file":"tests/aeon-1028-projheader.spec.ts","listedTests":42,"weightSeconds":93.219512,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/aeon-1042-headergraph.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/aeon-1062-qapolish.spec.ts","listedTests":20,"weightSeconds":24,"weightSource":"local-single-worker-AEON-1062-18.8s-plus-margin"}
         ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,
@@ -772,7 +780,7 @@
         ,
         {"file":"tests/agents-worker-tree.spec.ts","listedTests":10,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/agents.spec.ts","listedTests":29,"weightSeconds":64.365854,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agents.spec.ts","listedTests":35,"weightSeconds":64.365854,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/attachments.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":8.707,"median":6.187,"min":3.667},"seconds":15.877279,"selectedTests":2},"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
         ,
@@ -820,7 +828,7 @@
         ,
         {"file":"tests/display-language.spec.ts","listedTests":5,"weightSeconds":35,"weightSource":"AEON-998 targeted spot checks, five views with six sizes/themes each"}
         ,
-        {"file":"tests/doctrine-inbox.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/doctrine-inbox.spec.ts","listedTests":7,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/done-gate.spec.ts","listedTests":20,"weightSeconds":44.390244,"weightSource":"unmeasured-test-rate"}
         ,

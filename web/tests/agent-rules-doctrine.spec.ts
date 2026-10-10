@@ -312,7 +312,7 @@ test('missing proposal guard gives administrators a reason while doctrine remain
 
 // R14: proposal controls must follow host policy rather than repository names.
 test('configured private doctrine can be proposed while public packs stay read-only', async ({ page }) => {
-  const privateSource = { ...READY, id: 'd0000000-0000-4000-8000-000000001043', repository: 'augmentoring-team/agm-doctrine', visibility: 'private', proposals_enabled: true }
+  const privateSource = { ...READY, id: 'd0000000-0000-4000-8000-000000001043', repository: 'example-business-team/agm-doctrine', visibility: 'private', proposals_enabled: true }
   await setup(page, { manage: true, layer: { sources: [{ ...READY, proposals_enabled: false }, privateSource], proposals_enabled: true } })
   await page.goto('/settings/agent-rules')
   const sources = page.locator('.doctrine > .source')

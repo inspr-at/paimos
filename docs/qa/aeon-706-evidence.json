@@ -120,7 +120,7 @@
       }
     ],
     "limits": [
-      "Specific fix-round instructions require local focused tests and forbid mbp2606; remote-test.sh was not invoked despite the generic remote-first line.",
+      "Specific fix-round instructions require local focused tests and forbid build-6; remote-test.sh was not invoked despite the generic remote-first line.",
       "Full just test/build/unit/browser suites and Linux CI-equivalent Chromium remain coordinator CI gates. No affected Go package, API, migration, visual design, template, CSS or keyboard change.",
       "Local commit only: no push, deploy, merge, production access, model review or ticket-status changes."
     ],
@@ -197,7 +197,7 @@
     "ownership": "Verified ppm account: tenant INSPR, principal workstation-agents (agent); coordinator builder markers for aeon-706-planbind verified on AEON-706 before edits. No status changes.",
     "design": "Existing PAIMOS components and layout retained; no visual redesign or approved-decision conflict. Needs Opus design for any future new layout.",
     "limits": [
-      "Specific brief requires local targeted tests and forbids mbp2606. remote-test.sh uses temporary pushed refs, so was not invoked under the user no-push instruction. No affected Go packages.",
+      "Specific brief requires local targeted tests and forbids build-6. remote-test.sh uses temporary pushed refs, so was not invoked under the user no-push instruction. No affected Go packages.",
       "Focused macOS Chromium evidence only; CI-equivalent Linux Chromium, full just test/build/unit/browser suites and consolidated release review remain coordinator gates.",
       "Local commit only; no pushes, remote-test host access, production access, deployments, ticket-status changes, model review gates or version changes."
     ]
@@ -268,7 +268,7 @@
     "ownership": "Verified ppm account: INSPR tenant, workstation-agents agent; coordinator builder markers for aeon-706-planbind present on AEON-706. No ticket-status changes.",
     "design": "Existing PAIMOS picker reused; no conflict with approved decisions. Needs Opus design for future new layouts.",
     "limits": [
-      "Specific brief requires local targeted tests and forbids mbp2606, and direct user instruction forbids pushes. remote-test.sh pushes a temporary ref and uses mbp2606, so it was not invoked. No Go packages, contracts, migrations or versions changed.",
+      "Specific brief requires local targeted tests and forbids build-6, and direct user instruction forbids pushes. remote-test.sh pushes a temporary ref and uses build-6, so it was not invoked. No Go packages, contracts, migrations or versions changed.",
       "Focused macOS Chromium evidence only. CI-equivalent Linux Chromium, full just test/build/unit/browser suites and consolidated release review remain coordinator gates.",
       "Local commit only; no pushes, deploys, production access, model review gates, destructive git or changes outside this worktree."
     ]

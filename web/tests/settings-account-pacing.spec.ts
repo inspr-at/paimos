@@ -126,7 +126,7 @@ test('Remove account… says what stays untouched, and only Remove account remov
   await menu.getByRole('menuitem', { name: /Remove account/ }).click()
   const confirm = page.getByRole('dialog', { name: 'Remove Grok · markus?' })
   await expect(confirm).toContainText('It leaves Accounts and agents stop using it.')
-  await expect(confirm).toContainText('Its binding on mbp2607 is disconnected.')
+  await expect(confirm).toContainText('Its binding on build-7 is disconnected.')
   await expect(confirm).toContainText('Its runs and history stay. Other accounts and the vendor subscription are untouched.')
   await confirm.getByRole('button', { name: 'Cancel' }).click()
   expect(archived).toEqual([])

@@ -123,8 +123,17 @@ export const showsEffort = (entry: ModelEntry | null | undefined) => (entry?.eff
 export const entryFor = (entries: ModelEntry[], line: string | null | undefined) => line ? entries.find(entry => entry.line === line) ?? null : null
 /** "GPT-6.1 Sol · xhigh"; a model with one level shows no level. */
 export const pickText = (entry: ModelEntry | null, effort: string | null, fallback = '') => entry ? `${entry.name}${showsEffort(entry) && effort ? ` · ${effort}` : ''}` : fallback
-/** Unknown lines still get a readable name: "anthropic:opus" → "opus". */
-export const lineFallback = (line: string | null | undefined) => line ? line.split(':').at(-1) ?? line : ''
+/**
+ * A line the registry has no profile for still reads as a name, never a raw id (AEON-1062):
+ * "anthropic:fable" → "Fable", "unknown:openrouter/qwen/qwen3-coder" → "Qwen3 Coder".
+ */
+export function lineFallback(line: string | null | undefined): string {
+  if (!line) return ''
+  const id = line.split(':').at(-1)!.split('/').at(-1)!
+  return id.split(/[-_\s]+/).filter(Boolean).map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ') || line
+}
+/** The model family of a line ("anthropic:fable" → "anthropic"), for its brand mark when the registry has no profile. */
+export const lineFamily = (line: string | null | undefined) => line?.includes(':') ? line.split(':')[0]! : ''
 
 export interface RowView {
   key: string; column: string; label: string; isDefault: boolean

@@ -77,7 +77,7 @@ for (const theme of ['light', 'dark'] as const) {
       })
       expect(body.fields.tags).toEqual([
         { id: 16, name: 'CUSTOMERPORTAL', color: 'blue' },
-        { id: 5, name: 'hsb8', color: 'green' },
+        { id: 5, name: 'worker-8', color: 'green' },
       ])
       expect(body.fields.hide_from_release_notes).toBeUndefined()
       await expect(page.getByText('before done:')).toHaveCount(0)

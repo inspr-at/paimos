@@ -46,6 +46,6 @@ proof that the deployed nightly lane is green.
 Worker verification on 2026-10-09 at source commit `1715191df` passed all 41
 checks in `ci-static --merge-main` and all 47 browser files implicated by the
 historical failures: 696 passing tests and 24 unchanged optional skips. Browser
-files ran individually with one worker on mbp2606; the backup/restore drill used
+files ran individually with one worker on build-6; the backup/restore drill used
 the approved remote Go runner. The handoff retains each tested SHA, failed-before
 log, passing result and mapping for updated UI assertions.

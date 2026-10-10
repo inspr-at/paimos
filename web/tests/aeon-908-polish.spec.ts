@@ -30,9 +30,9 @@ async function setup(page: Page, theme: 'light' | 'dark') {
   }
   c.verification_capabilities = { ...c.verification_capabilities, claude: { supported: true, policy: 'read_only', reason: '' } }
   const e = c.enrollments.find(e => e.account_id === ACCOUNTS.claude)!
-  Object.assign(e, { can_verify: true, verification_state: 'expired', verification_expired_ready: false, label: 'markus.barta@augmentoring.com', local_cleanup: 'confirmed' })
+  Object.assign(e, { can_verify: true, verification_state: 'expired', verification_expired_ready: false, label: 'markus.barta@example.com', local_cleanup: 'confirmed' })
   const second = c.enrollments.find(e => e.account_id === ACCOUNTS.grok)!
-  Object.assign(second, { harness: 'claude', label: 'administration-mit-langer-deutscher-kontobezeichnung@augmentoring.com', state: 'revoked', verification_state: 'not_selected' })
+  Object.assign(second, { harness: 'claude', label: 'administration-mit-langer-deutscher-kontobezeichnung@example.com', state: 'revoked', verification_state: 'not_selected' })
   Object.assign(world.accounts.find(a => a.id === ACCOUNTS.grok)!, { harness: 'claude', label: second.label })
   Object.assign(c, { host_capacity: { policy: defaultHostPolicy(), signals: { load: 32.4, cores: 18, memory_used_gb: 39.3, memory_total_gb: 64, memory_pressure: 'normal', power: 'plugged_in', thermal: 'normal' }, running: 8, queued: 4, reported_at: new Date(NOW).toISOString(), reason: '', load_limit: 0, history: [] } })
   const base = data.sessions[0]!
@@ -95,7 +95,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     const pane = page.locator('section.pane')
     const footer = pane.locator('.pane-foot .verify-button')
     await expect(footer).toBeVisible()
-    await expect(pane.locator('.si-who .name-link').filter({ hasText: 'markus.barta' })).toHaveText('Claude · markus.barta@augmentoring.com')
+    await expect(pane.locator('.si-who .name-link').filter({ hasText: 'markus.barta' })).toHaveText('Claude · markus.barta@example.com')
     await expect(pane).not.toContainText('not_selected')
     await expect(pane).not.toContainText('claude needs')
     for (const value of ['39.3 / 64 GB', 'Plugged in']) {

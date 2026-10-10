@@ -22,6 +22,49 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
+func TestGetApprovalKeepsNativeSourceAndHistoryVisibility(t *testing.T) {
+	f := newFixture(t)
+	w := f.do(f.agentA, f.wide, "POST", "/api/approvals", proposalJSON("nodes.read", "node", &f.nodeA, nil))
+	if w.Code != 201 {
+		t.Fatalf("propose: %d %s", w.Code, w.Body.String())
+	}
+	var created Approval
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/approvals/" + created.ID
+	w = f.do(f.personA, "", "GET", path, "")
+	if w.Code != 200 {
+		t.Fatalf("read: %d %s", w.Code, w.Body.String())
+	}
+	var read Approval
+	if err := json.Unmarshal(w.Body.Bytes(), &read); err != nil {
+		t.Fatal(err)
+	}
+	if read.ID != created.ID || read.Scope != created.Scope || read.Decision != nil {
+		t.Fatalf("source changed: %+v", read)
+	}
+	if w = f.do(f.personA, "", "POST", path+"/decision", `{"decision":"denied","reason":"No grant"}`); w.Code != 200 {
+		t.Fatalf("deny: %d %s", w.Code, w.Body.String())
+	}
+	w = f.do(f.personA, "", "GET", path, "")
+	if w.Code != 200 {
+		t.Fatalf("history: %d %s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &read); err != nil {
+		t.Fatal(err)
+	}
+	if read.Decision == nil || *read.Decision != "denied" {
+		t.Fatal("native history lost")
+	}
+	if w = f.do(f.agentB, f.tokenB, "GET", path, ""); w.Code != 404 {
+		t.Fatalf("foreign source exposed: %d %s", w.Code, w.Body.String())
+	}
+	if w = f.do(f.personB, "", "GET", path, ""); w.Code != 404 {
+		t.Fatalf("foreign tenant exposed: %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestScopeWithinKey(t *testing.T) {
 	cases := []struct {
 		scope  string

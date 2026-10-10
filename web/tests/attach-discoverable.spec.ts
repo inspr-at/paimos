@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync } from 'node:fs'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page, type Locator } from '@playwright/test'
 import { openAttachSession } from './agents-menu-fixtures'
@@ -11,7 +10,6 @@ import { expectStableControls } from './helpers/stable'
 // AEON-440: a started attach is easy to find. /agents lists the owner's waiting
 // requests (no code), the terminal's link only fills the code in, and expiry or
 // cancellation is shown instead of silence.
-const shots = process.env.ATTACH_DISCOVERABLE_SHOTS ?? '/private/tmp/aeon-440-shots'
 // The page runs on this clock and every expiry is relative to it, so no assertion depends on the wall time.
 const NOW = Date.parse('2026-09-30T12:00:00Z')
 const PENDING = '**/api/agent-pairing/attach/pending'
@@ -45,12 +43,12 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; manage?: b
     return route.fulfill({ json: value })
   })
   const data = agentData({
-    me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' },
+    now: NOW, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' },
     tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' },
     nodes: { 'p-pharos': { key: 'PHAROS', title: 'Pharos' }, 'n-2': { key: 'PHAROS-12', title: 'PDF worker image' } },
   })
   data.runs.splice(0); data.approvals.splice(0); data.messages.splice(0)
-  await mockAgents(page, data)
+  await mockAgents(page, data, { now: () => NOW + (options.paused ? 60_000 : 0) })
   await page.route('**/api/me/leaving-at', route => route.fulfill({ json: { deadline_at: null, request_id: null, hosts: 'all', stop_in_flight: false, owner_principal_id: me.id, items: [] } }))
   await page.route('**/api/nodes/p-pharos', route => route.fulfill({ json: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' } }))
   await page.route('**/api/nodes/n-2', route => route.fulfill({ json: { id: 'n-2', key: 'PHAROS-12', title: 'PDF worker image' } }))
@@ -59,7 +57,7 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; manage?: b
 async function list(page: Page, requests: ReturnType<typeof request>[]) {
   await page.route(PENDING, route => route.fulfill({ json: { requests } }))
 }
-const strip = (page: Page) => page.locator('.queue:has(.attach-item)')
+const strip = (page: Page) => page.getByRole('region', { name: 'Sign-ins and connections', exact: true })
 async function chooseAndDecide(dialog: Locator, choice: 'Allow' | 'Decline') {
   await dialog.getByRole('radio', { name: choice, exact: true }).check()
   await dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ }).click()
@@ -67,7 +65,7 @@ async function chooseAndDecide(dialog: Locator, choice: 'Allow' | 'Decline') {
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)
 
 for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
-  test(`New menu preserves authorized attach and header controls ${theme} ${width}`, async ({ page }) => {
+  test(`New menu preserves authorized attach and header controls ${theme} ${width}`, async ({ page }, testInfo) => {
     await setup(page, { theme })
     await list(page, [])
     await page.setViewportSize({ width, height: 900 })
@@ -81,8 +79,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
           await add.click()
           await expect(page.getByRole('menuitem', { name: /Attach a running session/ })).toBeVisible()
           await expect(page.getByRole('menuitem', { name: /Connect your machine/ })).toBeVisible()
-          mkdirSync(shots, { recursive: true })
-          await page.screenshot({ path: `${shots}/new-menu-${width}-${theme}.png` })
+          await page.screenshot({ path: testInfo.outputPath(`new-menu-${width}-${theme}.png`) })
         } },
         { name: 'close New menu', run: async () => { await page.keyboard.press('Escape'); await expect(page.getByRole('menu')).toHaveCount(0) } },
       ],
@@ -91,7 +88,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
 }
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390]) {
-  test(`attach controls never move from code to memo or settled state ${theme} ${width}`, async ({ page }) => {
+  test(`attach controls never move from code to memo or settled state ${theme} ${width}`, async ({ page }, testInfo) => {
     await setup(page, { theme, paused: true })
     await page.setViewportSize({ width, height: 900 })
     let state: State = 'pending'
@@ -130,13 +127,12 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     expect(await fits(page)).toBe(true)
     expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
     expect((await new AxeBuilder({ page }).include('dialog').analyze()).violations).toEqual([])
-    mkdirSync(shots, { recursive: true })
-    await page.screenshot({ path: `${shots}/memo-guard-${theme}-${width}.png` })
+    await page.screenshot({ path: testInfo.outputPath(`memo-guard-${theme}-${width}.png`) })
   })
 }
 
 for (const platform of ['MacIntel', 'Win32']) {
-  test(`attach keyboard keeps browser shortcuts native and requires explicit lookup on ${platform}`, async ({ page }) => {
+  test(`attach keyboard keeps browser shortcuts native and requires explicit lookup on ${platform}`, async ({ page }, testInfo) => {
     await page.addInitScript(platform => Object.defineProperty(navigator, 'platform', { value: platform }), platform)
     await setup(page, { paused: true })
     await list(page, [])
@@ -183,13 +179,13 @@ for (const platform of ['MacIntel', 'Win32']) {
   })
 }
 
-test('a reviewed request expires in place and cannot send an approval', async ({ page }) => {
+test('a reviewed request expires in place and cannot send an approval', async ({ page }, testInfo) => {
   await setup(page, { paused: true })
   await list(page, [request('expires', 'pending', { mins: 2 })])
   const posts: string[] = []
   await page.route('**/api/agent-pairing/attach/**', route => { if (route.request().method() === 'GET') return route.fallback(); posts.push(route.request().url()); return route.fulfill({ json: request('expires', 'approved') }) })
   await page.goto('/agents')
-  await strip(page).getByRole('button', { name: 'Review' }).click()
+  await strip(page).getByRole('button', { name: 'Review connection' }).click()
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('radio', { name: 'Allow', exact: true }).check()
   await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeEnabled()
@@ -202,31 +198,33 @@ test('a reviewed request expires in place and cannot send an approval', async ({
   expect(posts).toEqual([])
 })
 
-test('attach approvals share the queue count and expiry ordering, never a code or inline Allow', async ({ page }) => {
+test('connections retain expiry ordering and stay separate from canonical permission decisions, never a code or inline Allow', async ({ page }, testInfo) => {
   const data = await setup(page, { paused: true })
   data.approvals.push({ id: 'permission', agent_name: 'worker', resource_id: 'p-pharos', run_id: null, decision: null, decided_by_principal_id: null, agent_principal_id: data.sessions[0]!.agent_principal_id, scope: 'nodes.read', resource_kind: 'node', rationale: 'Read this project', expires_at: new Date(NOW + 4 * 60_000).toISOString(), proposed_at: new Date(NOW).toISOString(), risk: 'low' })
   await list(page, [request('later', 'pending', { mins: 6 }), request('sooner', 'pending', { mins: 2, mode: 'lease' })])
   await page.goto('/agents')
   const queue = strip(page)
-  await expect(queue.locator('.count-badge')).toHaveText('3')
-  const rows = queue.locator('.items > li')
-  await expect(rows).toHaveCount(3)
-  expect(await rows.evaluateAll(rows => rows.map(row => row.getAttribute('data-row')))).toEqual(['t:sooner', 'a:permission', 't:later'])
-  await expect(queue.locator('.attach-item').getByRole('button', { name: /Allow/ })).toHaveCount(0)
+  await expect(queue.getByLabel('Connections to review')).toHaveText('2')
+  await expect(page.getByRole('region', { name: 'Decision Desk', exact: true }).getByLabel('Open decisions')).toHaveText('1')
+  await expect(page.locator('.desk-panel .desk-item')).toHaveAttribute('href', '/decision-desk?item=a:permission')
+  const rows = queue.locator('.connection-item')
+  await expect(rows).toHaveCount(2)
+  expect(await rows.evaluateAll(rows => rows.map(row => row.getAttribute('data-row')))).toEqual(['t:sooner', 't:later'])
+  await expect(queue.locator('.connection-item').getByRole('button', { name: /Allow/ })).toHaveCount(0)
   await expect(queue).not.toContainText('123456789')
-  await expect(queue.locator('.attach-item').first()).toContainText('Status only')
+  await expect(queue.locator('.connection-item').first()).toContainText('Status only')
   await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
   await expect(page.getByRole('menuitem', { name: /Attach a running session/ }).locator('.count-badge')).toHaveCount(0)
   await page.keyboard.press('Escape')
 })
 
-test('round navigation and choices keep controls fixed, Skip sends no decision', async ({ page }) => {
+test('round navigation and choices keep controls fixed, Skip sends no decision', async ({ page }, testInfo) => {
   await setup(page, { paused: true })
   await list(page, [request('one', 'pending', { mins: 4 }), request('two', 'pending', { mins: 8, host: 'Another Mac with a much longer host name', mode: 'lease' })])
   const posts: string[] = []
   await page.route('**/api/agent-pairing/attach/**', route => { if (route.request().method() === 'GET') return route.fallback(); posts.push(route.request().url()); return route.fulfill({ json: request('one', 'approved') }) })
   await page.goto('/agents')
-  await strip(page).getByRole('button', { name: 'Review' }).first().click()
+  await strip(page).getByRole('button', { name: 'Review connection' }).first().click()
   const dialog = page.getByRole('dialog')
   const controls = dialog.locator('.desk-top button')
   const positions = async () => controls.evaluateAll(items => items.map(item => { const { x, y, width, height } = item.getBoundingClientRect(); return { x, y, width, height } }))
@@ -245,23 +243,23 @@ test('round navigation and choices keep controls fixed, Skip sends no decision',
   expect(posts).toEqual([])
 })
 
-test('a declined request settles then folds into Decided', async ({ page }) => {
+test('a declined request settles then folds into Decided', async ({ page }, testInfo) => {
   await setup(page, { paused: true })
   let state: State = 'pending'
   await page.route(PENDING, route => route.fulfill({ json: { requests: [request('fold', state)] } }))
   await page.route('**/api/agent-pairing/attach/fold/revoke', route => { state = 'detached'; return route.fulfill({ json: request('fold', state) }) })
   await page.goto('/agents')
-  await strip(page).getByRole('button', { name: 'Review' }).click()
+  await strip(page).getByRole('button', { name: 'Review connection' }).click()
   await chooseAndDecide(page.getByRole('dialog'), 'Decline')
   await expect(strip(page).locator('[data-outcome="declined"]')).toContainText('You declined it')
   await page.getByRole('button', { name: 'Close attach review' }).click()
   await page.clock.fastForward(7_000)
-  await expect(page.locator('.attach-item')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Decided', exact: false }).click()
-  await expect(page.locator('.attach-past')).toContainText('Declined')
+  await expect(page.locator('.connection-item')).toHaveCount(0)
+  await strip(page).locator('summary').click()
+  await expect(page.locator('.connection-past')).toContainText('Declined')
 })
 
-test('a waiting attach is listed with computer, harness and expiry, and one click reviews it', async ({ page }) => {
+test('a waiting attach is listed with computer, harness and expiry, and one click reviews it', async ({ page }, testInfo) => {
   await setup(page)
   await list(page, [request('r-wait', 'pending')])
   const posts: { url: string; body: unknown }[] = []
@@ -272,16 +270,15 @@ test('a waiting attach is listed with computer, harness and expiry, and one clic
   })
   await page.goto('/agents')
   const row = strip(page).locator('[data-outcome="waiting"]')
-  mkdirSync(shots, { recursive: true })
   await expect(row).toContainText('Claude on Markus’s MacBook')
-  await page.screenshot({ path: `${shots}/single-waiting.png` })
+  await page.screenshot({ path: testInfo.outputPath(`single-waiting.png`) })
   await expect(row).toContainText('and share its conversation')
   await expect(row).toContainText('PHAROS-12')
   await expect(row).toContainText('Your terminal on Markus’s MacBook waits')
   await expect(row.getByRole('button', { name: /Allow/ })).toHaveCount(0)
   await expect(row).toContainText(/Expires in [89]m/)
   expect(posts).toEqual([])
-  await row.getByRole('button', { name: 'Review' }).click()
+  await row.getByRole('button', { name: 'Review connection' }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('heading', { name: 'Watch a running session' })).toBeVisible()
   await expect(dialog).toContainText('Requested by a process on Markus’s MacBook.')
@@ -297,14 +294,14 @@ test('a waiting attach is listed with computer, harness and expiry, and one clic
   expect(posts[0].body).toEqual({ request_digest: 'a'.repeat(64), consent_digest: 'b'.repeat(64) })
 })
 
-test('a decision refreshes the list instead of waiting for the next poll', async ({ page }) => {
+test('a decision refreshes the list instead of waiting for the next poll', async ({ page }, testInfo) => {
   await setup(page)
   let state: State = 'pending'
   let reads = 0
   await page.route(PENDING, route => { reads++; return route.fulfill({ json: { requests: [request('r-wait', state)] } }) })
   await page.route('**/api/agent-pairing/attach/r-wait/revoke', route => { state = 'detached'; return route.fulfill({ json: request('r-wait', 'detached') }) })
   await page.goto('/agents')
-  await strip(page).getByRole('button', { name: 'Review' }).click()
+  await strip(page).getByRole('button', { name: 'Review connection' }).click()
   const before = reads
   await chooseAndDecide(page.getByRole('dialog'), 'Decline')
   await expect(page.getByRole('dialog')).toContainText('You declined it. Nothing was shared.')
@@ -313,7 +310,7 @@ test('a decision refreshes the list instead of waiting for the next poll', async
   expect(reads).toBeGreaterThan(before)
 })
 
-test('approved, expired and cancelled requests say so, and ended ones can be dismissed', async ({ page }) => {
+test('approved, expired and cancelled requests say so, and ended ones can be dismissed', async ({ page }, testInfo) => {
   await setup(page)
   await list(page, [
     request('r-strict', 'approved', { consent: 'local_auth' }),
@@ -327,22 +324,22 @@ test('approved, expired and cancelled requests say so, and ended ones can be dis
   await expect(expired).toContainText('Request expired. Run aeon-agentd attach again.')
   await expect(strip(page).locator('[data-outcome="cancelled"]')).toContainText('Request cancelled')
   // Nothing waits, so no Review action and no primary button.
-  await expect(strip(page).getByRole('button', { name: 'Review' })).toHaveCount(0)
+  await expect(strip(page).getByRole('button', { name: 'Review connection' })).toHaveCount(0)
   await expired.getByRole('button', { name: 'Dismiss this attach request' }).click()
   await expect(strip(page).locator('[data-outcome="expired"]')).toHaveCount(0)
   await expect(strip(page).locator('[data-outcome="cancelled"]')).toHaveCount(1)
 })
 
-test('a request past its expiry reads as expired before the next poll says so', async ({ page }) => {
+test('a request past its expiry reads as expired before the next poll says so', async ({ page }, testInfo) => {
   await setup(page)
   await list(page, [request('r-late', 'pending', { mins: 0.15 })])
   await page.goto('/agents')
   await expect(strip(page).locator('[data-outcome="waiting"]')).toContainText(/Expires in \d+s/)
   await expect(strip(page).locator('[data-outcome="expired"]')).toContainText('Request expired', { timeout: 14_000 })
-  await expect(strip(page).getByRole('button', { name: 'Review' })).toHaveCount(0)
+  await expect(strip(page).getByRole('button', { name: 'Review connection' })).toHaveCount(0)
 })
 
-test('an empty list shows nothing, and people who cannot attach never ask', async ({ page }) => {
+test('an empty list shows nothing, and people who cannot attach never ask', async ({ page }, testInfo) => {
   await setup(page, { manage: false })
   const asked: string[] = []
   await page.route(PENDING, route => { asked.push(route.request().url()); return route.fulfill({ json: { requests: [request('r-wait', 'pending')] } }) })
@@ -356,7 +353,7 @@ test('an empty list shows nothing, and people who cannot attach never ask', asyn
   expect(asked).toEqual([])
 })
 
-test('an unavailable list stays quiet', async ({ page }) => {
+test('an unavailable list stays quiet', async ({ page }, testInfo) => {
   await setup(page)
   await page.route(PENDING, route => route.fulfill({ status: 503, json: { error: 'unavailable' } }))
   await page.goto('/agents')
@@ -366,7 +363,7 @@ test('an unavailable list stays quiet', async ({ page }) => {
   await expect(page.getByRole('alert')).toHaveCount(0)
 })
 
-test('the terminal link fills the code in, is removed from the address bar, and approves nothing', async ({ page }) => {
+test('the terminal link fills the code in, is removed from the address bar, and approves nothing', async ({ page }, testInfo) => {
   await setup(page)
   const urls: string[] = []
   page.on('request', r => urls.push(r.url()))
@@ -385,8 +382,7 @@ test('the terminal link fills the code in, is removed from the address bar, and 
   // The code rides in the fragment only: no request carries it, and opening the link sent nothing.
   expect(sent).toEqual([])
   expect(urls.filter(url => url.includes('123456789'))).toEqual([])
-  mkdirSync(shots, { recursive: true })
-  await page.screenshot({ path: `${shots}/link-prefilled.png` })
+  await page.screenshot({ path: testInfo.outputPath(`link-prefilled.png`) })
   await dialog.getByRole('button', { name: /Find request/ }).click()
   await expect(dialog).toContainText('Requested by a process on Markus’s MacBook.')
   expect(sent).toEqual([{ url: expect.stringMatching(/\/attach\/lookup$/), body: { user_code: '123456789' } }])
@@ -396,7 +392,7 @@ test('the terminal link fills the code in, is removed from the address bar, and 
   expect(sent).toHaveLength(1)
 })
 
-test('a link with anything but nine digits opens nothing', async ({ page }) => {
+test('a link with anything but nine digits opens nothing', async ({ page }, testInfo) => {
   await setup(page)
   await page.goto('/agents#attach=12345')
   await expect(page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })).toBeVisible()
@@ -427,7 +423,7 @@ test('a de-AT browser still shows English pairing guidance and only prefills the
   } finally { await page.close() }
 })
 
-test('a person who cannot attach gets no dialog from the link, and the code leaves the address bar', async ({ page }) => {
+test('a person who cannot attach gets no dialog from the link, and the code leaves the address bar', async ({ page }, testInfo) => {
   await setup(page, { manage: false })
   await page.goto('/agents#attach=123456789')
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
@@ -438,7 +434,7 @@ test('a person who cannot attach gets no dialog from the link, and the code leav
 const OLA = { principal: { id: '33333333-3333-4333-8333-333333333333', name: 'Ola Nordmann', kind: 'person', roles: ['admin'] }, tenant: { id: 't2', name: 'Other Studio' } }
 const gate = () => { let open!: () => void; const passed = new Promise<void>(resolve => { open = resolve }); return { passed, open } }
 
-test('a list still on its way when the person changes is never shown to the next person', async ({ page }) => {
+test('a list still on its way when the person changes is never shown to the next person', async ({ page }, testInfo) => {
   await setup(page)
   const previous = gate(), next = gate(), permissions = gate()
   let switched = false, olaAsked = 0, anyAsked = 0, permissionsAsked = false
@@ -494,7 +490,7 @@ test('a list still on its way when the person changes is never shown to the next
   await expect(page.getByText('Previous person’s Mac')).toHaveCount(0)
 })
 
-test('the attach code never reaches a sign-in address, even when the session has ended', async ({ page }) => {
+test('the attach code never reaches a sign-in address, even when the session has ended', async ({ page }, testInfo) => {
   await setup(page)
   const urls: string[] = []
   page.on('request', r => urls.push(r.url()))
@@ -523,7 +519,7 @@ const ADMIN_PERMISSIONS = (project?: string) => {
   return value
 }
 
-test('a reset queued between the scope check and continuation cannot open A’s code for B', async ({ page }) => {
+test('a reset queued between the scope check and continuation cannot open A’s code for B', async ({ page }, testInfo) => {
   await setup(page)
   // Instrument the real scope at precisely the r3 gap: after permissions, the
   // last nextTick check queues an identity switch before the caller can open.
@@ -649,7 +645,7 @@ test('an OIDC round trip in another tab invalidates the old review and records t
 })
 
 // Every async path of the attach flow answers to the person who started it (AEON-440).
-test('a link code waiting for slow permissions never opens for the next person', async ({ page }) => {
+test('a link code waiting for slow permissions never opens for the next person', async ({ page }, testInfo) => {
   await setup(page)
   const slow = gate()
   let switched = false, before = 0
@@ -677,7 +673,7 @@ test('a link code waiting for slow permissions never opens for the next person',
   await expect(page.getByLabel('Attach code')).toHaveValue('987 654 321')
 })
 
-test('names still loading for the previous person never enable approval for the next one', async ({ page }) => {
+test('names still loading for the previous person never enable approval for the next one', async ({ page }, testInfo) => {
   await setup(page)
   const first = gate(), second = gate()
   let switched = false
@@ -685,13 +681,13 @@ test('names still loading for the previous person never enable approval for the 
   await list(page, [request('r-wait', 'pending')])
   await page.goto('/agents')
   const dialog = page.getByRole('dialog')
-  await strip(page).getByRole('button', { name: 'Review' }).click()
+  await strip(page).getByRole('button', { name: 'Review connection' }).click()
   await expect(dialog.getByText('Loading…')).toHaveCount(2)
   switched = true
   await signInAsOla(page)
   await expect(dialog).toHaveCount(0)
   // Ola's list carries the same kind of request; she opens it and her own names are still on their way.
-  await strip(page).getByRole('button', { name: 'Review' }).click()
+  await strip(page).getByRole('button', { name: 'Review connection' }).click()
   await expect(dialog.getByText('Loading…')).toHaveCount(2)
   first.open()
   await page.waitForTimeout(400)
@@ -705,7 +701,7 @@ test('names still loading for the previous person never enable approval for the 
   await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeEnabled()
 })
 
-test('a decision still on its way when the person changes shows nothing to the next person', async ({ page }) => {
+test('a decision still on its way when the person changes shows nothing to the next person', async ({ page }, testInfo) => {
   await setup(page)
   const answer = gate()
   let approvals = 0
@@ -717,7 +713,7 @@ test('a decision still on its way when the person changes shows nothing to the n
   })
   await list(page, [request('r-wait', 'pending')])
   await page.goto('/agents')
-  await strip(page).getByRole('button', { name: 'Review' }).click()
+  await strip(page).getByRole('button', { name: 'Review connection' }).click()
   await chooseAndDecide(page.getByRole('dialog'), 'Allow')
   await expect.poll(() => approvals).toBe(1)
   await signInAsOla(page)
@@ -769,7 +765,7 @@ const decisionBody = (page: Page) => page.evaluate(() => {
 const finishDecisionBody = (page: Page) => page.evaluate(() => (window as typeof window & { __attachBody: HeldDecisionBody }).__attachBody.finish())
 
 for (const action of ['approve', 'revoke'] as const) {
-  test(`an accepted ${action} refreshes pending requests and sessions after its review closes during body decoding`, async ({ page }) => {
+  test(`an accepted ${action} refreshes pending requests and sessions after its review closes during body decoding`, async ({ page }, testInfo) => {
     const data = await setup(page, { paused: true })
     let state: State = 'pending', pendingReads = 0, sessionReads = 0
     await page.route(PENDING, route => { pendingReads++; return route.fulfill({ json: { requests: [request('r-wait', state)] } }) })
@@ -782,7 +778,7 @@ for (const action of ['approve', 'revoke'] as const) {
     await page.goto('/agents')
     const session = page.locator(`[data-row="s:${data.sessions[0].id}"]`)
     await expect(session).toContainText('imac0')
-    await strip(page).getByRole('button', { name: 'Review' }).click()
+    await strip(page).getByRole('button', { name: 'Review connection' }).click()
     await page.getByRole('dialog').getByRole('radio', { name: 'Allow', exact: true }).check()
     await expect(page.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeEnabled()
     // The clock has not advanced since startup: only the accepted write can refresh.
@@ -806,12 +802,12 @@ for (const action of ['approve', 'revoke'] as const) {
     await expect(page.getByRole('dialog')).not.toContainText('Approved. Keep the attach terminal open')
   })
 
-  test(`an accepted ${action} body is aborted and dropped when the identity changes during decoding`, async ({ page }) => {
+  test(`an accepted ${action} body is aborted and dropped when the identity changes during decoding`, async ({ page }, testInfo) => {
     await setup(page, { paused: true })
     await list(page, [request('r-wait', 'pending')])
     await page.route(`**/api/agent-pairing/attach/r-wait/${action}`, route => route.fulfill({ json: request('r-wait', action === 'approve' ? 'approved' : 'detached') }))
     await page.goto('/agents')
-    await strip(page).getByRole('button', { name: 'Review' }).click()
+    await strip(page).getByRole('button', { name: 'Review connection' }).click()
     await page.getByRole('dialog').getByRole('radio', { name: 'Allow', exact: true }).check()
     await expect(page.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeEnabled()
     await holdDecisionBody(page, action)
@@ -836,7 +832,7 @@ for (const action of ['approve', 'revoke'] as const) {
   })
 }
 
-test('a link followed inside the open Agents page fills the code in again', async ({ page }) => {
+test('a link followed inside the open Agents page fills the code in again', async ({ page }, testInfo) => {
   await setup(page)
   await page.goto('/agents')
   await expect(page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })).toBeVisible()
@@ -849,7 +845,7 @@ test('a link followed inside the open Agents page fills the code in again', asyn
 })
 
 for (const entry of ['the list', 'a typed code'] as const) {
-  test(`approval waits for the project and ticket names (${entry})`, async ({ page }) => {
+  test(`approval waits for the project and ticket names (${entry})`, async ({ page }, testInfo) => {
     await setup(page)
     const names = gate()
     for (const id of ['p-pharos', 'n-2']) await page.route(`**/api/nodes/${id}`, async route => { await names.passed; await route.fallback() })
@@ -862,7 +858,7 @@ for (const entry of ['the list', 'a typed code'] as const) {
     await list(page, [request('r-wait', 'pending')])
     await page.goto('/agents')
     const dialog = page.getByRole('dialog')
-    if (entry === 'the list') await strip(page).getByRole('button', { name: 'Review' }).click()
+    if (entry === 'the list') await strip(page).getByRole('button', { name: 'Review connection' }).click()
     else {
       await openAttachSession(page)
       await dialog.getByLabel('Attach code').fill('123456789')
@@ -889,13 +885,13 @@ for (const entry of ['the list', 'a typed code'] as const) {
   })
 }
 
-test('names that cannot be read fall back to the ids and approval is possible', async ({ page }) => {
+test('names that cannot be read fall back to the ids and approval is possible', async ({ page }, testInfo) => {
   await setup(page)
   await page.route('**/api/nodes/p-pharos', route => route.fulfill({ status: 404, json: { error: 'not_found' } }))
   await page.route('**/api/nodes/n-2', route => route.fulfill({ status: 404, json: { error: 'not_found' } }))
   await list(page, [request('r-wait', 'pending')])
   await page.goto('/agents')
-  await strip(page).getByRole('button', { name: 'Review' }).click()
+  await strip(page).getByRole('button', { name: 'Review connection' }).click()
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('radio', { name: 'Allow', exact: true }).check()
   await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeEnabled()
@@ -904,7 +900,7 @@ test('names that cannot be read fall back to the ids and approval is possible', 
 })
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
-  test(`pending attach layout ${theme} ${width}`, async ({ page }) => {
+  test(`pending attach layout ${theme} ${width}`, async ({ page }, testInfo) => {
     await setup(page, { theme })
     await page.setViewportSize({ width, height: 900 })
     await list(page, [
@@ -918,16 +914,15 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await expect(strip(page).locator('[data-outcome="cancelled"]')).toBeVisible()
     expect(await fits(page)).toBe(true)
     expect(await strip(page).evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
-    expect((await new AxeBuilder({ page }).include('.queue').analyze()).violations).toEqual([])
-    mkdirSync(shots, { recursive: true })
-    await page.screenshot({ path: `${shots}/pending-${theme}-${width}.png` })
+    expect((await new AxeBuilder({ page }).include('.chores').analyze()).violations).toEqual([])
+    await page.screenshot({ path: testInfo.outputPath(`pending-${theme}-${width}.png`) })
     // Every action is a real, reachable control at this width.
-    const review = strip(page).getByRole('button', { name: 'Review' })
+    const review = strip(page).getByRole('button', { name: 'Review connection' })
     const box = await review.boundingBox()
     expect(box && box.x >= 0 && box.x + box.width <= width).toBe(true)
     await review.click()
     await expect(page.getByRole('dialog')).toContainText('Requested by a process on Markus’s MacBook.')
     expect(await page.getByRole('dialog').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
-    await page.screenshot({ path: `${shots}/pending-review-${theme}-${width}.png` })
+    await page.screenshot({ path: testInfo.outputPath(`pending-review-${theme}-${width}.png`) })
   })
 }
