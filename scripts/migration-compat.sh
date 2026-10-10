@@ -22,6 +22,12 @@ db="aeon-compat-db-$suffix"
 app="aeon-compat-app-$suffix"
 network="aeon-compat-$suffix"
 image="ghcr.io/inspr-at/aeon@$digest"
+# AEON-1051's activated refusal gate needs a binary below the capability floor.
+# The latest release may already advertise that capability. Keep testing its
+# read compatibility, and retain the last pre-capability release separately.
+# Published release v261009095632.0.0, source 2beba30ed75f68a6880ce0427fdc71c8d881fb76.
+floor_tag='v261009095632.0.0'
+floor_image='ghcr.io/inspr-at/aeon@sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
 cleanup() {
   docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
@@ -36,6 +42,7 @@ docker pull --platform linux/amd64 "$image"
 # Pull the release-note digest, then resolve its local config ID for both boots.
 image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
 [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
+previous_image_id="$image_id"
 echo "Previous image: $image_id"
 docker network create "$network" >/dev/null
 docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
@@ -76,11 +83,37 @@ docker container rm "$app" >/dev/null
 db_address="$(docker port "$db" 5432/tcp)"
 AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=disable" \
   GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
+# Neither application nor migration runner is connected now. Preserve the
+# inactive, migrated fixture for the separate legacy refusal gate: the latest
+# release's account-use probes activate policy and populate its account pool.
+docker exec -i "$db" psql -U postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+CREATE DATABASE aeon_compat_floor WITH TEMPLATE aeon OWNER aeon;
+SQL
 start_previous
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
 python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db" --release-tag "$tag"
+
+# Verify the immutable pre-capability binary and the seeded reads before
+# activation. The existing exact SQLSTATE/entry, empty/populated pool and
+# background-write refusal assertions remain mandatory for that binary.
+docker stop --time 30 "$app" >/dev/null
+docker container rm "$app" >/dev/null
+# Only this run's disposable database is replaced; both binaries start from
+# the same migrated rows with an empty account pool and inactive policy.
+docker exec -i "$db" psql -U postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+DROP DATABASE aeon;
+ALTER DATABASE aeon_compat_floor RENAME TO aeon;
+SQL
+echo "Account-use rollback boundary release: $floor_tag"
+docker pull --platform linux/amd64 "$floor_image"
+floor_image_id="$(docker image ls --quiet --no-trunc "$floor_image" | sort -u)"
+[[ "$floor_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable rollback boundary image ID' >&2; exit 1; }
+image_id="$floor_image_id"
+start_previous
+python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${floor_tag#v}"
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${floor_tag#v}" --database-container "$db"
 echo "Migration compatibility passed: $tag on the candidate schema"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
-    "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
+  printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations and passed account-use probes. Account-use refusal boundary %s; registry image %s; loaded image %s passed the activated legacy probes.\n' \
+    "$tag" "$image" "$previous_image_id" "$floor_tag" "$floor_image" "$floor_image_id" >> "$GITHUB_STEP_SUMMARY"
 fi

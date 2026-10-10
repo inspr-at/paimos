@@ -3,11 +3,13 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import subprocess
 import sys
 import threading
+import tempfile
 import unittest
 import uuid
 from unittest.mock import Mock, patch
@@ -263,6 +265,134 @@ class ProbeTest(unittest.TestCase):
         self.responses[path] = (409, 'application/json', b'{"error":"unrelated"}')
         with self.assertRaisesRegex(AssertionError, 'wrong policy refusal'):
             self.probe.refused(path, status=409, message='account_not_allowed_for_context')
+
+
+class MigrationRuntimeTest(unittest.TestCase):
+    def test_latest_compatibility_and_legacy_refusal_use_their_own_images(self):
+        # Risk: the latest release's policy checks and the below-floor binary's
+        # strict refusals must both run against their own inactive fixture.
+        floor_digest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
+        floor_version = '261009095632.0.0'
+        latest_digest = 'sha256:' + 'a' * 64
+        latest_version = '261010123154.0.0'
+        for latest_fails, legacy_fails in ((False, False), (False, True), (True, False)):
+            with self.subTest(latest_fails=latest_fails, legacy_fails=legacy_fails), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                scripts, commands = root / 'scripts', root / 'commands'
+                scripts.mkdir()
+                commands.mkdir()
+                script = scripts / 'migration-compat.sh'
+                script.write_bytes(Path(module.__file__).with_name('migration-compat.sh').read_bytes())
+                driver = '#!' + sys.executable + '\n' + '''
+import json, os, sys
+from pathlib import Path
+root = Path(os.environ['AEON_COMPAT_TEST_ROOT'])
+tool, args = Path(sys.argv[0]).name, sys.argv[1:]
+floor = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
+latest_id, floor_id = 'sha256:' + 'b' * 64, 'sha256:' + 'c' * 64
+def record(event):
+    with (root / 'events.jsonl').open('a') as out:
+        out.write(json.dumps(event) + '\\n')
+if tool == 'docker':
+    if args[0] == 'pull':
+        record(['pull', args[-1]])
+    elif args[:2] == ['image', 'ls']:
+        print(floor_id if args[-1].endswith(floor) else latest_id)
+    elif args[0] == 'run' and args[-1] in (latest_id, floor_id):
+        (root / 'image').write_text(args[-1])
+        (root / 'running').write_text('true')
+        record(['boot', args[-1]])
+    elif args[0] == 'stop':
+        (root / 'running').write_text('false')
+    elif args[0] == 'port':
+        print('127.0.0.1:18080')
+    elif args[0] == 'exec' and '-i' in args:
+        statement = sys.stdin.read()
+        if 'CREATE DATABASE aeon_compat_floor' in statement:
+            if (root / 'running').read_text() != 'false' or (root / 'fixture').read_text() != 'inactive':
+                sys.exit('snapshot requires an inactive fixture with no server connected')
+            (root / 'floor-fixture').write_text((root / 'fixture').read_text())
+            record(['snapshot'])
+        elif 'DROP DATABASE aeon;' in statement:
+            if (root / 'running').read_text() != 'false' or 'ALTER DATABASE aeon_compat_floor RENAME TO aeon;' not in statement:
+                sys.exit('restore requires no server connected and the saved database')
+            (root / 'fixture').write_text((root / 'floor-fixture').read_text())
+            record(['restore'])
+elif tool == 'go':
+    (root / 'fixture').write_text('inactive')
+    record(['migrate'])
+elif tool == 'python3':
+    mode = args[1]
+    current = (root / 'image').read_text()
+    version = args[args.index('--version') + 1] if '--version' in args else None
+    record(['probe', mode, current, version])
+    if mode in ('seed', 'check'):
+        expected = '261009095632.0.0' if current == floor_id else '261010123154.0.0'
+        if version != expected:
+            sys.exit('wrong binary version')
+    if mode == 'account-use':
+        expected = '261009095632.0.0' if current == floor_id else '261010123154.0.0'
+        if version != expected:
+            sys.exit('wrong account-use capability release')
+        if current == latest_id and args[args.index('--release-tag') + 1] != 'v' + expected:
+            sys.exit('latest capability must use its pinned release')
+        if current == floor_id and '--release-tag' in args:
+            sys.exit('legacy refusal must remain unconditional')
+        if (root / 'fixture').read_text() != 'inactive':
+            sys.exit('account-use probes require an empty inactive fixture')
+        (root / 'fixture').write_text('activated with populated pool')
+        if current == latest_id and os.environ['AEON_COMPAT_TEST_LATEST_FAILS'] == 'true':
+            sys.exit('latest policy gate failed')
+        if current == floor_id and os.environ['AEON_COMPAT_TEST_LEGACY_FAILS'] == 'true':
+            sys.exit('legacy refusal gate failed')
+'''
+                for name in ('docker', 'go', 'python3', 'trash'):
+                    executable = commands / name
+                    executable.write_text(driver)
+                    executable.chmod(0o700)
+                result = subprocess.run(['bash', str(script), 'v' + latest_version, latest_digest],
+                    cwd=root, env={**os.environ, 'PATH': str(commands) + os.pathsep + os.environ['PATH'],
+                        'GITHUB_STEP_SUMMARY': str(root / 'summary'),
+                        'AEON_COMPAT_TEST_ROOT': str(root),
+                        'AEON_COMPAT_TEST_LATEST_FAILS': str(latest_fails).lower(),
+                        'AEON_COMPAT_TEST_LEGACY_FAILS': str(legacy_fails).lower()},
+                    capture_output=True, text=True, timeout=30, check=False)
+                events = [json.loads(line) for line in (root / 'events.jsonl').read_text().splitlines()]
+                latest_id, floor_id = 'sha256:' + 'b' * 64, 'sha256:' + 'c' * 64
+                checks = [event for event in events if event[:2] == ['probe', 'check']]
+                if latest_fails:
+                    self.assertEqual(checks, [['probe', 'check', latest_id, latest_version]])
+                    self.assertEqual([event for event in events if event[:2] == ['probe', 'account-use']],
+                        [['probe', 'account-use', latest_id, latest_version]])
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('latest policy gate failed', result.stderr)
+                    self.assertNotIn('Migration compatibility passed:', result.stdout)
+                    self.assertNotIn(['restore'], events)
+                    continue
+                self.assertEqual(checks, [['probe', 'check', latest_id, latest_version],
+                    ['probe', 'check', floor_id, floor_version]])
+                self.assertEqual([event for event in events if event[:2] == ['probe', 'account-use']],
+                    [['probe', 'account-use', latest_id, latest_version],
+                     ['probe', 'account-use', floor_id, floor_version]])
+                self.assertEqual([event for event in events if event[0] == 'pull'],
+                    [['pull', 'ghcr.io/inspr-at/aeon@' + latest_digest],
+                     ['pull', 'ghcr.io/inspr-at/aeon@' + floor_digest]])
+                self.assertLess(events.index(['migrate']), events.index(['snapshot']))
+                self.assertLess(events.index(['snapshot']), events.index(checks[0]))
+                self.assertLess(events.index(['probe', 'account-use', latest_id, latest_version]), events.index(['restore']))
+                self.assertLess(events.index(['restore']), events.index(checks[1]))
+                if legacy_fails:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('legacy refusal gate failed', result.stderr)
+                    self.assertNotIn('Migration compatibility passed:', result.stdout)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn('Migration compatibility passed:', result.stdout)
+                    summary = (root / 'summary').read_text()
+                    self.assertIn(latest_version, summary)
+                    self.assertIn(latest_id, summary)
+                    self.assertIn(floor_version, summary)
+                    self.assertIn(floor_id, summary)
 
 
 if __name__ == '__main__':
