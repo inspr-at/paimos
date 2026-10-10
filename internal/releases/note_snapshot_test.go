@@ -241,7 +241,7 @@ func TestPublishedNoteSnapshotIgnoresLaterTicketEdits(t *testing.T) {
 			content := f.existing("ticket", f.project, "Unavailable content", "open")
 			membershipOK(t, f.addExisting([]string{visible, content}, 1, false))
 			f.tx(func(tx pgx.Tx) error {
-				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"pill_en":"Software change","pill_de":"Softwareänderung","benefit_en":"Visible software benefit.","benefit_de":"Sichtbarer Software-Nutzen."}'::jsonb WHERE id=$1`, visible); err != nil {
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"pill_en":"Software change","pill_de":"Neue Software","benefit_en":"Visible software benefit.","benefit_de":"Sichtbarer Software-Nutzen."}'::jsonb WHERE id=$1`, visible); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"no_release_needed":true,"hide_from_release_notes":false,"benefit_en":"Content benefit must not leak.","private_other_field":"not exported"}'::jsonb WHERE id=$1`, content); err != nil {
