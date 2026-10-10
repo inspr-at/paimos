@@ -156,6 +156,12 @@
       "title": "Rules, doctrine and knowledge",
       "paths": [
         "internal/rules/**",
+        "internal/rules/doctrine/default_source.go",
+        "internal/rules/doctrine/delivery_external_test.go",
+        "internal/rules/doctrine/mirror.go",
+        "internal/rules/doctrine/mirror_fs_unix.go",
+        "internal/rules/doctrine/mirror_fs_unsupported.go",
+        "internal/rules/doctrine/source_modes_test.go",
         "internal/doctrinerepo/**",
         "internal/rulesimport/**",
         "internal/rulescompare/**",

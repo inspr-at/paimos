@@ -310,6 +310,8 @@ func TestMissingDoctrineGuardFileDoesNotPreventStartup(t *testing.T) {
 func TestDoctrineRepositoriesFromEnv(t *testing.T) {
 	t.Setenv("AEON_DATABASE_URL", "postgres://example")
 	t.Setenv("AEON_ENV", "prod")
+	t.Setenv("AEON_DOCTRINE_APP_TENANT_ID", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	t.Setenv("AEON_DOCTRINE_MIRROR_DIR", "/host/mirrors")
 	for _, name := range []string{"AEON_DOCTRINE_GUARD_KEY_FILE", "AEON_MESSAGING_KEY_FILE", "AEON_LINK_KEY_FILE", "AEON_REVIEW_WEBHOOK_SECRET_FILE", "AEON_PHONE_PUSH_VAPID_FILE", "AEON_DATABASE_PASSWORD_FILE"} {
 		t.Setenv(name, "")
 	}
@@ -351,6 +353,9 @@ func TestDoctrineRepositoriesFromEnv(t *testing.T) {
 			}
 			if cfg.DoctrineRepositories == nil || cfg.DoctrineRepositories.Public() != tc.wantPublic || cfg.DoctrineRepositories.Private() != tc.wantPrivate {
 				t.Fatal("deployment proposal repositories not loaded")
+			}
+			if cfg.DoctrineDefaultSource != !tc.unset || cfg.DoctrineMirrorDir != "/host/mirrors" {
+				t.Fatal("host default requires an explicit private repository and preserves mirror policy")
 			}
 		})
 	}
