@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
@@ -826,7 +827,36 @@ func testWorkLifecycleStaleHolds(t *testing.T) {
 				t.Fatalf("run/order diagnostic: %d %s", status, raw)
 			}
 			if c.want == "forbidden" {
-				if _, err := adminPool.Exec(t.Context(), `DELETE FROM role_permissions WHERE tenant_id=$1 AND permission='run.create'`, p.TenantID); err != nil {
+				// Builtin role permissions come from the registry, not these rows.
+				// Bind a custom copy so removing the grant really revokes it.
+				effective, err := authz.Load(dbtest.Seed(t.Context()), appPool, p, project.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+					var role string
+					if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'stale_hold_controller','Stale hold controller') RETURNING id::text`, p.TenantID).Scan(&role); err != nil {
+						return err
+					}
+					if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, p.TenantID, role, effective.Workspace.Permissions); err != nil {
+						return err
+					}
+					if _, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, p.ID, role); err != nil {
+						return err
+					}
+					scope := authz.Scope{ProjectID: project.ID}
+					if err := authz.RequireTx(t.Context(), tx, p, "run.create", scope); err != nil {
+						return err
+					}
+					tag, err := tx.Exec(t.Context(), `DELETE FROM role_permissions WHERE role_id=$1 AND permission='run.create'`, role)
+					if err != nil {
+						return err
+					}
+					if tag.RowsAffected() != 1 || !errors.Is(authz.RequireTx(t.Context(), tx, p, "run.create", scope), authz.ErrForbidden) {
+						t.Fatal("fixture did not revoke the live run.create grant")
+					}
+					return nil
+				}); err != nil {
 					t.Fatal(err)
 				}
 			}
