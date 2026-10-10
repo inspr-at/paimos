@@ -2690,6 +2690,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestStaleQueueUndoFences","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestStaleWorkHoldKeepsWriterFenceAndOwnedExitReconciles","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestStartedTelemetryAcceptsMissingPlacementTrace","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestTelemetryFencesAndAtomicRollback","tier":"ESSENTIAL"}

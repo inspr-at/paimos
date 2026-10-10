@@ -67,7 +67,10 @@ telemetry count as activity; fresh telemetry after closure keeps the hold.
 A closure predating the run cannot release a new orphaned run immediately.
 The write rechecks `run.create` and `work_orders.write` under the access/tree
 fence, marks the run `ownership_lost`, and records `run.stale_hold_released`
-with the action ID. It preserves daemon ownership, launch uncertainty and all
+with the action ID. A `work_lifecycle_release.exit_unconfirmed` trace marker
+retains the writer fence even for runs without a durable assignment. Only a
+finished exit report from the same authorized daemon clears it. It preserves
+daemon ownership, launch uncertainty and all
 capacity/accounting holds so a later owned executor can reconcile. It never
 reports process exit or makes an uncertain writer eligible for takeover.
 A standalone running order with no reporting generation or run retains a

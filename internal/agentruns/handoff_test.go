@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -481,4 +482,60 @@ func TestWorkerHandoffObsoleteClaimDoesNotAcceptWriter(t *testing.T) {
 			f.addQueue(t, e.NodeID, nil)
 		})
 	}
+}
+
+// R4/R7/R9: releasing an old ticket hold must retain writer ownership and
+// capacity, including legacy runs without worker_assignment. Only the same
+// fenced daemon's confirmed exit can reconcile that separate writer fence.
+func TestStaleWorkHoldKeepsWriterFenceAndOwnedExitReconciles(t *testing.T) {
+	f := setup(t)
+	nodes.New(f.d.App, nil).Mount(f.mux)
+	id := f.ticket(t, "open", "high", nil)
+	e := f.addQueue(t, id, map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile})
+	v := f.claim(t, e.Run)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET created_at=now()-interval '3 hours',started_at=now()-interval '3 hours' WHERE id=$1`, v.ID)
+		return err
+	})
+	var preview struct {
+		UpdatedAt  time.Time `json:"updated_at"`
+		OpenLeaves int       `json:"open_leaves"`
+		Scope      string    `json:"scope_revision"`
+	}
+	f.call(t, f.person, "GET", "/api/nodes/"+id+"/work-lifecycle", nil, 200, &preview)
+	var action struct {
+		State string `json:"state"`
+	}
+	f.call(t, f.person, "POST", "/api/nodes/"+id+"/work-lifecycle", map[string]any{"request_id": uuid(), "kind": "cancel", "expected_updated_at": preview.UpdatedAt, "expected_open_leaves": preview.OpenLeaves, "expected_scope_revision": preview.Scope}, 200, &action)
+	if action.State != "completed" {
+		t.Fatal("stale run hold did not release")
+	}
+	if f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='ownership_lost' AND trace->'work_lifecycle_release'->>'exit_unconfirmed'='true' AND NOT trace ? 'worker_assignment'`, v.ID) != 1 {
+		t.Fatal("legacy uncertain writer evidence missing")
+	}
+	if f.count(t, f.person, `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, v.ID) != 1 {
+		t.Fatal("stale release freed accounting hold")
+	}
+	f.call(t, f.person, "PATCH", "/api/nodes/"+id, map[string]any{"state": "open"}, 200, nil)
+	w := f.request(f.person, "POST", "/api/queue", mustHandoffJSON(t, map[string]any{"node_id": id}), "")
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "previous writer exit or launch outcome is unconfirmed") {
+		t.Fatalf("stale release allowed another writer: %d %s", w.Code, w.Body.String())
+	}
+	path := "/api/runs/" + v.ID + "/telemetry"
+	report := map[string]any{"sequence": 1, "kind": "finished", "status": "failed", "process_state": "exited"}
+	otherToken := f.key(t, f.other, []string{"run.telemetry"})
+	w = f.request(f.other, "POST", path, mustHandoffJSON(t, report), otherToken)
+	if w.Code != 403 || !strings.Contains(w.Body.String(), "assigned agent or live run.claim grant required") {
+		t.Fatalf("wrong-owner exit failed for wrong reason: %d %s", w.Code, w.Body.String())
+	}
+	f.call(t, f.agent, "POST", path, map[string]any{"sequence": 1, "kind": "finished", "status": "failed", "process_state": "unconfirmed"}, 409, nil)
+	if f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'`, v.ID) != 1 {
+		t.Fatal("wrong owner or unconfirmed report cleared writer fence")
+	}
+	f.call(t, f.agent, "POST", path, report, 200, nil)
+	f.call(t, f.agent, "POST", path, report, 200, nil)
+	if f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='failed' AND trace->'work_lifecycle_release'->>'exit_unconfirmed'='false'`, v.ID) != 1 {
+		t.Fatal("owned exit did not reconcile writer fence")
+	}
+	f.addQueue(t, id, nil)
 }

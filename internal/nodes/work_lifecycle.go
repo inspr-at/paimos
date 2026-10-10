@@ -562,8 +562,10 @@ func (m *Module) releaseStaleWorkRuns(ctx context.Context, tx pgx.Tx, p tenant.P
 		// No capacity release or completed assignment: an uncertain writer may
 		// still exist. Its daemon can reconcile ownership_lost through telemetry.
 		err = tx.QueryRow(ctx, `UPDATE agent_runs r SET status='ownership_lost',
-   started_at=coalesce(started_at,created_at),ended_at=clock_timestamp()
-   WHERE id=$1 AND aeon_work_run_releasable(id) RETURNING to_jsonb(r)-'tenant_id'`, h.id).Scan(&after)
+   started_at=coalesce(started_at,created_at),ended_at=clock_timestamp(),
+   trace=jsonb_set(coalesce(nullif(trace,'null'::jsonb),'{}'::jsonb),'{work_lifecycle_release}',
+    jsonb_build_object('action_id',$2::text,'exit_unconfirmed',true))
+   WHERE id=$1 AND aeon_work_run_releasable(id) RETURNING to_jsonb(r)-'tenant_id'`, h.id, action).Scan(&after)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
 		}
