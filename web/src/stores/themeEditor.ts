@@ -196,6 +196,8 @@ export const canDelete = (state: ThemeEditorState) => {
   return !!target && target.revision === state.confirming!.revision && canConfirmDelete(state, target)
 }
 export const canReload = (state: ThemeEditorState) => !!state.identity && !state.pending && !isDirty(state)
+/** Pagination extends a loaded list; without an active theme, Reload is the way on. */
+export const canLoadMore = (state: ThemeEditorState) => !!state.cursor && ready(state)
 export const UNAVAILABLE = 'Your current theme could not be loaded. Reload themes.'
 /**
  * Everything the status line must say, in order: unfinished work, the
@@ -343,7 +345,7 @@ const FAILURES: FailureTable = {
     rejected: relay, server: relay, network: relay,
   },
   readDefault: {
-    missing: op => stale(op.themeID, 'create', 'The workspace default changed elsewhere. Reload themes, then create a new theme again.'),
+    missing: op => stale(op.themeID, 'create', 'The workspace default no longer exists. Reload themes, then create a new theme again.'),
     conflict: op => stale(op.themeID, 'create', 'The workspace default changed elsewhere. Reload themes, then create a new theme again.'),
     precondition: op => stale(op.themeID, 'create', 'The workspace default changed elsewhere. Reload themes, then create a new theme again.'),
     rejected: (_, __, reason) => transient(`The workspace default could not be read. ${reason}`),
@@ -405,8 +407,7 @@ function apply(state: ThemeEditorState, event: ThemeEvent): ThemeEditorState {
       return event.identity && event.identity === state.identity && !isDirty(state) && (!state.pending || state.pending.op.kind === 'load')
         ? start({ ...state, confirming: null }, { kind: 'load' }) : state
     case 'leave': return state.confirming || state.renaming ? { ...state, confirming: null, renaming: null } : state
-    // Pagination extends a loaded list; without an active theme, Reload is the way on.
-    case 'more': return state.cursor && ready(state) ? start(state, { kind: 'more', after: state.cursor }) : state
+    case 'more': return canLoadMore(state) ? start(state, { kind: 'more', after: state.cursor! }) : state
     case 'choose':
       if (!canChoose(state) || event.id === state.active!.theme.id || !state.items.some(item => item.id === event.id)) return state
       return start(state, { kind: 'choose', themeID: event.id, selectionRevision: state.active!.revision })
@@ -548,6 +549,7 @@ export function createThemeEditor() {
     canChoose: view(canChoose),
     canDelete: view(canDelete),
     canReload: view(canReload),
+    canLoadMore: view(canLoadMore),
     editable: (theme: ThemeRecord) => isEditable(state.value, theme),
     canDuplicate: (theme: ThemeRecord) => canDuplicate(state.value, theme),
     canRename: (theme: ThemeRecord) => canRename(state.value, theme),
