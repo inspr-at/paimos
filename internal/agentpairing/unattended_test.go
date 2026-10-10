@@ -32,6 +32,8 @@ func TestUnattendedMissingPlatformPreservesLegacyPairing(t *testing.T) {
 			q := f.propose("codex")
 			q.id = uuid(t, f.db)
 			q.request["request_id"] = q.id
+			q.request["runtime_hash"] = hash(p.runtime)
+			q.request["lifecycle_hash"] = hash(p.lifecycle)
 			q.request["existing_computer_id"] = *v.ComputerID
 			q.request["existing_lifecycle_secret"] = p.lifecycle
 			f.submit(q)
