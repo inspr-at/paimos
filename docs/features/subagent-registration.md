@@ -36,6 +36,8 @@ aeon harness run --parent-session "$AEON_SESSION_ID" --role worker \
 Use the actual parent generation and assigned ticket; retain the existing
 account's project and worker permissions. Claude lifecycle hook registration
 does not extend paired-hook consent or grant any new permissions.
+The standard hooks use the existing `harness.read`, `harness.write`, and
+`harness.worker` scopes for parent lookup, registration, heartbeat, and stop.
 
 Payloads were verified on 2026-10-10 against the official
 [SubagentStart](https://code.claude.com/docs/en/hooks#subagentstart) and
