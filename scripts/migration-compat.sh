@@ -6,7 +6,7 @@ set -euo pipefail
 # OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
 pgvector_image="${PGVECTOR_IMAGE:-ghcr.io/inspr-at/paimos-ci/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11}"
 
-for tool in docker python3 go; do
+for tool in docker python3 go git; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
 tag="${1:?usage: bash scripts/migration-compat.sh vYYMMDDhhmmss.0.0 sha256:DIGEST}"
@@ -103,9 +103,13 @@ SQL
     # pool and background-write refusal assertions remain mandatory.
     python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
     echo "Account-use rollback boundary passed: $tag on the candidate schema"
+  else
+    # Capability comes from the pinned release's embedded entry migration;
+    # supported releases must pass their policy probes, never legacy refusal.
+    python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db" --release-tag "$tag"
   fi
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-    printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \
+    printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations and passed account-use probes.\n' \
       "$tag" "$image" "$image_id" >> "$GITHUB_STEP_SUMMARY"
     if [[ "$exercise_floor" = 1 ]]; then
       printf 'Account-use refusal boundary %s; registry image %s; loaded image %s passed the activated legacy probes; verified activated empty/populated pools refuse below-floor binaries.\n' \
@@ -116,12 +120,15 @@ SQL
   docker container rm -fv "$app" "$db" >/dev/null
 }
 
+# Verify the pinned source remains below the capability floor before any
+# activated probe, even when the ordinary release is the same image.
+legacy_entry="$(git show "$account_use_floor_tag:internal/db/visibility.go")"
+[[ "$legacy_entry" == *"func enterTenant("* && "$legacy_entry" != *"aeon.account_use_capable"* ]] || {
+  echo 'Pinned rollback image must predate the account-use capability' >&2; exit 1;
+}
 docker network create "$network" >/dev/null
-if [[ "$tag" = "$account_use_floor_tag" && "$digest" = "$account_use_floor_digest" ]]; then
-  probe_release "$tag" "$digest" 1
-else
-  # Both images seed and migrate their own fresh disposable database.
-  probe_release "$tag" "$digest" 0
-  probe_release "$account_use_floor_tag" "$account_use_floor_digest" 1
-fi
-echo "Migration compatibility passed: $tag on the candidate schema; latest-release reads and below-floor account-use boundary"
+# Policy activation changes the fixture, so each probe seeds and migrates its
+# own fresh database even when both releases select the same immutable image.
+probe_release "$tag" "$digest" 0
+probe_release "$account_use_floor_tag" "$account_use_floor_digest" 1
+echo "Migration compatibility passed: $tag on the candidate schema; latest-release reads and account-use probes, and below-floor account-use boundary"

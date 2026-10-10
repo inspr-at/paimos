@@ -62,15 +62,21 @@ The shared fixture template explicitly preserves the previous all-allowed
 policy and activates it; policy-specific and pre-expansion migration fixtures
 retain their production defaults so their before-activation assertions remain
 meaningful. No production predicate, permission or audit is disabled.
-The previous-image harness also checks activated empty and populated pools.
-The latest published image retains its startup and authenticated read checks
-on the candidate schema. The rollback-floor checks use Release 128
-(`v261009095632.0.0`), pinned to its published image digest, in a separate fresh
-disposable database. Release 129 advertises account-use capability, so it
-must not be expected to fail at the older binary's entry guard.
-Older handlers sanitize database errors, so each refused request must produce
-the exact `0A000` message from `aeon_enter_principal` in the disposable
-Postgres log. Generic HTTP errors alone cannot pass that gate.
+The previous-image harness checks the latest published release's reads on the
+candidate schema and checks activated empty and denied pools.
+The pinned release's embedded principal-entry migration identifies whether it
+supports the capability. Supported releases must return only a catalog preview
+for an empty pool, refuse denied context selection and account hand-outs, and
+leave reservations, claims, starts and background state unchanged. The rollback
+checks use Release 128 (`v261009095632.0.0`), pinned to its published image digest.
+Both probes seed and migrate separate fresh disposable databases, even when the
+latest release is also Release 128, so policy activation cannot contaminate the
+rollback fixture. Each image's exact version and non-activated reads are checked
+before checking its activated pools. Release 129 advertises account-use
+capability and must pass the supported policy checks. For releases below the
+floor, handlers sanitize database errors, so each refused request must produce
+the exact `0A000` message from `aeon_enter_principal` in the disposable Postgres
+log. Generic HTTP errors alone cannot pass that gate.
 
 The selection layer uses the same database predicates for dispatch, claims,
 explicit account targets, review, catalog choices and account hand-outs. Denied
