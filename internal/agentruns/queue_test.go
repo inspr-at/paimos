@@ -2,21 +2,310 @@
 package agentruns_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
+	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
+
+// Risks: preparing the wrong/unconsented work, hidden dependency bypass,
+// replacing accepted criteria, incomplete scans reported ready and a second
+// writer racing a person pickup. Reuse queue/consent guards; the pickup proof
+// uses a PostgreSQL lock barrier, and cancellation is injected without sleeps.
+func TestRoutinePreparationPreservesAuthorityCriteriaAndPickup(t *testing.T) {
+	f := setup(t)
+	f.person.BrowserSession = true
+	var project, parent, kind string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Preparation project','{"project_key":"PRE"}' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.person.TenantID).Scan(&project); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Routine output',$2 FROM node_kinds WHERE slug='work' RETURNING id::text`, f.person.TenantID, project).Scan(&parent); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `SELECT aeon_seed_work_kinds($1)`, f.person.TenantID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM work_kinds WHERE slug='backend' AND project_id IS NULL`).Scan(&kind); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO project_lead_settings(tenant_id,project_id,owner_person_id,overrides,updated_by) VALUES($1,$2,$3,'{}',$3)`, f.person.TenantID, project, f.person.ID)
+		return err
+	})
+	q := modelregistry.Qualification{ID: uuid(), ProjectID: project, Runtime: modelregistry.ExecutionRuntime{ServerDigest: strings.Repeat("a", 64), DaemonDigest: strings.Repeat("b", 64), CapabilityDigest: strings.Repeat("c", 64), Capabilities: []string{"routine_native_coding_v1"}, HostMappingDigest: strings.Repeat("d", 64), BudgetModes: []string{"off"}}, CoordinatorAcceptance: strings.Repeat("e", 64), OPSAttestation: strings.Repeat("f", 64)}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var err error
+		q.OwnerPersonID, q.PolicyDigest, err = modelregistry.QualificationPolicyTx(t.Context(), tx, f.person.TenantID, project)
+		return err
+	})
+	runtime := func(ctx context.Context, tx pgx.Tx, _ string) (modelregistry.ExecutionRuntime, error) {
+		r := q.Runtime
+		err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&r.ObservedAt)
+		return r, err
+	}
+	recurrences.New(f.d.App).WithExecutionRuntime(runtime).Mount(f.mux)
+	in := recurrences.Input{ProjectID: project, ParentID: parent, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one", Template: recurrences.Template{Title: "Prepare {{occurrence}}", Description: "Read assigned work", Criteria: []string{"Keep accepted criteria"}, EstimateHours: 2, Priority: "high", Type: "work"}, Trigger: recurrences.Trigger{Kind: "time", RRULE: "FREQ=WEEKLY;BYDAY=MO", TimeOfDay: "09:00", Timezone: "Europe/Vienna"}, Definition: &recurrences.Definition{Scope: recurrences.DefinitionScope{Kind: "personal"}, OwnerPrincipalID: f.person.ID, Assignment: &recurrences.Assignment{Goal: "Prepare authorized work", Role: "build", WorkKindID: kind, AllowedActions: []string{"work.update"}, RuntimeRequirements: recurrences.RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"}, Budget: recurrences.DefinitionBudget{Mode: "off"}}}}
+	var routine recurrences.Recurrence
+	f.call(t, f.person, "POST", "/api/recurrences", in, 201, &routine)
+	input := agentruns.RoutinePreparationInput{RecurrenceID: routine.ID, DefinitionRevision: routine.Revision}
+	prepare := func() agentruns.RoutinePreparation {
+		t.Helper()
+		var out agentruns.RoutinePreparation
+		ctx := tenant.WithPrincipal(t.Context(), f.person)
+		if err := db.InTenant(ctx, f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+			var err error
+			out, err = agentruns.PrepareRoutineWorkTx(ctx, tx, f.person, input, runtime)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if got := prepare(); got.Candidate != nil || got.WaitReason != "routine_paused" || got.Partial {
+		t.Fatalf("paused preparation: %+v", got)
+	}
+	path := "/api/recurrences/" + routine.ID
+	f.call(t, f.person, "POST", path+"/resume", map[string]any{"expected_revision": routine.Revision}, 200, &routine)
+	input.DefinitionRevision = routine.Revision
+	if got := prepare(); got.Candidate != nil || got.WaitReason != "automatic_launch_disabled" || got.Partial {
+		t.Fatalf("default-off preparation: %+v", got)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error { return modelregistry.RecordQualificationTx(t.Context(), tx, f.person, q) })
+	revision, enabled := int64(0), true
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := modelregistry.WriteExecutionSettingsTx(t.Context(), tx, f.person, project, modelregistry.ExecutionSettingsInput{ExpectedRevision: &revision, AutomaticLaunchEnabled: &enabled, QualificationID: &q.ID}, runtime)
+		return err
+	})
+	if got := prepare(); got.Candidate != nil || got.WaitReason != "execution_consent_required" {
+		t.Fatalf("queue without consent: %+v", got)
+	}
+	f.call(t, f.person, "PUT", path+"/execution-consent", map[string]any{"expected_revision": routine.Revision, "execute_consent": true}, 200, &routine)
+	input.DefinitionRevision = routine.Revision
+	var first, second recurrences.Occurrence
+	f.call(t, f.person, "POST", path+"/run-now", map[string]string{"idempotency_key": "first"}, 200, &first)
+	f.call(t, f.person, "POST", path+"/run-now", map[string]string{"idempotency_key": "second"}, 200, &second)
+	unrelated := f.ticket(t, "open", "urgent", nil)
+	f.addQueue(t, unrelated, nil)
+	assertCandidate := func(want string) agentruns.RoutinePreparedWork {
+		t.Helper()
+		got := prepare()
+		if got.Partial || got.Candidate == nil || got.Candidate.NodeID != want || got.WaitReason != "" {
+			t.Fatalf("preparation selected wrong work: %+v, want %s", got, want)
+		}
+		return *got.Candidate
+	}
+	assertCandidate(*first.NodeID)
+	// Manual queue order and targeted Start now are retained, even though an
+	// unrelated urgent backlog entry exists. Preparation itself writes no route.
+	f.call(t, f.person, "POST", "/api/queue/"+*second.NodeID+"/move", map[string]int{"position": 1}, 200, nil)
+	assertCandidate(*second.NodeID)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_target_agent_id=$2,agent_principal_id=$2 WHERE id=$1`, *first.Run.AgentRunID, f.agent.ID)
+		return err
+	})
+	work := assertCandidate(*first.NodeID)
+	input.TargetAgentID = f.other.ID
+	assertCandidate(*second.NodeID)
+	input.TargetAgentID = ""
+	input.CandidateLimit = 1
+	if got := prepare(); !got.Partial || got.Candidate != nil || got.WaitReason != "candidate_scan_partial" {
+		t.Fatalf("incomplete scan ready: %+v", got)
+	}
+	input.CandidateLimit = 0
+	// Changes and rejection are drafts only; replay cannot rewrite prior criteria.
+	criteria := []string{"Changed criteria need acceptance"}
+	for range 2 {
+		draft, err := agentruns.DraftRoutineCriteria(work, criteria)
+		if err != nil || !draft.NeedsPerson || draft.NodeID != work.NodeID || !draft.ExpectedRevision.Equal(work.ExpectedRevision) || draft.CriteriaDigest != work.CriteriaDigest {
+			t.Fatalf("unbound draft: %+v %v", draft, err)
+		}
+		assertCandidate(*first.NodeID)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields-'estimate_hours',updated_at=clock_timestamp() WHERE id=$1`, *first.NodeID)
+		return err
+	})
+	missing := prepare()
+	if missing.Candidate == nil || missing.Candidate.Estimate == nil || missing.Candidate.CriteriaDigest != work.CriteriaDigest || missing.WaitReason != "estimate_action_required" {
+		t.Fatalf("estimate changed criteria identity: %+v", missing)
+	}
+	f.call(t, f.person, "POST", "/api/queue/"+*first.NodeID+"/estimate", map[string]float64{"estimate_hours": missing.Candidate.Estimate.EstimateHours}, 200, nil)
+	if next := assertCandidate(*first.NodeID); next.CriteriaDigest != work.CriteriaDigest {
+		t.Fatal("typed estimate replaced accepted criteria")
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields-'acceptance_criteria',updated_at=clock_timestamp() WHERE id=$1`, *first.NodeID)
+		return err
+	})
+	missing = prepare()
+	if missing.WaitReason != "criteria_wait" || missing.Candidate == nil || missing.Candidate.Estimate != nil {
+		t.Fatalf("new criteria did not wait: %+v", missing)
+	}
+	if _, err := agentruns.DraftRoutineCriteria(*missing.Candidate, criteria); err != nil {
+		t.Fatal(err)
+	}
+	err := db.InTenant(tenant.WithPrincipal(t.Context(), f.person), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		return agentruns.RequireRoutinePreparationTx(t.Context(), tx, f.person, input, *missing.Candidate, runtime)
+	})
+	var criteriaRefusal *workorders.Error
+	if !errors.As(err, &criteriaRefusal) || criteriaRefusal.Status != 409 || criteriaRefusal.Message != "criteria_wait" {
+		t.Fatalf("missing criteria passed the final write guard: %v", err)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_set(fields,'{acceptance_criteria}','["Keep accepted criteria"]'),body=repeat('a',65537),updated_at=clock_timestamp() WHERE id=$1`, *first.NodeID)
+		return err
+	})
+	if got := prepare(); !got.Partial || got.Candidate != nil || got.WaitReason != "preparation_fields_partial" {
+		t.Fatalf("field limit not honest: %+v", got)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET body='',updated_at=clock_timestamp() WHERE id=$1`, *first.NodeID)
+		return err
+	})
+	// Live blockers exclude even open work. RLS-hidden relation sources keep
+	// the check closed and its widened savepoint restores the original scope.
+	blocker := f.ticket(t, "open", "low", nil)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'blocks')`, f.person.TenantID, blocker, *first.NodeID)
+		return err
+	})
+	assertCandidate(*second.NodeID)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='accepted' WHERE id=$1`, blocker)
+		return err
+	})
+	assertCandidate(*first.NodeID)
+	var hiddenProject string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Hidden blocker project','{"project_key":"HBP"}' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.person.TenantID).Scan(&hiddenProject); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, blocker, hiddenProject)
+		return err
+	})
+	// Restrict visibility to the output project; even the closed hidden source
+	// remains unavailable, without exposing its identity in the returned reason.
+	visibility := "{" + project + "}"
+	err = db.InTenant(tenant.WithPrincipal(t.Context(), f.person), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.visible_projects',$1,true)`, visibility); err != nil {
+			return err
+		}
+		wait, err := workqueue.BlockingTx(t.Context(), tx, *first.NodeID)
+		if err != nil {
+			return err
+		}
+		if wait != "blocker_unavailable" {
+			t.Fatalf("hidden blocker bypass: %q", wait)
+		}
+		var visible string
+		if err := tx.QueryRow(t.Context(), `SELECT current_setting('aeon.visible_projects')`).Scan(&visible); err != nil {
+			return err
+		}
+		if visible != visibility {
+			t.Fatal("blocker scan leaked widened project scope")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Too many relation edges is an incomplete scan even if all are closed.
+	var extraBlockers []string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		rows, err := tx.Query(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state,parent_id) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Closed dependency','done',$2 FROM node_kinds k CROSS JOIN generate_series(1,64) WHERE k.slug='work' RETURNING id::text`, f.person.TenantID, hiddenProject)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			extraBlockers = append(extraBlockers, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) SELECT $1,unnest($2::uuid[]),$3,'blocks'`, f.person.TenantID, extraBlockers, *first.NodeID)
+		return err
+	})
+	if got := prepare(); !got.Partial || got.Candidate != nil || got.WaitReason != "blocker_scan_partial" {
+		t.Fatalf("blocker scan exceeded budget: %+v", got)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `DELETE FROM node_relations WHERE source_node_id=ANY($1::uuid[]) AND target_node_id=$2`, extraBlockers, *first.NodeID)
+		return err
+	})
+	// An injected expired deadline proves the explicit incomplete result.
+	expired, cancel := context.WithDeadline(tenant.WithPrincipal(t.Context(), f.person), time.Unix(0, 0))
+	defer cancel()
+	var timed agentruns.RoutinePreparation
+	err = db.InTenant(tenant.WithPrincipal(t.Context(), f.person), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		var err error
+		timed, err = agentruns.PrepareRoutineWorkTx(expired, tx, f.person, input, runtime)
+		return err
+	})
+	if !errors.Is(err, context.DeadlineExceeded) || !timed.Partial || timed.Candidate != nil || timed.WaitReason != "preparation_time_limit" {
+		t.Fatalf("timeout dishonest: %+v %v", timed, err)
+	}
+	work = assertCandidate(*first.NodeID)
+	// Human pickup holds the real access fence while the final preparation
+	// guard waits behind it. After commit, the stale preparation cannot proceed.
+	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(t.Context(), f.person), 15*time.Second)
+	defer cancel()
+	holder, err := f.d.App.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback(t.Context())
+	if _, err = holder.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true),set_config('aeon.visible_projects','*',true)`, f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.LockWorkTreeTx(ctx, holder); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = holder.Exec(ctx, `UPDATE nodes SET state='in_progress',fields=jsonb_set(fields,'{assignee}',to_jsonb($2::text)),updated_at=clock_timestamp() WHERE id=$1`, *first.NodeID, f.person.ID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- db.InTenant(ctx, f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+			return agentruns.RequireRoutinePreparationTx(ctx, tx, f.person, input, work, runtime)
+		})
+	}()
+	dbtest.WaitForLock(t, ctx, f.d, holder.Conn().PgConn().PID(), "transactionid")
+	if err = holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	err = dbtest.Await(t, ctx, done)
+	var refusal *workorders.Error
+	if !errors.As(err, &refusal) || refusal.Status != 409 || refusal.Message != "stale_preparation" {
+		t.Fatalf("pickup race refused for wrong reason: %v", err)
+	}
+	if n := f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE queue_node_id=$1`, *first.NodeID); n != 1 {
+		t.Fatalf("preparation made %d assignments", n)
+	}
+}
 
 type qEntry struct {
 	Undo *struct {
