@@ -516,9 +516,7 @@ elif tool == 'git':
         self.assertEqual(completed.returncode, 19)
         self.assertNotIn('Account-use rollback floor passed:', completed.stdout)
         self.assertNotIn('Migration compatibility passed:', completed.stdout)
-        activations = [call for call in calls if call[:3] == ['python3', 'scripts/migration-compat-probe.py', 'account-use']]
-        self.assertEqual(len(activations), 1)
-        self.assertEqual(activations[0][activations[0].index('--release-tag') + 1], self.latest_tag)
+        self.assertFalse(any(call[:3] == ['python3', 'scripts/migration-compat-probe.py', 'account-use'] for call in calls))
 
 
 class MigrationCompatImageTest(unittest.TestCase):

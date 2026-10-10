@@ -45,9 +45,12 @@ suffix="${tmp##*.}"
 db="aeon-compat-db-$suffix"
 app="aeon-compat-app-$suffix"
 network="aeon-compat-$suffix"
+resources_active=0
 cleanup() {
-  docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
-  docker network rm "$network" >/dev/null 2>&1 || true
+  if [[ "$resources_active" = 1 ]]; then
+    docker container rm -fv "$app" "$db" >/dev/null 2>&1 || true
+    docker network rm "$network" >/dev/null 2>&1 || true
+  fi
   if command -v trash >/dev/null 2>&1; then trash "$tmp";
   else echo "Disposable probe state left in $tmp (trash unavailable)" >&2; fi
 }
@@ -60,6 +63,7 @@ probe_release() {
   # including when they exercise the same immutable release image.
   db="aeon-compat-db-$suffix-$exercise_floor"
   app="aeon-compat-app-$suffix-$exercise_floor"
+  network="aeon-compat-$suffix-$exercise_floor"
   local state="$tmp/state-$exercise_floor.json"
   if [[ "$exercise_floor" = 1 ]]; then
     echo "Account-use rollback boundary release: $tag"
@@ -71,6 +75,8 @@ probe_release() {
   image_id="$(docker image ls --quiet --no-trunc "$image" | sort -u)"
   [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one immutable image ID' >&2; exit 1; }
   echo "Previous image: $image_id"
+  resources_active=1
+  docker network create "$network" >/dev/null
   docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
     -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=aeon \
     "$pgvector_image" >/dev/null
@@ -133,6 +139,8 @@ SQL
   fi
   docker stop --time 30 "$app" >/dev/null
   docker container rm -fv "$app" "$db" >/dev/null
+  docker network rm "$network" >/dev/null
+  resources_active=0
 }
 
 # Verify the pinned source remains below the capability floor before any
@@ -141,7 +149,6 @@ legacy_entry="$(git show "$account_use_floor_tag:internal/db/visibility.go")"
 [[ "$legacy_entry" == *"func enterTenant("* && "$legacy_entry" != *"aeon.account_use_capable"* ]] || {
   echo 'Pinned rollback image must predate the account-use capability' >&2; exit 1;
 }
-docker network create "$network" >/dev/null
 # Policy activation changes the fixture, so each probe seeds and migrates its
 # own fresh database even when both releases select the same immutable image.
 if [[ "$probe_mode" = account-use-floor ]]; then
