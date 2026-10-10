@@ -32,6 +32,7 @@ func (m *Module) previewDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	times := []time.Time{}
+	var policy *ExecutionPolicy
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if in.Definition == nil {
 			if err := manage(r.Context(), tx, p, in.ProjectID); err != nil {
@@ -56,9 +57,18 @@ func (m *Module) previewDraft(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		times, err = Preview(in.Trigger, now, 4)
+		if err == nil && in.Definition != nil {
+			item := Recurrence{Input: in}
+			err = m.projectExecutionPolicy(r.Context(), tx, p.TenantID, &item)
+			policy = item.ExecutionPolicy
+		}
 		return err
 	})
-	reply(w, 200, map[string]any{"times": times, "trigger_kind": in.Trigger.Kind}, err)
+	out := map[string]any{"times": times, "trigger_kind": in.Trigger.Kind}
+	if policy != nil {
+		out["execution_policy"] = policy
+	}
+	reply(w, 200, out, err)
 }
 
 // One bounded SQL read decorates a whole page, rather than fetching each row's

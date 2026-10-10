@@ -40,7 +40,7 @@ test('Live reads the recorded runs, follows a server hint, and keeps the time th
   await page.goto('/p/AEON/delivery?view=flow')
   await expect(chip(page)).toHaveText('Live · now 20:25')
   await expect(page.getByTestId('delivery-updated')).toHaveText('Now 20:25 · live')
-  await expect(page.getByRole('status').filter({ hasText: 'example' })).toHaveCount(0)
+  await expect(page.getByTestId('flow-empty')).toHaveCount(0)
   await expect(page.getByTestId('flow-moment-head')).toContainText('At 20:25 (now) Release 126 is live but not working properly (since 20:14)')
   const table = page.getByTestId('flow-inflight')
   await expect(table.locator('tbody tr')).toHaveCount(4)
@@ -214,11 +214,56 @@ test('a release no record has reported on says "not recorded" in the same four r
   await expect(record).toBeVisible()
   await expect(record.locator('dd')).toHaveCount(4)
   await expect(record.locator('dd')).toHaveText(['not recorded', 'not recorded', 'not recorded', 'not recorded'])
-  await expect(page.getByRole('status').filter({ hasText: 'example' })).toHaveCount(0)
+  await expect(page.getByTestId('flow-empty')).toHaveCount(0)
 })
 
+// AEON-1135 risk: without a recorded run Flow showed a built-in example (release 126, an incident, "Waiting for you:
+// release GO") that read as live data. Every mode shows one plain empty state instead, the mode controls stay put, and
+// the first recorded run replaces it without a reload.
+test('without a recorded run every mode shows the empty state and no sample data, until the first run is recorded', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1300 })
+  const flow = await setup(page, { empty: true })
+  await page.goto('/p/AEON/delivery?view=flow')
+  const empty = page.getByTestId('flow-empty')
+  const copy = 'No recorded runs yet. Runs appear here once work goes through the PAIMOS work queue.'
+  await expect(empty).toHaveText(copy)
+  const button = (mode: string) => modes(page).locator(`[data-mode="${mode}"]`)
+  const guard = await controlStability(page, { modes: modes(page), live: button('live'), replay: button('replay'), compare: button('compare'), empty })
+  for (const mode of ['replay', 'compare', 'live'] as const) {
+    await guard.check(async () => { await button(mode).click(); await expect(button(mode)).toHaveAttribute('aria-checked', 'true'); await expect(empty).toHaveText(copy) })
+    await expect(lanes(page), mode).toHaveCount(0)
+    await expect(page.getByTestId('flow-pick'), mode).toHaveCount(0)
+    await expect(page.getByTestId('flow-inflight'), mode).toHaveCount(0)
+    await expect(page.locator('.fl'), mode).not.toContainText(/Release 126|release GO|example/i)
+  }
+  guard.done()
+  // The first recorded run: a hint reads the run list again and Live shows the run in place of the empty state.
+  flow.setEmpty(false)
+  flow.hint('delivery.item', RUN.r126)
+  await expect(chip(page)).toHaveText('Live · now 20:25')
+  await expect(empty).toHaveCount(0)
+  await expect(lanes(page).locator('.ln-lane')).toHaveCount(6)
+  await expect(page.getByTestId('flow-moment-head')).toContainText('Release 126 is live but not working properly')
+})
+
+for (const [width, theme] of [[390, 'light'], [390, 'dark'], [1024, 'light'], [1024, 'dark'], [1440, 'light'], [1440, 'dark']] as const) {
+  test(`the Flow empty state at ${width} ${theme} sits under the mode controls without sample data`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 })
+    await setup(page, { theme, empty: true })
+    await page.goto('/p/AEON/delivery?view=flow')
+    const empty = page.getByTestId('flow-empty')
+    await expect(empty).toHaveText('No recorded runs yet. Runs appear here once work goes through the PAIMOS work queue.')
+    // Below the mode controls, inside the page, with the whole sentence readable.
+    const [top, box] = [(await modes(page).boundingBox())!, (await empty.boundingBox())!]
+    expect(box.y).toBeGreaterThanOrEqual(top.y + top.height)
+    expect(box.x + box.width).toBeLessThanOrEqual(width + 0.5)
+    expect(await empty.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
+    await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-1135/flow-empty-${width}-${theme}.png`) })
+  })
+}
+
 // Risk (AEON-1003 round 7, kept with the reviewed AEON-1007 placement): a refused preference save covers or moves the
-// Flow mode buttons. The failure takes the headline's fixed slot: with recorded runs, the labelled example and while
+// Flow mode buttons. The failure takes the headline's fixed slot: with recorded runs, with none (the empty state) and while
 // loading, the page head, the Updated line, the headline slot and the Flow mode controls keep their boxes (±0.5 px),
 // stay clickable, and the headline returns after the retry.
 for (const lang of ['en', 'de'] as const) {
@@ -227,9 +272,9 @@ for (const lang of ['en', 'de'] as const) {
     // AEON-998: a de-AT profile still uses the one English app language.
     const copy = { level: 'Level of detail', expert: 'Expert', warning: 'The window and level could not be saved. This choice stays on this page.', retry: 'Save again', now: 'Now 20:25 · live' }
     let reject = true
-    for (const width of [1440, 400]) for (const scenario of ['recorded', 'example', 'loading'] as const) {
+    for (const width of [1440, 400]) for (const scenario of ['recorded', 'empty', 'loading'] as const) {
       await page.setViewportSize({ width, height: width === 400 ? 2000 : 1300 })
-      await setup(page, { lang, empty: scenario === 'example' })
+      await setup(page, { lang, empty: scenario === 'empty' })
       let open: () => void = () => {}
       const gate = scenario === 'loading' ? new Promise<void>(resolve => { open = resolve }) : null
       const hold = async (route: Route) => { await gate; await route.fallback() }
@@ -245,7 +290,7 @@ for (const lang of ['en', 'de'] as const) {
       const levels = page.locator('.dl-head').getByRole('radiogroup', { name: copy.level })
       const expert = levels.getByRole('radio', { name: copy.expert, exact: true })
       if (scenario === 'recorded') await expect(line, where).toHaveText(copy.now)
-      else if (scenario === 'example') await expect(page.locator('.flow-empty'), where).toBeVisible()
+      else if (scenario === 'empty') await expect(page.getByTestId('flow-empty'), where).toBeVisible()
       else await expect(page.getByTestId('flow-loading').first(), where).toBeVisible()
       const baseline = (await line.textContent())!.trim()
       // The Updated line names Live's moment and clears in Replay and Compare, so its box is held only while the mode stays Live.
@@ -261,14 +306,14 @@ for (const lang of ['en', 'de'] as const) {
       await moving.check(async () => { await modes(page).locator('[data-mode="replay"]').click({ timeout: 5000 }); await expect(page, where).toHaveURL(/mode=replay/) })
       await moving.check(async () => { await modes(page).locator('[data-mode="live"]').click({ timeout: 5000 }); await expect(page, where).not.toHaveURL(/mode=/) })
       moving.done()
-      // The failure takes the headline's slot. Back on Live, the Updated line says what it said, and the example stays shown.
+      // The failure takes the headline's slot. Back on Live, the Updated line says what it said, and the empty state stays shown.
       await expect(failure, where).toBeVisible()
       await expect(failure, where).toContainText(copy.warning)
       await expect(anywhere, `${where}: one failure`).toHaveCount(1)
       await expect(line.getByTestId('delivery-pref-error'), `${where}: not in the Updated line`).toHaveCount(0)
       await expect(line, where).toHaveText(baseline)
       if (scenario === 'recorded') await expect(headline.locator('.big'), `${where}: the headline yields its slot`).toHaveCount(0)
-      if (scenario === 'example') await expect(page.locator('.flow-empty'), `${where}: the example stays shown`).toBeVisible()
+      if (scenario === 'empty') await expect(page.getByTestId('flow-empty'), `${where}: the empty state stays shown`).toBeVisible()
       await expect(expert, where).toHaveAttribute('aria-checked', 'true')
       // The retry works and the headline returns. Live's line is back, so its box is held again.
       reject = false
