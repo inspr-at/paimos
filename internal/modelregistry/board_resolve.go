@@ -65,6 +65,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if err != nil {
 		return nil, err
 	}
+	s = modelsBoardIdentities(s, c)
 	c = modelsCatalog(c)
 	s.Lines = c.lines
 	requirement, err := boardResidency(ctx, tx, s, q.PersonID, q.ProjectID, q.TicketResidency)
@@ -283,6 +284,54 @@ func modelsCatalog(c boardCatalog) boardCatalog {
 		out.lines = append(out.lines, modelprefs.BoardLine{ID: line, Family: out.profiles[line][0].Family, Tools: true, Review: true})
 	}
 	return out
+}
+
+// Existing pickers stored harness-derived line ids. Fold those references into
+// the provider line too, so a saved Cursor pick retains its meaning until S2/S3
+// migrate storage and the picker. The stored document is never rewritten here.
+func modelsBoardIdentities(s modelprefs.BoardState, c boardCatalog) modelprefs.BoardState {
+	aliases := map[string]string{}
+	for old, ps := range c.profiles {
+		if len(ps) > 0 {
+			aliases[old], _ = modelsLine(ps[0])
+		}
+	}
+	canonical := func(id string) string {
+		if next, ok := aliases[id]; ok {
+			return next
+		}
+		return id
+	}
+	for i := range s.Orders {
+		o := &s.Orders[i]
+		for j, id := range o.Rank {
+			o.Rank[j] = canonical(id)
+		}
+		for j, id := range o.Not {
+			o.Not[j] = canonical(id)
+		}
+		if len(o.Efforts) > 0 {
+			efforts := map[string]string{}
+			keys := []string{}
+			for id := range o.Efforts {
+				keys = append(keys, id)
+			}
+			sort.Strings(keys)
+			for _, id := range keys {
+				next := canonical(id)
+				if own, ok := o.Efforts[next]; ok {
+					efforts[next] = own
+				} else {
+					efforts[next] = o.Efforts[id]
+				}
+			}
+			o.Efforts = efforts
+		}
+	}
+	for i := range s.Rules {
+		s.Rules[i].Line = canonical(s.Rules[i].Line)
+	}
+	return s
 }
 
 // Select the nearest level separately on each route, so a route lacking the
