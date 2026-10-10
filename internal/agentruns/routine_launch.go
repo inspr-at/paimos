@@ -77,7 +77,7 @@ func PrepareRoutineLaunchTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	if err := agentpairing.Lock(ctx, tx); err != nil {
 		return err
 	}
-	if err := authz.RequireTx(ctx, tx, p, "run.dispatch", authz.Scope{ProjectID: g.ProjectID}); err != nil {
+	if err := authz.RequireTx(ctx, tx, p, "run.create", authz.Scope{ProjectID: g.ProjectID}); err != nil {
 		return err
 	}
 	v, o, err := lockRun(ctx, tx, g.AgentRunID)
@@ -164,7 +164,7 @@ func validateRoutineGrantTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	if err := authz.RequireTx(ctx, tx, owner, "nodes.write", authz.Scope{ProjectID: g.ProjectID}); err != nil {
 		return err
 	}
-	if err := authz.RequireTx(ctx, tx, owner, "run.dispatch", authz.Scope{ProjectID: g.ProjectID}); err != nil {
+	if err := authz.RequireTx(ctx, tx, owner, "run.create", authz.Scope{ProjectID: g.ProjectID}); err != nil {
 		return err
 	}
 	settings, err := modelregistry.ProjectExecutionTx(ctx, tx, p.TenantID, g.ProjectID, checks.Runtime)
