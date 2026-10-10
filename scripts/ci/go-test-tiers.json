@@ -5568,6 +5568,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowParkReplayAtOneTimestamp","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowProjectorUsesPartialEventIndex","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowProjectsPaimosRoundsReviewsAndHolds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowReadIsForProjectMembers","tier":"ESSENTIAL"}
