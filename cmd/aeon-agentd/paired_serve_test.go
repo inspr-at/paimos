@@ -79,8 +79,8 @@ func TestPairedServeRestartsWithUnconfirmedLedgerIntent(t *testing.T) {
 			w.WriteHeader(409)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "fixture attach disabled"})
 		case "/api/runs/queued/notifications", "/api/agent-accounts/probes":
-			// Exercise backward compatibility with a pre-batch/pre-hint server.
-			w.WriteHeader(http.StatusNotFound)
+			// Pre-batch/pre-hint servers deny undeclared /api/ routes to agent keys.
+			w.WriteHeader(http.StatusForbidden)
 		case "/api/runs/queued":
 			_ = json.NewEncoder(w).Encode([]any{})
 			select {
@@ -270,8 +270,8 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 					w.WriteHeader(tc.status)
 					_ = json.NewEncoder(w).Encode(map[string]string{"error": tc.message})
 				case "/api/runs/queued/notifications", "/api/agent-accounts/probes":
-					// Exercise backward compatibility with a pre-batch/pre-hint server.
-					w.WriteHeader(http.StatusNotFound)
+					// Pre-batch/pre-hint servers deny undeclared /api/ routes to agent keys.
+					w.WriteHeader(http.StatusForbidden)
 				case "/api/runs/queued":
 					_ = json.NewEncoder(w).Encode([]any{})
 					select {

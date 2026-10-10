@@ -49,7 +49,7 @@ func (s *Supervisor) reportAccountProbes(ctx context.Context, probes []AccountPr
 func (r *Remote) ProbeBatch(ctx context.Context, daemon, generation string, probes []AccountProbeObservation) []error {
 	results := make([]error, len(probes))
 	r.mu.RLock()
-	legacy := time.Now().Before(r.probeBatchRetryAt)
+	legacy := r.clock().Before(r.probeBatchRetryAt)
 	r.mu.RUnlock()
 	for offset := 0; offset < len(probes); offset += 32 {
 		part := probes[offset:min(offset+32, len(probes))]
@@ -84,13 +84,13 @@ func (r *Remote) ProbeBatch(ctx context.Context, daemon, generation string, prob
 			} `json:"items"`
 		}
 		err := r.Client.Do(ctx, "POST", "/api/agent-accounts/probes", map[string]any{"items": items}, &out)
-		var status *client.StatusError
-		if errors.As(err, &status) && (status.Status == http.StatusNotFound || status.Status == http.StatusMethodNotAllowed) {
-			// Older servers keep their established single-probe contract.
+		if optionalDaemonRouteUnavailable(err) {
+			// Older servers deny undeclared routes with 403. Each legacy
+			// single-probe write still checks its own current authorization.
 			// Do not add one failed batch request to every idle health tick.
 			legacy = true
 			r.mu.Lock()
-			r.probeBatchRetryAt = time.Now().Add(5 * time.Minute)
+			r.probeBatchRetryAt = r.clock().Add(5 * time.Minute)
 			r.mu.Unlock()
 			for i, p := range part {
 				results[offset+i] = r.ProbeStatus(ctx, p.AccountID, daemon, generation, p.Status)
@@ -112,4 +112,12 @@ func (r *Remote) ProbeBatch(ctx context.Context, daemon, generation string, prob
 		}
 	}
 	return results
+}
+
+// Only whole-request refusals negotiate the optional transport. Per-account
+// batch results never reach this check and retain their authorization failures.
+func optionalDaemonRouteUnavailable(err error) bool {
+	var status *client.StatusError
+	return errors.As(err, &status) && (status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden ||
+		status.Status == http.StatusNotFound || status.Status == http.StatusMethodNotAllowed)
 }

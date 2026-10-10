@@ -58,8 +58,7 @@ func (s *Supervisor) RunQueueHints(ctx context.Context) {
 	for ctx.Err() == nil {
 		err := watcher.WatchQueue(ctx, s.wakeQueue)
 		delay := emptyQueueInterval
-		var status *client.StatusError
-		if errors.As(err, &status) && (status.Status == http.StatusNotFound || status.Status == http.StatusMethodNotAllowed) {
+		if optionalDaemonRouteUnavailable(err) {
 			delay = 5 * time.Minute
 		}
 		timer := time.NewTimer(delay)

@@ -1778,6 +1778,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteProbeBatchPreservesIndividualResults","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRemoteProbeBatchUnavailableFallsBackWithoutWideningAuthority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteProbeStatusSendsOnlyTheCause","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteQueueHintsStayOpenAndBoundFrames","tier":"ESSENTIAL"}
@@ -1941,6 +1943,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestSupervisorPublishesAccountMetadataOnce","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSupervisorQueueHintsCannotBypassDispatchFences","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSupervisorQueueHintsUnavailableBackoff","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSupervisorRelaysOwnedChatThroughJournaledInput","tier":"ESSENTIAL"}
     ,

@@ -11,9 +11,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/hostcapacity"
 )
 
@@ -167,8 +169,14 @@ func TestRemoteProbeBatchPreservesIndividualResults(t *testing.T) {
 	}))
 	defer server.Close()
 	results := NewRemote(server.URL, "fixture").ProbeBatch(t.Context(), "daemon", "generation", []AccountProbeObservation{{"a", probeOK, now}, {"b", probeAuthFailed, now}, {"c", probeUnavailable, now}})
-	if calls.Load() != 1 || len(results) != 3 || results[0] != nil || results[1] == nil || results[2] == nil {
+	if calls.Load() != 1 || len(results) != 3 || results[0] != nil {
 		t.Fatalf("calls=%d results=%v", calls.Load(), results)
+	}
+	for i, want := range []int{http.StatusForbidden, http.StatusConflict} {
+		var status *client.StatusError
+		if !errors.As(results[i+1], &status) || status.Status != want {
+			t.Fatalf("item %d refusal changed: got %v, want HTTP %d", i+1, results[i+1], want)
+		}
 	}
 	var unsupported, singles atomic.Int32
 	older := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -196,6 +204,141 @@ func TestRemoteProbeBatchPreservesIndividualResults(t *testing.T) {
 	}
 	if unsupported.Load() != 1 || singles.Load() != 6 {
 		t.Fatalf("old server repeated unsupported requests: batch=%d single=%d", unsupported.Load(), singles.Load())
+	}
+}
+
+// Risk: pre-batch agent middleware refuses an undeclared route with 403. A
+// whole-request refusal must preserve health through independently authorized
+// single writes, then renegotiate after the bounded compatibility interval.
+func TestRemoteProbeBatchUnavailableFallsBackWithoutWideningAuthority(t *testing.T) {
+	for _, unavailable := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed} {
+		t.Run(fmt.Sprint(unavailable), func(t *testing.T) {
+			var batches, singles atomic.Int32
+			var upgraded atomic.Bool
+			now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					t.Errorf("unexpected probe method %s", r.Method)
+					w.WriteHeader(http.StatusMethodNotAllowed)
+					return
+				}
+				switch r.URL.Path {
+				case "/api/agent-accounts/probes":
+					batches.Add(1)
+					if !upgraded.Load() {
+						w.WriteHeader(unavailable)
+						return
+					}
+					fmt.Fprint(w, `{"items":[{"account_id":"a","status":200},{"account_id":"b","status":403},{"account_id":"c","status":200}]}`)
+				case "/api/agent-accounts/a/probe", "/api/agent-accounts/b/probe", "/api/agent-accounts/c/probe":
+					singles.Add(1)
+					var probe struct {
+						DaemonID   string `json:"daemon_id"`
+						Generation string `json:"daemon_generation"`
+						Available  bool   `json:"available"`
+						Failure    string `json:"failure"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&probe); err != nil {
+						t.Error(err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					failed := r.URL.Path == "/api/agent-accounts/c/probe"
+					if probe.DaemonID != "daemon" || probe.Generation != "generation" || probe.Available == failed ||
+						failed && probe.Failure != ProbeAuthFailed || !failed && probe.Failure != "" {
+						t.Errorf("lost individual probe or fencing identity: %+v", probe)
+					}
+					if r.URL.Path == "/api/agent-accounts/b/probe" {
+						w.WriteHeader(http.StatusForbidden)
+						return
+					}
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected compatibility route %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			remote := NewRemote(server.URL, "fixture")
+			remote.now = func() time.Time { return now }
+			probes := []AccountProbeObservation{{"a", probeOK, now}, {"b", probeOK, now}, {"c", probeAuthFailed, now}}
+			check := func() {
+				results := remote.ProbeBatch(t.Context(), "daemon", "generation", probes)
+				if len(results) != 3 || results[0] != nil || results[2] != nil {
+					t.Fatalf("whole-request HTTP %d did not preserve individual health: %v", unavailable, results)
+				}
+				var status *client.StatusError
+				if !errors.As(results[1], &status) || status.Status != http.StatusForbidden {
+					t.Fatalf("single-account authority refusal lost: %v", results[1])
+				}
+			}
+			check()
+			if batches.Load() != 1 || singles.Load() != 3 {
+				t.Fatalf("compatibility calls: batches=%d singles=%d", batches.Load(), singles.Load())
+			}
+			upgraded.Store(true)
+			now = now.Add(5*time.Minute - time.Nanosecond)
+			check()
+			if batches.Load() != 1 || singles.Load() != 6 {
+				t.Fatalf("unsupported route retried before backoff: batches=%d singles=%d", batches.Load(), singles.Load())
+			}
+			now = now.Add(time.Nanosecond)
+			check()
+			if batches.Load() != 2 || singles.Load() != 6 {
+				t.Fatalf("upgrade not renegotiated or item denial retried: batches=%d singles=%d", batches.Load(), singles.Load())
+			}
+		})
+	}
+}
+
+type queueHintRetryAPI struct {
+	*fakeAPI
+	status, calls int
+}
+
+func (a *queueHintRetryAPI) WatchQueue(context.Context, func()) error {
+	a.calls++
+	return &client.StatusError{Status: a.status}
+}
+
+// Risk: an older server's 401/403 must not cause unsupported hint reads every
+// safety scan. synctest injects virtual time; no wall-clock delay proves backoff.
+func TestSupervisorQueueHintsUnavailableBackoff(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusConflict, http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				api := &queueHintRetryAPI{fakeAPI: &fakeAPI{}, status: status}
+				s := &Supervisor{api: api}
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				go s.RunQueueHints(ctx)
+				synctest.Wait()
+				if api.calls != 1 {
+					t.Fatalf("initial hint subscriptions=%d", api.calls)
+				}
+				delay := emptyQueueInterval
+				if status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusNotFound || status == http.StatusMethodNotAllowed {
+					delay = 5 * time.Minute
+				}
+				time.Sleep(delay - time.Nanosecond) // Virtual clock inside the synctest bubble.
+				synctest.Wait()
+				if api.calls != 1 {
+					t.Fatalf("HTTP %d retried before %s: subscriptions=%d", status, delay, api.calls)
+				}
+				time.Sleep(time.Nanosecond)
+				synctest.Wait()
+				if api.calls != 2 {
+					t.Fatalf("HTTP %d did not retry at %s: subscriptions=%d", status, delay, api.calls)
+				}
+				cancel()
+				synctest.Wait()
+				time.Sleep(5 * time.Minute)
+				synctest.Wait()
+				if api.calls != 2 {
+					t.Fatalf("cancelled hint watcher retried: subscriptions=%d", api.calls)
+				}
+			})
+		})
 	}
 }
 
