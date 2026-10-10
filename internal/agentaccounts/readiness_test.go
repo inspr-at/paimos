@@ -930,7 +930,7 @@ func TestBRestartHeartbeatSurvivesOldCheckFence(t *testing.T) {
 }
 
 // Risk: resolver health and the account pages disagree about unknown usage,
-// fresh room, genuine exhaustion or a saved floor without numeric evidence.
+// fresh room or genuine exhaustion.
 func TestReadinessAndHarnessHealthShareRoutingSignal(t *testing.T) {
 	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 	f := readinessWorld(t, "readiness-health", now)
