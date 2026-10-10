@@ -179,7 +179,11 @@ inventory. No new secret storage is introduced.
 
 AEON-825 adds API/CLI JSON configuration for `node.done`, `knowledge.changed`,
 `external.tag` and `external.deploy`. The existing recurrence editor still
-configures time and release triggers; use JSON definitions for these new kinds.
+creates time and release triggers; use JSON definitions for these new kinds.
+Existing definitions display the correct event type and retain selectors/sender
+configuration when editing templates or event delays. Manual Run now for the new
+kinds creates a normal manual occurrence without offering a release picker.
+New trigger configuration controls need Opus design.
 
 A Done trigger derives a transition from actual node/status events into the
 kind's configured Done category, including custom status names. Updates that

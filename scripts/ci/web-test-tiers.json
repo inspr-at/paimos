@@ -10436,6 +10436,8 @@
     ,
     {"kind":"browser","file":"tests/recurrences.spec.ts","name":"monthly last-day input, token insertion and platform save use the contract","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/recurrences.spec.ts","name":"non-release event edits preserve configuration and stable manual controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/recurrences.spec.ts","name":"read-only people can see history and provenance, but cannot repeat or mutate","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/recurrences.spec.ts","name":"renaming legacy monthly and event definitions leaves their trigger unchanged","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -16667,6 +16669,8 @@
     {"kind":"vitest","file":"tests/recurrence-source.unit.test.ts","name":"drops a late source response when the selected source changes","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/recurrence-source.unit.test.ts","name":"editable metadata cannot create source-edit state without authoritative provenance","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/recurrence-source.unit.test.ts","name":"preserves non-release triggers through edits and manual runs","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/recurrence-source.unit.test.ts","name":"rejects a source from another project without choosing the first row","tier":"NIGHTLY"}
     ,
