@@ -136,6 +136,7 @@
       "table": "agent_pairing_computers",
       "classification": "metadata",
       "columns": {
+        "install_method": "metadata",
         "ledger_enrolled_at": "metadata",
         "ledger_generation": "metadata"
       },
