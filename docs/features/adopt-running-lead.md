@@ -25,7 +25,10 @@ aeon harness lead claim --state-dir /path/to/existing-heartbeat-state
 Use the directory passed to `harness run-heartbeat --state-dir`. Claim reads
 the existing lease, project and registered reference from its owned private
 files while the heartbeat continues running. `--project KEY` is optional with
-state and must match its project when supplied. The command reads the current
+state and must match its project when supplied. State must belong to the current
+user, with directory mode `0700` and regular file mode `0600`; symlinks are
+refused. Claim leaves the heartbeat's lifetime lock and saved state intact.
+The command reads the current
 lead revision unless `--expected-revision` is specified, then proves the lease
 in a request header. Neither proof is printed. A person must confirm first;
 the command cannot create an intent or choose its owner.
