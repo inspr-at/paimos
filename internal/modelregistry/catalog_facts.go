@@ -147,3 +147,34 @@ func bootstrapCatalogFacts(ctx context.Context, tx pgx.Tx, tenantID string) erro
 	}
 	return RecordCatalogFacts(ctx, tx, tenantID, facts)
 }
+
+// Presentation fallback is a raw identifier, not a marketing table. User
+// overrides stay separate from source facts; native levels never get numbers.
+func catalogPinDisplay(ctx context.Context, tx pgx.Tx, pin profileWrite) (Display, error) {
+	provider, id := CatalogIdentity(pin.Family, pin.Harness, pin.Model, pin.Effort)
+	rows, err := tx.Query(ctx, `SELECT provider,model_id,route,fact,value,source,source_kind,field_path,fetched_at FROM model_catalog_facts WHERE provider=$1 AND model_id=$2 AND fact IN ('display_name','model_version') AND (route='' OR route=$3) ORDER BY fact,source LIMIT 33`, provider, id, pin.Harness+"/"+pin.Model)
+	if err != nil {
+		return Display{}, err
+	}
+	defer rows.Close()
+	facts := []CatalogFact{}
+	for rows.Next() {
+		var f CatalogFact
+		if err := rows.Scan(&f.Provider, &f.ModelID, &f.Route, &f.Fact, &f.Value, &f.Source, &f.SourceKind, &f.FieldPath, &f.FetchedAt); err != nil {
+			return Display{}, err
+		}
+		facts = append(facts, f)
+	}
+	if err := rows.Err(); err != nil {
+		return Display{}, err
+	}
+	if len(facts) > 32 {
+		return Display{}, errors.New("catalog presentation evidence limit")
+	}
+	chosen := ResolveCatalogFacts(facts, pin.Harness+"/"+pin.Model)
+	name, version := rawString(chosen["display_name"].Value), rawString(chosen["model_version"].Value)
+	if len(name) > 128 || len(version) > 64 || strings.ContainsAny(name+version, "\x00\r\n") {
+		return Display{}, errors.New("invalid catalog presentation")
+	}
+	return Display{DisplayName: name, ShortName: name, ModelVersion: version}, nil
+}

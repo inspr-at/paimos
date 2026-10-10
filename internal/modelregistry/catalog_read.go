@@ -2,11 +2,13 @@
 package modelregistry
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/jackc/pgx/v5"
@@ -40,6 +42,10 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+
 	limit := 20
 	if v := r.URL.Query().Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -61,6 +67,11 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := PrepareCatalog(r.Context(), m.pool, p, CatalogPreparation{Operation: CatalogRead, Request: r}); err != nil {
+		writeErr(w, err)
+		return
+	}
+
 	out := catalogPage{Models: []catalogModelView{}}
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(r.Context(), `SELECT DISTINCT provider,model_id FROM model_catalog_facts WHERE (provider,model_id)>($1,$2) ORDER BY provider,model_id LIMIT $3`, after[0], after[1], limit+1)

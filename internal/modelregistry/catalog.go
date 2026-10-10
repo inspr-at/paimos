@@ -2,8 +2,6 @@
 
 package modelregistry
 
-import "strings"
-
 // CatalogVersion is the dispatch catalog pin seeded and upgraded automatically.
 const CatalogVersion = "4"
 

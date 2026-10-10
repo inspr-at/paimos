@@ -116,6 +116,14 @@ func insertObservedProfile(ctx context.Context, tx pgx.Tx, tenantID string, in p
 
 func insertActivatedProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite, enabled bool, cause modelactivation.Cause) (Profile, error) {
 	var out Profile
+	if in.DisplayName == "" {
+		display, err := catalogPinDisplay(ctx, tx, in)
+		if err != nil {
+			return out, err
+		}
+		in.Display = display
+	}
+
 	overrides := map[string]string{}
 	if in.DisplayName != "" {
 		overrides["display_name"] = in.DisplayName
