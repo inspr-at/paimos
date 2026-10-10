@@ -974,6 +974,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestSharedQuotaVendorDenial","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestStaleWorkReleaseRetainsAdmissionUntilExit","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestStoredResidencyClassification","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestThreeAccountQuotaPoolAdditionsAndExplicitRemovals","tier":"GATED-FULL"}
@@ -2439,6 +2441,8 @@
     {"kind":"go","package":"internal/agentpairing","name":"TestPairingRevokedClaimReportsEnrollmentBeforeReservations","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPairingRevokedCleanupPreservesUnconfirmedAccounting","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestPairingStaleWorkReleaseRetainsCapacityAndDrain","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPairingSupervisorHTTPVerificationRoutesUnboundQueue","tier":"ESSENTIAL"}
     ,
