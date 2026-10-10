@@ -55,7 +55,11 @@ func (m *Module) mergeWebhook(w http.ResponseWriter, r *http.Request) {
 	defer controller.SetReadDeadline(time.Time{})
 	raw, err := io.ReadAll(io.LimitReader(r.Body, (2<<20)+1))
 	if err != nil || len(raw) > 2<<20 {
-		w.WriteHeader(413)
+		class := webhookClass("body_too_large")
+		if err != nil {
+			class = "body_read"
+		}
+		m.rejectWebhook(w, r, "unknown", "parse", 413, class)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Minute)
@@ -68,15 +72,24 @@ func (m *Module) mergeWebhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(response.status)
 		return
 	}
+	m.finishMergeWebhook(w, r, raw, reader)
+}
+
+// The authenticated audit phase has accepted before merge completion starts.
+func (m *Module) finishMergeWebhook(w http.ResponseWriter, r *http.Request, raw []byte, reader MergeReader) {
+	ctx := r.Context()
 	var e envelope
-	if json.Unmarshal(raw, &e) != nil {
-		w.WriteHeader(400)
+	if err := json.Unmarshal(raw, &e); err != nil {
+		m.rejectWebhook(w, r, webhookLogAction(raw, r.Header.Get("X-GitHub-Event")), "parse", 400, webhookClass("invalid_json"))
 		return
 	}
+	var err error
+	step := ""
 	facts := []MergeFact{}
 	switch r.Header.Get("X-GitHub-Event") {
 	case "pull_request":
 		if e.Action == "closed" {
+			step = "reader-MergedPull"
 			var f *MergeFact
 			f, err = reader.MergedPull(ctx, e.Pull.Number)
 			if f != nil {
@@ -85,18 +98,21 @@ func (m *Module) mergeWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	case "merge_group":
 		if e.Action == "destroyed" {
+			step = "reader-completedGroup"
 			facts, err = m.completedGroup(ctx, reader, e.Group.Head)
 		}
 	case "push":
 		if e.Ref == "refs/heads/main" {
+			step = "reader-MergedGroup"
 			facts, err = reader.MergedGroup(ctx, e.After)
 		}
 	}
 	if err == nil && len(facts) > 0 {
+		step = "completeMerges"
 		err = m.completeMerges(ctx, facts)
 	}
 	if err != nil {
-		w.WriteHeader(502)
+		m.rejectWebhook(w, r, e.Action, step, 502, err)
 		return
 	}
 	w.WriteHeader(204)
