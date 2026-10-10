@@ -734,7 +734,7 @@ func TestModelAllowanceUnknownAndMeasuredLimit(t *testing.T) {
 				profileID = sol.ID
 			}
 			var id string
-			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,state,last_probe_at,last_probe_ok,last_daemon_generation,owner_person_id,allowed_model_profile_ids) VALUES($1,$2,$2,'fixture',$3,$2,'available',$4,true,'fixture',$5,ARRAY[$6::uuid]) RETURNING id::text`, admin.TenantID, h, runner.ID, now, admin.ID, profileID).Scan(&id); err != nil {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,state,last_probe_at,last_probe_ok,last_daemon_generation,owner_person_id,linked_at,allowed_model_profile_ids) VALUES($1,$2,$2,'fixture',$3,$2,'available',$4,true,'fixture',$5,$4,ARRAY[$6::uuid]) RETURNING id::text`, admin.TenantID, h, runner.ID, now, admin.ID, profileID).Scan(&id); err != nil {
 				return err
 			}
 			ids[h] = id

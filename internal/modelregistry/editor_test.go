@@ -395,13 +395,19 @@ func TestEditorMiddlewarePersonHeadersAndPermissionMatrix(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct{ method, path, body string }{{"PUT", "/api/models/routes", "[]"}, {"GET", "/api/model-preferences", ""}, {"PUT", path, body}, {"DELETE", path + "?revision=0", ""}, {"GET", "/api/work-kinds", ""}} {
+	for _, tc := range []struct{ method, path, body string }{{"PUT", "/api/models/routes", "[]"}, {"PUT", path, body}, {"DELETE", path + "?revision=0", ""}, {"GET", "/api/work-kinds", ""}} {
 		r := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 		r.Header.Set("Authorization", "Bearer aeon_"+prefix+"_editor-fixture")
 		w := httptest.NewRecorder()
 		h.handler.ServeHTTP(w, r)
 		editorError(t, w, 403, "agent key scope required")
 	}
+	// AEON-1146 permits preferences reads under the existing models.read grant.
+	r := httptest.NewRequest(http.MethodGet, "/api/model-preferences", nil)
+	r.Header.Set("Authorization", "Bearer aeon_"+prefix+"_editor-fixture")
+	w = httptest.NewRecorder()
+	h.handler.ServeHTTP(w, r)
+	editorDecode[preferenceDocument](t, w)
 }
 
 func linkEditorPerson(t *testing.T, p tenant.Principal, from, to string) {
