@@ -14,6 +14,20 @@ import urllib.request
 import uuid
 
 
+def previous_account_use_capable(tag):
+    """The pinned release's embedded entry migration identifies its floor.
+
+    A supported release must pass policy checks; an HTTP error never chooses
+    the legacy branch or turns a broken supported release into a passing gate.
+    """
+    result = subprocess.run(['git', 'ls-tree', '--name-only', tag, '--',
+        'internal/db/migrations/1310_account_use_entry_guard.sql'],
+        capture_output=True, text=True, timeout=15, check=False)
+    if result.returncode:
+        raise AssertionError('cannot determine the pinned release account-use floor')
+    return bool(result.stdout.strip())
+
+
 def release_ready(payload):
     """A previous binary is ready only when status is ready and it names no failure.
 
@@ -65,7 +79,7 @@ class Probe:
         print(f'previous release: {path} OK')
         return payload
 
-    def refused(self, path, body=None):
+    def refused(self, path, body=None, status=None, message=None):
         headers = {'Origin': 'http://localhost:8080'}
         if body is not None:
             headers['Content-Type'] = 'application/json'
@@ -80,6 +94,10 @@ class Probe:
                 raw = error.read(1 << 20)
                 if error.code < 400 or error.code >= 600 or b'command_template' in raw:
                     raise AssertionError(f'{path}: unsafe activated response')
+                if status is not None and error.code != status:
+                    raise AssertionError(f'{path}: expected HTTP {status}, got {error.code}')
+                if message is not None and json.loads(raw).get('error') != message:
+                    raise AssertionError(f'{path}: wrong policy refusal')
                 return error.code
 
     def login(self):
@@ -128,12 +146,14 @@ CAPABILITY_ERROR = 'account-use capability required: this binary is below the ro
 class AccountUseBoundary:
     """Disposable fixture only; SQL and bearer values never appear in output.
 
-    Older handlers sanitize DB errors into generic HTTP errors. PostgreSQL's
-    verbose error log proves the exact SQLSTATE, message and entry function for
-    each request; an unrelated 403/404/500 cannot satisfy this gate.
+    Below-floor handlers sanitize DB errors into generic HTTP errors. The
+    verbose log proves the exact SQLSTATE, message and entry function. Supported
+    releases instead prove safe previews and exact policy/authority refusals;
+    an unrelated 403/404/500 cannot satisfy either branch.
     """
-    def __init__(self, probe, container):
+    def __init__(self, probe, container, capable=False):
         self.probe, self.container = probe, container
+        self.capable = capable
 
     def sql(self, statement):
         result = subprocess.run(['docker', 'exec', '-i', self.container, 'psql',
@@ -165,6 +185,28 @@ class AccountUseBoundary:
             'runs',(SELECT coalesce(jsonb_agg(jsonb_build_array(id,status,started_at,daemon_id,daemon_generation) ORDER BY id),'[]') FROM agent_runs WHERE tenant_id='{tenant}'),
             'claims',(SELECT count(*) FROM events WHERE tenant_id='{tenant}' AND type IN ('run.claimed','work_order.started')));""")
 
+    def selection(self, populated, account):
+        """Supported releases enforce policy without rejecting every read."""
+        path = '/api/models/resolve?role=build&harness=codex'
+        resolved = self.probe.call(path)
+        if resolved.get('command_template'):
+            raise AssertionError(f'{path}: activated pool supplied executable material')
+        if not populated:
+            if resolved.get('preview') is not True or not isinstance(resolved.get('profile'), dict):
+                raise AssertionError(f'{path}: empty pool is not a catalog-only preview')
+        elif (resolved.get('profile') is not None or resolved.get('preview', False)
+              or not any('context' in item.get('skip_reasons', []) for item in resolved.get('ladder', []))):
+            raise AssertionError(f'{path}: denied pool lacks its context refusal')
+        next_path = '/api/agent-accounts/capacity/next?harness=codex'
+        next_account = self.probe.call(next_path)
+        reason = 'context' if populated else 'offline'
+        if (next_account.get('accounts') != [] or next_account.get('parallel_runs') != 0
+                or next_account.get('wait', {}).get('code') != reason):
+            raise AssertionError(f'{next_path}: pool supplied capacity or lost its refusal')
+        self.probe.refused(f'/api/agent-accounts/use?harness=codex&account_id={account}',
+            status=409 if populated else 404,
+            message='account_not_allowed_for_context' if populated else 'account not found')
+
     def check(self, state):
         self.probe.login()
         me = self.probe.call('/api/me')['principal']
@@ -183,6 +225,8 @@ class AccountUseBoundary:
         self.sql(f"""BEGIN;
             SELECT set_config('aeon.tenant_id','{tenant}',true),set_config('aeon.visible_projects','*',true),set_config('aeon.account_use_capable','on',true);
             INSERT INTO principals(tenant_id,id,kind,name) VALUES('{tenant}','{agent}','agent','Compatibility daemon');
+            INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
+                SELECT '{tenant}','{agent}',id,'workspace' FROM roles WHERE tenant_id='{tenant}' AND key='member';
             INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id,person_owner_required)
                 VALUES('{tenant}','{agent}','Disposable compatibility runtime','{prefix}','{hashlib.sha256(secret.encode()).hexdigest()}',ARRAY['run.claim'],'{owner}',true);
             INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id)
@@ -206,22 +250,33 @@ class AccountUseBoundary:
                     SELECT set_config('aeon.tenant_id','{tenant}',true),set_config('aeon.account_use_capable','on',true);
                     INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label)
                         VALUES('{tenant}','{account}','compat','codex','compat-daemon','{agent}','Compatibility login');
+                    DELETE FROM account_use_cells WHERE tenant_id='{tenant}' AND account_id='{account}';
                     UPDATE agent_runs SET account_id='{account}' WHERE id='{run}';
                     COMMIT;""")
             before = self.snapshot(tenant)
-            for path, body in [('/api/models/resolve?role=build&harness=codex', None),
+            reads = [('/api/models/resolve?role=build&harness=codex', None),
                 (f'/api/agent-accounts/use?harness=codex&account_id={account}', None),
-                ('/api/agent-accounts/capacity/next?harness=codex', None),
+                ('/api/agent-accounts/capacity/next?harness=codex', None)]
+            writes = [
                 ('/api/agent-accounts/route', {'run_id':run,'daemon_id':'compat-daemon','account_ids':[account],'estimated_units':{'requests':1}}),
-                (f'/api/agent-pairing/requests/{request}/approve', {'request_digest':'0'*64,'verification':'connect_only','selected_account_keys':['compat']})]:
-                self.request(self.probe, path, body)
-            self.request(runtime, f'/api/runs/{run}/claim', {'daemon_id':'compat-daemon','daemon_generation':'compat-generation','reservation_ids':[str(uuid.uuid4())]})
+                (f'/api/agent-pairing/requests/{request}/approve', {'request_digest':'0'*64,'verification':'connect_only','selected_account_keys':['compat']})]
+            claim = (f'/api/runs/{run}/claim', {'daemon_id':'compat-daemon','daemon_generation':'compat-generation','reservation_ids':[str(uuid.uuid4())]})
+            if self.capable:
+                self.selection(populated, account)
+                self.probe.refused(*writes[0], status=403, message='agent key required')
+                self.probe.refused(*writes[1], status=404, message='pairing not found')
+                runtime.refused(*claim, status=409, message='account daemon generation changed'
+                    if populated else 'account reservation required')
+            else:
+                for path, body in reads + writes:
+                    self.request(self.probe, path, body)
+                self.request(runtime, *claim)
             # The specification deliberately asks for a fixed background-job
             # window. State equality, not elapsed time, is the assertion.
             time.sleep(10)
             if self.snapshot(tenant) != before:
                 raise AssertionError('old background jobs created a reservation, claim or start')
-            print('previous release: activated ' + ('populated' if populated else 'empty') + ' pool and background jobs fail closed')
+            print('previous release: activated ' + ('denied' if populated else 'empty') + ' pool and background jobs fail closed')
 
 
 def main():
@@ -231,6 +286,7 @@ def main():
     parser.add_argument('--state', type=Path)
     parser.add_argument('--version')
     parser.add_argument('--database-container')
+    parser.add_argument('--release-tag')
     args = parser.parse_args()
     if args.mode == 'wait-ready':
         wait_ready(args.base)
@@ -241,7 +297,8 @@ def main():
     if args.mode == 'account-use':
         if not args.database_container:
             parser.error('account-use requires --database-container')
-        AccountUseBoundary(probe, args.database_container).check(json.loads(args.state.read_text()))
+        capable = previous_account_use_capable(args.release_tag) if args.release_tag else False
+        AccountUseBoundary(probe, args.database_container, capable).check(json.loads(args.state.read_text()))
         return
     if args.mode == 'seed':
         state = probe.seed()

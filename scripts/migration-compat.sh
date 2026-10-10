@@ -6,7 +6,7 @@ set -euo pipefail
 # OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
 pgvector_image="${PGVECTOR_IMAGE:-ghcr.io/inspr-at/paimos-ci/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11}"
 
-for tool in docker python3 go; do
+for tool in docker python3 go git; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
 tag="${1:?usage: bash scripts/migration-compat.sh vYYMMDDhhmmss.0.0 sha256:DIGEST}"
@@ -78,7 +78,7 @@ AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=di
   GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
 start_previous
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
-python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db" --release-tag "$tag"
 echo "Migration compatibility passed: $tag on the candidate schema"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \

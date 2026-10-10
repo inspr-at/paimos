@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import unittest
+import uuid
 from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('migration_compat_probe', Path(__file__).with_name('migration-compat-probe.py'))
@@ -175,6 +176,93 @@ class ProbeTest(unittest.TestCase):
             self.assertEqual(boundary.errors(), (0, 0))
             result.stderr = 'ERROR: 0A000: '+module.CAPABILITY_ERROR+'\nCONTEXT: aeon_enter_principal(uuid,uuid,boolean)'
             self.assertEqual(boundary.errors(), (1, 1))
+
+    def capable_fixture(self):
+        tenant, owner, agent, account, run, order, request = [str(uuid.UUID(int=i)) for i in range(1, 8)]
+        self.responses['/api/me'] = {'principal': {'id': owner, 'tenant_id': tenant}}
+        preview = {'preview': True, 'profile': {'id': 'catalog-only'}, 'ladder': []}
+        resolutions = iter([preview, preview, {'profile': None, 'ladder': [{'skip_reasons': ['context']}]}])
+        self.responses['/api/models/resolve?role=build&harness=codex'] = lambda: next(resolutions)
+        capacity = iter([{'accounts': [], 'parallel_runs': 0, 'wait': {'code': reason}}
+                         for reason in ('offline', 'context')])
+        self.responses['/api/agent-accounts/capacity/next?harness=codex'] = lambda: next(capacity)
+        uses = iter([(404, 'application/json', b'{"error":"account not found"}'),
+                     (409, 'application/json', b'{"error":"account_not_allowed_for_context"}')])
+        self.responses[f'/api/agent-accounts/use?harness=codex&account_id={account}'] = lambda: next(uses)
+        self.responses['/api/agent-accounts/route'] = (403, 'application/json', b'{"error":"agent key required"}')
+        self.responses[f'/api/agent-pairing/requests/{request}/approve'] = (404, 'application/json', b'{"error":"pairing not found"}')
+        claims = iter([(409, 'application/json', json.dumps({'error': reason}).encode())
+                       for reason in ('account reservation required', 'account daemon generation changed')])
+        self.responses[f'/api/runs/{run}/claim'] = lambda: next(claims)
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
+        boundary.capable = True
+
+        def sql(statement):
+            if 'enforced_at IS NULL' in statement:
+                return '0,1,true'
+            if "key='agents.working'" in statement:
+                return '0'
+            if 'jsonb_build_object' in statement:
+                return 'unchanged reservations, runs and claims'
+            return ''
+
+        boundary.sql = Mock(side_effect=sql)
+        boundary.errors = Mock(return_value=(0, 0))
+        ids = [uuid.UUID(value) for value in (agent, account, run, order, request)]
+        ids += [uuid.UUID(int=i) for i in (8, 9)]
+        return boundary, ids, {'ticket': str(uuid.UUID(int=10))}
+
+    # Risk: the latest published binary already supports account_use_v1. Its
+    # safe HTTP 200 preview must pass while runnable material still fails.
+    def test_supported_previous_release_checks_both_activated_pools(self):
+        boundary, ids, state = self.capable_fixture()
+        with patch.object(module.uuid, 'uuid4', side_effect=ids), patch.object(module.time, 'sleep'), contextlib.redirect_stdout(io.StringIO()):
+            boundary.check(state)
+        boundary.errors.assert_not_called()
+        self.assertEqual(sum('jsonb_build_object' in c.args[0] for c in boundary.sql.call_args_list), 4)
+        self.assertTrue(any('DELETE FROM account_use_cells' in c.args[0] for c in boundary.sql.call_args_list))
+        self.assertEqual(sum(path.startswith('/api/runs/') for path, _ in self.posts), 2)
+
+    def test_supported_previous_release_rejects_executable_preview(self):
+        boundary, ids, state = self.capable_fixture()
+        self.responses['/api/models/resolve?role=build&harness=codex'] = {
+            'preview': True, 'profile': {'id': 'unsafe'}, 'command_template': 'unsafe launch'}
+        with patch.object(module.uuid, 'uuid4', side_effect=ids), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(AssertionError, 'activated pool supplied executable material'):
+                boundary.check(state)
+
+    def test_supported_previous_release_requires_context_and_no_capacity(self):
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
+        path = '/api/models/resolve?role=build&harness=codex'
+        self.responses[path] = {'profile': None, 'ladder': [{'skip_reasons': ['offline']}]}
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(AssertionError, 'denied pool lacks its context refusal'):
+                boundary.selection(True, 'account')
+            self.responses[path] = {'profile': None, 'ladder': [{'skip_reasons': ['context']}]}
+            self.responses['/api/agent-accounts/capacity/next?harness=codex'] = {
+                'accounts': [{'account_id': 'denied'}], 'parallel_runs': 1, 'wait': {'code': 'context'}}
+            with self.assertRaisesRegex(AssertionError, 'pool supplied capacity or lost its refusal'):
+                boundary.selection(True, 'account')
+
+    def test_pinned_release_floor_selects_checks_without_http_fallback(self):
+        with patch.object(module.subprocess, 'run') as run:
+            run.return_value = Mock(returncode=0, stdout='internal/db/migrations/1310_account_use_entry_guard.sql\n')
+            self.assertTrue(module.previous_account_use_capable('pinned-release'))
+            self.assertEqual(run.call_args.args[0][3], 'pinned-release')
+            run.return_value = Mock(returncode=0, stdout='')
+            self.assertFalse(module.previous_account_use_capable('legacy-release'))
+            run.return_value = Mock(returncode=128, stdout='')
+            with self.assertRaisesRegex(AssertionError, 'cannot determine the pinned release'):
+                module.previous_account_use_capable('missing-release')
+
+    def test_supported_refusal_rejects_wrong_status_or_reason(self):
+        path = '/api/agent-accounts/use'
+        self.responses[path] = (500, 'application/json', b'{"error":"unrelated"}')
+        with self.assertRaisesRegex(AssertionError, 'expected HTTP 409, got 500'):
+            self.probe.refused(path, status=409, message='account_not_allowed_for_context')
+        self.responses[path] = (409, 'application/json', b'{"error":"unrelated"}')
+        with self.assertRaisesRegex(AssertionError, 'wrong policy refusal'):
+            self.probe.refused(path, status=409, message='account_not_allowed_for_context')
 
 
 if __name__ == '__main__':
