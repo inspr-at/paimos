@@ -117,6 +117,9 @@ func TestRetiredModelAutoUpdateMigrationIsTenantScopedAndIdempotent(t *testing.T
 				return err
 			}
 			if err := db.InTenant(seed, d.App, f.tenant, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(seed, `INSERT INTO model_refresh_settings(tenant_id) VALUES($1)`, f.tenant); err != nil {
+					return err
+				}
 				if _, err := tx.Exec(seed, `UPDATE account_use_rules SET new_models=$1,new_accounts='ask',new_contexts='ask',new_projects='default',revision=10`, rule); err != nil {
 					return err
 				}
