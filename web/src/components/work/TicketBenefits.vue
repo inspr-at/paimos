@@ -32,10 +32,15 @@ const countLabel = (value: string) => { const n = pillWords(value); return n ? `
   <section class="benefits" :class="{ editing }" :aria-labelledby="`${uid}-title`">
     <header class="section-head">
       <h3 :id="`${uid}-title`" class="eyebrow">User benefit</h3>
-      <span v-if="!editing && fields.hide_from_release_notes === true" class="hidden-note"><AppIcon name="eye-off" :size="12" />Hidden from release notes</span>
+      <span v-if="!editing && fields.no_release_needed === true" class="hidden-note">No release needed</span>
+      <span v-else-if="!editing && fields.hide_from_release_notes === true" class="hidden-note"><AppIcon name="eye-off" :size="12" />Hidden from release notes</span>
     </header>
 
     <template v-if="editing">
+      <div class="release-controls">
+        <label v-if="!parent" class="release-control" data-tip="Content work uses the automatic acceptance delay after Done, unless there is an objection or human check. Omitted from release notes."><input type="checkbox" :checked="fields.no_release_needed === true" :disabled="disabled" @change="emit('change', 'no_release_needed', ($event.target as HTMLInputElement).checked)" />No release needed</label>
+        <label class="release-control" data-tip="Hidden tickets still need both languages."><input type="checkbox" :checked="fields.hide_from_release_notes === true" :disabled="disabled" @change="emit('change', 'hide_from_release_notes', ($event.target as HTMLInputElement).checked)" />Hide from release notes</label>
+      </div>
       <p v-if="notice" :id="`${uid}-notice`" class="guidance" role="status">{{ notice }}</p>
       <p v-else-if="guidance" class="guidance" role="status">{{ guidance }}</p>
       <div class="languages">
@@ -49,7 +54,6 @@ const countLabel = (value: string) => { const n = pillWords(value); return n ? `
           <textarea :id="`${uid}-benefit-${language.key}`" class="field" rows="3" :value="raw(`benefit_${language.key}`)" :placeholder="language.benefit" :disabled="disabled" :aria-invalid="invalidKey === `benefit_${language.key}` ? 'true' : undefined" :aria-describedby="invalidKey === `benefit_${language.key}` && notice ? `${uid}-notice` : undefined" @input="emit('change', `benefit_${language.key}`, ($event.target as HTMLTextAreaElement).value)" />
         </div>
       </div>
-      <label class="hide" data-tip="Hidden tickets still need both languages."><input type="checkbox" :checked="fields.hide_from_release_notes === true" :disabled="disabled" @change="emit('change', 'hide_from_release_notes', ($event.target as HTMLInputElement).checked)" />Hide from release notes</label>
     </template>
 
     <template v-else>
@@ -103,5 +107,8 @@ label { font-size: 12px; color: var(--ink-2); }
 .field { width: 100%; padding: 8px 10px; }
 .field[aria-invalid="true"] { box-shadow: 0 0 0 1px var(--warn); }
 textarea.field { height: auto; min-height: 68px; resize: vertical; line-height: 1.45; }
-.hide { display: inline-flex; align-items: center; gap: 8px; justify-self: start; margin-top: 2px; }
+.release-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.release-control { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; cursor: pointer; }
+.release-control input { flex: none; margin: 0; }
+@media (pointer: coarse) { .release-control { min-height: 44px; } }
 </style>
