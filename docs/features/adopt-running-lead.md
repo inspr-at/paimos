@@ -9,7 +9,7 @@ harness and latest reporting time. Pages use bounded keyset pagination.
 If the first page is empty but a reporting root coordinator has no person
 owner, the panel names its label (or harness) and computer and explains that it
 must be registered with a key created by the adopting person. An agent key
-without an active person creator cannot establish that ownership. The
+without a person creator cannot establish that ownership. The
 explanation does not make that session eligible, and other people's owned
 sessions are not named in it. Ownership and adoption authority remain unchanged.
 
