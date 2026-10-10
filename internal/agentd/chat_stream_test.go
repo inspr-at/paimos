@@ -207,6 +207,47 @@ func TestCodexFinalCompletedBeforeAcknowledgementIsKept(t *testing.T) {
 	}
 }
 
+// Risk: before acknowledgement, a running marker, two chunks and the final
+// filled the old four-slot queue, so the terminal idle was dropped and the
+// relay stayed "running", refusing every later person input.
+func TestCodexPreAcknowledgementFinalKeepsTerminalIdle(t *testing.T) {
+	const (
+		started   = `{"method":"turn/started","params":{"threadId":"thread-1","turn":{"id":"turn-1"}}}`
+		delta     = `{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","delta":"part"}}`
+		message   = `{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","text":"answer"}}}`
+		completed = `{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}}`
+	)
+	api := newFakeRelayAPI()
+	api.inputs = []ChatInput{chatInput("m1", "sent")}
+	delivered := make(chan string, 1)
+	r := NewChatRelay(api, HarnessSession{ID: "session", Lease: "lease"}, ChatRelayOptions{
+		After:   func(time.Duration) <-chan time.Time { return make(chan time.Time) },
+		Deliver: func(_ context.Context, id, _ string, _ func()) error { delivered <- id; return nil },
+	})
+	var got []ChatUpdate
+	var sequence uint64
+	p := &codexProcess{wireProcess: &wireProcess{threadID: "thread-1", turnID: "turn-0", observe: func(ev AdapterEvent) {
+		got = append(got, *ev.Chat)
+		sequence++
+		r.Observe(ChatSessionEvent{Sequence: sequence, Update: ev.Chat})
+	}}}
+	for _, raw := range []string{started, delta, delta, message, completed} {
+		p.observeCodexChat(json.RawMessage(raw))
+	}
+	p.turnID, p.acknowledged = "turn-1", true
+	p.flushCodexChat("turn-1")
+	want := []ChatUpdate{chatState("running"), chatText("part"), chatText("part"), chatFinal("answer"), chatState("idle")}
+	if !reflect.DeepEqual(got, want) || p.DroppedChatFrames() != 0 {
+		t.Fatalf("published %+v dropped %d", got, p.DroppedChatFrames())
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go r.Run(ctx)
+	if id := receive(t, delivered); id != "m1" {
+		t.Fatalf("delivered %s", id)
+	}
+}
+
 func TestChatLiveOnlyBindingOverflowAndJournalIsolation(t *testing.T) {
 	// No API or journal exists: any accidental fallthrough to durable telemetry
 	// fails this test, including if a producer mistakenly also sets Kind.

@@ -2436,6 +2436,9 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	} else {
 		proc := entry.process
 		entry.mu.Unlock()
+		if req.writing != nil {
+			req.writing()
+		}
 		err = proc.Control(ctx, req.Operation, req.Text)
 		entry.mu.Lock()
 	}

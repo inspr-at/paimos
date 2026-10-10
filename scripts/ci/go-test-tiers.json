@@ -1266,6 +1266,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestChatLiveOnlyBindingOverflowAndJournalIsolation","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestChatReceiptsIgnoreTurnsBeforeTheInputWriteBegins","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestChatRejectsForeignAndOversizedFrames","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestChatRelayBoundedQueueBackoffRebindAndUnsupported","tier":"ESSENTIAL"}
@@ -1385,6 +1387,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestCodexOwnedSettingsReachHarnessHeartbeats","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexPreAckContradictionsAreBounded","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestCodexPreAcknowledgementFinalKeepsTerminalIdle","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexQuotaNeutralFallbackUsesOwnedFakeCLI","tier":"GATED-FULL"}
     ,

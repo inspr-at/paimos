@@ -79,7 +79,9 @@ type ChatRelayAPI interface {
 
 type ChatRelayOptions struct {
 	// Deliver writes one person input to the owned harness; nil disables input.
-	Deliver func(ctx context.Context, messageID, body string) error
+	// It calls writing once the harness write begins, after any wait behind
+	// other input: turn markers before that belong to other work.
+	Deliver func(ctx context.Context, messageID, body string, writing func()) error
 	// Settled runs after the server committed delivery evidence.
 	Settled func(messageID string)
 	// Unsupported runs when the server refuses the relay. The reason is an
@@ -102,10 +104,11 @@ type chatRelayItem struct {
 type chatPendingInput struct {
 	id             string
 	after, started uint64
-	// Turn markers seen while Deliver runs stay tentative: a failed write
-	// discards them, a confirmed one turns them into receipts.
-	written, read bool
-	at            time.Time
+	// Only markers after the write began (armed) can belong to this input.
+	// Those seen while Deliver runs stay tentative: a failed write discards
+	// them, a confirmed one turns them into receipts.
+	armed, written, read bool
+	at                   time.Time
 }
 
 // ChatRelay forwards one owned session's S1 stream to the server: live frames
@@ -162,7 +165,7 @@ func (r *ChatRelay) Observe(ev ChatSessionEvent) {
 	u := ev.Update
 	if u.SessionUpdate == "state" {
 		r.state = u.State
-		if in := r.input; in != nil {
+		if in := r.input; in != nil && in.armed {
 			switch {
 			case in.started == 0 && u.State == "running" && ev.Sequence > in.after:
 				// The harness started a turn after agentd wrote the input.
@@ -596,19 +599,31 @@ func (r *ChatRelay) deliverNext(ctx context.Context, b ChatRelayBinding) error {
 	}
 	r.attempted[next.Message.ID] = true
 	r.order = append(r.order, next.Message.ID)
-	r.input = &chatPendingInput{id: next.Message.ID, after: r.sequence, at: r.opts.Now()}
+	pending := &chatPendingInput{id: next.Message.ID, at: r.opts.Now()}
+	r.input = pending
 	r.mu.Unlock()
-	err := r.opts.Deliver(ctx, next.Message.ID, next.Message.Body)
+	// A turn another input starts while this write waits is not its evidence.
+	arm := func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.input == pending && !pending.armed {
+			pending.armed, pending.after = true, r.sequence
+		}
+	}
+	err := r.opts.Deliver(ctx, next.Message.ID, next.Message.Body, arm)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	in := r.input
-	if in == nil || in.id != next.Message.ID {
+	if in != pending {
 		return err
 	}
 	if err != nil {
 		// Nothing was confirmed: no receipt, and the message stays "sent".
 		r.input = nil
 		return errors.Join(errChatDeliver, err)
+	}
+	if !in.armed { // confirmed without a write signal: evidence starts now
+		in.armed, in.after = true, r.sequence
 	}
 	in.written, in.at = true, r.opts.Now() // the evidence window starts at the write
 	if in.started != 0 {
@@ -702,12 +717,12 @@ func (s *Supervisor) newChatRelay(api ChatRelayAPI, entry *owned, runID string) 
 		Unsupported: s.chatGate.disable,
 	}
 	if entry.inboxCapable {
-		opts.Deliver = func(ctx context.Context, id, body string) error {
+		opts.Deliver = func(ctx context.Context, id, body string, writing func()) error {
 			if !validChatID(id, 128) || len(body) > chatChunkBytes {
 				return errors.New("chat input exceeds the person message bound")
 			}
 			_, err := s.controlInbox(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: runID,
-				Generation: s.generation, CorrelationID: "chat:" + id, Operation: "inbox", Text: chatInputText(id, body)}, false, true)
+				Generation: s.generation, CorrelationID: "chat:" + id, Operation: "inbox", Text: chatInputText(id, body), writing: writing}, false, true)
 			return err
 		}
 	}

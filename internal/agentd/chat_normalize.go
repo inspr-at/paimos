@@ -322,6 +322,32 @@ type pendingCodexChat struct {
 	update ChatUpdate
 }
 
+// Before acknowledgement, content and state have separate budgets, so chunks
+// and the final can never take the slot of the turn's terminal state.
+const (
+	codexPendingContent = 4 // large chunks and tool calls (256 KiB)
+	codexPendingStates  = 8 // content-free; the last slot is kept for idle
+)
+
+func (p *codexProcess) pendingRoom(u ChatUpdate) bool {
+	content, states := 0, 0
+	for _, pending := range p.chatPending {
+		switch pending.update.SessionUpdate {
+		case "state":
+			states++
+		case "agent_message_chunk", "tool_call":
+			content++
+		}
+	}
+	switch {
+	case u.SessionUpdate == "state" && u.State == "idle":
+		return states < codexPendingStates
+	case u.SessionUpdate == "state":
+		return states < codexPendingStates-1
+	}
+	return content < codexPendingContent
+}
+
 // Fast app-server output can precede turn/start's reply. Hold only normalized
 // projections, then release them only if the acknowledged owned turn agrees.
 // The completed agent message is one bounded, turn-scoped final candidate:
@@ -375,7 +401,7 @@ func (p *codexProcess) observeCodexChat(raw json.RawMessage) {
 			if candidate := p.chatCandidate; candidate.turn == turn {
 				p.chatCandidate = pendingCodexChat{}
 				if f.Method == "turn/completed" && f.Params.Turn.Status == "completed" && candidate.update.Content.Text != "" {
-					// At most one final waits; it is not one of the four chunks.
+					// At most one final waits, outside both budgets.
 					if !candidate.update.valid() || slices.ContainsFunc(p.chatPending, func(c pendingCodexChat) bool { return c.update.SessionUpdate == "final" }) {
 						p.chatDropped.Add(1)
 					} else {
@@ -386,8 +412,7 @@ func (p *codexProcess) observeCodexChat(raw json.RawMessage) {
 		}
 	}
 	for _, update := range updates {
-		// At most 4 large chunks (256 KiB) before acknowledgement.
-		if !validChatID(turn, 256) || !update.valid() || len(p.chatPending) >= 4 {
+		if !validChatID(turn, 256) || !update.valid() || !p.pendingRoom(update) {
 			p.chatDropped.Add(1)
 			continue
 		}

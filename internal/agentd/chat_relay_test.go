@@ -421,7 +421,8 @@ func TestChatRelayReceiptsFollowExplicitTurnMarkers(t *testing.T) {
 			defer clockMu.Unlock()
 			return now
 		},
-		Deliver: func(_ context.Context, id, body string) error {
+		Deliver: func(_ context.Context, id, body string, writing func()) error {
+			writing()
 			if !strings.Contains(body, "PRIVATE_SENTINEL") {
 				t.Error("input body not delivered")
 			}
@@ -693,7 +694,8 @@ func TestChatRelayReceiptsNeedAConfirmedWrite(t *testing.T) {
 	release := make(chan error)
 	r := NewChatRelay(api, HarnessSession{ID: "session", Lease: "lease"}, ChatRelayOptions{
 		After: func(time.Duration) <-chan time.Time { return ticks },
-		Deliver: func(_ context.Context, id, _ string) error {
+		Deliver: func(_ context.Context, id, _ string, writing func()) error {
+			writing()
 			entered <- id
 			return <-release
 		},
@@ -737,6 +739,68 @@ func TestChatRelayReceiptsNeedAConfirmedWrite(t *testing.T) {
 	defer api.mu.Unlock()
 	if !reflect.DeepEqual(api.receipts, []string{"m2:delivered"}) {
 		t.Fatalf("receipts %v", api.receipts)
+	}
+}
+
+// Risk: a chat input waiting behind another inbox control got the read
+// receipt of the unrelated turn that control started, before its own turn ran.
+func TestChatReceiptsIgnoreTurnsBeforeTheInputWriteBegins(t *testing.T) {
+	relay := newFakeRelayAPI()
+	relay.inputs = []ChatInput{chatInput("m1", "sent")}
+	api := &relaySupervisorAPI{fakeAPI: &fakeAPI{}, relay: relay}
+	var logged []string
+	s, p := relaySupervisor(t, api, &logged)
+	if err := s.PollOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	entry := s.runs["run"]
+	waitCall(t, relay.calls, "lookup")
+	state := func(st string) {
+		u := chatState(st)
+		s.observe(entry, AdapterEvent{Chat: &u})
+	}
+	// Another inbox control holds the harness while the chat input arrives.
+	entry.controlMu.Lock()
+	state("idle")
+	eventually(t, "chat input pending behind the other control", func() bool {
+		entry.relay.mu.Lock()
+		defer entry.relay.mu.Unlock()
+		return entry.relay.input != nil
+	})
+	// The other control's turn runs to completion before the chat write begins.
+	state("running")
+	state("idle")
+	p.mu.Lock()
+	calls := p.calls
+	p.mu.Unlock()
+	if calls != 0 {
+		t.Fatal("chat input written while another control held the harness")
+	}
+	entry.controlMu.Unlock()
+	eventually(t, "chat input written", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.calls == 1
+	})
+	// Receipts go before queued items, so the final proves none was queued.
+	final := chatFinal("unrelated final")
+	s.observe(entry, AdapterEvent{Chat: &final})
+	waitCall(t, relay.calls, "final")
+	relay.mu.Lock()
+	early := append([]string(nil), relay.receipts...)
+	relay.mu.Unlock()
+	if len(early) != 0 {
+		t.Fatalf("receipts from the unrelated turn: %v", early)
+	}
+	// The input's own turn is the evidence.
+	state("running")
+	waitCall(t, relay.calls, "receipt")
+	state("idle")
+	waitCall(t, relay.calls, "receipt")
+	relay.mu.Lock()
+	defer relay.mu.Unlock()
+	if !reflect.DeepEqual(relay.receipts, []string{"m1:delivered", "m1:read"}) {
+		t.Fatalf("receipts %v", relay.receipts)
 	}
 }
 
@@ -818,7 +882,7 @@ func TestChatRelayRebindingResetsInputCursor(t *testing.T) {
 	delivered := make(chan string, 2)
 	r := NewChatRelay(api, HarnessSession{ID: "session", Lease: "lease"}, ChatRelayOptions{
 		After:   func(time.Duration) <-chan time.Time { return ticks },
-		Deliver: func(_ context.Context, id, _ string) error { delivered <- id; return nil },
+		Deliver: func(_ context.Context, id, _ string, _ func()) error { delivered <- id; return nil },
 	})
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

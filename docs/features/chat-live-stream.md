@@ -95,7 +95,8 @@ stream sequence, so a retried final persists once.
 inbox input, written to the harness only while it is idle, through the same journaled inbox control as other
 harness input, so a crash never re-injects one. **Delivered** is reported when
 the harness starts a turn after that write, **read** when that turn completes.
-Fetching or queueing an input is no evidence. If no turn starts within two
+Fetching or queueing an input is no evidence, nor is a turn another input
+started while this write waited. If no turn starts within two
 minutes, the input stays `sent`. Person read evidence remains the read markers.
 
 ## Upgrade order and reverse proxies
