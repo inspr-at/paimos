@@ -22,7 +22,10 @@ func TestRoutineDefinitionScopeAuthorityAndInertRoundTrip(t *testing.T) {
 	workspaceReader := viewer(f)
 	var kind string
 	f.tx(func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT id::text FROM work_kinds WHERE archived_at IS NULL AND project_id IS NULL ORDER BY id LIMIT 1`).Scan(&kind)
+		if _, err := tx.Exec(t.Context(), `SELECT aeon_seed_work_kinds($1)`, f.p.TenantID); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `SELECT id::text FROM work_kinds WHERE slug='backend' AND archived_at IS NULL AND project_id IS NULL`).Scan(&kind)
 	})
 	tokens, money := int64(10000), int64(2000000)
 	in := f.input()
