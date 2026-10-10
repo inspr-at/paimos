@@ -354,16 +354,16 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `
 			INSERT INTO agent_accounts
 				(tenant_id, account_key, harness, daemon_id, registered_by_principal_id, label, state,
-				 last_probe_at, last_probe_ok, last_daemon_generation)
+				 last_probe_at, last_probe_ok, last_daemon_generation, share_usage)
 			VALUES ($1::uuid, 'local-codex', 'codex', 'daemon-a', $2::uuid, 'Codex', 'available',
-			        now() - interval '10 minutes', true, 'gen-1')`, admin.TenantID, agent.ID)
+			        now() - interval '10 minutes', true, 'gen-1', true)`, admin.TenantID, agent.ID)
 		return err
 	})
 	if err != nil {
 		t.Fatalf("account: %v", err)
 	}
 	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
-	if scout.Profile == nil || scout.Profile.ID != haiku.ID || scout.Ladder[0].SkipReasons[0] != "account availability" {
+	if scout.Profile == nil || scout.Profile.ID != haiku.ID || scout.Ladder[0].SkipReasons[0] != "Codex account has no recent successful sign-in check" {
 		t.Fatalf("stale probe %+v", scout)
 	}
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
@@ -383,7 +383,7 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 		t.Fatalf("window: %v", err)
 	}
 	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
-	if scout.Profile == nil || scout.Profile.ID != haiku.ID || scout.Ladder[0].SkipReasons[0] != "allowance" {
+	if scout.Profile == nil || scout.Profile.ID != haiku.ID || !strings.HasPrefix(scout.Ladder[0].SkipReasons[0], "Codex account is at its allowance or floor until ") {
 		t.Fatalf("full allowance %+v", scout)
 	}
 	other := makePrincipal(t, "beta", "person", "Bea", []string{"admin"})

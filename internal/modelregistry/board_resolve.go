@@ -192,7 +192,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		if len(reasons) == 0 {
 			return false, "no registered effort for this line"
 		}
-		return false, strings.Join(reasons, "; ")
+		return false, joinReasons(reasons)
 	}
 	d := modelprefs.ResolveBoard(s, query, available)
 	// Policy exclusions are traced even when the pure board resolver removes
@@ -336,4 +336,21 @@ func PinnedBottomUsed(raw []byte, profile string) (map[string]any, bool, error) 
 		return nil, false, nil
 	}
 	return map[string]any{"column": placement.Column, "situation": placement.Situation, "preference_of": placement.PreferenceOf, "lock": placement.Lock, "profile_id": profile}, true, nil
+}
+
+// joinReasons keeps one sentence per cause across efforts and fallback stages.
+func joinReasons(reasons []string) string {
+	out := []string{}
+	for _, reason := range reasons {
+		for _, part := range strings.Split(reason, ";") {
+			part = strings.TrimSpace(part)
+			for _, stage := range []string{"column: ", "default: ", "role: "} {
+				part = strings.TrimPrefix(part, stage)
+			}
+			if part != "" && !slices.Contains(out, part) {
+				out = append(out, part)
+			}
+		}
+	}
+	return strings.Join(out, "; ")
 }

@@ -51,9 +51,20 @@ describe('registry lines', () => {
     expect(lines.map(line => line.model)).toEqual(['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna', 'claude-opus-5-5'])
   })
   it('describes a line as harness, route (when it adds something), id, source and what was taken on', () => {
-    const [codex, cursor] = [buildLines([sol('high', 3)])[0]!, buildLines([profile({ harness: 'cursor', model: 'composer-2.5', effort: 'default', family: 'cursor' })])[0]!]
-    expect(metaParts(codex)).toEqual(['Codex', 'OpenAI', 'gpt-6.1-sol', 'Auto-discovered'])
-    expect(metaParts(cursor)).toEqual(['Cursor', 'composer-2.5', 'Auto-discovered'])
+    const [codex, cursor] = [buildLines([sol('high', 3, { origin: 'harness' })])[0]!, buildLines([profile({ harness: 'cursor', model: 'composer-2.5', effort: 'default', family: 'cursor', origin: 'harness' })])[0]!]
+    expect(metaParts(codex)).toEqual(['Codex', 'OpenAI', 'gpt-6.1-sol', 'From harness'])
+    expect(metaParts(cursor)).toEqual(['Cursor', 'composer-2.5', 'From harness'])
+    expect(metaParts({ ...codex, origin: 'shipped' }).at(-1)).toBe('Shipped')
+    expect(metaParts({ ...codex, origin: 'provider' }).at(-1)).toBe('From provider')
+  })
+  it('keeps legacy auto provenance generic until the server names its origin', () => {
+    const line = buildLines([sol('high', 3)])[0]!
+    expect(line.origin).toBeUndefined()
+    expect(metaParts(line)).toEqual(['Codex', 'OpenAI', 'gpt-6.1-sol', 'Auto-discovered'])
+    expect(metaParts({ ...line, source: 'manual' }).at(-1)).toBe('Added by hand')
+    expect(metaParts({ ...line, origin: 'shipped' }).at(-1)).toBe('Shipped')
+    expect(metaParts({ ...line, origin: 'provider' }).at(-1)).toBe('From provider')
+    expect(metaParts({ ...line, origin: 'harness' }).at(-1)).toBe('From harness')
   })
 })
 

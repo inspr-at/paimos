@@ -192,6 +192,16 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				}
 			}
 			scope, controlled := coreAgentScope(r)
+			// Preference reads are a coordinator exception to the outer route
+			// ceiling. RequirePattern below still checks live grants and creator
+			// authority; a models.read-only key retains its placement ceiling.
+			if authz.IsCoordinatorKey(p.Scopes) {
+				switch r.Pattern {
+				case "GET /api/model-preferences", "GET /api/model-preferences/board", "GET /api/model-preferences/coverage",
+					"GET /api/model-preferences/evidence", "GET /api/model-preferences/simple", "GET /api/model-preferences/situations":
+					scope, controlled = "models.read", true
+				}
+			}
 			if authz.OwnerWorkstation(p) && workstationGovernance(r) && !strings.HasSuffix(r.Pattern, "/owner-workstation") {
 				scope, controlled = authz.RoutePermissions[r.Pattern], true
 			}

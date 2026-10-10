@@ -167,6 +167,7 @@ func recordReports(ctx context.Context, tx pgx.Tx, p tenant.Principal, in []Obse
 			out.Proposed++
 			continue
 		}
+		pin.Source = "harness"
 		if _, err := insertObservedProfile(ctx, tx, p.TenantID, pin); err != nil {
 			return out, err
 		}

@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PairingView } from '../src/lib/agentPairing'
 import type { OverviewAccount } from '../src/lib/accountsOverview'
+import { readiness } from '../src/lib/computerAccounts'
 import { glanceItems, glanceSummary, onlineComputers, signinStatus } from '../src/lib/accountsGlance'
 
 function door(id: string, over: Record<string, unknown> = {}) {
@@ -161,4 +162,18 @@ describe('the status line', () => {
     boundary.windows[0]!.reading.read_at = new Date(NOW - 10 * 60_000).toISOString()
     expect(glanceItems([boundary], [mbp], LOW, NOW).map(item => item.name)).toEqual(['Codex is low: 2% left this week'])
   })
+})
+
+// Risk: Settings says Ready while the Agents count and resolver wait on a cap.
+it('uses the same readiness words and ready count for unknown quota and a measured cap', () => {
+ const c = computer('build-7', { claude: 'ready' })
+ const a = account('claude', [c])
+ const row = door('a-claude', { state: 'unread', routing: { rank: 1, available_slots: 1 } })
+ a.rows = [row] as never
+ expect(signinStatus(c, 'a-claude', a.rows[0], NOW)).toBe(readiness(a.rows[0]!, c, NOW).text)
+ expect(glanceSummary([a], [c], [], NOW).ready).toBe(1)
+ Object.assign(row, { routing: { rank: 0, available_slots: 0, wait: { code: 'allowance', until: '2026-10-06T14:00:00Z' } } })
+ expect(signinStatus(c, 'a-claude', a.rows[0], NOW)).toBe(readiness(a.rows[0]!, c, NOW).text)
+ expect(signinStatus(c, 'a-claude', a.rows[0], NOW)).toMatch(/^At limit until /)
+ expect(glanceSummary([a], [c], [], NOW).ready).toBe(0)
 })

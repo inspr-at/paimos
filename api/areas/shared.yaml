@@ -1294,6 +1294,7 @@ components:
             effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5, readOnly: true, description: "Shared effort scale from the immutable effort pin, including Gemini fixed thinking-budget buckets; unknown stays null."}
             provider: {type: string, readOnly: true, description: Registered model brand; separate from the routing family.}
             source: {type: string, enum: [auto, manual], readOnly: true}
+            origin: {type: string, enum: [shipped, provider, harness, manual], readOnly: true, description: "Immutable model origin; later usage reports do not relabel shipped profiles."}
             retire_at: {type: [string, 'null'], format: date-time, readOnly: true}
             retired: {type: boolean, readOnly: true}
     ModelProfileWrite:

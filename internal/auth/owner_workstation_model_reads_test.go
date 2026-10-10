@@ -35,10 +35,11 @@ func TestWorkstationModelReadSnapshots(t *testing.T) {
 			}
 		})
 	}
-	// Preference GET retains its existing middleware ceiling, even for a
-	// designated workstation. Do not broaden the approved person-only surface.
-	if w := f.call(f.key.Token, http.MethodGet, "/api/model-preferences", "", ""); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "agent key scope required") {
-		t.Fatalf("workstation preference ceiling: HTTP %d", w.Code)
+	// Reading preferences uses the same live models.read ceiling as placement.
+	for _, path := range []string{"/api/model-preferences", "/api/model-preferences/simple"} {
+		if w := f.call(f.key.Token, http.MethodGet, path, "", ""); w.Code != http.StatusOK {
+			t.Fatalf("workstation preferences: HTTP %d: %s", w.Code, w.Body.String())
+		}
 	}
 	if w := f.mark(f.owner, f.key.ID, f.computer, false); w.Code != http.StatusOK {
 		t.Fatalf("remove workstation designation: HTTP %d", w.Code)
