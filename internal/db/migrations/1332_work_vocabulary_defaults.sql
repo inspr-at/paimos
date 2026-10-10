@@ -11,10 +11,12 @@ DECLARE
     prior_setting text := current_setting('aeon.tenant_id', true);
 BEGIN
     -- Row-level security is forced on work_vocabulary: act as the new tenant.
+    -- An existing row is kept. Only this transaction can see the new tenant,
+    -- so no concurrent writer can add one between the check and the insert.
     PERFORM set_config('aeon.tenant_id', NEW.id::text, true);
     INSERT INTO work_vocabulary (tenant_id, revision, vocabulary)
-    VALUES (NEW.id, 1, '{"leaf":{"name":"Task","icon":"task"},"levels":[{"name":"Epic","icon":"layers"},{"name":"Ticket","icon":"ticket"}]}'::jsonb)
-    ON CONFLICT (tenant_id) DO NOTHING;
+    SELECT NEW.id, 1, '{"leaf":{"name":"Task","icon":"task"},"levels":[{"name":"Epic","icon":"layers"},{"name":"Ticket","icon":"ticket"}]}'::jsonb
+    WHERE NOT EXISTS (SELECT 1 FROM work_vocabulary WHERE tenant_id = NEW.id);
     PERFORM set_config('aeon.tenant_id', coalesce(prior_setting, ''), true);
     RETURN NEW;
 EXCEPTION WHEN OTHERS THEN

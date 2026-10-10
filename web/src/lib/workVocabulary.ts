@@ -2,7 +2,7 @@
 import type { ListItem } from './api.ts'
 import type { IconName } from '../components/AppIcon.vue'
 import { kindLabel } from './work.ts'
-import { isWorkIcon, workIconLabel } from './workIcons.ts'
+import { isWorkIcon } from './workIcons.ts'
 export { WORK_ICONS } from './workIcons.ts'
 export interface WorkLevel { name: string; icon: string }
 export interface LeadNames { singular: string; plural: string }
@@ -19,7 +19,6 @@ export function workLevel(v: WorkVocabulary, leaf: boolean, depth: number): Work
 export function workIconChoice(icon: string, fallback: IconName): IconName {
   return isWorkIcon(icon) ? icon : fallback
 }
-export const workIconName = workIconLabel
 /** Settings label of a level: levels[0] is the top level, the leaf comes last. */
 export function vocabularyLabel(index: number, leaf = false): string {
   return leaf ? 'Leaf (work item)' : index === 0 ? 'Top level' : `Level ${index + 1}`

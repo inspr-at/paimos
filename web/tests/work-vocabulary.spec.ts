@@ -254,7 +254,7 @@ for (const width of sizes) for (const theme of ['light', 'dark']) {
     await search.press('ArrowDown'); await expect(option('Rocket')).toBeFocused()
     await expect(list.locator('[aria-selected=true]')).toHaveAccessibleName('Rocket')
     const names = await options.evaluateAll(cells => cells.map(cell => cell.getAttribute('aria-label')!))
-    const columns = await options.evaluateAll(cells => cells.filter(cell => cell.offsetTop === cells[0].offsetTop).length)
+    const columns = await options.evaluateAll(cells => cells.filter(cell => (cell as HTMLElement).offsetTop === (cells[0] as HTMLElement).offsetTop).length)
     expect(columns).toBeGreaterThanOrEqual(7)
     const at = names.indexOf('Rocket')
     const keyGuard = await controlStability(page, { dialog, search, first: options.first(), chosen: option('Rocket'), last: options.last() })

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { WORK_ICON_LIST, isWorkIcon, searchWorkIcons, workIconLabel } from '../../lib/workIcons'
+import { isWorkIcon, searchWorkIcons, workIconLabel } from '../../lib/workIcons'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 
@@ -79,7 +79,8 @@ function move(event: KeyboardEvent) {
     return
   }
   const cols = columns(items), last = items.length - 1
-  const next = { ArrowRight: Math.min(last, at + 1), ArrowLeft: Math.max(0, at - 1), ArrowDown: Math.min(last, at + cols), ArrowUp: at - cols, Home: 0, End: last }[event.key]
+  const targets: Record<string, number> = { ArrowRight: Math.min(last, at + 1), ArrowLeft: Math.max(0, at - 1), ArrowDown: Math.min(last, at + cols), ArrowUp: at - cols, Home: 0, End: last }
+  const next = targets[event.key]
   if (next === undefined) return
   event.preventDefault(); event.stopPropagation()
   if (next < 0) field.value?.focus()
