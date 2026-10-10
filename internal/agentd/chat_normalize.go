@@ -33,6 +33,12 @@ func chatText(text string) ChatUpdate {
 	return ChatUpdate{SessionUpdate: "agent_message_chunk", Content: &ChatContent{Type: "text", Text: text}}
 }
 
+// chatFinal is the harness's own completed answer for a turn. It is never
+// assembled from chunks; harnesses without an explicit marker produce none.
+func chatFinal(text string) ChatUpdate {
+	return ChatUpdate{SessionUpdate: "final", Content: &ChatContent{Type: "text", Text: text}}
+}
+
 func chatTool(id, title, status string) ChatUpdate {
 	return ChatUpdate{SessionUpdate: "tool_call", ToolCallID: id, Title: title, Status: status}
 }
@@ -43,7 +49,7 @@ func validChatID(s string, bound int) bool {
 
 func (u ChatUpdate) valid() bool {
 	switch u.SessionUpdate {
-	case "agent_message_chunk":
+	case "agent_message_chunk", "final":
 		return u.Content != nil && u.Content.Type == "text" && len(u.Content.Text) > 0 && len(u.Content.Text) <= chatChunkBytes && utf8.ValidString(u.Content.Text) && !strings.ContainsRune(u.Content.Text, 0) && u.ToolCallID == "" && u.Title == "" && u.Status == "" && u.State == ""
 	case "tool_call":
 		return u.Content == nil && validChatID(u.ToolCallID, 256) && validChatID(u.Title, 128) && (u.Status == "in_progress" || u.Status == "completed" || u.Status == "failed") && u.State == ""
@@ -53,9 +59,10 @@ func (u ChatUpdate) valid() bool {
 	return false
 }
 
-// ValidChatUpdate exposes the same allowlist to the authenticated server relay.
+// ValidChatUpdate exposes the live allowlist to the authenticated server relay.
 // Raw vendor frames, reasoning and tool payloads never cross this boundary.
-func ValidChatUpdate(u ChatUpdate) bool { return u.valid() }
+// A final answer is durable and travels only through the final-message route.
+func ValidChatUpdate(u ChatUpdate) bool { return u.valid() && u.SessionUpdate != "final" }
 
 // observeChat is called only by the event reader of an owned native connection.
 // False includes unknown shapes and out-of-scope frames; none are logged.
@@ -64,6 +71,11 @@ func (p *wireProcess) observeChat(harness string, raw json.RawMessage) {
 	if !known {
 		p.chatDropped.Add(1)
 		return
+	}
+	if harness == Codex {
+		if final, ok := p.codexFinal(raw); ok {
+			updates = append([]ChatUpdate{final}, updates...)
+		}
 	}
 	for _, update := range updates {
 		if !update.valid() {
@@ -87,6 +99,7 @@ func normalizeChat(harness string, raw json.RawMessage, thread, turn string) ([]
 		var f struct {
 			Kind   string     `json:"kind"`
 			Update ChatUpdate `json:"update"`
+			Text   string     `json:"text"`
 		}
 		if json.Unmarshal(raw, &f) != nil {
 			return nil, false
@@ -94,6 +107,9 @@ func normalizeChat(harness string, raw json.RawMessage, thread, turn string) ([]
 		switch f.Kind {
 		case "chat":
 			return []ChatUpdate{f.Update}, true
+		case "chat_final":
+			// Emitted only from the SDK's own turn result record.
+			return []ChatUpdate{chatFinal(f.Text)}, true
 		case "turn_started":
 			return []ChatUpdate{chatState("running")}, true
 		case "turn_completed":
@@ -249,6 +265,47 @@ func normalizePiChat(raw json.RawMessage) ([]ChatUpdate, bool) {
 		return nil, true
 	}
 	return nil, false
+}
+
+// codexFinal follows `codex exec`'s final-message semantics on the owned
+// app-server turn: the last completed agentMessage item (never its deltas),
+// released only by that turn's own successful completion record. Commentary
+// items are skipped when the harness labels the phase.
+func (p *wireProcess) codexFinal(raw json.RawMessage) (ChatUpdate, bool) {
+	var f struct {
+		Method string `json:"method"`
+		Params struct {
+			ThreadID string `json:"threadId"`
+			TurnID   string `json:"turnId"`
+			Turn     struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			} `json:"turn"`
+			Item struct {
+				Type  string `json:"type"`
+				Text  string `json:"text"`
+				Phase string `json:"phase"`
+			} `json:"item"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(raw, &f) != nil || p.threadID == "" || p.turnID == "" || f.Params.ThreadID != p.threadID || firstNonempty(f.Params.TurnID, f.Params.Turn.ID) != p.turnID {
+		return ChatUpdate{}, false
+	}
+	switch f.Method {
+	case "turn/started":
+		p.chatFinal = ""
+	case "item/completed":
+		if f.Params.Item.Type == "agentMessage" && (f.Params.Item.Phase == "" || f.Params.Item.Phase == "final_answer") {
+			p.chatFinal = f.Params.Item.Text
+		}
+	case "turn/completed", "turn/failed":
+		text := p.chatFinal
+		p.chatFinal = ""
+		if f.Method == "turn/completed" && f.Params.Turn.Status == "completed" && text != "" {
+			return chatFinal(text), true
+		}
+	}
+	return ChatUpdate{}, false
 }
 
 type pendingCodexChat struct {

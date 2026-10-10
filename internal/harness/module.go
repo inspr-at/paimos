@@ -601,7 +601,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 				continue
 			}
 			switch v {
-			case "inbox", "pause", "owned_stop_v1", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability, recoveryCapability, servicetier.Capability:
+			case "inbox", "pause", "owned_stop_v1", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability, recoveryCapability, servicetier.Capability, ChatCapability:
 			default:
 				return nil, workorders.Fail(400, "invalid capability")
 			}

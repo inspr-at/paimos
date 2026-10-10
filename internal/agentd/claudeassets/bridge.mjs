@@ -326,6 +326,19 @@ function observeChat(message) {
   }
 }
 
+// The final answer comes only from the SDK's own turn result record, never
+// from assembled deltas. Reviews and pairing verification are not chat.
+function observeChatFinal(message) {
+  if (start.purpose === "pairing_verification" || start.read_only_review === true) return;
+  if (message?.subtype !== "success" || message.is_error === true || message.parent_tool_use_id) return;
+  const text = message.result;
+  if (typeof text !== "string" || text.length === 0 || Buffer.byteLength(text) > 65536 || text.includes("\0")) {
+    emit({ kind: "chat_dropped" });
+    return;
+  }
+  emit({ kind: "chat_final", text });
+}
+
 // Project only the documented quota fields. Never forward arbitrary SDK data.
 let lastCapacity = null;
 let lastCapacityAt = "";
@@ -661,6 +674,7 @@ try {
     observeChat(message);
     if (message?.type === "result") {
       turnActive = false;
+      observeChatFinal(message);
       finishCapacity();
       const tokens = observeUsage(message);
       completedTurns++;

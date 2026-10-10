@@ -28,12 +28,13 @@ then closes without its content. Reload final history before a fresh live
 subscription. A viewer losing access closes silently. Replay is a transient
 convenience, not a durable transcript.
 
-The existing external worker lease and exact current binding authorize
-`POST /api/chat-deliveries/live`, which accepts the S1 normalized event DTO.
-Only update frames with a nonzero source sequence are admitted. Duplicate or
-older source sequences do not rebroadcast within the retained session/epoch
-buffer. Capability snapshots are excluded. This is a server ingress seam;
-daemon transport wiring and the composer belong to the subsequent slices.
+The private worker lease of a chat registration and the exact current binding
+authorize `POST /api/chat-deliveries/live`, which accepts the S1 normalized
+event DTO. Only update frames with a nonzero source sequence are admitted.
+Duplicate or older source sequences do not rebroadcast within the retained
+session/epoch buffer. Capability snapshots are excluded, and so are final
+answers, which travel only through the final-message route. The agentd relay
+below feeds this ingress; the composer belongs to a subsequent slice.
 
 `POST /api/chat-threads/{id}/outbox` stores a person's final input, while
 `POST /api/chat-deliveries/final` stores an explicit final agent response.
@@ -56,51 +57,64 @@ These routes preserve the disabled-by-default chat gate. They do not launch,
 resume, steer, stop or automatically resend an agent's work. No schema
 migration or release version change is required for this server slice.
 
-## Daemon integration prerequisites (AEON-1074)
+## Daemon relay (AEON-1074)
 
-The daemon relay is not connected yet. The current S1 stream and server ingress
-have incompatible registration boundaries: `Supervisor.SubscribeChat` exposes
-supervisor-owned managed runs, while chat selection and every worker ingress
-require a live external **unmanaged** registration. `ExternalRegistrationTx`
-enforces this distinction, and `TestBindingRejectsForeignWrongRoleManagedAndStaleRegistration`
-checks that a managed registration cannot be selected. Reclassifying an owned
-run as external or removing this check would change the ownership policy.
+agentd relays the chat of its own runs. A Claude, Codex or Pi run that accepts
+inbox input registers with the `chat` capability. The server's chat-only
+registration check admits such a managed run, or an unmanaged registration with
+`inbox`, under the same conditions: the caller is the session's agent
+principal with its private worker lease, an owner person is set, and the
+session is live with a heartbeat younger than two minutes. Other harness
+routes still admit only unmanaged registrations.
 
-The current `POST /api/chat-deliveries/binding/resolve` verifies a supplied
-conversation ID, session ID and binding epoch; it does not discover a binding
-from an owned session. The daemon currently has no approved source for that
-conversation ID and epoch. Integration needs an explicit, authorized binding
-handoff and a decision about which registration boundary supplies the stream.
-Both must preserve exact-session ownership, the private worker lease, current
-permissions and binding-epoch checks.
+At run start the relay asks `POST /api/chat-deliveries/binding/current` for its
+own session's conversation ID and binding epoch, authorised like the other
+relay routes. It never sees another session's binding and receives no message
+content. While a run is unbound it asks again at most every 15 seconds, plus
+up to 3 seconds of jitter. A 404 or 409 from a relay route triggers a new
+lookup; an item refused twice is dropped.
 
-S1 supplies chunks, tool activity, capability snapshots and running/idle/action
-state only. It supplies no explicit final-response or recipient-receipt event.
-An idle state does not establish a final response, and fetching or queueing an
-input does not establish delivery or read. Integration also needs explicit
-final-response and recipient evidence sources. Interim chunks must never be
-assembled into a persisted final body or copied into the daemon journal.
+The relay keeps its own bounded RAM queue: up to 64 live frames, eight final
+answers and 32 receipts. When the queue is full it drops the oldest live frame
+and reports the count in `dropped_events`. Transient failures back off from
+250 ms, doubling up to 30 seconds, with jitter. A live frame is given up after
+three attempts; a final answer retries until the run ends, then for at most
+five more seconds. Nothing the relay carries is logged, journaled or kept after
+the run.
+
+**Final answers** come only from the harness's own turn-completion record. For
+Claude this is the SDK `result` of a successful turn. For Codex it is the last
+completed agent message of the owned turn, released by that turn's successful
+`turn/completed`; commentary-phase messages are skipped. Deltas are never
+assembled into a final. Pi has no such marker, so Pi runs deliver live frames
+only. Each final carries a client message ID derived from the session and
+stream sequence, so a retried final persists once.
+
+**Person inputs** are read from the worker outbox and written to the harness
+only while it is idle, through the same journaled inbox control as other
+harness input, so a crash never re-injects one. **Delivered** is reported when
+the harness starts a turn after that write, **read** when that turn completes.
+Fetching or queueing an input is no evidence. If no turn starts within two
+minutes, the input stays `sent`. Person read evidence remains the read markers.
 
 ## Upgrade order and reverse proxies
 
-The required rollout supports either upgrade order. A new daemon talking to a
-release 128 server must detect missing relay routes, disable only the relay and
-emit one content-free diagnostic. Runs, verification and existing final-message
-delivery must continue. An older daemon talking to the new server supplies no
-live frames; the live view must show **live view unavailable** without treating
-the absent stream as an execution or final-delivery failure. These are pending
-daemon/UI integration acceptance requirements, not a tested compatibility claim
-for the server ingress alone. Until those prerequisites and both mixed-version
-tests are complete, this slice does not establish an end-to-end live-chat rollout.
+Either upgrade order is safe; both mixed versions are tested.
 
-The compatibility matrix below records the current coverage. Passing the S1
-and S2 package tests independently does not verify a daemon-to-server relay.
-
-| Daemon / server | Evidence | Remaining acceptance |
-| --- | --- | --- |
-| New daemon / new server | S1 owned-stream and S2 ingress/SSE fixtures are separate. Managed registrations are deliberately rejected by the server binding test. | Binding handoff, authenticated relay, explicit final/receipt sources, daemon retry/backoff and bounded relay queue; the end-to-end latency and final-once test remain blocked. |
-| New daemon / release 128 server | No relay is wired, so no daemon missing-route fallback has been exercised. | Detect missing routes, disable only the relay, emit one content-free diagnostic, and prove runs, verification and existing final delivery continue. |
-| Older daemon / new server | `TestDurableIdentityAndPrivateRoleHandover` verifies that a bound, unqualified receiver returns a successful thread response with `readiness.state=unavailable` and no capabilities. | Browser wording, absence of execution errors and existing final delivery with an actual older daemon remain untested. |
+- **New agentd, release 128 server.** The older server rejects the `chat`
+  capability. agentd registers again without it, so runs, verification and
+  existing final delivery continue, and it writes one content-free log line.
+  A server that accepts the capability but lacks the relay routes, or has chat
+  switched off, disables only the relay. The relay is offered again after ten
+  minutes, so a server upgraded in the meantime gets live chat without a
+  daemon restart. Tested by
+  `TestNewAgentdAgainstServerWithoutRelayKeepsRunsAndLogsOnce`.
+- **Older agentd, new server.** No live frames arrive. A bound thread still
+  answers successfully with readiness `unavailable`, the live stream opens
+  normally, and final messages arrive through the existing route. Tested by
+  `TestChatWithoutRelayIsUnavailableNotAnError`. The chat view will show this
+  as **live view unavailable** once the composer slice ships; there is no chat
+  UI yet.
 
 The live endpoint returns `text/event-stream` and flushes each frame. Keepalives
 arrive every 15 seconds; set proxy idle timeouts above 15 seconds. Each stream
@@ -112,6 +126,18 @@ needs no `flush_interval` setting for this route. Preserve authentication and
 cursor headers, and do not cache the stream or log its response bodies.
 
 ## Acceptance and validation
+
+`TestAgentdRelayReachesViewerAndPersistsFinalOnce` runs the agentd relay
+against the real server routes. Each frame of the S1 fixture stream reaches an
+SSE viewer within one second, and a final whose first response is lost is
+retried with the same client ID and stored once.
+`TestManagedChatSessionUsesLeaseBoundCurrentBinding` and the extended
+`TestBindingRejectsForeignWrongRoleManagedAndStaleRegistration` check the
+managed boundary and the binding lookup. A managed run with `chat` and the
+right lease is admitted. A run without `chat`, a foreign principal, a wrong
+lease, a stopped or stale session, a superseded epoch or a revoked key scope
+gets 404. The relay's queue bound, backoff, rebinding, refusal handling and
+receipt evidence are covered in `internal/agentd/chat_relay_test.go`.
 
 `TestChatLiveViewersReplayFinalOnlyAndReceipts` exercises two actual HTTP SSE
 viewers, resume through `Last-Event-ID`, duplicate source suppression, an
@@ -127,28 +153,7 @@ connections complete. `TestChatLiveTenantCapacityAndIdleEviction` checks tenant
 quotas, idle eviction and body-free hints, including an injected-clock proof
 that a hint does not recreate an expired buffer. The handover, stopped-session
 and expired-heartbeat cases in `TestChatLiveObsoleteBindingReplayRequestsResync`
-require explicit resync without obsolete content. These three regressions
-fail against the unchanged pre-fix production code at `7d8d1952`.
+require explicit resync without obsolete content.
 
-The affected `internal/chat`, `internal/agentd`, `internal/authz` and
-`internal/reportercontract` packages passed on the approved remote test lane
-after the fix round.
-The locked `ci-static --merge-main` check passed all 42 checks without skips;
-ownership, test-tier and web-shard checks also passed. No migration was added,
-and existing pinned response schemas remain unchanged.
-
-AEON-1074 reboot recovery preserved commit `9754945cb` and reran the
-`internal/chat`, `internal/agentd` and `internal/reportercontract` packages with
-`-count=1` on the approved remote lane; all three passed. The locked
-`ci-static --merge-main` run against that source snapshot exited 0 with 42
-checks passed and no optional skips. The recovery change adds only the
-compatibility evidence matrix above. Daemon relay delivery and both mixed-version
-acceptance cases remain blocked; these passing checks do not establish them.
-
-Remote snapshot preparation must generate the ignored OpenAPI bundle with
-`node api/generate.mjs --write` before running contract tests. Maintenance
-database identifiers must be SQL-safe or quoted. The coordinator's runner
-currently omits bundle preparation and uses an unquoted hyphenated database
-name. Validation used an in-memory adaptation for those two prerequisites,
-preserving its canonical script identity and all host, hold, load, capacity,
-cache and cleanup guards. The shared runner was not edited.
+No migration is needed. The registration request accepts one more capability
+value, `chat`; pinned response schemas are unchanged.
