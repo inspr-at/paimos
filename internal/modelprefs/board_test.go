@@ -250,3 +250,54 @@ func TestRankedBoardOmittedKindsFollowDefault(t *testing.T) {
 		t.Fatalf("review preserved Default: %v", rank)
 	}
 }
+
+// Risk: situation fallback or a person's row bypasses the workspace lock or
+// never lines, or a closed order acquires an unlisted model after exhaustion.
+func TestModelsV2RowOwnershipAndSituations(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		query     BoardQuery
+		rank      []string
+		situation string
+		level     int
+	}{
+		{"row", BoardQuery{Column: "backend"}, []string{"anthropic:opus", "openai:sol"}, "first", 3},
+		{"small", BoardQuery{Column: "backend", EstimateHours: 2}, []string{"anthropic:sonnet", "openai:astra"}, ModelsSmallSituation, 3},
+		{"fix", BoardQuery{Column: "backend", FixRound: 1}, []string{"openai:astra"}, "fix", 3},
+		{"stuck", BoardQuery{Column: "backend", FixRound: 4}, []string{"anthropic:fable"}, "stuck", 3},
+		{"missing kind", BoardQuery{Area: "missing"}, []string{"openai:astra"}, "first", 3},
+		{"review", BoardQuery{Column: "backend", Review: true, AuthorFamily: "openai"}, []string{"anthropic:fable"}, "review", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := rankedFixture()
+			s.Orders = []BoardOrder{
+				{ProfileID: "workspace", Column: "other", Situation: "first", Rank: []string{"openai:astra"}},
+				{ProfileID: "person", Column: "backend", Situation: "first", Rank: []string{"anthropic:opus", "openai:sol"}, Not: []string{"xai:grok"}},
+				{ProfileID: "person", Column: "backend", Situation: ModelsSmallSituation, Rank: []string{"anthropic:sonnet"}, End: "default"},
+				{ProfileID: "person", Column: "backend", Situation: "fix", Rank: []string{"xai:grok", "openai:astra"}, End: "wait"},
+				{ProfileID: "person", Column: "backend", Situation: "stuck", Rank: []string{"anthropic:fable"}, End: "wait"},
+				{ProfileID: "person", Column: "backend", Situation: "review", Rank: []string{"anthropic:fable"}, End: "wait"},
+			}
+			got := ResolveModelsBoard(s, tc.query)
+			if !reflect.DeepEqual(got.Rank, tc.rank) || got.Situation != tc.situation || got.EffortLevel != tc.level {
+				t.Fatalf("order: %+v; want %v/%s/%d", got, tc.rank, tc.situation, tc.level)
+			}
+			if tc.query.Column == "backend" && got.PreferenceOf.Source != "person" {
+				t.Fatalf("owner lost: %+v", got)
+			}
+			if tc.query.Column == "backend" {
+				s.Orders = append(s.Orders, BoardOrder{ProfileID: "workspace", Column: "backend", Situation: "first", Rank: []string{"openai:astra"}, Effort: str("high"), EffortLevel: func() *int { v := 3; return &v }()})
+				s.Rules = []Rule{{Scope: "workspace", Column: "backend", Line: "anthropic:opus", Lock: "top"}}
+				locked := ResolveModelsBoard(s, tc.query)
+				if locked.PreferenceOf.Source == "person" || (!tc.query.Review && !reflect.DeepEqual(locked.Rank, []string{"anthropic:opus", "openai:astra"})) {
+					t.Fatalf("personal order bypassed lock: %+v", locked)
+				}
+			}
+		})
+	}
+	s := rankedFixture()
+	auto := ResolveModelsBoard(s, BoardQuery{Column: "backend", Review: true})
+	if !auto.Automatic || len(auto.Steps) != 0 {
+		t.Fatalf("review fell into build order: %+v", auto)
+	}
+}

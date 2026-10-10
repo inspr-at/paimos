@@ -281,14 +281,8 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 		}
 
 		query := WorkQuery{Role: q.Role, AuthorFamily: q.AuthorFamily, Harness: q.Harness, ProjectID: project, PersonID: modelprefs.PrefsPerson(r.Context(), tx, current)}
-		resolved, err := resolveDailyWith(r.Context(), tx, current, query, now, func(query WorkQuery) (WorkResolution, error) {
-			resolution, err := resolveRole(r.Context(), tx, resolveQuery{Role: query.Role, AuthorFamily: query.AuthorFamily, Harness: query.Harness, ProjectID: project, OffHarnesses: query.OffHarnesses}, now)
-			if err != nil {
-				return WorkResolution{}, err
-			}
-			_, trace, _, err := placementTrace(r.Context(), tx, query)
-			return WorkResolution{Resolution: resolution, Trace: trace, Residency: trace.Residency.Value}, err
-		})
+		query.Area, query.Situation = "other", "first"
+		resolved, err := ResolveWork(r.Context(), tx, current, query, now)
 		out.Resolution, out.Trace = resolved.Resolution, resolved.Trace
 		return err
 	})

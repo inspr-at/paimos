@@ -30,6 +30,9 @@ type BoardOrder struct {
 	Thinking    *string  `json:"thinking"`
 	Effort      *string  `json:"effort"`
 	EffortLevel *int     `json:"effort_level"`
+	// Populated by the v2 order reader; kept internal until the S3 contract.
+	End     string            `json:"-"`
+	Efforts map[string]string `json:"-"`
 }
 type Rule struct {
 	Scope     string    `json:"scope"`
@@ -112,6 +115,164 @@ type BoardDecision struct {
 	FollowsFirst   bool                  `json:"-"`
 	ThinkingColumn bool                  `json:"-"`
 	Selected       string                `json:"-"`
+	Steps          []BoardStep           `json:"-"`
+	Automatic      bool                  `json:"-"`
+}
+
+type BoardStep struct {
+	Line   string
+	Effort string
+	Level  int
+	Stage  string
+}
+
+// ModelsSmallSituation is the reversible First build matrix decision. The row
+// itself remains "first"; changing this constant to "first" restores that use.
+const ModelsSmallSituation = "small"
+
+// ResolveModelsBoard reads the Models order without admitting a route. Unlike
+// the legacy board display, capabilities are checked per route by dispatch.
+func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
+	review := q.Review
+	q.Review = false
+	q.PreviousFamily = "" // A stored order is never silently reordered.
+	if q.Situation == "" {
+		q.Situation = "first"
+		small, fix := s.SmallHours, s.FixRounds
+		if small == 0 {
+			small = 2
+		}
+		if fix == 0 {
+			fix = 3
+		}
+		if q.EstimateHours > 0 && q.EstimateHours <= float64(small) {
+			q.Situation = ModelsSmallSituation
+		}
+		if q.FixRound > 0 {
+			q.Situation = "fix"
+		}
+		if q.FixRound > fix {
+			q.Situation = "stuck"
+		}
+	}
+	if review {
+		q.Situation = "review"
+	}
+	s.Lines = slices.Clone(s.Lines)
+	for i := range s.Lines {
+		s.Lines[i].Tools, s.Lines[i].Review, s.Lines[i].Residency = true, true, nil
+	}
+	column := ResolveBoard(s, BoardQuery{Column: q.Column, Area: q.Area, Labels: q.Labels, Concept: q.Concept, Situation: "first"}, nil).Column
+	// A workspace pick lock freezes its order too, including effort. Personal
+	// situation orders cannot change the route after that pick becomes capped.
+	for _, r := range s.Rules {
+		if r.Column == column && r.Scope == "workspace" && r.Lock == "top" {
+			s.Person = nil
+			break
+		}
+	}
+	q.Column = column
+	// Decide the owner from the row, then look up situations on that layer.
+	rowQuery := q
+	rowQuery.Situation, rowQuery.EstimateHours, rowQuery.FixRound = "first", 0, 0
+	row := ResolveBoard(s, rowQuery, nil)
+	owner := s.Workspace
+	if s.Person != nil && row.PreferenceOf.Source == "person" {
+		owner = *s.Person
+	}
+	owned := s
+	if owner.Scope != "person" {
+		owned.Person = nil
+	}
+	exact, hasExact := boardOrder(owned, owner, column, q.Situation)
+	if !hasExact && row.Source == "follows" {
+		exact, hasExact = boardOrder(owned, owner, "other", q.Situation)
+	}
+	hasExact = hasExact && exact.Rank != nil
+	d := row
+	d.Situation = q.Situation
+	d.FollowsFirst = q.Situation != "first" && !hasExact
+	if review && !hasExact {
+		d.Rank, d.Steps, d.Automatic = []string{}, []BoardStep{}, true
+		return d
+	}
+	if hasExact {
+		// ResolveBoard's display rules for concepts do not apply to Models'
+		// situations. Resolve the selected order as a row, retaining its rules.
+		owned.Orders = slices.Clone(owned.Orders)
+		for i := range owned.Orders {
+			o := &owned.Orders[i]
+			if o.ProfileID == owner.ID && o.Column == column && o.Situation == "first" {
+				o.Rank = nil
+			}
+		}
+		exact.Column, exact.Situation = column, "first"
+		owned.Orders = append([]BoardOrder{exact}, owned.Orders...)
+		d = ResolveBoard(owned, rowQuery, nil)
+		d.Situation, d.FollowsFirst = q.Situation, false
+	}
+	order, _, found := profileOrder(s, owner, column, "first")
+	if hasExact {
+		order, found = exact, true
+	}
+	if !hasExact && d.Effort == "" {
+		if q.Situation == ModelsSmallSituation || q.Situation == "fix" {
+			d.EffortLevel--
+		}
+		if q.Situation == "stuck" {
+			d.EffortLevel = max(d.EffortLevel, 4)
+		}
+	}
+	// The row's never lines remain in force in every situation.
+	for _, id := range row.Not {
+		if !slices.Contains(d.Not, id) {
+			d.Not = append(d.Not, id)
+		}
+	}
+	appendSteps := func(rank []string, effort string, level int, efforts map[string]string, stage string) {
+		for _, id := range rank {
+			if slices.Contains(d.Not, id) {
+				continue
+			}
+			seen := false
+			for _, step := range d.Steps {
+				seen = seen || step.Line == id
+			}
+			if seen {
+				continue
+			}
+			e := effort
+			if v, ok := efforts[id]; ok {
+				e = v
+			}
+			d.Steps = append(d.Steps, BoardStep{id, e, level, stage})
+		}
+	}
+	appendSteps(d.Rank, d.Effort, d.EffortLevel, order.Efforts, "column")
+	end := "wait"
+	if found && order.End != "" {
+		end = order.End
+	} else if hasExact && q.Situation != "first" && !review {
+		end = "default"
+	}
+	if end == "default" && (column != "other" || q.Situation != "first") {
+		def := ResolveBoard(owned, BoardQuery{Column: "other", Situation: "first"}, nil)
+		for _, id := range def.Not {
+			if !slices.Contains(d.Not, id) {
+				d.Not = append(d.Not, id)
+			}
+		}
+		defOrder, _, _ := profileOrder(owned, owner, "other", "first")
+		appendSteps(def.Rank, def.Effort, def.EffortLevel, defOrder.Efforts, "default")
+	}
+	d.Rank = []string{}
+	for _, step := range d.Steps {
+		if !slices.Contains(d.Not, step.Line) {
+			d.Rank = append(d.Rank, step.Line)
+		}
+	}
+	d.Thinking = ThinkingWord(d.EffortLevel)
+	return d
 }
 
 // Templates name a closed set of lines. Catalog discoveries never join implicitly.

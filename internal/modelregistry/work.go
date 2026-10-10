@@ -10,11 +10,13 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
 type WorkQuery struct {
+	ReviewPolicies   []reviewgate.FamilyPolicy
 	TicketID         string
 	Role             string
 	TicketRole       string
@@ -148,8 +150,7 @@ func expandPreference(cell modelprefs.Cell, profiles []Profile) []Profile {
 	return out
 }
 
-// ResolveWork preserves resolveRole byte-for-byte with an empty matrix and an
-// any requirement. Placement chooses a cell; it never changes the role ladder.
+// ResolveWork routes every role through Models and the same live account policy.
 func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time) (WorkResolution, error) {
 	return resolveDailyWork(ctx, tx, p, q, now)
 }
@@ -198,151 +199,13 @@ func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 			return WorkResolution{}, fail(400, "review-gate requires a known author_family")
 		}
 	}
-	if board, err := resolveBoardWork(ctx, tx, p, q, now, nil); err != nil {
-		return WorkResolution{}, err
-	} else if board != nil {
-		return *board, nil
-	}
-	if q.Role == "review-gate" || q.Role == "review-gate-security" {
-		if q.AuthorFamily == "" {
-			return WorkResolution{}, fail(400, "review-gate requires author_family")
-		}
-		route, err := resolveReviewWithCatalog(ctx, tx, p, q, now, catalog)
-		if err != nil {
-			return WorkResolution{}, err
-		}
-		out := WorkResolution{Resolution: Resolution{Role: route.Role, AuthorFamily: q.AuthorFamily, Profile: route.Profile, Ladder: route.Ladder,
-			OwnerRequired: route.OwnerRequired, Source: "aeon"}, Residency: route.Residency, Trace: route.Trace}
-		if route.Profile != nil {
-			out.CommandTemplate, err = commandTemplate(route.Profile.Harness, route.Profile.Model, route.Profile.Effort, true)
-		}
-		return out, err
-	}
-	if escalated, err := escalationForWork(ctx, tx, p, q, now); err != nil {
-		return WorkResolution{}, err
-	} else if escalated != nil {
-		return *escalated, nil
-	}
-	role, ok := roleByName(q.Role)
-	if !ok {
-		return WorkResolution{}, fail(400, "unknown model role")
-	}
-	chain, trace, requirement, err := placementTrace(ctx, tx, q)
+	board, err := resolveBoardWork(ctx, tx, p, q, now, nil)
 	if err != nil {
 		return WorkResolution{}, err
 	}
-	out := WorkResolution{Residency: requirement, Trace: trace}
-	out.Resolution = Resolution{Role: q.Role, Ladder: []Candidate{}, Source: "aeon"}
-	if q.Harness != "" && !validHarness(q.Harness) {
-		return out, fail(400, "unsupported model harness")
-	}
-	if q.Role == "scout" || q.Role == "mechanical" {
-		out.Trace.Prefs = "not applied: role"
-	} else {
-		kind, fallback, err := modelprefs.LookupKind(ctx, tx, q.Area, q.ProjectID)
-		if err != nil {
-			return out, err
-		}
-		out.Trace.Kind = kind.Slug
-		out.Trace.KindSource = "ticket"
-		if fallback {
-			out.Trace.KindSource = "fallback"
-		}
-		result := modelprefs.ResolveCell(chain, kind.Slug, out.Trace.Bucket)
-		traceCell(&out.Trace, result)
-		if result.Cell != nil && result.Cell.Mode != "auto" {
-			profiles, err := catalog.profiles(ctx, tx)
-			if err != nil {
-				return out, err
-			}
-			profiles = expandPreference(*result.Cell, profiles)
-			if len(profiles) == 0 {
-				out.Trace.Fallback = "preferred profile unavailable"
-			}
-			health, err := agentaccounts.HarnessHealthAt(ctx, tx, now, q.ProjectID)
-			if err != nil {
-				return out, err
-			}
-			for _, profile := range profiles {
-				step, err := preferenceStep(ctx, tx, profile, q.Role)
-				if err != nil {
-					return out, err
-				}
-				reasons := skipReasons(step, role, resolveQuery{Role: q.Role, Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, health)
-				ids, err := agentaccounts.QualifyingAccountIDs(ctx, tx, profile.ID, profile.Harness, q.ProjectID, requirement, now)
-				if err != nil {
-					return out, err
-				}
-				if len(ids) == 0 {
-					if requirement != "any" {
-						reasons = append(reasons, "not allowed: "+requirement)
-					} else {
-						reasons = append(reasons, "no available account allows profile")
-					}
-				}
-				candidate := Candidate{ProfileID: profile.ID, SkipReasons: reasons}
-				if len(reasons) == 0 {
-					candidate.Selected = true
-					out.Trace.Fallback = ""
-					out.Trace.PreferredCandidates = append(out.Trace.PreferredCandidates, candidate)
-					out.Profile = &profile
-					out.OwnerRequired = false
-					for i := range out.Ladder {
-						out.Ladder[i].Selected = false
-					}
-					out.Trace.QualifyingAccountIDs = ids
-					if result.Cell.Mode == "latest" {
-						out.Trace.LatestResolvedTo = profile.ID
-					}
-					out.CommandTemplate, err = commandTemplate(profile.Harness, profile.Model, profile.Effort, role.readOnly)
-					return out, err
-				}
-				out.Trace.PreferredCandidates = append(out.Trace.PreferredCandidates, candidate)
-				out.Trace.Fallback = strings.Join(reasons, "; ")
-			}
-		}
-	}
-	out.Resolution, err = resolveRoleWithCatalog(ctx, tx, resolveQuery{Role: q.Role, Harness: q.Harness, ProjectID: q.ProjectID, OffHarnesses: q.OffHarnesses}, now, catalog)
-	if err != nil {
-		return out, err
-	}
-	// H4 is a no-op for any so historical resolutions do not gain account gates.
-	if requirement == "any" {
-		return out, nil
-	}
-	steps, err := catalog.ladder(ctx, tx, q.Role)
-	if err != nil {
-		return out, err
-	}
-	out.Profile = nil
-	out.CommandTemplate = ""
-	for i := range out.Ladder {
-		c := &out.Ladder[i]
-		c.Selected = false
-		profile := steps[i].Profile
-		ids, err := agentaccounts.QualifyingAccountIDs(ctx, tx, profile.ID, profile.Harness, q.ProjectID, requirement, now)
-		if err != nil {
-			return out, err
-		}
-		if len(ids) == 0 {
-			c.SkipReasons = append(c.SkipReasons, "not allowed: "+requirement)
-		}
-		if len(c.SkipReasons) == 0 && out.Profile == nil {
-			c.Selected = true
-			out.Profile = &profile
-			out.Trace.QualifyingAccountIDs = ids
-			out.CommandTemplate, err = commandTemplate(profile.Harness, profile.Model, profile.Effort, role.readOnly)
-			if err != nil {
-				return out, err
-			}
-		}
-	}
-	if out.Profile == nil {
-		out.OwnerRequired = true
-		out.Trace.Blocked = "no " + requirement + " model route"
-	}
-	return out, nil
+	return *board, nil
 }
+
 func preferenceStep(ctx context.Context, tx pgx.Tx, profile Profile, role string) (ladderStep, error) {
 	step := ladderStep{Profile: profile, Route: Route{Role: role, ProfileID: profile.ID, State: "available"}}
 	err := tx.QueryRow(ctx, `SELECT coalesce(r.state,'available'),coalesce(r.reason,''),r.valid_until,

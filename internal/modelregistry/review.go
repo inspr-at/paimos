@@ -10,8 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
-	"github.com/inspr-at/paimos/internal/agentverification"
-	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -65,6 +63,7 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	if err := requireCatalog(ctx, tx); err != nil {
 		return out, err
 	}
+	q.ReviewPolicies = policies
 	q.Role = out.Role
 	q.AuthorFamily = author
 	if board, err := resolveBoardWork(ctx, tx, p, q, now, nil); err != nil {
@@ -75,140 +74,6 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 			out.Account, err = agentaccounts.ReviewAccount(ctx, tx, out.Profile.ID, out.Profile.Harness, q.ProjectID, now, out.Residency)
 		}
 		return out, err
-	}
-	chain, trace, requirement, err := placementTrace(ctx, tx, q)
-	if err != nil {
-		return out, err
-	}
-	out.Trace = trace
-	out.Residency = requirement
-	if _, known := roleByName(out.Role); !known {
-		out.OwnerRequired = true
-		out.Trace.Blocked = "security review ladder not available (AEON-485)"
-		out.Trace.Hard = []string{"security_review"}
-		return out, nil
-	}
-	steps, mode, err := catalog.ladderSnapshot(ctx, tx, out.Role)
-	if err != nil {
-		return out, err
-	}
-	if out.Role == "review-gate" {
-		out.Trace.OrderMode = mode
-		if mode == reviewOrderLegacy {
-			sortLegacyReview(steps, func(s ladderStep) Profile { return s.Profile })
-		}
-	}
-
-	role, _ := roleByName(out.Role)
-	qualified := map[string]*agentaccounts.Account{}
-	for _, step := range steps {
-		reasons := skipReasons(step, role, resolveQuery{Role: out.Role, AuthorFamily: author, Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, nil)
-		for _, policy := range policies {
-			if allowed, reason := policy.Decision(author, step.Profile.Family); !allowed {
-				reasons = append(reasons, reason)
-			}
-		}
-		if step.Profile.Effort != "xhigh" || step.Profile.Tier != "frontier" && step.Profile.Tier != "strong" {
-			reasons = append(reasons, "review requires frontier or strong at xhigh")
-		}
-		// Claude has a platform-independent qualified no-tools bridge. Native
-		// Grok is qualified only for an arm64 Mac enrollment; Cursor/pi/Codex
-		// are deliberately skipped until their release-owned boundary qualifies.
-		var account *agentaccounts.Account
-		if len(reasons) == 0 {
-			capability := agentverification.For(step.Profile.Harness, "darwin", "arm64")
-			if !capability.Supported {
-				reasons = append(reasons, capability.Reason)
-			} else {
-				account, err = agentaccounts.ReviewAccount(ctx, tx, step.ProfileID, step.Profile.Harness, q.ProjectID, now, requirement)
-				if err != nil {
-					return out, err
-				}
-				if account == nil {
-					reasons = append(reasons, "no approved account with available capacity")
-					if requirement != "any" {
-						reasons = append(reasons, "not allowed: "+requirement)
-					}
-				}
-				if account != nil && step.Profile.Harness == "grok" {
-					native, err := nativeGrokEnrolled(ctx, tx, account.ID)
-					if err != nil {
-						return out, err
-					}
-					if !native {
-						reasons = append(reasons, "native Grok needs a qualified macOS arm64 enrollment")
-						account = nil
-					}
-				}
-			}
-		}
-		candidate := Candidate{ProfileID: step.ProfileID, SkipReasons: reasons}
-		if len(reasons) == 0 {
-			qualified[step.ProfileID] = account
-			if out.Profile == nil {
-				profile := step.Profile
-				out.Profile = &profile
-				out.Account = account
-				candidate.Selected = true
-			}
-		}
-		out.Ladder = append(out.Ladder, candidate)
-	}
-	if out.Role == "review-gate-security" {
-		out.Trace.Hard = []string{"security_review"}
-	} else {
-		out.Trace.Kind = "review"
-		out.Trace.KindSource = "review"
-		result := modelprefs.ResolveCell(chain, "review", out.Trace.Bucket)
-		traceCell(&out.Trace, result)
-		if result.Cell != nil && result.Cell.Mode != "auto" {
-			profiles, err := catalog.profiles(ctx, tx)
-			if err != nil {
-				return out, err
-			}
-			preferred := expandPreference(*result.Cell, profiles)
-			if len(preferred) == 0 {
-				out.Trace.Fallback = "preferred profile unavailable"
-			}
-			var pick *Profile
-			for _, profile := range preferred {
-				if qualified[profile.ID] != nil {
-					copy := profile
-					pick = &copy
-					break
-				}
-				reason := "not on the review ladder"
-				for _, c := range out.Ladder {
-					if c.ProfileID == profile.ID {
-						reason = strings.Join(c.SkipReasons, "; ")
-						break
-					}
-				}
-				out.Trace.Fallback = reason
-			}
-			if pick != nil {
-				out.Profile = pick
-				out.Account = qualified[pick.ID]
-				out.Trace.Fallback = ""
-				if result.Cell.Mode == "latest" {
-					out.Trace.LatestResolvedTo = pick.ID
-				}
-				for i := range out.Ladder {
-					out.Ladder[i].Selected = out.Ladder[i].ProfileID == pick.ID
-				}
-			}
-		}
-	}
-	if out.Profile == nil {
-		out.OwnerRequired = true
-		if out.Role == "review-gate-security" {
-			out.Trace.Blocked = "no qualified security review profile/account"
-		}
-		if requirement != "any" {
-			out.Trace.Blocked = "no " + requirement + " model route"
-		}
-	} else {
-		out.Trace.QualifyingAccountIDs = []string{out.Account.ID}
 	}
 	return out, nil
 }

@@ -17,10 +17,10 @@ import (
 // resolveDailyWork uses the existing ranked order and qualification, excluding
 // exhausted harnesses only after the selected harness explicitly permits it.
 // A pinned harness, unknown reading or wait setting never becomes a fallback.
+// Daily caps are already part of shared account admission. Trying another
+// route belongs inside the Models walk, before moving to the next model.
 func resolveDailyWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time) (WorkResolution, error) {
-	return resolveDailyWith(ctx, tx, p, q, now, func(query WorkQuery) (WorkResolution, error) {
-		return resolveWorkWithCatalog(ctx, tx, p, query, now, nil)
-	})
+	return resolveWorkWithCatalog(ctx, tx, p, q, now, nil)
 }
 
 func resolveDailyWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, resolve func(WorkQuery) (WorkResolution, error)) (WorkResolution, error) {

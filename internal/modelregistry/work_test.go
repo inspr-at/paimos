@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
@@ -327,4 +328,137 @@ func TestPreferenceStoreCanonicalPeopleAndGuards(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// Risk: the resolver ignores Models, tries another model before its sibling
+// route, admits an author's family/security Anthropic, or blocks unknown quota.
+func TestModelsV2RolesRoutesAndWait(t *testing.T) {
+	admin, _ := boardFixture(t)
+	runner := addPrincipal(t, admin.TenantID, "agent", "Models v2 runner", []string{"admin"})
+	var cursor Profile
+	var now, until time.Time
+	accounts := map[string]string{}
+	var ticket string
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		var err error
+		cursor, err = insertProfile(t.Context(), tx, admin.TenantID, profileWrite{Slug: "cursor-opus-v2", Version: "1", Harness: "cursor", Family: "anthropic", Model: "claude-opus-5-5", Effort: "xhigh", Tier: "strong"})
+		return err
+	})
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"anthropic:opus", "openai:sol"}, "not": []string{}, "revision": 0}, ""), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first/thinking?for=default", map[string]any{"effort": "xhigh", "revision": 1}, ""), 200)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		ctx := tenant.WithPrincipal(t.Context(), admin)
+		var err error
+		now, err = dbNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		until = now.Add(time.Hour)
+		schedule := capacity.DefaultSchedule("UTC")
+		schedule.Override = "sprint"
+		schedule.OverrideUntil = &until
+		schedule.Reserve = capacity.ReserveOff
+		raw, _ := json.Marshal(schedule)
+		for _, h := range []string{"claude", "cursor", "codex"} {
+			var id string
+			if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,state,last_probe_at,last_probe_ok,last_daemon_generation,owner_person_id,linked_at)
+    VALUES($1,$2,$2,'models-v2',$3,$2,'available',$4,true,'v2-generation',$5,$6) RETURNING id::text`, admin.TenantID, h, runner.ID, now, admin.ID, now.Add(-2*time.Minute)).Scan(&id); err != nil {
+				return err
+			}
+			accounts[h] = id
+			if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, admin.TenantID, admin.ID, id, raw); err != nil {
+				return err
+			}
+		}
+		for _, tc := range []struct{ role, author, family string }{
+			{"build", "", "anthropic"}, {"build-hard", "", "anthropic"}, {"scout", "", "openai"}, {"mechanical", "", "openai"}, {"review-gate", "openai", "anthropic"}, {"review-gate-security", "anthropic", "openai"},
+		} {
+			got, err := ResolveWork(ctx, tx, admin, WorkQuery{Role: tc.role, AuthorFamily: tc.author}, now)
+			if err != nil {
+				return err
+			}
+			if got.Profile == nil || got.Profile.Family != tc.family || got.OwnerRequired || len(got.Trace.QualifyingAccountIDs) == 0 {
+				t.Fatalf("%s unknown quota: %+v", tc.role, got)
+			}
+			if tc.role == "scout" || tc.role == "mechanical" {
+				if got.Profile.Model != "gpt-6-luna" || got.Ladder[len(got.Ladder)-1].Stage != "quick" {
+					t.Fatalf("cheapest fast: %+v", got)
+				}
+			}
+			if strings.HasPrefix(tc.role, "review-gate") && (got.Profile.Family == tc.author || !qualifiedReviewProfile(*got.Profile)) {
+				t.Fatalf("review rule escaped: %+v", got)
+			}
+		}
+		return tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1,id,'MV2-1','Models work','{"route_role":"build","area":"backend","estimate_hours":2,"fix_round":1}' FROM node_kinds WHERE slug='work' RETURNING id::text`, admin.TenantID).Scan(&ticket)
+	})
+	// CLI without and with a ticket shares Models and canonical caller.
+	resolved := decode[WorkResolution](t, &admin, "GET", "/api/models/resolve?role=build", "", 200)
+	if resolved.Profile == nil || resolved.Profile.Model != "opus" || resolved.Trace.Situation != "first" || resolved.Trace.PersonID == nil || *resolved.Trace.PersonID != admin.ID {
+		t.Fatalf("CLI ignored Default/caller: %+v", resolved)
+	}
+	ticketed := decode[WorkResolution](t, &admin, "GET", "/api/models/resolve?role=build&ticket="+ticket, "", 200)
+	if ticketed.Profile == nil || ticketed.Profile.Model != "opus" || ticketed.Trace.Column != "backend" || ticketed.Trace.Situation != "fix" {
+		t.Fatalf("CLI ignored ticket placement: %+v", ticketed)
+	}
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		ctx := tenant.WithPrincipal(t.Context(), admin)
+		// A measured cap skips only Claude's route, before the next model step.
+		if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','',10080,100,$3,$4,'harness')`, admin.TenantID, accounts["claude"], until, now); err != nil {
+			return err
+		}
+		got, err := ResolveWork(ctx, tx, admin, WorkQuery{Role: "build"}, now)
+		if err != nil {
+			return err
+		}
+		if got.Profile == nil || got.Profile.ID != cursor.ID || len(got.Trace.Held) != 0 || len(got.Ladder) < 2 {
+			t.Fatalf("sibling route was skipped: %+v", got)
+		}
+		if got.Ladder[0].Selected || !strings.Contains(got.Ladder[0].SkipReasons[0], until.UTC().Format(time.RFC3339)) {
+			t.Fatalf("missing cap/reset cause: %+v", got.Ladder)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE model_pref_orders SET rank=ARRAY['anthropic:opus'] WHERE column_key='other' AND situation='first'`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET state='paused' WHERE harness='cursor'`); err != nil {
+			return err
+		}
+		waited, err := ResolveWork(ctx, tx, admin, WorkQuery{Role: "build"}, now)
+		if err != nil {
+			return err
+		}
+		if waited.Profile != nil || !waited.OwnerRequired || len(waited.Trace.Held) != 1 || waited.Trace.Blocked != waited.Ladder[0].SkipReasons[0] || !strings.Contains(waited.Trace.Blocked, until.UTC().Format(time.RFC3339)) {
+			t.Fatalf("Wait lost first cause or ran hidden fallback: %+v", waited)
+		}
+		for _, step := range waited.Ladder {
+			if step.Stage != "column" {
+				t.Fatalf("hidden tail ran: %+v", step)
+			}
+		}
+		return nil
+	})
+}
+
+// Risk: selecting a level globally drops a sibling route's native level or
+// reviews run below the highest available native level.
+func TestModelsV2NativeLevelsPerRoute(t *testing.T) {
+	ptr := func(v int) *int { return &v }
+	profiles := []Profile{
+		{ID: "claude", Harness: "claude", Family: "anthropic", Model: "opus", Effort: "xhigh", EffortLevel: ptr(4), Tier: "strong", Enabled: true},
+		{ID: "cursor-high", Harness: "cursor", Family: "anthropic", Model: "claude-opus-5-5", Effort: "high", EffortLevel: ptr(3), Tier: "strong", Enabled: true},
+		{ID: "cursor-ultra", Harness: "cursor", Family: "anthropic", Model: "claude-opus-5-5", Effort: "ultra", EffortLevel: ptr(6), Tier: "strong", Enabled: true},
+	}
+	got := modelsRouteCandidates(profiles, "xhigh", 4, false)
+	if len(got) != 2 || got[0].ID != "claude" || got[1].ID != "cursor-high" {
+		t.Fatalf("nearest per route: %+v", got)
+	}
+	review := modelsRouteCandidates(profiles, "xhigh", 4, true)
+	if len(review) != 2 || review[1].ID != "cursor-ultra" || !qualifiedReviewProfile(review[1]) {
+		t.Fatalf("highest native review: %+v", review)
+	}
+	ties := profiles[1:]
+	ties[0].EffortLevel = ptr(2)
+	ties[1].EffortLevel = ptr(4)
+	if tie := modelsRouteCandidates(ties, "", 3, false); len(tie) != 1 || tie[0].ID != "cursor-ultra" {
+		t.Fatalf("native tie did not go up: %+v", tie)
+	}
 }
