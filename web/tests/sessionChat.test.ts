@@ -253,8 +253,16 @@ test('receipt catch-up cannot replace Read with Sending or a late failure', () =
 })
 
 // AEON-977: harness presentation must not turn a Gemini prompt into implicit interruption.
-test('chat queue placement respects evidence and the static harness capability', () => {
-  for (const harness of ['claude', 'codex', 'pi']) assert.equal(chatCapability({ harness, management_mode: 'managed' }), 'native')
+// AEON-1071: Claude, Codex and Pi follow the agentd flags, so Send now appears
+// only where the session advertises native steering.
+test('chat queue placement respects evidence and the per-session capability flags', () => {
+  const steer = ['managed_control_v1', 'steer', 'interrupt']
+  for (const harness of ['claude', 'codex']) {
+    assert.equal(chatCapability({ harness, management_mode: 'managed', advertised_capabilities: steer }), 'native')
+    assert.equal(chatCapability({ harness, management_mode: 'managed', advertised_capabilities: ['interrupt'] }), 'queue')
+  }
+  assert.equal(chatCapability({ harness: 'pi', management_mode: 'managed', advertised_capabilities: steer }), 'next')
+  assert.equal(chatCapability({ harness: 'pi', management_mode: 'managed', advertised_capabilities: [] }), 'queue')
   assert.equal(chatCapability({ harness: 'gemini', management_mode: 'managed' }), 'abort')
   assert.equal(chatCapability({ harness: 'opencode', management_mode: 'managed' }), 'next')
   assert.equal(chatCapability({ harness: 'grok', management_mode: 'managed' }), 'queue')
