@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/routineactions
+paths:
+  /routine-runs/{runId}/actions:
+    parameters:
+      - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: executeRoutineAction
+      description: 'Submit one bounded internal action from the current running attempt. The persisted run and attempt are the grant; a saved assignment or queued run is insufficient. Current project qualification, execution consent, owner, scope, target project and revision, caller authority and verified guardrail allow are rechecked under the final tenant/tree fence. Missing independent evaluation holds execution. Identical run/key replay returns the original receipt; changed content conflicts. Internal mutation, receipt and audit commit together. External PR and pipeline actions use separate outbox brokers; survey, notify, command, merge, deploy and unknown actions are unavailable. Automatic execution remains default off.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoutineActionRequest'}}}}
+      responses:
+        '200': {description: 'Committed action receipt or identical replay', content: {application/json: {schema: {$ref: '#/components/schemas/RoutineActionReceipt'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    RoutineActionRequest:
+      type: object
+      additionalProperties: false
+      required: [attempt_id, action_key, kind, project_id, target_id, expected_revision]
+      description: 'UTF-8 JSON limited to 65536 bytes. Exactly the payload matching kind is required. target_id is the parent for creation and the entry for updates. expected_revision is the target updated_at as integral Unix microseconds. Knowledge creation targets the output project; work creation targets a work parent inside the frozen output subtree. No path, recipient, command or arbitrary metadata is accepted.'
+      properties:
+        attempt_id: {type: string, format: uuid}
+        action_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$'}
+        kind: {type: string, enum: [work.create, work.update, knowledge.write]}
+        project_id: {type: string, format: uuid}
+        target_id: {type: string, format: uuid}
+        expected_revision: {type: integer, minimum: 1, maximum: 253402300799999999}
+        work_create: {$ref: '#/components/schemas/RoutineWorkCreate'}
+        work_update: {$ref: '#/components/schemas/RoutineWorkUpdate'}
+        knowledge_write: {$ref: '#/components/schemas/RoutineKnowledgeWrite'}
+    RoutineWorkCreate:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 500}
+        body: {type: string, maxLength: 32768}
+    RoutineWorkUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title: {type: string, minLength: 1, maxLength: 500}
+        body: {type: string, maxLength: 32768}
+        state: {type: string, minLength: 1, maxLength: 64}
+    RoutineKnowledgeWrite:
+      type: object
+      additionalProperties: false
+      required: [type, slug, title]
+      description: 'Creates a proposed knowledge entry when target_id is the output project; otherwise updates an entry with unchanged type and slug. Decision records remain person-owned through the Decision Desk.'
+      properties:
+        type: {type: string, enum: [runbook, guideline, memory, external-system, related-project]}
+        slug: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z][a-z0-9_-]*$'}
+        title: {type: string, minLength: 1, maxLength: 500}
+        body: {type: string, maxLength: 32768}
+    RoutineActionReceipt:
+      type: object
+      additionalProperties: false
+      required: [id, run_id, action_key, kind, request_digest, state, node_id, revision]
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        action_key: {type: string}
+        kind: {type: string}
+        request_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        state: {type: string, enum: [succeeded]}
+        node_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}

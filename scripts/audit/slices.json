@@ -242,6 +242,7 @@
         "internal/recurrences/consent.go",
         "internal/recurrences/consent_test.go",
         "internal/routineguard/**",
+        "internal/routineactions/**",
         "internal/recurrences/runs.go",
         "internal/recurrences/runs_test.go"
       ]

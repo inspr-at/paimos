@@ -233,6 +233,16 @@ func loadQueueProjection(ctx context.Context, tx pgx.Tx, node *nodeJSON) error {
 }
 
 func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCreate) (nodeJSON, error) {
+	var out nodeJSON
+	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		out, err = m.createNodeTx(ctx, tx, p, in)
+		return err
+	})
+	return out, err
+}
+
+func (m *Module) createNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in nodeCreate) (nodeJSON, error) {
 	humanCheck, err := parseHumanCheck(in.HumanCheck)
 	if err != nil {
 		return nodeJSON{}, err
@@ -268,7 +278,7 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 		return nodeJSON{}, err
 	}
 	var node nodeJSON
-	err = m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+	err = func(ctx context.Context, tx pgx.Tx) error {
 		if err := armPortalModeration(ctx, tx, p); err != nil {
 			return err
 		}
@@ -380,11 +390,21 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		return enrichNodes(ctx, tx, []*nodeJSON{&node})
-	})
+	}(ctx, tx)
 	return node, err
 }
 
 func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, raw map[string]json.RawMessage, expected *time.Time) (nodeJSON, error) {
+	var out nodeJSON
+	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		out, err = m.updateNodeTx(ctx, tx, p, id, raw, expected)
+		return err
+	})
+	return out, err
+}
+
+func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, raw map[string]json.RawMessage, expected *time.Time) (nodeJSON, error) {
 	if len(raw) == 0 {
 		return nodeJSON{}, badRequest("patch is empty")
 	}
@@ -400,7 +420,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		}
 	}
 	var node nodeJSON
-	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+	err := func(ctx context.Context, tx pgx.Tx) error {
 		if value, ok := raw["state"]; ok {
 			state, _ := parsePatchString(value)
 			if workqueue.Terminal(state) {
@@ -597,7 +617,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			return err
 		}
 		return enrichNodes(ctx, tx, []*nodeJSON{&node})
-	})
+	}(ctx, tx)
 	return node, dbErr("update node", err)
 }
 

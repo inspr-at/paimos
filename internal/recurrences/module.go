@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/routineactions"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -24,6 +25,7 @@ import (
 type Module struct {
 	pool             *pgxpool.Pool
 	executionRuntime ExecutionRuntimeReader
+	actionEvaluator  ActionEvaluatorTx
 	// now is an injected database-clock substitute for deterministic tests only.
 	now     func(context.Context, pgx.Tx) (time.Time, error)
 	history []Publication
@@ -46,6 +48,7 @@ func (m *Module) WithHistory(publications []Publication) *Module {
 	return m
 }
 func (m *Module) Mount(mux *http.ServeMux) {
+	routineactions.New(m.pool, m.authorizeActionTx).Mount(mux)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/guardrails", m.getGuardrails)
 	mux.HandleFunc("PUT /api/recurrences/{recurrenceId}/guardrails", m.putGuardrails)
 	mux.HandleFunc("GET /api/recurrences", m.list)
