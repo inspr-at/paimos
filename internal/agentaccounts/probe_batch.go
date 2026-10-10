@@ -88,10 +88,13 @@ func (m *Module) probes(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusInternalServerError
 			var he *httpError
 			var pe *agentpairing.Error
+			var we *workorders.Error
 			if errors.As(err, &he) {
 				status = he.status
 			} else if errors.As(err, &pe) {
 				status = pe.Status
+			} else if errors.As(err, &we) {
+				status = we.Status
 			}
 		}
 		out.Items = append(out.Items, result{item.AccountID, status})

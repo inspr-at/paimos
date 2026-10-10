@@ -700,14 +700,29 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 		observations = append(observations, observation{account, status, pendingSince, hold, dependencyErr, probeErr, s.capacityNow()})
 	}
 	probes := make([]AccountProbeObservation, 0, len(observations))
+	currentObservations := observations[:0]
 	for _, o := range observations {
+		// A sibling's slow local probe leaves time for a repin or tombstone.
+		// Do not publish the earlier observation after its lifecycle changed.
+		s.mu.Lock()
+		current := s.probePendingSince[o.account.ID].Equal(o.pendingSince)
+		s.mu.Unlock()
+		fenced, err := s.readFence(o.account.ID)
+		if !current || fenced || err != nil {
+			continue
+		}
+		currentObservations = append(currentObservations, o)
 		probes = append(probes, AccountProbeObservation{AccountID: o.account.ID, Status: o.status, ObservedAt: o.observedAt})
 	}
+	observations = currentObservations
 	results := s.reportAccountProbes(ctx, probes)
 	for i, o := range observations {
 		account, status, pendingSince, hold := o.account, o.status, o.pendingSince, o.hold
 		dependencyErr, probeErr, err := o.dependencyErr, o.probeErr, results[i]
 		available := status.OK
+		if cancelled := pollContextError(ctx, err); cancelled != nil {
+			return cancelled
+		}
 		if account.DependencyBlocked {
 			if err != nil {
 				failures = append(failures, errors.New("account probe unavailable"))

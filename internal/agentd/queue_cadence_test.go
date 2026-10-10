@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/hostcapacity"
 )
 
@@ -112,7 +113,7 @@ func TestSupervisorQueueHintsCannotBypassDispatchFences(t *testing.T) {
 			s.wakeQueue()
 			switch fence {
 			case "reconciliation":
-				s.SetPairingFailure("server_unavailable")
+				s.SetPairingFailure(agentsetup.PairingServerUnavailable)
 			case "tombstone":
 				if err := PersistFence(s.state.Path(), s.daemonID, ""); err != nil {
 					t.Fatal(err)
