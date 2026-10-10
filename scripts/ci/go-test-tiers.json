@@ -7992,6 +7992,8 @@
     ,
     {"kind":"go","package":"internal/questions","name":"TestDeliveryConcurrentEditAndReplicaClaims","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/questions","name":"TestDeliveryDeadlineWakeScheduling","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/questions","name":"TestDeliveryFanoutFailureAndReceiptVisibility","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/questions","name":"TestDeliveryGraceEditRestartAndCorrections","tier":"NIGHTLY"}

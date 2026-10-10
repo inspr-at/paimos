@@ -19,29 +19,57 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const dispatchBatch = 32
+const (
+	dispatchBatch     = 32
+	deliveryReconcile = 30 * time.Second
+)
 
-// Run discovers new work at most a second apart and sleeps to the next database
-// deadline. Each effect commits separately with the question revision lock;
+// Run wakes on committed events and sleeps to the next database deadline, with
+// bounded reconciliation for missed hints. Each effect retains its revision lock;
 // replicas, restarts and retries therefore need no in-memory lease authority.
 func (m *Module) Run(ctx context.Context) {
-	timer := time.NewTimer(0)
+	wakes := make(chan struct{}, 1)
+	listenCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); m.listenDelivery(listenCtx, wakes, waitDelivery) }()
+	defer func() { cancel(); <-done }()
+	m.runDelivery(ctx, wakes, time.Now, waitDelivery)
+}
+
+func waitDelivery(ctx context.Context, wakes <-chan struct{}, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
 	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-wakes:
+	case <-timer.C:
+	}
+	return true
+}
+
+// Clock and wait injection establish deadline/wake ordering without sleeps.
+func (m *Module) runDelivery(ctx context.Context, wakes <-chan struct{}, now func() time.Time, wait func(context.Context, <-chan struct{}, time.Duration) bool) {
+	for ctx.Err() == nil {
+		delay := m.dispatchQueue(ctx, now)
+		if !wait(ctx, wakes, max(delay, 10*time.Millisecond)) {
+			return
+		}
+	}
+}
+
+func (m *Module) dispatchQueue(ctx context.Context, now func() time.Time) time.Duration {
+	deadline := now().Add(deliveryReconcile)
 	cursor := ""
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-		}
-		delay := time.Second
-		rows, err := m.pool.Query(ctx, `SELECT id::text FROM tenants WHERE id::text>$1 ORDER BY id::text LIMIT 100`, cursor)
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		rows, err := m.pool.Query(readCtx, `SELECT id::text FROM tenants WHERE id::text>$1 ORDER BY id::text LIMIT 100`, cursor)
 		if err != nil {
+			cancel()
 			if ctx.Err() == nil {
 				slog.Error("desk dispatcher tenant scan failed")
 			}
-			timer.Reset(delay)
-			continue
+			return min(time.Second, deadline.Sub(now()))
 		}
 		ids := []string{}
 		for rows.Next() {
@@ -53,31 +81,93 @@ func (m *Module) Run(ctx context.Context) {
 		}
 		rowErr := rows.Err()
 		rows.Close()
+		cancel()
 		if err != nil || rowErr != nil {
-			timer.Reset(delay)
-			continue
-		}
-		if len(ids) < 100 {
-			cursor = ""
-		} else {
-			cursor = ids[len(ids)-1]
-			delay = 0
+			return min(time.Second, deadline.Sub(now()))
 		}
 		for _, id := range ids {
+			started := now()
 			batchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			next, e := m.DispatchTenant(batchCtx, id)
 			cancel()
 			if e != nil && ctx.Err() == nil {
 				slog.Error("desk delivery pass failed")
 			}
-			if next < delay {
-				delay = next
+			if candidate := started.Add(next); candidate.Before(deadline) {
+				deadline = candidate
 			}
 		}
-		if delay < 10*time.Millisecond {
-			delay = 10 * time.Millisecond
+		if len(ids) < 100 || ctx.Err() != nil {
+			return deadline.Sub(now())
 		}
-		timer.Reset(delay)
+		// Retain earlier pages' deadlines while giving every tenant a bounded pass.
+		cursor = ids[len(ids)-1]
+	}
+}
+
+func wakeDelivery(wakes chan<- struct{}) {
+	select {
+	case wakes <- struct{}{}:
+	default:
+	}
+}
+
+func (m *Module) listenDelivery(ctx context.Context, wakes chan<- struct{}, wait func(context.Context, <-chan struct{}, time.Duration) bool) {
+	for ctx.Err() == nil {
+		_ = m.listenDeliveryConnection(ctx, wakes)
+		// A disconnect can hide a newly committed deadline. Reconcile immediately,
+		// then subscribe before scanning again on reconnect.
+		wakeDelivery(wakes)
+		if !wait(ctx, nil, time.Second) {
+			return
+		}
+	}
+}
+
+func (m *Module) listenDeliveryConnection(ctx context.Context, wakes chan<- struct{}) error {
+	ctx, stop := context.WithTimeout(ctx, db.ListenerMaxLifetime)
+	defer stop()
+	connectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	conn, err := pgx.ConnectConfig(connectCtx, m.pool.Config().ConnConfig.Copy())
+	if conn != nil {
+		defer func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_ = conn.Close(closeCtx)
+		}()
+	}
+	if err == nil {
+		_, err = conn.Exec(connectCtx, "LISTEN aeon_events")
+	}
+	cancel()
+	if err != nil {
+		return err
+	}
+	wakeDelivery(wakes)
+	for {
+		n, err := conn.WaitForNotification(ctx)
+		if err != nil {
+			return err
+		}
+		var hint struct {
+			Tenant string `json:"tenant_id"`
+			ID     int64  `json:"id"`
+		}
+		if len(n.Payload) > 1024 || json.Unmarshal([]byte(n.Payload), &hint) != nil || !uuidRE.MatchString(hint.Tenant) || hint.ID < 1 {
+			continue
+		}
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		var relevant bool
+		err = db.InTenantReadSnapshot(db.AllProjects(readCtx, "decision desk notification hint; effects reauthorized"), m.pool, hint.Tenant, func(tx pgx.Tx) error {
+			return tx.QueryRow(readCtx, `SELECT coalesce(type='question.answered' OR type='inbox.receipt_failed' AND after->>'failure_reason'='session_ended',false) FROM events WHERE tenant_id=$1 AND id=$2`, hint.Tenant, hint.ID).Scan(&relevant)
+		})
+		cancel()
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if relevant {
+			wakeDelivery(wakes)
+		}
 	}
 }
 
@@ -86,30 +176,26 @@ func (m *Module) Run(ctx context.Context) {
 func (m *Module) DispatchTenant(ctx context.Context, tid string) (time.Duration, error) {
 	ctx = db.AllProjects(ctx, "decision desk durable outbox")
 	var ids []string
-	err := db.InTenant(ctx, m.pool, tid, func(tx pgx.Tx) error {
-		now, err := m.now(ctx, tx)
+	var due *time.Time
+	var now time.Time
+	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	err := db.InTenantReadSnapshot(readCtx, m.pool, tid, func(tx pgx.Tx) error {
+		var err error
+		now, err = m.now(readCtx, tx)
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT e.id::text FROM desk_pending e JOIN desk_questions q ON q.tenant_id=e.tenant_id AND q.node_id=e.question_id AND q.revision=e.revision
+		return tx.QueryRow(readCtx, `WITH candidates AS MATERIALIZED (
+ SELECT e.id,e.question_id,e.kind,coalesce(e.retry_at,e.deliver_after) AS ordering,greatest(e.deliver_after,coalesce(e.retry_at,e.deliver_after)) AS due
+ FROM desk_pending e JOIN desk_questions q ON q.tenant_id=e.tenant_id AND q.node_id=e.question_id AND q.revision=e.revision
  LEFT JOIN inbox_receipts r ON r.tenant_id=e.tenant_id AND r.message_id=(CASE WHEN e.kind='inbox' THEN nullif(e.effect_ref,'')::uuid END)
  WHERE e.tenant_id=$1 AND e.kind IN ('inbox','comment','outcome') AND (e.state IN ('pending','failed') OR e.state='delivered' AND r.state='failed' AND r.failure_reason='session_ended')
  AND coalesce(e.effect_data->>'retryable','true')<>'false'
- AND e.deliver_after<=$2 AND coalesce(e.retry_at,e.deliver_after)<=$2
- ORDER BY coalesce(e.retry_at,e.deliver_after),e.question_id,(e.kind='outcome') DESC,e.kind,e.id LIMIT $3`, tid, now, dispatchBatch)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				return err
-			}
-			ids = append(ids, id)
-		}
-		return rows.Err()
+ ) SELECT ARRAY(SELECT id::text FROM candidates WHERE due<=$2
+ ORDER BY ordering,question_id,(kind='outcome') DESC,kind,id LIMIT $3),
+ (SELECT min(due) FROM candidates WHERE due>$2)`, tid, now, dispatchBatch).Scan(&ids, &due)
 	})
+	cancel()
 	if err != nil {
 		return time.Second, err
 	}
@@ -118,23 +204,15 @@ func (m *Module) DispatchTenant(ctx context.Context, tid string) (time.Duration,
 			return time.Second, err
 		}
 	}
-	if len(ids) == dispatchBatch {
+	if len(ids) != 0 {
+		// Effects may have persisted retries. Refresh with the same combined read
+		// after draining this batch, rather than use a pre-effect deadline.
 		return 0, nil
 	}
-	delay := time.Second
-	err = db.InTenant(ctx, m.pool, tid, func(tx pgx.Tx) error {
-		now, err := m.now(ctx, tx)
-		if err != nil {
-			return err
-		}
-		var due *time.Time
-		err = tx.QueryRow(ctx, `SELECT min(greatest(e.deliver_after,coalesce(e.retry_at,e.deliver_after))) FROM desk_pending e JOIN desk_questions q ON q.tenant_id=e.tenant_id AND q.node_id=e.question_id AND q.revision=e.revision WHERE e.tenant_id=$1 AND e.state IN ('pending','failed') AND coalesce(e.effect_data->>'retryable','true')<>'false' AND e.kind IN ('inbox','comment','outcome')`, tid).Scan(&due)
-		if due != nil && due.Sub(now) < delay {
-			delay = due.Sub(now)
-		}
-		return err
-	})
-	return delay, err
+	if due != nil {
+		return max(0, due.Sub(now)), nil
+	}
+	return deliveryReconcile, nil
 }
 
 type delivery struct {
